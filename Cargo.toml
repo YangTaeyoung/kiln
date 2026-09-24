@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+kiln-proto = { path = "crates/kiln-proto" }
+kiln-daemon = { path = "crates/kiln-daemon" }
+kiln-common = { path = "crates/kiln-common" }
+kiln-editor = { path = "crates/kiln-editor" }
+kiln-git = { path = "crates/kiln-git" }
+kiln-db = { path = "crates/kiln-db" }
+
+egui = "0.36"
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "persistence", "accesskit"] }
+egui_extras = "0.36"
+egui_kittest = "0.36"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+postcard = { version = "1", features = ["use-std"] }
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+directories = "6"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 2

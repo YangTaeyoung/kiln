@@ -1,0 +1,35 @@
+[package]
+name = "kiln"
+version.workspace = true
+edition.workspace = true
+default-run = "kiln"
+
+[[bin]]
+name = "kiln"
+path = "src/main.rs"
+
+[dependencies]
+kiln-proto.workspace = true
+kiln-daemon.workspace = true
+kiln-common.workspace = true
+egui.workspace = true
+eframe.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+clap = { version = "4", features = ["derive"] }
+arboard = "3"
+regex = "1"
+open = "5"
+rfd = "0.17"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
