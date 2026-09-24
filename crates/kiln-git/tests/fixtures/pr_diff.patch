@@ -1,0 +1,1658 @@
+diff --git a/.github/skills/cli-exercise/internal/cli-exercise-evidence/SKILL.md b/.github/skills/cli-exercise/internal/cli-exercise-evidence/SKILL.md
+index 45d0b57941f..e5e51cfad99 100644
+--- a/.github/skills/cli-exercise/internal/cli-exercise-evidence/SKILL.md
++++ b/.github/skills/cli-exercise/internal/cli-exercise-evidence/SKILL.md
+@@ -45,7 +45,8 @@ and ready receipt. Honor the requested GIF/MP4 formats and size constraints.
+ Condensed presentation is the default when timing is unspecified. Honor explicit real-time requests.
+ Retain source timing and record shortened pauses and reading holds in the
+ rendering metadata. Do not add repeated timing labels to the video.
+-Go loads and rasterizes the explicit fonts; FFmpeg encodes the resulting frames.
++Select an existing compatible primary font, pass it with `--font FILE`, and let
++Go rasterize it; FFmpeg encodes the resulting frames.
+ Do not add an interpreter, browser, or font service as an unapproved fallback.
+ 
+ For another output from an existing capture, use `--format` and/or `--timing`
+@@ -54,6 +55,12 @@ Each invocation writes a new rendering and records its presentation options
+ separately. Do not rewrite
+ the execution contract or rerun a command merely to change its presentation.
+ 
++Every rendering requires `--font FILE`. If it reports a missing glyph, repeat
++`--font-fallback FILE` to define the complete ordered fallback chain. These
++options apply to session chapters and the overview too.
++Select existing compatible fonts, then rerun only `evidence`; the new report
++records the rendering choices and font hashes without changing the capture.
++
+ The default deliverable is the requested media, without HTML. Add `--html` only
+ for an interactive report request. This applies to both standalone and session
+ renders, including per-chapter reports. Raw capture, JSON results, and inspection
+diff --git a/.github/skills/cli-exercise/references/prerequisites.md b/.github/skills/cli-exercise/references/prerequisites.md
+index 08ef8885b75..c442d0399c3 100644
+--- a/.github/skills/cli-exercise/references/prerequisites.md
++++ b/.github/skills/cli-exercise/references/prerequisites.md
+@@ -76,7 +76,6 @@ Optional selections:
+ | `--node PATH` | Existing Node executable; defaults to PATH discovery |
+ | `--ffmpeg PATH` | Existing ffmpeg executable |
+ | `--ffprobe PATH` | Existing ffprobe executable |
+-| `--font PATH` | Existing monospaced TTF, OTF, or TTC file; never silently replaced if unusable |
+ | `--format gif` / `--format mp4` | Repeat for requested formats; both are checked by default |
+ | `--probe-timeout SECONDS` | Per-process bound, 5-120 seconds; default 20 |
+ 
+@@ -85,7 +84,6 @@ For example, to check explicitly supplied dependencies without modifying them:
+ ```sh
+ <helper> --skill-root <package-root> preflight check \
+   --module-root /absolute/dependencies/node_modules \
+-  --font /absolute/fonts/monospace.ttf \
+   --output /absolute/workspace/preflight.json
+ ```
+ 
+@@ -138,8 +136,7 @@ and these `tools` entries:
+   "node": {"path": "/absolute/node", "version": "observed version"},
+   "tuistory": {"moduleRoot": "/absolute/node_modules", "version": "0.11.0"},
+   "ffmpeg": {"path": "/absolute/ffmpeg", "version": "observed version"},
+-  "ffprobe": {"path": "/absolute/ffprobe", "version": "observed version"},
+-  "font": {"path": "/absolute/font.ttf", "family": "observed family"}
++  "ffprobe": {"path": "/absolute/ffprobe", "version": "observed version"}
+ }
+ ```
+ 
+@@ -153,8 +150,8 @@ and 2 for blocked or invalid input.
+ `manifestSha256` hashes `scripts/package.json` then `scripts/package-lock.json`.
+ For each, the hash input is its base
+ UTF-8 filename, a zero byte, its byte length as an eight-byte big-endian integer,
+-and its exact contents. Executable/font hashes are additional provenance, not an
+-OS trust or permission mechanism.
++and its exact contents. Executable hashes are additional provenance, not an OS
++trust or permission mechanism.
+ 
+ ## Agent-led setup
+ 
+diff --git a/.github/skills/cli-exercise/references/recording-sessions.md b/.github/skills/cli-exercise/references/recording-sessions.md
+index a5eda0dfbfc..7cd60bdc31b 100644
+--- a/.github/skills/cli-exercise/references/recording-sessions.md
++++ b/.github/skills/cli-exercise/references/recording-sessions.md
+@@ -174,6 +174,9 @@ but it does not provide the session overview or whole-session progress.
+ An explicit session `output.timing` overrides chapter presentation timing;
+ otherwise each recorded contract's timing is retained, including the condensed
+ default. `--format` and `--timing` can select another final presentation.
++`--font` and repeated `--font-fallback` select rendering fonts for every chapter
++and the overview without modifying the recorded contracts. See
++[render-time font selection](runtime-interface.md#offline-evidence-rendering).
+ Use a consistent frame rate across runs. Different dimensions can be padded
+ without cropping or scaling terminal text.
+ 
+diff --git a/.github/skills/cli-exercise/references/run-contract.md b/.github/skills/cli-exercise/references/run-contract.md
+index 712d9ba3f32..07c6efb1916 100644
+--- a/.github/skills/cli-exercise/references/run-contract.md
++++ b/.github/skills/cli-exercise/references/run-contract.md
+@@ -59,7 +59,6 @@ If literal fidelity would require disclosing a real secret, report blocked.
+   "terminal": {
+     "columns": 100,
+     "rows": 28,
+-    "fontPath": "/absolute/path/to/monospace-font.ttf",
+     "fontSize": 20,
+     "fps": 30,
+     "background": "#0d1117",
+@@ -199,7 +198,8 @@ nonzero exit may pass, while exit zero does not excuse a contradicted assertion.
+ 
+ GIF and MP4 are supported output requests. `output.captions` defaults to true;
+ set it to false when the caller requires an unannotated recording. Optional
+-`terminal.fontFallbacks` lists explicit additional font paths for missing glyphs.
++render-time font choices do not belong in this execution contract; see
++[render-time font selection](runtime-interface.md#offline-evidence-rendering).
+ `terminal.fps` must be a whole number from 1 through 60.
+ `output.timing` defaults to `condensed` when omitted. Use `realtime` when the
+ caller requests full timing; an existing contract's explicit timing is preserved.
+diff --git a/.github/skills/cli-exercise/references/runtime-interface.md b/.github/skills/cli-exercise/references/runtime-interface.md
+index efd2da6d97a..f16f1d96cee 100644
+--- a/.github/skills/cli-exercise/references/runtime-interface.md
++++ b/.github/skills/cli-exercise/references/runtime-interface.md
+@@ -17,7 +17,7 @@ instructions loaded into the current agent context, not separate worker agents.
+ Build the Go helper using [the offline-first prerequisite flow](prerequisites.md).
+ `<helper> --skill-root <package-root> preflight check --output <receipt.json>`
+ performs checks only. It must never install or update a dependency. Optional
+-`--module-root`, `--node`, and `--font` select caller-approved existing tools.
++`--module-root` and `--node` select caller-approved existing runtime tools.
+ 
+ A ready receipt has this shape:
+ 
+@@ -30,8 +30,7 @@ A ready receipt has this shape:
+     "node": {"path":"/absolute/node","version":"..."},
+     "tuistory": {"moduleRoot":"/absolute/node_modules","version":"..."},
+     "ffmpeg": {"path":"/absolute/ffmpeg","version":"..."},
+-    "ffprobe": {"path":"/absolute/ffprobe","version":"..."},
+-    "font": {"path":"/absolute/font.ttf","family":"..."}
++    "ffprobe": {"path":"/absolute/ffprobe","version":"..."}
+   }
+ }
+ ```
+@@ -289,9 +288,11 @@ The low-level form
+ remains available for per-invocation clips. It is not the normal path to a final
+ session video with overview and whole-session progress.
+ Go rasterizes the recorded terminal cells and captions from the explicit
+-OpenType fonts, then streams frames to FFmpeg. It writes a new private rendering directory
+-rather than replacing prior evidence. Only media is delivered by default; raw
+-capture, JSON reports, and inspection files remain internal evidence.
++OpenType fonts, places terminal and overview content inside a framed 48-pixel
++safe area so common playback controls do not obscure the first row, then streams
++frames to FFmpeg. It writes a new private rendering directory rather than
++replacing prior evidence. Only media is delivered by default; raw capture, JSON
++reports, and inspection files remain internal evidence.
+ Add `--html` to also generate a self-contained HTML report. Without it, neither
+ standalone nor session renders create HTML, including per-chapter reports.
+ Use `--inspection all` when the claim
+@@ -318,6 +319,33 @@ contract hash. Without overrides, output follows the recorded contract, using
+ condensed timing only when that field is omitted. `--timing-authorization` may
+ optionally record the caller's request for a condensed companion.
+ 
++Rendering can also select `--font FILE` and repeated `--font-fallback FILE`
++options. Every new rendering requires `--font`; supplying `--font-fallback`
++defines the complete explicit fallback chain in the supplied order. Relative
++paths resolve from the helper's working directory. Unusable fonts fail rendering
++explicitly, not the recorded case's outcome. Execution contracts and preflight
++receipts contain no font selection.
++
++These options work with both `--run-dir` and `--session`, including the session
++overview. They are saved in `presentation.fontPath` and
++`presentation.fontFallbacks`; successful renderings also identify the actual
++font files and SHA-256 hashes in `rendering.font`, `rendering.fontStyles`, and
++`rendering.fontFallbacks`. Style companions are recorded separately from glyph
++fallbacks.
++To recover an existing capture with a missing glyph, select a compatible
++fallback and rerun only evidence rendering:
++
++```sh
++<helper> --skill-root <package-root> evidence \
++  --session <manifest.json> --preflight <receipt.json> \
++  --font /absolute/fonts/monospace.ttf \
++  --font-fallback /absolute/fonts/symbols.ttf
++```
++
++Neither the immutable execution contract nor any captured output is rewritten.
++No subject command is rerun, and no new execution preflight receipt is needed
++solely to select rendering fonts.
++
+ Annotated session output labels preparation in purple and running in blue.
+ Validation has visible result text, green for passed expectations and red for
+ failed ones; unknown, blocked, and observed results must not look passed.
+diff --git a/.github/skills/cli-exercise/tool/internal/engine/contract.go b/.github/skills/cli-exercise/tool/internal/engine/contract.go
+index 71fb8d98e2f..33a727132ec 100644
+--- a/.github/skills/cli-exercise/tool/internal/engine/contract.go
++++ b/.github/skills/cli-exercise/tool/internal/engine/contract.go
+@@ -331,9 +331,8 @@ func parseContract(options Options) (*runContract, error) {
+ 		stateDirectory = str(value)
+ 	}
+ 	terminal, ok := object(source["terminal"])
+-	if !ok || !filepath.IsAbs(str(terminal["fontPath"])) || !hexColor.MatchString(str(terminal["background"])) ||
+-		!hexColor.MatchString(str(terminal["foreground"])) {
+-		return fail("Terminal dimensions, an explicit font, and colors are required.")
++	if !ok || !hexColor.MatchString(str(terminal["background"])) || !hexColor.MatchString(str(terminal["foreground"])) {
++		return fail("Terminal dimensions and colors are required.")
+ 	}
+ 	for _, key := range []string{"columns", "rows"} {
+ 		value, ok := integer(terminal[key])
+@@ -346,16 +345,11 @@ func parseContract(options Options) (*runContract, error) {
+ 	if !sizeOK || size <= 0 || size > 512 || !fpsOK || fps < 1 || fps > 60 {
+ 		return fail("The font size and integer recording cadence must be supported.")
+ 	}
+-	if value, exists := terminal["fontFallbacks"]; exists {
+-		paths, ok := stringList(value)
+-		if !ok {
+-			return fail("Font fallbacks must be explicit paths.")
+-		}
+-		for _, path := range paths {
+-			if !filepath.IsAbs(path) {
+-				return fail("Font fallbacks must be absolute.")
+-			}
+-		}
++	if _, exists := terminal["fontPath"]; exists {
++		return fail("Terminal font choices belong to evidence rendering, not the execution contract.")
++	}
++	if _, exists := terminal["fontFallbacks"]; exists {
++		return fail("Terminal font choices belong to evidence rendering, not the execution contract.")
+ 	}
+ 	limits, ok := object(source["limits"])
+ 	actions, actionsOK := integer(limits["maxActions"])
+diff --git a/.github/skills/cli-exercise/tool/internal/engine/runtime_test.go b/.github/skills/cli-exercise/tool/internal/engine/runtime_test.go
+index 75332e2f9c1..81960f3ead4 100644
+--- a/.github/skills/cli-exercise/tool/internal/engine/runtime_test.go
++++ b/.github/skills/cli-exercise/tool/internal/engine/runtime_test.go
+@@ -121,7 +121,7 @@ func newFixture(t *testing.T) *fixture {
+ 		"command":       document{"executable": executable, "args": []any{}, "sha256": hex.EncodeToString(hash[:]), "version": "fixture 1", "cwd": "work"},
+ 		"environment":   document{"values": document{}, "pass": []any{}},
+ 		"authorization": document{"status": "approved", "basis": "The caller approved this local fixture.", "effects": []any{}},
+-		"terminal": document{"columns": 80, "rows": 24, "fontPath": filepath.Join(root, "mono.ttf"), "fontSize": 18,
++		"terminal": document{"columns": 80, "rows": 24, "fontSize": 18,
+ 			"fps": 30, "background": "#0d1117", "foreground": "#e6edf3"},
+ 		"limits": document{"maxActions": 100, "maxDurationSeconds": 10, "idleTimeoutSeconds": 5},
+ 		"steps":  []any{}, "constraints": document{"deny": []any{}}, "expectations": []any{},
+@@ -228,6 +228,12 @@ func TestContractAndActionValidation(t *testing.T) {
+ 		}, code: "private_contract"},
+ 		{name: "reserved environment", change: func(f *fixture) { f.contract["environment"].(document)["values"] = document{"HOME": "/elsewhere"} }, code: "invalid_contract"},
+ 		{name: "unsupported cadence", change: func(f *fixture) { f.contract["terminal"].(document)["fps"] = 120 }, code: "invalid_contract"},
++		{name: "font path belongs to rendering", change: func(f *fixture) {
++			f.contract["terminal"].(document)["fontPath"] = filepath.Join(f.root, "mono.ttf")
++		}, code: "invalid_contract"},
++		{name: "font fallbacks belong to rendering", change: func(f *fixture) {
++			f.contract["terminal"].(document)["fontFallbacks"] = []any{filepath.Join(f.root, "symbols.ttf")}
++		}, code: "invalid_contract"},
+ 		{name: "unspecified timing defaults to condensed", change: func(f *fixture) { delete(f.contract["output"].(document), "timing") }},
+ 		{name: "condensed needs no separate approval", change: func(f *fixture) { f.contract["output"].(document)["timing"] = "condensed" }},
+ 		{name: "explicit realtime permits unannotated output", change: func(f *fixture) { f.contract["output"].(document)["captions"] = false }},
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/evidence_test.go b/.github/skills/cli-exercise/tool/internal/evidence/evidence_test.go
+index 61865bbc576..aa70246b91e 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/evidence_test.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/evidence_test.go
+@@ -192,7 +192,8 @@ func TestRun(t *testing.T) {
+ 			receiptPath := filepath.Join(root, "preflight.json")
+ 			require.NoError(t, cliutil.WriteJSON(receiptPath, map[string]string{"status": "ready"}))
+ 			var output bytes.Buffer
+-			opts := options{runDir: root, preflight: receiptPath, inspection: "sampled", html: tc.html}
++			opts := options{runDir: root, preflight: receiptPath, inspection: "sampled", html: tc.html,
++				fontPath: filepath.Join(root, "selected.ttf")}
+ 			wantTiming := tc.recordedTiming
+ 			if wantTiming == "" {
+ 				wantTiming = "condensed"
+@@ -229,12 +230,11 @@ func TestRun(t *testing.T) {
+ 			require.NoError(t, err)
+ 			require.Equal(t, raw, unchanged)
+ 			require.Equal(t, tc.recordedTiming, source.Output.Timing)
++			require.NotNil(t, report.Presentation)
++			require.Equal(t, opts.fontPath, report.Presentation.FontPath)
+ 			if tc.companion {
+-				require.NotNil(t, report.Presentation)
+ 				require.Equal(t, wantTiming, report.Presentation.Timing)
+ 				require.Equal(t, opts.timingAuthorization, report.Presentation.TimingAuthorization)
+-			} else {
+-				require.Nil(t, report.Presentation)
+ 			}
+ 			if !tc.renderError {
+ 				require.Equal(t, wantTiming, report.Rendering.Timing)
+@@ -353,7 +353,7 @@ func TestRun(t *testing.T) {
+ 		require.NoError(t, os.WriteFile(font, gomono.TTF, 0o600))
+ 		require.NoError(t, os.WriteFile(filepath.Join(root, "Mono-Bold.ttf"), gomonobold.TTF, 0o600))
+ 		config := terminalConfig{FontPath: font, FontSize: 18, FPS: 30, Background: "#0d1117", Foreground: "#e6edf3"}
+-		raster, err := newRasterizer(config, recording.Receipt{})
++		raster, err := newRasterizer(config)
+ 		require.NoError(t, err)
+ 		defer func() { require.NoError(t, raster.fonts.Close()) }()
+ 		data := testState("Mona", 0).Data
+@@ -367,7 +367,7 @@ func TestRun(t *testing.T) {
+ 		source.Output.Timing = "realtime"
+ 		canvas, err := raster.compose(top, source, frame{}, top.Bounds().Dx(), 6*raster.fonts.CellHeight, 2*raster.fonts.CellHeight)
+ 		require.NoError(t, err)
+-		require.Equal(t, 6*raster.fonts.CellHeight, canvas.Bounds().Dy())
++		require.Equal(t, 6*raster.fonts.CellHeight+2*presentationMargin, canvas.Bounds().Dy())
+ 		store, err := newImageStore(t.TempDir())
+ 		require.NoError(t, err)
+ 		original, err := store.save(top)
+@@ -411,8 +411,12 @@ func TestRun(t *testing.T) {
+ 		skillRoot, err := filepath.Abs("../../..")
+ 		require.NoError(t, err)
+ 		var output bytes.Buffer
++		fontPath := os.Getenv("CLI_EXERCISE_RENDER_FONT")
++		if fontPath == "" {
++			t.Skip("Supply an explicit font for native rendering.")
++		}
+ 		code, err := run(context.Background(), skillRoot, options{
+-			runDir: root, preflight: preflight, inspection: "all",
++			runDir: root, preflight: preflight, inspection: "all", fontPath: fontPath,
+ 		}, cliutil.Streams{Out: &output, ErrOut: io.Discard}, render)
+ 		require.NoError(t, err)
+ 		require.Zero(t, code, output.String())
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/fonts_test.go b/.github/skills/cli-exercise/tool/internal/evidence/fonts_test.go
+new file mode 100644
+index 00000000000..4d8ea2f8b83
+--- /dev/null
++++ b/.github/skills/cli-exercise/tool/internal/evidence/fonts_test.go
+@@ -0,0 +1,263 @@
++package evidence
++
++import (
++	"context"
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/cli/cli/v2/cli-exercise/internal/cliutil"
++	"github.com/cli/cli/v2/cli-exercise/internal/recording"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	"golang.org/x/image/font/gofont/gomono"
++	"golang.org/x/image/font/gofont/gomonobold"
++	"golang.org/x/image/font/gofont/gomonobolditalic"
++	"golang.org/x/image/font/gofont/gomonoitalic"
++	"golang.org/x/image/font/gofont/goregular"
++)
++
++func fontCapture(t *testing.T) (string, string, map[string][]byte) {
++	t.Helper()
++	root := t.TempDir()
++	require.NoError(t, os.Mkdir(filepath.Join(root, "capture"), 0o700))
++	source := contract{
++		CaseID: "font-fixture", Mode: "exact", Goal: "Read the captured output",
++		Terminal: terminalConfig{
++			Columns: 40, Rows: 2, FontSize: 18, FPS: 10, Background: "#0d1117", Foreground: "#e6edf3",
++		},
++		Output:       recording.OutputOptions{Formats: []string{"mp4"}, Timing: "realtime"},
++		Expectations: []expectation{{ID: "output", Type: "screen_contains", Value: json.RawMessage(`"hello"`)}},
++	}
++	source.Command.Executable = filepath.Join(root, "never-executed")
++	raw, err := json.Marshal(source)
++	require.NoError(t, err)
++	require.NotContains(t, string(raw), "fontPath")
++	require.NotContains(t, string(raw), "fontFallbacks")
++	require.NoError(t, os.WriteFile(filepath.Join(root, "contract.json"), raw, 0o400))
++	sum := sha256.Sum256(raw)
++	zero := 0
++	require.NoError(t, cliutil.WriteJSON(filepath.Join(root, "result.json"), result{
++		ContractSHA256: hex.EncodeToString(sum[:]), ExitCode: &zero, StepsCompleted: &zero,
++		CaptureStatus: "complete", DurationSeconds: .1,
++		StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:00:01Z",
++	}))
++	state, err := json.Marshal(testState("hello", 0))
++	require.NoError(t, err)
++	require.NoError(t, os.WriteFile(filepath.Join(root, "capture/states.jsonl"), append(state, '\n'), 0o400))
++	require.NoError(t, os.WriteFile(filepath.Join(root, "capture/events.jsonl"), nil, 0o400))
++	require.NoError(t, os.WriteFile(filepath.Join(root, "capture/raw.jsonl"), []byte("{\"t\":0,\"type\":\"output\",\"data\":\"hello\"}\n"), 0o400))
++	receipt := filepath.Join(root, "preflight.json")
++	require.NoError(t, cliutil.WriteJSON(receipt, recording.Receipt{Status: "ready",
++		Checks: recording.CapabilityChecks{Formats: map[string]bool{"mp4": true}}}))
++	originals := map[string][]byte{}
++	for _, name := range []string{"contract.json", "result.json", "capture/states.jsonl", "capture/events.jsonl", "capture/raw.jsonl"} {
++		path := filepath.Join(root, name)
++		data, err := os.ReadFile(path)
++		require.NoError(t, err)
++		originals[path] = data
++	}
++	return root, receipt, originals
++}
++
++func TestRenderFontOverridesPreserveCapture(t *testing.T) {
++	t.Parallel()
++
++	// Given a capture whose original fonts are no longer available.
++	root, receipt, originals := fontCapture(t)
++	font := filepath.Join(root, "replacement.ttf")
++	fallback := filepath.Join(root, "symbols.ttf")
++	require.NoError(t, os.WriteFile(font, gomono.TTF, 0o600))
++	for name, data := range map[string][]byte{
++		"replacement-Bold.ttf": gomonobold.TTF, "replacement-Italic.ttf": gomonoitalic.TTF,
++		"replacement-BoldItalic.ttf": gomonobolditalic.TTF,
++	} {
++		require.NoError(t, os.WriteFile(filepath.Join(root, name), data, 0o600))
++	}
++	require.NoError(t, os.WriteFile(fallback, goregular.TTF, 0o600))
++
++	// When rendering requests a different primary font and fallback chain.
++	opts, err := parseOptions([]string{"--run-dir", root, "--preflight", receipt, "--font", font, "--font-fallback", fallback})
++	require.NoError(t, err)
++	report, err := buildReport(t.Context(), t.TempDir(), opts, func(_ context.Context, c contract, _ result, states []state, _ []event, r recording.Receipt, _, _ string) (rendering, error) {
++		assert.Equal(t, font, c.Terminal.FontPath)
++		assert.Equal(t, []string{fallback}, c.Terminal.FontFallbacks)
++		raster, err := newRasterizer(c.Terminal)
++		require.NoError(t, err)
++		defer func() { require.NoError(t, raster.fonts.Close()) }()
++		_, err = raster.draw(states[0].Data)
++		require.NoError(t, err)
++		return rendering{
++			Status: "complete", Font: &raster.fonts.Info,
++			FontStyles: raster.fonts.Styles, FontFallbacks: raster.fonts.Fallbacks,
++		}, nil
++	})
++
++	// Then rendering succeeds with separately recorded choices and unchanged evidence.
++	require.NoError(t, err)
++	assert.Equal(t, "complete", report.Rendering.Status)
++	assert.Equal(t, "passed", report.CaseStatus)
++	require.NotNil(t, report.Rendering.Font)
++	assert.Equal(t, font, report.Rendering.Font.Path)
++	require.Len(t, report.Rendering.FontStyles, 3)
++	for index, name := range []string{"replacement-Bold.ttf", "replacement-Italic.ttf", "replacement-BoldItalic.ttf"} {
++		data, err := os.ReadFile(filepath.Join(root, name))
++		require.NoError(t, err)
++		sum := sha256.Sum256(data)
++		assert.Equal(t, filepath.Join(root, name), report.Rendering.FontStyles[index].Path)
++		assert.NotEmpty(t, report.Rendering.FontStyles[index].Family)
++		assert.Equal(t, hex.EncodeToString(sum[:]), report.Rendering.FontStyles[index].SHA256)
++	}
++	require.Len(t, report.Rendering.FontFallbacks, 1)
++	assert.Equal(t, fallback, report.Rendering.FontFallbacks[0].Path)
++	assert.Equal(t, font, report.terminal.FontPath, "session overview must use the rendering font too")
++	assert.Equal(t, []string{fallback}, report.terminal.FontFallbacks)
++	require.NotNil(t, report.Presentation)
++	assert.Equal(t, font, report.Presentation.FontPath)
++	assert.Equal(t, []string{fallback}, report.Presentation.FontFallbacks)
++	for path, before := range originals {
++		after, err := os.ReadFile(path)
++		require.NoError(t, err)
++		assert.Equal(t, before, after, path)
++	}
++}
++
++func TestParseRenderingFonts(t *testing.T) {
++	t.Parallel()
++	primary, err := filepath.Abs("primary.ttf")
++	require.NoError(t, err)
++	first, err := filepath.Abs("first.ttf")
++	require.NoError(t, err)
++	second, err := filepath.Abs("second.ttf")
++	require.NoError(t, err)
++	for _, tc := range []struct {
++		name      string
++		flags     []string
++		primary   string
++		fallbacks []string
++	}{
++		{name: "omitted choices remain empty"},
++		{name: "primary font only", flags: []string{"--font", "primary.ttf"}, primary: primary},
++		{name: "ordered fallbacks only", flags: []string{"--font-fallback", "first.ttf", "--font-fallback", "second.ttf"},
++			fallbacks: []string{first, second}},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			// Given an evidence request with optional font choices.
++			args := append([]string{"--run-dir", "capture", "--preflight", "receipt"}, tc.flags...)
++
++			// When parsing the request.
++			opts, err := parseOptions(args)
++
++			// Then only explicit choices override the contract, with absolute paths and preserved order.
++			require.NoError(t, err)
++			assert.Equal(t, tc.primary, opts.fontPath)
++			assert.Equal(t, tc.fallbacks, opts.fontFallbacks)
++		})
++	}
++}
++
++func TestRejectBlankRenderingFonts(t *testing.T) {
++	t.Parallel()
++	for _, flag := range []string{"--font", "--font-fallback"} {
++		t.Run(flag, func(t *testing.T) {
++			// Given an explicitly empty font path.
++			args := []string{"--run-dir", "capture", "--preflight", "receipt", flag, ""}
++
++			// When parsing the request.
++			_, err := parseOptions(args)
++
++			// Then the request is rejected rather than silently using the recorded font.
++			require.ErrorContains(t, err, "font path must not be empty")
++		})
++	}
++}
++
++func TestUnavailableRenderingFallbackPreservesCaseOutcome(t *testing.T) {
++	t.Parallel()
++
++	// Given a successful capture and an unavailable requested rendering fallback.
++	root, receipt, originals := fontCapture(t)
++	primary := filepath.Join(root, "primary.ttf")
++	require.NoError(t, os.WriteFile(primary, gomono.TTF, 0o600))
++	missing := filepath.Join(root, "missing.ttf")
++	opts, err := parseOptions([]string{"--run-dir", root, "--preflight", receipt,
++		"--font", primary, "--font-fallback", missing})
++	require.NoError(t, err)
++
++	// When the renderer attempts to open the requested fonts.
++	report, err := buildReport(t.Context(), t.TempDir(), opts, func(_ context.Context, c contract, _ result, _ []state, _ []event, r recording.Receipt, _, _ string) (rendering, error) {
++		raster, err := newRasterizer(c.Terminal)
++		if err != nil {
++			return rendering{}, err
++		}
++		defer func() { require.NoError(t, raster.fonts.Close()) }()
++		return rendering{Status: "complete"}, nil
++	})
++
++	// Then rendering fails explicitly without turning the successful case into a failure.
++	require.NoError(t, err)
++	assert.Equal(t, "passed", report.CaseStatus)
++	assert.Equal(t, "failed", report.Rendering.Status)
++	assert.Contains(t, report.Rendering.Error, "load explicit fallback")
++	assert.Contains(t, report.Rendering.Error, missing)
++	require.NotNil(t, report.Presentation)
++	assert.Equal(t, []string{missing}, report.Presentation.FontFallbacks)
++	for path, before := range originals {
++		after, err := os.ReadFile(path)
++		require.NoError(t, err)
++		assert.Equal(t, before, after, path)
++	}
++}
++
++func TestRenderingRequiresExplicitFont(t *testing.T) {
++	t.Parallel()
++
++	// Given an execution capture without presentation font paths.
++	root, receipt, _ := fontCapture(t)
++	replacement := filepath.Join(root, "replacement.ttf")
++	require.NoError(t, os.WriteFile(replacement, gomono.TTF, 0o600))
++	for _, tc := range []struct {
++		name      string
++		flags     []string
++		primary   string
++		fallbacks []string
++		status    string
++	}{
++		{name: "missing primary", status: "failed"},
++		{name: "selected primary", flags: []string{"--font", replacement}, primary: replacement, status: "complete"},
++		{name: "fallback still needs primary", flags: []string{"--font-fallback", replacement},
++			fallbacks: []string{replacement}, status: "failed"},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			// When rendering uses only the explicit presentation choices.
++			args := append([]string{"--run-dir", root, "--preflight", receipt}, tc.flags...)
++			opts, err := parseOptions(args)
++			require.NoError(t, err)
++			report, err := buildReport(t.Context(), t.TempDir(), opts, func(_ context.Context, c contract, _ result, _ []state, _ []event, _ recording.Receipt, _, _ string) (rendering, error) {
++				assert.Equal(t, tc.primary, c.Terminal.FontPath)
++				assert.Equal(t, tc.fallbacks, c.Terminal.FontFallbacks)
++				raster, err := newRasterizer(c.Terminal)
++				if err != nil {
++					return rendering{}, err
++				}
++				defer func() { require.NoError(t, raster.fonts.Close()) }()
++				return rendering{Status: "complete", Font: &raster.fonts.Info, FontFallbacks: raster.fonts.Fallbacks}, nil
++			})
++
++			// Then no font path is inherited from execution or preflight.
++			if tc.status == "failed" {
++				require.ErrorContains(t, err, "--font")
++				return
++			}
++			require.NoError(t, err)
++			assert.Equal(t, tc.status, report.Rendering.Status)
++			assert.Equal(t, tc.primary, report.terminal.FontPath)
++			assert.Equal(t, tc.fallbacks, report.terminal.FontFallbacks)
++			require.NotNil(t, report.Rendering.Font)
++			assert.Equal(t, tc.primary, report.Rendering.Font.Path)
++		})
++	}
++}
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/main.go b/.github/skills/cli-exercise/tool/internal/evidence/main.go
+index 121c37956b0..5df53a7e497 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/main.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/main.go
+@@ -34,6 +34,8 @@ type options struct {
+ 	chapter             *chapterPresentation
+ 	captions            *bool
+ 	html                bool
++	fontPath            string
++	fontFallbacks       []string
+ }
+ 
+ func parseOptions(args []string) (options, error) {
+@@ -46,6 +48,26 @@ func parseOptions(args []string) (options, error) {
+ 	flags.StringVar(&opts.verification, "verification", "", "Evidence-backed manual expectations")
+ 	flags.StringVar(&opts.inspection, "inspection", "sampled", "sampled or all")
+ 	flags.BoolVar(&opts.html, "html", false, "Also generate an interactive HTML report")
++	fontPath := func(value string) (string, error) {
++		if strings.TrimSpace(value) == "" {
++			return "", fmt.Errorf("font path must not be empty")
++		}
++		return filepath.Abs(value)
++	}
++	flags.Func("font", "Primary rendering font; leaves the recorded contract unchanged", func(value string) error {
++		path, err := fontPath(value)
++		if err == nil {
++			opts.fontPath = path
++		}
++		return err
++	})
++	flags.Func("font-fallback", "Rendering fallback font; repeat to replace the recorded fallback chain in order", func(value string) error {
++		path, err := fontPath(value)
++		if err == nil {
++			opts.fontFallbacks = append(opts.fontFallbacks, path)
++		}
++		return err
++	})
+ 	flags.Func("format", "Additional presentation format: gif or mp4; repeat for both", func(value string) error {
+ 		if !slices.Contains([]string{"gif", "mp4"}, value) {
+ 			return fmt.Errorf("--format must be gif or mp4")
+@@ -177,20 +199,29 @@ func readRecords[T any](path string) ([]T, error) {
+ 	return values, nil
+ }
+ 
++// Presentation output is already resolved, so it must not inherit the contract's input unmarshaler.
++type presentationOutput recording.OutputOptions
++
++type presentationOptions struct {
++	presentationOutput
++	FontPath      string   `json:"fontPath,omitempty"`
++	FontFallbacks []string `json:"fontFallbacks,omitempty"`
++}
++
+ type report struct {
+-	SchemaVersion  int                      `json:"schemaVersion"`
+-	CaseID         string                   `json:"caseId"`
+-	Mode           string                   `json:"mode"`
+-	StartedAt      string                   `json:"startedAt,omitempty"`
+-	FinishedAt     string                   `json:"finishedAt,omitempty"`
+-	CaseStatus     string                   `json:"caseStatus"`
+-	CaptureStatus  string                   `json:"captureStatus"`
+-	ContractSHA256 string                   `json:"contractSha256"`
+-	Expectations   []check                  `json:"expectations"`
+-	Rendering      rendering                `json:"rendering"`
+-	Presentation   *recording.OutputOptions `json:"presentation,omitempty"`
+-	Report         string                   `json:"report,omitempty"`
+-	Chapter        *chapterPresentation     `json:"chapter,omitempty"`
++	SchemaVersion  int                  `json:"schemaVersion"`
++	CaseID         string               `json:"caseId"`
++	Mode           string               `json:"mode"`
++	StartedAt      string               `json:"startedAt,omitempty"`
++	FinishedAt     string               `json:"finishedAt,omitempty"`
++	CaseStatus     string               `json:"caseStatus"`
++	CaptureStatus  string               `json:"captureStatus"`
++	ContractSHA256 string               `json:"contractSha256"`
++	Expectations   []check              `json:"expectations"`
++	Rendering      rendering            `json:"rendering"`
++	Presentation   *presentationOptions `json:"presentation,omitempty"`
++	Report         string               `json:"report,omitempty"`
++	Chapter        *chapterPresentation `json:"chapter,omitempty"`
+ 	terminal       terminalConfig
+ }
+ 
+@@ -250,6 +281,9 @@ func buildReport(ctx context.Context, skillRoot string, opts options, renderMedi
+ 	if receipt.Status != "ready" {
+ 		return report{}, fmt.Errorf("a ready preflight receipt is required")
+ 	}
++	if opts.fontPath == "" {
++		return report{}, fmt.Errorf("evidence rendering requires --font")
++	}
+ 	statePath, err := containedFile(workspace, "capture/states.jsonl")
+ 	if err != nil {
+ 		return report{}, err
+@@ -278,6 +312,8 @@ func buildReport(ctx context.Context, skillRoot string, opts options, renderMedi
+ 		return report{}, err
+ 	}
+ 	presentation := contract
++	presentation.Terminal.FontPath = ""
++	presentation.Terminal.FontFallbacks = nil
+ 	if opts.chapter != nil {
+ 		if !filepath.IsAbs(contract.Command.Executable) {
+ 			return report{}, fmt.Errorf("session chapters require the recorded command identity")
+@@ -287,7 +323,7 @@ func buildReport(ctx context.Context, skillRoot string, opts options, renderMedi
+ 		chapter.Status = outcome
+ 		presentation.Chapter = &chapter
+ 	}
+-	var requestedOutput *recording.OutputOptions
++	var requestedOutput *presentationOptions
+ 	if len(opts.formats) > 0 || opts.timing != "" || opts.captions != nil {
+ 		if len(opts.formats) > 0 {
+ 			presentation.Output.Formats = slices.Clone(opts.formats)
+@@ -302,8 +338,15 @@ func buildReport(ctx context.Context, skillRoot string, opts options, renderMedi
+ 		if presentation.Output.Timing == "condensed" && presentation.Output.Captions != nil && !*presentation.Output.Captions {
+ 			return report{}, fmt.Errorf("unannotated output preserves real timing; use realtime instead of condensed")
+ 		}
+-		requestedOutput = &presentation.Output
++		requestedOutput = &presentationOptions{presentationOutput: presentationOutput(presentation.Output)}
++	}
++	presentation.Terminal.FontPath = opts.fontPath
++	presentation.Terminal.FontFallbacks = slices.Clone(opts.fontFallbacks)
++	if requestedOutput == nil {
++		requestedOutput = &presentationOptions{presentationOutput: presentationOutput(presentation.Output)}
+ 	}
++	requestedOutput.FontPath = presentation.Terminal.FontPath
++	requestedOutput.FontFallbacks = slices.Clone(presentation.Terminal.FontFallbacks)
+ 	artifacts := filepath.Join(workspace, "artifacts")
+ 	if info, err := os.Lstat(artifacts); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+ 		return report{}, fmt.Errorf("artifact directory must be a real directory, not a symlink")
+@@ -323,7 +366,7 @@ func buildReport(ctx context.Context, skillRoot string, opts options, renderMedi
+ 	}
+ 	resultReport := report{
+ 		SchemaVersion: 1, CaseID: contract.CaseID, CaseStatus: outcome, CaptureStatus: result.CaptureStatus,
+-		Mode: contract.Mode, StartedAt: result.StartedAt, FinishedAt: result.FinishedAt, terminal: contract.Terminal,
++		Mode: contract.Mode, StartedAt: result.StartedAt, FinishedAt: result.FinishedAt, terminal: presentation.Terminal,
+ 		ContractSHA256: hash, Expectations: checks, Rendering: rendered,
+ 		Presentation: requestedOutput,
+ 		Chapter:      presentation.Chapter,
+@@ -426,7 +469,7 @@ func Main(ctx context.Context, skillRoot string, args []string, streams cliutil.
+ 	opts, err := parseOptions(args)
+ 	if errors.Is(err, flag.ErrHelp) {
+ 		if _, err := fmt.Fprintln(streams.Out,
+-			"Usage: cli-exercise --skill-root PATH evidence {--run-dir PATH|--session FILE} --preflight FILE [--html] [--verification FILE] [--inspection sampled|all] [--format gif|mp4] [--timing realtime|condensed] [--timing-authorization TEXT]"); err != nil {
++			"Usage: cli-exercise --skill-root PATH evidence {--run-dir PATH|--session FILE} --preflight FILE [--html] [--verification FILE] [--inspection sampled|all] [--format gif|mp4] [--timing realtime|condensed] [--timing-authorization TEXT] [--font FILE] [--font-fallback FILE ...]"); err != nil {
+ 			return 1
+ 		}
+ 		return 0
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/model.go b/.github/skills/cli-exercise/tool/internal/evidence/model.go
+index 0221aea0d25..53cb472d2db 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/model.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/model.go
+@@ -17,8 +17,8 @@ import (
+ type terminalConfig struct {
+ 	Columns       int      `json:"columns"`
+ 	Rows          int      `json:"rows"`
+-	FontPath      string   `json:"fontPath"`
+-	FontFallbacks []string `json:"fontFallbacks"`
++	FontPath      string   `json:"-"`
++	FontFallbacks []string `json:"-"`
+ 	FontSize      float64  `json:"fontSize"`
+ 	FPS           int      `json:"fps"`
+ 	Background    string   `json:"background"`
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/overview.go b/.github/skills/cli-exercise/tool/internal/evidence/overview.go
+index 45b023e1b13..2a01ee18cc7 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/overview.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/overview.go
+@@ -93,20 +93,25 @@ func wrapOverviewText(fonts *fontutil.Set, text string, width, limit int) ([]str
+ 
+ func planOverview(fonts, heading *fontutil.Set, title string, cases []sessionCaseResult, width, height int) (overviewLayout, error) {
+ 	layout := overviewLayout{}
++	contentWidth := width - 2*presentationMargin
++	contentHeight := height - 2*presentationMargin
++	if contentWidth <= 64 || contentHeight <= 0 {
++		return layout, fmt.Errorf("overview needs room for the framed presentation")
++	}
+ 	var err error
+-	layout.title, err = wrapOverviewText(heading, title, width-64, 2)
++	layout.title, err = wrapOverviewText(heading, title, contentWidth-64, 2)
+ 	if err != nil {
+ 		return layout, err
+ 	}
+ 	layout.top = 40 + fonts.CellHeight + len(layout.title)*heading.CellHeight + 28
+-	layout.footer = height - 2*fonts.CellHeight - 28
++	layout.footer = contentHeight - 2*fonts.CellHeight - 28
+ 	available := layout.footer - layout.top
+ 	if available < fonts.CellHeight+20 || len(cases) == 0 {
+ 		return layout, fmt.Errorf("overview needs room for at least one readable result row")
+ 	}
+ 	page, used := []overviewRow{}, 0
+ 	for _, item := range cases {
+-		lines, err := wrapOverviewText(fonts, item.Title, width-224, 2)
++		lines, err := wrapOverviewText(fonts, item.Title, contentWidth-224, 2)
+ 		if err != nil {
+ 			return layout, fmt.Errorf("case %s: %w", item.ID, err)
+ 		}
+@@ -149,24 +154,33 @@ func statusMark(canvas *image.RGBA, x, y, size int, status string, ink color.RGB
+ 
+ func drawOverview(raster *rasterizer, heading *fontutil.Set, layout overviewLayout, page, width, height int, mode string) (*image.RGBA, error) {
+ 	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
+-	fill(canvas, canvas.Bounds(), raster.background)
+-	if err := raster.fonts.DrawText(canvas, 32, 24+raster.fonts.Ascent, fidelityLabel(mode), runningInk); err != nil {
++	fill(canvas, canvas.Bounds(), presentationInk)
++	contentWidth := width - 2*presentationMargin
++	contentHeight := height - 2*presentationMargin
++	panel := image.Rect(presentationMargin-1, presentationMargin-1,
++		presentationMargin+contentWidth+1, presentationMargin+contentHeight+1)
++	fill(canvas, panel, panelBorderInk)
++	fill(canvas, image.Rect(presentationMargin, presentationMargin,
++		presentationMargin+contentWidth, presentationMargin+contentHeight), raster.background)
++	if err := raster.fonts.DrawText(canvas, presentationMargin+32,
++		presentationMargin+24+raster.fonts.Ascent, fidelityLabel(mode), runningInk); err != nil {
+ 		return nil, err
+ 	}
+-	y := 40 + raster.fonts.CellHeight
++	y := presentationMargin + 40 + raster.fonts.CellHeight
+ 	for _, line := range layout.title {
+-		if err := heading.DrawText(canvas, 32, y+heading.Ascent, line, raster.foreground); err != nil {
++		if err := heading.DrawText(canvas, presentationMargin+32, y+heading.Ascent, line, raster.foreground); err != nil {
+ 			return nil, err
+ 		}
+ 		y += heading.CellHeight
+ 	}
+-	y = layout.top
++	y = presentationMargin + layout.top
+ 	border := color.RGBA{0x30, 0x36, 0x3d, 0xff}
+ 	for _, row := range layout.pages[page] {
+ 		label, ink := outcomeAppearance(row.result.Status)
+-		statusMark(canvas, 34, y+5, max(10, raster.fonts.CellHeight-10), row.result.Status, ink)
++		statusMark(canvas, presentationMargin+34, y+5, max(10, raster.fonts.CellHeight-10), row.result.Status, ink)
+ 		for index, line := range row.lines {
+-			if err := raster.fonts.DrawText(canvas, 64, y+index*raster.fonts.CellHeight+raster.fonts.Ascent, line, raster.foreground); err != nil {
++			if err := raster.fonts.DrawText(canvas, presentationMargin+64,
++				y+index*raster.fonts.CellHeight+raster.fonts.Ascent, line, raster.foreground); err != nil {
+ 				return nil, err
+ 			}
+ 		}
+@@ -174,17 +188,20 @@ func drawOverview(raster *rasterizer, heading *fontutil.Set, layout overviewLayo
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		if err := raster.fonts.DrawText(canvas, width-32-int(labelWidth), y+raster.fonts.Ascent, label, ink); err != nil {
++		if err := raster.fonts.DrawText(canvas, presentationMargin+contentWidth-32-int(labelWidth),
++			y+raster.fonts.Ascent, label, ink); err != nil {
+ 			return nil, err
+ 		}
+ 		y += row.height
+-		fill(canvas, image.Rect(32, y-8, width-32, y-7), border)
++		fill(canvas, image.Rect(presentationMargin+32, y-8,
++			presentationMargin+contentWidth-32, y-7), border)
+ 	}
+ 	footer := "Recorded outcomes"
+ 	if len(layout.pages) > 1 {
+ 		footer += fmt.Sprintf(" | Page %d of %d", page+1, len(layout.pages))
+ 	}
+-	if err := raster.fonts.DrawText(canvas, 32, height-24-raster.fonts.CellHeight+raster.fonts.Ascent, footer, mutedInk); err != nil {
++	if err := raster.fonts.DrawText(canvas, presentationMargin+32,
++		presentationMargin+contentHeight-24-raster.fonts.CellHeight+raster.fonts.Ascent, footer, mutedInk); err != nil {
+ 		return nil, err
+ 	}
+ 	return canvas, nil
+@@ -195,7 +212,7 @@ func renderOverview(ctx context.Context, directory string, receipt recording.Rec
+ 	if fps < 1 || fps > 60 || width <= 0 || height <= 0 || width%2 != 0 || height%2 != 0 || width > 64_000_000/height {
+ 		return nil, nil, fmt.Errorf("overview requires bounded even geometry and a supported frame rate")
+ 	}
+-	raster, err := newRasterizer(config, receipt)
++	raster, err := newRasterizer(config)
+ 	if err != nil {
+ 		return nil, nil, err
+ 	}
+@@ -243,6 +260,7 @@ func renderOverview(ctx context.Context, directory string, receipt recording.Rec
+ 				Status: "complete", Media: map[string]string{"mp4": videoPath},
+ 				Width: width, Height: height, Frames: overviewPageSeconds * fps, FPS: fps,
+ 				DurationSeconds: overviewPageSeconds,
++				Font:            &raster.fonts.Info, FontStyles: raster.fonts.Styles, FontFallbacks: raster.fonts.Fallbacks,
+ 			}}})
+ 	}
+ 	return chapters, &sessionOverview{Mode: mode, Title: title, Pages: len(layout.pages),
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/presentation_test.go b/.github/skills/cli-exercise/tool/internal/evidence/presentation_test.go
+index 29683558dec..56e4714db93 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/presentation_test.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/presentation_test.go
+@@ -19,6 +19,7 @@ import (
+ 	"github.com/cli/cli/v2/cli-exercise/internal/cliutil"
+ 	"github.com/cli/cli/v2/cli-exercise/internal/fontutil"
+ 	"github.com/cli/cli/v2/cli-exercise/internal/recording"
++	"github.com/stretchr/testify/assert"
+ 	"github.com/stretchr/testify/require"
+ 	"golang.org/x/image/font/gofont/gomono"
+ )
+@@ -28,13 +29,32 @@ func presentationRaster(t *testing.T) (*rasterizer, terminalConfig) {
+ 	path := filepath.Join(t.TempDir(), "Mono.ttf")
+ 	require.NoError(t, os.WriteFile(path, gomono.TTF, 0o600))
+ 	config := terminalConfig{FontPath: path, FontSize: 18, FPS: 10, Background: "#0d1117", Foreground: "#e6edf3"}
+-	raster, err := newRasterizer(config, recording.Receipt{})
++	raster, err := newRasterizer(config)
+ 	require.NoError(t, err)
+ 	t.Cleanup(func() { require.NoError(t, raster.fonts.Close()) })
+ 	return raster, config
+ }
+ 
+ func presentationCases(t *testing.T) {
++	t.Run("terminal presentation keeps content inside a framed safe area", func(t *testing.T) {
++		raster, config := presentationRaster(t)
++
++		// Given a terminal frame whose first cell starts at the source image edge.
++		top, err := raster.draw(testState("edge content", 0).Data)
++		require.NoError(t, err)
++		source := contract{CaseID: "case", Goal: "Keep playback controls clear of terminal content", Terminal: config}
++		contentHeight := top.Bounds().Dy() + 4*raster.fonts.CellHeight
++
++		// When the terminal presentation is composed.
++		canvas, err := raster.compose(top, source, frame{}, top.Bounds().Dx(), contentHeight, top.Bounds().Dy())
++		require.NoError(t, err)
++
++		// Then the frame provides a 48px safe area and a visible panel boundary.
++		assert.Equal(t, image.Rect(0, 0, top.Bounds().Dx()+96, contentHeight+96), canvas.Bounds())
++		assert.Equal(t, color.RGBA{0x01, 0x04, 0x09, 0xff}, canvas.RGBAAt(0, 0))
++		assert.Equal(t, color.RGBA{0x30, 0x36, 0x3d, 0xff}, canvas.RGBAAt(47, 47))
++		assert.Equal(t, raster.background, canvas.RGBAAt(48, 48))
++	})
+ 	t.Run("phase colors and readable result labels", func(t *testing.T) {
+ 		raster, config := presentationRaster(t)
+ 		for _, tc := range []struct {
+@@ -68,7 +88,8 @@ func presentationCases(t *testing.T) {
+ 				canvas, err := raster.compose(top, source, frame{Note: &notes[0]}, top.Bounds().Dx(),
+ 					height+4*raster.fonts.CellHeight, height)
+ 				require.NoError(t, err)
+-				require.Equal(t, tc.ink, canvas.RGBAAt(5, height+1), "the phase accent must be in the actual raster")
++				require.Equal(t, tc.ink, canvas.RGBAAt(presentationMargin+5, presentationMargin+height+1),
++					"the phase accent must be in the actual raster")
+ 				require.Contains(t, *notes[0].Chapter, tc.label)
+ 				require.Equal(t, "Check the requested behavior", *notes[0].Text)
+ 			})
+@@ -93,7 +114,7 @@ func presentationCases(t *testing.T) {
+ 		canvas, err := raster.compose(top, source, frame{}, top.Bounds().Dx(), height+4*raster.fonts.CellHeight, height)
+ 		require.NoError(t, err)
+ 		captured := image.NewRGBA(top.Bounds())
+-		draw.Draw(captured, captured.Bounds(), canvas, image.Pt(0, offset), draw.Src)
++		draw.Draw(captured, captured.Bounds(), canvas, image.Pt(presentationMargin, presentationMargin+offset), draw.Src)
+ 		require.Equal(t, before, pixelHash(captured), "the terminal must retain every original output cell below the invocation")
+ 		require.Equal(t, before, pixelHash(top), "raw source images remain unchanged")
+ 		off := false
+@@ -103,7 +124,9 @@ func presentationCases(t *testing.T) {
+ 		require.Empty(t, lines)
+ 		plain, err := raster.compose(top, source, frame{}, top.Bounds().Dx(), top.Bounds().Dy(), top.Bounds().Dy())
+ 		require.NoError(t, err)
+-		require.Equal(t, before, pixelHash(plain), "an explicit unannotated capture must not gain an artificial prompt")
++		captured = image.NewRGBA(top.Bounds())
++		draw.Draw(captured, captured.Bounds(), plain, image.Pt(presentationMargin, presentationMargin), draw.Src)
++		require.Equal(t, before, pixelHash(captured), "an explicit unannotated capture must not gain an artificial prompt")
+ 	})
+ 	t.Run("timing adjustments do not add a footer", func(t *testing.T) {
+ 		raster, config := presentationRaster(t)
+@@ -116,8 +139,8 @@ func presentationCases(t *testing.T) {
+ 			source.Output.Timing = timing
+ 			canvas, err := raster.compose(top, source, frame{}, top.Bounds().Dx(), height, top.Bounds().Dy())
+ 			require.NoError(t, err)
+-			for y := height - raster.fonts.CellHeight; y < height; y++ {
+-				for x := range canvas.Bounds().Dx() {
++			for y := presentationMargin + height - raster.fonts.CellHeight; y < presentationMargin+height; y++ {
++				for x := presentationMargin; x < presentationMargin+top.Bounds().Dx(); x++ {
+ 					require.Equal(t, raster.background, canvas.RGBAAt(x, y), "bottom padding must not contain a repeated timing label")
+ 				}
+ 			}
+@@ -148,6 +171,8 @@ func presentationCases(t *testing.T) {
+ 		heading, err := fontutil.Open(config.FontPath, config.FontSize*1.4, nil)
+ 		require.NoError(t, err)
+ 		defer func() { require.NoError(t, heading.Close()) }()
++
++		// Given an overview rendered into the same video geometry as terminal chapters.
+ 		for _, count := range []int{1, 4, 31} {
+ 			cases := make([]sessionCaseResult, count)
+ 			for index := range cases {
+@@ -158,9 +183,15 @@ func presentationCases(t *testing.T) {
+ 			require.NoError(t, err)
+ 			shown := []sessionCaseResult{}
+ 			for page, rows := range layout.pages {
++				// When an overview page is drawn.
+ 				canvas, err := drawOverview(raster, heading, layout, page, 1000, 440, "exact")
+ 				require.NoError(t, err)
++
++				// Then its content uses the same framed 48px safe area.
+ 				require.Equal(t, image.Rect(0, 0, 1000, 440), canvas.Bounds())
++				require.Equal(t, presentationInk, canvas.RGBAAt(0, 0))
++				require.Equal(t, panelBorderInk, canvas.RGBAAt(47, 47))
++				require.Equal(t, raster.background, canvas.RGBAAt(48, 48))
+ 				for _, row := range rows {
+ 					shown = append(shown, row.result)
+ 				}
+@@ -190,10 +221,15 @@ func presentationNativeCase(t *testing.T) {
+ 	var receipt recording.Receipt
+ 	_, err := cliutil.ReadJSON(receiptPath, 4<<20, &receipt)
+ 	require.NoError(t, err)
+-	require.NotNil(t, receipt.Tools.Font)
++	fontPath := os.Getenv("CLI_EXERCISE_RENDER_FONT")
++	if fontPath == "" {
++		t.Skip("Select an explicit font for native presentation checks.")
++	}
+ 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+ 	defer cancel()
+ 	root := t.TempDir()
++	fallback := filepath.Join(root, "fallback.ttf")
++	require.NoError(t, os.WriteFile(fallback, gomono.TTF, 0o600))
+ 	manifest := sessionManifest{SchemaVersion: 1, ID: "presentation", Title: "Focused CLI checks",
+ 		Source: "Record independent synthetic cases with immediate validation.", Workspace: root}
+ 	manifest.Output.Formats = []string{"mp4"}
+@@ -206,7 +242,8 @@ func presentationNativeCase(t *testing.T) {
+ 			directory := filepath.Join(root, item.ID, phase)
+ 			require.NoError(t, os.MkdirAll(filepath.Join(directory, "capture"), 0o700))
+ 			recorded := contract{CaseID: item.ID + "-" + phase, Mode: mode, Goal: "Inspect only the synthetic fixture",
+-				Terminal: terminalConfig{Columns: 90, Rows: 10, FontPath: receipt.Tools.Font.Path, FontSize: 18,
++				Terminal: terminalConfig{Columns: 90, Rows: 10, FontPath: filepath.Join(root, "unavailable-original.ttf"),
++					FontFallbacks: []string{filepath.Join(root, "unavailable-fallback.ttf")}, FontSize: 18,
+ 					FPS: 10, Background: "#0d1117", Foreground: "#e6edf3"},
+ 				Output:       recording.OutputOptions{Formats: []string{"mp4"}, Timing: "condensed"},
+ 				Expectations: []expectation{{ID: "exit", Type: "exit_code", Value: json.RawMessage("0")}},
+@@ -246,19 +283,29 @@ func presentationNativeCase(t *testing.T) {
+ 	path := filepath.Join(root, "session.json")
+ 	require.NoError(t, cliutil.WriteJSON(path, manifest))
+ 	var output bytes.Buffer
+-	code, err := runSession(ctx, t.TempDir(), options{sessionManifest: path, preflight: receiptPath, inspection: "all"},
++	// Given recorded chapters whose original font files are unavailable.
++	opts, err := parseOptions([]string{"--session", path, "--preflight", receiptPath, "--inspection", "all",
++		"--font", fontPath, "--font-fallback", fallback})
++	require.NoError(t, err)
++
++	// When a session is rendered with replacement fonts.
++	code, err := runSession(ctx, t.TempDir(), opts,
+ 		cliutil.Streams{Out: &output}, render)
+ 	require.NoError(t, err)
++
++	// Then every chapter and the overview render without rewriting the recorded contracts.
+ 	var report sessionReport
+ 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+ 	require.Equal(t, 1, code, output.String())
+ 	require.Equal(t, "failed", report.SessionStatus)
+ 	require.Equal(t, "complete", report.Rendering.Status, report.Rendering.Error)
+-	fonts, err := fontutil.Open(receipt.Tools.Font.Path, 18, nil)
++	fonts, err := fontutil.Open(fontPath, 18, nil)
+ 	require.NoError(t, err)
+ 	expectedHeight := 15 * fonts.CellHeight
++	expectedWidth := 90 * fonts.CellWidth
+ 	require.NoError(t, fonts.Close())
+-	require.Equal(t, expectedHeight+expectedHeight%2, report.Rendering.Height, "the removed timing footer must not leave an extra row")
++	require.Equal(t, expectedHeight+expectedHeight%2+96, report.Rendering.Height, "the framed terminal keeps a 48px vertical safe area")
++	require.Equal(t, expectedWidth+expectedWidth%2+96, report.Rendering.Width, "the framed terminal keeps a 48px horizontal safe area")
+ 	require.True(t, report.OrderVerified)
+ 	require.Equal(t, "mixed", report.Mode)
+ 	require.NotNil(t, report.Overview)
+@@ -275,6 +322,13 @@ func presentationNativeCase(t *testing.T) {
+ 		if chapter.Kind == "overview" {
+ 			kind = "overview"
+ 		} else {
++			require.NotNil(t, chapter.Evidence.Presentation)
++			assert.Equal(t, fontPath, chapter.Evidence.Presentation.FontPath)
++			assert.Equal(t, []string{fallback}, chapter.Evidence.Presentation.FontFallbacks)
++			require.Len(t, chapter.Evidence.Rendering.FontFallbacks, 1)
++			sum := sha256.Sum256(gomono.TTF)
++			assert.Equal(t, fallback, chapter.Evidence.Rendering.FontFallbacks[0].Path)
++			assert.Equal(t, hex.EncodeToString(sum[:]), chapter.Evidence.Rendering.FontFallbacks[0].SHA256)
+ 			require.Equal(t, "condensed", chapter.Evidence.Rendering.Timing)
+ 			require.Positive(t, chapter.Evidence.Rendering.PresentationHoldSeconds, "reading holds remain recorded in metadata")
+ 		}
+@@ -296,7 +350,7 @@ func presentationNativeCase(t *testing.T) {
+ 			cases[index] = sessionCaseResult{ID: fmt.Sprint(index), Title: "A brief independent behavior", Status: "passed", Mode: "exact"}
+ 		}
+ 		directory := t.TempDir()
+-		config := terminalConfig{FontPath: receipt.Tools.Font.Path, FontSize: 18, FPS: 10, Background: "#0d1117", Foreground: "#e6edf3"}
++		config := terminalConfig{FontPath: fontPath, FontSize: 18, FPS: 10, Background: "#0d1117", Foreground: "#e6edf3"}
+ 		pages, overview, err := renderOverview(ctx, directory, receipt, config, "Exact CLI checks", "exact", cases,
+ 			report.Rendering.Width, report.Rendering.Height, report.Rendering.FPS)
+ 		require.NoError(t, err)
+@@ -322,7 +376,9 @@ func presentationNativeCase(t *testing.T) {
+ 		path := filepath.Join(root, "plain.json")
+ 		require.NoError(t, cliutil.WriteJSON(path, plain))
+ 		var output bytes.Buffer
+-		code, err := runSession(ctx, t.TempDir(), options{sessionManifest: path, preflight: receiptPath, inspection: "sampled"},
++		plainOptions := opts
++		plainOptions.sessionManifest, plainOptions.inspection = path, "sampled"
++		code, err := runSession(ctx, t.TempDir(), plainOptions,
+ 			cliutil.Streams{Out: &output}, render)
+ 		require.NoError(t, err)
+ 		require.Equal(t, 1, code)
+@@ -346,7 +402,8 @@ func presentationNativeCase(t *testing.T) {
+ 		path := filepath.Join(root, "reordered.json")
+ 		require.NoError(t, cliutil.WriteJSON(path, reordered))
+ 		var output bytes.Buffer
+-		code, err := runSession(ctx, t.TempDir(), options{sessionManifest: path, preflight: receiptPath},
++		code, err := runSession(ctx, t.TempDir(), options{sessionManifest: path, preflight: receiptPath,
++			fontPath: fontPath},
+ 			cliutil.Streams{Out: &output}, func(context.Context, contract, result, []state, []event, recording.Receipt, string, string) (rendering, error) {
+ 				return rendering{Status: "complete"}, nil
+ 			})
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/raster.go b/.github/skills/cli-exercise/tool/internal/evidence/raster.go
+index b55187a7681..e2ca9ba68d2 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/raster.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/raster.go
+@@ -20,14 +20,18 @@ type rasterizer struct {
+ }
+ 
+ var (
+-	preparationInk = color.RGBA{0xd2, 0xa8, 0xff, 0xff}
+-	runningInk     = color.RGBA{0x79, 0xc0, 0xff, 0xff}
+-	passedInk      = color.RGBA{0x7e, 0xe7, 0x87, 0xff}
+-	failedInk      = color.RGBA{0xff, 0x7b, 0x72, 0xff}
+-	blockedInk     = color.RGBA{0xe3, 0xb3, 0x41, 0xff}
+-	mutedInk       = color.RGBA{0x91, 0x98, 0xa1, 0xff}
++	preparationInk  = color.RGBA{0xd2, 0xa8, 0xff, 0xff}
++	runningInk      = color.RGBA{0x79, 0xc0, 0xff, 0xff}
++	passedInk       = color.RGBA{0x7e, 0xe7, 0x87, 0xff}
++	failedInk       = color.RGBA{0xff, 0x7b, 0x72, 0xff}
++	blockedInk      = color.RGBA{0xe3, 0xb3, 0x41, 0xff}
++	mutedInk        = color.RGBA{0x91, 0x98, 0xa1, 0xff}
++	presentationInk = color.RGBA{0x01, 0x04, 0x09, 0xff}
++	panelBorderInk  = color.RGBA{0x30, 0x36, 0x3d, 0xff}
+ )
+ 
++const presentationMargin = 48
++
+ func outcomeAppearance(status string) (string, color.RGBA) {
+ 	switch status {
+ 	case "passed":
+@@ -109,7 +113,7 @@ func parseColor(value string) (color.RGBA, error) {
+ 	return color.RGBA{R: uint8(rgb >> 16), G: uint8(rgb >> 8), B: uint8(rgb), A: 255}, nil
+ }
+ 
+-func newRasterizer(config terminalConfig, receipt recording.Receipt) (*rasterizer, error) {
++func newRasterizer(config terminalConfig) (*rasterizer, error) {
+ 	background, err := parseColor(config.Background)
+ 	if err != nil {
+ 		return nil, err
+@@ -120,10 +124,7 @@ func newRasterizer(config terminalConfig, receipt recording.Receipt) (*rasterize
+ 	}
+ 	path := config.FontPath
+ 	if path == "" {
+-		if receipt.Tools.Font == nil {
+-			return nil, fmt.Errorf("an explicit font selection is required")
+-		}
+-		path = receipt.Tools.Font.Path
++		return nil, fmt.Errorf("rendering requires an explicit font selection")
+ 	}
+ 	fonts, err := fontutil.Open(path, config.FontSize, config.FontFallbacks)
+ 	if err != nil {
+@@ -235,8 +236,13 @@ func (raster *rasterizer) draw(data recording.TerminalData) (*image.RGBA, error)
+ }
+ 
+ func (raster *rasterizer) compose(top *image.RGBA, contract contract, entry frame, width, height, terminalHeight int) (*image.RGBA, error) {
+-	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
+-	fill(canvas, canvas.Bounds(), raster.background)
++	canvas := image.NewRGBA(image.Rect(0, 0, width+2*presentationMargin, height+2*presentationMargin))
++	fill(canvas, canvas.Bounds(), presentationInk)
++	panel := image.Rect(presentationMargin-1, presentationMargin-1,
++		presentationMargin+width+1, presentationMargin+height+1)
++	fill(canvas, panel, panelBorderInk)
++	fill(canvas, image.Rect(presentationMargin, presentationMargin,
++		presentationMargin+width, presentationMargin+height), raster.background)
+ 	command, err := raster.commandLines(contract, width)
+ 	if err != nil {
+ 		return nil, err
+@@ -244,11 +250,12 @@ func (raster *rasterizer) compose(top *image.RGBA, contract contract, entry fram
+ 	offset := len(command) * raster.fonts.CellHeight
+ 	// The invocation is recorded launch metadata, not invented terminal keystrokes.
+ 	for row, line := range command {
+-		if err := raster.fonts.DrawText(canvas, 0, row*raster.fonts.CellHeight+raster.fonts.Ascent, line, raster.foreground); err != nil {
++		if err := raster.fonts.DrawText(canvas, presentationMargin,
++			presentationMargin+row*raster.fonts.CellHeight+raster.fonts.Ascent, line, raster.foreground); err != nil {
+ 			return nil, err
+ 		}
+ 	}
+-	draw.Draw(canvas, top.Bounds().Add(image.Pt(0, offset)), top, image.Point{}, draw.Src)
++	draw.Draw(canvas, top.Bounds().Add(image.Pt(presentationMargin, presentationMargin+offset)), top, image.Point{}, draw.Src)
+ 	if contract.Output.Captions != nil && !*contract.Output.Captions {
+ 		return canvas, nil
+ 	}
+@@ -257,8 +264,9 @@ func (raster *rasterizer) compose(top *image.RGBA, contract contract, entry fram
+ 	if contract.Chapter != nil {
+ 		_, accent = phaseAppearance(contract.Chapter.Phase, contract.Chapter.Status)
+ 	}
+-	fill(canvas, image.Rect(0, terminalHeight, width, terminalHeight+1), border)
+-	fill(canvas, image.Rect(0, terminalHeight, width, terminalHeight+3), accent)
++	terminalBottom := presentationMargin + terminalHeight
++	fill(canvas, image.Rect(presentationMargin, terminalBottom, presentationMargin+width, terminalBottom+1), border)
++	fill(canvas, image.Rect(presentationMargin, terminalBottom, presentationMargin+width, terminalBottom+3), accent)
+ 	chapter, text := contract.CaseID, contract.Goal
+ 	if entry.Note != nil {
+ 		if entry.Note.Chapter != nil {
+@@ -299,12 +307,12 @@ func (raster *rasterizer) compose(top *image.RGBA, contract contract, entry fram
+ 	if len(lines) > 2 {
+ 		return nil, fmt.Errorf("annotation exceeds two lines; revise it rather than truncate it")
+ 	}
+-	if err := raster.fonts.DrawText(canvas, 12, terminalHeight+8+raster.fonts.Ascent, chapter, accent); err != nil {
++	if err := raster.fonts.DrawText(canvas, presentationMargin+12, terminalBottom+8+raster.fonts.Ascent, chapter, accent); err != nil {
+ 		return nil, err
+ 	}
+ 	for index, line := range lines {
+-		baseline := terminalHeight + raster.fonts.CellHeight*(index+1) + 8 + raster.fonts.Ascent
+-		if err := raster.fonts.DrawText(canvas, 12, baseline, line, raster.foreground); err != nil {
++		baseline := terminalBottom + raster.fonts.CellHeight*(index+1) + 8 + raster.fonts.Ascent
++		if err := raster.fonts.DrawText(canvas, presentationMargin+12, baseline, line, raster.foreground); err != nil {
+ 			return nil, err
+ 		}
+ 	}
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/render.go b/.github/skills/cli-exercise/tool/internal/evidence/render.go
+index 950e7074337..c309f1f1c6d 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/render.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/render.go
+@@ -64,6 +64,8 @@ type rendering struct {
+ 	CapturedStates          int                  `json:"capturedStates,omitempty"`
+ 	VideoStates             int                  `json:"videoStates,omitempty"`
+ 	Font                    *fontutil.Info       `json:"font,omitempty"`
++	FontStyles              []fontutil.Info      `json:"fontStyles,omitempty"`
++	FontFallbacks           []fontutil.Info      `json:"fontFallbacks,omitempty"`
+ 	Inspection              *inspectionInfo      `json:"inspection,omitempty"`
+ 	Warnings                []string             `json:"warnings,omitempty"`
+ 	inspectionFrames        []int
+@@ -281,7 +283,7 @@ func render(ctx context.Context, contract contract, result result, states []stat
+ 			}
+ 		}
+ 	}
+-	raster, err := newRasterizer(contract.Terminal, receipt)
++	raster, err := newRasterizer(contract.Terminal)
+ 	if err != nil {
+ 		return empty, err
+ 	}
+@@ -324,7 +326,9 @@ func render(ctx context.Context, contract contract, result result, states []stat
+ 	}
+ 	width += width % 2
+ 	height += height % 2
+-	if width <= 0 || height <= 0 || int64(width)*int64(height) > 64_000_000 {
++	mediaWidth := width + 2*presentationMargin
++	mediaHeight := height + 2*presentationMargin
++	if width <= 0 || height <= 0 || int64(mediaWidth)*int64(mediaHeight) > 64_000_000 {
+ 		return empty, fmt.Errorf("recorded geometry exceeds the bounded raster dimensions")
+ 	}
+ 	environment, err := rendererEnvironment(directory, receipt.Tools)
+@@ -346,7 +350,7 @@ func render(ctx context.Context, contract contract, result result, states []stat
+ 		primaryKind = "mp4"
+ 	}
+ 	primary := filepath.Join(directory, "terminal."+primaryKind)
+-	arguments, err := encodingArguments(receipt.Tools.FFmpeg.Path, primary, width, height, contract.Terminal.FPS, primaryKind)
++	arguments, err := encodingArguments(receipt.Tools.FFmpeg.Path, primary, mediaWidth, mediaHeight, contract.Terminal.FPS, primaryKind)
+ 	if err != nil {
+ 		return empty, err
+ 	}
+@@ -462,11 +466,11 @@ func render(ctx context.Context, contract contract, result result, states []stat
+ 		if !exists {
+ 			continue
+ 		}
+-		details[kind], err = inspectMedia(bounded, filename, kind, receipt.Tools, environment, width, height, count)
++		details[kind], err = inspectMedia(bounded, filename, kind, receipt.Tools, environment, mediaWidth, mediaHeight, count)
+ 		if err != nil {
+ 			return empty, err
+ 		}
+-		encoded[kind], err = decodedSamples(bounded, filename, kind, receipt.Tools, environment, width, height, count, inspection)
++		encoded[kind], err = decodedSamples(bounded, filename, kind, receipt.Tools, environment, mediaWidth, mediaHeight, count, inspection)
+ 		if err != nil {
+ 			return empty, err
+ 		}
+@@ -514,11 +518,12 @@ func render(ctx context.Context, contract contract, result result, states []stat
+ 		inspectionFrames = renderedInspectionFrames(renderedOccurrences, count, additionalFrames)
+ 	}
+ 	return rendering{
+-		Status: "complete", Media: media, MediaDetails: details, Width: width, Height: height,
++		Status: "complete", Media: media, MediaDetails: details, Width: mediaWidth, Height: mediaHeight,
+ 		DurationSeconds: timelineDuration, CaptureDurationSeconds: result.DurationSeconds, EndHoldSeconds: hold,
+ 		PresentationHoldSeconds: float64(additionalFrames) / float64(contract.Terminal.FPS),
+ 		Frames:                  count, FPS: contract.Terminal.FPS, Timing: contract.Output.Timing,
+ 		CapturedStates: len(states), VideoStates: len(videoStates), Font: &raster.fonts.Info,
++		FontStyles: raster.fonts.Styles, FontFallbacks: raster.fonts.Fallbacks,
+ 		Inspection: &inspectionInfo{
+ 			Mode: inspectionMode, Directory: inspection, Manifest: manifest, ManifestSHA256: hash,
+ 			EncodedSamples: encoded, VisualReview: "pending",
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/session.go b/.github/skills/cli-exercise/tool/internal/evidence/session.go
+index 0ef7cf97a21..e96d5b7a317 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/session.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/session.go
+@@ -189,6 +189,7 @@ func runSession(ctx context.Context, skillRoot string, opts options, streams cli
+ 			}
+ 			settings := options{runDir: directory, preflight: opts.preflight, inspection: opts.inspection, html: opts.html,
+ 				formats: []string{"mp4"}, timing: manifest.Output.Timing, captions: manifest.Output.Captions,
++				fontPath: opts.fontPath, fontFallbacks: opts.fontFallbacks,
+ 				chapter: &chapterPresentation{Label: item.Title, Phase: run.Phase, Title: run.Title, MinimumDurationSeconds: minimum}}
+ 			if opts.timing != "" {
+ 				settings.timing, settings.timingAuthorization = opts.timing, opts.timingAuthorization
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/session_inspection_native_test.go b/.github/skills/cli-exercise/tool/internal/evidence/session_inspection_native_test.go
+index 4893deeece7..b61f52bb934 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/session_inspection_native_test.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/session_inspection_native_test.go
+@@ -29,7 +29,10 @@ func sessionInspectionNativeCase(t *testing.T) {
+ 	var receipt recording.Receipt
+ 	_, err := cliutil.ReadJSON(preflight, 4<<20, &receipt)
+ 	require.NoError(t, err)
+-	require.NotNil(t, receipt.Tools.Font)
++	fontPath := os.Getenv("CLI_EXERCISE_RENDER_FONT")
++	if fontPath == "" {
++		t.Skip("Select an explicit font for native rendering.")
++	}
+ 	require.True(t, receipt.Checks.Formats["mp4"] && receipt.Checks.Formats["gif"])
+ 	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
+ 	defer cancel()
+@@ -45,7 +48,7 @@ func sessionInspectionNativeCase(t *testing.T) {
+ 		directory := filepath.Join(root, fmt.Sprintf("case-%d", index))
+ 		require.NoError(t, os.MkdirAll(filepath.Join(directory, "capture"), 0o700))
+ 		source := contract{CaseID: fmt.Sprintf("case-%d", index), Mode: "exact", Goal: "Inspect synthetic output",
+-			Terminal: terminalConfig{Columns: 80, Rows: 12, FontPath: receipt.Tools.Font.Path, FontSize: 14,
++			Terminal: terminalConfig{Columns: 80, Rows: 12, FontPath: fontPath, FontSize: 14,
+ 				FPS: 10, Background: "#0d1117", Foreground: "#e6edf3"},
+ 			Output:       recording.OutputOptions{Formats: []string{"mp4"}, Timing: "condensed"},
+ 			Expectations: []expectation{{ID: "exit", Type: "exit_code", Value: json.RawMessage("0")}},
+@@ -87,7 +90,8 @@ func sessionInspectionNativeCase(t *testing.T) {
+ 	require.NoError(t, cliutil.WriteJSON(path, manifest))
+ 	reports := map[string]sessionReport{}
+ 	for _, mode := range []string{"sampled", "all"} {
+-		opts, err := parseOptions([]string{"--session", path, "--preflight", preflight, "--inspection", mode})
++		opts, err := parseOptions([]string{"--session", path, "--preflight", preflight, "--inspection", mode,
++			"--font", fontPath})
+ 		require.NoError(t, err)
+ 		var output bytes.Buffer
+ 		code, err := runSession(ctx, skillRoot, opts, cliutil.Streams{Out: &output}, render)
+@@ -148,7 +152,7 @@ func sessionInspectionNativeCase(t *testing.T) {
+ 	t.Run("GIF-only repeated images share storage", func(t *testing.T) {
+ 		off := false
+ 		source := contract{CaseID: "repeated", Goal: "Repeated state",
+-			Terminal: terminalConfig{FontPath: receipt.Tools.Font.Path, FontSize: 14, FPS: 30, Background: "#0d1117", Foreground: "#e6edf3"},
++			Terminal: terminalConfig{FontPath: fontPath, FontSize: 14, FPS: 30, Background: "#0d1117", Foreground: "#e6edf3"},
+ 			Output:   recording.OutputOptions{Formats: []string{"mp4"}, Timing: "realtime", Captions: &off}}
+ 		captured := testState("", 0)
+ 		captured.Data.Columns = 4
+diff --git a/.github/skills/cli-exercise/tool/internal/evidence/session_test.go b/.github/skills/cli-exercise/tool/internal/evidence/session_test.go
+index 8f0cce5372f..6a0feb7d5e1 100644
+--- a/.github/skills/cli-exercise/tool/internal/evidence/session_test.go
++++ b/.github/skills/cli-exercise/tool/internal/evidence/session_test.go
+@@ -47,7 +47,8 @@ func sessionCases(t *testing.T) {
+ 			require.NoError(t, cliutil.WriteJSON(receiptPath, recording.Receipt{Status: "ready",
+ 				Checks: recording.CapabilityChecks{Formats: map[string]bool{"mp4": true}}}))
+ 			var output bytes.Buffer
+-			code, err := runSession(context.Background(), t.TempDir(), options{sessionManifest: path, preflight: receiptPath, inspection: "all", html: withHTML},
++			code, err := runSession(context.Background(), t.TempDir(), options{sessionManifest: path, preflight: receiptPath,
++				inspection: "all", html: withHTML, fontPath: filepath.Join(root, "selected.ttf")},
+ 				cliutil.Streams{Out: &output}, func(context.Context, contract, result, []state, []event, recording.Receipt, string, string) (rendering, error) {
+ 					return rendering{Status: "failed", Error: "This fixture does not encode media."}, nil
+ 				})
+@@ -145,7 +146,8 @@ func sessionCases(t *testing.T) {
+ 		receipt := recording.Receipt{Status: "ready", Checks: recording.CapabilityChecks{Formats: map[string]bool{"mp4": true}}}
+ 		require.NoError(t, cliutil.WriteJSON(receiptPath, receipt))
+ 		var output bytes.Buffer
+-		code, err := runSession(context.Background(), t.TempDir(), options{sessionManifest: path, preflight: receiptPath, inspection: "all"},
++		code, err := runSession(context.Background(), t.TempDir(), options{sessionManifest: path, preflight: receiptPath,
++			inspection: "all", fontPath: filepath.Join(root, "selected.ttf")},
+ 			cliutil.Streams{Out: &output}, render)
+ 		require.NoError(t, err)
+ 		require.Equal(t, 1, code)
+diff --git a/.github/skills/cli-exercise/tool/internal/execution/cli_test.go b/.github/skills/cli-exercise/tool/internal/execution/cli_test.go
+index 7529a7f3869..7da8242b7b6 100644
+--- a/.github/skills/cli-exercise/tool/internal/execution/cli_test.go
++++ b/.github/skills/cli-exercise/tool/internal/execution/cli_test.go
+@@ -88,7 +88,6 @@ func TestRun(t *testing.T) {
+ 		var receipt recording.Receipt
+ 		_, err = cliutil.ReadJSON(receiptPath, 4<<20, &receipt)
+ 		require.NoError(t, err)
+-		require.NotNil(t, receipt.Tools.Font)
+ 		fixture, err := os.Executable()
+ 		require.NoError(t, err)
+ 		fixtureHash, err := cliutil.SHA256File(fixture)
+@@ -113,7 +112,7 @@ func TestRun(t *testing.T) {
+ 						"sha256": fixtureHash, "version": "synthetic Go test fixture", "cwd": "work"},
+ 					"environment":   map[string]any{"values": map[string]string{"CLI_EXERCISE_TEST_FIXTURE": "workflow", "GORACE": "atexit_sleep_ms=0"}, "pass": []any{}},
+ 					"authorization": map[string]any{"status": "approved", "basis": "The caller selected this local isolated test.", "effects": []any{}},
+-					"terminal": map[string]any{"columns": 80, "rows": 18, "fontPath": receipt.Tools.Font.Path, "fontSize": 18, "fps": 30,
++					"terminal": map[string]any{"columns": 80, "rows": 18, "fontSize": 18, "fps": 30,
+ 						"background": "#0d1117", "foreground": "#e6edf3"},
+ 					"limits": map[string]any{"maxActions": 20, "maxDurationSeconds": 30, "idleTimeoutSeconds": 10},
+ 					"steps":  steps, "constraints": map[string]any{"deny": []any{map[string]any{
+diff --git a/.github/skills/cli-exercise/tool/internal/fontutil/font.go b/.github/skills/cli-exercise/tool/internal/fontutil/font.go
+index ceda43eb7b8..ab3a1d2941d 100644
+--- a/.github/skills/cli-exercise/tool/internal/fontutil/font.go
++++ b/.github/skills/cli-exercise/tool/internal/fontutil/font.go
+@@ -25,7 +25,7 @@ import (
+ 	"golang.org/x/text/width"
+ )
+ 
+-// Info identifies the actual font bytes used by a capability probe.
++// Info identifies the actual font bytes used by a capability probe or rendering.
+ type Info struct {
+ 	Path   string `json:"path"`
+ 	Family string `json:"family"`
+@@ -40,6 +40,8 @@ type face struct {
+ // Set holds explicit font faces and the terminal's fixed cell metrics.
+ type Set struct {
+ 	Info       Info
++	Styles     []Info
++	Fallbacks  []Info
+ 	CellWidth  int
+ 	CellHeight int
+ 	Ascent     int
+@@ -163,21 +165,23 @@ func Open(filename string, size float64, fallbacks []string) (_ *Set, err error)
+ 			} else if err != nil {
+ 				return nil, err
+ 			}
+-			extra, _, _, err := load(path, size)
++			extra, _, info, err := load(path, size)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+ 			set.faces = append(set.faces, extra...)
+ 			set.styles[flags] = extra[0]
++			set.Styles = append(set.Styles, info)
+ 		}
+ 	}
+ 	for _, path := range fallbacks {
+-		extra, _, _, err := load(path, size)
++		extra, _, info, err := load(path, size)
+ 		if err != nil {
+ 			return nil, fmt.Errorf("load explicit fallback: %w", err)
+ 		}
+ 		set.faces = append(set.faces, extra...)
+ 		set.fallbacks = append(set.fallbacks, extra[0])
++		set.Fallbacks = append(set.Fallbacks, info)
+ 	}
+ 	base := set.styles[0]
+ 	scale := fixed.Int26_6(math.Round(size * 64))
+diff --git a/.github/skills/cli-exercise/tool/internal/fontutil/font_test.go b/.github/skills/cli-exercise/tool/internal/fontutil/font_test.go
+index fecf749a031..79eff933182 100644
+--- a/.github/skills/cli-exercise/tool/internal/fontutil/font_test.go
++++ b/.github/skills/cli-exercise/tool/internal/fontutil/font_test.go
+@@ -1,6 +1,8 @@
+ package fontutil
+ 
+ import (
++	"crypto/sha256"
++	"encoding/hex"
+ 	"image"
+ 	"image/color"
+ 	"os"
+@@ -77,6 +79,18 @@ func TestDraw(t *testing.T) {
+ 			require.Greater(t, advance, float64(0))
+ 		})
+ 	}
++	set, err := Open(filepath.Join(root, "Mono-Regular.ttf"), 18, nil)
++	require.NoError(t, err)
++	defer func() { require.NoError(t, set.Close()) }()
++	require.Len(t, set.Styles, 3)
++	for index, name := range []string{"Mono-Bold.ttf", "Mono-Italic.ttf", "Mono-BoldItalic.ttf"} {
++		data, err := os.ReadFile(filepath.Join(root, name))
++		require.NoError(t, err)
++		sum := sha256.Sum256(data)
++		require.Equal(t, filepath.Join(root, name), set.Styles[index].Path)
++		require.NotEmpty(t, set.Styles[index].Family)
++		require.Equal(t, hex.EncodeToString(sum[:]), set.Styles[index].SHA256)
++	}
+ 	require.Equal(t, 0, Cells('\u0301'))
+ 	require.Equal(t, 2, Cells('\u754c'))
+ 	require.Equal(t, 1, Cells('M'))
+diff --git a/.github/skills/cli-exercise/tool/internal/preflight/check.go b/.github/skills/cli-exercise/tool/internal/preflight/check.go
+index 2d85846fb17..2a2a5750032 100644
+--- a/.github/skills/cli-exercise/tool/internal/preflight/check.go
++++ b/.github/skills/cli-exercise/tool/internal/preflight/check.go
+@@ -15,13 +15,11 @@ import (
+ 	"os/exec"
+ 	"path/filepath"
+ 	"regexp"
+-	"runtime"
+ 	"slices"
+ 	"strings"
+ 	"time"
+ 
+ 	"github.com/cli/cli/v2/cli-exercise/internal/cliutil"
+-	"github.com/cli/cli/v2/cli-exercise/internal/fontutil"
+ 	"github.com/cli/cli/v2/cli-exercise/internal/recording"
+ 	"github.com/cli/cli/v2/cli-exercise/internal/terminal"
+ )
+@@ -33,7 +31,6 @@ type options struct {
+ 	Node         string   `json:"node,omitempty"`
+ 	FFmpeg       string   `json:"ffmpeg,omitempty"`
+ 	FFprobe      string   `json:"ffprobe,omitempty"`
+-	Font         string   `json:"font,omitempty"`
+ 	Formats      []string `json:"formats"`
+ 	ProbeTimeout float64  `json:"probe_timeout"`
+ }
+@@ -85,7 +82,6 @@ type service struct {
+ 	root, manifest string
+ 	helper         string
+ 	runner         runner
+-	fontProbe      func(string) (fontutil.Info, error)
+ 	lookup         func(string, string) (string, error)
+ 	managed        bool
+ 	nativeProbe    func(context.Context, terminal.Session, terminal.LaunchOptions) error
+@@ -119,7 +115,7 @@ func newService(root string, selected options) (*service, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	for _, value := range []*string{&selected.ModuleRoot, &selected.Font} {
++	for _, value := range []*string{&selected.ModuleRoot} {
+ 		if *value != "" {
+ 			absolute, err := filepath.Abs(*value)
+ 			if err != nil {
+@@ -146,7 +142,7 @@ func newService(root string, selected options) (*service, error) {
+ 		return nil, fmt.Errorf("the skill manifest does not pin the supported Tuistory version")
+ 	}
+ 	return &service{options: selected, root: root, manifest: manifest, helper: helper,
+-		runner: processRunner{}, fontProbe: fontutil.Probe, lookup: executable, managed: cliutil.ManagedProcesses(),
++		runner: processRunner{}, lookup: executable, managed: cliutil.ManagedProcesses(),
+ 		nativeProbe: checkTerminal}, nil
+ }
+ 
+@@ -172,24 +168,9 @@ func isolatedEnvironment(workspace, node string) (map[string]string, error) {
+ 	return values, nil
+ }
+ 
+-func fontCandidates() []string {
+-	switch runtime.GOOS {
+-	case "darwin":
+-		return []string{"/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Monaco.ttf"}
+-	case "windows":
+-		root := filepath.Join(os.Getenv("SystemRoot"), "Fonts")
+-		return []string{filepath.Join(root, "consola.ttf"), filepath.Join(root, "cour.ttf"), filepath.Join(root, "lucon.ttf")}
+-	default:
+-		return []string{"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+-			"/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
+-			"/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+-			"/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf"}
+-	}
+-}
+-
+ func (service *service) check(ctx context.Context) (result report, err error) {
+ 	result = report{SchemaVersion: 1, Manifest: service.manifest, Issues: []issue{}}
+-	result.Checks.Formats, result.Checks.FontAttempts = map[string]bool{}, []map[string]any{}
++	result.Checks.Formats = map[string]bool{}
+ 	problem := func(item, kind, detail string, needsInstall bool) {
+ 		remedy := "Select a working existing capability and rerun check; system installation is a separate user decision."
+ 		if needsInstall {
+@@ -294,23 +275,6 @@ func (service *service) check(ctx context.Context) (result report, err error) {
+ 			}
+ 		}
+ 	}
+-	candidates := fontCandidates()
+-	if service.options.Font != "" {
+-		candidates = []string{service.options.Font}
+-	}
+-	for _, path := range candidates {
+-		info, err := service.fontProbe(path)
+-		if err != nil {
+-			result.Checks.FontAttempts = append(result.Checks.FontAttempts, map[string]any{"path": path, "status": "unusable", "detail": err.Error()})
+-			continue
+-		}
+-		result.Tools.Font = &recording.Font{Path: info.Path, Family: info.Family, SHA256: info.SHA256}
+-		result.Checks.FontAttempts = append(result.Checks.FontAttempts, map[string]any{"path": path, "status": "usable"})
+-		break
+-	}
+-	if result.Tools.Font == nil {
+-		problem("font", "unusable", "No selected installed font passed Go loading and monospaced rasterization.", false)
+-	}
+ 	if result.Tools.FFmpeg != nil && result.Tools.FFprobe != nil {
+ 		raw := filepath.Join(work, "frames.rgb")
+ 		if err := os.WriteFile(raw, make([]byte, 16*16*3*2), 0o600); err != nil {
+diff --git a/.github/skills/cli-exercise/tool/internal/preflight/main.go b/.github/skills/cli-exercise/tool/internal/preflight/main.go
+index 36846dea00a..33244a773dc 100644
+--- a/.github/skills/cli-exercise/tool/internal/preflight/main.go
++++ b/.github/skills/cli-exercise/tool/internal/preflight/main.go
+@@ -42,7 +42,6 @@ func parseOptions(args []string) (cliOptions, error) {
+ 	flags.StringVar(&result.selections.Node, "node", "", "Selected Node executable")
+ 	flags.StringVar(&result.selections.FFmpeg, "ffmpeg", "", "Selected FFmpeg executable")
+ 	flags.StringVar(&result.selections.FFprobe, "ffprobe", "", "Selected ffprobe executable")
+-	flags.StringVar(&result.selections.Font, "font", "", "Selected monospaced font")
+ 	flags.Float64Var(&result.selections.ProbeTimeout, "probe-timeout", 20, "Per-process timeout in seconds")
+ 	var formats formats
+ 	flags.Var(&formats, "format", "Requested gif or mp4 output; repeat as needed")
+@@ -52,7 +51,7 @@ func parseOptions(args []string) (cliOptions, error) {
+ 	var emptySelection string
+ 	flags.Visit(func(option *flag.Flag) {
+ 		switch option.Name {
+-		case "module-root", "node", "ffmpeg", "ffprobe", "font":
++		case "module-root", "node", "ffmpeg", "ffprobe":
+ 			if strings.TrimSpace(option.Value.String()) == "" {
+ 				emptySelection = option.Name
+ 			}
+diff --git a/.github/skills/cli-exercise/tool/internal/preflight/preflight_test.go b/.github/skills/cli-exercise/tool/internal/preflight/preflight_test.go
+index 4630b9cc6ee..3a626a095b9 100644
+--- a/.github/skills/cli-exercise/tool/internal/preflight/preflight_test.go
++++ b/.github/skills/cli-exercise/tool/internal/preflight/preflight_test.go
+@@ -15,7 +15,6 @@ import (
+ 	"time"
+ 
+ 	"github.com/cli/cli/v2/cli-exercise/internal/cliutil"
+-	"github.com/cli/cli/v2/cli-exercise/internal/fontutil"
+ 	"github.com/cli/cli/v2/cli-exercise/internal/terminal"
+ 	"github.com/stretchr/testify/require"
+ )
+@@ -101,9 +100,7 @@ func setup(t *testing.T) testSetup {
+ 	packagePath := filepath.Join(modules, "tuistory/package.json")
+ 	require.NoError(t, cliutil.WriteJSON(packagePath, map[string]string{"name": "tuistory", "version": version, "main": "entry"}))
+ 	require.NoError(t, os.WriteFile(filepath.Join(modules, "tuistory/entry"), []byte("fixture entry"), 0o600))
+-	font := filepath.Join(root, "mono.ttf")
+-	require.NoError(t, os.WriteFile(font, []byte("font fixture"), 0o600))
+-	settings := options{ModuleRoot: modules, Font: font,
++	settings := options{ModuleRoot: modules,
+ 		Node: binaries["node"], FFmpeg: binaries["ffmpeg"], FFprobe: binaries["ffprobe"],
+ 		Formats: []string{"gif", "mp4"}, ProbeTimeout: 5}
+ 	runner := &fakeRunner{}
+@@ -134,10 +131,6 @@ func setup(t *testing.T) testSetup {
+ 			}
+ 			return path, nil
+ 		}
+-		service.fontProbe = func(path string) (fontutil.Info, error) {
+-			hash, err := cliutil.SHA256File(path)
+-			return fontutil.Info{Path: path, Family: "Fixture Mono", SHA256: hash}, err
+-		}
+ 		return service, nil
+ 	}
+ 	return testSetup{root, skill, packagePath, settings, runner, factory}
+@@ -160,6 +153,7 @@ func TestParseOptions(t *testing.T) {
+ 		{name: "missing plan", args: []string{"install"}, fail: true},
+ 		{name: "unknown format", args: []string{"check", "--output", "receipt", "--format", "webm"}, fail: true},
+ 		{name: "blank explicit selection", args: []string{"check", "--output", "receipt", "--node", ""}, fail: true},
++		{name: "font selection belongs to rendering", args: []string{"check", "--output", "receipt", "--font", "mono.ttf"}, fail: true},
+ 		{name: "nonfinite timeout", args: []string{"check", "--output", "receipt", "--probe-timeout", "NaN"}, fail: true},
+ 		{name: "old interpreter flag rejected", args: []string{"check", "--output", "receipt", "--python", "not-used"}, fail: true},
+ 	} {
+@@ -185,7 +179,7 @@ func TestRun(t *testing.T) {
+ 		require.Contains(t, diagnostic.String(), "probe_fixture_failed")
+ 	})
+ 	for _, name := range []string{
+-		"ready", "missing", "incompatible", "native failure", "missing raw", "font failure", "encoder failure", "presentation filter failure",
++		"ready", "missing", "incompatible", "native failure", "missing raw", "encoder failure", "presentation filter failure",
+ 		"no installation selected", "unsupported runtime", "stdout is not a file", "read only",
+ 	} {
+ 		t.Run(name, func(t *testing.T) {
+@@ -196,8 +190,6 @@ func TestRun(t *testing.T) {
+ 				fixture.runner.nativeFailure = true
+ 			case "missing raw":
+ 				fixture.runner.missingRaw = true
+-			case "font failure":
+-				require.NoError(t, os.Remove(options.Font))
+ 			case "encoder failure":
+ 				fixture.runner.encoderFailure = true
+ 			case "presentation filter failure":
+diff --git a/.github/skills/cli-exercise/tool/internal/recording/models.go b/.github/skills/cli-exercise/tool/internal/recording/models.go
+index 66152f07a41..3a26a657a77 100644
+--- a/.github/skills/cli-exercise/tool/internal/recording/models.go
++++ b/.github/skills/cli-exercise/tool/internal/recording/models.go
+@@ -119,20 +119,12 @@ type Tuistory struct {
+ 	PackageSHA256 string `json:"packageSha256,omitempty"`
+ }
+ 
+-// Font identifies the selected font and its actual bytes.
+-type Font struct {
+-	Path   string `json:"path"`
+-	Family string `json:"family"`
+-	SHA256 string `json:"sha256"`
+-}
+-
+ // Tools distinguishes an unavailable tool from a selected one.
+ type Tools struct {
+ 	Node     *Executable `json:"node,omitempty"`
+ 	FFmpeg   *Executable `json:"ffmpeg,omitempty"`
+ 	FFprobe  *Executable `json:"ffprobe,omitempty"`
+ 	Tuistory *Tuistory   `json:"tuistory,omitempty"`
+-	Font     *Font       `json:"font,omitempty"`
+ }
+ 
+ // Executable returns one of the known executable selections.
+@@ -151,9 +143,8 @@ func (tools Tools) Executable(name string) *Executable {
+ 
+ // CapabilityChecks records observed readiness rather than presumed compatibility.
+ type CapabilityChecks struct {
+-	Formats      map[string]bool  `json:"formats"`
+-	NativePTY    bool             `json:"nativePty"`
+-	FontAttempts []map[string]any `json:"fontAttempts"`
++	Formats   map[string]bool `json:"formats"`
++	NativePTY bool            `json:"nativePty"`
+ }
+ 
+ // Receipt is the common prerequisite identity and capability record.
+diff --git a/.github/skills/cli-exercise/tool/internal/recording/models_test.go b/.github/skills/cli-exercise/tool/internal/recording/models_test.go
+index 2492b1e32e6..2151637022e 100644
+--- a/.github/skills/cli-exercise/tool/internal/recording/models_test.go
++++ b/.github/skills/cli-exercise/tool/internal/recording/models_test.go
+@@ -34,9 +34,8 @@ func TestDecode(t *testing.T) {
+ 			"node":{"path":"/node","version":"v1","sha256":"node"},
+ 			"tuistory":{"moduleRoot":"/modules","version":"0.11.0","packageSha256":"package"},
+ 			"ffmpeg":{"path":"/ffmpeg","version":"v1","sha256":"ffmpeg"},
+-			"ffprobe":{"path":"/ffprobe","version":"v1","sha256":"ffprobe"},
+-			"font":{"path":"/font","family":"Mono","sha256":"font"}},
+-			"checks":{"formats":{"gif":true},"nativePty":true,"fontAttempts":[]}}`
++			"ffprobe":{"path":"/ffprobe","version":"v1","sha256":"ffprobe"}},
++			"checks":{"formats":{"gif":true},"nativePty":true}}`
+ 		var receipt Receipt
+ 		require.NoError(t, json.Unmarshal([]byte(source), &receipt))
+ 		data, err := json.Marshal(receipt)

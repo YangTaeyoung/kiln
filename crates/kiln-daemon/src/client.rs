@@ -161,6 +161,13 @@ pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        // 부모의 잡 객체(예: SSH 세션)와 함께 종료되지 않도록 잡에서 분리를 먼저 시도한다.
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
+        if let Ok(child) = cmd.spawn() {
+            std::mem::forget(child);
+            return Ok(());
+        }
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     }
     let child = cmd.spawn()?;

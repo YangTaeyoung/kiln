@@ -7,7 +7,7 @@ mod keys;
 mod layout;
 mod palette;
 mod state;
-mod terminal;
+pub mod terminal;
 mod tools;
 
 use conn::{Conn, ConnEvent};

@@ -99,6 +99,27 @@ impl Conn {
         c
     }
 
+    /// 데몬 없이 화면 캐시만 쓰는 연결(렌더링 벤치마크·테스트용).
+    #[doc(hidden)]
+    pub fn offline(ctx: egui::Context) -> Self {
+        Conn {
+            client: None,
+            state: State::Disconnected { since: Instant::now(), last_error: String::new() },
+            screens: HashMap::new(),
+            infos: HashMap::new(),
+            attached: HashMap::new(),
+            events: Vec::new(),
+            ctx,
+            socket: String::new(),
+            exe: Default::default(),
+            last_attempt: Some(Instant::now() + Duration::from_secs(3600)),
+            daemon_pid: 0,
+            daemon_build: String::new(),
+            upgrade_requested: false,
+            sessions_listed: false,
+        }
+    }
+
     pub fn is_connected(&self) -> bool {
         matches!(self.state, State::Connected)
     }

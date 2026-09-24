@@ -1,0 +1,26 @@
+[package]
+name = "kiln-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kiln-common.workspace = true
+egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "mysql", "sqlite", "runtime-tokio", "tls-rustls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+futures-util = "0.3"
+keyring = "4"
+rfd = "0.17"
+chrono = "0.4"
+uuid = "1"
+hex = "0.4"
+url = "2"
+
+[dev-dependencies]
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
+tempfile.workspace = true
