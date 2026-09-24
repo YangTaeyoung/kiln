@@ -46,6 +46,17 @@ impl ToolKind {
         }
     }
 
+    pub fn vicon(&self) -> super::icons::Icon {
+        use super::icons::Icon;
+        match self {
+            ToolKind::Explorer => Icon::Folder,
+            ToolKind::Search => Icon::Search,
+            ToolKind::Git => Icon::Branch,
+            ToolKind::PullRequests => Icon::PullRequest,
+            ToolKind::Database => Icon::Database,
+        }
+    }
+
     pub fn icon(&self) -> &'static str {
         match self {
             ToolKind::Explorer => "🗀",

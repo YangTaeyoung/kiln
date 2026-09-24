@@ -1,6 +1,8 @@
 //! 데몬 서버: 세션(PTY + 에뮬레이터) 소유, 클라이언트 연결 처리, 화면 프레임 전송.
 
-use crate::emu::{Dump, Emu};
+#[cfg(unix)]
+use crate::emu::Dump;
+use crate::emu::Emu;
 use crate::osc::{OscEvent, OscScanner};
 use crate::pty::{Pty, ReadResult};
 use crate::transport::{Conn, Listener};
@@ -9,6 +11,7 @@ use alacritty_terminal::event::Event;
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use kiln_proto::*;
 use parking_lot::{Mutex, RwLock};
+#[cfg(unix)]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -54,6 +57,7 @@ pub struct Daemon {
     socket: String,
 }
 
+#[cfg(unix)]
 #[derive(Serialize, Deserialize)]
 struct UpgradeState {
     next_session: u64,
@@ -61,6 +65,7 @@ struct UpgradeState {
     sessions: Vec<SavedSession>,
 }
 
+#[cfg(unix)]
 #[derive(Serialize, Deserialize)]
 struct SavedSession {
     info: SessionInfo,
@@ -574,6 +579,7 @@ fn exec(exe: &str, args: &[&str]) -> std::io::Error {
     std::process::Command::new(exe).args(args).exec()
 }
 
+#[cfg(unix)]
 static LISTENER_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 fn line_hash(l: &Line) -> u64 {

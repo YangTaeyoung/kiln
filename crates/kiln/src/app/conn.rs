@@ -88,7 +88,7 @@ impl Conn {
             events: Vec::new(),
             ctx,
             socket: socket_name(),
-            exe: std::env::current_exe().unwrap_or_default(),
+            exe: daemon_exe(),
             last_attempt: None,
             daemon_pid: 0,
             daemon_build: String::new(),
@@ -112,7 +112,7 @@ impl Conn {
                 self.daemon_pid = c.server_pid;
                 self.daemon_build = c.server_build.clone();
                 // 실행 파일이 데몬보다 새로우면 데몬을 교체한다(세션은 유지된다).
-                if c.server_build != kiln_daemon::build_id() && c.can_upgrade && !self.upgrade_requested && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_none() {
+                if c.server_build != kiln_daemon::exe_build_id(&self.exe) && c.can_upgrade && !self.upgrade_requested && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_none() {
                     self.upgrade_requested = true;
                     c.send(ClientMsg::Upgrade { req: c.next_req(), exe: self.exe.to_string_lossy().into_owned() });
                     self.events.push(ConnEvent::Upgrading);
@@ -255,4 +255,9 @@ impl Conn {
     pub fn next_req(&self) -> u32 {
         self.client.as_ref().map(|c| c.next_req()).unwrap_or(0)
     }
+}
+
+/// 데몬을 실행할 파일. `KILN_EXE` 가 있으면 그 경로를 쓴다.
+pub fn daemon_exe() -> std::path::PathBuf {
+    std::env::var_os("KILN_EXE").map(std::path::PathBuf::from).unwrap_or_else(|| std::env::current_exe().unwrap_or_default())
 }

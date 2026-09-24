@@ -3,7 +3,7 @@ use kiln_daemon::client::Client;
 use kiln_proto::{ClientMsg, ServerMsg, SpawnSpec};
 use std::time::Duration;
 
-mod app;
+use kiln::app;
 
 #[derive(Parser)]
 #[command(name = "kiln", version, about = "Kiln — terminal-first IDE with persistent sessions")]

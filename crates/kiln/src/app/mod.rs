@@ -1,7 +1,8 @@
 //! Kiln GUI.
 
-mod conn;
+pub mod conn;
 mod fonts;
+mod icons;
 mod keys;
 mod layout;
 mod palette;
@@ -643,7 +644,7 @@ impl KilnApp {
             Action::KillSession(sid) => self.conn.kill(sid),
             Action::OpenSettings => self.settings_open = true,
             Action::UpgradeDaemon => {
-                let exe = std::env::current_exe().unwrap_or_default();
+                let exe = conn::daemon_exe();
                 self.conn.send(kiln_proto::ClientMsg::Upgrade { req: 0, exe: exe.to_string_lossy().into_owned() });
             }
             Action::OpenTab(factory) => {
@@ -709,9 +710,6 @@ impl KilnApp {
         self.toasts.push(Toast { text: text.into(), at: Instant::now(), kind });
     }
 
-    fn session_workspace(&self, sid: SessionId) -> Option<usize> {
-        self.workspaces.iter().position(|ws| ws.tabs.iter().any(|t| matches!(&t.kind, TabKind::Terminal(tt) if tt.root.panes().iter().any(|p| self.panes.get(p).and_then(|x| x.session) == Some(sid)))))
-    }
 
     // ---------- 이벤트 ----------
 
@@ -847,6 +845,34 @@ impl KilnApp {
             if ctx.input_mut(|inp| inp.consume_shortcut(&KeyboardShortcut::new(tab_mod, *k))) {
                 self.actions.push(Action::SelectTab(i));
             }
+        }
+    }
+}
+
+/// 테스트용 상태 조회.
+impl KilnApp {
+    #[doc(hidden)]
+    pub fn debug_focused_text(&self) -> Option<String> {
+        let s = self.focused_session()?;
+        let sc = self.conn.screens.get(&s)?;
+        Some(sc.lines.iter().map(|l| l.text().trim_end().to_string()).collect::<Vec<_>>().join("\n"))
+    }
+
+    #[doc(hidden)]
+    pub fn debug_pane_count(&self) -> usize {
+        let ws = &self.workspaces[self.active];
+        match &ws.tabs[ws.active_tab].kind {
+            TabKind::Terminal(t) => t.root.panes().len(),
+            _ => 0,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn debug_active_tab_title(&self) -> String {
+        let ws = &self.workspaces[self.active];
+        match &ws.tabs[ws.active_tab].kind {
+            TabKind::Terminal(_) => "terminal".into(),
+            TabKind::Tool(t) => t.title(),
         }
     }
 }

@@ -5,19 +5,18 @@ use egui::{Align2, CornerRadius, CursorIcon, Frame, Margin, UiBuilder};
 
 const ACTIVITY_W: f32 = 44.0;
 
-fn icon_button(ui: &mut egui::Ui, icon: &str, active: bool, tip: &str, theme: &Theme) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ACTIVITY_W, 38.0), Sense::click());
+fn icon_button(ui: &mut egui::Ui, icon: icons::Icon, active: bool, tip: &str, theme: &Theme) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ACTIVITY_W, 40.0), Sense::click());
     let color = if active { theme.text } else if resp.hovered() { theme.text_dim } else { theme.text_faint };
     if active {
-        ui.painter().rect_filled(Rect::from_min_size(rect.min, vec2(2.0, rect.height())), 0.0, theme.accent);
+        ui.painter().rect_filled(Rect::from_min_size(rect.min + vec2(0.0, 6.0), vec2(2.0, rect.height() - 12.0)), 1.0, theme.accent);
     }
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, icon, FontId::proportional(17.0), color);
+    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(20.0, 20.0)), icon, color);
     resp.on_hover_text(tip)
 }
 
 impl KilnApp {
     pub(super) fn ui_sidebar(&mut self, root: &mut egui::Ui) {
-        let ctx = &root.ctx().clone();
         let theme = self.theme;
         egui::Panel::left("activity")
             .exact_size(ACTIVITY_W)
@@ -26,7 +25,7 @@ impl KilnApp {
             .show(root, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                 ui.add_space(6.0);
-                if icon_button(ui, "☰", self.sidebar_open, "워크스페이스 (⌘B)", &theme).clicked() {
+                if icon_button(ui, icons::Icon::Menu, self.sidebar_open, "워크스페이스 (⌘B)", &theme).clicked() {
                     self.actions.push(Action::ToggleSidebar);
                 }
                 ui.add_space(6.0);
@@ -39,16 +38,16 @@ impl KilnApp {
                         tools::ToolKind::PullRequests => "⇧⌘R",
                         tools::ToolKind::Database => "⇧⌘B",
                     };
-                    if icon_button(ui, k.icon(), open && tool == k, &format!("{} ({sc})", k.label()), &theme).clicked() {
+                    if icon_button(ui, k.vicon(), open && tool == k, &format!("{} ({sc})", k.label()), &theme).clicked() {
                         self.actions.push(Action::ToggleTool(k));
                     }
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(6.0);
-                    if icon_button(ui, "⚙", self.settings_open, "설정 (⌘,)", &theme).clicked() {
+                    if icon_button(ui, icons::Icon::Gear, self.settings_open, "설정 (⌘,)", &theme).clicked() {
                         self.actions.push(Action::OpenSettings);
                     }
-                    if icon_button(ui, "⌘", self.palette.is_open(), "명령 팔레트 (⇧⌘P)", &theme).clicked() {
+                    if icon_button(ui, icons::Icon::Command, self.palette.is_open(), "명령 팔레트 (⇧⌘P)", &theme).clicked() {
                         self.actions.push(Action::OpenPalette);
                     }
                 });
@@ -65,7 +64,7 @@ impl KilnApp {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("워크스페이스").size(11.5).color(theme.text_faint).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(egui::Button::new(RichText::new("＋").size(13.0)).frame(false)).on_hover_text("새 워크스페이스 (⌘N)").clicked() {
+                        if icons::button(ui, icons::Icon::Plus, vec2(22.0, 22.0), theme.text_dim, theme.bg_hover, "새 워크스페이스 (⌘N)").clicked() {
                             self.actions.push(Action::NewWorkspace(None));
                         }
                     });
@@ -239,7 +238,6 @@ impl KilnApp {
     }
 
     pub(super) fn ui_statusbar(&mut self, root: &mut egui::Ui) {
-        let ctx = &root.ctx().clone();
         let theme = self.theme;
         egui::Panel::bottom("status").exact_size(24.0).frame(Frame::new().fill(theme.bg).inner_margin(Margin::symmetric(10, 3))).show(root, |ui| {
             ui.horizontal_centered(|ui| {
@@ -276,7 +274,6 @@ impl KilnApp {
     }
 
     pub(super) fn ui_tool_panel(&mut self, root: &mut egui::Ui) {
-        let ctx = &root.ctx().clone();
         let theme = self.theme;
         let Some(ws) = self.workspaces.get_mut(self.active) else { return };
         if !ws.tool_open {
@@ -312,8 +309,8 @@ impl KilnApp {
                         let dir = i.cwd.as_deref().and_then(|c| Path::new(c).file_name()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                         let proc_name = i.fg_process.clone().unwrap_or_else(|| "shell".into());
                         let n = tt.root.panes().len();
-                        let base = if !i.title.is_empty() && !shells().contains(&proc_name.as_str()) { format!("{proc_name}") } else { format!("{proc_name} · {dir}") };
-                        if n > 1 { format!("{base}  ⊞{n}") } else { base }
+                        let base = if shells().contains(&proc_name.as_str()) { format!("{proc_name} · {dir}") } else { proc_name };
+                        if n > 1 { format!("{base}  ({n})") } else { base }
                     }
                     None => "터미널".into(),
                 };
@@ -324,7 +321,6 @@ impl KilnApp {
     }
 
     pub(super) fn ui_center(&mut self, root: &mut egui::Ui) {
-        let ctx = &root.ctx().clone();
         let theme = self.theme;
         egui::CentralPanel::default().frame(Frame::new().fill(theme.bg)).show(root, |ui| {
             if self.workspaces.is_empty() {
@@ -387,22 +383,17 @@ impl KilnApp {
                         }
                     });
                 }
-                let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
-                if resp.hovered() {
-                    ui.painter().rect_filled(r, 4.0, theme.bg_hover);
-                }
-                ui.painter().text(r.center(), Align2::CENTER_CENTER, "+", FontId::proportional(16.0), theme.text_dim);
-                if resp.on_hover_text("새 터미널 탭 (⌘T)").clicked() {
+                if icons::button(ui, icons::Icon::Plus, vec2(28.0, 28.0), theme.text_dim, theme.bg_hover, "새 터미널 탭 (⌘T)").clicked() {
                     self.actions.push(Action::NewTermTab);
                 }
             });
             // 분할 버튼.
             let right = Rect::from_min_max(pos2(bar.right() - 70.0, bar.top()), bar.right_bottom());
             let mut rui = ui.new_child(UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
-            if rui.add(egui::Button::new(RichText::new("⬓").size(14.0).color(theme.text_dim)).frame(false)).on_hover_text("아래로 분할 (⇧⌘D)").clicked() {
+            if icons::button(&mut rui, icons::Icon::SplitDown, vec2(28.0, 28.0), theme.text_dim, theme.bg_hover, "아래로 분할 (⇧⌘D)").clicked() {
                 self.actions.push(Action::Split(Dir::Vertical));
             }
-            if rui.add(egui::Button::new(RichText::new("◫").size(14.0).color(theme.text_dim)).frame(false)).on_hover_text("오른쪽으로 분할 (⌘D)").clicked() {
+            if icons::button(&mut rui, icons::Icon::SplitRight, vec2(28.0, 28.0), theme.text_dim, theme.bg_hover, "오른쪽으로 분할 (⌘D)").clicked() {
                 self.actions.push(Action::Split(Dir::Horizontal));
             }
 
@@ -432,7 +423,8 @@ impl KilnApp {
         let mut rects = Vec::new();
         root.layout(content, &mut rects);
         let multi = rects.len() > 1;
-        let focus_req = std::mem::take(&mut self.focus_terminal) && self.confirm.is_none() && !self.palette.is_open();
+        let focus_req = self.focus_terminal && self.confirm.is_none() && !self.palette.is_open();
+        let mut focus_consumed = false;
         let mut new_focus = None;
         for (pid, rect) in &rects {
             let Some(pane) = self.panes.get_mut(pid) else { continue };
@@ -444,6 +436,9 @@ impl KilnApp {
             match (&mut pane.view, pane.session) {
                 (Some(view), Some(_)) => {
                     let out = view.ui(&mut child, &mut self.conn, &settings, focus_req && is_focused, cwd.as_deref());
+                    if focus_req && is_focused {
+                        focus_consumed = true;
+                    }
                     if out.clicked && !is_focused {
                         new_focus = Some(*pid);
                     }
@@ -496,6 +491,9 @@ impl KilnApp {
             if resp.double_clicked() {
                 ratio_change = Some((path, 0.5));
             }
+        }
+        if focus_consumed {
+            self.focus_terminal = false;
         }
         if let TabKind::Terminal(tt) = &mut self.workspaces[ws_idx].tabs[tab_idx].kind {
             tt.rects = rects;

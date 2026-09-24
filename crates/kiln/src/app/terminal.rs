@@ -834,9 +834,16 @@ fn build_row(ctx: &egui::Context, line: &Line, cell: Vec2, font: &FontId, pal: &
                 }
             }
             let span = if c.flags & flags::WIDE != 0 { 2.0 } else { 1.0 };
-            let g = ctx.fonts_mut(|f| f.layout_no_wrap(s, font.clone(), fg));
+            let mut g = ctx.fonts_mut(|f| f.layout_no_wrap(s.clone(), font.clone(), fg));
+            // 두 칸 문자는 칸 폭을 채우도록 최대 1.2배까지 키운다.
+            if span == 2.0 && g.size().x > 0.0 && g.size().x < cell.x * 1.8 {
+                let scale = (cell.x * 1.9 / g.size().x).min(1.2);
+                let f2 = FontId::new(font.size * scale, font.family.clone());
+                g = ctx.fonts_mut(|f| f.layout_no_wrap(s, f2, fg));
+            }
             let x = i as f32 * cell.x + (span * cell.x - g.size().x) / 2.0;
-            shapes.push(Shape::galley(pos2(x, y_text), g, fg));
+            let y = ((cell.y - g.size().y) / 2.0).round();
+            shapes.push(Shape::galley(pos2(x, y), g, fg));
             if deco != 0 {
                 flush(&mut shapes, &mut " ".repeat(span as usize), i, Some((fg, deco)));
             }

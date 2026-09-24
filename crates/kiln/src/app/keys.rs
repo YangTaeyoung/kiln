@@ -82,7 +82,7 @@ pub fn encode_key(key: Key, m: Modifiers, term_mode: u32, option_as_meta: bool) 
         }
         Key::Space if m.ctrl => vec![0],
         _ => {
-            if m.ctrl && !m.command_only() {
+            if m.ctrl && !m.mac_cmd {
                 return ctrl_key(key, m, kitty, mp);
             }
             if m.alt && option_as_meta {
@@ -132,17 +132,6 @@ fn key_char(key: Key) -> Option<char> {
     Some(c.to_ascii_lowercase())
 }
 
-trait CommandOnly {
-    fn command_only(&self) -> bool;
-}
-
-impl CommandOnly for Modifiers {
-    /// macOS 에서 Cmd 만 눌린 상태(앱 단축키)인지.
-    fn command_only(&self) -> bool {
-        self.mac_cmd && !self.ctrl
-    }
-}
-
 /// 브래킷 붙여넣기 모드를 반영한 붙여넣기 바이트.
 pub fn paste_bytes(text: &str, term_mode: u32) -> Vec<u8> {
     let text = text.replace("\r\n", "\r").replace('\n', "\r");
@@ -184,6 +173,15 @@ mod tests {
         assert_eq!(encode_key(Key::ArrowUp, Modifiers::NONE, 0, true).unwrap(), b"\x1b[A");
         assert_eq!(encode_key(Key::ArrowUp, Modifiers::NONE, mode::APP_CURSOR, true).unwrap(), b"\x1bOA");
         assert_eq!(encode_key(Key::ArrowLeft, Modifiers::ALT, 0, true).unwrap(), b"\x1b[1;3D");
+    }
+
+    #[test]
+    fn ctrl_letter_with_command_flag_is_encoded() {
+        // Linux/Windows 에서는 Ctrl 이 command 플래그도 켠다.
+        let m = Modifiers { ctrl: true, command: true, ..Default::default() };
+        assert_eq!(encode_key(Key::A, m, 0, true).unwrap(), vec![1]);
+        let mac_cmd = Modifiers { mac_cmd: true, command: true, ..Default::default() };
+        assert!(encode_key(Key::A, mac_cmd, 0, true).is_none());
     }
 
     #[test]

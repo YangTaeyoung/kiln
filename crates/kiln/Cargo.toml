@@ -32,4 +32,4 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true
-egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
