@@ -5,6 +5,7 @@ mod driver;
 pub mod edit;
 pub mod export;
 mod manager;
+pub mod logo;
 pub mod meta;
 mod panel;
 pub mod sql;

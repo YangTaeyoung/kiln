@@ -65,6 +65,11 @@ impl DbTab {
         self.conn
     }
 
+    /// 이 탭이 쓰는 연결의 드라이버.
+    pub fn driver(&self) -> Option<crate::Driver> {
+        self.manager.driver(self.conn)
+    }
+
     /// 탭 제목.
     pub fn title(&self) -> String {
         let name = self

@@ -572,7 +572,14 @@ impl KilnApp {
         let mut x = rect.left() + 14.0;
         widgets::status_dot(ui, pos2(x, cy), info.dot, info.pulse);
         x += 11.0;
-        icons::paint(ui.painter(), egui::Rect::from_center_size(pos2(x + 6.0, cy), vec2(12.0, 12.0)), info.icon, if focused { t.text_dim } else { t.text_faint });
+        let icon_rect = egui::Rect::from_center_size(pos2(x + 6.0, cy), vec2(12.0, 12.0));
+        let custom = match self.panes.get(&pid).map(|p| &p.kind) {
+            Some(PaneKind::Tool(tool)) => tool.paint_icon(ui, icon_rect),
+            _ => false,
+        };
+        if !custom {
+            icons::paint(ui.painter(), icon_rect, info.icon, if focused { t.text_dim } else { t.text_faint });
+        }
         x += 19.0;
         let show_buttons = hovered || (focused && multi);
         let buttons_w = if show_buttons { 4.0 * 26.0 + 6.0 } else { 0.0 };

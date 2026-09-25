@@ -5,7 +5,7 @@ use crate::manager::Job;
 use crate::meta::{TableDetails, TableInfo, TableKind};
 use crate::ui::{self, Glyph, TypedConfirm, chevron, dim, faint, icon_button, status_color, tree_row};
 use crate::{ConnConfig, ConnId, ConnStatus, DbManager, DbResult, Driver, SslMode};
-use egui::{Align2, Color32, RichText, Ui, pos2, vec2};
+use egui::{Align2, Color32, RichText, Sense, Ui, pos2, vec2};
 use kiln_common::icons::Icon;
 use kiln_common::widgets::{self, ButtonKind};
 use kiln_common::{Theme, fonts};
@@ -211,18 +211,15 @@ impl DbPanel {
                 egui::Popup::menu(&add).gap(4.0).show(|ui| {
                     ui.set_min_width(190.0);
                     for d in Driver::ALL {
-                        if ui.button(format!("{}…", d.label())).clicked() {
-                            let cfg = ConnConfig {
-                                driver: d,
-                                port: d.default_port(),
-                                host: if d == Driver::Sqlite {
-                                    String::new()
-                                } else {
-                                    "localhost".into()
-                                },
-                                ..ConnConfig::default()
-                            };
-                            self.dialog = Some(ConnDialog::new(cfg, String::new(), true));
+                        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width().max(190.0), 32.0), Sense::click());
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{} 연결", d.label())));
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, 6.0, theme.bg_hover);
+                        }
+                        crate::logo::paint(ui, egui::Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(20.0, 20.0)), d);
+                        ui.painter().text(pos2(r.left() + 34.0, r.center().y), Align2::LEFT_CENTER, d.label(), fonts::medium(13.0), theme.text);
+                        if resp.clicked() {
+                            self.start_new_connection(d);
                             ui.close();
                         }
                     }
@@ -351,13 +348,38 @@ impl DbPanel {
         }
     }
 
+    fn start_new_connection(&mut self, d: Driver) {
+        let cfg = ConnConfig {
+            driver: d,
+            port: d.default_port(),
+            host: if d == Driver::Sqlite { String::new() } else { "localhost".into() },
+            ..ConnConfig::default()
+        };
+        self.dialog = Some(ConnDialog::new(cfg, String::new(), true));
+    }
+
     fn tree(&mut self, ui: &mut Ui) {
         let theme = Theme::current();
         let conns = self.manager.connections();
         if conns.is_empty() {
-            if widgets::empty_state(ui, Icon::Database, "아직 연결이 없습니다", Some("연결 추가")) {
-                self.open_new_connection_dialog();
+            ui.add_space(28.0);
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new("데이터베이스에 연결하세요").font(fonts::semibold(15.0)).color(theme.text));
+                ui.add_space(4.0);
+                ui.label(RichText::new("연결할 데이터베이스 종류를 고르세요").size(12.5).color(theme.text_faint));
+            });
+            ui.add_space(16.0);
+            if let Some(d) = driver_cards(ui, None) {
+                self.start_new_connection(d);
             }
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                if widgets::button_with(ui, None, "URL 에서 가져오기…", widgets::ButtonKind::Ghost, true).clicked() {
+                    let mut d = ConnDialog::new(ConnConfig::default(), String::new(), true);
+                    d.url = "postgres://user:password@localhost:5432/db".into();
+                    self.dialog = Some(d);
+                }
+            });
             return;
         }
         let filter = self.filter.trim().to_lowercase();
@@ -372,17 +394,11 @@ impl DbPanel {
             chevron(ui, pos2(x0 + 5.0, cy), node.open, true);
             let tint = cfg.color.map(|c| Color32::from_rgb(c[0], c[1], c[2]));
             let ir = egui::Rect::from_center_size(pos2(x0 + 22.0, cy), vec2(20.0, 20.0));
-            ui.painter().rect_filled(
-                ir,
-                6.0,
-                widgets::tint(tint.unwrap_or(theme.text_dim), if theme.dark { 0.16 } else { 0.12 }),
-            );
-            kiln_common::icons::paint(
-                ui.painter(),
-                egui::Rect::from_center_size(ir.center(), vec2(12.0, 12.0)),
-                Icon::Database,
-                tint.unwrap_or(theme.text_dim),
-            );
+            crate::logo::paint(ui, ir, cfg.driver);
+            if let Some(c) = tint {
+                // 사용자가 고른 연결 색은 행 왼쪽 막대로 표시한다.
+                ui.painter().rect_filled(egui::Rect::from_min_size(pos2(rect.min.x, rect.min.y + 6.0), vec2(3.0, rect.height() - 12.0)), 2.0, c);
+            }
             let dot = ir.right_bottom() - vec2(1.0, 1.0);
             ui.painter().circle_filled(dot, 4.0, theme.bg_panel);
             ui.painter().circle_filled(dot, 2.8, status_color(&status));
@@ -533,14 +549,8 @@ impl DbPanel {
             ui.set_width(460.0);
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
             ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), egui::Sense::hover());
-                ui.painter().rect_filled(r, 8.0, theme.accent_soft(if theme.dark { 40 } else { 28 }));
-                kiln_common::icons::paint(
-                    ui.painter(),
-                    egui::Rect::from_center_size(r.center(), vec2(16.0, 16.0)),
-                    Icon::Database,
-                    theme.accent,
-                );
+                let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), egui::Sense::hover());
+                crate::logo::paint(ui, r, d.cfg.driver);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(
@@ -618,23 +628,12 @@ impl DbPanel {
                     );
                     ui.end_row();
                     label(ui, "드라이버");
-                    egui::ComboBox::from_id_salt("db-driver")
-                        .selected_text(d.cfg.driver.label())
-                        .width(full)
-                        .height(240.0)
-                        .show_ui(ui, |ui| {
-                            for drv in Driver::ALL {
-                                if ui
-                                    .selectable_label(d.cfg.driver == drv, drv.label())
-                                    .clicked()
-                                {
-                                    if d.cfg.port == d.cfg.driver.default_port() {
-                                        d.cfg.port = drv.default_port();
-                                    }
-                                    d.cfg.driver = drv;
-                                }
-                            }
-                        });
+                    if let Some(drv) = driver_chips(ui, d.cfg.driver, full) {
+                        if d.cfg.port == d.cfg.driver.default_port() {
+                            d.cfg.port = drv.default_port();
+                        }
+                        d.cfg.driver = drv;
+                    }
                     ui.end_row();
                     if d.cfg.driver == Driver::Sqlite {
                         label(ui, "파일");
@@ -1369,4 +1368,66 @@ fn table_ui(
             }
         }
     }
+}
+
+/// 드라이버를 로고 카드로 고른다. 누른 드라이버를 돌려준다.
+fn driver_cards(ui: &mut Ui, selected: Option<Driver>) -> Option<Driver> {
+    let theme = Theme::current();
+    let mut picked = None;
+    let avail = ui.available_width();
+    let cols = if avail > 420.0 { 4 } else { 2 };
+    let gap = 8.0;
+    let w = ((avail - gap * (cols as f32 - 1.0)) / cols as f32).min(150.0);
+    let rows: Vec<&[Driver]> = Driver::ALL.chunks(cols).collect();
+    for row in rows {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for d in row {
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 74.0), Sense::click());
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, d.label()));
+                let sel = selected == Some(*d);
+                let fill = if sel { theme.accent_soft(if theme.dark { 30 } else { 22 }) } else if resp.hovered() { theme.bg_hover } else { theme.bg_elevated };
+                ui.painter().rect_filled(r, 10.0, fill);
+                let stroke = if sel { egui::Stroke::new(1.5, theme.accent) } else { egui::Stroke::new(1.0, theme.border) };
+                ui.painter().rect_stroke(r, 10.0, stroke, egui::StrokeKind::Inside);
+                crate::logo::paint(ui, egui::Rect::from_center_size(pos2(r.center().x, r.top() + 27.0), vec2(30.0, 30.0)), *d);
+                ui.painter().text(pos2(r.center().x, r.bottom() - 15.0), Align2::CENTER_CENTER, d.label(), fonts::medium(12.5), if sel { theme.text } else { theme.text_dim });
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if resp.clicked() {
+                    picked = Some(*d);
+                }
+            }
+        });
+    }
+    picked
+}
+
+/// 대화상자용 한 줄 드라이버 선택(로고 + 이름).
+fn driver_chips(ui: &mut Ui, selected: Driver, width: f32) -> Option<Driver> {
+    let theme = Theme::current();
+    let mut picked = None;
+    let gap = 6.0;
+    let n = Driver::ALL.len() as f32;
+    let w = ((width - gap * (n - 1.0)) / n).max(70.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for d in Driver::ALL {
+            let (r, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, d.label()));
+            let sel = selected == d;
+            let fill = if sel { theme.accent_soft(if theme.dark { 30 } else { 22 }) } else if resp.hovered() { theme.bg_hover } else { theme.bg_input };
+            ui.painter().rect_filled(r, 8.0, fill);
+            let stroke = if sel { egui::Stroke::new(1.5, theme.accent) } else { egui::Stroke::new(1.0, theme.border) };
+            ui.painter().rect_stroke(r, 8.0, stroke, egui::StrokeKind::Inside);
+            crate::logo::paint(ui, egui::Rect::from_center_size(pos2(r.left() + 17.0, r.center().y), vec2(20.0, 20.0)), d);
+            let short = if d == Driver::Postgres { "Postgres" } else { d.label() };
+            ui.painter().with_clip_rect(r.shrink(2.0)).text(pos2(r.left() + 32.0, r.center().y), Align2::LEFT_CENTER, short, fonts::medium(12.0), if sel { theme.text } else { theme.text_dim });
+            if resp.clicked() {
+                picked = Some(d);
+            }
+        }
+    });
+    picked
 }

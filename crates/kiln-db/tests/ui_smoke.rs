@@ -277,7 +277,7 @@ fn connection_dialog_renders_with_all_fields() {
             state,
         );
     h.step();
-    h.get_by_label("연결 추가").click();
+    h.get_by_label("PostgreSQL").click();
     for _ in 0..4 {
         h.step();
     }

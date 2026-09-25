@@ -106,6 +106,10 @@ pub trait ToolTab {
     }
     /// 보이지 않는 탭도 매 프레임 호출된다(LSP 응답 반영 등).
     fn tick(&mut self) {}
+    /// 카드 머리글 아이콘을 직접 그린다. 그렸으면 true.
+    fn paint_icon(&self, _ui: &egui::Ui, _rect: egui::Rect) -> bool {
+        false
+    }
 }
 
 /// 도구 탭을 만든다. 같은 키의 탭이 열려 있으면 `reuse` 가 호출된다.
@@ -320,6 +324,15 @@ impl ToolTab for DbTabW {
     }
     fn is_dirty(&self) -> bool {
         self.tab.pending_changes() > 0
+    }
+    fn paint_icon(&self, ui: &egui::Ui, rect: egui::Rect) -> bool {
+        match self.tab.driver() {
+            Some(d) => {
+                kiln_db::logo::paint(ui, rect.expand(1.5), d);
+                true
+            }
+            None => false,
+        }
     }
     fn persist(&self) -> Option<ToolP> {
         Some(self.persist.clone())

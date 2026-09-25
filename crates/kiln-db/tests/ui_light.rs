@@ -104,7 +104,7 @@ fn light_theme_panels_render() {
         );
     h.step();
     save_png(&mut h, "light_panel_empty");
-    h.get_by_label("연결 추가").click();
+    h.get_by_label("PostgreSQL").click();
     for _ in 0..4 {
         h.step();
     }

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+resvg = { version = "0.48", default-features = false }
 kiln-common.workspace = true
 egui.workspace = true
 serde.workspace = true
