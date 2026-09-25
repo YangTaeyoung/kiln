@@ -2711,6 +2711,7 @@ dependencies = [
  "log",
  "open",
  "parking_lot",
+ "postcard",
  "regex",
  "rfd",
  "serde",
@@ -2750,6 +2751,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "widestring",
  "windows-sys 0.61.2",
 ]
 
@@ -2795,6 +2797,8 @@ dependencies = [
  "nucleo-matcher",
  "parking_lot",
  "regex",
+ "serde",
+ "serde_json",
  "syntect",
  "tempfile",
  "trash",

@@ -18,6 +18,7 @@ pub enum Icon {
     Close,
     Terminal,
     Bell,
+    Warning,
 }
 
 pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
@@ -107,6 +108,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Terminal => {
             p.add(Shape::line(vec![at(-7.0, -4.0), at(-2.5, 0.0), at(-7.0, 4.0)], st));
             p.line_segment([at(0.0, 5.0), at(7.0, 5.0)], st);
+        }
+        Icon::Warning => {
+            p.add(Shape::closed_line(vec![at(0.0, -7.5), at(8.0, 6.5), at(-8.0, 6.5)], st));
+            p.line_segment([at(0.0, -2.5), at(0.0, 2.0)], st);
+            p.circle_filled(at(0.0, 4.3), 0.9 * s, color);
         }
         Icon::Bell => {
             let pts: Vec<Pos2> = vec![at(-6.0, 4.0), at(-4.5, 2.0), at(-4.5, -2.5), at(-2.0, -6.0), at(2.0, -6.0), at(4.5, -2.5), at(4.5, 2.0), at(6.0, 4.0)];

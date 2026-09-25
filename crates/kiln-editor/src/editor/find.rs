@@ -99,6 +99,7 @@ impl Editor {
 
     fn select_match(&mut self, i: usize) {
         let (a, b) = self.find.matches[i];
+        self.extra.clear();
         self.sel = Selection::new(a, b);
         self.find.current = Some(i);
         self.preferred_col = None;
@@ -132,6 +133,7 @@ impl Editor {
         if self.find.matches.contains(&sel) && !self.read_only {
             let matched = self.buf.text_range(sel.0, sel.1);
             let rep = expand_replacement(&re, &matched, &self.find.replacement, self.find.opts.regex);
+            self.extra.clear();
             self.buf.begin(EditKind::Other, self.sel, self.now());
             let end = self.buf.replace(sel.0, sel.1, &rep);
             self.sel = Selection::caret(end);
@@ -158,6 +160,7 @@ impl Editor {
             self.buf.replace(a, b, &rep);
         }
         let head = self.buf.clamp(self.sel.head);
+        self.extra.clear();
         self.sel = Selection::caret(head);
         self.buf.end(self.sel);
         self.sync_highlighter();

@@ -25,10 +25,10 @@ fn frame(seed: u64, cols: u16, rows: u16) -> Frame {
                     Cell { c, fg, bg, flags: if v % 13 == 0 { flags::BOLD } else { 0 } }
                 })
                 .collect();
-            (r, Line { cells, combining: vec![] })
+            (r, Line { cells, combining: vec![], links: vec![] })
         })
         .collect();
-    Frame { session: 1, cols, rows, full: true, lines, cursor: None, mode: 0, display_offset: 0, history: 0 }
+    Frame { session: 1, cols, rows, full: true, lines, cursor: None, mode: 0, display_offset: 0, history: 0, images: vec![] }
 }
 
 #[test]

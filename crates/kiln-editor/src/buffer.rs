@@ -135,6 +135,21 @@ struct UndoGroup {
     sealed: bool,
 }
 
+/// LSP 증분 동기화용 텍스트 변경. 열은 변경 직전 줄 기준 UTF-16 코드 단위.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextDelta {
+    pub start_line: usize,
+    pub start_u16: usize,
+    pub end_line: usize,
+    pub end_u16: usize,
+    pub text: String,
+}
+
+/// 줄 안 바이트 위치까지의 UTF-16 코드 단위 수.
+pub fn utf16_len(s: &str) -> usize {
+    if s.is_ascii() { s.len() } else { s.chars().map(char::len_utf16).sum() }
+}
+
 const UNDO_LIMIT: usize = 2000;
 const MERGE_WINDOW_SECS: f64 = 1.0;
 
@@ -148,6 +163,8 @@ pub struct Buffer {
     open: bool,
     next_group_id: u64,
     saved_group: Option<u64>,
+    track_deltas: bool,
+    deltas: Vec<TextDelta>,
 }
 
 impl Default for Buffer {
@@ -179,6 +196,8 @@ impl Buffer {
             open: false,
             next_group_id: 1,
             saved_group: None,
+            track_deltas: false,
+            deltas: Vec::new(),
         }
     }
 
@@ -221,6 +240,31 @@ impl Buffer {
     /// 누적된 줄 변경 기록을 꺼낸다.
     pub fn take_changes(&mut self) -> Vec<LineEdit> {
         std::mem::take(&mut self.changes)
+    }
+
+    /// 켜 두면 모든 변경을 [`TextDelta`] 로 기록한다.
+    pub fn set_track_deltas(&mut self, on: bool) {
+        self.track_deltas = on;
+        self.deltas.clear();
+    }
+
+    /// 누적된 텍스트 변경을 꺼낸다.
+    pub fn take_deltas(&mut self) -> Vec<TextDelta> {
+        std::mem::take(&mut self.deltas)
+    }
+
+    /// 열린 편집 그룹에 지금까지 쌓인 편집 수. [`Buffer::map_since`] 의 기준점.
+    pub fn edit_mark(&self) -> usize {
+        if self.open { self.undo.last().map_or(0, |g| g.edits.len()) } else { 0 }
+    }
+
+    /// `mark` 이후 열린 그룹에서 일어난 편집을 거쳐 위치를 옮긴다. 편집 뒤쪽 위치만 밀린다.
+    pub fn map_since(&self, mark: usize, mut p: Pos) -> Pos {
+        let Some(g) = self.undo.last() else { return p };
+        for e in g.edits.iter().skip(mark) {
+            p = map_pos(p, e.start, advance(e.start, &e.removed), advance(e.start, &e.inserted));
+        }
+        p
     }
 
     pub fn end_pos(&self) -> Pos {
@@ -332,6 +376,15 @@ impl Buffer {
     fn raw_replace(&mut self, a: Pos, b: Pos, text: &str) -> (String, Pos) {
         let removed = self.text_range(a, b);
         self.version += 1;
+        if self.track_deltas {
+            self.deltas.push(TextDelta {
+                start_line: a.line,
+                start_u16: utf16_len(&self.lines[a.line][..a.col]),
+                end_line: b.line,
+                end_u16: utf16_len(&self.lines[b.line][..b.col]),
+                text: text.to_owned(),
+            });
+        }
         if a.line == b.line && !text.contains('\n') {
             self.lines[a.line].replace_range(a.col..b.col, text);
             self.changes.push(LineEdit { start: a.line, old_count: 1, new_count: 1 });
@@ -584,6 +637,17 @@ impl Buffer {
     }
 }
 
+/// `a..b` 가 `a..e` 로 바뀐 뒤의 위치. 범위 안의 위치는 `e` 로 간다.
+pub fn map_pos(p: Pos, a: Pos, b: Pos, e: Pos) -> Pos {
+    if p >= b {
+        if p.line == b.line { Pos::new(e.line, e.col + (p.col - b.col)) } else { Pos::new(p.line + e.line - b.line, p.col) }
+    } else if p > a {
+        e
+    } else {
+        p
+    }
+}
+
 /// 텍스트 삽입 후 끝 위치를 계산한다.
 pub fn advance(start: Pos, text: &str) -> Pos {
     match text.rfind('\n') {
@@ -821,6 +885,33 @@ mod tests {
         assert_eq!(b.next_word(Pos::new(0, 3)), Pos::new(0, 11));
         assert_eq!(b.prev_word(Pos::new(0, 11)), Pos::new(0, 4));
         assert_eq!(b.word_at(Pos::new(0, 6)), (Pos::new(0, 4), Pos::new(0, 11)));
+    }
+
+    #[test]
+    fn map_since_shifts_positions_after_edits() {
+        let mut b = Buffer::from_text("abc\ndef\nghi");
+        b.begin(EditKind::Other, Selection::default(), 0.0);
+        let m = b.edit_mark();
+        b.replace(Pos::new(0, 1), Pos::new(1, 1), "XY\nZ\nW");
+        assert_eq!(b.to_text(), "aXY\nZ\nWef\nghi");
+        assert_eq!(b.map_since(m, Pos::new(1, 2)), Pos::new(2, 2));
+        assert_eq!(b.map_since(m, Pos::new(2, 1)), Pos::new(3, 1));
+        assert_eq!(b.map_since(m, Pos::new(0, 0)), Pos::new(0, 0));
+        assert_eq!(b.map_since(m, Pos::new(0, 2)), Pos::new(2, 1));
+        b.end(Selection::default());
+    }
+
+    #[test]
+    fn deltas_record_utf16_columns_before_each_change() {
+        let mut b = Buffer::from_text("한a😀b\nx");
+        b.set_track_deltas(true);
+        b.replace(Pos::new(0, 4), Pos::new(0, 8), "Q");
+        b.replace(Pos::new(0, 5), Pos::new(1, 0), "");
+        let d = b.take_deltas();
+        assert_eq!(d[0], TextDelta { start_line: 0, start_u16: 2, end_line: 0, end_u16: 4, text: "Q".into() });
+        assert_eq!(d[1], TextDelta { start_line: 0, start_u16: 3, end_line: 1, end_u16: 0, text: String::new() });
+        b.undo();
+        assert_eq!(b.take_deltas().len(), 2);
     }
 
     #[test]

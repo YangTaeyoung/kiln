@@ -37,6 +37,7 @@ impl KilnApp {
                         tools::ToolKind::Git => "⇧⌘G",
                         tools::ToolKind::PullRequests => "⇧⌘R",
                         tools::ToolKind::Database => "⇧⌘B",
+                        tools::ToolKind::Problems => "⇧⌘M",
                     };
                     if icon_button(ui, k.vicon(), open && tool == k, &format!("{} ({sc})", k.label()), &theme).clicked() {
                         self.actions.push(Action::ToggleTool(k));
@@ -266,6 +267,9 @@ impl KilnApp {
                         Some(TabKind::Tool(t)) => t.status_text(),
                         _ => None,
                     });
+                    if let Some(lsp) = self.workspaces.get(self.active).and_then(|w| w.tools.lsp.status_text()) {
+                        ui.label(RichText::new(lsp).size(11.0).color(theme.text_faint));
+                    }
                     if let Some(st) = tool_status {
                         ui.label(RichText::new(st).size(11.0).color(theme.text_dim));
                         return;

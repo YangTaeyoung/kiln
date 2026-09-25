@@ -90,7 +90,8 @@ fn arrow_keys_move_selection_and_escape_closes() {
     let mut h = harness(&root);
     wait_indexed(&mut h);
     type_text(&mut h, "editor");
-    assert!(common::wait_until(&mut h, 5.0, |h| h.state().qo.result_paths().len() >= 3));
+    // 빈 검색어의 전체 목록(16개)이 아니라 걸러진 결과가 올 때까지 기다린다.
+    assert!(common::wait_until(&mut h, 5.0, |h| (3..16).contains(&h.state().qo.result_paths().len())));
     let results = h.state().qo.result_paths();
     h.key_press(Key::ArrowDown);
     h.run();
@@ -114,7 +115,10 @@ fn clicking_a_result_opens_it() {
     let mut h = harness(&root);
     wait_indexed(&mut h);
     type_text(&mut h, "app");
-    assert!(common::wait_until(&mut h, 5.0, |h| h.state().qo.result_paths().iter().any(|p| p == "web/src/App.tsx")));
+    assert!(common::wait_until(&mut h, 5.0, |h| {
+        let r = h.state().qo.result_paths();
+        r.len() < 16 && r.iter().any(|p| p == "web/src/App.tsx")
+    }));
     h.get_by_label("web/src/App.tsx").click();
     h.run();
     assert_eq!(h.state().picked.as_deref(), Some(root.join("web/src/App.tsx").as_path()));
@@ -136,7 +140,7 @@ fn snapshot_quick_open() {
     let mut h = harness(&root);
     wait_indexed(&mut h);
     type_text(&mut h, "srced");
-    assert!(common::wait_until(&mut h, 5.0, |h| h.state().qo.result_paths().len() >= 3));
+    assert!(common::wait_until(&mut h, 5.0, |h| h.state().qo.result_paths().len() == 3));
     h.key_press(Key::ArrowDown);
     h.run();
     h.remove_cursor();

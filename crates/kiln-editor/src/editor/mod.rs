@@ -1,6 +1,10 @@
 //! 파일 하나를 여는 코드 편집기.
 
+mod cursors;
+mod display;
 mod find;
+mod fold;
+mod lsp_glue;
 mod view;
 
 use std::path::{Path, PathBuf};
@@ -9,12 +13,17 @@ use std::time::{Instant, SystemTime};
 
 use anyhow::Context as _;
 
+use crate::EditorEvent;
 use crate::buffer::{Buffer, EditKind, Indent, Pos, Selection};
 use crate::highlight::Highlighter;
 use crate::syntax::{self, CommentStyle};
 
 pub use crate::buffer::LineEnding;
+pub(crate) use cursors::Cursor;
+pub(crate) use display::DisplayMap;
 pub(crate) use find::FindState;
+pub use fold::FoldRange;
+pub(crate) use fold::FoldState;
 
 /// 이 크기를 넘는 파일은 구문 강조를 끈다.
 pub const LARGE_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -62,8 +71,10 @@ pub struct EditorStatus {
     pub dirty: bool,
     pub indent: Indent,
     pub read_only: bool,
-    /// 선택된 문자 수. 선택이 없으면 0.
+    /// 선택된 문자 수(모든 커서 합). 선택이 없으면 0.
     pub selected: usize,
+    /// 커서 수(주 커서 포함).
+    pub cursors: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,9 +187,19 @@ pub struct Editor {
     path: PathBuf,
     pub(crate) buf: Buffer,
     pub(crate) hl: Highlighter,
+    /// 주 커서.
     pub(crate) sel: Selection,
+    /// 보조 커서(문서 순서).
+    pub(crate) extra: Vec<Cursor>,
     /// 세로 이동 시 유지할 표시 열.
     pub(crate) preferred_col: Option<usize>,
+    /// Cmd+D 가 단어 단위로 일치를 찾는지.
+    pub(crate) whole_word_next: bool,
+    pub(crate) display: DisplayMap,
+    pub(crate) folds: FoldState,
+    pub(crate) word_wrap: bool,
+    pub(crate) events: Vec<EditorEvent>,
+    pub(crate) lsp: Option<lsp_glue::LspState>,
     pub(crate) indent: Indent,
     comment: Option<CommentStyle>,
     language: String,
@@ -232,10 +253,16 @@ impl Editor {
             id: egui::Id::new(("kiln-editor", NEXT_ID.fetch_add(1, Ordering::Relaxed))),
             read_only: matches!(d.encoding, Encoding::Binary | Encoding::Utf8Lossy),
             path,
-            buf,
             hl,
             sel: Selection::default(),
+            extra: Vec::new(),
             preferred_col: None,
+            whole_word_next: false,
+            display: DisplayMap::new(buf.line_count()),
+            folds: FoldState::default(),
+            word_wrap: false,
+            events: Vec::new(),
+            lsp: None,
             indent,
             comment,
             language,
@@ -252,6 +279,7 @@ impl Editor {
             reveal: None,
             view: view::ViewState::default(),
             clock: Instant::now(),
+            buf,
         }
     }
 
@@ -302,7 +330,16 @@ impl Editor {
             dirty: self.is_dirty(),
             indent: self.indent,
             read_only: self.read_only,
-            selected: if a == b { 0 } else { self.buf.text_range(a, b).chars().count() },
+            selected: if a == b { 0 } else { self.buf.text_range(a, b).chars().count() }
+                + self
+                    .extra
+                    .iter()
+                    .map(|c| {
+                        let (a, b) = c.sel.range();
+                        if a == b { 0 } else { self.buf.text_range(a, b).chars().count() }
+                    })
+                    .sum::<usize>(),
+            cursors: self.cursor_count(),
         }
     }
 
@@ -332,6 +369,7 @@ impl Editor {
     }
 
     pub fn set_selection(&mut self, sel: Selection) {
+        self.extra.clear();
         self.sel = Selection::new(self.buf.clamp(sel.anchor), self.buf.clamp(sel.head));
         self.preferred_col = None;
         self.reveal = Some(Reveal::Nearest);
@@ -342,9 +380,41 @@ impl Editor {
         let l = line.saturating_sub(1).min(self.buf.line_count() - 1);
         let text = self.buf.line(l);
         let byte = text.char_indices().nth(col.saturating_sub(1)).map_or(text.len(), |(i, _)| i);
+        self.extra.clear();
         self.sel = Selection::caret(Pos::new(l, byte));
         self.preferred_col = None;
         self.reveal = Some(Reveal::Center);
+        self.unfold_around_cursors();
+    }
+
+    /// 자동 줄 바꿈을 켜거나 끈다. 줄 바꿈 폭은 다음 프레임에 화면 너비로 정해진다.
+    pub fn set_word_wrap(&mut self, on: bool) {
+        if self.word_wrap != on {
+            self.word_wrap = on;
+            if !on {
+                self.set_wrap_cols(0);
+            }
+            self.reveal = Some(Reveal::Nearest);
+        }
+    }
+
+    pub fn word_wrap(&self) -> bool {
+        self.word_wrap
+    }
+
+    pub fn toggle_word_wrap(&mut self) {
+        self.set_word_wrap(!self.word_wrap);
+    }
+
+    /// 줄 바꿈 폭을 열 수로 정한다. 0 이면 줄 바꿈 없음.
+    pub(crate) fn set_wrap_cols(&mut self, cols: usize) {
+        let tab = self.indent.width();
+        self.display.set_wrap(self.buf.lines(), cols, tab);
+    }
+
+    /// 쌓인 사건(정의로 이동 등)을 꺼낸다.
+    pub fn take_events(&mut self) -> Vec<EditorEvent> {
+        std::mem::take(&mut self.events)
     }
 
     /// 저장한다. 원래 인코딩, 줄 끝, 마지막 줄바꿈을 그대로 쓴다.
@@ -361,6 +431,7 @@ impl Editor {
                 self.conflict = false;
                 self.deleted_on_disk = false;
                 self.save_error = None;
+                self.lsp_did_save();
                 Ok(())
             }
             Err(e) => {
@@ -399,7 +470,11 @@ impl Editor {
         self.file_len = bytes.len() as u64;
         self.conflict = false;
         if d.encoding == Encoding::Binary || self.encoding == Encoding::Binary {
+            let mgr = self.lsp.take().map(|s| s.manager());
             *self = Self::open(self.path.clone())?;
+            if let Some(m) = mgr {
+                self.set_lsp(m);
+            }
             return Ok(());
         }
         self.encoding = d.encoding;
@@ -454,21 +529,55 @@ impl Editor {
     fn sync_highlighter(&mut self) {
         for e in self.buf.take_changes() {
             self.hl.on_edit(e);
+            self.display.on_edit(e, self.buf.lines());
+            self.folds.on_edit(e);
+            self.lsp_on_line_edit(e);
         }
+        self.apply_folds();
         self.find.invalidate();
     }
 
     // ---- 편집 명령 ----
 
-    fn edit(&mut self, kind: EditKind, f: impl FnOnce(&mut Self) -> Selection) {
+    /// 편집 한 번을 되돌리기 한 단계로 묶는다. 커서가 여럿이면 문서 뒤쪽 커서부터 `f` 를 부르고
+    /// 앞쪽 편집만큼 뒤쪽 결과 위치를 옮긴다.
+    fn edit(&mut self, kind: EditKind, mut f: impl FnMut(&mut Self) -> Selection) {
         if self.read_only {
             return;
         }
         let before = self.sel;
         let now = self.now();
         self.buf.begin(kind, before, now);
-        let after = f(self);
-        self.sel = Selection::new(self.buf.clamp(after.anchor), self.buf.clamp(after.head));
+        if self.extra.is_empty() {
+            let after = f(self);
+            self.sel = Selection::new(self.buf.clamp(after.anchor), self.buf.clamp(after.head));
+        } else {
+            let primary = self.sel;
+            let mut all: Vec<(Selection, bool)> = self.extra.drain(..).map(|c| (c.sel, false)).collect();
+            all.push((primary, true));
+            all.sort_by_key(|(s, _)| s.range());
+            let mut out: Vec<(Selection, bool)> = Vec::with_capacity(all.len());
+            for &(s, prim) in all.iter().rev() {
+                self.sel = s;
+                let mark = self.buf.edit_mark();
+                let r = f(self);
+                for (o, _) in &mut out {
+                    *o = Selection::new(self.buf.map_since(mark, o.anchor), self.buf.map_since(mark, o.head));
+                }
+                out.push((r, prim));
+            }
+            self.extra.clear();
+            for (s, prim) in out {
+                let s = Selection::new(self.buf.clamp(s.anchor), self.buf.clamp(s.head));
+                if prim {
+                    self.sel = s;
+                } else {
+                    self.extra.push(Cursor::new(s));
+                }
+            }
+            self.preferred_col = None;
+            self.normalize_cursors();
+        }
         self.buf.end(self.sel);
         self.sync_highlighter();
         self.preferred_col = None;
@@ -529,19 +638,6 @@ impl Editor {
         self.buf.line(p.line)[..p.col].chars().map(|c| char_cols(c, tab)).sum()
     }
 
-    fn col_for_display(&self, line: usize, target: usize) -> usize {
-        let tab = self.indent.width();
-        let mut w = 0;
-        for (i, c) in self.buf.line(line).char_indices() {
-            let cw = char_cols(c, tab);
-            if w + cw > target {
-                return if target - w > cw / 2 { i + c.len_utf8() } else { i };
-            }
-            w += cw;
-        }
-        self.buf.line(line).len()
-    }
-
     /// Tab: 여러 줄 선택이면 들여쓰기, 아니면 다음 탭 위치까지 공백(또는 탭)을 넣는다.
     pub fn indent_or_tab(&mut self) {
         let (a, b) = self.sel.range();
@@ -549,21 +645,22 @@ impl Editor {
             self.indent_lines(true);
             return;
         }
-        let text = match self.indent {
-            Indent::Tabs => "\t".to_owned(),
-            Indent::Spaces(n) => {
-                let n = n as usize;
-                " ".repeat(n - self.display_col(a) % n)
-            }
-        };
         self.edit(EditKind::Other, |ed| {
             let (a, b) = ed.sel.range();
+            let text = match ed.indent {
+                Indent::Tabs => "\t".to_owned(),
+                Indent::Spaces(n) => {
+                    let n = n as usize;
+                    " ".repeat(n - ed.display_col(a) % n)
+                }
+            };
             Selection::caret(ed.buf.replace(a, b, &text))
         });
     }
 
     /// 선택된 줄들을 한 단계 들여쓰거나(`true`) 내어쓴다.
     pub fn indent_lines(&mut self, indent: bool) {
+        self.extra.clear();
         let (first, last) = self.selected_lines();
         let unit = self.indent.unit();
         let width = self.indent.width();
@@ -649,6 +746,7 @@ impl Editor {
     /// 선택된 줄들의 줄 주석을 토글한다.
     pub fn toggle_comment(&mut self) {
         let Some(style) = self.comment else { return };
+        self.extra.clear();
         let (first, last) = self.selected_lines();
         self.edit(EditKind::Other, |ed| {
             let shifts = ed.buf.toggle_comment(first, last, style);
@@ -666,6 +764,7 @@ impl Editor {
 
     /// 현재 줄(또는 선택된 줄들)을 지운다.
     pub fn delete_lines(&mut self) {
+        self.extra.clear();
         let (first, last) = self.selected_lines();
         self.edit(EditKind::Other, |ed| {
             let n = ed.buf.line_count();
@@ -684,6 +783,7 @@ impl Editor {
 
     /// 선택된 줄들을 위(`true`)나 아래로 한 줄 옮긴다.
     pub fn move_lines(&mut self, up: bool) {
+        self.extra.clear();
         let (first, last) = self.selected_lines();
         let n = self.buf.line_count();
         if (up && first == 0) || (!up && last + 1 >= n) {
@@ -712,6 +812,7 @@ impl Editor {
             return;
         }
         if let Some(sel) = self.buf.undo() {
+            self.extra.clear();
             self.sel = Selection::new(self.buf.clamp(sel.anchor), self.buf.clamp(sel.head));
             self.sync_highlighter();
             self.reveal = Some(Reveal::Nearest);
@@ -723,6 +824,7 @@ impl Editor {
             return;
         }
         if let Some(sel) = self.buf.redo() {
+            self.extra.clear();
             self.sel = Selection::new(self.buf.clamp(sel.anchor), self.buf.clamp(sel.head));
             self.sync_highlighter();
             self.reveal = Some(Reveal::Nearest);
@@ -730,11 +832,28 @@ impl Editor {
     }
 
     pub fn select_all(&mut self) {
+        self.extra.clear();
         self.sel = Selection::new(Pos::default(), self.buf.end_pos());
     }
 
-    /// 복사할 텍스트. 선택이 없으면 현재 줄 전체(줄바꿈 포함).
+    /// 복사할 텍스트. 선택이 없으면 현재 줄 전체(줄바꿈 포함). 커서가 여럿이면 커서마다 한 줄씩 잇는다.
     pub fn copy_text(&self) -> String {
+        if !self.extra.is_empty() {
+            let all = self.cursors();
+            let empty = all.iter().all(Selection::is_empty);
+            let parts: Vec<String> = all
+                .iter()
+                .map(|s| {
+                    let (a, b) = s.range();
+                    if a == b { self.buf.line(a.line).to_owned() } else { self.buf.text_range(a, b) }
+                })
+                .collect();
+            let mut out = parts.join("\n");
+            if empty {
+                out.push('\n');
+            }
+            return out;
+        }
         let (a, b) = self.sel.range();
         if a == b {
             format!("{}\n", self.buf.line(a.line))
@@ -746,7 +865,7 @@ impl Editor {
     /// 잘라내고 잘라낸 텍스트를 돌려준다. 선택이 없으면 현재 줄을 잘라낸다.
     pub fn cut(&mut self) -> String {
         let text = self.copy_text();
-        if self.sel.is_empty() {
+        if self.sel.is_empty() && self.extra.is_empty() {
             self.delete_lines();
         } else {
             self.edit(EditKind::Other, |ed| {
@@ -758,15 +877,98 @@ impl Editor {
         text
     }
 
+    /// 붙여 넣는다. 커서 수와 줄 수가 같으면 커서마다 한 줄씩 나눠 넣는다.
     pub fn paste(&mut self, text: &str) {
+        let n = self.cursor_count();
+        let norm = text.replace("\r\n", "\n");
+        let body = norm.strip_suffix('\n').unwrap_or(&norm);
+        let pieces: Vec<&str> = body.split('\n').collect();
+        let distribute = n > 1 && pieces.len() == n;
+        let mut k = n;
         self.edit(EditKind::Other, |ed| {
+            k -= 1;
+            let piece = if distribute { pieces[k] } else { text };
             let (a, b) = ed.sel.range();
-            Selection::caret(ed.buf.replace(a, b, text))
+            Selection::caret(ed.buf.replace(a, b, piece))
         });
     }
 
-    /// 커서를 움직인다. `extend` 면 선택을 넓힌다.
+    /// 모든 커서를 움직인다. `extend` 면 선택을 넓힌다.
     pub(crate) fn move_caret(&mut self, m: Motion, extend: bool) {
+        if self.extra.is_empty() {
+            self.move_one(m, extend);
+            return;
+        }
+        if matches!(m, Motion::DocStart | Motion::DocEnd) && !extend {
+            self.extra.clear();
+            self.move_one(m, extend);
+            return;
+        }
+        let (primary, ppref) = (self.sel, self.preferred_col);
+        let extras = std::mem::take(&mut self.extra);
+        let mut moved = Vec::with_capacity(extras.len());
+        for c in extras {
+            self.sel = c.sel;
+            self.preferred_col = c.pref;
+            self.move_one(m, extend);
+            moved.push(Cursor { sel: self.sel, pref: self.preferred_col });
+        }
+        self.sel = primary;
+        self.preferred_col = ppref;
+        self.move_one(m, extend);
+        self.extra = moved;
+        self.normalize_cursors();
+    }
+
+    /// 위치가 속한 시각 줄의 바이트 범위와 줄의 마지막 시각 줄인지.
+    pub(crate) fn seg_of(&self, p: Pos) -> (usize, usize, bool) {
+        let sub = self.display.sub_of(p);
+        let len = self.buf.line(p.line).len();
+        let (a, b) = self.display.segment(p.line, sub, len);
+        (a, b, sub + 1 >= self.display.rows(p.line).max(1))
+    }
+
+    /// 시각 줄 시작부터 센 표시 열.
+    pub(crate) fn row_display_col(&self, p: Pos) -> usize {
+        let (s, _, _) = self.seg_of(p);
+        let tab = self.indent.width();
+        self.buf.line(p.line)[s.min(p.col)..p.col].chars().map(|c| char_cols(c, tab)).sum()
+    }
+
+    /// 시각 줄 `s..e` 안에서 표시 열 `target` 에 가장 가까운 바이트 위치. 마지막이 아닌 시각 줄의 끝은 피한다.
+    fn col_in_seg(&self, line: usize, s: usize, e: usize, last: bool, target: usize) -> usize {
+        let tab = self.indent.width();
+        let text = &self.buf.line(line)[s..e];
+        let before_end = s + text.char_indices().next_back().map_or(0, |(i, _)| i);
+        let mut w = 0;
+        for (i, c) in text.char_indices() {
+            let cw = char_cols(c, tab);
+            if w + cw > target {
+                let at = if target - w > cw / 2 { s + i + c.len_utf8() } else { s + i };
+                return if at == e && !last { before_end } else { at };
+            }
+            w += cw;
+        }
+        if last { e } else { before_end }
+    }
+
+    /// `head` 에서 시각 줄 `delta` 만큼 떨어진 줄의 표시 열 `pref` 위치. 문서 밖이면 `None`.
+    pub(crate) fn vertical_step(&mut self, head: Pos, pref: usize, delta: isize) -> Option<Pos> {
+        let row = self.display.pos_row(head) as isize;
+        let total = self.display.total_rows() as isize;
+        let t = row + delta;
+        if t < 0 || t >= total {
+            return None;
+        }
+        let (line, sub) = self.display.row_to_line(t as usize);
+        let len = self.buf.line(line).len();
+        let (s, e) = self.display.segment(line, sub, len);
+        let last = sub + 1 >= self.display.rows(line).max(1);
+        Some(Pos::new(line, self.col_in_seg(line, s, e, last, pref)))
+    }
+
+    /// 주 커서 하나를 움직인다.
+    fn move_one(&mut self, m: Motion, extend: bool) {
         let (a, b) = self.sel.range();
         let head = self.sel.head;
         let collapse_to = |p: Pos| if extend { None } else { Some(p) };
@@ -776,20 +978,33 @@ impl Editor {
             Motion::WordLeft => self.buf.prev_word(head),
             Motion::WordRight => self.buf.next_word(head),
             Motion::Home => {
-                let fnw = self.buf.first_non_ws(head.line);
-                Pos::new(head.line, if head.col == fnw { 0 } else { fnw })
-            }
-            Motion::End => Pos::new(head.line, self.buf.line(head.line).len()),
-            Motion::Up(n) | Motion::Down(n) => {
-                let pref = self.preferred_col.unwrap_or_else(|| self.display_col(head));
-                let last = self.buf.line_count() - 1;
-                let line = if matches!(m, Motion::Up(_)) { head.line.saturating_sub(n) } else { (head.line + n).min(last) };
-                let p = if matches!(m, Motion::Up(_)) && head.line == 0 {
-                    Pos::new(0, 0)
-                } else if matches!(m, Motion::Down(_)) && head.line == last {
-                    Pos::new(last, self.buf.line(last).len())
+                let (s, _, _) = self.seg_of(head);
+                if s > 0 && head.col != s {
+                    Pos::new(head.line, s)
                 } else {
-                    Pos::new(line, self.col_for_display(line, pref))
+                    let fnw = self.buf.first_non_ws(head.line);
+                    Pos::new(head.line, if head.col == fnw { 0 } else { fnw })
+                }
+            }
+            Motion::End => {
+                let (_, e, last) = self.seg_of(head);
+                let line_end = self.buf.line(head.line).len();
+                let seg_end = self.buf.line(head.line)[..e].char_indices().next_back().map_or(e, |(i, _)| i);
+                if !last && head.col != seg_end { Pos::new(head.line, seg_end) } else { Pos::new(head.line, line_end) }
+            }
+            Motion::Up(n) | Motion::Down(n) => {
+                let pref = self.preferred_col.unwrap_or_else(|| self.row_display_col(head));
+                let up = matches!(m, Motion::Up(_));
+                let row = self.display.pos_row(head);
+                let total = self.display.total_rows();
+                let p = if up && row == 0 {
+                    Pos::new(0, 0)
+                } else if !up && row + 1 >= total {
+                    let (l, _) = self.display.row_to_line(total.saturating_sub(1));
+                    Pos::new(l, self.buf.line(l).len())
+                } else {
+                    let d = if up { -(n.min(row) as isize) } else { n.min(total - 1 - row) as isize };
+                    self.vertical_step(head, pref, d).unwrap_or(head)
                 };
                 self.sel = if extend { Selection::new(self.sel.anchor, p) } else { Selection::caret(p) };
                 self.preferred_col = Some(pref);
@@ -798,6 +1013,16 @@ impl Editor {
             }
             Motion::DocStart => Pos::default(),
             Motion::DocEnd => self.buf.end_pos(),
+        };
+        let target = if self.display.is_hidden(target.line) {
+            let forward = target > head;
+            match self.display.next_visible(target.line, forward) {
+                Some(l) if forward => Pos::new(l, 0),
+                Some(l) => Pos::new(l, self.buf.line(l).len()),
+                None => target,
+            }
+        } else {
+            target
         };
         self.sel = if extend { Selection::new(self.sel.anchor, target) } else { Selection::caret(target) };
         self.preferred_col = None;
@@ -888,6 +1113,52 @@ mod tests {
         assert_eq!(e.sel.head, Pos::new(1, 2));
         e.move_caret(Motion::Down(1), false);
         assert_eq!(e.sel.head, Pos::new(2, 5));
+    }
+
+    #[test]
+    fn wrapped_lines_move_by_visual_row_and_home_end_stay_in_row() {
+        let mut e = ed("aaaa bbbb cccc\nx");
+        e.set_wrap_cols(5);
+        e.sel = Selection::caret(Pos::new(0, 1));
+        e.move_caret(Motion::Down(1), false);
+        assert_eq!(e.sel.head, Pos::new(0, 6));
+        e.move_caret(Motion::End, false);
+        assert_eq!(e.sel.head, Pos::new(0, 9));
+        e.move_caret(Motion::End, false);
+        assert_eq!(e.sel.head, Pos::new(0, 14));
+        e.move_caret(Motion::Home, false);
+        assert_eq!(e.sel.head, Pos::new(0, 10));
+        e.move_caret(Motion::Home, false);
+        assert_eq!(e.sel.head, Pos::new(0, 0));
+        e.move_caret(Motion::Down(1), false);
+        assert_eq!(e.sel.head, Pos::new(0, 5));
+        e.move_caret(Motion::Down(2), false);
+        assert_eq!(e.sel.head, Pos::new(1, 0));
+        e.move_caret(Motion::Up(1), false);
+        assert_eq!(e.sel.head, Pos::new(0, 10));
+        e.insert_text("dddd ");
+        assert_eq!(e.display.rows(0), 4);
+        e.set_word_wrap(true);
+        e.set_word_wrap(false);
+        assert_eq!(e.display.rows(0), 1);
+    }
+
+    #[test]
+    fn cursor_motion_skips_folded_lines() {
+        let mut e = ed("fn a() {\n    x();\n}\nz");
+        e.fold_range(FoldRange { start: 0, end: 1 });
+        e.sel = Selection::caret(Pos::new(0, 8));
+        e.move_caret(Motion::Right, false);
+        assert_eq!(e.sel.head, Pos::new(2, 0));
+        e.move_caret(Motion::Left, false);
+        assert_eq!(e.sel.head, Pos::new(0, 8));
+        e.sel = Selection::caret(Pos::new(0, 3));
+        e.move_caret(Motion::Down(1), false);
+        assert_eq!(e.sel.head, Pos::new(2, 1));
+        e.move_caret(Motion::Up(1), false);
+        assert_eq!(e.sel.head, Pos::new(0, 3));
+        e.goto(2, 1);
+        assert!(e.folded_ranges().is_empty());
     }
 
     #[test]

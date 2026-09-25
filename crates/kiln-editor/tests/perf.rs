@@ -181,3 +181,80 @@ fn quick_open_index_and_match_real_tree() {
     println!("PERF real tree match: 's' {:.1} ms ({}), narrowed 'srclib' {:.1} ms ({}), fresh 'parserrs' {:.1} ms ({})",
         ms(one), r1.total, ms(narrow), r2.total, ms(fresh), r3.total);
 }
+
+#[test]
+fn word_wrap_folding_and_multi_cursor_on_20k_line_file() {
+    // 긴 줄이 섞인 20k 줄 파일.
+    let mut src = common::rust_source(20_000);
+    let long = format!("    // {}\n", "lorem ipsum dolor sit amet 한글 주석 ".repeat(8));
+    src = src.lines().enumerate().map(|(i, l)| if i % 10 == 0 { long.clone() } else { format!("{l}\n") }).collect();
+    let mut ed = Editor::from_text("big.rs", &src);
+    ed.set_word_wrap(true);
+    let ctx = egui::Context::default();
+    common::apply_theme(&ctx);
+    let mut size = egui::vec2(1200.0, 800.0);
+    let raw = |size: egui::Vec2| egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+        ..Default::default()
+    };
+    let frame = |ed: &mut Editor, input: egui::RawInput| {
+        let t = Instant::now();
+        let mut out = ctx.run_ui(input, |ui| {
+            ed.ui(ui);
+        });
+        out.textures_delta.clear();
+        t.elapsed()
+    };
+    let first = frame(&mut ed, raw(size));
+    let second = frame(&mut ed, raw(size));
+    // 창 너비가 바뀌면 전체 줄 바꿈을 다시 계산한다.
+    let mut resize = Duration::ZERO;
+    for k in 0..10 {
+        size.x = 900.0 + k as f32 * 30.0;
+        resize = resize.max(frame(&mut ed, raw(size)));
+    }
+    ctx.memory_mut(|m| m.request_focus(ed.id()));
+    let _ = frame(&mut ed, raw(size));
+    ed.goto(10_000, 1);
+    let jump = frame(&mut ed, raw(size));
+    let mut typing = Duration::ZERO;
+    let mut worst = Duration::ZERO;
+    for c in "let wrapped = compute(42); ".chars() {
+        let mut input = raw(size);
+        input.events.push(egui::Event::Text(c.to_string()));
+        let d = frame(&mut ed, input);
+        typing += d;
+        worst = worst.max(d);
+    }
+    let avg = typing / 27;
+
+    let t = Instant::now();
+    let n_ranges = ed.fold_ranges().len();
+    let fold_compute = t.elapsed();
+    let t = Instant::now();
+    ed.fold_all();
+    let fold_all = t.elapsed();
+    let folded_frame = frame(&mut ed, raw(size));
+    let t = Instant::now();
+    ed.unfold_all();
+    let unfold_all = t.elapsed();
+
+    // Cmd+D 로 같은 단어 200개에 커서를 두고 입력한다.
+    ed.goto(1, 1);
+    ed.set_selection(kiln_editor::Selection::new(kiln_editor::Pos::new(4, 8), kiln_editor::Pos::new(4, 12)));
+    for _ in 0..199 {
+        ed.add_next_occurrence();
+    }
+    let cursors = ed.cursor_count();
+    let t = Instant::now();
+    ed.insert_text("x");
+    let multi_edit = t.elapsed();
+    let multi_frame = frame(&mut ed, raw(size));
+
+    println!("PERF wrap: first frame {:.2} ms, second {:.2} ms, worst resize (full rewrap) frame {:.2} ms", ms(first), ms(second), ms(resize));
+    println!("PERF wrap: jump to line 10000 {:.2} ms, typing frame avg {:.2} ms worst {:.2} ms", ms(jump), ms(avg), ms(worst));
+    println!("PERF fold: compute {n_ranges} ranges {:.2} ms, fold all {:.2} ms, frame folded {:.2} ms, unfold all {:.2} ms", ms(fold_compute), ms(fold_all), ms(folded_frame), ms(unfold_all));
+    println!("PERF multi-cursor: {cursors} cursors single keystroke edit {:.2} ms, next frame {:.2} ms", ms(multi_edit), ms(multi_frame));
+    assert!(ed.text().contains("let wrapped = compute(42);"));
+    assert!(avg < Duration::from_millis(50));
+}

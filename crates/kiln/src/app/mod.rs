@@ -653,7 +653,8 @@ impl KilnApp {
                         factory.reuse(x.as_mut());
                     }
                 } else {
-                    match factory.make(ctx) {
+                    let env = self.workspaces[self.active].tools.env();
+                    match factory.make(ctx, &env) {
                         Ok(tab) => {
                             let tid = self.id();
                             let ws = &mut self.workspaces[self.active];
@@ -844,6 +845,7 @@ impl KilnApp {
             (base_shift, Key::G, Action::ToggleTool(tools::ToolKind::Git)),
             (base_shift, Key::R, Action::ToggleTool(tools::ToolKind::PullRequests)),
             (base_shift, Key::B, Action::ToggleTool(tools::ToolKind::Database)),
+            (base_shift, Key::M, Action::ToggleTool(tools::ToolKind::Problems)),
             (base_shift, Key::U, Action::JumpUnread),
             (base_shift, Key::OpenBracket, Action::NextTab(-1)),
             (base_shift, Key::CloseBracket, Action::NextTab(1)),
@@ -970,6 +972,11 @@ impl eframe::App for KilnApp {
         let active = self.active;
         for (i, ws) in self.workspaces.iter_mut().enumerate() {
             ws.tools.tick(i == active);
+            for t in &mut ws.tabs {
+                if let TabKind::Tool(x) = &mut t.kind {
+                    x.tick();
+                }
+            }
         }
     }
 
@@ -990,6 +997,9 @@ impl eframe::App for KilnApp {
 
     fn on_exit(&mut self) {
         self.save_if_changed(true);
+        for ws in &self.workspaces {
+            ws.tools.lsp.shutdown();
+        }
     }
 }
 

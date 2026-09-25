@@ -4,7 +4,7 @@ use super::Action;
 use super::state::TabP;
 use kiln_common::Task;
 use kiln_db::{ConnId, DbEvent, DbManager, DbPanel, DbTab};
-use kiln_editor::{Decoration, Editor, EditorEvent, FileTree, QuickOpen, SearchPanel};
+use kiln_editor::{Decoration, Editor, EditorEvent, FileTree, LspManager, QuickOpen, SearchPanel};
 use kiln_git::{DiffView, GitEvent, GitPanel, PrPanel, PrView, RepoSummary};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,10 +17,11 @@ pub enum ToolKind {
     Git,
     PullRequests,
     Database,
+    Problems,
 }
 
 impl ToolKind {
-    pub const ALL: [ToolKind; 5] = [ToolKind::Explorer, ToolKind::Search, ToolKind::Git, ToolKind::PullRequests, ToolKind::Database];
+    pub const ALL: [ToolKind; 6] = [ToolKind::Explorer, ToolKind::Search, ToolKind::Git, ToolKind::PullRequests, ToolKind::Database, ToolKind::Problems];
 
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -29,6 +30,7 @@ impl ToolKind {
             ToolKind::Git => "git",
             ToolKind::PullRequests => "prs",
             ToolKind::Database => "db",
+            ToolKind::Problems => "problems",
         }
     }
 
@@ -38,6 +40,7 @@ impl ToolKind {
             "git" => ToolKind::Git,
             "prs" => ToolKind::PullRequests,
             "db" => ToolKind::Database,
+            "problems" => ToolKind::Problems,
             _ => ToolKind::Explorer,
         }
     }
@@ -49,6 +52,7 @@ impl ToolKind {
             ToolKind::Git => "소스 제어",
             ToolKind::PullRequests => "풀 리퀘스트",
             ToolKind::Database => "데이터베이스",
+            ToolKind::Problems => "문제",
         }
     }
 
@@ -60,6 +64,7 @@ impl ToolKind {
             ToolKind::Git => Icon::Branch,
             ToolKind::PullRequests => Icon::PullRequest,
             ToolKind::Database => Icon::Database,
+            ToolKind::Problems => Icon::Warning,
         }
     }
 }
@@ -88,10 +93,17 @@ pub trait ToolTab {
     fn path(&self) -> Option<&Path> {
         None
     }
+    /// 보이지 않는 탭도 매 프레임 호출된다(LSP 응답 반영 등).
+    fn tick(&mut self) {}
 }
 
 /// 도구 탭을 만든다. 같은 키의 탭이 열려 있으면 `reuse` 가 호출된다.
-type MakeTab = Box<dyn FnOnce(&egui::Context) -> Result<Box<dyn ToolTab>, String>>;
+/// 탭을 만들 때 쓰는 워크스페이스 환경.
+pub struct TabEnv {
+    pub lsp: LspManager,
+}
+
+type MakeTab = Box<dyn FnOnce(&egui::Context, &TabEnv) -> Result<Box<dyn ToolTab>, String>>;
 type ReuseTab = Box<dyn FnOnce(&mut dyn ToolTab)>;
 
 pub struct TabFactory {
@@ -101,8 +113,8 @@ pub struct TabFactory {
 }
 
 impl TabFactory {
-    pub fn make(self, ctx: &egui::Context) -> Result<Box<dyn ToolTab>, String> {
-        (self.make)(ctx)
+    pub fn make(self, ctx: &egui::Context, env: &TabEnv) -> Result<Box<dyn ToolTab>, String> {
+        (self.make)(ctx, env)
     }
 
     pub fn reuse(self, tab: &mut dyn ToolTab) {
@@ -117,8 +129,8 @@ pub fn open_file_factory(path: PathBuf, line: Option<usize>, col: Option<usize>)
     let p2 = path.clone();
     TabFactory {
         key,
-        make: Box::new(move |ctx| {
-            let mut ed = Editor::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        make: Box::new(move |ctx, env| {
+            let mut ed = Editor::open_with_lsp(&path, Some(env.lsp.clone())).map_err(|e| format!("{}: {e}", path.display()))?;
             if let Some(l) = line {
                 ed.goto(l, col.unwrap_or(1));
             }
@@ -137,7 +149,7 @@ pub fn open_file_factory(path: PathBuf, line: Option<usize>, col: Option<usize>)
 fn diff_factory(root: PathBuf, path: PathBuf, staged: bool) -> TabFactory {
     TabFactory {
         key: format!("diff:{}:{staged}", path.display()),
-        make: Box::new(move |_| {
+        make: Box::new(move |_, _| {
             let title = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
             Ok(Box::new(DiffTab { view: DiffView::for_file(&root, &path, staged), title: format!("{title} ({})", if staged { "스테이징됨" } else { "변경" }), key: format!("diff:{}:{staged}", path.display()) }) as Box<dyn ToolTab>)
         }),
@@ -148,7 +160,7 @@ fn diff_factory(root: PathBuf, path: PathBuf, staged: bool) -> TabFactory {
 fn commit_factory(root: PathBuf, sha: String) -> TabFactory {
     TabFactory {
         key: format!("commit:{sha}"),
-        make: Box::new(move |_| {
+        make: Box::new(move |_, _| {
             let short: String = sha.chars().take(8).collect();
             Ok(Box::new(DiffTab { view: DiffView::for_commit(&root, &sha), title: format!("커밋 {short}"), key: format!("commit:{sha}") }) as Box<dyn ToolTab>)
         }),
@@ -159,7 +171,7 @@ fn commit_factory(root: PathBuf, sha: String) -> TabFactory {
 fn pr_factory(root: PathBuf, number: u64) -> TabFactory {
     TabFactory {
         key: format!("pr:{number}"),
-        make: Box::new(move |_| Ok(Box::new(PrTab { view: PrView::new(root.clone(), number), number, root }) as Box<dyn ToolTab>)),
+        make: Box::new(move |_, _| Ok(Box::new(PrTab { view: PrView::new(root.clone(), number), number, root }) as Box<dyn ToolTab>)),
         reuse: None,
     }
 }
@@ -167,7 +179,7 @@ fn pr_factory(root: PathBuf, number: u64) -> TabFactory {
 pub fn db_table_factory(db: DbManager, conn: ConnId, schema: Option<String>, table: String) -> TabFactory {
     TabFactory {
         key: format!("db:{}:{}.{}", conn.0, schema.clone().unwrap_or_default(), table),
-        make: Box::new(move |_| Ok(Box::new(DbTabW { tab: DbTab::table(db, conn, schema.clone(), table.clone()), persist: TabP::DbTable { conn: conn.0, schema, table } }) as Box<dyn ToolTab>)),
+        make: Box::new(move |_, _| Ok(Box::new(DbTabW { tab: DbTab::table(db, conn, schema.clone(), table.clone()), persist: TabP::DbTable { conn: conn.0, schema, table } }) as Box<dyn ToolTab>)),
         reuse: None,
     }
 }
@@ -175,7 +187,7 @@ pub fn db_table_factory(db: DbManager, conn: ConnId, schema: Option<String>, tab
 pub fn db_console_factory(db: DbManager, conn: ConnId, n: u64) -> TabFactory {
     TabFactory {
         key: format!("dbconsole:{}:{n}", conn.0),
-        make: Box::new(move |_| Ok(Box::new(DbTabW { tab: DbTab::console(db, conn), persist: TabP::DbConsole { conn: conn.0 } }) as Box<dyn ToolTab>)),
+        make: Box::new(move |_, _| Ok(Box::new(DbTabW { tab: DbTab::console(db, conn), persist: TabP::DbConsole { conn: conn.0 } }) as Box<dyn ToolTab>)),
         reuse: None,
     }
 }
@@ -199,7 +211,10 @@ impl ToolTab for EditorTab {
             self.ed.request_focus(ui.ctx());
         }
         self.ed.ui(ui);
-        Vec::new()
+        self.ed.take_events().into_iter().filter_map(editor_event_action).collect()
+    }
+    fn tick(&mut self) {
+        self.ed.poll_lsp();
     }
     fn is_dirty(&self) -> bool {
         self.ed.is_dirty()
@@ -327,6 +342,7 @@ fn editor_event_action(e: EditorEvent) -> Option<Action> {
 
 pub struct WorkspaceTools {
     pub root: PathBuf,
+    pub lsp: LspManager,
     ctx: egui::Context,
     db: DbManager,
     tree: Option<FileTree>,
@@ -345,8 +361,11 @@ pub struct WorkspaceTools {
 
 impl WorkspaceTools {
     pub fn new(root: &Path, ctx: &egui::Context, db: DbManager) -> Self {
+        let lsp = LspManager::new(root.to_path_buf());
+        lsp.set_repaint_ctx(ctx);
         WorkspaceTools {
             root: root.to_path_buf(),
+            lsp,
             ctx: ctx.clone(),
             db,
             tree: None,
@@ -420,7 +439,11 @@ impl WorkspaceTools {
             }
             _ => return None,
         };
-        f.make(ctx).ok()
+        f.make(ctx, &self.env()).ok()
+    }
+
+    pub fn env(&self) -> TabEnv {
+        TabEnv { lsp: self.lsp.clone() }
     }
 
     pub fn panel_ui(&mut self, ui: &mut egui::Ui, kind: ToolKind) -> Vec<Action> {
@@ -446,6 +469,7 @@ impl WorkspaceTools {
                 let p = self.prs.get_or_insert_with(|| PrPanel::new(root.clone()));
                 p.ui(ui).into_iter().filter_map(|e| git_event_action(&root, e)).collect()
             }
+            ToolKind::Problems => kiln_editor::diagnostics_ui(ui, &self.lsp).into_iter().filter_map(editor_event_action).collect(),
             ToolKind::Database => {
                 let db = self.db.clone();
                 let panel = self.db_panel.get_or_insert_with(|| DbPanel::new(db.clone()));

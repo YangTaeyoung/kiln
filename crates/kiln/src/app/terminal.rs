@@ -945,7 +945,7 @@ mod tests {
 
     #[test]
     fn word_bounds_stop_at_separators() {
-        let line = Line { cells: "foo bar.baz(x)".chars().map(|c| Cell { c, ..Default::default() }).collect(), combining: vec![] };
+        let line = Line { cells: "foo bar.baz(x)".chars().map(|c| Cell { c, ..Default::default() }).collect(), combining: vec![], links: vec![] };
         assert_eq!(word_bounds(&line, 5), (4, 10));
     }
 

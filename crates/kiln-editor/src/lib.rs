@@ -5,6 +5,7 @@ pub mod editor;
 pub mod file_tree;
 pub mod fuzzy;
 pub mod highlight;
+pub mod lsp;
 pub mod quick_open;
 pub mod search;
 pub mod search_panel;
@@ -14,8 +15,9 @@ mod ui_kit;
 use std::path::PathBuf;
 
 pub use buffer::{FindOptions, Indent, LineEnding, Pos, Selection};
-pub use editor::{Editor, EditorStatus, Encoding};
+pub use editor::{Editor, EditorStatus, Encoding, FoldRange};
 pub use file_tree::{Decoration, FileTree};
+pub use lsp::{LspManager, diagnostics_ui};
 pub use quick_open::QuickOpen;
 pub use search_panel::SearchPanel;
 
