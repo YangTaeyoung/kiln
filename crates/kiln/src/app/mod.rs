@@ -1,7 +1,7 @@
 //! Kiln GUI.
 
 pub mod conn;
-mod fonts;
+pub mod fonts;
 mod icons;
 mod keys;
 mod layout;
@@ -99,7 +99,10 @@ pub enum Action {
     KillSession(SessionId),
     OpenSettings,
     UpgradeDaemon,
-    OpenTab(Box<dyn tools::ToolTabFactory>),
+    OpenTab(tools::TabFactory),
+    CloseTabByKey(String),
+    RenamedFile(PathBuf, PathBuf),
+    NewTermAt(PathBuf),
     RunInTerminal(String),
     Toast(String),
 }
@@ -146,6 +149,7 @@ pub struct KilnApp {
     actions: Vec<Action>,
     theme: Theme,
     pending_input: HashMap<PaneId, String>,
+    db: kiln_db::DbManager,
 }
 
 fn shells() -> &'static [&'static str] {
@@ -181,6 +185,7 @@ impl KilnApp {
             actions: Vec::new(),
             theme,
             pending_input: HashMap::new(),
+            db: kiln_db::DbManager::load(),
         };
         app.restore(&persisted, ctx);
         if let Some(p) = open_path {
@@ -220,7 +225,7 @@ impl KilnApp {
                 active_tab: wp.active_tab,
                 tool: tools::ToolKind::from_str(&wp.tool),
                 tool_open: wp.tool_open,
-                tools: tools::WorkspaceTools::new(&wp.root, ctx),
+                tools: tools::WorkspaceTools::new(&wp.root, ctx, self.db.clone()),
                 renaming: None,
             };
             for t in &wp.tabs {
@@ -320,7 +325,7 @@ impl KilnApp {
         self.workspaces.push(Workspace {
             id: wid,
             name,
-            tools: tools::WorkspaceTools::new(&root, ctx),
+            tools: tools::WorkspaceTools::new(&root, ctx, self.db.clone()),
             root,
             tabs: vec![Tab { id: tid, kind: TabKind::Terminal(TermTab { root: Node::Leaf(pane), focused: pane, rects: vec![], title: None }) }],
             active_tab: 0,
@@ -648,22 +653,48 @@ impl KilnApp {
                 self.conn.send(kiln_proto::ClientMsg::Upgrade { req: 0, exe: exe.to_string_lossy().into_owned() });
             }
             Action::OpenTab(factory) => {
-                let root = self.workspaces[self.active].root.clone();
-                if let Some(tab) = factory.make(&root, ctx) {
-                    let key = tab.key();
-                    let ws = &mut self.workspaces[self.active];
-                    if let Some(i) = ws.tabs.iter().position(|t| matches!(&t.kind, TabKind::Tool(x) if x.key() == key)) {
-                        ws.active_tab = i;
-                        if let TabKind::Tool(x) = &mut ws.tabs[i].kind {
-                            factory.reuse(x.as_mut());
+                let ws = &mut self.workspaces[self.active];
+                if let Some(i) = ws.tabs.iter().position(|t| matches!(&t.kind, TabKind::Tool(x) if x.key() == factory.key)) {
+                    ws.active_tab = i;
+                    if let TabKind::Tool(x) = &mut ws.tabs[i].kind {
+                        factory.reuse(x.as_mut());
+                    }
+                } else {
+                    match factory.make(ctx) {
+                        Ok(tab) => {
+                            let tid = self.id();
+                            let ws = &mut self.workspaces[self.active];
+                            ws.tabs.push(Tab { id: tid, kind: TabKind::Tool(tab) });
+                            ws.active_tab = ws.tabs.len() - 1;
                         }
-                    } else {
-                        let tid = self.id();
-                        let ws = &mut self.workspaces[self.active];
-                        ws.tabs.push(Tab { id: tid, kind: TabKind::Tool(tab) });
-                        ws.active_tab = ws.tabs.len() - 1;
+                        Err(e) => self.toast(e, ToastKind::Error),
                     }
                 }
+            }
+            Action::CloseTabByKey(key) => {
+                let ws = &self.workspaces[self.active];
+                if let Some(i) = ws.tabs.iter().position(|t| matches!(&t.kind, TabKind::Tool(x) if x.key() == key)) {
+                    self.apply(Action::CloseTab(i, true), ctx);
+                }
+            }
+            Action::RenamedFile(from, to) => {
+                let key = format!("file:{}", from.display());
+                let ws = &self.workspaces[self.active];
+                if let Some(i) = ws.tabs.iter().position(|t| matches!(&t.kind, TabKind::Tool(x) if x.key() == key && !x.is_dirty())) {
+                    self.apply(Action::CloseTab(i, true), ctx);
+                    if to.is_file() {
+                        self.apply(Action::OpenTab(tools::open_file_factory(to, None, None)), ctx);
+                    }
+                }
+            }
+            Action::NewTermAt(dir) => {
+                let pane = self.new_pane(Some(dir.to_string_lossy().into_owned()));
+                let tid = self.id();
+                if let Some(ws) = self.ws() {
+                    ws.tabs.push(Tab { id: tid, kind: TabKind::Terminal(TermTab { root: Node::Leaf(pane), focused: pane, rects: vec![], title: None }) });
+                    ws.active_tab = ws.tabs.len() - 1;
+                }
+                self.focus_terminal = true;
             }
             Action::RunInTerminal(cmd) => {
                 let cwd = self.workspaces.get(self.active).map(|w| w.root.to_string_lossy().into_owned());
@@ -682,10 +713,11 @@ impl KilnApp {
     }
 
     fn open_file(&mut self, path: PathBuf, line: Option<usize>, col: Option<usize>, _ctx: &egui::Context) {
-        let root = self.workspaces[self.active].root.clone();
-        let factory = tools::open_file_factory(path, line, col);
-        let _ = root;
-        self.actions.push(Action::OpenTab(factory));
+        if path.is_dir() {
+            self.actions.push(Action::NewTermAt(path));
+            return;
+        }
+        self.actions.push(Action::OpenTab(tools::open_file_factory(path, line, col)));
     }
 
     fn reveal_session(&mut self, sid: SessionId) {
@@ -831,6 +863,9 @@ impl KilnApp {
             (base_alt, Key::Equals, Action::Equalize),
             (base, Key::Comma, Action::OpenSettings),
         ];
+        // consume_shortcut 은 추가 Shift/Alt 를 무시하므로 수식키가 많은 조합부터 검사한다.
+        let mut table = table;
+        table.sort_by_key(|(m, _, _)| std::cmp::Reverse(m.shift as u8 + m.alt as u8 + m.ctrl as u8 + m.mac_cmd as u8));
         for (m, k, a) in table {
             if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k))) {
                 self.actions.push(a);
@@ -912,13 +947,25 @@ fn short_path(p: &Path) -> String {
 impl eframe::App for KilnApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.conn.pump();
-        self.window_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        let focused_now = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        if focused_now && !self.window_focused {
+            if let Some(ws) = self.workspaces.get_mut(self.active) {
+                for t in &mut ws.tabs {
+                    if let TabKind::Tool(x) = &mut t.kind {
+                        x.on_focus_regained();
+                    }
+                }
+            }
+        }
+        self.window_focused = focused_now;
         self.handle_conn_events(ctx);
-        if self.confirm.is_none() && !self.palette.is_open() {
+        let quick_open = self.workspaces.get(self.active).is_some_and(|w| w.tools.quick_is_open());
+        if self.confirm.is_none() && !self.palette.is_open() && !quick_open {
             self.shortcuts(ctx);
         }
-        for ws in &mut self.workspaces {
-            ws.tools.tick(ctx);
+        let active = self.active;
+        for (i, ws) in self.workspaces.iter_mut().enumerate() {
+            ws.tools.tick(i == active);
         }
     }
 

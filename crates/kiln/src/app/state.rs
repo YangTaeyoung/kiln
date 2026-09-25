@@ -55,8 +55,8 @@ pub struct WorkspaceP {
 pub enum TabP {
     Terminal { root: Node, focused: PaneId, panes: Vec<PaneP>, title: Option<String> },
     Editor { path: PathBuf },
-    DbTable { conn: String, schema: Option<String>, table: String },
-    DbConsole { conn: String },
+    DbTable { conn: u64, schema: Option<String>, table: String },
+    DbConsole { conn: u64 },
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]

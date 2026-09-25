@@ -1,9 +1,12 @@
 //! GUI 를 헤드리스로 띄워 실제 데몬과 연결된 상태에서 입력·분할·스냅샷을 검증한다.
 
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use kiln::app::KilnApp;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn setup(tag: &str) -> (PathBuf, PathBuf) {
     let base = PathBuf::from(format!("/tmp/kg-{}-{tag}", std::process::id()));
@@ -11,12 +14,21 @@ fn setup(tag: &str) -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(base.join("cfg")).unwrap();
     std::fs::create_dir_all(base.join("proj/src")).unwrap();
     std::fs::write(base.join("proj/src/main.rs"), "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
+    std::fs::write(base.join("proj/README.md"), "# proj\n").unwrap();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git").args(args).current_dir(base.join("proj")).output().unwrap();
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(&["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-qm", "init"]);
+    std::fs::write(base.join("proj/src/lib.rs"), "pub fn add(a: i32, b: i32) -> i32 { a + b }\n").unwrap();
     // SAFETY: 테스트 시작 시 단일 스레드에서 설정한다.
     unsafe {
         std::env::set_var("KILN_SOCKET", base.join("d.sock"));
         std::env::set_var("KILN_CONFIG_DIR", base.join("cfg"));
         std::env::set_var("KILN_EXE", env!("CARGO_BIN_EXE_kiln"));
         std::env::set_var("KILN_NO_AUTO_UPGRADE", "1");
+        std::env::set_var("KILN_DB_NO_KEYCHAIN", "1");
     }
     (base.clone(), base.join("proj"))
 }
@@ -42,6 +54,7 @@ fn pump_until(h: &mut Harness<'_, KilnApp>, secs: u64, mut f: impl FnMut(&mut Ha
 
 #[test]
 fn terminal_roundtrip_split_and_snapshot() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (base, proj) = setup("main");
     let mut h = Harness::builder().with_size([1280.0, 800.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| !t.trim().is_empty())), "shell prompt did not appear");
@@ -64,5 +77,57 @@ fn terminal_roundtrip_split_and_snapshot() {
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("green-bg\n") || t.matches("green-bg").count() >= 2)));
     h.run_steps(3);
     h.snapshot("app_split_terminal");
+    shutdown(&base);
+}
+
+fn cmd() -> egui::Modifiers {
+    if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers::CTRL | egui::Modifiers::SHIFT }
+}
+
+fn cmd_shift() -> egui::Modifiers {
+    if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD | egui::Modifiers::SHIFT } else { egui::Modifiers::CTRL | egui::Modifiers::SHIFT | egui::Modifiers::ALT }
+}
+
+#[test]
+fn explorer_opens_file_in_editor_and_saves() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("editor");
+    let mut h = Harness::builder().with_size([1280.0, 800.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| !t.trim().is_empty())));
+    h.key_press_modifiers(cmd_shift(), egui::Key::E);
+    assert!(pump_until(&mut h, 5, |h| h.query_by_label("src").is_some()), "explorer not shown");
+    h.get_by_label("src").click();
+    assert!(pump_until(&mut h, 5, |h| h.query_by_label("main.rs").is_some()));
+    h.get_by_label("main.rs").click();
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h, 5, |h| h.state().debug_active_tab_title().contains("main.rs")), "editor tab not opened: {}", h.state().debug_active_tab_title());
+    h.run_steps(5);
+    h.snapshot("app_explorer_editor");
+    // 편집 후 저장.
+    h.key_press_modifiers(if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers::CTRL }, egui::Key::End);
+    h.event(egui::Event::Text("// edited by kiln".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers::CTRL }, egui::Key::S);
+    h.run_steps(3);
+    let content = std::fs::read_to_string(proj.join("src/main.rs")).unwrap();
+    assert!(content.contains("// edited by kiln"), "{content}");
+    shutdown(&base);
+}
+
+#[test]
+fn git_and_db_panels_render() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("panels");
+    let mut h = Harness::builder().with_size([1280.0, 800.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| !t.trim().is_empty())));
+    h.key_press_modifiers(cmd_shift(), egui::Key::G);
+    assert!(pump_until(&mut h, 10, |h| h.query_by_label_contains("lib.rs").is_some()), "git panel did not list untracked file");
+    h.run_steps(5);
+    h.snapshot("app_git_panel");
+    h.key_press_modifiers(cmd_shift(), egui::Key::B);
+    h.run_steps(5);
+    h.snapshot("app_db_panel");
+    let _ = cmd();
     shutdown(&base);
 }

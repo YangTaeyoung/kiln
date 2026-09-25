@@ -32,6 +32,26 @@ fn cjk_candidates() -> Vec<(PathBuf, u32)> {
     v
 }
 
+fn symbol_candidates() -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        v.push("/System/Library/Fonts/Apple Symbols.ttf".into());
+        v.push("/System/Library/Fonts/Supplemental/Arial Unicode.ttf".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        v.push("C:\\Windows\\Fonts\\seguisym.ttf".into());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        v.push("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".into());
+        v.push("/usr/share/fonts/dejavu/DejaVuSans.ttf".into());
+        v.push("/usr/share/fonts/TTF/DejaVuSans.ttf".into());
+    }
+    v
+}
+
 fn find_nerd_font() -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
@@ -94,6 +114,13 @@ pub fn install(ctx: &egui::Context) {
         if let Ok(b) = std::fs::read(&p) {
             add("cjk", b, idx);
             break;
+        }
+    }
+    let mut n = 0;
+    for p in symbol_candidates() {
+        if let Ok(b) = std::fs::read(&p) {
+            add(&format!("symbols{n}"), b, 0);
+            n += 1;
         }
     }
     ctx.set_fonts(defs);

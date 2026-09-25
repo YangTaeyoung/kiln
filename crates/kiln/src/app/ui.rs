@@ -141,7 +141,9 @@ impl KilnApp {
             if let Some(s) = &summary {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(RichText::new(format!("⎇ {}", s.branch)).size(11.0).color(theme.purple));
+                    let (r, _) = ui.allocate_exact_size(vec2(12.0, 14.0), Sense::hover());
+                    icons::paint(ui.painter(), r, icons::Icon::Branch, theme.purple);
+                    ui.label(RichText::new(&s.branch).size(11.0).color(theme.purple));
                     if s.dirty > 0 {
                         ui.label(RichText::new(format!("●{}", s.dirty)).size(10.5).color(theme.yellow));
                     }
@@ -228,7 +230,7 @@ impl KilnApp {
                     acts.push(Action::AttachSession(o.id));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(theme.text_faint)).frame(false)).on_hover_text("세션 종료").clicked() {
+                    if icons::button(ui, icons::Icon::Close, vec2(18.0, 18.0), theme.text_faint, theme.bg_hover, "세션 종료").clicked() {
                         acts.push(Action::KillSession(o.id));
                     }
                 });
@@ -250,14 +252,26 @@ impl KilnApp {
                 ui.label(RichText::new(format!("● {text}")).size(11.0).color(dot)).on_hover_text(format!("build {}", self.conn.daemon_build));
                 if let Some(ws) = self.workspaces.get(self.active) {
                     if let Some(s) = ws.tools.summary() {
-                        ui.label(RichText::new(format!("⎇ {}", s.branch)).size(11.0).color(theme.text_dim));
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let (r, _) = ui.allocate_exact_size(vec2(12.0, 14.0), Sense::hover());
+                        icons::paint(ui.painter(), r, icons::Icon::Branch, theme.text_dim);
+                        ui.label(RichText::new(s.branch).size(11.0).color(theme.text_dim));
+                        ui.spacing_mut().item_spacing.x = 14.0;
                     }
                 }
                 let unread = self.unread.len();
-                if unread > 0 && ui.add(egui::Button::new(RichText::new(format!("🔔 {unread}")).size(11.0).color(theme.orange)).frame(false)).on_hover_text("최근 알림으로 이동 (⇧⌘U)").clicked() {
+                if unread > 0 && ui.add(egui::Button::new(RichText::new(format!("알림 {unread}")).size(11.0).color(theme.orange)).frame(false)).on_hover_text("최근 알림으로 이동 (⇧⌘U)").clicked() {
                     self.actions.push(Action::JumpUnread);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let tool_status = self.workspaces.get(self.active).and_then(|w| match w.tabs.get(w.active_tab).map(|t| &t.kind) {
+                        Some(TabKind::Tool(t)) => t.status_text(),
+                        _ => None,
+                    });
+                    if let Some(st) = tool_status {
+                        ui.label(RichText::new(st).size(11.0).color(theme.text_dim));
+                        return;
+                    }
                     ui.label(RichText::new(format!("{:.1}pt", self.settings.font_size)).size(11.0).color(theme.text_faint));
                     if let Some(info) = self.focused_session().and_then(|s| self.conn.infos.get(&s)) {
                         ui.label(RichText::new(format!("{}×{}", info.cols, info.rows)).size(11.0).color(theme.text_faint));
@@ -625,17 +639,22 @@ impl KilnApp {
             egui::Area::new(egui::Id::new("toasts")).anchor(Align2::RIGHT_BOTTOM, vec2(-16.0, -36.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
                 ui.set_max_width(screen.width().min(380.0));
                 for t in self.toasts.iter().rev().take(4) {
-                    let (fg, icon) = match t.kind {
-                        ToastKind::Info => (theme.accent, "ℹ"),
-                        ToastKind::Notify => (theme.orange, "🔔"),
-                        ToastKind::Error => (theme.red, "⚠"),
+                    let fg = match t.kind {
+                        ToastKind::Info => theme.accent,
+                        ToastKind::Notify => theme.orange,
+                        ToastKind::Error => theme.red,
                     };
-                    Frame::popup(ui.style()).fill(theme.bg_elevated).corner_radius(8.0).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+                    let r = Frame::popup(ui.style()).fill(theme.bg_elevated).corner_radius(8.0).inner_margin(Margin { left: 16, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(icon).color(fg));
+                            if t.kind == ToastKind::Notify {
+                                let (ir, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                                icons::paint(ui.painter(), ir, icons::Icon::Bell, fg);
+                            }
                             ui.add(egui::Label::new(RichText::new(&t.text).color(theme.text)).wrap());
                         });
                     });
+                    let rr = r.response.rect;
+                    ui.painter().rect_filled(Rect::from_min_size(rr.min + vec2(5.0, 8.0), vec2(3.0, rr.height() - 16.0)), 2.0, fg);
                     ui.add_space(6.0);
                 }
             });
