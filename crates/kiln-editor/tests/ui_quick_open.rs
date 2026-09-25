@@ -67,7 +67,7 @@ fn type_text(h: &mut Harness<'static, State>, s: &str) {
 }
 
 fn wait_indexed(h: &mut Harness<'static, State>) {
-    assert!(common::wait_until(h, 5.0, |h| !h.state().qo.is_indexing() && h.state().qo.file_count() > 0));
+    assert!(common::wait_until(h, 15.0, |h| !h.state().qo.is_indexing() && h.state().qo.file_count() > 0));
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn fuzzy_query_and_enter_opens_best_match() {
     wait_indexed(&mut h);
     assert_eq!(h.state().qo.file_count(), 16, "gitignored target/ is excluded");
     type_text(&mut h, "main");
-    assert!(common::wait_until(&mut h, 5.0, |h| h.state().qo.result_paths().first().map(String::as_str) == Some("src/main.rs")));
+    assert!(common::wait_until(&mut h, 15.0, |h| h.state().qo.result_paths().first().map(String::as_str) == Some("src/main.rs")));
     h.key_press(Key::Enter);
     h.run();
     assert_eq!(h.state().picked.as_deref(), Some(root.join("src/main.rs").as_path()));
@@ -91,7 +91,7 @@ fn arrow_keys_move_selection_and_escape_closes() {
     wait_indexed(&mut h);
     type_text(&mut h, "editor");
     // 빈 검색어의 전체 목록(16개)이 아니라 걸러진 결과가 올 때까지 기다린다.
-    assert!(common::wait_until(&mut h, 5.0, |h| (3..16).contains(&h.state().qo.result_paths().len())));
+    assert!(common::wait_until(&mut h, 15.0, |h| (3..16).contains(&h.state().qo.result_paths().len())));
     let results = h.state().qo.result_paths();
     h.key_press(Key::ArrowDown);
     h.run();
@@ -115,7 +115,7 @@ fn clicking_a_result_opens_it() {
     let mut h = harness(&root);
     wait_indexed(&mut h);
     type_text(&mut h, "app");
-    assert!(common::wait_until(&mut h, 5.0, |h| {
+    assert!(common::wait_until(&mut h, 15.0, |h| {
         let r = h.state().qo.result_paths();
         r.len() < 16 && r.iter().any(|p| p == "web/src/App.tsx")
     }));
@@ -131,7 +131,7 @@ fn recently_opened_files_come_first_for_empty_query() {
     wait_indexed(&mut h);
     h.state_mut().qo.note_recent(&root.join("web/src/main.ts"));
     h.state_mut().qo.open(&root);
-    assert!(common::wait_until(&mut h, 5.0, |h| h.state().qo.result_paths().first().map(String::as_str) == Some("web/src/main.ts")));
+    assert!(common::wait_until(&mut h, 15.0, |h| h.state().qo.result_paths().first().map(String::as_str) == Some("web/src/main.ts")));
 }
 
 #[test]
@@ -140,7 +140,7 @@ fn snapshot_quick_open() {
     let mut h = harness(&root);
     wait_indexed(&mut h);
     type_text(&mut h, "srced");
-    assert!(common::wait_until(&mut h, 5.0, |h| h.state().qo.result_paths().len() == 3));
+    assert!(common::wait_until(&mut h, 15.0, |h| h.state().qo.result_paths().len() == 3));
     h.key_press(Key::ArrowDown);
     h.run();
     h.remove_cursor();

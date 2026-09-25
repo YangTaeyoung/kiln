@@ -128,8 +128,10 @@ struct EditRecord {
 struct UndoGroup {
     id: u64,
     edits: Vec<EditRecord>,
-    before: Selection,
-    after: Selection,
+    /// 편집 전 커서 전체. 첫 항목이 주 커서.
+    before: Vec<Selection>,
+    /// 편집 후 커서 전체. 첫 항목이 주 커서.
+    after: Vec<Selection>,
     kind: EditKind,
     time: f64,
     sealed: bool,
@@ -299,8 +301,8 @@ impl Buffer {
         out
     }
 
-    /// 편집 그룹을 연다. 연속 타이핑은 직전 그룹에 합친다.
-    pub fn begin(&mut self, kind: EditKind, before: Selection, time: f64) {
+    /// 편집 그룹을 연다. `before` 는 편집 전 커서 전체(첫 항목이 주 커서). 연속 타이핑은 직전 그룹에 합친다.
+    pub fn begin(&mut self, kind: EditKind, before: &[Selection], time: f64) {
         self.redo.clear();
         if let Some(last) = self.undo.last_mut()
             && !last.sealed
@@ -321,8 +323,8 @@ impl Buffer {
         self.undo.push(UndoGroup {
             id,
             edits: Vec::new(),
-            before,
-            after: before,
+            before: before.to_vec(),
+            after: before.to_vec(),
             kind,
             time,
             sealed: false,
@@ -333,8 +335,8 @@ impl Buffer {
         self.open = true;
     }
 
-    /// 편집 그룹을 닫는다. 편집이 없었던 그룹은 버린다.
-    pub fn end(&mut self, after: Selection) {
+    /// 편집 그룹을 닫는다. `after` 는 편집 후 커서 전체. 편집이 없었던 그룹은 버린다.
+    pub fn end(&mut self, after: &[Selection]) {
         if !self.open {
             return;
         }
@@ -343,7 +345,7 @@ impl Buffer {
             if last.edits.is_empty() {
                 self.undo.pop();
             } else {
-                last.after = after;
+                last.after = after.to_vec();
             }
         }
     }
@@ -361,7 +363,7 @@ impl Buffer {
         let text = normalize_newlines(text);
         let (removed, end) = self.raw_replace(a, b, &text);
         if !self.open {
-            self.begin(EditKind::Other, Selection::caret(a), 0.0);
+            self.begin(EditKind::Other, &[Selection::caret(a)], 0.0);
         }
         if let Some(g) = self.undo.last_mut() {
             g.edits.push(EditRecord { start: a, removed, inserted: text.into_owned() });
@@ -411,8 +413,8 @@ impl Buffer {
         !self.redo.is_empty()
     }
 
-    /// 마지막 그룹을 되돌리고 그 이전 선택 영역을 돌려준다.
-    pub fn undo(&mut self) -> Option<Selection> {
+    /// 마지막 그룹을 되돌리고 그 이전 커서 전체를 돌려준다.
+    pub fn undo(&mut self) -> Option<Vec<Selection>> {
         self.open = false;
         let mut g = self.undo.pop()?;
         for e in g.edits.iter().rev() {
@@ -420,20 +422,20 @@ impl Buffer {
             self.raw_replace(e.start, end, &e.removed);
         }
         g.sealed = true;
-        let sel = g.before;
+        let sel = g.before.clone();
         self.redo.push(g);
         Some(sel)
     }
 
-    /// 되돌린 그룹을 다시 적용하고 그 이후 선택 영역을 돌려준다.
-    pub fn redo(&mut self) -> Option<Selection> {
+    /// 되돌린 그룹을 다시 적용하고 그 이후 커서 전체를 돌려준다.
+    pub fn redo(&mut self) -> Option<Vec<Selection>> {
         self.open = false;
         let g = self.redo.pop()?;
         for e in &g.edits {
             let end = advance(e.start, &e.removed);
             self.raw_replace(e.start, end, &e.inserted);
         }
-        let sel = g.after;
+        let sel = g.after.clone();
         self.undo.push(g);
         Some(sel)
     }
@@ -579,8 +581,15 @@ impl Buffer {
         last: usize,
         style: crate::syntax::CommentStyle,
     ) -> Vec<(usize, usize, isize)> {
+        let lines: Vec<usize> = (first..=last).collect();
+        self.toggle_comment_lines(&lines, style)
+    }
+
+    /// 오름차순 줄 번호 목록의 줄 주석을 한 번에 토글한다. 빈 줄은 건너뛰고, 모든 줄이 주석이면 풀고
+    /// 아니면 모두 주석으로 만든다. 줄마다 (삽입·삭제 열, 변화량)을 돌려준다.
+    pub fn toggle_comment_lines(&mut self, lines: &[usize], style: crate::syntax::CommentStyle) -> Vec<(usize, usize, isize)> {
         use crate::syntax::CommentStyle;
-        let rows: Vec<usize> = (first..=last).filter(|&l| !self.lines[l].trim().is_empty()).collect();
+        let rows: Vec<usize> = lines.iter().copied().filter(|&l| !self.lines[l].trim().is_empty()).collect();
         if rows.is_empty() {
             return Vec::new();
         }
@@ -779,9 +788,9 @@ mod tests {
     #[test]
     fn replace_across_lines_and_undo_redo() {
         let mut b = Buffer::from_text("hello\nworld\nfoo");
-        b.begin(EditKind::Other, Selection::default(), 0.0);
+        b.begin(EditKind::Other, &[Selection::default()], 0.0);
         let end = b.replace(Pos::new(0, 2), Pos::new(1, 3), "XY\nZ");
-        b.end(Selection::caret(end));
+        b.end(&[Selection::caret(end)]);
         assert_eq!(b.to_text(), "heXY\nZld\nfoo");
         assert_eq!(end, Pos::new(1, 1));
         assert!(b.is_dirty());
@@ -797,9 +806,9 @@ mod tests {
         let mut b = Buffer::from_text("");
         let mut p = Pos::default();
         for (i, ch) in "abc".chars().enumerate() {
-            b.begin(EditKind::Typing, Selection::caret(p), i as f64 * 0.1);
+            b.begin(EditKind::Typing, &[Selection::caret(p)], i as f64 * 0.1);
             p = b.insert(p, &ch.to_string());
-            b.end(Selection::caret(p));
+            b.end(&[Selection::caret(p)]);
         }
         assert_eq!(b.to_text(), "abc");
         b.undo();
@@ -809,14 +818,14 @@ mod tests {
     #[test]
     fn saved_state_tracks_dirty_through_undo() {
         let mut b = Buffer::from_text("x");
-        b.begin(EditKind::Typing, Selection::default(), 0.0);
+        b.begin(EditKind::Typing, &[Selection::default()], 0.0);
         let p = b.insert(Pos::default(), "a");
-        b.end(Selection::caret(p));
+        b.end(&[Selection::caret(p)]);
         b.mark_saved();
         assert!(!b.is_dirty());
-        b.begin(EditKind::Typing, Selection::caret(p), 0.1);
+        b.begin(EditKind::Typing, &[Selection::caret(p)], 0.1);
         let p2 = b.insert(p, "b");
-        b.end(Selection::caret(p2));
+        b.end(&[Selection::caret(p2)]);
         assert!(b.is_dirty());
         b.undo();
         assert!(!b.is_dirty());
@@ -890,7 +899,7 @@ mod tests {
     #[test]
     fn map_since_shifts_positions_after_edits() {
         let mut b = Buffer::from_text("abc\ndef\nghi");
-        b.begin(EditKind::Other, Selection::default(), 0.0);
+        b.begin(EditKind::Other, &[Selection::default()], 0.0);
         let m = b.edit_mark();
         b.replace(Pos::new(0, 1), Pos::new(1, 1), "XY\nZ\nW");
         assert_eq!(b.to_text(), "aXY\nZ\nWef\nghi");
@@ -898,7 +907,7 @@ mod tests {
         assert_eq!(b.map_since(m, Pos::new(2, 1)), Pos::new(3, 1));
         assert_eq!(b.map_since(m, Pos::new(0, 0)), Pos::new(0, 0));
         assert_eq!(b.map_since(m, Pos::new(0, 2)), Pos::new(2, 1));
-        b.end(Selection::default());
+        b.end(&[Selection::default()]);
     }
 
     #[test]

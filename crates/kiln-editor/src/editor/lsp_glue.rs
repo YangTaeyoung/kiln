@@ -483,6 +483,7 @@ impl Editor {
     }
 
     /// 편집 목록을 되돌리기 한 단계로 적용한다. 범위는 현재 버퍼 기준 UTF-16 위치.
+    /// 모든 커서는 편집을 거쳐 옮긴다.
     pub(crate) fn apply_lsp_edits(&mut self, edits: &[TextEdit]) {
         if edits.is_empty() || self.read_only {
             return;
@@ -493,19 +494,18 @@ impl Editor {
             .map(|(i, e)| (i, self.pos_from_lsp(e.range.start), self.pos_from_lsp(e.range.end), e.new_text.as_str()))
             .collect();
         conv.sort_by_key(|&(i, a, _, _)| Reverse((a, i)));
-        self.extra.clear();
-        let before = self.sel;
+        let before = self.cursor_snapshot();
         let now = self.now();
-        self.buf.begin(EditKind::Other, before, now);
+        self.buf.begin(EditKind::Other, &before, now);
         let mark = self.buf.edit_mark();
         for (_, a, b, text) in conv {
             let (a, b) = (self.buf.clamp(a), self.buf.clamp(b));
             self.buf.replace(a, b, text);
+            self.sync_line_edits();
         }
-        let anchor = self.buf.clamp(self.buf.map_since(mark, before.anchor));
-        let head = self.buf.clamp(self.buf.map_since(mark, before.head));
-        self.sel = Selection::new(anchor, head);
-        self.buf.end(self.sel);
+        let after = self.mapped_cursors(mark);
+        self.restore_cursors(&after);
+        self.buf.end(&self.cursor_snapshot());
         self.sync_highlighter();
         self.preferred_col = None;
     }
@@ -697,7 +697,7 @@ impl Editor {
         if c.version == v && !c.shown.is_empty() {
             return;
         }
-        if head.line != c.anchor.line || head.col < c.anchor.col || !self.extra.is_empty() {
+        if head.line != c.anchor.line || head.col < c.anchor.col {
             self.lsp.as_mut().expect("lsp").completion = None;
             return;
         }
@@ -733,6 +733,8 @@ impl Editor {
         c.version = v;
     }
 
+    /// 고른 완성 항목을 모든 커서에 넣는다. 주 커서는 항목의 편집 범위(없으면 단어 앞부분)를 바꾸고,
+    /// 다른 커서는 커서 앞 같은 글자 수만큼을 바꾼다.
     fn accept_completion(&mut self) {
         let Some(st) = &mut self.lsp else { return };
         let Some(c) = st.completion.take() else { return };
@@ -744,21 +746,31 @@ impl Editor {
             None => (c.anchor, item.insert_text.clone()),
         };
         let start = if start.line == head.line && start <= head { start } else { c.anchor };
+        let prefix_chars = self.buf.line(head.line)[start.col.min(head.col)..head.col].chars().count();
         let mut edits: Vec<TextEdit> = item.additional_edits.clone();
-        let range = Range { start: self.to_lsp(start), end: self.to_lsp(head) };
-        edits.push(TextEdit { range, new_text: text.clone() });
+        edits.push(TextEdit { range: Range { start: self.to_lsp(start), end: self.to_lsp(head) }, new_text: text.clone() });
+        let mut floor = Pos::default();
+        for s in self.cursors() {
+            let h = s.head;
+            if h == head {
+                floor = h;
+                continue;
+            }
+            let line = self.buf.line(h.line);
+            let from = line[..h.col].char_indices().rev().take(prefix_chars).last().map_or(h.col, |(i, _)| i);
+            let from = if floor.line == h.line { from.max(floor.col) } else { from };
+            floor = h;
+            let range = Range { start: self.to_lsp(Pos::new(h.line, from)), end: self.to_lsp(h) };
+            edits.push(TextEdit { range, new_text: text.clone() });
+        }
         self.apply_lsp_edits(&edits);
         // 커서는 삽입 끝으로 옮겨져 있다. 스니펫 첫 탭 정지가 있으면 그만큼 되돌린다.
         let caret_off = item.cursor_offset.unwrap_or(text.len()).min(text.len());
-        let end_of_insert = self.sel.head;
-        let tail = &text[caret_off..];
-        let back = crate::buffer::advance(Pos::new(0, 0), tail);
-        let caret = if back.line == 0 {
-            Pos::new(end_of_insert.line, end_of_insert.col.saturating_sub(back.col))
-        } else {
-            end_of_insert
-        };
-        self.sel = Selection::caret(self.buf.clamp(caret));
+        let back = crate::buffer::advance(Pos::new(0, 0), &text[caret_off..]);
+        let step_back = |p: Pos| if back.line == 0 { Pos::new(p.line, p.col.saturating_sub(back.col)) } else { p };
+        let carets: Vec<Selection> =
+            self.cursor_snapshot().into_iter().map(|s| Selection::caret(self.buf.clamp(step_back(s.head)))).collect();
+        self.restore_cursors(&carets);
         self.reveal = Some(Reveal::Nearest);
         self.lsp_flush();
     }

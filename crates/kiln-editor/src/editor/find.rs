@@ -133,11 +133,12 @@ impl Editor {
         if self.find.matches.contains(&sel) && !self.read_only {
             let matched = self.buf.text_range(sel.0, sel.1);
             let rep = expand_replacement(&re, &matched, &self.find.replacement, self.find.opts.regex);
+            let before = self.cursor_snapshot();
             self.extra.clear();
-            self.buf.begin(EditKind::Other, self.sel, self.now());
+            self.buf.begin(EditKind::Other, &before, self.now());
             let end = self.buf.replace(sel.0, sel.1, &rep);
             self.sel = Selection::caret(end);
-            self.buf.end(self.sel);
+            self.buf.end(&[self.sel]);
             self.sync_highlighter();
             self.update_find_matches();
         }
@@ -153,16 +154,18 @@ impl Editor {
         }
         let matches = std::mem::take(&mut self.find.matches);
         let n = matches.len();
-        self.buf.begin(EditKind::Other, self.sel, self.now());
+        let before = self.cursor_snapshot();
+        self.buf.begin(EditKind::Other, &before, self.now());
         for &(a, b) in matches.iter().rev() {
             let matched = self.buf.text_range(a, b);
             let rep = expand_replacement(&re, &matched, &self.find.replacement, self.find.opts.regex);
             self.buf.replace(a, b, &rep);
+            self.sync_line_edits();
         }
         let head = self.buf.clamp(self.sel.head);
         self.extra.clear();
         self.sel = Selection::caret(head);
-        self.buf.end(self.sel);
+        self.buf.end(&[self.sel]);
         self.sync_highlighter();
         n
     }

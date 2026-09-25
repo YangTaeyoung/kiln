@@ -117,6 +117,38 @@ fn completion_popup_filters_and_accepts_text_edit_and_snippet() {
 }
 
 #[test]
+fn completion_accept_applies_to_every_cursor() {
+    let (_d, _root, mut h) = setup("fn main() {\n    x\n    y\n}\n");
+    h.state_mut().set_cursors(Selection::caret(Pos::new(1, 5)), &[Selection::caret(Pos::new(2, 5))]);
+    h.run_ok();
+    type_text(&mut h, ".");
+    assert!(wait_popup(&mut h, "completion"));
+    type_text(&mut h, "b");
+    h.run_ok();
+    assert_eq!(h.state().lsp_popup_kind(), Some("completion"), "커서가 여럿이어도 목록을 유지한다");
+    h.key_press(Key::Enter);
+    h.run_ok();
+    assert_eq!(h.state().text(), "fn main() {\n    x.beta_edit\n    y.beta_edit\n}\n");
+    assert_eq!(h.state().cursor_count(), 2);
+
+    h.key_press(Key::Enter);
+    type_text(&mut h, "pr");
+    assert!(wait_popup(&mut h, "completion"));
+    h.key_press(Key::Tab);
+    h.run_ok();
+    assert_eq!(
+        h.state().text(),
+        "fn main() {\n    x.beta_edit\n    println!(\"msg\")\n    y.beta_edit\n    println!(\"msg\")\n}\n"
+    );
+    let heads: Vec<Pos> = h.state().cursors().iter().map(|s| s.head).collect();
+    assert_eq!(heads, vec![Pos::new(2, 14), Pos::new(4, 14)], "모든 커서가 첫 탭 정지로 간다");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run_ok();
+    assert_eq!(h.state().text(), "fn main() {\n    x.beta_edit\n    pr\n    y.beta_edit\n    pr\n}\n");
+    assert_eq!(h.state().cursor_count(), 2);
+}
+
+#[test]
 fn definition_references_and_cross_file_open_event() {
     let (_d, root, mut h) = setup(SRC);
     h.state_mut().set_selection(Selection::caret(Pos::new(5, 18)));

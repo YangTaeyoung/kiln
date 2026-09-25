@@ -19,7 +19,7 @@ use crate::highlight::Highlighter;
 use crate::syntax::{self, CommentStyle};
 
 pub use crate::buffer::LineEnding;
-pub(crate) use cursors::Cursor;
+pub(crate) use cursors::{ColumnSel, Cursor};
 pub(crate) use display::DisplayMap;
 pub(crate) use find::FindState;
 pub use fold::FoldRange;
@@ -193,6 +193,12 @@ pub struct Editor {
     pub(crate) extra: Vec<Cursor>,
     /// 세로 이동 시 유지할 표시 열.
     pub(crate) preferred_col: Option<usize>,
+    /// 주 커서 헤드가 이 위치면 줄 바꿈 지점의 커서를 앞 시각 줄 끝에 둔다.
+    pub(crate) row_end_at: Option<Pos>,
+    /// 마지막 사각 선택과 그때의 커서 전체.
+    pub(crate) column: Option<(ColumnSel, Vec<Selection>)>,
+    /// 다음 편집 그룹의 편집 전 커서 전체. 없으면 현재 커서를 쓴다.
+    edit_before: Option<Vec<Selection>>,
     /// Cmd+D 가 단어 단위로 일치를 찾는지.
     pub(crate) whole_word_next: bool,
     pub(crate) display: DisplayMap,
@@ -257,6 +263,9 @@ impl Editor {
             sel: Selection::default(),
             extra: Vec::new(),
             preferred_col: None,
+            row_end_at: None,
+            column: None,
+            edit_before: None,
             whole_word_next: false,
             display: DisplayMap::new(buf.line_count()),
             folds: FoldState::default(),
@@ -372,6 +381,7 @@ impl Editor {
         self.extra.clear();
         self.sel = Selection::new(self.buf.clamp(sel.anchor), self.buf.clamp(sel.head));
         self.preferred_col = None;
+        self.row_end_at = None;
         self.reveal = Some(Reveal::Nearest);
     }
 
@@ -485,7 +495,6 @@ impl Editor {
         let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
         let max_suffix = old.len().min(new.len()) - prefix;
         let suffix = old.iter().rev().zip(new.iter().rev()).take(max_suffix).take_while(|(a, b)| a == b).count();
-        let sel = self.sel;
         if prefix + suffix < old.len() || old.len() != new.len() {
             let a = Pos::new(prefix, 0);
             let old_last = old.len() - suffix;
@@ -505,15 +514,17 @@ impl Editor {
             } else {
                 (Pos::new(prefix - 1, old[prefix - 1].len()), Pos::new(prefix - 1, old[prefix - 1].len()), format!("\n{mid}"))
             };
-            self.buf.begin(EditKind::Other, sel, self.now());
+            let snap = self.cursor_snapshot();
+            self.buf.begin(EditKind::Other, &snap, self.now());
             self.buf.replace(a, b, &mid);
-            self.buf.end(sel);
+            self.buf.end(&snap);
             self.sync_highlighter();
         }
         self.buf.line_ending = fresh.line_ending;
         debug_assert_eq!(self.buf.to_text(), d.text.replace("\r\n", "\n").replace('\n', self.buf.line_ending.as_str()));
         self.buf.mark_saved();
-        self.sel = Selection::new(self.buf.clamp(sel.anchor), self.buf.clamp(sel.head));
+        let snap = self.cursor_snapshot();
+        self.restore_cursors(&snap);
         Ok(())
     }
 
@@ -527,14 +538,20 @@ impl Editor {
     }
 
     fn sync_highlighter(&mut self) {
+        self.sync_line_edits();
+        self.apply_folds();
+        self.find.invalidate();
+    }
+
+    /// 쌓인 줄 변경을 강조·화면 줄·접기·진단 위치에 반영한다. 한 그룹 안에서 편집할 때마다 불러
+    /// 화면 줄 대응이 그 시점의 버퍼 내용으로 계산되게 한다.
+    pub(crate) fn sync_line_edits(&mut self) {
         for e in self.buf.take_changes() {
             self.hl.on_edit(e);
             self.display.on_edit(e, self.buf.lines());
             self.folds.on_edit(e);
             self.lsp_on_line_edit(e);
         }
-        self.apply_folds();
-        self.find.invalidate();
     }
 
     // ---- 편집 명령 ----
@@ -543,11 +560,13 @@ impl Editor {
     /// 앞쪽 편집만큼 뒤쪽 결과 위치를 옮긴다.
     fn edit(&mut self, kind: EditKind, mut f: impl FnMut(&mut Self) -> Selection) {
         if self.read_only {
+            self.edit_before = None;
             return;
         }
-        let before = self.sel;
+        let before = self.edit_before.take().unwrap_or_else(|| self.cursor_snapshot());
         let now = self.now();
-        self.buf.begin(kind, before, now);
+        self.buf.begin(kind, &before, now);
+        self.row_end_at = None;
         if self.extra.is_empty() {
             let after = f(self);
             self.sel = Selection::new(self.buf.clamp(after.anchor), self.buf.clamp(after.head));
@@ -561,6 +580,7 @@ impl Editor {
                 self.sel = s;
                 let mark = self.buf.edit_mark();
                 let r = f(self);
+                self.sync_line_edits();
                 for (o, _) in &mut out {
                     *o = Selection::new(self.buf.map_since(mark, o.anchor), self.buf.map_since(mark, o.head));
                 }
@@ -578,10 +598,39 @@ impl Editor {
             self.preferred_col = None;
             self.normalize_cursors();
         }
-        self.buf.end(self.sel);
+        self.finish_edit();
+    }
+
+    /// 열린 편집 그룹을 지금 커서 전체로 닫고 화면 상태를 맞춘다.
+    fn finish_edit(&mut self) {
+        let after = self.cursor_snapshot();
+        self.buf.end(&after);
         self.sync_highlighter();
         self.preferred_col = None;
+        self.row_end_at = None;
         self.reveal = Some(Reveal::Nearest);
+    }
+
+    /// 여러 버퍼 편집을 되돌리기 한 단계로 묶는다. `f` 는 그룹의 편집 기준점을 받아 편집하고
+    /// 편집 후 커서 전체(첫 항목이 주 커서)를 돌려준다.
+    fn edit_group(&mut self, f: impl FnOnce(&mut Self, usize) -> Vec<Selection>) {
+        if self.read_only {
+            self.edit_before = None;
+            return;
+        }
+        let before = self.edit_before.take().unwrap_or_else(|| self.cursor_snapshot());
+        let now = self.now();
+        self.buf.begin(EditKind::Other, &before, now);
+        let mark = self.buf.edit_mark();
+        let after = f(self, mark);
+        self.restore_cursors(&after);
+        self.finish_edit();
+    }
+
+    /// 편집 기준점 `mark` 이후의 편집을 거쳐 커서 전체를 옮긴 목록.
+    fn mapped_cursors(&self, mark: usize) -> Vec<Selection> {
+        let map = |p: Pos| self.buf.clamp(self.buf.map_since(mark, p));
+        self.cursor_snapshot().into_iter().map(|s| Selection::new(map(s.anchor), map(s.head))).collect()
     }
 
     /// 선택 영역을 텍스트로 바꾼다(타이핑).
@@ -628,20 +677,36 @@ impl Editor {
 
     /// 선택된 줄들 번호(첫 줄, 끝 줄). 끝 위치가 줄 맨 앞이면 그 줄은 제외.
     pub(crate) fn selected_lines(&self) -> (usize, usize) {
-        let (a, b) = self.sel.range();
-        let last = if b.line > a.line && b.col == 0 { b.line - 1 } else { b.line };
-        (a.line, last)
+        sel_lines(self.sel)
     }
 
-    fn display_col(&self, p: Pos) -> usize {
+    /// 모든 커서가 걸친 줄 구간. 겹치거나 맞닿은 구간은 합친다. 문서 순서.
+    pub(crate) fn line_blocks(&self) -> Vec<(usize, usize)> {
+        let mut spans: Vec<(usize, usize)> = self.cursors().into_iter().map(sel_lines).collect();
+        spans.sort();
+        let mut out: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+        for (a, b) in spans {
+            match out.last_mut() {
+                Some(last) if a <= last.1 + 1 => last.1 = last.1.max(b),
+                _ => out.push((a, b)),
+            }
+        }
+        out
+    }
+
+    /// 모든 커서가 걸친 줄 번호(중복 없이 오름차순).
+    fn cursor_lines(&self) -> Vec<usize> {
+        self.line_blocks().into_iter().flat_map(|(a, b)| a..=b).collect()
+    }
+
+    pub(crate) fn display_col(&self, p: Pos) -> usize {
         let tab = self.indent.width();
         self.buf.line(p.line)[..p.col].chars().map(|c| char_cols(c, tab)).sum()
     }
 
     /// Tab: 여러 줄 선택이면 들여쓰기, 아니면 다음 탭 위치까지 공백(또는 탭)을 넣는다.
     pub fn indent_or_tab(&mut self) {
-        let (a, b) = self.sel.range();
-        if a.line != b.line {
+        if self.cursors().iter().any(|s| s.anchor.line != s.head.line) {
             self.indent_lines(true);
             return;
         }
@@ -658,30 +723,20 @@ impl Editor {
         });
     }
 
-    /// 선택된 줄들을 한 단계 들여쓰거나(`true`) 내어쓴다.
+    /// 모든 커서가 걸친 줄들을 한 단계 들여쓰거나(`true`) 내어쓴다.
     pub fn indent_lines(&mut self, indent: bool) {
-        self.extra.clear();
-        let (first, last) = self.selected_lines();
+        let lines = self.cursor_lines();
         let unit = self.indent.unit();
         let width = self.indent.width();
-        self.edit(EditKind::Other, |ed| {
-            let mut sel = ed.sel;
-            for l in first..=last {
-                let shift = |p: &mut Pos, at: usize, d: isize| {
-                    if p.line == l && p.col >= at {
-                        p.col = (p.col as isize + d).max(at as isize) as usize;
-                    }
-                };
+        self.edit_group(|ed, mark| {
+            let mut touched = Vec::new();
+            for &l in &lines {
                 if indent {
                     if ed.buf.line(l).is_empty() {
                         continue;
                     }
                     ed.buf.insert(Pos::new(l, 0), &unit);
-                    shift(&mut sel.anchor, 0, unit.len() as isize);
-                    shift(&mut sel.head, 0, unit.len() as isize);
-                    if sel.anchor.line == l && sel.anchor.col == unit.len() && sel.anchor != sel.head && ed.sel.anchor.col == 0 {
-                        sel.anchor.col = 0;
-                    }
+                    touched.push(l);
                 } else {
                     let line = ed.buf.line(l);
                     let n = if line.starts_with('\t') {
@@ -691,13 +746,29 @@ impl Editor {
                     };
                     if n > 0 {
                         ed.buf.replace(Pos::new(l, 0), Pos::new(l, n), "");
-                        shift(&mut sel.anchor, 0, -(n as isize));
-                        shift(&mut sel.head, 0, -(n as isize));
                     }
                 }
             }
-            sel
+            ed.keep_line_starts(mark, &touched)
         });
+    }
+
+    /// `mark` 이후 편집으로 옮긴 커서 전체. 선택의 시작이 `lines` 중 한 줄의 맨 앞이었으면 맨 앞에 남긴다.
+    fn keep_line_starts(&self, mark: usize, lines: &[usize]) -> Vec<Selection> {
+        let before = self.cursor_snapshot();
+        let mut after = self.mapped_cursors(mark);
+        for (b, a) in before.iter().zip(after.iter_mut()) {
+            if b.is_empty() {
+                continue;
+            }
+            let fwd = b.anchor <= b.head;
+            let start = if fwd { b.anchor } else { b.head };
+            if start.col == 0 && lines.contains(&start.line) {
+                let p = if fwd { &mut a.anchor } else { &mut a.head };
+                p.col = 0;
+            }
+        }
+        after
     }
 
     /// Backspace. `word` 면 이전 단어까지, `line` 이면 줄 처음까지 지운다.
@@ -743,77 +814,109 @@ impl Editor {
         });
     }
 
-    /// 선택된 줄들의 줄 주석을 토글한다.
+    /// 모든 커서가 걸친 줄들의 줄 주석을 한 번에 토글한다.
     pub fn toggle_comment(&mut self) {
         let Some(style) = self.comment else { return };
-        self.extra.clear();
-        let (first, last) = self.selected_lines();
-        self.edit(EditKind::Other, |ed| {
-            let shifts = ed.buf.toggle_comment(first, last, style);
-            let mut sel = ed.sel;
-            for (l, at, d) in shifts {
-                for p in [&mut sel.anchor, &mut sel.head] {
-                    if p.line == l && p.col >= at {
-                        p.col = (p.col as isize + d).max(at as isize) as usize;
-                    }
-                }
-            }
-            sel
+        let lines = self.cursor_lines();
+        self.edit_group(|ed, mark| {
+            let shifts = ed.buf.toggle_comment_lines(&lines, style);
+            let added: Vec<usize> = shifts.iter().filter(|s| s.2 > 0 && s.1 == 0).map(|s| s.0).collect();
+            ed.keep_line_starts(mark, &added)
         });
     }
 
-    /// 현재 줄(또는 선택된 줄들)을 지운다.
+    /// 모든 커서가 걸친 줄들을 지운다. 커서는 지운 자리 다음 줄의 첫 글자로 간다.
     pub fn delete_lines(&mut self) {
-        self.extra.clear();
-        let (first, last) = self.selected_lines();
-        self.edit(EditKind::Other, |ed| {
-            let n = ed.buf.line_count();
-            let (a, b) = if last + 1 < n {
-                (Pos::new(first, 0), Pos::new(last + 1, 0))
-            } else if first > 0 {
-                (Pos::new(first - 1, ed.buf.line(first - 1).len()), Pos::new(last, ed.buf.line(last).len()))
-            } else {
-                (Pos::new(0, 0), Pos::new(last, ed.buf.line(last).len()))
-            };
-            ed.buf.replace(a, b, "");
-            let l = first.min(ed.buf.line_count() - 1);
-            Selection::caret(Pos::new(l, ed.buf.first_non_ws(l)))
+        let blocks = self.line_blocks();
+        let primary_block = blocks.iter().position(|&(a, b)| (a..=b).contains(&sel_lines(self.sel).0)).unwrap_or(0);
+        self.edit_group(|ed, _| {
+            for &(first, last) in blocks.iter().rev() {
+                let n = ed.buf.line_count();
+                let (a, b) = if last + 1 < n {
+                    (Pos::new(first, 0), Pos::new(last + 1, 0))
+                } else if first > 0 {
+                    (Pos::new(first - 1, ed.buf.line(first - 1).len()), Pos::new(last, ed.buf.line(last).len()))
+                } else {
+                    (Pos::new(0, 0), Pos::new(last, ed.buf.line(last).len()))
+                };
+                ed.buf.replace(a, b, "");
+                ed.sync_line_edits();
+            }
+            let mut removed = 0;
+            let mut carets = Vec::with_capacity(blocks.len());
+            for &(first, last) in &blocks {
+                let l = (first - removed).min(ed.buf.line_count() - 1);
+                carets.push(Selection::caret(Pos::new(l, ed.buf.first_non_ws(l))));
+                removed += last - first + 1;
+            }
+            let p = carets.remove(primary_block);
+            carets.insert(0, p);
+            carets
         });
     }
 
-    /// 선택된 줄들을 위(`true`)나 아래로 한 줄 옮긴다.
+    /// 모든 커서가 걸친 줄들을 위(`true`)나 아래로 한 줄 옮긴다. 한 구간이라도 못 옮기면 그대로 둔다.
     pub fn move_lines(&mut self, up: bool) {
-        self.extra.clear();
-        let (first, last) = self.selected_lines();
+        let blocks = self.line_blocks();
         let n = self.buf.line_count();
-        if (up && first == 0) || (!up && last + 1 >= n) {
+        let (Some(&(top, _)), Some(&(_, bottom))) = (blocks.first(), blocks.last()) else { return };
+        if (up && top == 0) || (!up && bottom + 1 >= n) {
             return;
         }
-        self.edit(EditKind::Other, |ed| {
-            let block = ed.buf.text_range(Pos::new(first, 0), Pos::new(last, ed.buf.line(last).len()));
-            let mut sel = ed.sel;
-            if up {
-                let above = ed.buf.line(first - 1).to_owned();
-                ed.buf.replace(Pos::new(first - 1, 0), Pos::new(last, ed.buf.line(last).len()), &format!("{block}\n{above}"));
-                sel.anchor.line -= 1;
-                sel.head.line -= 1;
-            } else {
-                let below = ed.buf.line(last + 1).to_owned();
-                ed.buf.replace(Pos::new(first, 0), Pos::new(last + 1, ed.buf.line(last + 1).len()), &format!("{below}\n{block}"));
-                sel.anchor.line += 1;
-                sel.head.line += 1;
+        self.edit_group(|ed, _| {
+            for &(first, last) in &blocks {
+                let block = ed.buf.text_range(Pos::new(first, 0), Pos::new(last, ed.buf.line(last).len()));
+                if up {
+                    let above = ed.buf.line(first - 1).to_owned();
+                    let end = Pos::new(last, ed.buf.line(last).len());
+                    ed.buf.replace(Pos::new(first - 1, 0), end, &format!("{block}\n{above}"));
+                } else {
+                    let below = ed.buf.line(last + 1).to_owned();
+                    let end = Pos::new(last + 1, ed.buf.line(last + 1).len());
+                    ed.buf.replace(Pos::new(first, 0), end, &format!("{below}\n{block}"));
+                }
             }
-            sel
+            let shift = |p: Pos| Pos::new(if up { p.line - 1 } else { p.line + 1 }, p.col);
+            ed.cursor_snapshot().into_iter().map(|s| Selection::new(shift(s.anchor), shift(s.head))).collect()
         });
+    }
+
+    /// 커서가 있는 줄마다 아래(`true`)나 위에 빈 줄을 넣고 그 줄로 커서를 옮긴다. 들여쓰기는 이어 간다.
+    pub fn insert_line(&mut self, below: bool) {
+        if self.read_only {
+            return;
+        }
+        let before = self.cursor_snapshot();
+        let mut lines: Vec<usize> = self.extra.iter().map(|c| c.sel.head.line).collect();
+        let primary_line = self.sel.head.line;
+        lines.retain(|&l| l != primary_line);
+        lines.sort_unstable();
+        lines.dedup();
+        let at = |ed: &Self, l: usize| Selection::caret(Pos::new(l, if below { ed.buf.line(l).len() } else { 0 }));
+        let carets: Vec<Selection> = lines.iter().map(|&l| at(self, l)).collect();
+        let primary = at(self, primary_line);
+        self.sel = primary;
+        self.extra = carets.into_iter().map(Cursor::new).collect();
+        self.normalize_cursors();
+        self.edit_before = Some(before);
+        if below {
+            self.newline();
+        } else {
+            self.edit(EditKind::Other, |ed| {
+                let l = ed.sel.head.line;
+                let base = ed.buf.line(l)[..ed.buf.first_non_ws(l)].to_owned();
+                ed.buf.insert(Pos::new(l, 0), &format!("{base}\n"));
+                Selection::caret(Pos::new(l, base.len()))
+            });
+        }
     }
 
     pub fn undo(&mut self) {
         if self.read_only {
             return;
         }
-        if let Some(sel) = self.buf.undo() {
-            self.extra.clear();
-            self.sel = Selection::new(self.buf.clamp(sel.anchor), self.buf.clamp(sel.head));
+        if let Some(all) = self.buf.undo() {
+            self.restore_cursors(&all);
             self.sync_highlighter();
             self.reveal = Some(Reveal::Nearest);
         }
@@ -823,9 +926,8 @@ impl Editor {
         if self.read_only {
             return;
         }
-        if let Some(sel) = self.buf.redo() {
-            self.extra.clear();
-            self.sel = Selection::new(self.buf.clamp(sel.anchor), self.buf.clamp(sel.head));
+        if let Some(all) = self.buf.redo() {
+            self.restore_cursors(&all);
             self.sync_highlighter();
             self.reveal = Some(Reveal::Nearest);
         }
@@ -865,7 +967,7 @@ impl Editor {
     /// 잘라내고 잘라낸 텍스트를 돌려준다. 선택이 없으면 현재 줄을 잘라낸다.
     pub fn cut(&mut self) -> String {
         let text = self.copy_text();
-        if self.sel.is_empty() && self.extra.is_empty() {
+        if self.cursors().iter().all(Selection::is_empty) {
             self.delete_lines();
         } else {
             self.edit(EditKind::Other, |ed| {
@@ -904,25 +1006,44 @@ impl Editor {
             self.move_one(m, extend);
             return;
         }
-        let (primary, ppref) = (self.sel, self.preferred_col);
+        let primary = self.primary_cursor();
         let extras = std::mem::take(&mut self.extra);
         let mut moved = Vec::with_capacity(extras.len());
         for c in extras {
-            self.sel = c.sel;
-            self.preferred_col = c.pref;
+            self.set_primary_cursor(c);
             self.move_one(m, extend);
-            moved.push(Cursor { sel: self.sel, pref: self.preferred_col });
+            moved.push(self.primary_cursor());
         }
-        self.sel = primary;
-        self.preferred_col = ppref;
+        self.set_primary_cursor(primary);
         self.move_one(m, extend);
         self.extra = moved;
         self.normalize_cursors();
     }
 
-    /// 위치가 속한 시각 줄의 바이트 범위와 줄의 마지막 시각 줄인지.
-    pub(crate) fn seg_of(&self, p: Pos) -> (usize, usize, bool) {
+    /// 위치가 속한 시각 줄의 줄 안 순번. `row_end` 면 줄 바꿈 지점을 앞 시각 줄 끝으로 본다.
+    pub(crate) fn sub_of_aff(&self, p: Pos, row_end: bool) -> usize {
         let sub = self.display.sub_of(p);
+        if row_end && sub > 0 && self.display.segment(p.line, sub, self.buf.line(p.line).len()).0 == p.col {
+            sub - 1
+        } else {
+            sub
+        }
+    }
+
+    /// 위치의 시각 줄 번호. `row_end` 는 [`Editor::sub_of_aff`] 와 같다.
+    pub(crate) fn pos_row_aff(&mut self, p: Pos, row_end: bool) -> usize {
+        let sub = self.sub_of_aff(p, row_end);
+        self.display.line_row(p.line) + sub
+    }
+
+    /// 주 커서 헤드가 앞 시각 줄 끝에 붙어 있는지.
+    pub(crate) fn head_at_row_end(&self) -> bool {
+        self.row_end_at == Some(self.sel.head)
+    }
+
+    /// 위치가 속한 시각 줄의 바이트 범위와 줄의 마지막 시각 줄인지. `row_end` 는 [`Editor::sub_of_aff`] 와 같다.
+    pub(crate) fn seg_of_aff(&self, p: Pos, row_end: bool) -> (usize, usize, bool) {
+        let sub = self.sub_of_aff(p, row_end);
         let len = self.buf.line(p.line).len();
         let (a, b) = self.display.segment(p.line, sub, len);
         (a, b, sub + 1 >= self.display.rows(p.line).max(1))
@@ -930,7 +1051,11 @@ impl Editor {
 
     /// 시각 줄 시작부터 센 표시 열.
     pub(crate) fn row_display_col(&self, p: Pos) -> usize {
-        let (s, _, _) = self.seg_of(p);
+        self.row_display_col_aff(p, false)
+    }
+
+    fn row_display_col_aff(&self, p: Pos, row_end: bool) -> usize {
+        let (s, _, _) = self.seg_of_aff(p, row_end);
         let tab = self.indent.width();
         self.buf.line(p.line)[s.min(p.col)..p.col].chars().map(|c| char_cols(c, tab)).sum()
     }
@@ -954,7 +1079,11 @@ impl Editor {
 
     /// `head` 에서 시각 줄 `delta` 만큼 떨어진 줄의 표시 열 `pref` 위치. 문서 밖이면 `None`.
     pub(crate) fn vertical_step(&mut self, head: Pos, pref: usize, delta: isize) -> Option<Pos> {
-        let row = self.display.pos_row(head) as isize;
+        self.vertical_step_aff(head, false, pref, delta)
+    }
+
+    fn vertical_step_aff(&mut self, head: Pos, row_end: bool, pref: usize, delta: isize) -> Option<Pos> {
+        let row = self.pos_row_aff(head, row_end) as isize;
         let total = self.display.total_rows() as isize;
         let t = row + delta;
         if t < 0 || t >= total {
@@ -971,6 +1100,8 @@ impl Editor {
     fn move_one(&mut self, m: Motion, extend: bool) {
         let (a, b) = self.sel.range();
         let head = self.sel.head;
+        let aff = self.head_at_row_end();
+        self.row_end_at = None;
         let collapse_to = |p: Pos| if extend { None } else { Some(p) };
         let target = match m {
             Motion::Left => collapse_to(a).filter(|_| a != b).unwrap_or_else(|| self.buf.prev_char(head)),
@@ -978,7 +1109,7 @@ impl Editor {
             Motion::WordLeft => self.buf.prev_word(head),
             Motion::WordRight => self.buf.next_word(head),
             Motion::Home => {
-                let (s, _, _) = self.seg_of(head);
+                let (s, _, _) = self.seg_of_aff(head, aff);
                 if s > 0 && head.col != s {
                     Pos::new(head.line, s)
                 } else {
@@ -987,15 +1118,19 @@ impl Editor {
                 }
             }
             Motion::End => {
-                let (_, e, last) = self.seg_of(head);
-                let line_end = self.buf.line(head.line).len();
-                let seg_end = self.buf.line(head.line)[..e].char_indices().next_back().map_or(e, |(i, _)| i);
-                if !last && head.col != seg_end { Pos::new(head.line, seg_end) } else { Pos::new(head.line, line_end) }
+                let (_, e, last) = self.seg_of_aff(head, aff);
+                if !last && !(aff && head.col == e) {
+                    let p = Pos::new(head.line, e);
+                    self.row_end_at = Some(p);
+                    p
+                } else {
+                    Pos::new(head.line, self.buf.line(head.line).len())
+                }
             }
             Motion::Up(n) | Motion::Down(n) => {
-                let pref = self.preferred_col.unwrap_or_else(|| self.row_display_col(head));
+                let pref = self.preferred_col.unwrap_or_else(|| self.row_display_col_aff(head, aff));
                 let up = matches!(m, Motion::Up(_));
-                let row = self.display.pos_row(head);
+                let row = self.pos_row_aff(head, aff);
                 let total = self.display.total_rows();
                 let p = if up && row == 0 {
                     Pos::new(0, 0)
@@ -1004,7 +1139,7 @@ impl Editor {
                     Pos::new(l, self.buf.line(l).len())
                 } else {
                     let d = if up { -(n.min(row) as isize) } else { n.min(total - 1 - row) as isize };
-                    self.vertical_step(head, pref, d).unwrap_or(head)
+                    self.vertical_step_aff(head, aff, pref, d).unwrap_or(head)
                 };
                 self.sel = if extend { Selection::new(self.sel.anchor, p) } else { Selection::caret(p) };
                 self.preferred_col = Some(pref);
@@ -1028,6 +1163,13 @@ impl Editor {
         self.preferred_col = None;
         self.reveal = Some(Reveal::Nearest);
     }
+}
+
+/// 선택이 걸친 줄 번호(첫 줄, 끝 줄). 끝 위치가 줄 맨 앞이면 그 줄은 제외.
+fn sel_lines(s: Selection) -> (usize, usize) {
+    let (a, b) = s.range();
+    let last = if b.line > a.line && b.col == 0 { b.line - 1 } else { b.line };
+    (a.line, last)
 }
 
 #[cfg(test)]
@@ -1123,7 +1265,8 @@ mod tests {
         e.move_caret(Motion::Down(1), false);
         assert_eq!(e.sel.head, Pos::new(0, 6));
         e.move_caret(Motion::End, false);
-        assert_eq!(e.sel.head, Pos::new(0, 9));
+        assert_eq!(e.sel.head, Pos::new(0, 10));
+        assert!(e.head_at_row_end());
         e.move_caret(Motion::End, false);
         assert_eq!(e.sel.head, Pos::new(0, 14));
         e.move_caret(Motion::Home, false);
@@ -1141,6 +1284,43 @@ mod tests {
         e.set_word_wrap(true);
         e.set_word_wrap(false);
         assert_eq!(e.display.rows(0), 1);
+    }
+
+    #[test]
+    fn end_on_wrapped_row_puts_caret_after_last_char_of_that_row() {
+        let mut e = ed("aaaa bbbb cccc\nx");
+        e.set_wrap_cols(5);
+        e.sel = Selection::caret(Pos::new(0, 1));
+        e.move_caret(Motion::End, false);
+        assert_eq!(e.sel.head, Pos::new(0, 5));
+        assert!(e.head_at_row_end());
+        assert_eq!(e.pos_row_aff(e.sel.head, e.head_at_row_end()), 0, "커서는 첫 시각 줄 끝에 그린다");
+        assert_eq!(e.display.pos_row(e.sel.head), 1);
+        e.move_caret(Motion::Home, false);
+        assert_eq!(e.sel.head, Pos::new(0, 0), "Home 은 같은 시각 줄의 처음으로 간다");
+        e.move_caret(Motion::End, false);
+        e.move_caret(Motion::Down(1), false);
+        assert_eq!(e.sel.head, Pos::new(0, 9));
+        assert!(!e.head_at_row_end());
+        e.sel = Selection::caret(Pos::new(0, 1));
+        e.move_caret(Motion::End, true);
+        assert_eq!(e.sel, Selection::new(Pos::new(0, 1), Pos::new(0, 5)));
+        e.sel = Selection::caret(Pos::new(0, 1));
+        e.move_caret(Motion::End, false);
+        e.insert_text("X");
+        assert_eq!(e.text(), "aaaa Xbbbb cccc\nx");
+        assert!(!e.head_at_row_end());
+    }
+
+    #[test]
+    fn end_affinity_is_kept_per_cursor() {
+        let mut e = ed("aaaa bbbb\ncccc dddd");
+        e.set_wrap_cols(5);
+        e.set_cursors(Selection::caret(Pos::new(0, 0)), &[Selection::caret(Pos::new(1, 0))]);
+        e.move_caret(Motion::End, false);
+        assert_eq!(e.cursors().iter().map(|s| s.head).collect::<Vec<_>>(), vec![Pos::new(0, 5), Pos::new(1, 5)]);
+        assert!(e.head_at_row_end());
+        assert!(e.extra.iter().all(|c| c.row_end_at == Some(c.sel.head)));
     }
 
     #[test]

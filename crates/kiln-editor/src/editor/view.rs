@@ -12,7 +12,7 @@ use egui::{
 };
 use kiln_common::Theme;
 
-use super::{Editor, Motion, Reveal, char_cols};
+use super::{ColumnSel, Editor, Motion, Reveal, char_cols};
 use crate::buffer::{Pos, Selection};
 use crate::ui_kit::{self, Icon};
 
@@ -31,6 +31,8 @@ pub(crate) enum DragMode {
     Char,
     Word(Pos, Pos),
     Line(usize),
+    /// 사각 선택 끌기. 시작 줄, 시작 표시 열, 시작점을 벗어났는지.
+    Column { line: usize, col: usize, moved: bool },
 }
 
 #[derive(Default)]
@@ -349,9 +351,10 @@ impl Editor {
     }
 
     /// 위치가 속한 시각 줄의 갤리, 그 시각 줄 시작 바이트, 줄 바꿈 들여쓰기(px).
-    fn galley_for_pos(&self, ui: &Ui, p: Pos, font: &FontId) -> (Arc<Galley>, usize, f32) {
-        let (s, e, _) = self.seg_of(p);
-        let indent = self.row_indent_px(p.line, self.display.sub_of(p));
+    /// `row_end` 면 줄 바꿈 지점을 앞 시각 줄 끝으로 본다.
+    fn galley_for_pos(&self, ui: &Ui, p: Pos, row_end: bool, font: &FontId) -> (Arc<Galley>, usize, f32) {
+        let (s, e, _) = self.seg_of_aff(p, row_end);
+        let indent = self.row_indent_px(p.line, self.sub_of_aff(p, row_end));
         (self.seg_galley(ui, p.line, s, e, font, None), s, indent)
     }
 
@@ -381,9 +384,10 @@ impl Editor {
         let row_h = self.view.row_h;
         let font = self.view.font.clone().unwrap_or_else(|| TextStyle::Monospace.resolve(ui.style()));
         let head = self.sel.head;
-        let (g, s, ind) = self.galley_for_pos(ui, head, &font);
+        let aff = self.head_at_row_end();
+        let (g, s, ind) = self.galley_for_pos(ui, head, aff, &font);
         let x = PAD_LEFT + ind + self.seg_x(&g, head.line, s, head.col);
-        let y = self.display.pos_row(head) as f32 * row_h;
+        let y = self.pos_row_aff(head, aff) as f32 * row_h;
         let mut off = self.view.scroll;
         let vw = if self.view.viewport.x > 0.0 { self.view.viewport.x } else { view.x };
         let vh = if self.view.viewport.y > 0.0 { self.view.viewport.y } else { view.y };
@@ -495,6 +499,10 @@ impl Editor {
         let painter = ui.painter_at(screen_vp);
         let base_x = origin.x + PAD_LEFT;
         let sels = self.cursors();
+        let row_ends: Vec<Pos> = std::iter::once(self.primary_cursor())
+            .chain(self.extra.iter().copied())
+            .filter_map(|c| c.row_end_at.filter(|&p| p == c.sel.head))
+            .collect();
         let primary = self.sel;
         let (psa, psb) = primary.range();
         let has_focus = ui.memory(|m| m.has_focus(self.id()));
@@ -629,7 +637,7 @@ impl Editor {
                 while ci < sels.len() && sels[ci].range().0.line <= i {
                     let s = sels[ci];
                     ci += 1;
-                    if s.head.line != i || !self.seg_contains(r, s.head.col) {
+                    if s.head.line != i || !caret_in_row(r, s.head.col, row_ends.contains(&s.head)) {
                         continue;
                     }
                     let is_primary = s == primary;
@@ -658,30 +666,41 @@ impl Editor {
 
     /// 화면 좌표의 버퍼 위치.
     pub(crate) fn pos_at(&mut self, ui: &Ui, p: Pos2, origin: Pos2, font: &FontId) -> Pos {
+        self.hit(ui, p, origin, font).0
+    }
+
+    /// 화면 좌표의 버퍼 위치와 줄 처음부터 센 표시 열. 줄 끝 너머는 빈 열까지 센다.
+    fn hit(&mut self, ui: &Ui, p: Pos2, origin: Pos2, font: &FontId) -> (Pos, usize) {
         let row_h = self.view.row_h;
         let fy = (p.y - origin.y) / row_h;
         if fy < 0.0 {
-            return Pos::new(0, 0);
+            return (Pos::new(0, 0), 0);
         }
         let total = self.display.total_rows();
         let row = fy.floor() as usize;
-        if row >= total {
-            let (l, _) = self.display.row_to_line(total.saturating_sub(1));
-            return Pos::new(l, self.buf.line(l).len());
-        }
-        let (line, sub) = self.display.row_to_line(row);
+        let (line, sub) = self.display.row_to_line(row.min(total.saturating_sub(1)));
         let len = self.buf.line(line).len();
         let (s, e) = self.display.segment(line, sub, len);
         let last = sub + 1 >= self.display.rows(line).max(1);
         let g = self.seg_galley(ui, line, s, e, font, None);
         let x = p.x - origin.x - PAD_LEFT - self.row_indent_px(line, sub);
+        if row >= total {
+            let end = Pos::new(line, len);
+            return (end, self.display_col(end));
+        }
         let cc = g.cursor_from_pos(vec2(x, g.size().y / 2.0));
         let text = self.buf.line(line);
         let mut col = s + char_to_byte(&text[s..e], cc.index.0);
         if col == e && !last {
             col = text[..e].char_indices().next_back().map_or(s, |(i, _)| i.max(s));
         }
-        Pos::new(line, col)
+        let pos = Pos::new(line, col);
+        let mut vcol = self.display_col(pos);
+        if col == e && last {
+            let over = ((x - g.size().x) / self.view.char_w.max(1.0)).round();
+            vcol += over.max(0.0) as usize;
+        }
+        (pos, vcol)
     }
 
     fn handle_mouse(&mut self, ui: &Ui, resp: &Response, origin: Pos2, font: &FontId) {
@@ -700,11 +719,16 @@ impl Editor {
                 self.view.drag = DragMode::None;
                 return;
             }
-            let pos = self.pos_at(ui, p, origin, font);
+            let (pos, vcol) = self.hit(ui, p, origin, font);
             self.preferred_col = None;
-            if mods.alt && !mods.shift && !cmd {
-                self.add_cursor(pos);
-                self.view.drag = DragMode::None;
+            self.row_end_at = None;
+            if mods.alt && !cmd {
+                if mods.shift {
+                    self.set_selection(Selection::caret(pos));
+                } else {
+                    self.add_cursor(pos);
+                }
+                self.view.drag = DragMode::Column { line: pos.line, col: vcol, moved: mods.shift };
                 return;
             }
             if cmd && !mods.shift && self.lsp_goto_definition_at(pos) {
@@ -731,8 +755,19 @@ impl Editor {
             self.view.drag = DragMode::Line(pos.line);
         }
         if resp.dragged() && self.view.drag != DragMode::None && let Some(p) = pointer {
-            let pos = self.pos_at(ui, p, origin, font);
+            let (pos, vcol) = self.hit(ui, p, origin, font);
             match self.view.drag {
+                DragMode::Column { line, col, moved } => {
+                    if moved || (pos.line, vcol) != (line, col) {
+                        self.view.drag = DragMode::Column { line, col, moved: true };
+                        self.set_column_selection(ColumnSel {
+                            anchor_line: line,
+                            anchor_col: col,
+                            head_line: pos.line,
+                            head_col: vcol,
+                        });
+                    }
+                }
                 DragMode::Char => self.sel.head = pos,
                 DragMode::Word(a, b) => {
                     let (wa, wb) = self.buf.word_at(pos);
@@ -913,13 +948,14 @@ impl Editor {
     fn ime_output(&mut self, ui: &Ui, inner: Rect) {
         let row_h = self.view.row_h;
         let head = self.sel.head;
+        let aff = self.head_at_row_end();
         let font = match &self.view.font {
             Some(f) => f.clone(),
             None => return,
         };
-        let (g, s, ind) = self.galley_for_pos(ui, head, &font);
+        let (g, s, ind) = self.galley_for_pos(ui, head, aff, &font);
         let x = inner.left() + PAD_LEFT + ind + self.seg_x(&g, head.line, s, head.col) - self.view.scroll.x;
-        let y = inner.top() + self.display.pos_row(head) as f32 * row_h - self.view.scroll.y;
+        let y = inner.top() + self.pos_row_aff(head, aff) as f32 * row_h - self.view.scroll.y;
         let cursor = Rect::from_min_size(pos2(x, y), vec2(2.0, row_h));
         let to_global = ui.ctx().layer_transform_to_global(ui.layer_id()).unwrap_or_default();
         ui.output_mut(|o| {
@@ -935,7 +971,7 @@ impl Editor {
     /// 버퍼 위치의 화면 좌표(시각 줄 왼쪽 위). 텍스트 영역 `inner` 기준.
     pub(crate) fn screen_pos_of(&mut self, ui: &Ui, p: Pos, inner: Rect) -> Pos2 {
         let font = self.view.font.clone().unwrap_or_else(|| TextStyle::Monospace.resolve(ui.style()));
-        let (g, s, ind) = self.galley_for_pos(ui, p, &font);
+        let (g, s, ind) = self.galley_for_pos(ui, p, false, &font);
         let x = inner.left() + PAD_LEFT + ind + self.seg_x(&g, p.line, s, p.col) - self.view.scroll.x;
         let y = inner.top() + self.display.pos_row(p) as f32 * self.view.row_h - self.view.scroll.y;
         pos2(x, y)
@@ -1048,8 +1084,9 @@ impl Editor {
                         let key = if modifiers.alt { physical_key.unwrap_or(*key) } else { *key };
                         self.view.swallow_text = false;
                         let handled = self.handle_key(key, *modifiers, is_mac);
-                        // Option 조합 단축키가 macOS 에서 함께 보내는 글자는 넣지 않는다.
-                        self.view.swallow_text = handled && modifiers.alt && !modifiers.command && !modifiers.ctrl;
+                        // Option 조합 단축키가 macOS 에서 함께 보내는 글자는 넣지 않는다. 화살표 키는 글자를 보내지 않는다.
+                        let arrow = matches!(key, Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight);
+                        self.view.swallow_text = handled && modifiers.alt && !modifiers.command && !modifiers.ctrl && !arrow;
                         handled
                     }
                 }
@@ -1129,6 +1166,14 @@ impl Editor {
             Key::F2 => self.lsp_start_rename(),
             Key::F if m.shift && m.alt && !cmd => self.lsp_format(),
             Key::Space if m.ctrl => self.lsp_trigger_completion(None),
+            Key::ArrowUp if m.shift && m.alt && !cmd && !m.ctrl => self.extend_column(-1, 0),
+            Key::ArrowDown if m.shift && m.alt && !cmd && !m.ctrl => self.extend_column(1, 0),
+            Key::ArrowLeft if m.shift && m.alt && !cmd && !m.ctrl && self.active_column().is_some() => {
+                self.extend_column(0, -1)
+            }
+            Key::ArrowRight if m.shift && m.alt && !cmd && !m.ctrl && self.active_column().is_some() => {
+                self.extend_column(0, 1)
+            }
             Key::ArrowLeft => self.move_caret(if mac_line { Motion::Home } else if word { Motion::WordLeft } else { Motion::Left }, ext),
             Key::ArrowRight => self.move_caret(if mac_line { Motion::End } else if word { Motion::WordRight } else { Motion::Right }, ext),
             Key::ArrowUp if m.alt && !cmd && !m.ctrl => self.move_lines(true),
@@ -1147,18 +1192,7 @@ impl Editor {
                 self.move_caret(Motion::Down(n), ext);
                 self.view.scroll.y += n as f32 * self.view.row_h;
             }
-            Key::Enter if cmd => {
-                let l = self.sel.head.line;
-                let (at, below) = if m.shift { (Pos::new(l, 0), false) } else { (Pos::new(l, self.buf.line(l).len()), true) };
-                self.sel = Selection::caret(at);
-                if below {
-                    self.newline();
-                } else {
-                    let base = self.buf.line(l)[..self.buf.first_non_ws(l)].to_owned();
-                    self.paste(&format!("{base}\n"));
-                    self.sel = Selection::caret(Pos::new(l, base.len()));
-                }
-            }
+            Key::Enter if cmd => self.insert_line(!m.shift),
             Key::Enter => self.newline(),
             Key::Tab if m.shift => self.indent_lines(false),
             Key::Tab if !cmd && !m.ctrl => self.indent_or_tab(),
@@ -1195,4 +1229,15 @@ fn remove_events(ui: &mut Ui, consumed: &[usize]) {
             keep
         });
     });
+}
+
+/// 커서가 이 시각 줄에 그려지는지. `row_end` 면 줄 바꿈 지점의 커서를 앞 시각 줄 끝에 둔다.
+fn caret_in_row(r: &RowInfo, col: usize, row_end: bool) -> bool {
+    if row_end && !r.last && col == r.end {
+        return true;
+    }
+    if row_end && r.sub > 0 && col == r.start {
+        return false;
+    }
+    r.start <= col && (col < r.end || (col == r.end && r.last))
 }

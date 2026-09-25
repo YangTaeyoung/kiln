@@ -239,3 +239,183 @@ fn snapshot_editor_folded() {
     h.run();
     h.snapshot("editor_folded");
 }
+
+/// 고정폭 글꼴 한 글자 폭(px).
+fn char_w(h: &Harness<'static, Editor>) -> f32 {
+    let font = egui::TextStyle::Monospace.resolve(&h.ctx.global_style());
+    h.ctx.fonts_mut(|f| f.glyph_width(&font, 'M'))
+}
+
+/// 시각 줄 `row`, 표시 열 `col` 의 화면 좌표.
+fn cell(h: &Harness<'static, Editor>, row: usize, col: f32) -> Pos2 {
+    let text = h.state().layout_info().2;
+    egui::pos2(text.left() + 6.0 + col * char_w(h), row_y(h, row))
+}
+
+fn drag(h: &mut Harness<'static, Editor>, from: Pos2, to: Pos2, modifiers: Modifiers) {
+    h.event(Event::ModifiersChanged(modifiers));
+    h.event(Event::PointerMoved(from));
+    h.event(Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers });
+    h.run();
+    let mid = from + (to - from) * 0.5;
+    h.event(Event::PointerMoved(mid));
+    h.run();
+    h.event(Event::PointerMoved(to));
+    h.run();
+    h.event(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers });
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run();
+}
+
+const COLUMN_TEXT: &str = "let alpha = 1;\nlet b = 2;\nlet gamma = 3;\nx\n";
+
+#[test]
+fn alt_drag_makes_column_selection_and_typing_edits_every_line() {
+    let mut h = harness(Editor::from_text("a.rs", COLUMN_TEXT));
+    h.run();
+    focus(&mut h);
+    let (from, to) = (cell(&h, 0, 4.0), cell(&h, 3, 9.0));
+    drag(&mut h, from, to, Modifiers::ALT);
+    let r: Vec<(Pos, Pos)> = h.state().cursors().iter().map(|s| s.range()).collect();
+    assert_eq!(
+        r,
+        vec![
+            (Pos::new(0, 4), Pos::new(0, 9)),
+            (Pos::new(1, 4), Pos::new(1, 9)),
+            (Pos::new(2, 4), Pos::new(2, 9)),
+            (Pos::new(3, 1), Pos::new(3, 1)),
+        ],
+        "시작 열보다 짧은 줄은 줄 끝 커서"
+    );
+    h.snapshot("editor_column_selection");
+    type_text(&mut h, "Z");
+    assert_eq!(h.state().text(), "let Z = 1;\nlet Z;\nlet Z = 3;\nxZ\n");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().text(), COLUMN_TEXT);
+    assert_eq!(h.state().cursor_count(), 4, "되돌리면 사각 선택 커서가 모두 돌아온다");
+}
+
+#[test]
+fn shift_alt_drag_starts_column_selection_at_press_point() {
+    let mut h = harness(Editor::from_text("a.rs", COLUMN_TEXT));
+    h.run();
+    focus(&mut h);
+    let (from, to) = (cell(&h, 2, 4.0), cell(&h, 0, 9.0));
+    drag(&mut h, from, to, Modifiers::ALT | Modifiers::SHIFT);
+    assert_eq!(h.state().cursor_count(), 3);
+    assert_eq!(h.state().selection(), Selection::new(Pos::new(0, 4), Pos::new(0, 9)), "끝 줄의 커서가 주 커서");
+}
+
+#[test]
+fn alt_click_without_drag_still_adds_one_cursor() {
+    let mut h = harness(Editor::from_text("a.rs", COLUMN_TEXT));
+    h.run();
+    focus(&mut h);
+    let p = cell(&h, 2, 3.0);
+    click(&mut h, p, Modifiers::ALT);
+    assert_eq!(h.state().cursor_count(), 2);
+}
+
+#[test]
+fn shift_alt_arrows_extend_column_selection() {
+    let mut ed = Editor::from_text("a.rs", COLUMN_TEXT);
+    ed.set_selection(Selection::caret(Pos::new(0, 4)));
+    let mut h = harness(ed);
+    h.run();
+    focus(&mut h);
+    let sa = Modifiers::ALT | Modifiers::SHIFT;
+    h.key_press_modifiers(sa, Key::ArrowDown);
+    h.key_press_modifiers(sa, Key::ArrowDown);
+    for _ in 0..5 {
+        h.key_press_modifiers(sa, Key::ArrowRight);
+    }
+    h.run();
+    let r: Vec<(Pos, Pos)> = h.state().cursors().iter().map(|s| s.range()).collect();
+    assert_eq!(r, vec![(Pos::new(0, 4), Pos::new(0, 9)), (Pos::new(1, 4), Pos::new(1, 9)), (Pos::new(2, 4), Pos::new(2, 9))]);
+    type_text(&mut h, "Z");
+    assert_eq!(h.state().text(), "let Z = 1;\nlet Z;\nlet Z = 3;\nx\n");
+}
+
+#[test]
+fn line_command_shortcuts_apply_to_every_cursor() {
+    const T: &str = "a();\nb();\nc();\n";
+    let mut ed = Editor::from_text("a.rs", T);
+    ed.set_cursors(Selection::caret(Pos::new(0, 1)), &[Selection::caret(Pos::new(0, 3)), Selection::caret(Pos::new(2, 0))]);
+    let mut h = harness(ed);
+    h.run();
+    focus(&mut h);
+    let heads = |h: &Harness<'static, Editor>| h.state().cursors().iter().map(|s| s.head).collect::<Vec<_>>();
+
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Slash);
+    h.run();
+    assert_eq!(h.state().text(), "// a();\nb();\n// c();\n");
+    assert_eq!(heads(&h), vec![Pos::new(0, 4), Pos::new(0, 6), Pos::new(2, 3)]);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Slash);
+    h.run();
+    assert_eq!(h.state().text(), T);
+
+    h.key_press_modifiers(Modifiers::COMMAND, Key::CloseBracket);
+    h.run();
+    assert_eq!(h.state().text(), "    a();\nb();\n    c();\n");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::OpenBracket);
+    h.run();
+    assert_eq!(h.state().text(), T);
+
+    h.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+    h.run();
+    assert_eq!(h.state().text(), "b();\na();\n\nc();");
+    assert_eq!(heads(&h), vec![Pos::new(1, 1), Pos::new(1, 3), Pos::new(3, 0)]);
+    h.key_press_modifiers(Modifiers::ALT, Key::ArrowUp);
+    h.run();
+    assert_eq!(h.state().text(), T);
+
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run();
+    assert_eq!(h.state().text(), "a();\n\nb();\nc();\n\n");
+    type_text(&mut h, "x");
+    assert_eq!(h.state().text(), "a();\nx\nb();\nc();\nx\n");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().text(), T);
+    assert_eq!(heads(&h), vec![Pos::new(0, 1), Pos::new(0, 3), Pos::new(2, 0)]);
+
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter);
+    h.run();
+    assert_eq!(h.state().text(), "\na();\nb();\n\nc();\n");
+    assert_eq!(heads(&h), vec![Pos::new(0, 0), Pos::new(3, 0)]);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::K);
+    h.run();
+    assert_eq!(h.state().text(), "b();\n");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!(h.state().text(), T);
+    assert_eq!(h.state().cursor_count(), 3);
+}
+
+#[test]
+fn end_on_wrapped_row_draws_caret_at_row_end() {
+    let long = format!("{}\nend", "word ".repeat(30));
+    let mut ed = Editor::from_text("a.txt", &long);
+    ed.set_word_wrap(true);
+    let mut h = harness_sized(ed, 420.0, 200.0);
+    h.run();
+    focus(&mut h);
+    h.key_press(Key::End);
+    h.run();
+    let sel = h.state().selection();
+    assert_eq!(sel.head.line, 0);
+    assert!(sel.head.col > 0 && sel.head.col % 5 == 0, "시각 줄 끝(다음 줄 첫 글자 앞): {sel:?}");
+    type_text(&mut h, "!");
+    let text = h.state().text();
+    assert_eq!(&text[sel.head.col - 1..=sel.head.col], " !", "마지막 글자 뒤에 들어간다");
+    h.key_press(Key::Backspace);
+    h.key_press(Key::Home);
+    h.key_press(Key::End);
+    h.run();
+    h.snapshot("editor_wrap_row_end");
+}
