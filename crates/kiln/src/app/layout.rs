@@ -19,7 +19,7 @@ pub enum Node {
     Split { dir: Dir, ratio: f32, a: Box<Node>, b: Box<Node> },
 }
 
-pub const SPLITTER: f32 = 5.0;
+pub const SPLITTER: f32 = 8.0;
 
 impl Node {
     pub fn panes(&self) -> Vec<PaneId> {

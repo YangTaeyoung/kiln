@@ -1,205 +1,389 @@
-//! 화면 구성: 액티비티 바, 워크스페이스 사이드바, 도구 패널, 탭, 분할 창, 상태 바, 오버레이.
+//! 화면 구성: 상단 바(명령 바·페이지·도구), 스페이스 레일, 카드 캔버스, 도구 시트, 오버레이.
 
+use kiln_common::widgets::{self, ButtonKind};
 use super::*;
-use egui::{Align2, CornerRadius, CursorIcon, Frame, Margin, UiBuilder};
+use egui::{Align2, Color32, CornerRadius, CursorIcon, Frame, Margin, RichText, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
+use icons::Icon;
+use kiln_common::fonts;
 
-const ACTIVITY_W: f32 = 44.0;
+pub const TOPBAR_H: f32 = 46.0;
+const HEADER_H: f32 = 32.0;
 
-fn icon_button(ui: &mut egui::Ui, icon: icons::Icon, active: bool, tip: &str, theme: &Theme) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ACTIVITY_W, 40.0), Sense::click());
-    let color = if active { theme.text } else if resp.hovered() { theme.text_dim } else { theme.text_faint };
-    if active {
-        ui.painter().rect_filled(Rect::from_min_size(rect.min + vec2(0.0, 6.0), vec2(2.0, rect.height() - 12.0)), 1.0, theme.accent);
+fn is_mac() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// 카드 한 장의 머리글 정보.
+pub(crate) struct CardInfo {
+    pub name: String,
+    pub detail: String,
+    pub right: String,
+    pub dot: Color32,
+    pub pulse: bool,
+    pub icon: Icon,
+}
+
+/// 터미널 제목 중 보여줄 만한 것만 고른다. 셸 기본 제목(`user@host:경로`)이나 경로만 있는 제목은 버린다.
+pub(crate) fn meaningful_title(title: &str, proc_name: &str, cwd: Option<&str>) -> Option<String> {
+    let t = title.trim();
+    if t.is_empty() || t == proc_name {
+        return None;
     }
-    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(20.0, 20.0)), icon, color);
-    resp.on_hover_text(tip)
+    let first = t.split_whitespace().next().unwrap_or("");
+    if first.contains('@') && first.contains(':') {
+        return None;
+    }
+    if t.starts_with('/') || t.starts_with('~') {
+        return None;
+    }
+    if let Some(c) = cwd {
+        if t == c || t.ends_with(c) || t == short_path(Path::new(c)) {
+            return None;
+        }
+    }
+    Some(t.chars().take(120).collect())
 }
 
 impl KilnApp {
-    pub(super) fn ui_sidebar(&mut self, root: &mut egui::Ui) {
-        let theme = self.theme;
-        egui::Panel::left("activity")
-            .exact_size(ACTIVITY_W)
-            .resizable(false)
-            .frame(Frame::new().fill(theme.bg).stroke(Stroke::NONE))
-            .show(root, |ui| {
-                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                ui.add_space(6.0);
-                if icon_button(ui, icons::Icon::Menu, self.sidebar_open, "워크스페이스 (⌘B)", &theme).clicked() {
-                    self.actions.push(Action::ToggleSidebar);
-                }
-                ui.add_space(6.0);
-                let (tool, open) = self.workspaces.get(self.active).map(|w| (w.tool, w.tool_open)).unwrap_or((tools::ToolKind::Explorer, false));
-                for k in tools::ToolKind::ALL {
-                    let sc = match k {
-                        tools::ToolKind::Explorer => "⇧⌘E",
-                        tools::ToolKind::Search => "⇧⌘F",
-                        tools::ToolKind::Git => "⇧⌘G",
-                        tools::ToolKind::PullRequests => "⇧⌘R",
-                        tools::ToolKind::Database => "⇧⌘B",
-                        tools::ToolKind::Problems => "⇧⌘M",
+    pub(crate) fn card_info(&self, pid: PaneId) -> CardInfo {
+        let t = self.theme;
+        let Some(pane) = self.panes.get(&pid) else {
+            return CardInfo { name: String::new(), detail: String::new(), right: String::new(), dot: t.text_faint, pulse: false, icon: Icon::Terminal };
+        };
+        match &pane.kind {
+            PaneKind::Term { session, .. } => match session.and_then(|s| self.conn.infos.get(&s)) {
+                Some(i) => {
+                    let proc_name = i.fg_process.clone().unwrap_or_else(|| "셸".into());
+                    let is_shell = shells().contains(&proc_name.as_str()) || proc_name == "셸";
+                    let (dot, pulse) = if i.exited.is_some() {
+                        (t.red, false)
+                    } else if i.attention {
+                        (t.orange, true)
+                    } else if is_shell {
+                        (t.text_faint, false)
+                    } else {
+                        (t.green, false)
                     };
-                    if icon_button(ui, k.vicon(), open && tool == k, &format!("{} ({sc})", k.label()), &theme).clicked() {
-                        self.actions.push(Action::ToggleTool(k));
-                    }
+                    let detail = match i.exited {
+                        Some(code) => format!("종료됨 · 코드 {code}"),
+                        None => meaningful_title(&i.title, &proc_name, i.cwd.as_deref()).unwrap_or_default(),
+                    };
+                    let right = i.cwd.as_deref().map(|c| short_path(Path::new(c))).unwrap_or_default();
+                    CardInfo { name: proc_name, detail, right, dot, pulse, icon: Icon::Terminal }
                 }
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(6.0);
-                    if icon_button(ui, icons::Icon::Gear, self.settings_open, "설정 (⌘,)", &theme).clicked() {
-                        self.actions.push(Action::OpenSettings);
-                    }
-                    if icon_button(ui, icons::Icon::Command, self.palette.is_open(), "명령 팔레트 (⇧⌘P)", &theme).clicked() {
-                        self.actions.push(Action::OpenPalette);
-                    }
-                });
-            });
-
-        if !self.sidebar_open {
-            return;
+                None => CardInfo { name: "시작하는 중…".into(), detail: String::new(), right: String::new(), dot: t.text_faint, pulse: false, icon: Icon::Terminal },
+            },
+            PaneKind::Tool(tool) => {
+                let dirty = tool.is_dirty();
+                let key = tool.key();
+                let icon = if key.starts_with("db") {
+                    Icon::Database
+                } else if key.starts_with("pr:") {
+                    Icon::PullRequest
+                } else if key.starts_with("diff") || key.starts_with("commit") {
+                    Icon::Branch
+                } else {
+                    Icon::File
+                };
+                CardInfo {
+                    name: tool.title(),
+                    detail: if dirty { "저장 안 됨".into() } else { String::new() },
+                    right: tool.status_text().unwrap_or_default(),
+                    dot: if dirty { t.yellow } else { t.accent },
+                    pulse: false,
+                    icon,
+                }
+            }
         }
-        egui::Panel::left("workspaces")
-            .default_size(232.0)
-            .size_range(170.0..=420.0)
-            .frame(Frame::new().fill(theme.bg_panel).inner_margin(Margin::symmetric(8, 8)))
-            .show(root, |ui| {
+    }
+
+    /// 페이지 이름: 지정한 제목, 없으면 셸이 아닌 첫 카드의 이름.
+    fn page_label(&self, page: &Page) -> String {
+        if let Some(t) = &page.title {
+            return t.clone();
+        }
+        let panes = page.root.panes();
+        let names: Vec<String> = panes.iter().map(|p| self.card_info(*p).name).collect();
+        let main = names.iter().find(|n| !shells().contains(&n.as_str()) && n.as_str() != "셸").cloned().unwrap_or_else(|| names.first().cloned().unwrap_or_default());
+        if panes.len() > 1 { format!("{main} +{}", panes.len() - 1) } else { main }
+    }
+
+    fn page_attention(&self, page: &Page) -> bool {
+        page.root.panes().iter().any(|p| self.panes.get(p).and_then(|x| x.session()).and_then(|s| self.conn.infos.get(&s)).is_some_and(|i| i.attention))
+    }
+
+    // ------------------------------------------------------------------ 상단 바
+
+    pub(super) fn ui_topbar(&mut self, root: &mut egui::Ui) {
+        let t = self.theme;
+        let canvas = widgets::canvas_color(&t);
+        egui::Panel::top("topbar").exact_size(TOPBAR_H).frame(Frame::new().fill(canvas)).show(root, |ui| {
+            let bar = ui.max_rect();
+            // 빈 곳을 끌면 창 이동, 두 번 누르면 최대화 전환.
+            let bg = ui.interact(bar, ui.id().with("drag"), Sense::click_and_drag());
+            if bg.drag_started() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            if bg.double_clicked() {
+                let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+            }
+
+            let cy = bar.center().y;
+            let mut x = bar.left() + if is_mac() { 80.0 } else { 12.0 };
+            let mut lui = ui.new_child(UiBuilder::new().max_rect(egui::Rect::from_min_size(pos2(x, cy - 15.0), vec2(30.0, 30.0))));
+            if widgets::icon_button(&mut lui, Icon::Sidebar, 30.0, false, "스페이스 레일 (⌘B)").clicked() {
+                self.actions.push(Action::ToggleSidebar);
+            }
+            x += 40.0;
+
+            // 현재 스페이스와 브랜치.
+            let ws = &self.workspaces[self.active];
+            let g = ui.painter().layout_no_wrap(ws.name.clone(), fonts::semibold(14.0), t.text);
+            ui.painter().galley(pos2(x, cy - g.size().y / 2.0), g.clone(), t.text);
+            x += g.size().x + 10.0;
+            if let Some(s) = ws.tools.summary() {
+                let label = if s.dirty > 0 { format!("{}  ●{}", s.branch, s.dirty) } else { s.branch.clone() };
+                let lg = ui.painter().layout_no_wrap(label, fonts::medium(12.0), t.text_dim);
+                let chip = egui::Rect::from_min_size(pos2(x, cy - 11.0), vec2(lg.size().x + 30.0, 22.0));
+                ui.painter().rect_filled(chip, CornerRadius::same(11), t.bg_elevated);
+                icons::paint(ui.painter(), egui::Rect::from_center_size(pos2(chip.left() + 13.0, cy), vec2(12.0, 12.0)), Icon::Branch, t.purple);
+                ui.painter().galley(pos2(chip.left() + 23.0, cy - lg.size().y / 2.0), lg, t.text_dim);
+                x = chip.right() + 16.0;
+            }
+
+            // 오른쪽 도구 아이콘.
+            let right_w = (tools::ToolKind::ALL.len() as f32 + 2.0) * 32.0 + 20.0;
+            let right_rect = egui::Rect::from_min_max(pos2(bar.right() - right_w - 10.0, cy - 16.0), pos2(bar.right() - 10.0, cy + 16.0));
+            let mut rui = ui.new_child(UiBuilder::new().max_rect(right_rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
+            rui.spacing_mut().item_spacing.x = 2.0;
+            if widgets::icon_button(&mut rui, Icon::Gear, 30.0, self.settings_ui.open, "설정 (⌘,)").clicked() {
+                self.actions.push(Action::OpenSettings);
+            }
+            let unread = self.unread.len();
+            let bell = widgets::icon_button(&mut rui, Icon::Bell, 30.0, false, if unread > 0 { "최근 알림으로 이동 (⇧⌘U)" } else { "새 알림 없음" });
+            if unread > 0 {
+                let c = pos2(bell.rect.right() - 8.0, bell.rect.top() + 8.0);
+                rui.painter().circle_filled(c, 7.0, t.orange);
+                rui.painter().text(c, Align2::CENTER_CENTER, unread.min(9).to_string(), fonts::semibold(9.5), Color32::BLACK);
+            }
+            if bell.clicked() && unread > 0 {
+                self.actions.push(Action::JumpUnread);
+            }
+            rui.add_space(6.0);
+            let (sep, _) = rui.allocate_exact_size(vec2(1.0, 18.0), Sense::hover());
+            rui.painter().rect_filled(sep, 0.0, t.border_strong);
+            rui.add_space(6.0);
+            let open = self.workspaces[self.active].sheet;
+            for k in tools::ToolKind::ALL.iter().rev() {
+                let tip = format!("{} ({})", k.label(), k.shortcut());
+                if widgets::icon_button(&mut rui, k.vicon(), 30.0, open == Some(*k), &tip).clicked() {
+                    self.actions.push(Action::ToggleSheet(*k));
+                }
+            }
+
+            // 가운데 명령 바.
+            let cmd_w = 420.0f32.min((right_rect.left() - x - 24.0).max(160.0));
+            let cmd_x = (bar.center().x - cmd_w / 2.0).max(x).min(right_rect.left() - cmd_w - 12.0);
+            let cmd = egui::Rect::from_min_size(pos2(cmd_x, cy - 15.0), vec2(cmd_w, 30.0));
+            let resp = ui.interact(cmd, ui.id().with("cmdbar"), Sense::click());
+            let fill = if resp.hovered() { t.bg_hover } else { t.bg_elevated };
+            ui.painter().rect_filled(cmd, CornerRadius::same(8), fill);
+            ui.painter().rect_stroke(cmd, CornerRadius::same(8), Stroke::new(1.0, t.border), StrokeKind::Inside);
+            icons::paint(ui.painter(), egui::Rect::from_center_size(pos2(cmd.left() + 18.0, cy), vec2(14.0, 14.0)), Icon::Search, t.text_faint);
+            ui.painter().with_clip_rect(cmd.shrink(2.0)).text(pos2(cmd.left() + 34.0, cy), Align2::LEFT_CENTER, "명령 · 세션 · 스페이스 검색", fonts::regular(13.0), t.text_faint);
+            let mut kui = ui.new_child(UiBuilder::new().max_rect(egui::Rect::from_min_max(pos2(cmd.right() - 60.0, cy - 9.0), pos2(cmd.right() - 8.0, cy + 9.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
+            widgets::keycaps(&mut kui, &["K", "⌘"]);
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if resp.clicked() {
+                self.actions.push(Action::OpenPalette);
+            }
+
+            // 페이지 알약: 스페이스 이름 뒤, 명령 바 앞.
+            let pages_right = cmd.left() - 12.0;
+            let mut px = x;
+            let active_page = self.workspaces[self.active].active_page;
+            let labels: Vec<(String, bool)> = self.workspaces[self.active].pages.iter().map(|p| (self.page_label(p), self.page_attention(p))).collect();
+            let n = labels.len();
+            if n > 1 {
+                for (i, (label, attention)) in labels.into_iter().enumerate() {
+                    let g = ui.painter().layout_no_wrap(label, fonts::medium(12.0), t.text);
+                    let w = (g.size().x + 30.0).min(180.0);
+                    if px + w > pages_right - 34.0 {
+                        break;
+                    }
+                    let r = egui::Rect::from_min_size(pos2(px, cy - 12.0), vec2(w, 24.0));
+                    let resp = ui.interact(r, ui.id().with(("page", i)), Sense::click());
+                    let sel = i == active_page;
+                    let fill = if sel { t.bg_selected } else if resp.hovered() { t.bg_hover } else { Color32::TRANSPARENT };
+                    ui.painter().rect_filled(r, CornerRadius::same(12), fill);
+                    let dot_c = if attention { t.orange } else if sel { t.accent } else { t.text_faint };
+                    ui.painter().circle_filled(pos2(r.left() + 12.0, cy), 3.0, dot_c);
+                    ui.painter().with_clip_rect(r.shrink2(vec2(6.0, 0.0))).galley(pos2(r.left() + 21.0, cy - g.size().y / 2.0), g, if sel { t.text } else { t.text_dim });
+                    if resp.clicked() {
+                        self.actions.push(Action::SelectPage(i));
+                    }
+                    if resp.middle_clicked() {
+                        self.actions.push(Action::ClosePage(i, false));
+                    }
+                    resp.context_menu(|ui| {
+                        if ui.button("페이지 닫기").clicked() {
+                            self.actions.push(Action::ClosePage(i, false));
+                            ui.close();
+                        }
+                    });
+                    px = r.right() + 4.0;
+                }
+            }
+            if px + 28.0 < pages_right {
+                let mut pui = ui.new_child(UiBuilder::new().max_rect(egui::Rect::from_min_size(pos2(px, cy - 13.0), vec2(26.0, 26.0))));
+                if widgets::icon_button(&mut pui, Icon::Plus, 26.0, false, "새 페이지 (⌘T)").clicked() {
+                    self.actions.push(Action::NewPage);
+                }
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ 스페이스 레일
+
+    pub(super) fn ui_spaces(&mut self, root: &mut egui::Ui) {
+        let t = self.theme;
+        let canvas = widgets::canvas_color(&t);
+        let wide = self.sidebar_open;
+        let width = if wide { 244.0 } else { 62.0 };
+        egui::Panel::left("spaces").exact_size(width).resizable(false).frame(Frame::new().fill(canvas).inner_margin(Margin { left: 10, right: 6, top: 2, bottom: 10 })).show(root, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 4.0);
+            if wide {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("워크스페이스").size(11.5).color(theme.text_faint).strong());
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("스페이스").font(fonts::semibold(11.5)).color(t.text_faint));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icons::button(ui, icons::Icon::Plus, vec2(22.0, 22.0), theme.text_dim, theme.bg_hover, "새 워크스페이스 (⌘N)").clicked() {
+                        if widgets::icon_button(ui, Icon::Plus, 24.0, false, "새 스페이스 (⌘N)").clicked() {
                             self.actions.push(Action::NewWorkspace(None));
                         }
                     });
                 });
-                ui.add_space(6.0);
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    for i in 0..self.workspaces.len() {
-                        self.workspace_card(ui, i);
-                        ui.add_space(4.0);
-                    }
+                ui.add_space(4.0);
+            }
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                for i in 0..self.workspaces.len() {
+                    self.space_row(ui, i, wide);
+                }
+                if !wide {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(5.0);
+                        if widgets::icon_button(ui, Icon::Plus, 32.0, false, "새 스페이스 (⌘N)").clicked() {
+                            self.actions.push(Action::NewWorkspace(None));
+                        }
+                    });
+                } else {
                     self.detached_sessions(ui);
-                });
+                }
             });
+        });
     }
 
-    fn workspace_sessions(&self, i: usize) -> Vec<SessionId> {
-        let ws = &self.workspaces[i];
-        ws.tabs.iter().filter_map(|t| match &t.kind {
-            TabKind::Terminal(tt) => Some(tt.root.panes()),
-            _ => None,
-        }).flatten().filter_map(|p| self.panes.get(&p).and_then(|x| x.session)).collect()
-    }
-
-    fn workspace_card(&mut self, ui: &mut egui::Ui, i: usize) {
-        let theme = self.theme;
+    fn space_row(&mut self, ui: &mut egui::Ui, i: usize, wide: bool) {
+        let t = self.theme;
         let active = i == self.active;
-        let sessions = self.workspace_sessions(i);
+        let ws = &self.workspaces[i];
+        let sessions: Vec<SessionId> = ws.all_panes().iter().filter_map(|p| self.panes.get(p).and_then(|x| x.session())).collect();
         let infos: Vec<&kiln_proto::SessionInfo> = sessions.iter().filter_map(|s| self.conn.infos.get(s)).collect();
         let attention = infos.iter().filter(|x| x.attention).count();
-        let last_note = infos.iter().filter(|x| x.attention).filter_map(|x| x.last_notification.clone()).next();
-        let procs: Vec<(String, bool)> = {
-            let mut v: Vec<(String, bool)> = Vec::new();
-            for inf in &infos {
-                if let Some(p) = &inf.fg_process
-                    && !shells().contains(&p.as_str()) && !v.iter().any(|(n, _)| n == p) {
-                        v.push((p.clone(), inf.attention));
-                    }
+        let mut agents: Vec<(String, bool)> = Vec::new();
+        for inf in &infos {
+            if let Some(p) = &inf.fg_process {
+                if !shells().contains(&p.as_str()) && !agents.iter().any(|(n, _)| n == p) {
+                    agents.push((p.clone(), inf.attention));
+                }
             }
-            v
+        }
+        let note = infos.iter().filter(|x| x.attention).find_map(|x| x.last_notification.clone());
+        let name = ws.name.clone();
+        let root_path = ws.root.clone();
+        let h = if wide { if note.is_some() { 66.0 } else { 52.0 } } else { 44.0 };
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
+        let fill = if active {
+            t.bg_elevated
+        } else if resp.hovered() {
+            widgets::lerp_color(widgets::canvas_color(&t), t.bg_elevated, 0.55)
+        } else {
+            Color32::TRANSPARENT
         };
-        let summary = self.workspaces[i].tools.summary();
-        let ws = &mut self.workspaces[i];
-
-        let fill = if active { theme.bg_selected } else { theme.bg_panel };
-        let frame = Frame::new().fill(fill).corner_radius(CornerRadius::same(6)).inner_margin(Margin { left: 10, right: 8, top: 7, bottom: 7 });
-        let resp = frame.show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 2.0;
-            ui.horizontal(|ui| {
-                if i < 9 {
-                    ui.label(RichText::new(format!("{}", i + 1)).size(10.5).color(theme.text_faint).monospace());
+        ui.painter().rect_filled(rect, CornerRadius::same(10), fill);
+        if active {
+            ui.painter().rect_stroke(rect, CornerRadius::same(10), Stroke::new(1.0, t.border), StrokeKind::Inside);
+        }
+        let av = egui::Rect::from_min_size(pos2(rect.left() + 7.0, rect.top() + if wide { 10.0 } else { 7.0 }), vec2(30.0, 30.0));
+        widgets::avatar(ui, av, &name, active);
+        if attention > 0 {
+            let c = pos2(av.right() - 1.0, av.top() + 1.0);
+            ui.painter().circle_filled(c, 6.5, widgets::canvas_color(&t));
+            widgets::status_dot(ui, c, t.orange, true);
+        }
+        if wide {
+            let x = av.right() + 11.0;
+            let clip = egui::Rect::from_min_max(pos2(x, rect.top()), pos2(rect.right() - 8.0, rect.bottom()));
+            let p = ui.painter().with_clip_rect(clip);
+            if let Some(buf) = &mut self.workspaces[i].renaming {
+                let mut cui = ui.new_child(UiBuilder::new().max_rect(egui::Rect::from_min_size(pos2(x, rect.top() + 7.0), vec2(rect.right() - x - 10.0, 22.0))));
+                let te = cui.add(egui::TextEdit::singleline(buf).font(fonts::medium(13.5)).desired_width(f32::INFINITY));
+                te.request_focus();
+                if te.lost_focus() {
+                    let n = buf.clone();
+                    self.workspaces[i].renaming = None;
+                    self.actions.push(Action::RenameWorkspace(i, n));
                 }
-                if let Some(buf) = &mut ws.renaming {
-                    let te = ui.add(egui::TextEdit::singleline(buf).desired_width(ui.available_width() - 30.0));
-                    te.request_focus();
-                    if te.lost_focus() {
-                        let name = buf.clone();
-                        ws.renaming = None;
-                        self.actions.push(Action::RenameWorkspace(i, name));
-                    }
-                } else {
-                    ui.label(RichText::new(&ws.name).size(13.0).strong().color(if active { theme.text } else { theme.text_dim }));
+            } else {
+                p.text(pos2(x, rect.top() + 18.0), Align2::LEFT_CENTER, &name, fonts::medium(13.5), if active { t.text } else { t.text_dim });
+                if i < 9 && resp.hovered() {
+                    p.text(pos2(rect.right() - 10.0, rect.top() + 18.0), Align2::RIGHT_CENTER, format!("⌘{}", i + 1), fonts::regular(11.0), t.text_faint);
                 }
-                if attention > 0 {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let (r, _) = ui.allocate_exact_size(vec2(18.0, 16.0), Sense::hover());
-                        ui.painter().rect_filled(r, 8.0, theme.orange);
-                        ui.painter().text(r.center(), Align2::CENTER_CENTER, attention.to_string(), FontId::proportional(10.5), Color32::BLACK);
-                    });
+            }
+            // 두 번째 줄: 실행 중인 에이전트, 없으면 브랜치.
+            let ly = rect.top() + 36.0;
+            if agents.is_empty() {
+                let s = self.workspaces[i].tools.summary().map(|s| s.branch).unwrap_or_else(|| short_path(&root_path));
+                p.text(pos2(x, ly), Align2::LEFT_CENTER, s, fonts::regular(11.5), t.text_faint);
+            } else {
+                let mut lx = x;
+                for (a, att) in agents.iter().take(3) {
+                    p.circle_filled(pos2(lx + 3.0, ly), 3.0, if *att { t.orange } else { t.green });
+                    let g = ui.painter().layout_no_wrap(a.clone(), fonts::medium(11.5), t.text_dim);
+                    let w = g.size().x;
+                    p.galley(pos2(lx + 10.0, ly - g.size().y / 2.0), g, t.text_dim);
+                    lx += w + 20.0;
                 }
-            });
-            ui.label(RichText::new(short_path(&ws.root)).size(11.0).color(theme.text_faint));
-            if let Some(s) = &summary {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let (r, _) = ui.allocate_exact_size(vec2(12.0, 14.0), Sense::hover());
-                    icons::paint(ui.painter(), r, icons::Icon::Branch, theme.purple);
-                    ui.label(RichText::new(&s.branch).size(11.0).color(theme.purple));
-                    if s.dirty > 0 {
-                        ui.label(RichText::new(format!("●{}", s.dirty)).size(10.5).color(theme.yellow));
-                    }
-                    if s.ahead > 0 {
-                        ui.label(RichText::new(format!("↑{}", s.ahead)).size(10.5).color(theme.text_dim));
-                    }
-                    if s.behind > 0 {
-                        ui.label(RichText::new(format!("↓{}", s.behind)).size(10.5).color(theme.text_dim));
-                    }
-                    if let Some((n, st)) = &s.pr {
-                        ui.label(RichText::new(format!("#{n} {st}")).size(10.5).color(theme.green));
-                    }
-                });
             }
-            if !procs.is_empty() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for (p, att) in &procs {
-                        let color = if *att { theme.orange } else { theme.green };
-                        let text = RichText::new(format!("● {p}")).size(10.5).color(color);
-                        ui.label(text);
-                    }
-                });
+            if let Some(n) = note {
+                p.text(pos2(x, rect.top() + 53.0), Align2::LEFT_CENTER, n, fonts::regular(11.0), t.orange);
             }
-            if let Some(n) = last_note {
-                ui.label(RichText::new(n).size(10.5).italics().color(theme.text_dim)).on_hover_text("알림");
-            }
-        });
-        let resp = ui.interact(resp.response.rect, ui.id().with(("ws", i)), Sense::click());
+        }
+        let resp = resp.on_hover_text(format!("{} — {}", name, short_path(&root_path)));
         if resp.clicked() {
             self.actions.push(Action::SelectWorkspace(i));
         }
-        if resp.double_clicked() {
-            self.workspaces[i].renaming = Some(self.workspaces[i].name.clone());
-        }
-        if resp.hovered() && !active {
-            ui.painter().rect_stroke(resp.rect, 6.0, Stroke::new(1.0, theme.border), egui::StrokeKind::Inside);
-        }
-        if active {
-            ui.painter().rect_filled(Rect::from_min_size(resp.rect.min + vec2(0.0, 8.0), vec2(3.0, resp.rect.height() - 16.0)), 2.0, theme.accent);
+        if resp.double_clicked() && wide {
+            self.workspaces[i].renaming = Some(name.clone());
         }
         resp.context_menu(|ui| {
             if ui.button("이름 바꾸기").clicked() {
-                self.workspaces[i].renaming = Some(self.workspaces[i].name.clone());
+                self.workspaces[i].renaming = Some(name.clone());
                 ui.close();
             }
-            if ui.button("폴더 열기").clicked() {
-                let _ = open::that_detached(&self.workspaces[i].root);
+            if ui.button("Finder 에서 열기").clicked() {
+                let _ = open::that_detached(&root_path);
                 ui.close();
             }
             ui.separator();
-            if ui.button(RichText::new("워크스페이스 닫기 (세션 종료)").color(theme.red)).clicked() {
+            if ui.button(RichText::new("스페이스 닫기").color(t.red)).clicked() {
                 self.confirm = Some(Confirm {
-                    title: "워크스페이스 닫기".into(),
-                    body: format!("'{}' 의 모든 터미널 세션이 종료됩니다.", self.workspaces[i].name),
-                    ok: "닫기".into(),
+                    title: format!("'{name}' 스페이스를 닫을까요?"),
+                    body: "이 스페이스의 모든 터미널 세션이 종료됩니다.".into(),
+                    ok: "스페이스 닫기".into(),
                     action: Action::CloseWorkspace(i),
                 });
                 ui.close();
@@ -208,352 +392,293 @@ impl KilnApp {
     }
 
     fn detached_sessions(&mut self, ui: &mut egui::Ui) {
-        let theme = self.theme;
-        let used: std::collections::HashSet<SessionId> = self.panes.values().filter_map(|p| p.session).collect();
-        let mut orphans: Vec<&kiln_proto::SessionInfo> = self.conn.infos.values().filter(|i| !used.contains(&i.id)).collect();
+        let t = self.theme;
+        let used: std::collections::HashSet<SessionId> = self.panes.values().filter_map(|p| p.session()).collect();
+        let mut orphans: Vec<kiln_proto::SessionInfo> = self.conn.infos.values().filter(|i| !used.contains(&i.id)).cloned().collect();
         if orphans.is_empty() {
             return;
         }
         orphans.sort_by_key(|i| i.id);
-        ui.add_space(10.0);
-        ui.label(RichText::new(format!("분리된 세션 ({})", orphans.len())).size(11.5).color(theme.text_faint).strong());
-        let mut acts = Vec::new();
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            ui.label(RichText::new(format!("분리된 세션 {}", orphans.len())).font(fonts::semibold(11.5)).color(t.text_faint));
+        });
+        ui.add_space(2.0);
         for o in orphans {
-            let label = format!(
-                "#{} {} {}",
-                o.id,
-                o.fg_process.clone().unwrap_or_else(|| "shell".into()),
-                o.cwd.as_deref().map(|c| short_path(Path::new(c))).unwrap_or_default()
-            );
-            ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new(label).size(11.5)).frame(false)).on_hover_text("현재 워크스페이스에 붙이기").clicked() {
-                    acts.push(Action::AttachSession(o.id));
+            let label = o.fg_process.clone().unwrap_or_else(|| "셸".into());
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, CornerRadius::same(8), t.bg_hover);
+            }
+            ui.painter().circle_filled(pos2(rect.left() + 14.0, rect.center().y), 3.0, t.text_faint);
+            let cwd = o.cwd.as_deref().map(|c| short_path(Path::new(c))).unwrap_or_default();
+            let p = ui.painter().with_clip_rect(rect.shrink2(vec2(4.0, 0.0)));
+            let g = ui.painter().layout_no_wrap(label, fonts::medium(12.5), t.text_dim);
+            let w = g.size().x;
+            p.galley(pos2(rect.left() + 24.0, rect.center().y - g.size().y / 2.0), g, t.text_dim);
+            p.text(pos2(rect.left() + 32.0 + w, rect.center().y), Align2::LEFT_CENTER, cwd, fonts::regular(11.5), t.text_faint);
+            let resp = resp.on_hover_text("눌러서 현재 스페이스에 붙이기");
+            if resp.clicked() {
+                self.actions.push(Action::AttachSession(o.id));
+            }
+            resp.context_menu(|ui| {
+                if ui.button("붙이기").clicked() {
+                    self.actions.push(Action::AttachSession(o.id));
+                    ui.close();
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icons::button(ui, icons::Icon::Close, vec2(18.0, 18.0), theme.text_faint, theme.bg_hover, "세션 종료").clicked() {
-                        acts.push(Action::KillSession(o.id));
-                    }
-                });
+                if ui.button(RichText::new("세션 종료").color(t.red)).clicked() {
+                    self.actions.push(Action::KillSession(o.id));
+                    ui.close();
+                }
             });
         }
-        self.actions.extend(acts);
     }
 
-    pub(super) fn ui_statusbar(&mut self, root: &mut egui::Ui) {
-        let theme = self.theme;
-        egui::Panel::bottom("status").exact_size(24.0).frame(Frame::new().fill(theme.bg).inner_margin(Margin::symmetric(10, 3))).show(root, |ui| {
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 14.0;
-                let (dot, text) = if self.conn.is_connected() {
-                    (theme.green, format!("데몬 pid {}", self.conn.daemon_pid))
-                } else {
-                    (theme.red, "데몬 재연결 중…".to_string())
-                };
-                ui.label(RichText::new(format!("● {text}")).size(11.0).color(dot)).on_hover_text(format!("build {}", self.conn.daemon_build));
-                if let Some(ws) = self.workspaces.get(self.active)
-                    && let Some(s) = ws.tools.summary() {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        let (r, _) = ui.allocate_exact_size(vec2(12.0, 14.0), Sense::hover());
-                        icons::paint(ui.painter(), r, icons::Icon::Branch, theme.text_dim);
-                        ui.label(RichText::new(s.branch).size(11.0).color(theme.text_dim));
-                        ui.spacing_mut().item_spacing.x = 14.0;
-                    }
-                let unread = self.unread.len();
-                if unread > 0 && ui.add(egui::Button::new(RichText::new(format!("알림 {unread}")).size(11.0).color(theme.orange)).frame(false)).on_hover_text("최근 알림으로 이동 (⇧⌘U)").clicked() {
-                    self.actions.push(Action::JumpUnread);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let tool_status = self.workspaces.get(self.active).and_then(|w| match w.tabs.get(w.active_tab).map(|t| &t.kind) {
-                        Some(TabKind::Tool(t)) => t.status_text(),
-                        _ => None,
-                    });
-                    if let Some(lsp) = self.workspaces.get(self.active).and_then(|w| w.tools.lsp.status_text()) {
-                        ui.label(RichText::new(lsp).size(11.0).color(theme.text_faint));
-                    }
-                    if let Some(st) = tool_status {
-                        ui.label(RichText::new(st).size(11.0).color(theme.text_dim));
-                        return;
-                    }
-                    ui.label(RichText::new(format!("{:.1}pt", self.settings.font_size)).size(11.0).color(theme.text_faint));
-                    if let Some(info) = self.focused_session().and_then(|s| self.conn.infos.get(&s)) {
-                        ui.label(RichText::new(format!("{}×{}", info.cols, info.rows)).size(11.0).color(theme.text_faint));
-                        if let Some(c) = &info.cwd {
-                            ui.label(RichText::new(short_path(Path::new(c))).size(11.0).color(theme.text_dim));
-                        }
-                        if let Some(p) = &info.fg_process {
-                            ui.label(RichText::new(p).size(11.0).color(theme.text));
-                        }
-                    }
-                });
-            });
-        });
-    }
+    // ------------------------------------------------------------------ 카드 캔버스
 
-    pub(super) fn ui_tool_panel(&mut self, root: &mut egui::Ui) {
-        let theme = self.theme;
-        let Some(ws) = self.workspaces.get_mut(self.active) else { return };
-        if !ws.tool_open {
-            return;
-        }
-        let kind = ws.tool;
-        let mut acts = Vec::new();
-        egui::Panel::left(egui::Id::new(("tool", ws.id)))
-            .default_size(300.0)
-            .size_range(200.0..=700.0)
-            .frame(Frame::new().fill(theme.bg_panel).inner_margin(Margin { left: 0, right: 0, top: 6, bottom: 0 }).stroke(Stroke::new(1.0, theme.border)))
-            .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    ui.label(RichText::new(kind.label().to_uppercase()).size(11.0).strong().color(theme.text_faint));
-                });
-                ui.add_space(4.0);
-                acts = ws.tools.panel_ui(ui, kind);
-            });
-        self.actions.extend(acts);
-    }
-
-    fn tab_title(&self, t: &Tab) -> (String, bool) {
-        match &t.kind {
-            TabKind::Terminal(tt) => {
-                let attention = tt.root.panes().iter().any(|p| self.panes.get(p).and_then(|x| x.session).and_then(|s| self.conn.infos.get(&s)).is_some_and(|i| i.attention));
-                if let Some(title) = &tt.title {
-                    return (title.clone(), attention);
-                }
-                let info = self.panes.get(&tt.focused).and_then(|p| p.session).and_then(|s| self.conn.infos.get(&s));
-                let title = match info {
-                    Some(i) => {
-                        let dir = i.cwd.as_deref().and_then(|c| Path::new(c).file_name()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                        let proc_name = i.fg_process.clone().unwrap_or_else(|| "shell".into());
-                        let n = tt.root.panes().len();
-                        let base = if shells().contains(&proc_name.as_str()) { format!("{proc_name} · {dir}") } else { proc_name };
-                        if n > 1 { format!("{base}  ({n})") } else { base }
-                    }
-                    None => "터미널".into(),
-                };
-                (title, attention)
-            }
-            TabKind::Tool(x) => (format!("{} {}", x.icon(), x.title()), false),
-        }
-    }
-
-    pub(super) fn ui_center(&mut self, root: &mut egui::Ui) {
-        let theme = self.theme;
-        egui::CentralPanel::default().frame(Frame::new().fill(theme.bg)).show(root, |ui| {
-            if self.workspaces.is_empty() {
-                return;
-            }
-            // 탭 바.
-            let bar = Rect::from_min_size(ui.max_rect().min, vec2(ui.max_rect().width(), 34.0));
-            ui.painter().rect_filled(bar, 0.0, theme.bg_panel);
-            ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, theme.border));
-            let titles: Vec<(String, bool, bool)> = {
-                let ws = &self.workspaces[self.active];
-                ws.tabs.iter().map(|t| {
-                    let (s, a) = self.tab_title(t);
-                    let dirty = matches!(&t.kind, TabKind::Tool(x) if x.is_dirty());
-                    (s, a, dirty)
-                }).collect()
-            };
-            let active_tab = self.workspaces[self.active].active_tab;
-            let mut bar_ui = ui.new_child(UiBuilder::new().max_rect(bar.shrink2(vec2(6.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-            egui::ScrollArea::horizontal().id_salt("tabs").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(&mut bar_ui, |ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                for (i, (title, attention, dirty)) in titles.iter().enumerate() {
-                    let is_active = i == active_tab;
-                    let font = FontId::proportional(12.5);
-                    let galley = ui.painter().layout_no_wrap(title.clone(), font.clone(), theme.text);
-                    let w = (galley.size().x + 44.0).clamp(90.0, 260.0);
-                    let (rect, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                    let fill = if is_active { theme.bg } else if resp.hovered() { theme.bg_hover } else { theme.bg_panel };
-                    ui.painter().rect_filled(rect.shrink2(vec2(0.0, 2.0)).translate(vec2(0.0, 2.0)), CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, fill);
-                    if is_active {
-                        ui.painter().line_segment([rect.left_top() + vec2(4.0, 2.0), rect.right_top() + vec2(-4.0, 2.0)], Stroke::new(2.0, theme.accent));
-                    }
-                    let color = if is_active { theme.text } else { theme.text_dim };
-                    let mut x = rect.left() + 12.0;
-                    if *attention {
-                        ui.painter().circle_filled(pos2(x + 2.0, rect.center().y + 1.0), 3.5, theme.orange);
-                        x += 12.0;
-                    }
-                    let text_rect = Rect::from_min_max(pos2(x, rect.top()), pos2(rect.right() - 24.0, rect.bottom()));
-                    ui.painter().with_clip_rect(text_rect).text(pos2(x, rect.center().y + 1.0), Align2::LEFT_CENTER, title, font, color);
-                    let close_rect = Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y + 1.0), vec2(16.0, 16.0));
-                    let close_resp = ui.interact(close_rect, ui.id().with(("close", i)), Sense::click());
-                    if *dirty && !close_resp.hovered() {
-                        ui.painter().circle_filled(close_rect.center(), 4.0, theme.text_dim);
-                    } else if is_active || resp.hovered() || close_resp.hovered() {
-                        if close_resp.hovered() {
-                            ui.painter().rect_filled(close_rect, 3.0, theme.bg_hover);
-                        }
-                        ui.painter().text(close_rect.center(), Align2::CENTER_CENTER, "×", FontId::proportional(14.0), theme.text_dim);
-                    }
-                    if close_resp.clicked() || resp.middle_clicked() {
-                        self.actions.push(Action::CloseTab(i, false));
-                    } else if resp.clicked() {
-                        self.actions.push(Action::SelectTab(i));
-                    }
-                    resp.context_menu(|ui| {
-                        if ui.button("탭 닫기").clicked() {
-                            self.actions.push(Action::CloseTab(i, false));
-                            ui.close();
-                        }
-                    });
-                }
-                if icons::button(ui, icons::Icon::Plus, vec2(28.0, 28.0), theme.text_dim, theme.bg_hover, "새 터미널 탭 (⌘T)").clicked() {
-                    self.actions.push(Action::NewTermTab);
-                }
-            });
-            // 분할 버튼.
-            let right = Rect::from_min_max(pos2(bar.right() - 70.0, bar.top()), bar.right_bottom());
-            let mut rui = ui.new_child(UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
-            if icons::button(&mut rui, icons::Icon::SplitDown, vec2(28.0, 28.0), theme.text_dim, theme.bg_hover, "아래로 분할 (⇧⌘D)").clicked() {
-                self.actions.push(Action::Split(Dir::Vertical));
-            }
-            if icons::button(&mut rui, icons::Icon::SplitRight, vec2(28.0, 28.0), theme.text_dim, theme.bg_hover, "오른쪽으로 분할 (⌘D)").clicked() {
-                self.actions.push(Action::Split(Dir::Horizontal));
-            }
-
-            let content = Rect::from_min_max(pos2(ui.max_rect().left(), bar.bottom()), ui.max_rect().max);
+    pub(super) fn ui_canvas(&mut self, root: &mut egui::Ui) {
+        let t = self.theme;
+        let canvas = widgets::canvas_color(&t);
+        egui::CentralPanel::default().frame(Frame::new().fill(canvas).inner_margin(Margin { left: 4, right: 10, top: 0, bottom: 10 })).show(root, |ui| {
+            let area = ui.max_rect();
             let ws_idx = self.active;
-            let tab_idx = self.workspaces[ws_idx].active_tab;
-            let is_term = matches!(self.workspaces[ws_idx].tabs.get(tab_idx).map(|t| &t.kind), Some(TabKind::Terminal(_)));
-            if is_term {
-                self.ui_terminal_tab(ui, content);
-            } else if let Some(Tab { kind: TabKind::Tool(t), .. }) = self.workspaces[ws_idx].tabs.get_mut(tab_idx) {
-                let mut child = ui.new_child(UiBuilder::new().max_rect(content));
-                let acts = t.ui(&mut child);
-                self.actions.extend(acts);
+            let (root_node, focused, zoomed) = {
+                let p = self.workspaces[ws_idx].page();
+                (p.root.clone(), p.focused, p.zoomed)
+            };
+            let mut rects = Vec::new();
+            match zoomed {
+                Some(z) if root_node.panes().contains(&z) => rects.push((z, area)),
+                _ => root_node.layout(area, &mut rects),
             }
-        });
-    }
-
-    fn ui_terminal_tab(&mut self, ui: &mut egui::Ui, content: Rect) {
-        let theme = self.theme;
-        let settings = TermSettings { font_size: self.settings.font_size, option_as_meta: self.settings.option_as_meta, line_height: 1.2 };
-        let ws_idx = self.active;
-        let tab_idx = self.workspaces[ws_idx].active_tab;
-        let (root, focused) = match &self.workspaces[ws_idx].tabs[tab_idx].kind {
-            TabKind::Terminal(tt) => (tt.root.clone(), tt.focused),
-            _ => return,
-        };
-        let mut rects = Vec::new();
-        root.layout(content, &mut rects);
-        let multi = rects.len() > 1;
-        let focus_req = self.focus_terminal && self.confirm.is_none() && !self.palette.is_open();
-        let mut focus_consumed = false;
-        let mut new_focus = None;
-        for (pid, rect) in &rects {
-            let Some(pane) = self.panes.get_mut(pid) else { continue };
-            let mut child = ui.new_child(UiBuilder::new().max_rect(*rect).id_salt(("pane", *pid)));
-            let is_focused = *pid == focused;
-            let info = pane.session.and_then(|s| self.conn.infos.get(&s));
-            let attention = info.is_some_and(|i| i.attention);
-            let cwd = info.and_then(|i| i.cwd.clone());
-            match (&mut pane.view, pane.session) {
-                (Some(view), Some(_)) => {
-                    let out = view.ui(&mut child, &mut self.conn, &settings, focus_req && is_focused, cwd.as_deref());
-                    if focus_req && is_focused {
-                        focus_consumed = true;
-                    }
-                    if out.clicked && !is_focused {
-                        new_focus = Some(*pid);
-                    }
-                    if let Some(t) = out.open {
-                        self.actions.push(Action::OpenLink(t, cwd.clone()));
-                    }
-                    if out.restart {
-                        self.actions.push(Action::RestartPane(*pid));
-                    }
-                    if out.clicked && attention
-                        && let Some(s) = pane.session {
-                            self.conn.send(kiln_proto::ClientMsg::ClearAttention { session: s });
+            let multi = rects.len() > 1;
+            let focus_req = self.focus_terminal && self.confirm.is_none() && !self.palette.is_open() && !self.settings_ui.open;
+            let mut focus_consumed = false;
+            let mut new_focus = None;
+            let settings = terminal::TermSettings { font_size: self.settings.font_size, option_as_meta: self.settings.option_as_meta, line_height: self.settings.line_height };
+            for (pid, rect) in &rects {
+                let is_focused = *pid == focused;
+                let info = self.card_info(*pid);
+                let session = self.panes.get(pid).and_then(|p| p.session());
+                let attention = session.and_then(|s| self.conn.infos.get(&s)).is_some_and(|i| i.attention);
+                let cwd = session.and_then(|s| self.conn.infos.get(&s)).and_then(|i| i.cwd.clone());
+                ui.painter().rect_filled(*rect, CornerRadius::same(10), t.bg);
+                let header = egui::Rect::from_min_size(rect.min, vec2(rect.width(), HEADER_H));
+                let body = egui::Rect::from_min_max(pos2(rect.left() + 1.0, header.bottom() + 1.0), pos2(rect.right() - 1.0, rect.bottom() - 5.0));
+                let hresp = ui.interact(header, ui.id().with(("hdr", *pid)), Sense::click());
+                self.card_header(ui, *pid, header, &info, is_focused, multi, zoomed.is_some());
+                if hresp.clicked() && !is_focused {
+                    new_focus = Some(*pid);
+                }
+                if hresp.double_clicked() {
+                    self.actions.push(Action::ToggleZoom(Some(*pid)));
+                }
+                let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("card", *pid)));
+                child.set_clip_rect(body);
+                match self.panes.get_mut(pid).map(|p| &mut p.kind) {
+                    Some(PaneKind::Term { view: Some(view), session: Some(_), .. }) => {
+                        view.fill_background = false;
+                        let out = view.ui(&mut child, &mut self.conn, &settings, focus_req && is_focused, cwd.as_deref());
+                        if focus_req && is_focused {
+                            focus_consumed = true;
                         }
+                        if out.clicked && !is_focused {
+                            new_focus = Some(*pid);
+                        }
+                        if let Some(target) = out.open {
+                            self.actions.push(Action::OpenLink(target));
+                        }
+                        if out.restart {
+                            self.actions.push(Action::RestartPane(*pid));
+                        }
+                        if out.clicked && attention {
+                            if let Some(s) = session {
+                                self.conn.send(kiln_proto::ClientMsg::ClearAttention { session: s });
+                            }
+                        }
+                    }
+                    Some(PaneKind::Tool(tool)) => {
+                        let acts = tool.ui(&mut child);
+                        if !is_focused && child.ui_contains_pointer() && ui.input(|i| i.pointer.any_pressed()) {
+                            new_focus = Some(*pid);
+                        }
+                        self.actions.extend(acts);
+                    }
+                    _ => {
+                        let msg = if self.conn.is_connected() { "셸을 시작하는 중…" } else { "데몬에 연결하는 중…" };
+                        child.painter().text(body.center(), Align2::CENTER_CENTER, msg, fonts::regular(13.0), t.text_faint);
+                    }
                 }
-                _ => {
-                    child.painter().rect_filled(*rect, 0.0, theme.bg);
-                    let msg = if self.conn.is_connected() { "세션 시작 중…" } else { "데몬 연결 대기 중…" };
-                    child.painter().text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(13.0), theme.text_faint);
+                let stroke = if attention {
+                    Stroke::new(1.5, t.orange)
+                } else if is_focused && multi {
+                    Stroke::new(1.5, t.accent_soft(190))
+                } else {
+                    Stroke::new(1.0, t.border)
+                };
+                ui.painter().rect_stroke(*rect, CornerRadius::same(10), stroke, StrokeKind::Inside);
+            }
+            if focus_consumed {
+                self.focus_terminal = false;
+            }
+
+            // 카드 사이 간격을 끌어 크기를 바꾼다.
+            let mut ratio_change = None;
+            if zoomed.is_none() {
+                let mut seps = Vec::new();
+                root_node.splitters(area, 0, &mut seps);
+                for (path, dir, sep, parent) in seps {
+                    let resp = ui.interact(sep, ui.id().with(("sep", path)), Sense::drag());
+                    if resp.hovered() || resp.dragged() {
+                        let line = match dir {
+                            layout::Dir::Horizontal => egui::Rect::from_center_size(sep.center(), vec2(2.0, (sep.height() - 24.0).max(10.0))),
+                            layout::Dir::Vertical => egui::Rect::from_center_size(sep.center(), vec2((sep.width() - 24.0).max(10.0), 2.0)),
+                        };
+                        ui.painter().rect_filled(line, CornerRadius::same(1), t.accent_soft(170));
+                        ui.ctx().set_cursor_icon(if dir == layout::Dir::Horizontal { CursorIcon::ResizeHorizontal } else { CursorIcon::ResizeVertical });
+                    }
+                    if resp.dragged() {
+                        if let Some(p) = resp.interact_pointer_pos() {
+                            let r = match dir {
+                                layout::Dir::Horizontal => (p.x - parent.left()) / parent.width(),
+                                layout::Dir::Vertical => (p.y - parent.top()) / parent.height(),
+                            };
+                            ratio_change = Some((path, r));
+                        }
+                    }
+                    if resp.double_clicked() {
+                        ratio_change = Some((path, 0.5));
+                    }
                 }
             }
-            if multi && is_focused {
-                ui.painter().rect_stroke(*rect, 0.0, Stroke::new(1.0, theme.accent.gamma_multiply(0.7)), egui::StrokeKind::Inside);
-            }
-            if attention {
-                ui.painter().rect_stroke(rect.shrink(1.0), 3.0, Stroke::new(2.0, theme.orange), egui::StrokeKind::Inside);
-            }
-        }
-        // 분할선 드래그.
-        let mut seps = Vec::new();
-        root.splitters(content, 0, &mut seps);
-        let mut ratio_change = None;
-        for (path, dir, sep, parent) in seps {
-            let hit = sep.expand2(if dir == Dir::Horizontal { vec2(3.0, 0.0) } else { vec2(0.0, 3.0) });
-            let resp = ui.interact(hit, ui.id().with(("sep", path)), Sense::drag());
-            let hovered = resp.hovered() || resp.dragged();
-            ui.painter().rect_filled(sep, 0.0, if hovered { theme.accent.gamma_multiply(0.6) } else { theme.border });
-            if hovered {
-                ui.ctx().set_cursor_icon(if dir == Dir::Horizontal { CursorIcon::ResizeHorizontal } else { CursorIcon::ResizeVertical });
-            }
-            if resp.dragged()
-                && let Some(p) = resp.interact_pointer_pos() {
-                    let r = match dir {
-                        Dir::Horizontal => (p.x - parent.left()) / parent.width(),
-                        Dir::Vertical => (p.y - parent.top()) / parent.height(),
-                    };
-                    ratio_change = Some((path, r));
-                }
-            if resp.double_clicked() {
-                ratio_change = Some((path, 0.5));
-            }
-        }
-        if focus_consumed {
-            self.focus_terminal = false;
-        }
-        if let TabKind::Terminal(tt) = &mut self.workspaces[ws_idx].tabs[tab_idx].kind {
-            tt.rects = rects;
+            let page = self.workspaces[ws_idx].page_mut();
+            page.rects = rects;
             if let Some((path, r)) = ratio_change {
-                tt.root.set_ratio(path, r);
+                page.root.set_ratio(path, r);
             }
             if let Some(f) = new_focus {
-                tt.focused = f;
+                page.focused = f;
+            }
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn card_header(&mut self, ui: &mut egui::Ui, pid: PaneId, rect: egui::Rect, info: &CardInfo, focused: bool, multi: bool, zoomed: bool) {
+        let t = self.theme;
+        let cy = rect.center().y;
+        ui.painter().line_segment([pos2(rect.left() + 1.0, rect.bottom()), pos2(rect.right() - 1.0, rect.bottom())], Stroke::new(1.0, t.border));
+        let hovered = ui.rect_contains_pointer(rect);
+        let mut x = rect.left() + 14.0;
+        widgets::status_dot(ui, pos2(x, cy), info.dot, info.pulse);
+        x += 11.0;
+        icons::paint(ui.painter(), egui::Rect::from_center_size(pos2(x + 6.0, cy), vec2(12.0, 12.0)), info.icon, if focused { t.text_dim } else { t.text_faint });
+        x += 19.0;
+        let show_buttons = hovered || (focused && multi);
+        let buttons_w = if show_buttons { 4.0 * 26.0 + 6.0 } else { 0.0 };
+        let right_limit = rect.right() - 10.0 - buttons_w;
+        let clip = egui::Rect::from_min_max(pos2(x, rect.top()), pos2(right_limit, rect.bottom()));
+        let p = ui.painter().with_clip_rect(clip);
+        let g = ui.painter().layout_no_wrap(info.name.clone(), fonts::semibold(12.5), t.text);
+        let name_w = g.size().x;
+        p.galley(pos2(x, cy - g.size().y / 2.0), g, if focused || !multi { t.text } else { t.text_dim });
+        x += name_w + 10.0;
+        if !info.detail.is_empty() {
+            let g = ui.painter().layout_no_wrap(info.detail.clone(), fonts::regular(12.0), t.text_dim);
+            let w = g.size().x;
+            p.galley(pos2(x, cy - g.size().y / 2.0), g, t.text_dim);
+            x += w + 10.0;
+        }
+        if !info.right.is_empty() {
+            let g = ui.painter().layout_no_wrap(info.right.clone(), fonts::regular(11.5), t.text_faint);
+            let rx = (right_limit - g.size().x - 4.0).max(x);
+            p.galley(pos2(rx, cy - g.size().y / 2.0), g, t.text_faint);
+        }
+        if show_buttons {
+            let br = egui::Rect::from_min_max(pos2(rect.right() - 8.0 - buttons_w, cy - 12.0), pos2(rect.right() - 8.0, cy + 12.0));
+            let mut bui = ui.new_child(UiBuilder::new().max_rect(br).layout(egui::Layout::right_to_left(egui::Align::Center)));
+            bui.spacing_mut().item_spacing.x = 2.0;
+            if widgets::icon_button(&mut bui, Icon::Close, 24.0, false, "카드 닫기 (⌘W)").clicked() {
+                self.actions.push(Action::ClosePane(pid, false));
+            }
+            let (zi, zt) = if zoomed { (Icon::Restore, "원래 배치로 (⇧⌘↩)") } else { (Icon::Maximize, "이 카드만 크게 (⇧⌘↩)") };
+            if widgets::icon_button(&mut bui, zi, 24.0, false, zt).clicked() {
+                self.actions.push(Action::ToggleZoom(Some(pid)));
+            }
+            if widgets::icon_button(&mut bui, Icon::SplitDown, 24.0, false, "아래로 나누기 (⇧⌘D)").clicked() {
+                self.actions.push(Action::SplitPane(pid, layout::Dir::Vertical));
+            }
+            if widgets::icon_button(&mut bui, Icon::SplitRight, 24.0, false, "오른쪽으로 나누기 (⌘D)").clicked() {
+                self.actions.push(Action::SplitPane(pid, layout::Dir::Horizontal));
             }
         }
     }
 
-    pub(super) fn ui_overlays(&mut self, root: &mut egui::Ui) {
-        let ctx = &root.ctx().clone();
-        let theme = self.theme;
-        // 도구 오버레이(빠른 열기 등).
-        if let Some(ws) = self.workspaces.get_mut(self.active) {
-            let acts = ws.tools.overlay_ui(ctx);
-            self.actions.extend(acts);
-        }
+    // ------------------------------------------------------------------ 도구 시트
 
-        // 명령 팔레트.
+    pub(super) fn ui_sheet(&mut self, ctx: &egui::Context) {
+        let t = self.theme;
+        let ws_idx = self.active;
+        let open = self.workspaces[ws_idx].sheet;
+        let Some(kind) = open else { return };
+        let k = ctx.animate_bool_with_time(egui::Id::new(("sheet-open", self.workspaces[ws_idx].id, kind.as_str())), true, 0.14);
+        let screen = ctx.content_rect();
+        let width = 400.0f32.min(screen.width() * 0.5);
+        let top = screen.top() + TOPBAR_H;
+        let shift = (1.0 - k) * 24.0;
+        let rect = egui::Rect::from_min_max(pos2(screen.right() - width - 10.0 + shift, top), pos2(screen.right() - 10.0 + shift, screen.bottom() - 10.0));
+        let mut acts = Vec::new();
+        egui::Area::new(egui::Id::new(("sheet", self.workspaces[ws_idx].id))).fixed_pos(rect.min).order(egui::Order::Middle).show(ctx, |ui| {
+            ui.set_opacity(k.max(0.2));
+            Frame::new().fill(t.bg_panel).stroke(Stroke::new(1.0, t.border_strong)).corner_radius(CornerRadius::same(12)).shadow(t.shadow()).show(ui, |ui| {
+                ui.set_min_size(rect.size());
+                ui.set_max_size(rect.size());
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for tk in tools::ToolKind::ALL {
+                        if tk == kind {
+                            let g = ui.painter().layout_no_wrap(tk.label().to_string(), fonts::semibold(12.5), t.text);
+                            let (r, _) = ui.allocate_exact_size(vec2(g.size().x + 38.0, 30.0), Sense::hover());
+                            ui.painter().rect_filled(r, CornerRadius::same(8), t.bg_selected);
+                            icons::paint(ui.painter(), egui::Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(14.0, 14.0)), tk.vicon(), t.accent);
+                            ui.painter().galley(pos2(r.left() + 28.0, r.center().y - g.size().y / 2.0), g, t.text);
+                        } else if widgets::icon_button(ui, tk.vicon(), 30.0, false, &format!("{} ({})", tk.label(), tk.shortcut())).clicked() {
+                            acts.push(Action::ToggleSheet(tk));
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(6.0);
+                        if widgets::icon_button(ui, Icon::Close, 28.0, false, "닫기 (Esc)").clicked() {
+                            acts.push(Action::CloseSheet);
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+                let (sep, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+                ui.painter().rect_filled(sep, 0.0, t.border);
+                let body = ui.available_rect_before_wrap();
+                let mut child = ui.new_child(UiBuilder::new().max_rect(body.shrink2(vec2(0.0, 4.0))));
+                child.set_clip_rect(body);
+                acts.extend(self.workspaces[ws_idx].tools.panel_ui(&mut child, kind));
+            });
+        });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && ctx.memory(|m| m.focused().is_none()) {
+            acts.push(Action::CloseSheet);
+        }
+        self.actions.extend(acts);
+    }
+
+    // ------------------------------------------------------------------ 오버레이
+
+    pub(super) fn ui_overlays(&mut self, ctx: &egui::Context) {
+        let t = self.theme;
+        let acts = self.workspaces[self.active].tools.overlay_ui(ctx);
+        self.actions.extend(acts);
+
         if self.palette.is_open() {
-            let mut items: Vec<palette::Item<Action>> = Vec::new();
-            let mut add = |label: &str, hint: &str, a: Action| items.push(palette::Item { label: label.into(), hint: hint.into(), action: a });
-            add("새 터미널 탭", "⌘T", Action::NewTermTab);
-            add("오른쪽으로 분할", "⌘D", Action::Split(Dir::Horizontal));
-            add("아래로 분할", "⇧⌘D", Action::Split(Dir::Vertical));
-            add("분할 크기 균등화", "⌥⌘=", Action::Equalize);
-            add("창/탭 닫기", "⌘W", Action::CloseActive);
-            add("새 워크스페이스…", "⌘N", Action::NewWorkspace(None));
-            add("파일 빠르게 열기", "⌘P", Action::QuickOpen);
-            add("터미널에서 찾기", "⌘F", Action::FindInTerminal);
-            add("워크스페이스 사이드바 토글", "⌘B", Action::ToggleSidebar);
-            for k in tools::ToolKind::ALL {
-                add(&format!("{} 열기/닫기", k.label()), "", Action::ToggleTool(k));
-            }
-            add("최근 알림으로 이동", "⇧⌘U", Action::JumpUnread);
-            add("글꼴 크게", "⌘=", Action::FontDelta(1.0));
-            add("글꼴 작게", "⌘-", Action::FontDelta(-1.0));
-            add("글꼴 크기 초기화", "⌘0", Action::FontDelta(0.0));
-            add("설정", "⌘,", Action::OpenSettings);
-            add("데몬 업그레이드 (세션 유지)", "", Action::UpgradeDaemon);
-            for (i, w) in self.workspaces.iter().enumerate() {
-                add(&format!("워크스페이스로 이동: {}", w.name), &format!("⌘{}", i + 1), Action::SelectWorkspace(i));
-            }
+            let items = self.palette_items();
             if let Some(a) = self.palette.ui(ctx, items) {
                 self.actions.push(a);
             }
@@ -562,101 +687,156 @@ impl KilnApp {
             }
         }
 
-        // 확인 대화상자.
+        if self.settings_ui.open {
+            let info = settings::AboutInfo { daemon_pid: self.conn.daemon_pid, daemon_build: self.conn.daemon_build.clone(), connected: self.conn.is_connected() };
+            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info);
+            self.actions.extend(acts);
+            if !self.settings_ui.open {
+                self.focus_terminal = true;
+            }
+        }
+
         let mut close_confirm = false;
+        let mut ok = false;
         if let Some(c) = &self.confirm {
-            let mut ok = false;
-            egui::Modal::new(egui::Id::new("confirm")).show(ctx, |ui| {
-                ui.set_width(380.0);
-                ui.label(RichText::new(&c.title).size(15.0).strong());
-                ui.add_space(6.0);
-                ui.label(RichText::new(&c.body).color(theme.text_dim));
-                ui.add_space(12.0);
+            let frame = Frame::new().fill(t.bg_elevated).stroke(Stroke::new(1.0, t.border_strong)).corner_radius(CornerRadius::same(14)).shadow(t.shadow()).inner_margin(Margin::same(22));
+            egui::Modal::new(egui::Id::new("confirm")).frame(frame).backdrop_color(Color32::from_black_alpha(110)).show(ctx, |ui| {
+                ui.set_width(390.0);
                 ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(egui::Button::new(RichText::new(&c.ok).color(Color32::WHITE)).fill(theme.red)).clicked() || ui.input(|i| i.key_pressed(Key::Enter)) {
-                            ok = true;
-                        }
-                        if ui.button("취소").clicked() || ui.input(|i| i.key_pressed(Key::Escape)) {
-                            close_confirm = true;
-                        }
+                    let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+                    ui.painter().rect_filled(r, CornerRadius::same(10), Color32::from_rgba_unmultiplied(t.red.r(), t.red.g(), t.red.b(), 36));
+                    icons::paint(ui.painter(), r.shrink(9.0), Icon::Warning, t.red);
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.label(RichText::new(&c.title).font(fonts::semibold(15.5)).color(t.text));
+                        ui.label(RichText::new(&c.body).size(13.0).color(t.text_dim));
                     });
                 });
+                ui.add_space(20.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::button(ui, &c.ok, ButtonKind::Danger).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        ok = true;
+                    }
+                    if widgets::button(ui, "취소", ButtonKind::Secondary).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        close_confirm = true;
+                    }
+                });
             });
-            if ok
-                && let Some(c) = self.confirm.take() {
-                    self.actions.push(c.action);
-                }
+        }
+        if ok {
+            if let Some(c) = self.confirm.take() {
+                self.actions.push(c.action);
+            }
         }
         if close_confirm {
             self.confirm = None;
             self.focus_terminal = true;
         }
 
-        // 설정.
-        if self.settings_open {
-            let mut open = true;
-            egui::Window::new("설정").open(&mut open).collapsible(false).resizable(false).default_width(380.0).show(ctx, |ui| {
-                egui::Grid::new("settings").num_columns(2).spacing(vec2(16.0, 10.0)).show(ui, |ui| {
-                    ui.label("터미널 글꼴 크기");
-                    ui.add(egui::Slider::new(&mut self.settings.font_size, 8.0..=32.0).step_by(0.5));
-                    ui.end_row();
-                    ui.label("UI 배율");
-                    if ui.add(egui::Slider::new(&mut self.settings.ui_scale, 0.7..=1.8).step_by(0.05)).drag_stopped() {
-                        ctx.set_zoom_factor(self.settings.ui_scale);
-                    }
-                    ui.end_row();
-                    ui.label("Option 을 Meta 로");
-                    ui.checkbox(&mut self.settings.option_as_meta, "Option+키 → ESC 접두");
-                    ui.end_row();
-                    ui.label("실행 중 닫기 확인");
-                    ui.checkbox(&mut self.settings.confirm_close_running, "claude 등 실행 중이면 묻기");
-                    ui.end_row();
-                    ui.label("OS 알림");
-                    ui.checkbox(&mut self.settings.os_notifications, "창이 비활성일 때 시스템 알림");
-                    ui.end_row();
-                    ui.label("셸");
-                    ui.add(egui::TextEdit::singleline(&mut self.settings.shell).hint_text("기본: 로그인 셸"));
-                    ui.end_row();
-                });
-                ui.add_space(8.0);
-                ui.separator();
-                ui.label(RichText::new(format!("데몬 pid {} · build {}", self.conn.daemon_pid, self.conn.daemon_build)).size(11.0).color(theme.text_faint));
-                ui.label(RichText::new(format!("앱 build {}", kiln_daemon::build_id())).size(11.0).color(theme.text_faint));
-            });
-            if !open {
-                self.settings_open = false;
-                self.focus_terminal = true;
-            }
-        }
+        self.ui_toasts(ctx);
+    }
 
-        // 토스트.
-        self.toasts.retain(|t| t.at.elapsed() < Duration::from_secs(if t.kind == ToastKind::Error { 8 } else { 5 }));
-        if !self.toasts.is_empty() {
-            ctx.request_repaint_after(Duration::from_millis(250));
-            let screen = ctx.content_rect();
-            egui::Area::new(egui::Id::new("toasts")).anchor(Align2::RIGHT_BOTTOM, vec2(-16.0, -36.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
-                ui.set_max_width(screen.width().min(380.0));
-                for t in self.toasts.iter().rev().take(4) {
-                    let fg = match t.kind {
-                        ToastKind::Info => theme.accent,
-                        ToastKind::Notify => theme.orange,
-                        ToastKind::Error => theme.red,
-                    };
-                    let r = Frame::popup(ui.style()).fill(theme.bg_elevated).corner_radius(8.0).inner_margin(Margin { left: 16, right: 12, top: 8, bottom: 8 }).show(ui, |ui| {
+    fn ui_toasts(&mut self, ctx: &egui::Context) {
+        let t = self.theme;
+        self.toasts.retain(|x| x.at.elapsed() < Duration::from_secs(if x.kind == ToastKind::Error { 8 } else { 6 }));
+        if self.toasts.is_empty() {
+            return;
+        }
+        ctx.request_repaint_after(Duration::from_millis(200));
+        let mut reveal = None;
+        let mut dismiss = None;
+        egui::Area::new(egui::Id::new("toasts")).anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -20.0)).order(egui::Order::Tooltip).show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            let n = self.toasts.len();
+            for idx in (n.saturating_sub(4)..n).rev() {
+                let toast = &self.toasts[idx];
+                let (accent, icon) = match toast.kind {
+                    ToastKind::Info => (t.accent, Icon::Sparkle),
+                    ToastKind::Notify => (t.orange, Icon::Bell),
+                    ToastKind::Error => (t.red, Icon::Warning),
+                };
+                let resp = Frame::new()
+                    .fill(t.bg_elevated)
+                    .stroke(Stroke::new(1.0, t.border_strong))
+                    .corner_radius(CornerRadius::same(12))
+                    .shadow(t.shadow())
+                    .inner_margin(Margin { left: 14, right: 14, top: 12, bottom: 12 })
+                    .show(ui, |ui| {
+                        ui.set_width(320.0);
                         ui.horizontal(|ui| {
-                            if t.kind == ToastKind::Notify {
-                                let (ir, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                                icons::paint(ui.painter(), ir, icons::Icon::Bell, fg);
-                            }
-                            ui.add(egui::Label::new(RichText::new(&t.text).color(theme.text)).wrap());
+                            let (r, _) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::hover());
+                            ui.painter().rect_filled(r, CornerRadius::same(8), Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 34));
+                            icons::paint(ui.painter(), r.shrink(7.0), icon, accent);
+                            ui.add_space(4.0);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                ui.add(egui::Label::new(RichText::new(&toast.title).font(fonts::semibold(13.0)).color(t.text)).wrap());
+                                if !toast.body.is_empty() {
+                                    ui.add(egui::Label::new(RichText::new(&toast.body).size(12.5).color(t.text_dim)).wrap());
+                                }
+                                if toast.session.is_some() {
+                                    ui.label(RichText::new("눌러서 이동").size(11.5).color(accent));
+                                }
+                            });
                         });
                     });
-                    let rr = r.response.rect;
-                    ui.painter().rect_filled(Rect::from_min_size(rr.min + vec2(5.0, 8.0), vec2(3.0, rr.height() - 16.0)), 2.0, fg);
-                    ui.add_space(6.0);
+                let r = ui.interact(resp.response.rect, ui.id().with(("toast", idx)), Sense::click());
+                if r.clicked() {
+                    match toast.session {
+                        Some(s) => reveal = Some((idx, s)),
+                        None => dismiss = Some(idx),
+                    }
                 }
-            });
+            }
+        });
+        if let Some((idx, s)) = reveal {
+            self.toasts.remove(idx);
+            self.reveal_session(s);
+        } else if let Some(idx) = dismiss {
+            self.toasts.remove(idx);
         }
+    }
+
+    fn palette_items(&self) -> Vec<palette::Item<Action>> {
+        use palette::Group;
+        let mut items: Vec<palette::Item<Action>> = Vec::new();
+        let mut add = |group: Group, icon: Icon, label: String, hint: &str, a: Action| items.push(palette::Item { group, icon, label, hint: hint.into(), action: a });
+        for ws in self.workspaces.iter() {
+            for page in &ws.pages {
+                for p in page.root.panes() {
+                    if let Some(s) = self.panes.get(&p).and_then(|x| x.session()) {
+                        let info = self.card_info(p);
+                        let label = if info.detail.is_empty() { format!("{} — {}", info.name, ws.name) } else { format!("{} · {} — {}", info.name, info.detail, ws.name) };
+                        add(Group::Sessions, Icon::Terminal, label, "", Action::RevealSession(s));
+                    }
+                }
+            }
+        }
+        add(Group::Commands, Icon::Plus, "새 페이지".into(), "⌘T", Action::NewPage);
+        add(Group::Commands, Icon::SplitRight, "오른쪽으로 나누기".into(), "⌘D", Action::Split(layout::Dir::Horizontal));
+        add(Group::Commands, Icon::SplitDown, "아래로 나누기".into(), "⇧⌘D", Action::Split(layout::Dir::Vertical));
+        add(Group::Commands, Icon::Maximize, "카드 크게 보기 전환".into(), "⇧⌘↩", Action::ToggleZoom(None));
+        add(Group::Commands, Icon::Command, "카드 크기 균등하게".into(), "⌥⌘=", Action::Equalize);
+        add(Group::Commands, Icon::Close, "카드 닫기".into(), "⌘W", Action::CloseActive);
+        add(Group::Commands, Icon::File, "파일 빠르게 열기".into(), "⌘P", Action::QuickOpen);
+        add(Group::Commands, Icon::Search, "터미널·에디터에서 찾기".into(), "⌘F", Action::FindInFocused);
+        add(Group::Commands, Icon::Folder, "새 스페이스…".into(), "⌘N", Action::NewWorkspace(None));
+        add(Group::Commands, Icon::Sidebar, "스페이스 레일 접기/펴기".into(), "⌘B", Action::ToggleSidebar);
+        add(Group::Commands, Icon::Bell, "최근 알림으로 이동".into(), "⇧⌘U", Action::JumpUnread);
+        for k in tools::ToolKind::ALL {
+            add(Group::Tools, k.vicon(), k.label().into(), k.shortcut(), Action::ToggleSheet(k));
+        }
+        for (i, w) in self.workspaces.iter().enumerate() {
+            add(Group::Spaces, Icon::Folder, w.name.clone(), &format!("⌘{}", i + 1), Action::SelectWorkspace(i));
+        }
+        for th in Theme::ALL {
+            add(Group::Settings, Icon::Sparkle, format!("테마: {}", th.label), "", Action::SetTheme(th.name.into()));
+        }
+        add(Group::Settings, Icon::Gear, "설정 열기".into(), "⌘,", Action::OpenSettings);
+        add(Group::Settings, Icon::Command, "글꼴 크게".into(), "⌘=", Action::FontDelta(1.0));
+        add(Group::Settings, Icon::Command, "글꼴 작게".into(), "⌘-", Action::FontDelta(-1.0));
+        add(Group::Settings, Icon::Sparkle, "데몬을 이 버전으로 교체".into(), "", Action::UpgradeDaemon);
+        items
     }
 }

@@ -19,6 +19,12 @@ pub enum Icon {
     Terminal,
     Bell,
     Warning,
+    Sidebar,
+    Maximize,
+    Restore,
+    File,
+    ChevronDown,
+    Sparkle,
 }
 
 pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
@@ -108,6 +114,34 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Terminal => {
             p.add(Shape::line(vec![at(-7.0, -4.0), at(-2.5, 0.0), at(-7.0, 4.0)], st));
             p.line_segment([at(0.0, 5.0), at(7.0, 5.0)], st);
+        }
+        Icon::Sidebar => {
+            let r = Rect::from_center_size(c, vec2(16.0 * s, 13.0 * s));
+            p.rect_stroke(r, 2.5 * s, st, egui::StrokeKind::Middle);
+            p.line_segment([pos2(r.left() + 5.5 * s, r.top()), pos2(r.left() + 5.5 * s, r.bottom())], st);
+        }
+        Icon::Maximize => {
+            p.add(Shape::line(vec![at(1.5, -7.0), at(7.0, -7.0), at(7.0, -1.5)], st));
+            p.add(Shape::line(vec![at(-1.5, 7.0), at(-7.0, 7.0), at(-7.0, 1.5)], st));
+            p.line_segment([at(7.0, -7.0), at(2.0, -2.0)], st);
+            p.line_segment([at(-7.0, 7.0), at(-2.0, 2.0)], st);
+        }
+        Icon::Restore => {
+            p.add(Shape::line(vec![at(-1.0, -6.5), at(-1.0, -1.0), at(-6.5, -1.0)], st));
+            p.add(Shape::line(vec![at(1.0, 6.5), at(1.0, 1.0), at(6.5, 1.0)], st));
+            p.line_segment([at(-1.0, -1.0), at(-6.5, -6.5)], st);
+            p.line_segment([at(1.0, 1.0), at(6.5, 6.5)], st);
+        }
+        Icon::File => {
+            p.add(Shape::closed_line(vec![at(-5.5, -8.0), at(2.0, -8.0), at(6.0, -4.0), at(6.0, 8.0), at(-5.5, 8.0)], st));
+            p.add(Shape::line(vec![at(2.0, -8.0), at(2.0, -4.0), at(6.0, -4.0)], st));
+        }
+        Icon::ChevronDown => {
+            p.add(Shape::line(vec![at(-5.0, -2.0), at(0.0, 3.0), at(5.0, -2.0)], st));
+        }
+        Icon::Sparkle => {
+            let pts = vec![at(0.0, -8.0), at(2.0, -2.0), at(8.0, 0.0), at(2.0, 2.0), at(0.0, 8.0), at(-2.0, 2.0), at(-8.0, 0.0), at(-2.0, -2.0)];
+            p.add(Shape::convex_polygon(pts, color, Stroke::NONE));
         }
         Icon::Warning => {
             p.add(Shape::closed_line(vec![at(0.0, -7.5), at(8.0, 6.5), at(-8.0, 6.5)], st));

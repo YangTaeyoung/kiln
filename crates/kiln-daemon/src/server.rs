@@ -484,7 +484,7 @@ impl Daemon {
                     continue;
                 }
                 let fg = s.pty.fg_pid();
-                let name = fg.and_then(procinfo::name);
+                let name = fg.and_then(procinfo::display_name);
                 let cwd = fg.and_then(procinfo::cwd).or_else(|| procinfo::cwd(s.pty.pid()));
                 let mut changed = false;
                 {

@@ -1,7 +1,7 @@
 //! 사이드 도구 패널(탐색기, 검색, Git, PR, DB)과 중앙 도구 탭.
 
 use super::Action;
-use super::state::TabP;
+use super::state::ToolP;
 use kiln_common::Task;
 use kiln_db::{ConnId, DbEvent, DbManager, DbPanel, DbTab};
 use kiln_editor::{Decoration, Editor, EditorEvent, FileTree, LspManager, QuickOpen, SearchPanel};
@@ -47,7 +47,7 @@ impl ToolKind {
 
     pub fn label(&self) -> &'static str {
         match self {
-            ToolKind::Explorer => "탐색기",
+            ToolKind::Explorer => "파일",
             ToolKind::Search => "검색",
             ToolKind::Git => "소스 제어",
             ToolKind::PullRequests => "풀 리퀘스트",
@@ -56,8 +56,19 @@ impl ToolKind {
         }
     }
 
-    pub fn vicon(&self) -> super::icons::Icon {
-        use super::icons::Icon;
+    pub fn shortcut(&self) -> &'static str {
+        match self {
+            ToolKind::Explorer => "⇧⌘E",
+            ToolKind::Search => "⇧⌘F",
+            ToolKind::Git => "⇧⌘G",
+            ToolKind::PullRequests => "⇧⌘R",
+            ToolKind::Database => "⇧⌘B",
+            ToolKind::Problems => "⇧⌘M",
+        }
+    }
+
+    pub fn vicon(&self) -> kiln_common::icons::Icon {
+        use kiln_common::icons::Icon;
         match self {
             ToolKind::Explorer => Icon::Folder,
             ToolKind::Search => Icon::Search,
@@ -81,7 +92,7 @@ pub trait ToolTab {
     fn is_dirty(&self) -> bool {
         false
     }
-    fn persist(&self) -> Option<TabP> {
+    fn persist(&self) -> Option<ToolP> {
         None
     }
     fn find(&mut self) {}
@@ -179,7 +190,7 @@ fn pr_factory(root: PathBuf, number: u64) -> TabFactory {
 pub fn db_table_factory(db: DbManager, conn: ConnId, schema: Option<String>, table: String) -> TabFactory {
     TabFactory {
         key: format!("db:{}:{}.{}", conn.0, schema.clone().unwrap_or_default(), table),
-        make: Box::new(move |_, _| Ok(Box::new(DbTabW { tab: DbTab::table(db, conn, schema.clone(), table.clone()), persist: TabP::DbTable { conn: conn.0, schema, table } }) as Box<dyn ToolTab>)),
+        make: Box::new(move |_, _| Ok(Box::new(DbTabW { tab: DbTab::table(db, conn, schema.clone(), table.clone()), persist: ToolP::DbTable { conn: conn.0, schema, table } }) as Box<dyn ToolTab>)),
         reuse: None,
     }
 }
@@ -187,7 +198,7 @@ pub fn db_table_factory(db: DbManager, conn: ConnId, schema: Option<String>, tab
 pub fn db_console_factory(db: DbManager, conn: ConnId, n: u64) -> TabFactory {
     TabFactory {
         key: format!("dbconsole:{}:{n}", conn.0),
-        make: Box::new(move |_, _| Ok(Box::new(DbTabW { tab: DbTab::console(db, conn), persist: TabP::DbConsole { conn: conn.0 } }) as Box<dyn ToolTab>)),
+        make: Box::new(move |_, _| Ok(Box::new(DbTabW { tab: DbTab::console(db, conn), persist: ToolP::DbConsole { conn: conn.0 } }) as Box<dyn ToolTab>)),
         reuse: None,
     }
 }
@@ -219,8 +230,8 @@ impl ToolTab for EditorTab {
     fn is_dirty(&self) -> bool {
         self.ed.is_dirty()
     }
-    fn persist(&self) -> Option<TabP> {
-        Some(TabP::Editor { path: self.ed.path().to_path_buf() })
+    fn persist(&self) -> Option<ToolP> {
+        Some(ToolP::Editor { path: self.ed.path().to_path_buf() })
     }
     fn find(&mut self) {
         self.ed.open_find(false);
@@ -290,7 +301,7 @@ impl ToolTab for PrTab {
 
 struct DbTabW {
     tab: DbTab,
-    persist: TabP,
+    persist: ToolP,
 }
 
 impl ToolTab for DbTabW {
@@ -299,7 +310,7 @@ impl ToolTab for DbTabW {
     }
     fn key(&self) -> String {
         match &self.persist {
-            TabP::DbTable { conn, schema, table } => format!("db:{conn}:{}.{table}", schema.clone().unwrap_or_default()),
+            ToolP::DbTable { conn, schema, table } => format!("db:{conn}:{}.{table}", schema.clone().unwrap_or_default()),
             _ => format!("dbconsole:{}:{:p}", self.tab.conn().0, self),
         }
     }
@@ -310,7 +321,7 @@ impl ToolTab for DbTabW {
     fn is_dirty(&self) -> bool {
         self.tab.pending_changes() > 0
     }
-    fn persist(&self) -> Option<TabP> {
+    fn persist(&self) -> Option<ToolP> {
         Some(self.persist.clone())
     }
 }
@@ -429,11 +440,11 @@ impl WorkspaceTools {
         self.quick.open(self.root.clone());
     }
 
-    pub fn restore_tab(&mut self, t: &TabP, ctx: &egui::Context) -> Option<Box<dyn ToolTab>> {
+    pub fn restore_tool(&mut self, t: &ToolP, ctx: &egui::Context) -> Option<Box<dyn ToolTab>> {
         let f = match t {
-            TabP::Editor { path } if path.exists() => open_file_factory(path.clone(), None, None),
-            TabP::DbTable { conn, schema, table } => db_table_factory(self.db.clone(), ConnId(*conn), schema.clone(), table.clone()),
-            TabP::DbConsole { conn } => {
+            ToolP::Editor { path } if path.exists() => open_file_factory(path.clone(), None, None),
+            ToolP::DbTable { conn, schema, table } => db_table_factory(self.db.clone(), ConnId(*conn), schema.clone(), table.clone()),
+            ToolP::DbConsole { conn } => {
                 self.console_seq += 1;
                 db_console_factory(self.db.clone(), ConnId(*conn), self.console_seq)
             }

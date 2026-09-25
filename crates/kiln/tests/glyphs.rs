@@ -3,7 +3,7 @@
 #[test]
 fn ui_symbols_exist_in_default_fonts() {
     let ctx = egui::Context::default();
-    kiln::app::fonts::install(&ctx);
+    kiln_common::fonts::install(&ctx);
     let mut out = ctx.run_ui(Default::default(), |_| {});
     out.textures_delta.clear();
     let used = ['✓', '✗', '✕', '↑', '↓', '×', '●', '…', '⌘', '⇧', '⌥'];

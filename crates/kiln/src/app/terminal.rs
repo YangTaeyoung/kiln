@@ -17,21 +17,15 @@ pub struct Palette {
 
 impl Default for Palette {
     fn default() -> Self {
-        let h = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
-        Palette {
-            fg: h(0xdcdee6),
-            bg: h(0x16171c),
-            ansi: [
-                h(0x3b3f4c), h(0xe06c75), h(0x98c379), h(0xe5c07b), h(0x61afef), h(0xc678dd), h(0x56b6c2), h(0xabb2bf),
-                h(0x5c6370), h(0xff7a85), h(0xb5e890), h(0xffd68a), h(0x7cc4ff), h(0xde8fff), h(0x6fd3df), h(0xf0f2f6),
-            ],
-            cursor: h(0xdfe3ec),
-            selection: Color32::from_rgba_unmultiplied(0x6c, 0x9e, 0xff, 0x55),
-        }
+        Palette::from_theme(&kiln_common::Theme::current())
     }
 }
 
 impl Palette {
+    pub fn from_theme(t: &kiln_common::Theme) -> Self {
+        Palette { fg: t.text, bg: t.bg, ansi: t.ansi, cursor: t.accent, selection: t.accent_soft(if t.dark { 80 } else { 60 }) }
+    }
+
     pub fn resolve(&self, c: Color, _is_fg: bool) -> Color32 {
         match c {
             Color::DefaultFg => self.fg,
@@ -137,6 +131,9 @@ pub struct TermView {
     search: Option<SearchBar>,
     pub palette: Arc<Palette>,
     pending_size: Option<((u16, u16), std::time::Instant)>,
+    theme_name: &'static str,
+    /// false 면 바탕을 칠하지 않는다(카드가 둥근 바탕을 그린다).
+    pub fill_background: bool,
 }
 
 impl TermView {
@@ -154,6 +151,8 @@ impl TermView {
             search: None,
             palette: Arc::new(Palette::default()),
             pending_size: None,
+            theme_name: kiln_common::Theme::current().name,
+            fill_background: true,
         }
     }
 
@@ -268,14 +267,22 @@ impl TermView {
 
         let cell = self.cell_size(ui.ctx(), settings);
         conn.set_cell_px(cell.x.round().max(1.0) as u16, cell.y.round().max(1.0) as u16);
-        let pad = vec2(8.0, 4.0);
+        let pad = vec2(10.0, 6.0);
         let inner = rect.shrink2(pad);
         let cols = ((inner.width() / cell.x).floor() as u16).max(2);
         let rows = ((inner.height() / cell.y).floor() as u16).max(1);
         self.request_size(conn, cols, rows);
 
+        let theme = kiln_common::Theme::current();
+        if theme.name != self.theme_name {
+            self.theme_name = theme.name;
+            self.palette = Arc::new(Palette::from_theme(&theme));
+            self.rows.clear();
+        }
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, self.palette.bg);
+        if self.fill_background {
+            painter.rect_filled(rect, 0.0, self.palette.bg);
+        }
 
         let screen_exists = conn.screens.contains_key(&self.session);
         if !screen_exists {
@@ -874,9 +881,9 @@ fn build_row(ctx: &egui::Context, line: &Line, cell: Vec2, font: &FontId, pal: &
             }
             let span = if c.flags & flags::WIDE != 0 { 2.0 } else { 1.0 };
             let mut g = ctx.fonts_mut(|f| f.layout_no_wrap(s.clone(), font.clone(), fg));
-            // 두 칸 문자는 칸 폭을 채우도록 최대 1.2배까지 키운다.
+            // 두 칸 문자는 칸 폭을 채우도록 최대 1.4배까지 키운다.
             if span == 2.0 && g.size().x > 0.0 && g.size().x < cell.x * 1.8 {
-                let scale = (cell.x * 1.9 / g.size().x).min(1.2);
+                let scale = (cell.x * 1.92 / g.size().x).min(1.4);
                 let f2 = FontId::new(font.size * scale, font.family.clone());
                 g = ctx.fonts_mut(|f| f.layout_no_wrap(s, f2, fg));
             }
