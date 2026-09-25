@@ -1,6 +1,8 @@
 //! 테스트용 임시 git 저장소 헬퍼.
 #![allow(dead_code)]
 
+pub mod fake_gh;
+
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::process::Command;

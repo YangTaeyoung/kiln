@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::cmd::{GitError, GitResult, gh, gh_stdin};
+use crate::github::RepoRef;
 
 /// 체크 결과 요약.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -482,14 +483,35 @@ pub trait PrBackend: Send + Sync + 'static {
     fn mark_ready(&self, number: u64) -> GitResult<()>;
 }
 
-/// `gh` CLI 기반 백엔드.
+/// `gh` CLI 기반 백엔드. `repo` 가 있으면 PR 명령에 `-R owner/name` 을 붙인다.
 pub struct GhBackend {
-    root: PathBuf,
+    pub(crate) root: PathBuf,
+    repo: Option<RepoRef>,
 }
 
 impl GhBackend {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self { root, repo: None }
+    }
+
+    /// 지정한 저장소를 대상으로 하는 백엔드. `None` 이면 `new` 와 같다.
+    pub fn for_repo(root: PathBuf, repo: Option<RepoRef>) -> Self {
+        Self { root, repo }
+    }
+
+    pub fn repo(&self) -> Option<&RepoRef> {
+        self.repo.as_ref()
+    }
+
+    fn pr_gh(&self, args: &[&str]) -> GitResult<String> {
+        self.pr_gh_stdin(args, None)
+    }
+
+    fn pr_gh_stdin(&self, args: &[&str], input: Option<&[u8]>) -> GitResult<String> {
+        let extra = crate::github::repo_args(self.repo.as_ref());
+        let mut all: Vec<&str> = args.to_vec();
+        all.extend(extra.iter().map(String::as_str));
+        gh_stdin(&self.root, &all, input)
     }
 }
 
@@ -497,24 +519,30 @@ impl PrBackend for GhBackend {
     fn list(&self, filter: PrFilter) -> GitResult<Vec<PrItem>> {
         let mut args = vec!["pr", "list", "--limit", "50", "--json", PR_LIST_FIELDS];
         args.extend(filter.gh_args());
-        parse_pr_list(&gh(&self.root, &args)?)
+        parse_pr_list(&self.pr_gh(&args)?)
     }
 
     fn view(&self, number: u64) -> GitResult<PrDetail> {
         let n = number.to_string();
-        parse_pr_view(&gh(&self.root, &["pr", "view", &n, "--json", PR_VIEW_FIELDS])?)
+        parse_pr_view(&self.pr_gh(&["pr", "view", &n, "--json", PR_VIEW_FIELDS])?)
     }
 
     fn diff(&self, number: u64) -> GitResult<String> {
         let n = number.to_string();
-        gh(&self.root, &["pr", "diff", &n, "--color", "never"])
+        self.pr_gh(&["pr", "diff", &n, "--color", "never"])
     }
 
     fn create_defaults(&self) -> GitResult<PrCreateDefaults> {
         let root = &self.root;
         let st = crate::repo::status(root)?;
         let head = st.branch.head.clone().ok_or_else(|| GitError::Failed("분리된 HEAD입니다 — 먼저 브랜치로 전환하세요".into()))?;
-        let base = gh(root, &["repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"])
+        let repo_name = self.repo.as_ref().map(RepoRef::full_name);
+        let mut view_args = vec!["repo", "view"];
+        if let Some(n) = &repo_name {
+            view_args.push(n);
+        }
+        view_args.extend(["--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"]);
+        let base = gh(root, &view_args)
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|_| "main".into());
         let mut bases: Vec<String> = crate::repo::branches(root)
@@ -539,7 +567,7 @@ impl PrBackend for GhBackend {
         if req.draft {
             args.push("--draft");
         }
-        let out = gh_stdin(&self.root, &args, Some(req.body.as_bytes()))?;
+        let out = self.pr_gh_stdin(&args, Some(req.body.as_bytes()))?;
         Ok(out.lines().rev().find(|l| l.starts_with("http")).unwrap_or(out.trim()).to_string())
     }
 
@@ -555,7 +583,7 @@ impl PrBackend for GhBackend {
             args.push("--body-file");
             args.push("-");
         }
-        gh_stdin(&self.root, &args, Some(body.as_bytes())).map(|_| ())
+        self.pr_gh_stdin(&args, Some(body.as_bytes())).map(|_| ())
     }
 
     fn merge(&self, number: u64, method: MergeMethod, delete_branch: bool) -> GitResult<String> {
@@ -564,17 +592,17 @@ impl PrBackend for GhBackend {
         if delete_branch {
             args.push("--delete-branch");
         }
-        gh(&self.root, &args)
+        self.pr_gh(&args)
     }
 
     fn checkout(&self, number: u64) -> GitResult<String> {
         let n = number.to_string();
-        gh(&self.root, &["pr", "checkout", &n])
+        self.pr_gh(&["pr", "checkout", &n])
     }
 
     fn mark_ready(&self, number: u64) -> GitResult<()> {
         let n = number.to_string();
-        gh(&self.root, &["pr", "ready", &n]).map(|_| ())
+        self.pr_gh(&["pr", "ready", &n]).map(|_| ())
     }
 }
 

@@ -35,6 +35,8 @@ enum Source {
     File { path: PathBuf, staged: bool },
     Commit(String),
     Patch { title: String, text: String },
+    /// `git diff <from> [<to>]`. `to` 가 없으면 작업 트리와 비교한다.
+    Range { from: String, to: Option<String> },
 }
 
 struct Loaded {
@@ -120,6 +122,11 @@ impl DiffView {
     /// 커밋 diff.
     pub fn for_commit(root: &Path, sha: &str) -> Self {
         Self::new(root, Source::Commit(sha.to_string()))
+    }
+
+    /// 두 리비전(또는 리비전과 작업 트리) 사이의 diff.
+    pub fn for_range(root: &Path, from: &str, to: Option<&str>) -> Self {
+        Self::new(root, Source::Range { from: from.to_string(), to: to.map(str::to_string) })
     }
 
     /// 이미 가진 unified diff 텍스트(예: `gh pr diff`)를 보여준다. 헝크 조작은 비활성.
@@ -324,6 +331,7 @@ impl DiffView {
             Source::File { path, staged } => format!("{}:{staged}", path.display()),
             Source::Commit(s) => s.clone(),
             Source::Patch { title, .. } => title.clone(),
+            Source::Range { from, to } => format!("{from}..{}", to.as_deref().unwrap_or("")),
         }
     }
 
@@ -358,6 +366,15 @@ impl DiffView {
                         Source::Commit(_) => {}
                         Source::Patch { title, .. } => {
                             ui.label(RichText::new(title).font(kiln_common::fonts::semibold(14.0)).color(t.text));
+                        }
+                        Source::Range { from, to } => {
+                            let short = |s: &str| s.chars().take(8).collect::<String>();
+                            ui.label(RichText::new(short(from)).font(kiln_common::fonts::mono(13.0)).color(t.text));
+                            ui.label(RichText::new("→").color(t.text_faint));
+                            match to {
+                                Some(to) => ui.label(RichText::new(short(to)).font(kiln_common::fonts::mono(13.0)).color(t.text)),
+                                None => outline_badge(ui, "작업 트리", t.yellow),
+                            };
                         }
                     }
                     let (a, d) = self.files.iter().fold((0, 0), |(a, d), f| (a + f.added(), d + f.removed()));
@@ -611,6 +628,14 @@ fn load(root: &Path, source: &Source) -> GitResult<Loaded> {
             Ok(Loaded { top, rel: None, files, commit: Some(c) })
         }
         Source::Patch { text, .. } => Ok(Loaded { top, rel: None, files: parse_diff(text), commit: None }),
+        Source::Range { from, to } => {
+            let mut args = vec!["diff", "--no-color", "--no-ext-diff", from.as_str()];
+            if let Some(to) = to {
+                args.push(to.as_str());
+            }
+            let text = git(&top, Mode::Read, &args)?;
+            Ok(Loaded { top, rel: None, files: parse_diff(&text), commit: None })
+        }
     }
 }
 

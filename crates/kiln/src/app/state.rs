@@ -86,6 +86,7 @@ pub enum ToolP {
     Editor { path: PathBuf },
     DbTable { conn: u64, schema: Option<String>, table: String },
     DbConsole { conn: u64 },
+    History,
 }
 
 /// 이전 형식의 탭.

@@ -20,7 +20,45 @@ fn setup() -> (PathBuf, PathBuf) {
     git(&["init", "-q", "-b", "main"]);
     git(&["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
     git(&["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-qm", "init"]);
+    let commit = |file: &str, body: &str, msg: &str| {
+        std::fs::write(proj.join(file), body).unwrap();
+        git(&["add", "."]);
+        git(&["-c", "user.email=dev@kiln.app", "-c", "user.name=양태영", "-c", "commit.gpgsign=false", "commit", "-qm", msg]);
+    };
+    commit("README.md", "# demo\n", "README 추가");
+    git(&["checkout", "-qb", "feature/login"]);
+    commit("src/login.rs", "pub fn login() {}\n", "로그인 화면 뼈대");
+    commit("src/login.rs", "pub fn login() -> bool { true }\n", "로그인 결과 반환");
+    git(&["checkout", "-q", "main"]);
+    commit("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.2.0\"\n", "버전 0.2.0");
+    git(&["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "feature/login", "-m", "Merge branch 'feature/login'"]);
+    git(&["tag", "v0.2.0"]);
+    commit("src/main.rs", "fn main() {}\n", "main 정리");
     std::fs::write(proj.join("src/lib.rs"), "pub fn add(a: i32, b: i32) -> i32 { a + b }\n").unwrap();
+    let acc = base.join("accounts/config");
+    std::fs::create_dir_all(&acc).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    std::fs::write(
+        acc.join("accounts.json"),
+        serde_json::json!({
+            "claude": {
+                "auto_rotate": true,
+                "active": "c1",
+                "profiles": [
+                    {"id": "c1", "tool": "claude", "label": "개인", "email": "me@example.com", "added_unix": 1, "last_usage": {"five_hour": [0.92, now + 3600], "seven_day": [0.41, now + 86400 * 3], "status": "allowed_warning"}},
+                    {"id": "c2", "tool": "claude", "label": "회사", "email": "work@example.com", "added_unix": 2, "last_usage": {"five_hour": [0.12, now + 7200], "seven_day": [0.30, now + 86400 * 5], "status": "allowed"}}
+                ]
+            },
+            "codex": {
+                "profiles": [
+                    {"id": "x1", "tool": "codex", "label": "개인", "email": "me@example.com", "added_unix": 3}
+                ],
+                "active": "x1"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
     // SAFETY: 테스트 시작 시 설정한다.
     unsafe {
         std::env::set_var("KILN_SOCKET", base.join("d.sock"));
@@ -28,6 +66,7 @@ fn setup() -> (PathBuf, PathBuf) {
         std::env::set_var("KILN_EXE", env!("CARGO_BIN_EXE_kiln"));
         std::env::set_var("KILN_NO_AUTO_UPGRADE", "1");
         std::env::set_var("KILN_DB_NO_KEYCHAIN", "1");
+        std::env::set_var("KILN_ACCOUNTS_SANDBOX", base.join("accounts"));
         std::env::set_var("PS1", "%F{blue}%~%f %F{green}❯%f ");
     }
     (base, proj)
@@ -96,6 +135,15 @@ fn design_review_screens() {
     shot(&mut h, "03_editor_card_git_sheet");
     h.key_press_modifiers(cmd_shift(), egui::Key::G);
     h.run_steps(3);
+    h.key_press_modifiers(cmd_shift(), egui::Key::R);
+    pump(&mut h, 4.0, |_| false);
+    shot(&mut h, "03b_github_sheet");
+    h.key_press_modifiers(cmd_shift(), egui::Key::R);
+    h.run_steps(3);
+    h.key_press_modifiers(cmd_shift(), egui::Key::L);
+    pump(&mut h, 4.0, |h| h.state().debug_active_tab_title().contains("Git 로그"));
+    pump(&mut h, 2.0, |_| false);
+    shot(&mut h, "03c_git_history");
 
     h.state_mut().debug_open_palette();
     pump(&mut h, 1.0, |_| false);
@@ -109,6 +157,9 @@ fn design_review_screens() {
     h.state_mut().debug_open_settings(1);
     pump(&mut h, 1.0, |_| false);
     shot(&mut h, "06_settings_terminal");
+    h.state_mut().debug_open_settings(3);
+    pump(&mut h, 1.0, |_| false);
+    shot(&mut h, "06b_settings_accounts");
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
 

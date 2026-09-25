@@ -5,7 +5,9 @@ use super::state::ToolP;
 use kiln_common::Task;
 use kiln_db::{ConnId, DbEvent, DbManager, DbPanel, DbTab};
 use kiln_editor::{Decoration, Editor, EditorEvent, FileTree, LspManager, QuickOpen, SearchPanel};
-use kiln_git::{DiffView, GitEvent, GitPanel, PrPanel, PrView, RepoSummary};
+use kiln_git::github::RepoRef;
+use kiln_git::history::HistoryEvent;
+use kiln_git::{DiffView, GitEvent, GitPanel, GithubHub, HistoryView, IssueView, PrView, RepoSummary};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -50,7 +52,7 @@ impl ToolKind {
             ToolKind::Explorer => "파일",
             ToolKind::Search => "검색",
             ToolKind::Git => "소스 제어",
-            ToolKind::PullRequests => "풀 리퀘스트",
+            ToolKind::PullRequests => "GitHub",
             ToolKind::Database => "데이터베이스",
             ToolKind::Problems => "문제",
         }
@@ -106,6 +108,10 @@ pub trait ToolTab {
     }
     /// 보이지 않는 탭도 매 프레임 호출된다(LSP 응답 반영 등).
     fn tick(&mut self) {}
+    /// 새 페이지 하나를 차지하는 카드인지. 이런 카드는 다른 카드를 열 때 교체되지 않는다.
+    fn own_page(&self) -> bool {
+        false
+    }
     /// 카드 머리글 아이콘을 직접 그린다. 그렸으면 true.
     fn paint_icon(&self, _ui: &egui::Ui, _rect: egui::Rect) -> bool {
         false
@@ -183,10 +189,48 @@ fn commit_factory(root: PathBuf, sha: String) -> TabFactory {
     }
 }
 
-fn pr_factory(root: PathBuf, number: u64) -> TabFactory {
+fn repo_key(repo: &Option<RepoRef>) -> String {
+    repo.as_ref().map(|r| format!("{}:", r.full_name())).unwrap_or_default()
+}
+
+fn pr_factory(root: PathBuf, repo: Option<RepoRef>, number: u64) -> TabFactory {
+    let key = format!("pr:{}{number}", repo_key(&repo));
     TabFactory {
-        key: format!("pr:{number}"),
-        make: Box::new(move |_, _| Ok(Box::new(PrTab { view: PrView::new(root.clone(), number), number, root }) as Box<dyn ToolTab>)),
+        key: key.clone(),
+        make: Box::new(move |_, _| Ok(Box::new(PrTab { view: PrView::for_repo(root.clone(), repo.clone(), number), number, root, repo, key }) as Box<dyn ToolTab>)),
+        reuse: None,
+    }
+}
+
+pub fn history_factory(root: PathBuf) -> TabFactory {
+    TabFactory {
+        key: "git-history".into(),
+        make: Box::new(move |_, _| Ok(Box::new(HistoryTab { view: HistoryView::new(root.clone()) }) as Box<dyn ToolTab>)),
+        reuse: Some(Box::new(|t| t.on_focus_regained())),
+    }
+}
+
+fn range_factory(root: PathBuf, from: String, to: Option<String>) -> TabFactory {
+    let key = format!("range:{from}..{}", to.clone().unwrap_or_default());
+    TabFactory {
+        key: key.clone(),
+        make: Box::new(move |_, _| {
+            let short = |s: &str| s.chars().take(8).collect::<String>();
+            let title = match &to {
+                Some(to) => format!("{} → {}", short(&from), short(to)),
+                None => format!("{} → 작업 트리", short(&from)),
+            };
+            Ok(Box::new(DiffTab { view: DiffView::for_range(&root, &from, to.as_deref()), title, key: key.clone() }) as Box<dyn ToolTab>)
+        }),
+        reuse: None,
+    }
+}
+
+fn issue_factory(root: PathBuf, repo: Option<RepoRef>, number: u64) -> TabFactory {
+    let key = format!("issue:{}{number}", repo_key(&repo));
+    TabFactory {
+        key: key.clone(),
+        make: Box::new(move |_, _| Ok(Box::new(IssueTab { view: IssueView::new(root.clone(), repo.clone(), number), root, repo, key }) as Box<dyn ToolTab>)),
         reuse: None,
     }
 }
@@ -285,6 +329,8 @@ struct PrTab {
     view: PrView,
     number: u64,
     root: PathBuf,
+    repo: Option<RepoRef>,
+    key: String,
 }
 
 impl ToolTab for PrTab {
@@ -295,11 +341,73 @@ impl ToolTab for PrTab {
         }
     }
     fn key(&self) -> String {
-        format!("pr:{}", self.number)
+        self.key.clone()
     }
     fn ui(&mut self, ui: &mut egui::Ui) -> Vec<Action> {
         let root = self.root.clone();
-        self.view.ui(ui).into_iter().filter_map(|e| git_event_action(&root, e)).collect()
+        let repo = self.repo.clone();
+        self.view.ui(ui).into_iter().filter_map(|e| git_event_action(&root, repo.as_ref(), e)).collect()
+    }
+}
+
+struct HistoryTab {
+    view: HistoryView,
+}
+
+impl ToolTab for HistoryTab {
+    fn title(&self) -> String {
+        "Git 로그".into()
+    }
+    fn key(&self) -> String {
+        "git-history".into()
+    }
+    fn ui(&mut self, ui: &mut egui::Ui) -> Vec<Action> {
+        let root = self.view.root().to_path_buf();
+        self.view
+            .ui(ui)
+            .into_iter()
+            .map(|e| match e {
+                HistoryEvent::OpenCommit(sha) => Action::OpenTab(commit_factory(root.clone(), sha)),
+                HistoryEvent::OpenDiff { from, to } => Action::OpenTab(range_factory(root.clone(), from, to)),
+                HistoryEvent::OpenFile(p) => Action::OpenTab(open_file_factory(p, None, None)),
+                HistoryEvent::RunInTerminal(cmd) => Action::RunInTerminal(cmd),
+                HistoryEvent::Toast(t) => Action::Toast(t),
+            })
+            .collect()
+    }
+    fn on_focus_regained(&mut self) {
+        self.view.refresh();
+    }
+    fn paint_icon(&self, ui: &egui::Ui, rect: egui::Rect) -> bool {
+        kiln_common::icons::paint(ui.painter(), rect, kiln_common::icons::Icon::History, kiln_common::Theme::current().accent);
+        true
+    }
+    fn persist(&self) -> Option<ToolP> {
+        Some(ToolP::History)
+    }
+    fn own_page(&self) -> bool {
+        true
+    }
+}
+
+struct IssueTab {
+    view: IssueView,
+    root: PathBuf,
+    repo: Option<RepoRef>,
+    key: String,
+}
+
+impl ToolTab for IssueTab {
+    fn title(&self) -> String {
+        self.view.title()
+    }
+    fn key(&self) -> String {
+        self.key.clone()
+    }
+    fn ui(&mut self, ui: &mut egui::Ui) -> Vec<Action> {
+        let root = self.root.clone();
+        let repo = self.repo.clone();
+        self.view.ui(ui).into_iter().filter_map(|e| git_event_action(&root, repo.as_ref(), e)).collect()
     }
 }
 
@@ -339,13 +447,17 @@ impl ToolTab for DbTabW {
     }
 }
 
-fn git_event_action(root: &Path, e: GitEvent) -> Option<Action> {
+/// `repo` 는 이벤트를 낸 화면이 보고 있는 저장소(없으면 워크스페이스 저장소).
+fn git_event_action(root: &Path, repo: Option<&RepoRef>, e: GitEvent) -> Option<Action> {
     Some(match e {
         GitEvent::OpenFile(p) => Action::OpenTab(open_file_factory(p, None, None)),
         GitEvent::OpenDiff { path, staged } => Action::OpenTab(diff_factory(root.to_path_buf(), path, staged)),
-        GitEvent::OpenPr(n) => Action::OpenTab(pr_factory(root.to_path_buf(), n)),
+        GitEvent::OpenPr(n) => Action::OpenTab(pr_factory(root.to_path_buf(), repo.cloned(), n)),
+        GitEvent::OpenIssue(n) => Action::OpenTab(issue_factory(root.to_path_buf(), repo.cloned(), n)),
+        GitEvent::CloneRepo { name_with_owner } => Action::CloneRepo(name_with_owner),
         GitEvent::OpenCommit(sha) => Action::OpenTab(commit_factory(root.to_path_buf(), sha)),
         GitEvent::RunInTerminal(cmd) => Action::RunInTerminal(cmd),
+        GitEvent::OpenUrl(url) => Action::OpenLink(super::terminal::LinkTarget::Url(url)),
     })
 }
 
@@ -372,7 +484,7 @@ pub struct WorkspaceTools {
     tree: Option<FileTree>,
     search: Option<SearchPanel>,
     git: Option<GitPanel>,
-    prs: Option<PrPanel>,
+    hub: Option<GithubHub>,
     db_panel: Option<DbPanel>,
     quick: QuickOpen,
     summary: Option<RepoSummary>,
@@ -395,7 +507,7 @@ impl WorkspaceTools {
             tree: None,
             search: None,
             git: None,
-            prs: None,
+            hub: None,
             db_panel: None,
             quick: QuickOpen::new(),
             summary: None,
@@ -441,8 +553,8 @@ impl WorkspaceTools {
             ToolKind::Search => self.focus_search = true,
             ToolKind::Git => self.git().refresh(),
             ToolKind::PullRequests => {
-                if let Some(p) = &mut self.prs {
-                    p.refresh();
+                if let Some(h) = &mut self.hub {
+                    h.refresh();
                 }
             }
             _ => {}
@@ -461,6 +573,7 @@ impl WorkspaceTools {
                 self.console_seq += 1;
                 db_console_factory(self.db.clone(), ConnId(*conn), self.console_seq)
             }
+            ToolP::History => history_factory(self.root.clone()),
             _ => return None,
         };
         f.make(ctx, &self.env()).ok()
@@ -487,11 +600,13 @@ impl WorkspaceTools {
             }
             ToolKind::Git => {
                 let ev = self.git().ui(ui);
-                ev.into_iter().filter_map(|e| git_event_action(&root, e)).collect()
+                ev.into_iter().filter_map(|e| git_event_action(&root, None, e)).collect()
             }
             ToolKind::PullRequests => {
-                let p = self.prs.get_or_insert_with(|| PrPanel::new(root.clone()));
-                p.ui(ui).into_iter().filter_map(|e| git_event_action(&root, e)).collect()
+                let hub = self.hub.get_or_insert_with(|| GithubHub::new(root.clone()));
+                let ev = hub.ui(ui);
+                let repo = hub.repo();
+                ev.into_iter().filter_map(|e| git_event_action(&root, repo.as_ref(), e)).collect()
             }
             ToolKind::Problems => kiln_editor::diagnostics_ui(ui, &self.lsp).into_iter().filter_map(editor_event_action).collect(),
             ToolKind::Database => {

@@ -14,6 +14,7 @@ kiln-common = { path = "crates/kiln-common" }
 kiln-editor = { path = "crates/kiln-editor" }
 kiln-git = { path = "crates/kiln-git" }
 kiln-db = { path = "crates/kiln-db" }
+kiln-accounts = { path = "crates/kiln-accounts" }
 
 egui = "0.36"
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "persistence", "accesskit", "x11", "wayland"] }

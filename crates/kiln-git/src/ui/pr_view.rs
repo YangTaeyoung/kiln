@@ -70,6 +70,12 @@ impl PrView {
         Self::with_backend(root, number, backend)
     }
 
+    /// 지정 저장소(`-R owner/name`)의 PR 뷰. `repo` 가 `None` 이면 `new` 와 같다.
+    pub fn for_repo(root: PathBuf, repo: Option<crate::github::RepoRef>, number: u64) -> Self {
+        let backend = Arc::new(GhBackend::for_repo(root.clone(), repo));
+        Self::with_backend(root, number, backend)
+    }
+
     /// 데이터 소스를 주입해 만든다.
     pub fn with_backend(root: PathBuf, number: u64, backend: Arc<dyn PrBackend>) -> Self {
         Self {
@@ -599,7 +605,7 @@ fn pos_center(rect: egui::Rect, size: egui::Vec2) -> egui::Pos2 {
     rect.center() - size / 2.0
 }
 
-fn readable_on(bg: Color32) -> Color32 {
+pub(crate) fn readable_on(bg: Color32) -> Color32 {
     let l = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
     if l > 150.0 { kiln_common::Theme::KILN_LIGHT.text } else { kiln_common::Theme::KILN_DARK.text }
 }
@@ -646,7 +652,7 @@ fn build_timeline(d: &PrDetail) -> Vec<TimelineItem> {
 }
 
 /// 작성자/시간 헤더가 있는 코멘트 카드.
-fn comment_card(ui: &mut Ui, author: &str, when: i64, now: i64, verb: &str, accent: Color32, body: impl FnOnce(&mut Ui)) {
+pub(crate) fn comment_card(ui: &mut Ui, author: &str, when: i64, now: i64, verb: &str, accent: Color32, body: impl FnOnce(&mut Ui)) {
     let t = theme();
     egui::Frame::new()
         .fill(if t.dark { t.bg_panel } else { t.bg })

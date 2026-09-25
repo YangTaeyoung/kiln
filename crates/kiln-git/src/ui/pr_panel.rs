@@ -35,6 +35,8 @@ pub struct PrPanel {
     error: Option<GitError>,
     form: Option<CreateForm>,
     created: Option<String>,
+    embedded: bool,
+    can_create: bool,
     now_override: Option<i64>,
 }
 
@@ -55,7 +57,27 @@ impl PrPanel {
             error: None,
             form: None,
             created: None,
+            embedded: false,
+            can_create: true,
             now_override: None,
+        }
+    }
+
+    /// 지정 저장소(`-R owner/name`)를 대상으로 하는 패널. `repo` 가 `None` 이면 `new` 와 같다.
+    pub fn for_repo(root: PathBuf, repo: Option<crate::github::RepoRef>) -> Self {
+        Self::with_backend(Arc::new(GhBackend::for_repo(root, repo)))
+    }
+
+    /// 허브 안에 넣을 때 제목을 숨긴다.
+    pub fn set_embedded(&mut self, on: bool) {
+        self.embedded = on;
+    }
+
+    /// "새 PR" 버튼 표시 여부. 작업 폴더와 다른 저장소를 볼 때 끈다.
+    pub fn set_can_create(&mut self, on: bool) {
+        self.can_create = on;
+        if !on {
+            self.form = None;
         }
     }
 
@@ -171,9 +193,16 @@ impl PrPanel {
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
             egui::Frame::new().inner_margin(Margin { left: 12, right: 12, top: 10, bottom: 10 }).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("풀 리퀘스트").font(kiln_common::fonts::semibold(13.5)).color(t.text));
+                    if self.embedded {
+                        if self.started && self.load.is_none() && self.error.is_none() {
+                            ui.label(faint(format!("풀 리퀘스트 {}개", self.items.len())));
+                        }
+                    } else {
+                        ui.label(RichText::new("풀 리퀘스트").font(kiln_common::fonts::semibold(13.5)).color(t.text));
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if self.form.is_none()
+                            && self.can_create
                             && kiln_common::widgets::button_with(
                                 ui,
                                 Some(kiln_common::icons::Icon::Plus),
@@ -233,23 +262,10 @@ impl PrPanel {
 
     fn ui_list(&mut self, ui: &mut Ui, events: &mut Vec<GitEvent>) {
         let t = theme();
-        if let Some(e) = &self.error {
-            let (title, detail) = match e {
-                GitError::GhMissing => ("GitHub CLI를 찾을 수 없음", "풀 리퀘스트를 보려면 https://cli.github.com 에서 gh를 설치하세요.".to_string()),
-                GitError::GhAuth(_) => ("GitHub에 로그인되어 있지 않음", "터미널에서 `gh auth login`을 실행한 뒤 새로 고치세요.".to_string()),
-                GitError::NotARepo => ("Git 저장소가 아닙니다", String::new()),
-                other => ("풀 리퀘스트를 불러올 수 없습니다", other.to_string()),
-            };
-            let is_auth = matches!(e, GitError::GhAuth(_));
-            egui::Frame::new().inner_margin(Margin::same(10)).show(ui, |ui| {
-                banner(ui, BannerKind::Warning, title, Some(&detail), false);
-                if is_auth {
-                    ui.add_space(6.0);
-                    if tool_button(ui, None, "터미널에서 gh auth login 실행").clicked() {
-                        events.push(GitEvent::RunInTerminal("gh auth login".into()));
-                    }
-                }
-            });
+        if let Some(e) = self.error.clone() {
+            if super::gh_widgets::gh_error_state(ui, &e, "풀 리퀘스트", events) == super::gh_widgets::ErrorAction::Retry {
+                self.refresh();
+            }
             return;
         }
         if self.load.is_some() && self.items.is_empty() {

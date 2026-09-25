@@ -49,6 +49,22 @@ pub enum Icon {
     Minus,
     History,
     Info,
+    /// 열린 이슈(원 안의 점).
+    Issue,
+    /// 닫힌 이슈(원 안의 체크).
+    IssueClosed,
+    /// GitHub Actions(원 안의 재생 삼각형).
+    Actions,
+    /// 저장소(책).
+    Repo,
+    Star,
+    /// 라벨(태그).
+    Tag,
+    /// 댓글(말풍선).
+    Comment,
+    /// 사람(담당자).
+    Person,
+    Lock,
 }
 
 pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
@@ -301,6 +317,65 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.circle_stroke(c, 7.0 * s, st);
             p.line_segment([at(0.0, -0.5), at(0.0, 4.0)], st);
             p.circle_filled(at(0.0, -3.5), 0.9 * s, color);
+        }
+        Icon::Issue => {
+            p.circle_stroke(c, 7.0 * s, st);
+            p.circle_filled(c, 1.8 * s, color);
+        }
+        Icon::IssueClosed => {
+            p.circle_stroke(c, 7.0 * s, st);
+            p.add(Shape::line(vec![at(-3.2, 0.2), at(-0.8, 2.6), at(3.4, -2.2)], st));
+        }
+        Icon::Actions => {
+            p.circle_stroke(c, 7.0 * s, st);
+            p.add(Shape::convex_polygon(vec![at(-2.0, -3.6), at(3.8, 0.0), at(-2.0, 3.6)], color, Stroke::NONE));
+        }
+        Icon::Repo => {
+            p.add(Shape::line(vec![at(-6.0, 5.0), at(-6.0, -5.5), at(-4.0, -7.0), at(6.0, -7.0), at(6.0, 4.0), at(-4.0, 4.0), at(-6.0, 5.5), at(-4.0, 7.0), at(6.0, 7.0)], st));
+            p.line_segment([at(-3.0, -7.0), at(-3.0, 4.0)], st);
+        }
+        Icon::Star => {
+            let pts: Vec<Pos2> = (0..10)
+                .map(|i| {
+                    let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 5.0;
+                    let r = if i % 2 == 0 { 7.5 } else { 3.3 };
+                    at(r * a.cos(), r * a.sin() + 0.6)
+                })
+                .collect();
+            p.add(Shape::closed_line(pts, st));
+        }
+        Icon::Tag => {
+            p.add(Shape::closed_line(vec![at(-7.0, -7.0), at(0.5, -7.0), at(7.5, 0.0), at(0.0, 7.5), at(-7.0, 0.5)], st));
+            p.circle_filled(at(-3.3, -3.3), 1.3 * s, color);
+        }
+        Icon::Comment => {
+            p.add(Shape::closed_line(
+                vec![at(-7.5, -6.0), at(7.5, -6.0), at(7.5, 3.5), at(-1.0, 3.5), at(-4.5, 7.0), at(-4.5, 3.5), at(-7.5, 3.5)],
+                st,
+            ));
+        }
+        Icon::Person => {
+            p.circle_stroke(at(0.0, -3.5), 3.3 * s, st);
+            let arc: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = std::f32::consts::PI + std::f32::consts::PI * i as f32 / 16.0;
+                    at(6.5 * a.cos(), 7.5 + 5.5 * a.sin())
+                })
+                .collect();
+            p.add(Shape::line(arc, st));
+        }
+        Icon::Lock => {
+            p.rect_stroke(Rect::from_min_max(at(-6.0, -1.0), at(6.0, 7.5)), 1.5 * s, st, egui::StrokeKind::Middle);
+            let arc: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = std::f32::consts::PI + std::f32::consts::PI * i as f32 / 16.0;
+                    at(3.8 * a.cos(), -3.5 + 3.8 * a.sin())
+                })
+                .collect();
+            let mut pts = vec![at(-3.8, -1.0)];
+            pts.extend(arc);
+            pts.push(at(3.8, -1.0));
+            p.add(Shape::line(pts, st));
         }
         Icon::Bell => {
             let pts: Vec<Pos2> = vec![at(-6.0, 4.0), at(-4.5, 2.0), at(-4.5, -2.5), at(-2.0, -6.0), at(2.0, -6.0), at(4.5, -2.5), at(4.5, 2.0), at(6.0, 4.0)];

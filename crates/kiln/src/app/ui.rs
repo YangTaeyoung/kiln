@@ -696,7 +696,7 @@ impl KilnApp {
 
         if self.settings_ui.open {
             let info = settings::AboutInfo { daemon_pid: self.conn.daemon_pid, daemon_build: self.conn.daemon_build.clone(), connected: self.conn.is_connected() };
-            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info);
+            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr);
             self.actions.extend(acts);
             if !self.settings_ui.open {
                 self.focus_terminal = true;
@@ -753,11 +753,13 @@ impl KilnApp {
         ctx.request_repaint_after(Duration::from_millis(200));
         let mut reveal = None;
         let mut dismiss = None;
+        let mut pressed = None;
         egui::Area::new(egui::Id::new("toasts")).anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -20.0)).order(egui::Order::Tooltip).show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             let n = self.toasts.len();
             for idx in (n.saturating_sub(4)..n).rev() {
                 let toast = &self.toasts[idx];
+                let mut btn_rect: Option<egui::Rect> = None;
                 let (accent, icon) = match toast.kind {
                     ToastKind::Info => (t.accent, Icon::Sparkle),
                     ToastKind::Notify => (t.orange, Icon::Bell),
@@ -782,14 +784,19 @@ impl KilnApp {
                                 if !toast.body.is_empty() {
                                     ui.add(egui::Label::new(RichText::new(&toast.body).size(12.5).color(t.text_dim)).wrap());
                                 }
-                                if toast.session.is_some() {
+                                if let Some((label, _)) = &toast.button {
+                                    ui.add_space(4.0);
+                                    btn_rect = Some(widgets::button(ui, label, ButtonKind::Primary).rect);
+                                } else if toast.session.is_some() {
                                     ui.label(RichText::new("눌러서 이동").size(11.5).color(accent));
                                 }
                             });
                         });
                     });
                 let r = ui.interact(resp.response.rect, ui.id().with(("toast", idx)), Sense::click());
-                if r.clicked() {
+                if r.clicked() && btn_rect.zip(r.interact_pointer_pos()).is_some_and(|(b, p)| b.contains(p)) {
+                    pressed = Some(idx);
+                } else if r.clicked() {
                     match toast.session {
                         Some(s) => reveal = Some((idx, s)),
                         None => dismiss = Some(idx),
@@ -797,7 +804,12 @@ impl KilnApp {
                 }
             }
         });
-        if let Some((idx, s)) = reveal {
+        if let Some(idx) = pressed {
+            let toast = self.toasts.remove(idx);
+            if let Some((_, a)) = toast.button {
+                self.actions.push(a);
+            }
+        } else if let Some((idx, s)) = reveal {
             self.toasts.remove(idx);
             self.reveal_session(s);
         } else if let Some(idx) = dismiss {
@@ -823,6 +835,7 @@ impl KilnApp {
         add(Group::Commands, Icon::Plus, "새 페이지".into(), "⌘T", Action::NewPage);
         add(Group::Commands, Icon::SplitRight, "오른쪽으로 나누기".into(), "⌘D", Action::Split(layout::Dir::Horizontal));
         add(Group::Commands, Icon::SplitDown, "아래로 나누기".into(), "⇧⌘D", Action::Split(layout::Dir::Vertical));
+        add(Group::Commands, Icon::History, "Git 로그 (히스토리)".into(), "⇧⌘L", Action::OpenHistory);
         add(Group::Commands, Icon::Maximize, "카드 크게 보기 전환".into(), "⇧⌘↩", Action::ToggleZoom(None));
         add(Group::Commands, Icon::Command, "카드 크기 균등하게".into(), "⌥⌘=", Action::Equalize);
         add(Group::Commands, Icon::Close, "카드 닫기".into(), "⌘W", Action::CloseActive);

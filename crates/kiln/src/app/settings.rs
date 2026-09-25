@@ -19,16 +19,17 @@ pub struct AboutInfo {
     pub connected: bool,
 }
 
-const SECTIONS: [(&str, Icon); 5] = [
+const SECTIONS: [(&str, Icon); 6] = [
     ("모양", Icon::Sparkle),
     ("터미널", Icon::Terminal),
     ("동작", Icon::Gear),
+    ("계정", Icon::Person),
     ("단축키", Icon::Command),
     ("정보", Icon::Bell),
 ];
 
 impl SettingsUi {
-    pub fn ui(&mut self, ctx: &egui::Context, s: &mut Settings, about: &AboutInfo) -> Vec<Action> {
+    pub fn ui(&mut self, ctx: &egui::Context, s: &mut Settings, about: &AboutInfo, accounts: &kiln_accounts::AccountManager) -> Vec<Action> {
         let t = Theme::current();
         let mut acts = Vec::new();
         let screen = ctx.content_rect();
@@ -80,7 +81,8 @@ impl SettingsUi {
                         0 => appearance(ui, s, &mut acts),
                         1 => terminal(ui, s),
                         2 => behavior(ui, s),
-                        3 => shortcuts(ui),
+                        3 => accounts_page(ui, accounts, &mut acts, &mut close),
+                        4 => shortcuts(ui),
                         _ => about_page(ui, about, &mut acts),
                     }
                 });
@@ -90,6 +92,23 @@ impl SettingsUi {
             self.open = false;
         }
         acts
+    }
+}
+
+fn accounts_page(ui: &mut egui::Ui, mgr: &kiln_accounts::AccountManager, acts: &mut Vec<Action>, close: &mut bool) {
+    use kiln_accounts::AccountsEvent;
+    for e in kiln_accounts::accounts_settings_ui(ui, mgr) {
+        match e {
+            AccountsEvent::RunLogin(tool) => {
+                acts.push(Action::RunLogin(tool));
+                *close = true;
+            }
+            AccountsEvent::Switched { tool, .. } => {
+                let name = mgr.active(tool).and_then(|id| mgr.profiles(tool).into_iter().find(|p| p.id == id)).map(|p| p.label).unwrap_or_default();
+                acts.push(Action::Toast(format!("{} 계정을 {name}(으)로 바꿨습니다. 새로 시작하는 세션부터 적용됩니다", tool.display_name())));
+            }
+            AccountsEvent::Saved { tool, .. } => acts.push(Action::Toast(format!("현재 {} 로그인을 계정 목록에 저장했습니다", tool.display_name()))),
+        }
     }
 }
 
@@ -220,7 +239,7 @@ fn shortcuts(ui: &mut egui::Ui) {
     let rows: [(&str, &[(&str, &str)]); 4] = [
         ("카드와 페이지", &[("새 페이지", "⌘T"), ("오른쪽으로 나누기", "⌘D"), ("아래로 나누기", "⇧⌘D"), ("카드 닫기", "⌘W"), ("카드 크게 보기", "⇧⌘↩"), ("카드 이동", "⌥⌘←"), ("페이지 전환", "⌥⌘1")]),
         ("탐색", &[("명령 팔레트", "⌘K"), ("파일 빠르게 열기", "⌘P"), ("찾기", "⌘F"), ("스페이스 전환", "⌘1"), ("최근 알림", "⇧⌘U")]),
-        ("도구 시트", &[("파일", "⇧⌘E"), ("검색", "⇧⌘F"), ("Git", "⇧⌘G"), ("풀 리퀘스트", "⇧⌘R"), ("데이터베이스", "⇧⌘B"), ("문제", "⇧⌘M")]),
+        ("도구 시트", &[("파일", "⇧⌘E"), ("검색", "⇧⌘F"), ("Git", "⇧⌘G"), ("GitHub", "⇧⌘R"), ("데이터베이스", "⇧⌘B"), ("문제", "⇧⌘M"), ("Git 로그", "⇧⌘L")]),
         ("화면", &[("스페이스 레일", "⌘B"), ("글꼴 크게/작게", "⌘="), ("설정", "⌘,")]),
     ];
     for (title, items) in rows {

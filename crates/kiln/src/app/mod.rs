@@ -4,6 +4,7 @@ pub mod conn;
 mod keys;
 mod layout;
 mod palette;
+mod rotation;
 mod settings;
 mod state;
 pub mod terminal;
@@ -144,6 +145,14 @@ pub enum Action {
     Toast(String),
     SetTheme(String),
     RevealSession(SessionId),
+    /// 계정 로그인 명령을 새 터미널 카드에서 실행한다.
+    RunLogin(kiln_accounts::Tool),
+    /// 다음 계정으로 바꾸고 세션의 에이전트를 이어서 실행한다.
+    RotateAccount(SessionId, kiln_accounts::Tool),
+    /// GitHub 저장소(`owner/name`)를 고른 폴더 아래로 복제하고 새 스페이스로 연다.
+    CloneRepo(String),
+    /// 현재 스페이스 저장소의 Git 로그 카드를 연다.
+    OpenHistory,
 }
 
 pub(crate) struct Toast {
@@ -152,6 +161,8 @@ pub(crate) struct Toast {
     at: Instant,
     kind: ToastKind,
     session: Option<SessionId>,
+    /// 알림 안의 버튼(이름, 동작). 누르면 동작을 실행하고 알림을 닫는다.
+    button: Option<(String, Action)>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -191,6 +202,8 @@ pub struct KilnApp {
     theme: Theme,
     pending_input: HashMap<PaneId, String>,
     db: kiln_db::DbManager,
+    rotator: rotation::Rotator,
+    clones: (std::sync::mpsc::Sender<Result<PathBuf, String>>, std::sync::mpsc::Receiver<Result<PathBuf, String>>),
 }
 
 pub(crate) fn shells() -> &'static [&'static str] {
@@ -228,6 +241,15 @@ impl KilnApp {
             theme,
             pending_input: HashMap::new(),
             db: kiln_db::DbManager::load(),
+            rotator: rotation::Rotator::new({
+                let m = match std::env::var_os("KILN_ACCOUNTS_SANDBOX") {
+                    Some(dir) => kiln_accounts::AccountManager::with_env(kiln_accounts::Env::sandbox(Path::new(&dir), false).0),
+                    None => kiln_accounts::AccountManager::load(),
+                };
+                m.set_repaint_context(ctx);
+                m
+            }),
+            clones: std::sync::mpsc::channel(),
         };
         app.restore(persisted, ctx);
         if let Some(p) = open_path {
@@ -459,7 +481,7 @@ impl KilnApp {
         let id = self.id();
         self.panes.insert(id, Pane { id, kind, cwd: None });
         let page_panes = self.ws().page().root.panes();
-        let replace = page_panes.iter().copied().find(|p| *p != id && self.panes.get(p).and_then(|x| x.tool()).is_some_and(|t| !t.is_dirty()));
+        let replace = page_panes.iter().copied().find(|p| *p != id && self.panes.get(p).and_then(|x| x.tool()).is_some_and(|t| !t.is_dirty() && !t.own_page()));
         let page = self.ws().page_mut();
         match replace {
             Some(old) => {
@@ -752,6 +774,17 @@ impl KilnApp {
                 }
                 let env = self.workspaces[self.active].tools.env();
                 match factory.make(ctx, &env) {
+                    Ok(tab) if tab.own_page() => {
+                        let title = tab.title();
+                        let id = self.id();
+                        self.panes.insert(id, Pane { id, kind: PaneKind::Tool(tab), cwd: None });
+                        let pid = self.id();
+                        let ws = self.ws();
+                        let mut page = Page::new(pid, id);
+                        page.title = Some(title);
+                        ws.pages.push(page);
+                        ws.active_page = ws.pages.len() - 1;
+                    }
                     Ok(tab) => {
                         self.place_card(PaneKind::Tool(tab));
                     }
@@ -794,6 +827,29 @@ impl KilnApp {
                 self.focus_terminal = true;
             }
             Action::Toast(t) => self.toast(t, String::new(), ToastKind::Info, None),
+            Action::RunLogin(tool) => self.apply(Action::RunInTerminal(kiln_accounts::login_command(tool).to_string()), ctx),
+            Action::RotateAccount(session, tool) => self.rotator.start(session, tool),
+            Action::OpenHistory => {
+                let root = self.ws().root.clone();
+                self.apply(Action::OpenTab(tools::history_factory(root)), ctx);
+            }
+            Action::CloneRepo(name) => {
+                let Some(parent) = rfd::FileDialog::new().set_title(format!("{name} 을(를) 복제할 폴더 선택")).pick_folder() else { return };
+                let dir = name.rsplit('/').next().unwrap_or(&name).to_string();
+                let target = parent.join(&dir);
+                if target.exists() {
+                    self.toast("이미 있는 폴더입니다", target.display().to_string(), ToastKind::Error, None);
+                    return;
+                }
+                self.toast(format!("{name} 복제 중"), target.display().to_string(), ToastKind::Info, None);
+                let tx = self.clones.0.clone();
+                let ctx = ctx.clone();
+                std::thread::spawn(move || {
+                    let r = kiln_git::github::clone_repo(&name, &target).map(|_| target).map_err(|e| e.to_string());
+                    let _ = tx.send(r);
+                    ctx.request_repaint();
+                });
+            }
             Action::RevealSession(s) => self.reveal_session(s),
             Action::SetTheme(name) => {
                 Theme::set_current(&name);
@@ -821,7 +877,34 @@ impl KilnApp {
     }
 
     fn toast(&mut self, title: impl Into<String>, body: impl Into<String>, kind: ToastKind, session: Option<SessionId>) {
-        self.toasts.push(Toast { title: title.into(), body: body.into(), at: Instant::now(), kind, session });
+        self.toasts.push(Toast { title: title.into(), body: body.into(), at: Instant::now(), kind, session, button: None });
+    }
+
+    fn handle_rotation(&mut self, events: Vec<rotation::RotationEvent>) {
+        use rotation::RotationEvent as E;
+        for e in events {
+            match e {
+                E::LimitReached { session, tool, reset_hint } => {
+                    let body = match reset_hint {
+                        Some(h) => format!("{} 사용량 한도에 도달했습니다 · {h}", tool.display_name()),
+                        None => format!("{} 사용량 한도에 도달했습니다", tool.display_name()),
+                    };
+                    self.toasts.push(Toast {
+                        title: "사용량 한도".into(),
+                        body,
+                        at: Instant::now(),
+                        kind: ToastKind::Notify,
+                        session: Some(session),
+                        button: Some(("다음 계정으로 전환".into(), Action::RotateAccount(session, tool))),
+                    });
+                }
+                E::Switched { session, tool, label } => {
+                    self.toast(format!("계정 전환: {label}"), format!("{} 대화를 이어서 실행합니다", tool.display_name()), ToastKind::Info, Some(session));
+                }
+                E::NoAccount { tool } => self.toast("전환할 계정이 없습니다", format!("설정 → 계정에서 {} 계정을 더 등록하세요", tool.display_name()), ToastKind::Error, None),
+                E::Failed { tool, error } => self.toast(format!("{} 계정 전환 실패", tool.display_name()), error, ToastKind::Error, None),
+            }
+        }
     }
 
     // ---------- 이벤트 ----------
@@ -867,6 +950,11 @@ impl KilnApp {
                     }
                 }
                 ConnEvent::Upgrading => self.toast("데몬을 새 버전으로 교체하는 중", "실행 중인 세션은 그대로 유지됩니다", ToastKind::Info, None),
+                ConnEvent::SessionText { session, text } => {
+                    let mut out = Vec::new();
+                    self.rotator.on_text(&self.conn, session, &text, &mut out);
+                    self.handle_rotation(out);
+                }
                 ConnEvent::SearchResult { found } => {
                     if let Some(p) = self.focused_pane() {
                         if let Some(Pane { kind: PaneKind::Term { view: Some(v), .. }, .. }) = self.panes.get_mut(&p) {
@@ -926,6 +1014,7 @@ impl KilnApp {
             (base, Key::F, Action::FindInFocused),
             (base_shift, Key::Enter, Action::ToggleZoom(None)),
             (base_shift, Key::E, Action::ToggleSheet(T::Explorer)),
+            (base_shift, Key::L, Action::OpenHistory),
             (base_shift, Key::F, Action::ToggleSheet(T::Search)),
             (base_shift, Key::G, Action::ToggleSheet(T::Git)),
             (base_shift, Key::R, Action::ToggleSheet(T::PullRequests)),
@@ -1017,6 +1106,11 @@ impl KilnApp {
     }
 
     #[doc(hidden)]
+    pub fn debug_toast_titles(&self) -> Vec<String> {
+        self.toasts.iter().map(|t| t.title.clone()).collect()
+    }
+
+    #[doc(hidden)]
     pub fn debug_toast(&mut self, title: &str, body: &str) {
         self.toast(title, body, ToastKind::Notify, None);
     }
@@ -1077,6 +1171,21 @@ impl eframe::App for KilnApp {
         }
         self.window_focused = focused_now;
         self.handle_conn_events(ctx);
+        while let Ok(r) = self.clones.1.try_recv() {
+            match r {
+                Ok(p) => self.add_workspace(p, ctx),
+                Err(e) => self.toast("저장소 복제 실패", e, ToastKind::Error, None),
+            }
+        }
+        self.rotator.poll(&mut self.conn);
+        let mut out = Vec::new();
+        self.rotator.tick(&mut self.conn, &mut out);
+        self.handle_rotation(out);
+        if self.rotator.busy() {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        } else if self.conn.infos.values().any(|i| i.fg_process.as_deref().and_then(rotation::tool_for).is_some()) {
+            ctx.request_repaint_after(Duration::from_secs(3));
+        }
         let quick_open = self.workspaces.get(self.active).is_some_and(|w| w.tools.quick_is_open());
         if self.confirm.is_none() && !self.palette.is_open() && !quick_open && !self.settings_ui.open {
             self.shortcuts(ctx);

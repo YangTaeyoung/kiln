@@ -5,7 +5,9 @@
 pub mod cmd;
 pub mod diff;
 pub mod gh;
+pub mod github;
 pub mod graph;
+pub mod history;
 pub mod repo;
 pub mod status;
 mod ui;
@@ -18,7 +20,17 @@ pub use gh::{
     ChecksState, GhBackend, MergeMethod, PrBackend, PrBrief, PrCreate, PrCreateDefaults, PrDetail, PrFilter, PrItem,
     PrState, ReviewDecision, ReviewKind, pr_for_branch,
 };
+pub use github::{
+    CloseReason, GithubBackend, IssueCreate, IssueDetail, IssueEdit, IssueFilter, IssueItem, IssueState, Label, RepoInfo,
+    RepoListItem, RepoRef, RunFilter, RunItem, RunStatus, Viewer,
+};
+pub use ui::actions_panel::ActionsPanel;
 pub use ui::diff_view::{DiffMode, DiffView};
+pub use ui::history_view::HistoryView;
+pub use ui::hub::{GithubHub, HubTab};
+pub use ui::issue_panel::IssuePanel;
+pub use ui::issue_view::IssueView;
+pub use ui::repo_picker::RepoPicker;
 pub use ui::panel::GitPanel;
 pub use ui::pr_panel::PrPanel;
 pub use ui::pr_view::{PrTab, PrView};
@@ -33,6 +45,12 @@ pub enum GitEvent {
     OpenPr(u64),
     OpenCommit(String),
     RunInTerminal(String),
+    /// 이슈 상세 탭 열기. 대상 저장소는 `GithubHub::repo()` 로 얻는다.
+    OpenIssue(u64),
+    /// 저장소를 새 스페이스로 복제한다(`gh repo clone <name_with_owner>`).
+    CloneRepo { name_with_owner: String },
+    /// 브라우저로 URL 열기.
+    OpenUrl(String),
 }
 
 /// 상태바용 저장소 요약.

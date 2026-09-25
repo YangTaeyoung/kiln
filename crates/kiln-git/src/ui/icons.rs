@@ -28,6 +28,17 @@ pub(crate) enum Icon {
     Skip,
     External,
     Download,
+    Issue,
+    IssueClosed,
+    Actions,
+    Repo,
+    Star,
+    Tag,
+    Comment,
+    Person,
+    Lock,
+    Play,
+    Stop,
 }
 
 /// `rect` 중앙에 아이콘을 그린다. 아이콘 크기는 `rect` 의 짧은 변 기준.
@@ -41,6 +52,25 @@ pub(crate) fn paint_icon(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let line = |pts: &[Pos2]| {
         p.add(Shape::line(pts.to_vec(), st));
     };
+    let common = match icon {
+        Icon::Issue => Some(kiln_common::icons::Icon::Issue),
+        Icon::IssueClosed => Some(kiln_common::icons::Icon::IssueClosed),
+        Icon::Actions => Some(kiln_common::icons::Icon::Actions),
+        Icon::Repo => Some(kiln_common::icons::Icon::Repo),
+        Icon::Star => Some(kiln_common::icons::Icon::Star),
+        Icon::Tag => Some(kiln_common::icons::Icon::Tag),
+        Icon::Comment => Some(kiln_common::icons::Icon::Comment),
+        Icon::Person => Some(kiln_common::icons::Icon::Person),
+        Icon::Lock => Some(kiln_common::icons::Icon::Lock),
+        Icon::Play => Some(kiln_common::icons::Icon::Play),
+        Icon::Stop => Some(kiln_common::icons::Icon::Stop),
+        _ => None,
+    };
+    if let Some(ci) = common {
+        // 공용 아이콘 세트로 그린다.
+        kiln_common::icons::paint(p, Rect::from_center_size(c, vec2(s * 1.12, s * 1.12)), ci, color);
+        return;
+    }
     match icon {
         Icon::Plus => {
             line(&[pt(8.0, 3.0), pt(8.0, 13.0)]);
@@ -163,5 +193,6 @@ pub(crate) fn paint_icon(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.circle_stroke(c, 6.0 * u, st);
             line(&[pt(4.0, 12.0), pt(12.0, 4.0)]);
         }
+        _ => {}
     }
 }

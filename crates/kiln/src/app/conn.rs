@@ -54,6 +54,8 @@ pub enum ConnEvent {
     Connected,
     Upgrading,
     SearchResult { found: bool },
+    /// `read_text` 요청에 대한 세션 화면 텍스트.
+    SessionText { session: SessionId, text: String },
 }
 
 pub enum State {
@@ -81,6 +83,7 @@ pub struct Conn {
     pub textures: HashMap<(SessionId, u32), egui::TextureHandle>,
     /// 응답이 오면 클립보드로 복사할 ReadRange 요청.
     pending_copy: std::collections::HashSet<u32>,
+    pending_text: HashMap<u32, SessionId>,
     cell_px: (u16, u16),
 }
 
@@ -103,6 +106,7 @@ impl Conn {
             sessions_listed: false,
             textures: HashMap::new(),
             pending_copy: Default::default(),
+            pending_text: HashMap::new(),
             cell_px: (0, 0),
         };
         c.try_connect();
@@ -129,6 +133,7 @@ impl Conn {
             sessions_listed: false,
             textures: HashMap::new(),
             pending_copy: Default::default(),
+            pending_text: HashMap::new(),
             cell_px: (0, 0),
         }
     }
@@ -238,6 +243,8 @@ impl Conn {
             ServerMsg::Text { req, text } => {
                 if self.pending_copy.remove(&req) {
                     self.ctx.copy_text(text);
+                } else if let Some(session) = self.pending_text.remove(&req) {
+                    self.events.push(ConnEvent::SessionText { session, text });
                 }
             }
             ServerMsg::Image { session, id, width, height, rgba } => {
@@ -293,6 +300,16 @@ impl Conn {
         let req = self.next_req();
         self.pending_copy.insert(req);
         self.send(ClientMsg::ReadRange { req, session, start, end });
+    }
+
+    /// 세션의 보이는 화면 텍스트를 요청한다. 응답은 `ConnEvent::SessionText` 로 온다.
+    pub fn read_text(&mut self, session: SessionId) {
+        if self.client.is_none() {
+            return;
+        }
+        let req = self.next_req();
+        self.pending_text.insert(req, session);
+        self.send(ClientMsg::ReadText { req, session, history: 0 });
     }
 
     /// 셀 픽셀 크기가 바뀌면 데몬에 알린다(이미지 크기 계산용).

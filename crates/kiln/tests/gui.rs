@@ -26,6 +26,7 @@ fn setup(tag: &str) -> (PathBuf, PathBuf) {
     unsafe {
         std::env::set_var("KILN_SOCKET", base.join("d.sock"));
         std::env::set_var("KILN_CONFIG_DIR", base.join("cfg"));
+        std::env::set_var("KILN_ACCOUNTS_SANDBOX", base.join("accounts"));
         std::env::set_var("KILN_EXE", env!("CARGO_BIN_EXE_kiln"));
         std::env::set_var("KILN_NO_AUTO_UPGRADE", "1");
         std::env::set_var("KILN_DB_NO_KEYCHAIN", "1");
@@ -85,6 +86,32 @@ fn terminal_roundtrip_split_and_snapshot() {
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("green-bg\n") || t.matches("green-bg").count() >= 2)));
     h.run_steps(3);
     save_shot(&mut h, "app_split_terminal");
+    shutdown(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn agent_limit_message_offers_account_switch() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("limit");
+    let mut h = Harness::builder().with_size([1280.0, 800.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| !t.trim().is_empty())));
+
+    // argv[0] 이 claude 인 프로세스가 한도 메시지를 출력한 채 떠 있다.
+    h.event(egui::Event::Text("m='hit your session limit'; (printf \"You've $m · resets 3pm\\n\"; exec -a claude sleep 600)".into()));
+    h.key_press(egui::Key::Enter);
+    assert!(
+        pump_until(&mut h, 15, |h| h.state().debug_toast_titles().iter().any(|t| t == "사용량 한도")),
+        "limit toast missing: {:?} / {:?}",
+        h.state().debug_toast_titles(),
+        h.state().debug_focused_text()
+    );
+    h.run_steps(3);
+    save_shot(&mut h, "app_limit_toast");
+
+    // 등록된 다른 계정이 없으면 전환 대신 안내한다.
+    h.get_by_label("다음 계정으로 전환").click();
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_toast_titles().iter().any(|t| t == "전환할 계정이 없습니다")), "{:?}", h.state().debug_toast_titles());
     shutdown(&base);
 }
 
