@@ -1,0 +1,6 @@
+# 스냅샷 기준 이미지는 macOS 에서 만든다. 다른 OS 는 글꼴 래스터화 차이만큼 픽셀 수를 허용한다.
+[linux]
+max_failed_pixels = 20000
+
+[windows]
+max_failed_pixels = 20000

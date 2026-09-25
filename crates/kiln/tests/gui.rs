@@ -88,6 +88,11 @@ fn terminal_roundtrip_split_and_snapshot() {
     shutdown(&base);
 }
 
+/// 실제 입력과 같은 "주 수식키": macOS 는 ⌘, 그 외는 Ctrl(egui 는 command 도 함께 켠다).
+fn primary() -> egui::Modifiers {
+    if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers { ctrl: true, command: true, ..Default::default() } }
+}
+
 fn cmd() -> egui::Modifiers {
     if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers::CTRL | egui::Modifiers::SHIFT }
 }
@@ -113,10 +118,10 @@ fn explorer_opens_file_in_editor_and_saves() {
     h.run_steps(5);
     save_shot(&mut h, "app_explorer_editor");
     // 편집 후 저장.
-    h.key_press_modifiers(if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers::CTRL }, egui::Key::End);
+    h.key_press_modifiers(primary(), egui::Key::End);
     h.event(egui::Event::Text("// edited by kiln".into()));
     h.run_steps(2);
-    h.key_press_modifiers(if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers::CTRL }, egui::Key::S);
+    h.key_press_modifiers(primary(), egui::Key::S);
     h.run_steps(3);
     let content = std::fs::read_to_string(proj.join("src/main.rs")).unwrap();
     assert!(content.contains("// edited by kiln"), "{content}");
