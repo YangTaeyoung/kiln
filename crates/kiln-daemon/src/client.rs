@@ -214,13 +214,22 @@ pub fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // SAFETY: fork 이후 setsid 만 호출한다.
+        // 두 번 fork 한다: 중간 프로세스는 바로 끝나고 실제 프로세스는 init 의 자식이 된다.
+        // 그래서 띄운 쪽이 좀비를 남기지 않고, 종료 여부를 kill(pid, 0) 으로 정확히 알 수 있다.
+        // SAFETY: fork 이후 async-signal-safe 함수(setsid, fork, _exit)만 호출한다.
         unsafe {
             cmd.pre_exec(|| {
                 libc::setsid();
-                Ok(())
+                match libc::fork() {
+                    -1 => Err(std::io::Error::last_os_error()),
+                    0 => Ok(()),
+                    _ => libc::_exit(0),
+                }
             });
         }
+        let mut child = cmd.spawn()?;
+        let _ = child.wait();
+        return Ok(());
     }
     #[cfg(windows)]
     {
@@ -256,10 +265,10 @@ pub fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
             Err(_) => {}
         }
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        let child = cmd.spawn()?;
+        std::mem::forget(child);
+        Ok(())
     }
-    let child = cmd.spawn()?;
-    std::mem::forget(child);
-    Ok(())
 }
 
 /// Win32_Process.Create 로 프로세스를 만든다. 호출자의 잡 객체에 속하지 않는다.
