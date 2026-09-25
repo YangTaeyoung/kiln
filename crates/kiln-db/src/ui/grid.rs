@@ -346,7 +346,7 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
             let (rect, _) = ui.allocate_exact_size(vec2(content_w, content_h), Sense::hover());
             let resp = ui.interact(rect, body_id, Sense::click_and_drag());
             resp.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "data grid")
+                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "데이터 그리드")
             });
             let origin = rect.min;
             let painter = ui.painter_at(ui.clip_rect());
@@ -783,9 +783,9 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                         format!(" : {}", h.type_name)
                     },
                     if h.pk {
-                        "  (primary key)"
+                        "  (기본 키)"
                     } else if h.fk {
-                        "  (foreign key)"
+                        "  (외래 키)"
                     } else {
                         ""
                     }
@@ -986,7 +986,7 @@ fn context_menu(
         if ui
             .add_enabled(
                 st.sel.cursor.is_some(),
-                egui::Button::new("Edit cell").shortcut_text("Enter"),
+                egui::Button::new("셀 편집").shortcut_text("Enter"),
             )
             .clicked()
             && let Some((r, c)) = st.sel.cursor
@@ -995,28 +995,28 @@ fn context_menu(
             ui.close();
         }
         if ui
-            .add_enabled(has_sel, egui::Button::new("Set NULL").shortcut_text("Del"))
+            .add_enabled(has_sel, egui::Button::new("NULL로 설정").shortcut_text("Del"))
             .clicked()
         {
             events.push(GridEvent::SetNull);
             ui.close();
         }
         if ui
-            .add_enabled(has_sel, egui::Button::new("Set DEFAULT"))
+            .add_enabled(has_sel, egui::Button::new("DEFAULT로 설정"))
             .clicked()
         {
             events.push(GridEvent::SetDefault);
             ui.close();
         }
         ui.separator();
-        if ui.button("Add row").clicked() {
+        if ui.button("행 추가").clicked() {
             events.push(GridEvent::AddRow);
             ui.close();
         }
         if ui
             .add_enabled(
                 has_sel,
-                egui::Button::new("Duplicate row").shortcut_text("⌘D"),
+                egui::Button::new("행 복제").shortcut_text("⌘D"),
             )
             .clicked()
         {
@@ -1026,7 +1026,7 @@ fn context_menu(
         if ui
             .add_enabled(
                 has_sel,
-                egui::Button::new("Delete rows").shortcut_text("⌘⌫"),
+                egui::Button::new("행 삭제").shortcut_text("⌘⌫"),
             )
             .clicked()
         {
@@ -1034,7 +1034,7 @@ fn context_menu(
             ui.close();
         }
         if ui
-            .add_enabled(has_sel, egui::Button::new("Revert selected"))
+            .add_enabled(has_sel, egui::Button::new("선택 항목 되돌리기"))
             .clicked()
         {
             events.push(GridEvent::RevertSelection);
@@ -1042,7 +1042,7 @@ fn context_menu(
         }
         ui.separator();
     }
-    ui.menu_button("Copy as", |ui| {
+    ui.menu_button("다른 형식으로 복사", |ui| {
         for f in CopyFormat::ALL {
             if ui.button(f.label()).clicked() {
                 events.push(GridEvent::Copy(f, false));
@@ -1051,21 +1051,21 @@ fn context_menu(
         }
         ui.separator();
         for f in [CopyFormat::Tsv, CopyFormat::Csv] {
-            if ui.button(format!("{} with header", f.label())).clicked() {
+            if ui.button(format!("{} (헤더 포함)", f.label())).clicked() {
                 events.push(GridEvent::Copy(f, true));
                 ui.close();
             }
         }
     });
     if ui
-        .add_enabled(has_sel, egui::Button::new("Copy").shortcut_text("⌘C"))
+        .add_enabled(has_sel, egui::Button::new("복사").shortcut_text("⌘C"))
         .clicked()
     {
         events.push(GridEvent::Copy(CopyFormat::Tsv, false));
         ui.close();
     }
     if ui
-        .add_enabled(st.sel.cursor.is_some(), egui::Button::new("View value"))
+        .add_enabled(st.sel.cursor.is_some(), egui::Button::new("값 보기"))
         .clicked()
     {
         events.push(GridEvent::ViewValue);

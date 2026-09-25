@@ -6,41 +6,40 @@ pub fn now_unix() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-/// `now` 기준 상대 시간 문구(`3 hours ago`).
+/// `now` 기준 상대 시간 문구(`3시간 전`).
 pub fn relative_time(ts: i64, now: i64) -> String {
     let d = (now - ts).max(0);
     let (n, unit) = if d < 45 {
-        return "just now".into();
+        return "방금".into();
     } else if d < 3600 {
-        ((d + 30) / 60, "minute")
+        ((d + 30) / 60, "분")
     } else if d < 86_400 {
-        ((d + 1800) / 3600, "hour")
+        ((d + 1800) / 3600, "시간")
     } else if d < 86_400 * 30 {
-        ((d + 43_200) / 86_400, "day")
+        ((d + 43_200) / 86_400, "일")
     } else if d < 86_400 * 365 {
-        ((d + 86_400 * 15) / (86_400 * 30), "month")
+        ((d + 86_400 * 15) / (86_400 * 30), "개월")
     } else {
-        (d / (86_400 * 365), "year")
+        (d / (86_400 * 365), "년")
     };
-    let n = n.max(1);
-    if n == 1 { format!("1 {unit} ago") } else { format!("{n} {unit}s ago") }
+    format!("{}{unit} 전", n.max(1))
 }
 
-/// 짧은 상대 시간(`3h`, `2d`).
+/// 짧은 상대 시간(`3시간`, `2일`).
 pub fn short_relative_time(ts: i64, now: i64) -> String {
     let d = (now - ts).max(0);
     if d < 60 {
-        "now".into()
+        "방금".into()
     } else if d < 3600 {
-        format!("{}m", d / 60)
+        format!("{}분", d / 60)
     } else if d < 86_400 {
-        format!("{}h", d / 3600)
+        format!("{}시간", d / 3600)
     } else if d < 86_400 * 30 {
-        format!("{}d", d / 86_400)
+        format!("{}일", d / 86_400)
     } else if d < 86_400 * 365 {
-        format!("{}mo", d / (86_400 * 30))
+        format!("{}개월", d / (86_400 * 30))
     } else {
-        format!("{}y", d / (86_400 * 365))
+        format!("{}년", d / (86_400 * 365))
     }
 }
 

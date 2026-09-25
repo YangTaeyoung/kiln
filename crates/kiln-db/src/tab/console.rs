@@ -248,7 +248,7 @@ impl ConsoleView {
         if let Some(s) = self.session.lock().clone() {
             let _ = m.spawn(async move { s.cancel().await });
         }
-        self.messages.push(("Cancel requested".into(), false));
+        self.messages.push(("취소를 요청했습니다".into(), false));
     }
 
     fn poll(&mut self, m: &DbManager) {
@@ -257,8 +257,8 @@ impl ConsoleView {
         {
             self.export_job = None;
             self.messages.push(match r {
-                Ok(n) => (format!("Exported {} rows", thousands(n as i64)), false),
-                Err(e) => (format!("Export failed: {e}"), true),
+                Ok(n) => (format!("{}행을 내보냈습니다", thousands(n as i64)), false),
+                Err(e) => (format!("내보내기 실패: {e}"), true),
             });
         }
         let Some(r) = &mut self.running else {
@@ -280,15 +280,15 @@ impl ConsoleView {
             let msg = match &run.outcome {
                 Ok(o) if o.has_rows => (
                     format!(
-                        "{} row(s) fetched in {} ms{}",
+                        "{}행 조회 · {} ms{}",
                         thousands(o.result.len() as i64),
                         run.elapsed_ms,
-                        if o.truncated { " (limited)" } else { "" }
+                        if o.truncated { " (제한됨)" } else { "" }
                     ),
                     false,
                 ),
                 Ok(o) => (
-                    format!("{} row(s) affected in {} ms", o.affected, run.elapsed_ms),
+                    format!("{}행 영향 · {} ms", o.affected, run.elapsed_ms),
                     false,
                 ),
                 Err(e) => (format!("{e}"), true),
@@ -319,7 +319,7 @@ impl ConsoleView {
         if stop_waiting && !finished {
             r.job.abort();
             self.messages
-                .push(("Stopped waiting for the query".into(), true));
+                .push(("쿼리 대기를 중단했습니다".into(), true));
             *self.session.lock() = None;
         }
         if finished || stop_waiting {
@@ -329,7 +329,7 @@ impl ConsoleView {
             self.running = None;
             if total > 1 {
                 self.messages.push((
-                    format!("{n} of {total} statement(s) executed in {ms} ms"),
+                    format!("문 {total}개 중 {n}개 실행 · {ms} ms"),
                     false,
                 ));
             }
@@ -383,33 +383,33 @@ impl ConsoleView {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let running = self.running.is_some();
-                    if tool_button(ui, "▶ Run", !running, true)
-                        .on_hover_text("Run statement under cursor or selection (⌘↩)")
+                    if tool_button(ui, "▶ 실행", !running, true)
+                        .on_hover_text("커서 위치 또는 선택 영역의 문 실행 (⌘↩)")
                         .clicked()
                     {
                         let s = self.current_statements();
                         self.run(m, s, false);
                     }
-                    if tool_button(ui, "⏩ Run all", !running, false)
-                        .on_hover_text("Run all statements (⌘⇧↩)")
+                    if tool_button(ui, "⏩ 모두 실행", !running, false)
+                        .on_hover_text("모든 문 실행 (⌘⇧↩)")
                         .clicked()
                     {
                         let s = self.all_statements();
                         self.run(m, s, false);
                     }
-                    if tool_button(ui, "■ Cancel", running, false).clicked() {
+                    if tool_button(ui, "■ 취소", running, false).clicked() {
                         self.cancel(m);
                     }
-                    if tool_button(ui, "Explain", !running, false)
-                        .on_hover_text("Show the query plan for the current statement")
+                    if tool_button(ui, "실행 계획", !running, false)
+                        .on_hover_text("현재 문의 쿼리 실행 계획 표시")
                         .clicked()
                     {
                         let s = self.current_statements();
                         self.run(m, s, true);
                     }
                     ui.separator();
-                    ui.checkbox(&mut self.auto_limit, RichText::new("Limit").size(12.0))
-                        .on_hover_text("Append LIMIT to SELECT statements without one");
+                    ui.checkbox(&mut self.auto_limit, RichText::new("행 제한").size(12.0))
+                        .on_hover_text("LIMIT이 없는 SELECT 문에 LIMIT 추가");
                     ui.add_enabled(
                         self.auto_limit,
                         egui::DragValue::new(&mut self.limit)
@@ -426,10 +426,10 @@ impl ConsoleView {
                         )));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toggle_button(ui, "History", self.show_history).clicked() {
+                        if toggle_button(ui, "기록", self.show_history).clicked() {
                             self.show_history = !self.show_history;
                         }
-                        if toggle_button(ui, "Value", self.show_viewer).clicked() {
+                        if toggle_button(ui, "값", self.show_viewer).clicked() {
                             self.show_viewer = !self.show_viewer;
                         }
                         let name = m
@@ -476,7 +476,7 @@ impl ConsoleView {
                     .desired_width(f32::INFINITY)
                     .desired_rows(8)
                     .lock_focus(true)
-                    .hint_text(RichText::new("-- Write SQL here. ⌘↩ runs the statement under the cursor, ⌘⇧↩ runs all.").monospace().color(theme.text_faint))
+                    .hint_text(RichText::new("-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⇧↩는 전체를 실행합니다.").monospace().color(theme.text_faint))
                     .layouter(&mut layouter)
                     .show(ui);
                 if let Some(cr) = out.cursor_range {
@@ -508,9 +508,9 @@ impl ConsoleView {
                     for i in 0..n {
                         let t = &self.results[i];
                         let (label, color) = match &t.run.outcome {
-                            Ok(o) if o.has_rows => (format!("Result {} · {}", i + 1, thousands(o.result.len() as i64)), theme.text),
-                            Ok(o) => (format!("#{} · {} affected", i + 1, o.affected), theme.text_dim),
-                            Err(_) => (format!("#{} · error", i + 1), theme.red),
+                            Ok(o) if o.has_rows => (format!("결과 {} · {}", i + 1, thousands(o.result.len() as i64)), theme.text),
+                            Ok(o) => (format!("#{} · {}행 영향", i + 1, o.affected), theme.text_dim),
+                            Err(_) => (format!("#{} · 오류", i + 1), theme.red),
                         };
                         let sel = self.active == i;
                         let r = ui.add(
@@ -526,7 +526,7 @@ impl ConsoleView {
                     let out_sel = self.active == usize::MAX;
                     if ui
                         .add(
-                            egui::Button::new(RichText::new("Output").size(11.5).color(if out_sel { theme.text } else { theme.text_dim }))
+                            egui::Button::new(RichText::new("출력").size(11.5).color(if out_sel { theme.text } else { theme.text_dim }))
                                 .fill(if out_sel { theme.bg_elevated } else { egui::Color32::TRANSPARENT })
                                 .corner_radius(4.0),
                         )
@@ -540,9 +540,9 @@ impl ConsoleView {
                             .get(self.active)
                             .is_some_and(|t| matches!(&t.run.outcome, Ok(o) if o.has_rows));
                         ui.add_enabled_ui(exportable && self.export_job.is_none(), |ui| {
-                            ui.menu_button(RichText::new("Export ⏷").size(12.0), |ui| {
+                            ui.menu_button(RichText::new("내보내기 ⏷").size(12.0), |ui| {
                                 for f in [ExportFormat::Csv, ExportFormat::Json] {
-                                    if ui.button(format!("All rows to {}…", f.extension().to_uppercase())).clicked() {
+                                    if ui.button(format!("모든 행을 {}로…", f.extension().to_uppercase())).clicked() {
                                         ui.close();
                                         self.export(m, f);
                                     }
@@ -554,8 +554,8 @@ impl ConsoleView {
                         {
                             ui.label(dim(format!("{} ms", t.run.elapsed_ms)));
                             if o.truncated {
-                                ui.label(RichText::new("limited").size(11.0).color(theme.yellow))
-                                    .on_hover_text("More rows are available; raise or disable the limit to fetch them");
+                                ui.label(RichText::new("제한됨").size(11.0).color(theme.yellow))
+                                    .on_hover_text("행이 더 있습니다. 가져오려면 제한을 늘리거나 끄세요");
                             }
                         }
                     });
@@ -587,7 +587,7 @@ impl ConsoleView {
                             .unwrap_or(0)
                             + 1;
                         ui.add_space(6.0);
-                        ui.label(dim(format!("at line {line}, column {col}")));
+                        ui.label(dim(format!("{line}줄, {col}열")));
                     }
                     ui.add_space(6.0);
                     ui.label(
@@ -602,7 +602,7 @@ impl ConsoleView {
                 let (aff, ms, sql) = (o.affected, tab.run.elapsed_ms, tab.run.sql.clone());
                 egui::Frame::new().inner_margin(12).show(ui, |ui| {
                     ui.label(
-                        RichText::new(format!("✔ {aff} row(s) affected"))
+                        RichText::new(format!("✔ {aff}행 영향받음"))
                             .color(theme.green)
                             .size(13.0),
                     );
@@ -678,7 +678,7 @@ impl ConsoleView {
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(10).show(ui, |ui| {
                     if self.messages.is_empty() {
-                        ui.label(dim("No output yet"));
+                        ui.label(dim("아직 출력이 없습니다"));
                     }
                     for (msg, err) in &self.messages {
                         ui.label(RichText::new(msg).monospace().size(12.0).color(if *err {
@@ -693,10 +693,10 @@ impl ConsoleView {
 
     fn history_ui(&mut self, ui: &mut Ui, m: &DbManager) {
         let theme = Theme::current();
-        ui.label(RichText::new("History").strong());
+        ui.label(RichText::new("기록").strong());
         ui.add(
             egui::TextEdit::singleline(&mut self.history_filter)
-                .hint_text("Search")
+                .hint_text("검색")
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(4.0);

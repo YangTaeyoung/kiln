@@ -279,7 +279,7 @@ impl DiffView {
             self.ui_toolbar(ui);
             if let Some(e) = self.action_error.clone() {
                 egui::Frame::new().inner_margin(Margin::symmetric(10, 4)).show(ui, |ui| {
-                    if banner(ui, BannerKind::Error, "Could not apply hunk", Some(&e), true) {
+                    if banner(ui, BannerKind::Error, "헝크를 적용할 수 없습니다", Some(&e), true) {
                         self.action_error = None;
                     }
                 });
@@ -287,7 +287,7 @@ impl DiffView {
             if let Some(e) = &self.error {
                 let e = e.clone();
                 egui::Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
-                    banner(ui, BannerKind::Error, "Could not load diff", Some(&e), false);
+                    banner(ui, BannerKind::Error, "diff를 불러올 수 없습니다", Some(&e), false);
                 });
                 return;
             }
@@ -296,7 +296,7 @@ impl DiffView {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     spinner(ui, 14.0);
-                    ui.label(dim("Loading diff…"));
+                    ui.label(dim("diff 불러오는 중…"));
                 });
                 return;
             }
@@ -311,7 +311,7 @@ impl DiffView {
             }
             egui::CentralPanel::no_frame().show(ui, |ui| {
                 if self.files.is_empty() {
-                    empty_state(ui, "No changes", "There is nothing to show for this diff.");
+                    empty_state(ui, "변경 사항 없음", "이 diff에 표시할 내용이 없습니다.");
                     return;
                 }
                 self.ui_rows(ui);
@@ -352,7 +352,7 @@ impl DiffView {
                             if !dir.is_empty() {
                                 ui.label(RichText::new(dir).size(12.0).color(t.text_faint));
                             }
-                            let (lbl, c) = if *staged { ("Staged", t.green) } else { ("Working Tree", t.yellow) };
+                            let (lbl, c) = if *staged { ("스테이징됨", t.green) } else { ("작업 트리", t.yellow) };
                             outline_badge(ui, lbl, c);
                         }
                         Source::Commit(_) => {}
@@ -367,12 +367,12 @@ impl DiffView {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let mut mode = self.mode;
-                        if segmented(ui, &mut mode, &[(DiffMode::SideBySide, "Split"), (DiffMode::Unified, "Unified")]) {
+                        if segmented(ui, &mut mode, &[(DiffMode::SideBySide, "나란히"), (DiffMode::Unified, "통합")]) {
                             self.set_mode(mode);
                         }
                         if self.load.is_some() || self.action.is_some() {
                             spinner(ui, 12.0);
-                        } else if icon_button(ui, Icon::Refresh, "Reload").clicked() {
+                        } else if icon_button(ui, Icon::Refresh, "다시 불러오기").clicked() {
                             self.reload();
                         }
                     });
@@ -386,7 +386,7 @@ impl DiffView {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.add_space(10.0);
-            ui.label(RichText::new(format!("{} FILES", self.files.len())).size(10.5).color(t.text_faint));
+            ui.label(RichText::new(format!("파일 {}개", self.files.len())).size(10.5).color(t.text_faint));
         });
         ui.add_space(2.0);
         egui::ScrollArea::vertical().id_salt("diff_file_list").auto_shrink([false, false]).show(ui, |ui| {
@@ -500,14 +500,14 @@ impl DiffView {
                                 enabled && resp.clicked()
                             };
                             if staged {
-                                if hbtn(ui, "Unstage Hunk", false) {
+                                if hbtn(ui, "헝크 스테이징 취소", false) {
                                     hunk_action = Some((fi, hi, HunkAction::Unstage));
                                 }
                             } else {
-                                if hbtn(ui, "Stage Hunk", false) {
+                                if hbtn(ui, "헝크 스테이징", false) {
                                     hunk_action = Some((fi, hi, HunkAction::Stage));
                                 }
-                                if hbtn(ui, "Revert", true) {
+                                if hbtn(ui, "되돌리기", true) {
                                     hunk_action = Some((fi, hi, HunkAction::Revert));
                                 }
                             }
@@ -529,13 +529,13 @@ impl DiffView {
                     Row::Note(fi) => {
                         let f = &self.files[fi];
                         let msg = if f.binary {
-                            "Binary file not shown"
+                            "바이너리 파일은 표시하지 않습니다"
                         } else if f.change == FileChange::Renamed {
-                            "File renamed without changes"
+                            "내용 변경 없이 이름만 바뀌었습니다"
                         } else if f.old_mode != f.new_mode {
-                            "File mode changed"
+                            "파일 모드가 바뀌었습니다"
                         } else {
-                            "No content changes"
+                            "내용 변경 없음"
                         };
                         ui.painter().text(
                             vis.left_center() + vec2(16.0, 0.0),
@@ -570,7 +570,7 @@ impl DiffView {
         if f.change == FileChange::Renamed
             && let Some(o) = &f.old_path
         {
-            from = format!("  from {o}");
+            from = format!("  {o}에서");
             parts.push((&from, 11.5, t.text_faint));
         }
         let g = p.layout_job(one_line_job(&parts, r.width() - 160.0));
@@ -796,29 +796,29 @@ fn commit_header(
         ui.painter().circle_filled(r.center(), 10.0, alpha(t.accent, 0.3));
         ui.painter().text(r.center(), Align2::CENTER_CENTER, initial, FontId::proportional(11.0), t.text);
         ui.label(RichText::new(&c.author).strong().size(12.5).color(t.text));
-        ui.label(dim(format!("committed {}", relative_time(c.date, now))));
+        ui.label(dim(format!("{} 커밋함", relative_time(c.date, now))));
         if c.committer != c.author && !c.committer.is_empty() {
-            ui.label(faint(format!("(by {})", c.committer)));
+            ui.label(faint(format!("(커미터 {})", c.committer)));
         }
         ui.add_space(8.0);
         let short = &c.sha[..c.sha.len().min(10)];
         if ui
             .add(egui::Button::new(RichText::new(short).monospace().size(11.5).color(t.accent)).frame(false))
-            .on_hover_text("Copy full SHA")
+            .on_hover_text("전체 SHA 복사")
             .clicked()
         {
             ui.ctx().copy_text(c.sha.clone());
         }
         if !c.parents.is_empty() {
             let ps: Vec<&str> = c.parents.iter().map(|p| &p[..p.len().min(7)]).collect();
-            ui.label(faint(format!("parent {}", ps.join(" + "))));
+            ui.label(faint(format!("부모 {}", ps.join(" + "))));
         }
         for r in &c.refs {
             let r = r.strip_prefix("HEAD -> ").unwrap_or(r);
             outline_badge(ui, r, t.purple);
         }
         let (a, d) = stats.fold((0, 0), |(a, d), (x, y)| (a + x, d + y));
-        ui.label(faint(format!("{nfiles} file{} changed", if nfiles == 1 { "" } else { "s" })));
+        ui.label(faint(format!("파일 {nfiles}개 변경됨")));
         ui.label(RichText::new(format!("+{a}")).color(t.green).size(11.5).monospace());
         ui.label(RichText::new(format!("−{d}")).color(t.red).size(11.5).monospace());
     });

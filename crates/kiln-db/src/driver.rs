@@ -186,7 +186,7 @@ impl From<sqlx::Error> for DbError {
                     position,
                 }
             }
-            sqlx::Error::PoolTimedOut => DbError::msg("connection timed out"),
+            sqlx::Error::PoolTimedOut => DbError::msg("연결 시간이 초과되었습니다"),
             other => DbError::msg(other.to_string()),
         }
     }
@@ -478,7 +478,7 @@ macro_rules! driver_ops {
                         return Err(ChangeError {
                             index,
                             error: DbError::msg(format!(
-                                "expected 1 affected row, got {n} (row changed or deleted concurrently?)"
+                                "영향받은 행이 1개여야 하지만 {n}개입니다 (다른 곳에서 행이 변경되거나 삭제되었을 수 있음)"
                             )),
                         });
                     }
@@ -616,7 +616,7 @@ pub(crate) async fn connect_pool(cfg: &ConnConfig, password: Option<&str>) -> Db
             ),
             Driver::Sqlite => {
                 if cfg.file.trim().is_empty() {
-                    return Err(DbError::msg("SQLite file path is empty"));
+                    return Err(DbError::msg("SQLite 파일 경로가 비어 있습니다"));
                 }
                 DbPool::Lite(
                     PoolOptions::<Sqlite>::new()
@@ -631,7 +631,7 @@ pub(crate) async fn connect_pool(cfg: &ConnConfig, password: Option<&str>) -> Db
     match tokio::time::timeout(timeout, fut).await {
         Ok(r) => r,
         Err(_) => Err(DbError::msg(format!(
-            "connect timed out after {}s",
+            "{}초 동안 연결하지 못했습니다",
             timeout.as_secs()
         ))),
     }

@@ -143,7 +143,7 @@ impl Editor {
         let p = ui.painter_at(rect);
         let c = rect.center();
         ui_kit::paint_icon(&p, Rect::from_center_size(c - vec2(0.0, 34.0), vec2(28.0, 28.0)), Icon::Warning, t.yellow);
-        p.text(c, Align2::CENTER_CENTER, "Binary file not displayed", egui::FontId::proportional(15.0), t.text);
+        p.text(c, Align2::CENTER_CENTER, "바이너리 파일은 표시하지 않습니다", egui::FontId::proportional(15.0), t.text);
         p.text(
             c + vec2(0.0, 22.0),
             Align2::CENTER_CENTER,
@@ -185,14 +185,14 @@ impl Editor {
             let rect = Rect::from_min_size(pos2(full.left(), top), vec2(full.width(), BANNER_H));
             top += BANNER_H;
             let (accent, msg) = match b {
-                B::Conflict => (t.yellow, "This file changed on disk while you have unsaved edits.".to_owned()),
-                B::Deleted => (t.red, "This file was deleted on disk. Saving will recreate it.".to_owned()),
-                B::Lossy => (t.yellow, "File is not valid UTF-8 — opened read-only to avoid corrupting it.".to_owned()),
+                B::Conflict => (t.yellow, "저장하지 않은 편집 내용이 있는 동안 디스크의 파일이 변경되었습니다.".to_owned()),
+                B::Deleted => (t.red, "디스크에서 파일이 삭제되었습니다. 저장하면 다시 만들어집니다.".to_owned()),
+                B::Lossy => (t.yellow, "올바른 UTF-8 파일이 아닙니다 — 손상을 막기 위해 읽기 전용으로 열었습니다.".to_owned()),
                 B::Large => (
                     t.blue,
-                    format!("Large file ({}) — syntax highlighting is off.", ui_kit::size_label(self.file_len)),
+                    format!("큰 파일({}) — 구문 강조를 끕니다.", ui_kit::size_label(self.file_len)),
                 ),
-                B::SaveError => (t.red, format!("Save failed: {}", self.save_error.clone().unwrap_or_default())),
+                B::SaveError => (t.red, format!("저장 실패: {}", self.save_error.clone().unwrap_or_default())),
             };
             let p = ui.painter();
             p.rect_filled(rect, 0.0, accent.gamma_multiply(0.13));
@@ -205,27 +205,27 @@ impl Editor {
                 ui.label(egui::RichText::new(msg).size(12.5).color(t.text));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| match b {
                     B::Conflict => {
-                        if ui_kit::flat_button(ui, "Keep Mine", false).clicked() {
+                        if ui_kit::flat_button(ui, "내 변경 유지", false).clicked() {
                             self.keep_local_changes();
                         }
-                        if ui_kit::flat_button(ui, "Reload", true).clicked()
+                        if ui_kit::flat_button(ui, "다시 불러오기", true).clicked()
                             && let Err(e) = self.reload_from_disk()
                         {
                             self.save_error = Some(format!("{e:#}"));
                         }
                     }
                     B::Lossy => {
-                        if ui_kit::flat_button(ui, "Edit Anyway", false).clicked() {
+                        if ui_kit::flat_button(ui, "그래도 편집", false).clicked() {
                             self.read_only = false;
                         }
                     }
                     B::Large => {
-                        if ui_kit::icon_button(ui, Icon::Close, "Dismiss").clicked() {
+                        if ui_kit::icon_button(ui, Icon::Close, "닫기").clicked() {
                             self.large_banner = false;
                         }
                     }
                     B::SaveError => {
-                        if ui_kit::icon_button(ui, Icon::Close, "Dismiss").clicked() {
+                        if ui_kit::icon_button(ui, Icon::Close, "닫기").clicked() {
                             self.save_error = None;
                         }
                     }
@@ -607,30 +607,30 @@ impl Editor {
         resp.context_menu(|ui| {
             ui.set_min_width(180.0);
             let ro = self.read_only;
-            if ui.add_enabled(!ro, egui::Button::new("Cut")).clicked() {
+            if ui.add_enabled(!ro, egui::Button::new("잘라내기")).clicked() {
                 let text = self.cut();
                 ui.ctx().copy_text(text);
                 ui.close();
             }
-            if ui.button("Copy").clicked() {
+            if ui.button("복사").clicked() {
                 ui.ctx().copy_text(self.copy_text());
                 ui.close();
             }
             ui.separator();
-            if ui.button("Select All").clicked() {
+            if ui.button("모두 선택").clicked() {
                 self.select_all();
                 ui.close();
             }
-            if ui.add_enabled(!ro && self.comment.is_some(), egui::Button::new("Toggle Line Comment")).clicked() {
+            if ui.add_enabled(!ro && self.comment.is_some(), egui::Button::new("줄 주석 전환")).clicked() {
                 self.toggle_comment();
                 ui.close();
             }
             ui.separator();
-            if ui.button("Find…").clicked() {
+            if ui.button("찾기…").clicked() {
                 self.open_find(false);
                 ui.close();
             }
-            if ui.button("Go to Line…").clicked() {
+            if ui.button("줄로 이동…").clicked() {
                 self.goto = Some(String::new());
                 ui.close();
             }

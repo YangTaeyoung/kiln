@@ -106,7 +106,7 @@ fn status_reports_real_merge_conflict_and_abort_restores_state() {
     assert_eq!(c.len(), 1);
     assert_eq!(c[0].path, "a.txt");
     assert_eq!((c[0].index, c[0].worktree), ('U', 'U'));
-    assert_eq!(c[0].conflict_label(), "both modified");
+    assert_eq!(c[0].conflict_label(), "양쪽 수정");
     assert_eq!(decoration_char(c[0]), 'C');
     assert_eq!(st.conflicted_count(), 1);
     assert_eq!(repo::in_progress_op(&r.path), Some(RepoOp::Merge));

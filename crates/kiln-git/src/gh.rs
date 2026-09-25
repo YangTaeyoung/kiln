@@ -34,9 +34,9 @@ impl ReviewDecision {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Approved => "Approved",
-            Self::ChangesRequested => "Changes requested",
-            Self::ReviewRequired => "Review required",
+            Self::Approved => "승인됨",
+            Self::ChangesRequested => "변경 요청됨",
+            Self::ReviewRequired => "리뷰 필요",
         }
     }
 }
@@ -144,14 +144,33 @@ impl CheckItem {
 
     /// 표시용 상태 문구.
     pub fn outcome_label(&self) -> String {
-        if let Some(s) = &self.state {
-            return s.to_lowercase();
-        }
-        match self.status.as_deref() {
-            Some("COMPLETED") => self.conclusion.as_deref().unwrap_or("completed").to_lowercase().replace('_', " "),
-            Some(s) => s.to_lowercase().replace('_', " "),
-            None => "unknown".into(),
-        }
+        let raw = match (&self.state, self.status.as_deref()) {
+            (Some(s), _) => s.as_str(),
+            (None, Some("COMPLETED")) => self.conclusion.as_deref().unwrap_or("COMPLETED"),
+            (None, Some(s)) => s,
+            (None, None) => return "알 수 없음".into(),
+        };
+        let label = match raw.to_ascii_uppercase().as_str() {
+            "SUCCESS" => "성공",
+            "FAILURE" => "실패",
+            "ERROR" => "오류",
+            "NEUTRAL" => "중립",
+            "SKIPPED" => "건너뜀",
+            "CANCELLED" => "취소됨",
+            "TIMED_OUT" => "시간 초과",
+            "ACTION_REQUIRED" => "조치 필요",
+            "STARTUP_FAILURE" => "시작 실패",
+            "STALE" => "오래됨",
+            "COMPLETED" => "완료",
+            "IN_PROGRESS" => "진행 중",
+            "QUEUED" => "대기 중",
+            "PENDING" => "대기 중",
+            "WAITING" => "대기 중",
+            "REQUESTED" => "요청됨",
+            "EXPECTED" => "예정됨",
+            _ => return raw.to_lowercase().replace('_', " "),
+        };
+        label.into()
     }
 }
 
@@ -380,10 +399,10 @@ impl PrFilter {
 
     pub fn label(self) -> &'static str {
         match self {
-            PrFilter::Open => "Open",
-            PrFilter::Mine => "Mine",
-            PrFilter::ReviewRequested => "Review requested",
-            PrFilter::All => "All",
+            PrFilter::Open => "열림",
+            PrFilter::Mine => "내 PR",
+            PrFilter::ReviewRequested => "리뷰 요청됨",
+            PrFilter::All => "전체",
         }
     }
 
@@ -416,9 +435,9 @@ pub enum MergeMethod {
 impl MergeMethod {
     pub fn label(self) -> &'static str {
         match self {
-            MergeMethod::Squash => "Squash and merge",
-            MergeMethod::Merge => "Create a merge commit",
-            MergeMethod::Rebase => "Rebase and merge",
+            MergeMethod::Squash => "스쿼시 후 병합",
+            MergeMethod::Merge => "병합 커밋 만들기",
+            MergeMethod::Rebase => "리베이스 후 병합",
         }
     }
     fn flag(self) -> &'static str {
@@ -494,7 +513,7 @@ impl PrBackend for GhBackend {
     fn create_defaults(&self) -> GitResult<PrCreateDefaults> {
         let root = &self.root;
         let st = crate::repo::status(root)?;
-        let head = st.branch.head.clone().ok_or_else(|| GitError::Failed("Detached HEAD — switch to a branch first".into()))?;
+        let head = st.branch.head.clone().ok_or_else(|| GitError::Failed("분리된 HEAD입니다 — 먼저 브랜치로 전환하세요".into()))?;
         let base = gh(root, &["repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"])
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|_| "main".into());

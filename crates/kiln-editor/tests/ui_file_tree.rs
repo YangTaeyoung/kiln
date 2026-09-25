@@ -152,7 +152,7 @@ fn new_file_from_header_button() {
     take_events(&mut h);
     h.hover_at(egui::pos2(150.0, 15.0));
     h.run();
-    h.get_by_label("New File…").click();
+    h.get_by_label("새 파일…").click();
     h.run();
     for c in "notes.md".chars() {
         h.event(Event::Text(c.to_string()));
@@ -177,7 +177,7 @@ fn delete_asks_for_confirmation() {
     h.key_press(Key::Delete);
     h.run();
     assert!(root.join("Dockerfile").exists(), "not deleted before confirming");
-    h.get_by_label("Delete").click();
+    h.get_by_label("삭제").click();
     h.run();
     assert!(!root.join("Dockerfile").exists());
     assert_eq!(take_events(&mut h), vec![EditorEvent::FileDeleted(root.join("Dockerfile"))]);
@@ -193,7 +193,7 @@ fn cmd_backspace_then_cancel_keeps_file() {
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Backspace);
     h.run();
-    h.get_by_label("Cancel").click();
+    h.get_by_label("취소").click();
     h.run();
     assert!(root.join("Cargo.toml").exists());
 }

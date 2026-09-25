@@ -39,8 +39,8 @@ impl Encoding {
             Encoding::Utf8Bom => "UTF-8 with BOM",
             Encoding::Utf16Le => "UTF-16 LE",
             Encoding::Utf16Be => "UTF-16 BE",
-            Encoding::Utf8Lossy => "UTF-8 (lossy)",
-            Encoding::Binary => "Binary",
+            Encoding::Utf8Lossy => "UTF-8 (손실)",
+            Encoding::Binary => "바이너리",
         }
     }
 }
@@ -203,9 +203,9 @@ impl Editor {
     /// 파일을 연다. 이진 파일은 읽기 전용 자리표시로 연다.
     pub fn open(path: impl Into<PathBuf>) -> anyhow::Result<Editor> {
         let path: PathBuf = path.into();
-        let meta = std::fs::metadata(&path).with_context(|| format!("cannot open {}", path.display()))?;
-        anyhow::ensure!(!meta.is_dir(), "{} is a directory", path.display());
-        let bytes = std::fs::read(&path).with_context(|| format!("cannot read {}", path.display()))?;
+        let meta = std::fs::metadata(&path).with_context(|| format!("{}을(를) 열 수 없습니다", path.display()))?;
+        anyhow::ensure!(!meta.is_dir(), "{}은(는) 디렉터리입니다", path.display());
+        let bytes = std::fs::read(&path).with_context(|| format!("{}을(를) 읽을 수 없습니다", path.display()))?;
         let decoded = decode(&bytes);
         let large = bytes.len() as u64 > LARGE_FILE_BYTES;
         let mut ed = Self::from_decoded(path.clone(), decoded, large);
@@ -349,10 +349,10 @@ impl Editor {
 
     /// 저장한다. 원래 인코딩, 줄 끝, 마지막 줄바꿈을 그대로 쓴다.
     pub fn save(&mut self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.encoding != Encoding::Binary, "binary files cannot be saved");
-        anyhow::ensure!(!self.read_only, "file is read-only");
+        anyhow::ensure!(self.encoding != Encoding::Binary, "바이너리 파일은 저장할 수 없습니다");
+        anyhow::ensure!(!self.read_only, "읽기 전용 파일입니다");
         let bytes = encode(&self.buf.to_text(), self.encoding);
-        let res = std::fs::write(&self.path, &bytes).with_context(|| format!("cannot write {}", self.path.display()));
+        let res = std::fs::write(&self.path, &bytes).with_context(|| format!("{}에 쓸 수 없습니다", self.path.display()));
         match res {
             Ok(()) => {
                 self.buf.mark_saved();

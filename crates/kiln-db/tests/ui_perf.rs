@@ -1,5 +1,7 @@
 //! 10만 행 × 20열 결과 그리드의 프레임 시간 측정.
 
+mod common;
+
 use egui::vec2;
 use egui_kittest::Harness;
 use kiln_db::{ColumnInfo, ConnId, DbManager, DbTab, ResultSet, Value};
@@ -76,6 +78,7 @@ fn grid_frame_time_with_100k_rows_by_20_columns() {
         .build_ui_state(
             |ui, t: &mut DbTab| {
                 kiln_common::Theme::current().apply(ui.ctx());
+                common::install_korean_font(ui.ctx());
                 t.ui(ui);
             },
             tab,

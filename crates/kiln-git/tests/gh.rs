@@ -92,7 +92,7 @@ fn checks_rollup_prioritizes_failure_then_pending() {
     assert_eq!(rollup(&[pass, ctx_error]), Some(ChecksState::Fail));
     assert_eq!(ctx_pending.display_name(), "ci/legacy");
     assert_eq!(ctx_pending.url(), Some("https://ci"));
-    assert_eq!(failed.outcome_label(), "failure");
+    assert_eq!(failed.outcome_label(), "실패");
     assert_eq!(skipped.outcome(), None);
 }
 
@@ -130,8 +130,8 @@ fn iso_dates_and_relative_times() {
     assert_eq!(parse_iso8601("2026-09-24T06:12:43+09:00"), Some(1_790_197_963));
     assert_eq!(parse_iso8601("garbage"), None);
     let now = 1_000_000;
-    assert_eq!(relative_time(now - 10, now), "just now");
-    assert_eq!(relative_time(now - 3600, now), "1 hour ago");
-    assert_eq!(relative_time(now - 3 * 86_400, now), "3 days ago");
-    assert_eq!(short_relative_time(now - 7200, now), "2h");
+    assert_eq!(relative_time(now - 10, now), "방금");
+    assert_eq!(relative_time(now - 3600, now), "1시간 전");
+    assert_eq!(relative_time(now - 3 * 86_400, now), "3일 전");
+    assert_eq!(short_relative_time(now - 7200, now), "2시간");
 }

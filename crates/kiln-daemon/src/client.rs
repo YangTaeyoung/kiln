@@ -129,6 +129,10 @@ pub fn daemon_log_path(socket: &str) -> std::path::PathBuf {
 
 /// `exe daemon` 을 현재 프로세스와 분리해 실행한다.
 pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let exe_copy = daemon_copy(exe);
+    #[cfg(windows)]
+    let exe: &Path = exe_copy.as_deref().unwrap_or(exe);
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("daemon").env("KILN_SOCKET", socket);
     cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null());
@@ -162,6 +166,18 @@ pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        // 부모의 표준 핸들(예: 파이프)을 데몬이 물려받아 부모 쪽 파이프가 닫히지 않는 것을 막는다.
+        // SAFETY: 현재 프로세스의 표준 핸들 플래그만 바꾼다.
+        unsafe {
+            use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+            for h in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+                let handle = GetStdHandle(h);
+                if !handle.is_null() {
+                    SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+                }
+            }
+        }
         // 부모의 잡 객체(예: SSH 세션)와 함께 종료되지 않도록 잡에서 분리를 먼저 시도한다.
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
         if let Ok(child) = cmd.spawn() {
@@ -173,4 +189,27 @@ pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
     let child = cmd.spawn()?;
     std::mem::forget(child);
     Ok(())
+}
+
+/// Windows 는 실행 중인 exe 를 덮어쓸 수 없으므로 데몬을 빌드별 복사본에서 실행한다.
+/// 설치된 kiln.exe 는 잠기지 않아 업데이트로 교체할 수 있다.
+#[cfg(windows)]
+fn daemon_copy(exe: &Path) -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)?.join("Kiln").join("daemon");
+    std::fs::create_dir_all(&base).ok()?;
+    let target = base.join(format!("kiln-daemon-{}.exe", crate::exe_build_id(exe)));
+    if !target.exists() {
+        let tmp = target.with_extension("tmp");
+        std::fs::copy(exe, &tmp).ok()?;
+        std::fs::rename(&tmp, &target).ok()?;
+    }
+    // 사용 중이 아닌 이전 복사본은 지운다(사용 중이면 삭제가 실패한다).
+    if let Ok(rd) = std::fs::read_dir(&base) {
+        for e in rd.flatten() {
+            if e.path() != target {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    Some(target)
 }

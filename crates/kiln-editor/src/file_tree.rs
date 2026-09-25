@@ -380,7 +380,7 @@ impl FileTree {
             }
             Err(e) => {
                 self.dirs.insert(dir.to_path_buf(), Vec::new());
-                self.set_error(format!("Cannot read {}: {e}", dir.display()));
+                self.set_error(format!("{}을(를) 읽을 수 없음: {e}", dir.display()));
             }
         }
         self.rows_dirty = true;
@@ -663,11 +663,11 @@ impl FileTree {
         }
         let root = self.root.clone();
         bg.context_menu(|ui| {
-            menu_item(ui, "New File…", || actions.push(Action::NewEntry(root.clone(), false)));
-            menu_item(ui, "New Folder…", || actions.push(Action::NewEntry(root.clone(), true)));
+            menu_item(ui, "새 파일…", || actions.push(Action::NewEntry(root.clone(), false)));
+            menu_item(ui, "새 폴더…", || actions.push(Action::NewEntry(root.clone(), true)));
             ui.separator();
-            menu_item(ui, "Refresh", || actions.push(Action::Refresh));
-            menu_item(ui, "Open in Terminal", || actions.push(Action::Terminal(root.clone())));
+            menu_item(ui, "새로 고침", || actions.push(Action::Refresh));
+            menu_item(ui, "터미널에서 열기", || actions.push(Action::Terminal(root.clone())));
         });
 
         self.header_ui(ui, header, &mut actions);
@@ -739,19 +739,19 @@ impl FileTree {
                 ui.set_invisible();
             }
             let target = self.selected_dir();
-            if ui_kit::icon_button(ui, Icon::NewFile, "New File…").clicked() {
+            if ui_kit::icon_button(ui, Icon::NewFile, "새 파일…").clicked() {
                 actions.push(Action::NewEntry(target.clone(), false));
             }
-            if ui_kit::icon_button(ui, Icon::NewFolder, "New Folder…").clicked() {
+            if ui_kit::icon_button(ui, Icon::NewFolder, "새 폴더…").clicked() {
                 actions.push(Action::NewEntry(target, true));
             }
-            if ui_kit::icon_button(ui, Icon::Refresh, "Refresh Explorer").clicked() {
+            if ui_kit::icon_button(ui, Icon::Refresh, "탐색기 새로 고침").clicked() {
                 actions.push(Action::Refresh);
             }
-            if ui_kit::icon_button(ui, Icon::CollapseAll, "Collapse Folders").clicked() {
+            if ui_kit::icon_button(ui, Icon::CollapseAll, "폴더 모두 접기").clicked() {
                 actions.push(Action::CollapseAll);
             }
-            let (icon, tip) = if self.show_ignored { (Icon::Eye, "Hide Ignored Files") } else { (Icon::EyeOff, "Show Ignored Files") };
+            let (icon, tip) = if self.show_ignored { (Icon::Eye, "무시된 파일 숨기기") } else { (Icon::EyeOff, "무시된 파일 표시") };
             if ui_kit::icon_toggle(ui, icon, tip, self.show_ignored, true).clicked() {
                 actions.push(Action::ToggleIgnored);
             }
@@ -850,19 +850,19 @@ impl FileTree {
         resp.context_menu(|ui| {
             ui.set_min_width(190.0);
             if !e.is_dir {
-                menu_item(ui, "Open", || actions.push(Action::Click(e.path.clone(), false)));
+                menu_item(ui, "열기", || actions.push(Action::Click(e.path.clone(), false)));
                 ui.separator();
             }
-            menu_item(ui, "New File…", || actions.push(Action::NewEntry(target_dir.clone(), false)));
-            menu_item(ui, "New Folder…", || actions.push(Action::NewEntry(target_dir.clone(), true)));
+            menu_item(ui, "새 파일…", || actions.push(Action::NewEntry(target_dir.clone(), false)));
+            menu_item(ui, "새 폴더…", || actions.push(Action::NewEntry(target_dir.clone(), true)));
             ui.separator();
-            menu_item(ui, "Copy Path", || actions.push(Action::CopyPath(e.path.clone())));
-            menu_item(ui, "Copy Relative Path", || actions.push(Action::CopyRelative(e.path.clone())));
+            menu_item(ui, "경로 복사", || actions.push(Action::CopyPath(e.path.clone())));
+            menu_item(ui, "상대 경로 복사", || actions.push(Action::CopyRelative(e.path.clone())));
             ui.separator();
-            menu_item(ui, "Open in Terminal", || actions.push(Action::Terminal(target_dir.clone())));
+            menu_item(ui, "터미널에서 열기", || actions.push(Action::Terminal(target_dir.clone())));
             ui.separator();
-            menu_item(ui, "Rename…", || actions.push(Action::Rename(e.path.clone())));
-            menu_item(ui, "Delete", || actions.push(Action::Delete(e.path.clone())));
+            menu_item(ui, "이름 바꾸기…", || actions.push(Action::Rename(e.path.clone())));
+            menu_item(ui, "삭제", || actions.push(Action::Delete(e.path.clone())));
         });
     }
 
@@ -966,7 +966,7 @@ impl FileTree {
                 }
                 ui.ctx().request_repaint();
             }
-            Err(e) => self.set_error(format!("Cannot create {name}: {e}")),
+            Err(e) => self.set_error(format!("{name}을(를) 만들 수 없음: {e}")),
         }
     }
 
@@ -984,7 +984,7 @@ impl FileTree {
         }
         let to = r.path.with_file_name(name);
         if to.exists() && !name.eq_ignore_ascii_case(&old_name) {
-            self.set_error(format!("“{name}” already exists"));
+            self.set_error(format!("“{name}”이(가) 이미 있습니다"));
             return;
         }
         match std::fs::rename(&r.path, &to) {
@@ -998,7 +998,7 @@ impl FileTree {
                 self.pending_rename = Some((r.path.clone(), to));
                 ui.ctx().request_repaint();
             }
-            Err(e) => self.set_error(format!("Rename failed: {e}")),
+            Err(e) => self.set_error(format!("이름 바꾸기 실패: {e}")),
         }
     }
 
@@ -1021,24 +1021,23 @@ impl FileTree {
             )
             .show(ui.ctx(), |ui| {
                 ui.set_width(340.0);
-                let verb = if self.use_trash { "Move" } else { "Permanently delete" };
-                let dest = if self.use_trash { " to the Trash" } else { "" };
-                let what = if is_dir { "folder" } else { "file" };
-                ui.label(egui::RichText::new(format!("{verb} {what} “{name}”{dest}?")).size(14.0).strong().color(t.text));
+                let what = if is_dir { "폴더" } else { "파일" };
+                let verb = if self.use_trash { "휴지통으로 이동할까요" } else { "영구 삭제할까요" };
+                ui.label(egui::RichText::new(format!("{what} “{name}”을(를) {verb}?")).size(14.0).strong().color(t.text));
                 ui.add_space(4.0);
                 let sub = if self.use_trash {
-                    if is_dir { "The folder and its contents can be restored from the Trash." } else { "You can restore it from the Trash." }
+                    if is_dir { "폴더와 그 안의 내용은 휴지통에서 복원할 수 있습니다." } else { "휴지통에서 복원할 수 있습니다." }
                 } else {
-                    "This cannot be undone."
+                    "이 작업은 되돌릴 수 없습니다."
                 };
                 ui.label(egui::RichText::new(sub).size(12.0).color(t.text_dim));
                 ui.add_space(14.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if self.use_trash { "Move to Trash" } else { "Delete" };
+                    let label = if self.use_trash { "휴지통으로 이동" } else { "삭제" };
                     if ui_kit::flat_button(ui, label, true).clicked() {
                         confirm = true;
                     }
-                    if ui_kit::flat_button(ui, "Cancel", false).clicked() {
+                    if ui_kit::flat_button(ui, "취소", false).clicked() {
                         cancel = true;
                     }
                 });
@@ -1069,7 +1068,7 @@ impl FileTree {
                     }
                     events.push(EditorEvent::FileDeleted(path));
                 }
-                Err(e) => self.set_error(format!("Delete failed: {e}")),
+                Err(e) => self.set_error(format!("삭제 실패: {e}")),
             }
             ui.memory_mut(|m| m.request_focus(self.id));
         } else if cancel {
@@ -1246,13 +1245,13 @@ fn menu_item(ui: &mut Ui, label: &str, f: impl FnOnce()) {
 
 fn validate_name(name: &str) -> Result<(), String> {
     if name == "." || name == ".." {
-        return Err("Invalid name".into());
+        return Err("잘못된 이름".into());
     }
     if name.contains('\\') || name.contains('\0') || (cfg!(windows) && name.contains(['<', '>', ':', '"', '|', '?', '*'])) {
-        return Err(format!("“{name}” contains characters that are not allowed"));
+        return Err(format!("“{name}”에 사용할 수 없는 문자가 있습니다"));
     }
     if name.starts_with('/') {
-        return Err("Name cannot start with /".into());
+        return Err("이름은 /로 시작할 수 없습니다".into());
     }
     Ok(())
 }

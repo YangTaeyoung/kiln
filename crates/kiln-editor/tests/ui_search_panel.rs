@@ -84,12 +84,12 @@ fn toggles_change_results() {
     type_query(&mut h, "Config");
     wait_done(&mut h);
     let all = h.state().panel.summary().unwrap().matches;
-    h.get_by_label("Match Case").click();
+    h.get_by_label("대/소문자 구분").click();
     h.run();
     wait_done(&mut h);
     let cs = h.state().panel.summary().unwrap().matches;
     assert!(cs < all);
-    h.get_by_label("Match Whole Word").click();
+    h.get_by_label("단어 단위로").click();
     h.run();
     wait_done(&mut h);
     assert_eq!(h.state().panel.summary().unwrap().matches, 5);
@@ -114,11 +114,11 @@ fn replace_all_after_confirmation() {
     let mut h = harness(&root);
     h.run();
     type_query(&mut h, "Config");
-    h.get_by_label("Match Case").click();
-    h.get_by_label("Match Whole Word").click();
+    h.get_by_label("대/소문자 구분").click();
+    h.get_by_label("단어 단위로").click();
     h.run();
     wait_done(&mut h);
-    h.get_by_label("Toggle Replace").click();
+    h.get_by_label("바꾸기 전환").click();
     h.run();
     let rid = egui::Id::new(("kiln-search-panel", root.clone())).with("replace");
     h.ctx.memory_mut(|m| m.request_focus(rid));
@@ -127,9 +127,9 @@ fn replace_all_after_confirmation() {
         h.event(Event::Text(c.to_string()));
     }
     h.run();
-    h.get_by_label("Replace All").click();
+    h.get_by_label("모두 바꾸기").click();
     h.run();
-    h.get_by_label("Replace").click();
+    h.get_by_label("바꾸기").click();
     assert!(common::wait_until(&mut h, 5.0, |_| std::fs::read_to_string(root.join("src/main.rs")).unwrap().contains("Settings::load")));
     let cfg = std::fs::read_to_string(root.join("src/config.rs")).unwrap();
     assert!(cfg.contains("pub struct Settings") && !cfg.contains("Config"));
@@ -141,7 +141,7 @@ fn invalid_regex_shows_error() {
     let (_t, root) = fixture();
     let mut h = harness(&root);
     h.run();
-    h.get_by_label("Use Regular Expression").click();
+    h.get_by_label("정규식 사용").click();
     h.run();
     type_query(&mut h, "(unclosed");
     assert!(common::wait_until(&mut h, 5.0, |h| !h.state().panel.is_searching() && h.state().panel.error().is_some()));
@@ -172,8 +172,8 @@ fn snapshot_search_panel_replace_preview() {
     h.run();
     type_query(&mut h, "Config");
     wait_done(&mut h);
-    h.get_by_label("Toggle Replace").click();
-    h.get_by_label("Toggle Search Details").click();
+    h.get_by_label("바꾸기 전환").click();
+    h.get_by_label("검색 세부 정보 전환").click();
     h.run();
     let rid = egui::Id::new(("kiln-search-panel", root.clone())).with("replace");
     h.ctx.memory_mut(|m| m.request_focus(rid));

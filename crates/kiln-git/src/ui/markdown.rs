@@ -379,7 +379,7 @@ pub(crate) fn parse_inline(s: &str) -> Vec<Span> {
             && let Some((text, url, len)) = parse_link(if img { &rest[1..] } else { rest })
         {
             flush(&mut buf, &mut spans);
-            let text = if img { format!("🖼 {}", if text.is_empty() { "image" } else { &text }) } else { text };
+            let text = if img { format!("🖼 {}", if text.is_empty() { "이미지" } else { &text }) } else { text };
             spans.push(Span::Link { text, url });
             i += len + usize::from(img);
             continue;

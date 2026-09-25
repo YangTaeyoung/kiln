@@ -39,7 +39,7 @@ impl<T> Load<T> {
                     Err(e) => Load::Failed(e.to_string()),
                 };
             } else if !job.is_running() {
-                *self = Load::Failed("cancelled".into());
+                *self = Load::Failed("취소됨".into());
             }
         }
     }
@@ -201,7 +201,7 @@ impl DbPanel {
         let theme = Theme::current();
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("DATABASE")
+                RichText::new("데이터베이스")
                     .size(11.0)
                     .strong()
                     .color(theme.text_dim),
@@ -226,7 +226,7 @@ impl DbPanel {
                         }
                     }
                     ui.separator();
-                    if ui.button("Import from URL…").clicked() {
+                    if ui.button("URL에서 가져오기…").clicked() {
                         let mut d = ConnDialog::new(ConnConfig::default(), String::new(), true);
                         d.url = "postgres://user:password@localhost:5432/db".into();
                         self.dialog = Some(d);
@@ -234,8 +234,8 @@ impl DbPanel {
                     }
                 })
                 .response
-                .on_hover_text("Add connection");
-                if icon_button(ui, "⟳", "Refresh all").clicked() {
+                .on_hover_text("연결 추가");
+                if icon_button(ui, "⟳", "모두 새로 고침").clicked() {
                     for (id, n) in self.nodes.iter_mut() {
                         if n.schemas.is_some() {
                             let m = self.manager.clone();
@@ -244,7 +244,7 @@ impl DbPanel {
                         }
                     }
                 }
-                if icon_button(ui, "⌨", "New console for selected connection").clicked()
+                if icon_button(ui, "⌨", "선택한 연결에 새 콘솔 열기").clicked()
                     && let Some(id) = self.selected_conn()
                 {
                     self.events.push(DbEvent::OpenConsole { conn: id });
@@ -267,10 +267,10 @@ impl DbPanel {
                         egui::TextEdit::singleline(&mut self.filter)
                             .id_salt("db-filter")
                             .frame(egui::Frame::NONE)
-                            .hint_text("Filter tables")
+                            .hint_text("테이블 필터")
                             .desired_width(ui.available_width() - 18.0),
                     );
-                    if !self.filter.is_empty() && icon_button(ui, "×", "Clear").clicked() {
+                    if !self.filter.is_empty() && icon_button(ui, "×", "지우기").clicked() {
                         self.filter.clear();
                     }
                 });
@@ -312,7 +312,7 @@ impl DbPanel {
                             Ok(ddl) => {
                                 ctx.copy_text(ddl);
                                 self.toast =
-                                    Some(("DDL copied to clipboard".into(), false, Instant::now()));
+                                    Some(("DDL을 클립보드에 복사했습니다".into(), false, Instant::now()));
                             }
                             Err(e) => self.toast = Some((e.to_string(), true, Instant::now())),
                         }
@@ -323,7 +323,7 @@ impl DbPanel {
                     if let Some(r) = job.poll() {
                         match r {
                             Ok(()) => {
-                                self.toast = Some(("Done".into(), false, Instant::now()));
+                                self.toast = Some(("완료".into(), false, Instant::now()));
                                 reload.push((*conn, schema.clone()));
                             }
                             Err(e) => self.toast = Some((e.to_string(), true, Instant::now())),
@@ -357,9 +357,9 @@ impl DbPanel {
         if conns.is_empty() {
             ui.add_space(24.0);
             ui.vertical_centered(|ui| {
-                ui.label(dim("No connections yet"));
+                ui.label(dim("아직 연결이 없습니다"));
                 ui.add_space(6.0);
-                if ui::tool_button(ui, "Add connection", true, true).clicked() {
+                if ui::tool_button(ui, "연결 추가", true, true).clicked() {
                     self.open_new_connection_dialog();
                 }
             });
@@ -424,51 +424,51 @@ impl DbPanel {
             resp.context_menu(|ui| {
                 ui.set_min_width(180.0);
                 if status == ConnStatus::Connected {
-                    if ui.button("Disconnect").clicked() {
+                    if ui.button("연결 끊기").clicked() {
                         self.manager.disconnect(id);
                         node.schemas = None;
                         node.open = false;
                         ui.close();
                     }
-                } else if ui.button("Connect").clicked() {
+                } else if ui.button("연결").clicked() {
                     node.open = true;
                     node.schemas = Some(load_schemas(&self.manager, id));
                     ui.close();
                 }
-                if ui.button("New console").clicked() {
+                if ui.button("새 콘솔").clicked() {
                     self.events.push(DbEvent::OpenConsole { conn: id });
                     ui.close();
                 }
-                if ui.button("Refresh").clicked() {
+                if ui.button("새로 고침").clicked() {
                     node.schemas = Some(load_schemas(&self.manager, id));
                     node.open = true;
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Edit…").clicked() {
+                if ui.button("편집…").clicked() {
                     let pw = self.manager.password(id).unwrap_or_default();
                     self.dialog = Some(ConnDialog::new(cfg.clone(), pw, false));
                     ui.close();
                 }
-                if ui.button("Copy name").clicked() {
+                if ui.button("이름 복사").clicked() {
                     ui.ctx().copy_text(cfg.display_name());
                     ui.close();
                 }
                 ui.separator();
                 if ui
-                    .button(RichText::new("Delete connection…").color(theme.red))
+                    .button(RichText::new("연결 삭제…").color(theme.red))
                     .clicked()
                 {
                     self.confirm = Some((
                         TypedConfirm {
-                            title: "Delete connection".into(),
+                            title: "연결 삭제".into(),
                             message: format!(
-                                "Remove \"{}\" and its stored password?",
+                                "\"{}\" 연결과 저장된 비밀번호를 삭제할까요?",
                                 cfg.display_name()
                             ),
                             expected: cfg.display_name(),
                             input: String::new(),
-                            action_label: "Delete".into(),
+                            action_label: "삭제".into(),
                         },
                         ConfirmKind::DeleteConn(id),
                     ));
@@ -487,7 +487,7 @@ impl DbPanel {
             match schemas {
                 Load::Idle => {}
                 Load::Loading(_) => {
-                    info_row(ui, 1, "Connecting…", theme.text_faint);
+                    info_row(ui, 1, "연결 중…", theme.text_faint);
                 }
                 Load::Failed(e) => {
                     let e = e.clone();
@@ -539,9 +539,9 @@ impl DbPanel {
             }
             ui.label(
                 RichText::new(if d.is_new {
-                    "New connection"
+                    "새 연결"
                 } else {
-                    "Edit connection"
+                    "연결 편집"
                 })
                 .size(15.0)
                 .strong(),
@@ -555,7 +555,7 @@ impl DbPanel {
                         .hint_text("postgres://user:pass@host:5432/db")
                         .desired_width(310.0),
                 );
-                if ui.button("Import").clicked()
+                if ui.button("가져오기").clicked()
                     || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                 {
                     match ConnConfig::from_url(&d.url) {
@@ -581,7 +581,7 @@ impl DbPanel {
                 .num_columns(2)
                 .spacing(vec2(10.0, 6.0))
                 .show(ui, |ui| {
-                    ui.label("Name");
+                    ui.label("이름");
                     let hint = d.cfg.display_name();
                     ui.add(
                         egui::TextEdit::singleline(&mut d.cfg.name)
@@ -589,7 +589,7 @@ impl DbPanel {
                             .desired_width(300.0),
                     );
                     ui.end_row();
-                    ui.label("Driver");
+                    ui.label("드라이버");
                     egui::ComboBox::from_id_salt("db-driver")
                         .selected_text(d.cfg.driver.label())
                         .width(300.0)
@@ -608,15 +608,15 @@ impl DbPanel {
                         });
                     ui.end_row();
                     if d.cfg.driver == Driver::Sqlite {
-                        ui.label("File");
+                        ui.label("파일");
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(&mut d.cfg.file).desired_width(230.0),
                             );
-                            if ui.button("Browse…").clicked()
+                            if ui.button("찾아보기…").clicked()
                                 && let Some(p) = rfd::FileDialog::new()
                                     .add_filter("SQLite", &["db", "sqlite", "sqlite3", "db3"])
-                                    .add_filter("All files", &["*"])
+                                    .add_filter("모든 파일", &["*"])
                                     .pick_file()
                             {
                                 d.cfg.file = p.to_string_lossy().into_owned();
@@ -624,19 +624,19 @@ impl DbPanel {
                         });
                         ui.end_row();
                     } else {
-                        ui.label("Host");
+                        ui.label("호스트");
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(&mut d.cfg.host).desired_width(200.0),
                             );
-                            ui.label("Port");
+                            ui.label("포트");
                             ui.add(egui::DragValue::new(&mut d.cfg.port).range(1..=65535));
                         });
                         ui.end_row();
-                        ui.label("User");
+                        ui.label("사용자");
                         ui.add(egui::TextEdit::singleline(&mut d.cfg.user).desired_width(300.0));
                         ui.end_row();
-                        ui.label("Password");
+                        ui.label("비밀번호");
                         let r = ui.add(
                             egui::TextEdit::singleline(&mut d.password)
                                 .password(true)
@@ -646,12 +646,12 @@ impl DbPanel {
                             d.password_touched = true;
                         }
                         ui.end_row();
-                        ui.label("Database");
+                        ui.label("데이터베이스");
                         ui.add(
                             egui::TextEdit::singleline(&mut d.cfg.database).desired_width(300.0),
                         );
                         ui.end_row();
-                        ui.label("SSL mode");
+                        ui.label("SSL 모드");
                         egui::ComboBox::from_id_salt("db-ssl")
                             .selected_text(d.cfg.ssl_mode.label())
                             .width(140.0)
@@ -662,7 +662,7 @@ impl DbPanel {
                             });
                         ui.end_row();
                     }
-                    ui.label("Timeout");
+                    ui.label("타임아웃");
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::DragValue::new(&mut d.cfg.connect_timeout_secs)
@@ -671,10 +671,10 @@ impl DbPanel {
                         );
                     });
                     ui.end_row();
-                    ui.label("Color");
+                    ui.label("색상");
                     ui.horizontal(|ui| {
                         let none_sel = d.cfg.color.is_none();
-                        if ui.selectable_label(none_sel, "none").clicked() {
+                        if ui.selectable_label(none_sel, "없음").clicked() {
                             d.cfg.color = None;
                         }
                         for c in COLOR_PRESETS {
@@ -700,10 +700,10 @@ impl DbPanel {
                 ui.add_space(4.0);
                 ui.checkbox(
                     &mut d.cfg.save_password_in_file,
-                    "Save password in config file (plain text)",
+                    "설정 파일에 비밀번호 저장 (평문)",
                 );
                 if !d.cfg.save_password_in_file {
-                    ui.label(dim("Password is stored in the OS keychain."));
+                    ui.label(dim("비밀번호는 OS 키체인에 저장됩니다."));
                 }
             }
             ui.add_space(8.0);
@@ -711,12 +711,12 @@ impl DbPanel {
                 (Some(_), _) => {
                     ui.horizontal(|ui| {
                         ui::spinner(ui);
-                        ui.label(dim("Testing connection…"));
+                        ui.label(dim("연결 테스트 중…"));
                     });
                 }
                 (None, Some(Ok(v))) => {
                     ui.label(
-                        RichText::new(format!("✔ Connected · {}", first_line(v, 90)))
+                        RichText::new(format!("✔ 연결됨 · {}", first_line(v, 90)))
                             .color(theme.green)
                             .size(12.0),
                     );
@@ -729,7 +729,7 @@ impl DbPanel {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(d.test.is_none(), egui::Button::new("Test connection"))
+                    .add_enabled(d.test.is_none(), egui::Button::new("연결 테스트"))
                     .clicked()
                 {
                     let m = self.manager.clone();
@@ -742,10 +742,10 @@ impl DbPanel {
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui::tool_button(ui, "Save", true, true).clicked() {
+                    if ui::tool_button(ui, "저장", true, true).clicked() {
                         save = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button("취소").clicked() {
                         close = true;
                     }
                 });
@@ -990,8 +990,8 @@ fn schema_ui(
     let theme = Theme::current();
     let key = NodeKey::Schema(id, sc.name.clone());
     let label = match driver {
-        Driver::Postgres => "schema",
-        Driver::MySql | Driver::MariaDb => "database",
+        Driver::Postgres => "스키마",
+        Driver::MySql | Driver::MariaDb => "데이터베이스",
         Driver::Sqlite => "",
     };
     let resp = node_row(
@@ -1010,15 +1010,15 @@ fn schema_ui(
         sc.open = !sc.open;
     }
     resp.context_menu(|ui| {
-        if ui.button("Refresh").clicked() {
+        if ui.button("새로 고침").clicked() {
             sc.tables = load_tables(m, id, &sc.name);
             ui.close();
         }
-        if ui.button("New console").clicked() {
+        if ui.button("새 콘솔").clicked() {
             events.push(DbEvent::OpenConsole { conn: id });
             ui.close();
         }
-        if ui.button("Copy name").clicked() {
+        if ui.button("이름 복사").clicked() {
             ui.ctx().copy_text(sc.name.clone());
             ui.close();
         }
@@ -1031,7 +1031,7 @@ fn schema_ui(
     }
     match &mut sc.tables {
         Load::Idle => {}
-        Load::Loading(_) => info_row(ui, 2, "Loading…", theme.text_faint),
+        Load::Loading(_) => info_row(ui, 2, "불러오는 중…", theme.text_faint),
         Load::Failed(e) => {
             let e = e.clone();
             info_row(ui, 2, &format!("⚠ {e}"), theme.red);
@@ -1059,7 +1059,7 @@ fn schema_ui(
                     show,
                     if show { "📂" } else { "📁" },
                     theme.text_faint,
-                    if is_view { "Views" } else { "Tables" },
+                    if is_view { "뷰" } else { "테이블" },
                     &matching.len().to_string(),
                     false,
                 );
@@ -1145,7 +1145,7 @@ fn table_ui(
     }
     resp.context_menu(|ui| {
         ui.set_min_width(180.0);
-        if ui.button("Open table").clicked() {
+        if ui.button("테이블 열기").clicked() {
             events.push(DbEvent::OpenTable {
                 conn: id,
                 schema: Some(schema.to_string()),
@@ -1153,21 +1153,21 @@ fn table_ui(
             });
             ui.close();
         }
-        if ui.button("New console").clicked() {
+        if ui.button("새 콘솔").clicked() {
             events.push(DbEvent::OpenConsole { conn: id });
             ui.close();
         }
         ui.separator();
-        if ui.button("Copy name").clicked() {
+        if ui.button("이름 복사").clicked() {
             ui.ctx().copy_text(t.info.name.clone());
             ui.close();
         }
-        if ui.button("Copy qualified name").clicked() {
+        if ui.button("전체 이름 복사").clicked() {
             let d = m.driver(id).unwrap_or(Driver::Postgres);
             ui.ctx().copy_text(tref.sql_name(d));
             ui.close();
         }
-        if ui.button("Copy DDL").clicked() {
+        if ui.button("DDL 복사").clicked() {
             let m2 = m.clone();
             let tr = tref.clone();
             actions.push(PendingAction::CopyDdl(
@@ -1175,46 +1175,46 @@ fn table_ui(
             ));
             ui.close();
         }
-        if ui.button("Refresh").clicked() {
+        if ui.button("새로 고침").clicked() {
             t.details = load_details(m, id, tref.clone());
             ui.close();
         }
         ui.separator();
         if t.info.kind == TableKind::Table
             && ui
-                .button(RichText::new("Truncate…").color(theme.orange))
+                .button(RichText::new("비우기…").color(theme.orange))
                 .clicked()
         {
             *confirm = Some((
                 TypedConfirm {
-                    title: "Truncate table".into(),
+                    title: "테이블 비우기".into(),
                     message: format!(
-                        "Delete ALL rows from {}? This cannot be undone.",
+                        "{}의 모든 행을 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
                         t.info.name
                     ),
                     expected: t.info.name.clone(),
                     input: String::new(),
-                    action_label: "Truncate".into(),
+                    action_label: "비우기".into(),
                 },
                 ConfirmKind::Truncate(id, tref.clone()),
             ));
             ui.close();
         }
-        if ui.button(RichText::new("Drop…").color(theme.red)).clicked() {
+        if ui.button(RichText::new("삭제(DROP)…").color(theme.red)).clicked() {
             *confirm = Some((
                 TypedConfirm {
                     title: format!(
-                        "Drop {}",
+                        "{} 삭제",
                         if t.info.kind == TableKind::Table {
-                            "table"
+                            "테이블"
                         } else {
-                            "view"
+                            "뷰"
                         }
                     ),
-                    message: format!("Permanently drop {}? This cannot be undone.", t.info.name),
+                    message: format!("{}을(를) 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.", t.info.name),
                     expected: t.info.name.clone(),
                     input: String::new(),
-                    action_label: "Drop".into(),
+                    action_label: "삭제".into(),
                 },
                 ConfirmKind::Drop(id, tref.clone(), t.info.kind),
             ));
@@ -1229,7 +1229,7 @@ fn table_ui(
     }
     match &mut t.details {
         Load::Idle => {}
-        Load::Loading(_) => info_row(ui, 4, "Loading…", theme.text_faint),
+        Load::Loading(_) => info_row(ui, 4, "불러오는 중…", theme.text_faint),
         Load::Failed(e) => {
             let e = e.clone();
             info_row(ui, 4, &format!("⚠ {e}"), theme.red);
@@ -1246,18 +1246,18 @@ fn table_ui(
                 };
                 let mut suffix = c.data_type.clone();
                 if !c.nullable {
-                    suffix.push_str(" · not null");
+                    suffix.push_str(" · NOT NULL");
                 }
                 let r = node_row(ui, 4, false, false, icon, col, &c.name, &suffix, false);
                 let mut tip = format!("{} {}", c.name, c.data_type);
                 if let Some(d) = &c.default {
-                    tip.push_str(&format!("\ndefault {d}"));
+                    tip.push_str(&format!("\n기본값 {d}"));
                 }
                 if let Some(f) = fk {
-                    tip.push_str(&format!("\nreferences {f}"));
+                    tip.push_str(&format!("\n참조 {f}"));
                 }
                 r.on_hover_text(tip).context_menu(|ui| {
-                    if ui.button("Copy name").clicked() {
+                    if ui.button("이름 복사").clicked() {
                         ui.ctx().copy_text(c.name.clone());
                         ui.close();
                     }
@@ -1271,7 +1271,7 @@ fn table_ui(
                     t.indexes_open,
                     "⚡",
                     theme.orange,
-                    "Indexes",
+                    "인덱스",
                     &det.indexes.len().to_string(),
                     false,
                 );
@@ -1281,9 +1281,9 @@ fn table_ui(
                 if t.indexes_open {
                     for ix in &det.indexes {
                         let kind = if ix.primary {
-                            "primary"
+                            "기본 키"
                         } else if ix.unique {
-                            "unique"
+                            "고유"
                         } else {
                             ""
                         };
@@ -1310,7 +1310,7 @@ fn table_ui(
                     t.fks_open,
                     "🔗",
                     theme.blue,
-                    "Foreign keys",
+                    "외래 키",
                     &det.foreign_keys.len().to_string(),
                     false,
                 );

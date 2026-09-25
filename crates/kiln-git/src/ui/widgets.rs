@@ -193,7 +193,7 @@ pub(crate) fn banner(ui: &mut Ui, kind: BannerKind, title: &str, detail: Option<
                 ui.add(egui::Label::new(RichText::new(title).color(t.text).strong().size(12.5)).wrap());
                 if closable {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icon_button(ui, Icon::Close, "Dismiss").clicked() {
+                        if icon_button(ui, Icon::Close, "닫기").clicked() {
                             closed = true;
                         }
                     });
@@ -293,10 +293,10 @@ pub(crate) fn review_color(r: ReviewDecision) -> Color32 {
 /// PR 상태 배지(Open/Draft/Merged/Closed).
 pub(crate) fn pr_state_badge(ui: &mut Ui, state: PrState, draft: bool) -> Response {
     let (label, bg) = match (state, draft) {
-        (PrState::Open, true) => ("Draft", Color32::from_rgb(0x4a, 0x4f, 0x5c)),
-        (PrState::Open, false) => ("Open", Color32::from_rgb(0x2f, 0x8a, 0x4a)),
-        (PrState::Merged, _) => ("Merged", Color32::from_rgb(0x82, 0x50, 0xdf)),
-        (PrState::Closed, _) => ("Closed", Color32::from_rgb(0xc2, 0x44, 0x4e)),
+        (PrState::Open, true) => ("초안", Color32::from_rgb(0x4a, 0x4f, 0x5c)),
+        (PrState::Open, false) => ("열림", Color32::from_rgb(0x2f, 0x8a, 0x4a)),
+        (PrState::Merged, _) => ("병합됨", Color32::from_rgb(0x82, 0x50, 0xdf)),
+        (PrState::Closed, _) => ("닫힘", Color32::from_rgb(0xc2, 0x44, 0x4e)),
     };
     badge(ui, label, Color32::WHITE, bg)
 }
@@ -382,7 +382,7 @@ pub(crate) fn confirm_modal(
                 if ok.clicked() {
                     result = Some(true);
                 }
-                if secondary_button(ui, "Cancel").clicked() {
+                if secondary_button(ui, "취소").clicked() {
                     result = Some(false);
                 }
             });

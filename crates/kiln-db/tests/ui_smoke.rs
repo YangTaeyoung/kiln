@@ -1,5 +1,7 @@
 //! egui_kittest UI 테스트: 패널 트리, 테이블 편집 흐름, 콘솔 실행, 대용량 그리드 렌더 시간.
 
+mod common;
+
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -140,6 +142,7 @@ fn step_until<S>(
 
 fn themed(ctx: &egui::Context) {
     kiln_common::Theme::current().apply(ctx);
+    common::install_korean_font(ctx);
 }
 
 struct PanelState {
@@ -244,7 +247,7 @@ fn table_view_edits_cell_and_submits_to_database() {
     let tab = DbTab::table(m.clone(), id, Some("main".into()), "customers".into());
     let mut h = tab_harness(tab, vec2(1100.0, 520.0));
     step_until(&mut h, "rows", |h| {
-        h.query_by_label("email").is_some() && h.query_by_label_contains("of 12").is_some()
+        h.query_by_label("email").is_some() && h.query_by_label_contains("총 12").is_some()
     });
     save_png(&mut h, "table_view");
 
@@ -269,7 +272,7 @@ fn table_view_edits_cell_and_submits_to_database() {
 
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     step_until(&mut h, "submit", |h| {
-        h.state().tab.pending_changes() == 0 && h.query_by_label_contains("Committed").is_some()
+        h.state().tab.pending_changes() == 0 && h.query_by_label_contains("커밋됨").is_some()
     });
     let rs = m
         .block_on(m.query(
@@ -285,19 +288,19 @@ fn table_view_edits_cell_and_submits_to_database() {
     // 값 뷰어, 구조, DDL 하위 탭.
     let p = cell_pos(&h, "notes", 0);
     click_at(&mut h, p, false);
-    h.get_by_label("Value").click();
+    h.get_by_label("값").click();
     for _ in 0..3 {
         h.step();
     }
     save_png(&mut h, "table_value_viewer");
-    h.get_by_label("Value").click();
-    h.get_by_label("Structure").click();
+    h.get_by_label("값").click();
+    h.get_by_label("구조").click();
     for _ in 0..3 {
         h.step();
     }
     save_png(&mut h, "table_structure");
     h.get_by_label("DDL").click();
-    step_until(&mut h, "ddl", |h| h.query_by_label("Copy").is_some());
+    step_until(&mut h, "ddl", |h| h.query_by_label("복사").is_some());
     save_png(&mut h, "table_ddl");
 }
 
@@ -307,7 +310,7 @@ fn table_view_sorts_by_header_click_and_filters_with_where() {
     let tab = DbTab::table(m.clone(), id, Some("main".into()), "customers".into());
     let mut h = tab_harness(tab, vec2(1100.0, 420.0));
     step_until(&mut h, "rows", |h| {
-        h.query_by_label_contains("of 12").is_some()
+        h.query_by_label_contains("총 12").is_some()
     });
     // name 헤더 두 번 클릭 → 내림차순.
     let hdr = h.get_by_label("name").rect().center();
@@ -329,7 +332,7 @@ fn table_view_sorts_by_header_click_and_filters_with_where() {
     h.step();
     h.key_press(Key::Enter);
     step_until(&mut h, "filtered", |h| {
-        h.query_by_label_contains("of 6").is_some()
+        h.query_by_label_contains("총 6").is_some()
     });
     save_png(&mut h, "table_sorted_filtered");
 }
@@ -356,7 +359,7 @@ fn connection_dialog_renders_with_all_fields() {
             state,
         );
     h.step();
-    h.get_by_label("Add connection").click();
+    h.get_by_label("연결 추가").click();
     for _ in 0..4 {
         h.step();
     }
@@ -373,11 +376,11 @@ fn connection_dialog_renders_with_all_fields() {
         "postgres://kiln@db.internal:6543/app?sslmode=require".into(),
     ));
     h.step();
-    h.get_by_label("Import").click();
+    h.get_by_label("가져오기").click();
     for _ in 0..3 {
         h.step();
     }
-    h.get_by_label("Save").click();
+    h.get_by_label("저장").click();
     for _ in 0..3 {
         h.step();
     }
@@ -404,7 +407,7 @@ fn console_runs_typed_sql_and_shows_rows() {
     h.step();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     step_until(&mut h, "result", |h| {
-        h.query_by_label_contains("Result 1").is_some()
+        h.query_by_label_contains("결과 1").is_some()
     });
     assert!(h.query_by_label("payload").is_some());
     h.hover_at(egui::pos2(-5.0, -5.0));
@@ -422,7 +425,7 @@ fn console_runs_typed_sql_and_shows_rows() {
     h.step();
     h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter);
     step_until(&mut h, "error", |h| {
-        h.query_by_label_contains("error").is_some()
+        h.query_by_label_contains("오류").is_some()
     });
     save_png(&mut h, "console_error");
 }
@@ -433,12 +436,12 @@ fn pending_insert_delete_and_edit_states_render_and_revert() {
     let tab = DbTab::table(m.clone(), id, Some("main".into()), "customers".into());
     let mut h = tab_harness(tab, vec2(1100.0, 440.0));
     step_until(&mut h, "rows", |h| {
-        h.query_by_label_contains("of 12").is_some()
+        h.query_by_label_contains("총 12").is_some()
     });
     // 3행 삭제 표시.
     let p = cell_pos(&h, "name", 2);
     click_at(&mut h, p, false);
-    h.get_by_label("− Row").click();
+    h.get_by_label("− 행").click();
     h.step();
     // 2행 balance 편집.
     let p = cell_pos(&h, "balance", 1);
@@ -449,7 +452,7 @@ fn pending_insert_delete_and_edit_states_render_and_revert() {
     h.key_press(Key::Enter);
     h.step();
     // 새 행 추가 후 name 입력.
-    h.get_by_label("+ Row").click();
+    h.get_by_label("+ 행").click();
     h.step();
     let p = cell_pos(&h, "name", 12);
     click_at(&mut h, p, true);
@@ -463,7 +466,7 @@ fn pending_insert_delete_and_edit_states_render_and_revert() {
     h.hover_at(egui::pos2(-5.0, -5.0));
     h.step();
     save_png(&mut h, "table_pending_states");
-    h.get_by_label("⟲ Revert").click();
+    h.get_by_label("⟲ 되돌리기").click();
     h.step();
     assert_eq!(h.state().tab.pending_changes(), 0);
 }

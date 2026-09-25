@@ -171,15 +171,15 @@ impl PrPanel {
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
             egui::Frame::new().inner_margin(Margin { left: 10, right: 10, top: 8, bottom: 8 }).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Pull Requests").size(14.0).strong().color(t.text));
+                    ui.label(RichText::new("풀 리퀘스트").size(14.0).strong().color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if self.form.is_none() && primary_button(ui, "New PR", None).on_hover_text("Create a pull request").clicked()
+                        if self.form.is_none() && primary_button(ui, "새 PR", None).on_hover_text("풀 리퀘스트 새로 만들기").clicked()
                         {
                             self.open_create_form();
                         }
                         if self.load.is_some() {
                             spinner(ui, 12.0);
-                        } else if icon_button(ui, Icon::Refresh, "Refresh").clicked() {
+                        } else if icon_button(ui, Icon::Refresh, "새로 고침").clicked() {
                             self.refresh();
                         }
                     });
@@ -193,13 +193,13 @@ impl PrPanel {
                 ui.add_space(4.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search)
-                        .hint_text("Filter by title, author, branch or #number")
+                        .hint_text("제목, 작성자, 브랜치, #번호로 필터")
                         .desired_width(f32::INFINITY)
                         .frame(input_frame()),
                 );
                 if let Some(url) = self.created.clone() {
                     ui.add_space(4.0);
-                    if banner(ui, BannerKind::Success, "Pull request created", Some(&url), true) {
+                    if banner(ui, BannerKind::Success, "풀 리퀘스트를 만들었습니다", Some(&url), true) {
                         self.created = None;
                     }
                 }
@@ -221,17 +221,17 @@ impl PrPanel {
         let t = theme();
         if let Some(e) = &self.error {
             let (title, detail) = match e {
-                GitError::GhMissing => ("GitHub CLI not found", "Install gh from https://cli.github.com to see pull requests.".to_string()),
-                GitError::GhAuth(_) => ("Not signed in to GitHub", "Run `gh auth login` in a terminal, then refresh.".to_string()),
-                GitError::NotARepo => ("Not a git repository", String::new()),
-                other => ("Could not load pull requests", other.to_string()),
+                GitError::GhMissing => ("GitHub CLI를 찾을 수 없음", "풀 리퀘스트를 보려면 https://cli.github.com 에서 gh를 설치하세요.".to_string()),
+                GitError::GhAuth(_) => ("GitHub에 로그인되어 있지 않음", "터미널에서 `gh auth login`을 실행한 뒤 새로 고치세요.".to_string()),
+                GitError::NotARepo => ("Git 저장소가 아닙니다", String::new()),
+                other => ("풀 리퀘스트를 불러올 수 없습니다", other.to_string()),
             };
             let is_auth = matches!(e, GitError::GhAuth(_));
             egui::Frame::new().inner_margin(Margin::same(10)).show(ui, |ui| {
                 banner(ui, BannerKind::Warning, title, Some(&detail), false);
                 if is_auth {
                     ui.add_space(6.0);
-                    if tool_button(ui, None, "Run gh auth login in terminal").clicked() {
+                    if tool_button(ui, None, "터미널에서 gh auth login 실행").clicked() {
                         events.push(GitEvent::RunInTerminal("gh auth login".into()));
                     }
                 }
@@ -243,7 +243,7 @@ impl PrPanel {
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
                 spinner(ui, 14.0);
-                ui.label(dim("Loading pull requests…"));
+                ui.label(dim("풀 리퀘스트 불러오는 중…"));
             });
             return;
         }
@@ -262,11 +262,11 @@ impl PrPanel {
             .collect();
         if items.is_empty() {
             let msg = match self.filter {
-                PrFilter::Mine => "You have no open pull requests",
-                PrFilter::ReviewRequested => "No reviews requested from you",
-                _ => "No pull requests",
+                PrFilter::Mine => "열려 있는 내 풀 리퀘스트가 없습니다",
+                PrFilter::ReviewRequested => "나에게 요청된 리뷰가 없습니다",
+                _ => "풀 리퀘스트 없음",
             };
-            empty_state(ui, msg, if q.is_empty() { "" } else { "Try a different filter." });
+            empty_state(ui, msg, if q.is_empty() { "" } else { "다른 필터를 사용해 보세요." });
             return;
         }
         let now = self.now_override.unwrap_or_else(now_unix);
@@ -306,13 +306,13 @@ impl PrPanel {
                         rx = br.left() - 5.0;
                     };
                     if p.is_draft {
-                        chip("Draft", t.text_dim);
+                        chip("초안", t.text_dim);
                     }
                     if let Some(r) = p.review() {
                         chip(r.label(), review_color(r));
                     }
                     if pr_state != crate::gh::PrState::Open {
-                        chip(if pr_state == crate::gh::PrState::Merged { "Merged" } else { "Closed" }, sc);
+                        chip(if pr_state == crate::gh::PrState::Merged { "병합됨" } else { "닫힘" }, sc);
                     }
                     let x0 = rect.left() + 30.0;
                     let title_job = one_line_job(&[(&p.title, 13.0, t.text)], (rx - x0 - 4.0).max(40.0));
@@ -344,9 +344,9 @@ impl PrPanel {
         let Some(form) = &mut self.form else { return };
         let mut close = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("New Pull Request").size(14.0).strong().color(t.text));
+            ui.label(RichText::new("새 풀 리퀘스트").size(14.0).strong().color(t.text));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, Icon::Close, "Cancel").clicked() {
+                if icon_button(ui, Icon::Close, "취소").clicked() {
                     close = true;
                 }
             });
@@ -357,7 +357,7 @@ impl PrPanel {
         }
         ui.add_space(4.0);
         if let Some(e) = form.error.clone() {
-            if banner(ui, BannerKind::Error, "Could not create pull request", Some(&e), true) {
+            if banner(ui, BannerKind::Error, "풀 리퀘스트를 만들 수 없습니다", Some(&e), true) {
                 form.error = None;
             }
             ui.add_space(4.0);
@@ -365,16 +365,16 @@ impl PrPanel {
         if form.defaults.is_some() {
             ui.horizontal(|ui| {
                 spinner(ui, 12.0);
-                ui.label(dim("Preparing from branch commits…"));
+                ui.label(dim("브랜치 커밋으로 준비하는 중…"));
             });
             return;
         }
         let submitting = form.submit.is_some();
         ui.add_enabled_ui(!submitting, |ui| {
             ui.horizontal(|ui| {
-                ui.label(dim("From"));
+                ui.label(dim("원본"));
                 outline_badge(ui, if form.head.is_empty() { "?" } else { &form.head }, t.accent);
-                ui.label(dim("into"));
+                ui.label(dim("→ 대상"));
                 egui::ComboBox::from_id_salt(Id::new("pr_create_base"))
                     .selected_text(RichText::new(&form.req.base).size(12.5))
                     .width(140.0)
@@ -385,28 +385,28 @@ impl PrPanel {
                     });
             });
             ui.add_space(6.0);
-            ui.label(RichText::new("Title").size(11.5).color(t.text_dim));
+            ui.label(RichText::new("제목").size(11.5).color(t.text_dim));
             ui.add(
                 egui::TextEdit::singleline(&mut form.req.title)
-                    .hint_text("Pull request title")
+                    .hint_text("풀 리퀘스트 제목")
                     .desired_width(f32::INFINITY)
                     .frame(input_frame()),
             );
             ui.add_space(4.0);
-            ui.label(RichText::new("Description").size(11.5).color(t.text_dim));
+            ui.label(RichText::new("설명").size(11.5).color(t.text_dim));
             ui.add(
                 egui::TextEdit::multiline(&mut form.req.body)
-                    .hint_text("Describe your changes (Markdown supported)")
+                    .hint_text("변경 사항을 설명하세요 (Markdown 지원)")
                     .desired_rows(8)
                     .desired_width(f32::INFINITY)
                     .frame(input_frame()),
             );
             ui.add_space(4.0);
-            checkbox_row(ui, &mut form.req.draft, "Create as draft");
+            checkbox_row(ui, &mut form.req.draft, "초안으로 만들기");
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let can = !form.req.title.trim().is_empty() && !form.req.base.is_empty() && !submitting;
-                let label = if form.req.draft { "Create Draft PR" } else { "Create Pull Request" };
+                let label = if form.req.draft { "초안 PR 만들기" } else { "풀 리퀘스트 만들기" };
                 if ui.add_enabled_ui(can, |ui| primary_button(ui, label, None)).inner.clicked() {
                     let b = self.backend.clone();
                     let req = form.req.clone();
@@ -415,7 +415,7 @@ impl PrPanel {
                 }
                 if submitting {
                     spinner(ui, 12.0);
-                    ui.label(dim("Creating…"));
+                    ui.label(dim("만드는 중…"));
                 }
             });
         });

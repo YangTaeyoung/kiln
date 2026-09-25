@@ -33,6 +33,14 @@ fn setup(tag: &str) -> (PathBuf, PathBuf) {
     (base.clone(), base.join("proj"))
 }
 
+/// 실제 셸 출력(시각, pid, 임시 경로)이 들어가므로 비교하지 않고 검토용 PNG 로 저장한다.
+fn save_shot(h: &mut Harness<'_, KilnApp>, name: &str) {
+    let img = h.render().expect("render");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+    std::fs::create_dir_all(&dir).unwrap();
+    img.save(dir.join(format!("{name}.png"))).unwrap();
+}
+
 fn shutdown(base: &PathBuf) {
     if let Ok(c) = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None) {
         c.send(kiln_proto::ClientMsg::Shutdown);
@@ -76,7 +84,7 @@ fn terminal_roundtrip_split_and_snapshot() {
     h.key_press(egui::Key::Enter);
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("green-bg\n") || t.matches("green-bg").count() >= 2)));
     h.run_steps(3);
-    h.snapshot("app_split_terminal");
+    save_shot(&mut h, "app_split_terminal");
     shutdown(&base);
 }
 
@@ -103,7 +111,7 @@ fn explorer_opens_file_in_editor_and_saves() {
     h.key_press(egui::Key::Enter);
     assert!(pump_until(&mut h, 5, |h| h.state().debug_active_tab_title().contains("main.rs")), "editor tab not opened: {}", h.state().debug_active_tab_title());
     h.run_steps(5);
-    h.snapshot("app_explorer_editor");
+    save_shot(&mut h, "app_explorer_editor");
     // 편집 후 저장.
     h.key_press_modifiers(if cfg!(target_os = "macos") { egui::Modifiers::MAC_CMD } else { egui::Modifiers::CTRL }, egui::Key::End);
     h.event(egui::Event::Text("// edited by kiln".into()));
@@ -124,10 +132,10 @@ fn git_and_db_panels_render() {
     h.key_press_modifiers(cmd_shift(), egui::Key::G);
     assert!(pump_until(&mut h, 10, |h| h.query_by_label_contains("lib.rs").is_some()), "git panel did not list untracked file");
     h.run_steps(5);
-    h.snapshot("app_git_panel");
+    save_shot(&mut h, "app_git_panel");
     h.key_press_modifiers(cmd_shift(), egui::Key::B);
     h.run_steps(5);
-    h.snapshot("app_db_panel");
+    save_shot(&mut h, "app_db_panel");
     let _ = cmd();
     shutdown(&base);
 }

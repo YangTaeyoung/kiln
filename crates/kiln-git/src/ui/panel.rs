@@ -230,7 +230,7 @@ impl GitPanel {
                 match (&done.result, done.kind) {
                     (Ok(out), JobKind::Sync) => {
                         let msg = out.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
-                        self.banner = Some((BannerKind::Success, format!("{} finished", done.label), Some(msg)));
+                        self.banner = Some((BannerKind::Success, format!("{} 완료", done.label), Some(msg)));
                     }
                     (Ok(_), JobKind::Commit) => {
                         self.message.clear();
@@ -238,7 +238,7 @@ impl GitPanel {
                     }
                     (Ok(_), _) => {}
                     (Err(e), _) => {
-                        self.banner = Some((BannerKind::Error, format!("{} failed", done.label), Some(e.to_string())));
+                        self.banner = Some((BannerKind::Error, format!("{} 실패", done.label), Some(e.to_string())));
                     }
                 }
                 if done.kind == JobKind::Checkout && done.result.is_ok() {
@@ -327,28 +327,28 @@ impl GitPanel {
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     spinner(ui, 14.0);
-                    ui.label(dim("Reading repository…"));
+                    ui.label(dim("저장소 읽는 중…"));
                 });
             }
             Some(GitError::NotARepo) => {
-                empty_state(ui, "No Git repository", "This folder is not tracked by Git.");
+                empty_state(ui, "Git 저장소 없음", "이 폴더는 Git으로 추적되고 있지 않습니다.");
                 let root = self.root.clone();
                 ui.vertical_centered(|ui| {
-                    if primary_button(ui, "Initialize Repository", None).clicked() {
+                    if primary_button(ui, "저장소 초기화", None).clicked() {
                         let _ = git(&root, Mode::Write, &["init"]);
                         self.refresh();
                     }
                 });
             }
             Some(GitError::GitMissing) => {
-                empty_state(ui, "Git not found", "Install Git and make sure it is on your PATH.");
+                empty_state(ui, "Git을 찾을 수 없음", "Git을 설치하고 PATH에 있는지 확인하세요.");
             }
             Some(e) => {
                 let msg = e.to_string();
                 egui::Frame::new().inner_margin(Margin::same(10)).show(ui, |ui| {
-                    banner(ui, BannerKind::Error, "Could not read repository", Some(&msg), false);
+                    banner(ui, BannerKind::Error, "저장소를 읽을 수 없습니다", Some(&msg), false);
                     ui.add_space(6.0);
-                    if tool_button(ui, Some(Icon::Refresh), "Retry").clicked() {
+                    if tool_button(ui, Some(Icon::Refresh), "다시 시도").clicked() {
                         self.refresh();
                     }
                 });
@@ -396,11 +396,11 @@ impl GitPanel {
                     t.text_faint,
                 );
             } else if detached {
-                p.text(pos2(name_rect.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, "detached HEAD", FontId::proportional(11.5), t.orange);
+                p.text(pos2(name_rect.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, "분리된 HEAD", FontId::proportional(11.5), t.orange);
             }
             paint_icon(p, Rect::from_center_size(rect.right_center() - vec2(14.0, 0.0), vec2(12.0, 12.0)), Icon::ChevronDown, t.text_dim);
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Branch {label}")));
-            resp.on_hover_text("Switch branch")
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("브랜치 {label}")));
+            resp.on_hover_text("브랜치 전환")
         };
         self.ui_branch_popup(ui, &resp);
 
@@ -417,14 +417,14 @@ impl GitPanel {
                     self.submit(JobKind::Sync, "Pull", repo::pull);
                 }
                 let push_label = if br.upstream.is_none() && !detached {
-                    "Publish".to_string()
+                    "게시".to_string()
                 } else if br.ahead > 0 {
                     format!("Push {}", br.ahead)
                 } else {
                     "Push".into()
                 };
                 if tool_button(ui, Some(Icon::ArrowUp), &push_label)
-                    .on_hover_text(if br.upstream.is_none() { "Push and set upstream" } else { "git push" })
+                    .on_hover_text(if br.upstream.is_none() { "Push 후 upstream 설정" } else { "git push" })
                     .clicked()
                 {
                     self.submit(JobKind::Sync, "Push", repo::push);
@@ -480,7 +480,7 @@ impl GitPanel {
             .show(|ui| {
                 ui.set_width(width - 12.0);
                 let te = egui::TextEdit::singleline(&mut self.picker.filter)
-                    .hint_text("Filter or create branch…")
+                    .hint_text("브랜치 필터 또는 새로 만들기…")
                     .desired_width(f32::INFINITY)
                     .frame(input_frame());
                 let r = ui.add(te);
@@ -493,7 +493,7 @@ impl GitPanel {
                 let exists = self.picker.list.iter().any(|b| !b.remote && b.name == filter);
                 ui.add_space(4.0);
                 if !filter.is_empty() && !exists {
-                    let resp = branch_row(ui, &format!("Create branch \"{filter}\""), None, false, t.accent);
+                    let resp = branch_row(ui, &format!("새 브랜치 \"{filter}\" 만들기"), None, false, t.accent);
                     if resp.clicked() || (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
                         action = Some(BranchAction::Create(filter.clone()));
                     }
@@ -501,7 +501,7 @@ impl GitPanel {
                 if self.picker.load.is_some() && self.picker.list.is_empty() {
                     ui.horizontal(|ui| {
                         spinner(ui, 12.0);
-                        ui.label(dim("Loading branches…"));
+                        ui.label(dim("브랜치 불러오는 중…"));
                     });
                 }
                 if let Some(e) = &self.picker.error {
@@ -521,7 +521,7 @@ impl GitPanel {
                             continue;
                         }
                         ui.add_space(4.0);
-                        ui.label(RichText::new(if remote { "REMOTE" } else { "LOCAL" }).size(10.5).color(t.text_faint));
+                        ui.label(RichText::new(if remote { "원격" } else { "로컬" }).size(10.5).color(t.text_faint));
                         ui.add_space(2.0);
                         for b in items {
                             let color = if b.current { t.accent } else { t.text };
@@ -529,7 +529,7 @@ impl GitPanel {
                             let resp = branch_row(ui, &b.name, detail, b.current, color);
                             if !remote && !b.current && resp.hovered() {
                                 let r = Rect::from_center_size(resp.rect.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0));
-                                if icon_button_at(ui, r, resp.id.with("del"), Icon::Trash, "Delete branch").clicked() {
+                                if icon_button_at(ui, r, resp.id.with("del"), Icon::Trash, "브랜치 삭제").clicked() {
                                     action = Some(BranchAction::Delete(b.name.clone()));
                                     continue;
                                 }
@@ -545,10 +545,10 @@ impl GitPanel {
             egui::Popup::close_id(ui.ctx(), popup_id);
             match a {
                 BranchAction::Create(name) => {
-                    self.submit(JobKind::Checkout, "Create branch", move |p| repo::create_branch(p, &name));
+                    self.submit(JobKind::Checkout, "브랜치 만들기", move |p| repo::create_branch(p, &name));
                 }
                 BranchAction::Checkout(b) => {
-                    self.submit(JobKind::Checkout, "Checkout", move |p| repo::checkout(p, &b));
+                    self.submit(JobKind::Checkout, "체크아웃", move |p| repo::checkout(p, &b));
                 }
                 BranchAction::Delete(name) => {
                     self.confirm = Some(Confirm::DeleteBranch { name, force: false });
@@ -563,9 +563,9 @@ impl GitPanel {
             ui.add_space(6.0);
             let conflicts = snap.status.conflicted_count();
             let title = if conflicts > 0 {
-                format!("{} — resolve {conflicts} conflict{} and commit", op.label(), if conflicts == 1 { "" } else { "s" })
+                format!("{} 진행 중 — 충돌 {conflicts}개를 해결하고 커밋하세요", op.label())
             } else {
-                format!("{} — all conflicts resolved, ready to commit", op.label())
+                format!("{} 진행 중 — 모든 충돌을 해결했습니다. 커밋할 수 있습니다", op.label())
             };
             let mut abort = false;
             egui::Frame::new()
@@ -579,7 +579,7 @@ impl GitPanel {
                         ui.label(RichText::new("⚠").color(theme().orange));
                         ui.add(egui::Label::new(RichText::new(&title).size(12.5).color(theme().text)).wrap());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if tool_button(ui, None, "Abort").clicked() {
+                            if tool_button(ui, None, "중단").clicked() {
                                 abort = true;
                             }
                         });
@@ -614,7 +614,7 @@ impl GitPanel {
 
         let te = egui::TextEdit::multiline(&mut self.message)
             .id(te_id)
-            .hint_text(format!("Message ({} to commit on \"{branch}\")", shortcut_label(ui.ctx())))
+            .hint_text(format!("메시지 ({}로 \"{branch}\"에 커밋)", shortcut_label(ui.ctx())))
             .desired_rows(3)
             .desired_width(f32::INFINITY)
             .font(FontId::proportional(13.0))
@@ -631,7 +631,7 @@ impl GitPanel {
             } else {
                 t.text_faint
             };
-            let tip = if subject_len > SUBJECT_MAX { "Subject line is longer than 72 characters" } else { "Subject line length" };
+            let tip = if subject_len > SUBJECT_MAX { "제목 줄이 72자를 넘습니다" } else { "제목 줄 길이" };
             let r = ui.painter().text(
                 te_resp.rect.right_bottom() - vec2(8.0, 5.0),
                 Align2::RIGHT_BOTTOM,
@@ -649,39 +649,39 @@ impl GitPanel {
         ui.allocate_ui_with_layout(vec2(row_w, 28.0), Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let push_clicked = ui
-                .add_enabled_ui(can_commit, |ui| secondary_button(ui, "Commit & Push"))
+                .add_enabled_ui(can_commit, |ui| secondary_button(ui, "커밋 및 Push"))
                 .inner
-                .on_hover_text("Commit, then push to the upstream branch")
+                .on_hover_text("커밋한 뒤 upstream 브랜치로 Push")
                 .clicked();
             let amend_clicked = ui
-                .add_enabled_ui(can_amend, |ui| secondary_button(ui, "Amend"))
+                .add_enabled_ui(can_amend, |ui| secondary_button(ui, "커밋 수정"))
                 .inner
-                .on_hover_text("Amend the last commit (keeps its message when the box is empty)")
+                .on_hover_text("마지막 커밋 수정 (입력란이 비어 있으면 기존 메시지 유지)")
                 .clicked();
             let w = ui.available_width().max(60.0);
-            let label = if staged > 0 { format!("Commit ({staged})") } else { "Commit".into() };
+            let label = if staged > 0 { format!("커밋 ({staged})") } else { "커밋".into() };
             let r = ui.add_enabled_ui(can_commit, |ui| primary_button(ui, &label, Some(w))).inner;
             let hint = if conflicts > 0 {
-                "Resolve merge conflicts first"
+                "먼저 병합 충돌을 해결하세요"
             } else if staged == 0 && !merging {
-                "Stage changes to commit"
+                "커밋할 변경 사항을 스테이징하세요"
             } else if self.message.trim().is_empty() {
-                "Enter a commit message"
+                "커밋 메시지를 입력하세요"
             } else {
-                "Commit staged changes"
+                "스테이징된 변경 사항 커밋"
             };
             let clicked = r.on_hover_text(hint).on_disabled_hover_text(hint).clicked();
             if (clicked || submit) && can_commit {
                 let msg = self.message.clone();
-                self.submit(JobKind::Commit, "Commit", move |p| repo::commit(p, &msg, false));
+                self.submit(JobKind::Commit, "커밋", move |p| repo::commit(p, &msg, false));
             }
             if amend_clicked {
                 let msg = self.message.clone();
-                self.submit(JobKind::Commit, "Amend", move |p| repo::commit(p, &msg, true));
+                self.submit(JobKind::Commit, "커밋 수정", move |p| repo::commit(p, &msg, true));
             }
             if push_clicked {
                 let msg = self.message.clone();
-                self.submit(JobKind::Commit, "Commit & Push", move |p| {
+                self.submit(JobKind::Commit, "커밋 및 Push", move |p| {
                     let out = repo::commit(p, &msg, false)?;
                     repo::push(p).map(|o| format!("{out}\n{o}"))
                 });
@@ -701,7 +701,7 @@ impl GitPanel {
 
         if !conflicts.is_empty() {
             let mut open = self.open[&Section::Conflicts];
-            section_header(ui, &mut open, "Merge Conflicts", Some(conflicts.len()), Some(t.orange), |_| {});
+            section_header(ui, &mut open, "병합 충돌", Some(conflicts.len()), Some(t.orange), |_| {});
             self.open.insert(Section::Conflicts, open);
             if open {
                 for e in &conflicts {
@@ -712,18 +712,18 @@ impl GitPanel {
 
         let mut open = self.open[&Section::Staged];
         let mut unstage_all = false;
-        section_header(ui, &mut open, "Staged Changes", Some(staged.len()), None, |ui| {
-            if !staged.is_empty() && icon_button(ui, Icon::Minus, "Unstage all").clicked() {
+        section_header(ui, &mut open, "스테이징된 변경 사항", Some(staged.len()), None, |ui| {
+            if !staged.is_empty() && icon_button(ui, Icon::Minus, "모두 스테이징 취소").clicked() {
                 unstage_all = true;
             }
         });
         self.open.insert(Section::Staged, open);
         if unstage_all {
-            self.mutate("Unstage all", repo::unstage_all);
+            self.mutate("모두 스테이징 취소", repo::unstage_all);
         }
         if open {
             if staged.is_empty() {
-                hint_row(ui, "No staged changes");
+                hint_row(ui, "스테이징된 변경 사항 없음");
             }
             for e in &staged {
                 self.file_row(ui, e, RowKind::Staged, busy, events);
@@ -733,12 +733,12 @@ impl GitPanel {
         let mut open = self.open[&Section::Changes];
         let mut stage_all = false;
         let mut discard_all = false;
-        section_header(ui, &mut open, "Changes", Some(changes.len()), None, |ui| {
+        section_header(ui, &mut open, "변경 사항", Some(changes.len()), None, |ui| {
             if !changes.is_empty() {
-                if icon_button(ui, Icon::Plus, "Stage all changes").clicked() {
+                if icon_button(ui, Icon::Plus, "모든 변경 사항 스테이징").clicked() {
                     stage_all = true;
                 }
-                if icon_button(ui, Icon::Discard, "Discard all changes").clicked() {
+                if icon_button(ui, Icon::Discard, "모든 변경 사항 취소").clicked() {
                     discard_all = true;
                 }
             }
@@ -746,14 +746,14 @@ impl GitPanel {
         self.open.insert(Section::Changes, open);
         if stage_all {
             let paths: Vec<String> = changes.iter().map(|e| e.path.clone()).collect();
-            self.mutate("Stage all", move |p| repo::stage(p, &paths));
+            self.mutate("모두 스테이징", move |p| repo::stage(p, &paths));
         }
         if discard_all {
             self.confirm = Some(Confirm::DiscardAll);
         }
         if open {
             if changes.is_empty() {
-                hint_row(ui, "Working tree clean");
+                hint_row(ui, "작업 트리가 깨끗합니다");
             }
             for e in &changes {
                 self.file_row(ui, e, RowKind::Changed, busy, events);
@@ -763,15 +763,15 @@ impl GitPanel {
         if !untracked.is_empty() {
             let mut open = self.open[&Section::Untracked];
             let mut stage_u = false;
-            section_header(ui, &mut open, "Untracked", Some(untracked.len()), None, |ui| {
-                if icon_button(ui, Icon::Plus, "Stage all untracked files").clicked() {
+            section_header(ui, &mut open, "추적되지 않음", Some(untracked.len()), None, |ui| {
+                if icon_button(ui, Icon::Plus, "추적되지 않은 파일 모두 스테이징").clicked() {
                     stage_u = true;
                 }
             });
             self.open.insert(Section::Untracked, open);
             if stage_u {
                 let paths: Vec<String> = untracked.iter().map(|e| e.path.clone()).collect();
-                self.mutate("Stage untracked", move |p| repo::stage(p, &paths));
+                self.mutate("추적되지 않은 파일 스테이징", move |p| repo::stage(p, &paths));
             }
             if open {
                 for e in &untracked {
@@ -784,8 +784,8 @@ impl GitPanel {
         let mut open = self.open[&Section::Stashes];
         let mut new_stash = false;
         let dirty_tree = !staged.is_empty() || !changes.is_empty() || !untracked.is_empty();
-        section_header(ui, &mut open, "Stashes", Some(snap.stashes.len()), None, |ui| {
-            if dirty_tree && icon_button(ui, Icon::Plus, "Stash changes…").clicked() {
+        section_header(ui, &mut open, "스태시", Some(snap.stashes.len()), None, |ui| {
+            if dirty_tree && icon_button(ui, Icon::Plus, "변경 사항 스태시…").clicked() {
                 new_stash = true;
             }
         });
@@ -800,7 +800,7 @@ impl GitPanel {
 
         // 커밋 로그
         let mut open = self.open[&Section::Commits];
-        section_header(ui, &mut open, "Commits", None, None, |_| {});
+        section_header(ui, &mut open, "커밋 기록", None, None, |_| {});
         self.open.insert(Section::Commits, open);
         if open {
             self.ui_log(ui, &snap, events);
@@ -816,7 +816,7 @@ impl GitPanel {
                 ui.horizontal(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut msg)
-                            .hint_text("Stash message (optional)")
+                            .hint_text("스태시 메시지 (선택 사항)")
                             .desired_width(ui.available_width() - 110.0)
                             .frame(input_frame()),
                     );
@@ -824,12 +824,12 @@ impl GitPanel {
                         r.request_focus();
                     }
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                    if tool_button(ui, None, "Stash").clicked() || enter {
+                    if tool_button(ui, None, "스태시").clicked() || enter {
                         let m = msg.clone();
-                        self.submit(JobKind::Mutate, "Stash", move |p| repo::stash_push(p, &m));
+                        self.submit(JobKind::Mutate, "스태시", move |p| repo::stash_push(p, &m));
                         keep = false;
                     }
-                    if icon_button(ui, Icon::Close, "Cancel").clicked() {
+                    if icon_button(ui, Icon::Close, "취소").clicked() {
                         keep = false;
                     }
                 });
@@ -839,7 +839,7 @@ impl GitPanel {
             }
         }
         if stashes.is_empty() {
-            hint_row(ui, "No stashes");
+            hint_row(ui, "스태시 없음");
             return;
         }
         let now = self.now();
@@ -874,14 +874,14 @@ impl GitPanel {
                     t.bg_hover,
                 );
                 let idx = s.index;
-                if btn(ui, Icon::Trash, "Drop stash") {
+                if btn(ui, Icon::Trash, "스태시 삭제") {
                     self.confirm = Some(Confirm::DropStash { index: idx, message: msg.to_string() });
                 }
-                if btn(ui, Icon::Pop, "Pop stash (apply and remove)") {
-                    self.submit(JobKind::Mutate, "Stash pop", move |p| repo::stash_pop(p, idx));
+                if btn(ui, Icon::Pop, "스태시 팝 (적용 후 삭제)") {
+                    self.submit(JobKind::Mutate, "스태시 팝", move |p| repo::stash_pop(p, idx));
                 }
-                if btn(ui, Icon::Apply, "Apply stash") {
-                    self.submit(JobKind::Mutate, "Stash apply", move |p| repo::stash_apply(p, idx));
+                if btn(ui, Icon::Apply, "스태시 적용") {
+                    self.submit(JobKind::Mutate, "스태시 적용", move |p| repo::stash_apply(p, idx));
                 }
             }
         }
@@ -890,7 +890,7 @@ impl GitPanel {
     fn ui_log(&mut self, ui: &mut Ui, snap: &Snapshot, events: &mut Vec<GitEvent>) {
         let t = theme();
         if snap.log.is_empty() {
-            hint_row(ui, "No commits yet");
+            hint_row(ui, "아직 커밋이 없습니다");
             return;
         }
         let now = self.now();
@@ -972,7 +972,7 @@ impl GitPanel {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                if tool_button(ui, None, "Load more commits").clicked() {
+                if tool_button(ui, None, "커밋 더 불러오기").clicked() {
                     self.log_limit += LOG_PAGE;
                     self.refresh();
                 }
@@ -984,7 +984,7 @@ impl GitPanel {
         let t = theme();
         let w = ui.available_width();
         let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
-        let label = format!("{}{}", if kind == RowKind::Staged { "staged: " } else { "" }, e.path);
+        let label = format!("{}{}", if kind == RowKind::Staged { "스테이징됨: " } else { "" }, e.path);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
         if !ui.is_rect_visible(rect) {
             return;
@@ -1022,7 +1022,7 @@ impl GitPanel {
         parts.push((&name, 13.0, name_color));
         let dir_s;
         if let Some(orig) = &e.orig_path {
-            dir_s = format!("  from {orig}");
+            dir_s = format!("  {orig}에서");
             parts.push((&dir_s, 11.5, t.text_faint));
         } else if !dir.is_empty() {
             dir_s = format!("  {dir}");
@@ -1030,7 +1030,7 @@ impl GitPanel {
         }
         let sub_s;
         if e.submodule {
-            sub_s = "  submodule".to_string();
+            sub_s = "  서브모듈".to_string();
             parts.push((&sub_s, 11.0, t.purple));
         }
         let conf_s;
@@ -1060,42 +1060,42 @@ impl GitPanel {
             let paths = vec![e.path.clone()];
             match kind {
                 RowKind::Staged => {
-                    if btn(ui, Icon::Minus, "Unstage") {
+                    if btn(ui, Icon::Minus, "스테이징 취소") {
                         handled = true;
-                        self.mutate("Unstage", move |p| repo::unstage(p, &paths));
+                        self.mutate("스테이징 취소", move |p| repo::unstage(p, &paths));
                     }
                 }
                 RowKind::Changed => {
-                    if btn(ui, Icon::Plus, "Stage") {
+                    if btn(ui, Icon::Plus, "스테이징") {
                         handled = true;
                         let ps = paths.clone();
-                        self.mutate("Stage", move |p| repo::stage(p, &ps));
+                        self.mutate("스테이징", move |p| repo::stage(p, &ps));
                     }
-                    if btn(ui, Icon::Discard, "Discard changes") {
+                    if btn(ui, Icon::Discard, "변경 사항 취소") {
                         handled = true;
                         self.confirm = Some(Confirm::Discard { paths: paths.clone(), untracked: false });
                     }
                 }
                 RowKind::Untracked => {
-                    if btn(ui, Icon::Plus, "Stage") {
+                    if btn(ui, Icon::Plus, "스테이징") {
                         handled = true;
                         let ps = paths.clone();
-                        self.mutate("Stage", move |p| repo::stage(p, &ps));
+                        self.mutate("스테이징", move |p| repo::stage(p, &ps));
                     }
-                    if btn(ui, Icon::Trash, "Delete file") {
+                    if btn(ui, Icon::Trash, "파일 삭제") {
                         handled = true;
                         self.confirm = Some(Confirm::Discard { paths: paths.clone(), untracked: true });
                     }
                 }
                 RowKind::Conflict => {
-                    if btn(ui, Icon::Check, "Mark as resolved (stage)") {
+                    if btn(ui, Icon::Check, "해결됨으로 표시 (스테이징)") {
                         handled = true;
                         let ps = paths.clone();
-                        self.mutate("Mark resolved", move |p| repo::stage(p, &ps));
+                        self.mutate("해결됨으로 표시", move |p| repo::stage(p, &ps));
                     }
                 }
             }
-            if btn(ui, Icon::Open, "Open file") {
+            if btn(ui, Icon::Open, "파일 열기") {
                 handled = true;
                 events.push(GitEvent::OpenFile(abs.clone()));
             }
@@ -1114,47 +1114,47 @@ impl GitPanel {
         }
         let path_owned = e.path.clone();
         resp.context_menu(|ui| {
-            if ui.button("Open File").clicked() {
+            if ui.button("파일 열기").clicked() {
                 events.push(GitEvent::OpenFile(abs.clone()));
                 ui.close();
             }
-            if kind != RowKind::Conflict && kind != RowKind::Untracked && ui.button("Open Changes").clicked() {
+            if kind != RowKind::Conflict && kind != RowKind::Untracked && ui.button("변경 사항 열기").clicked() {
                 events.push(GitEvent::OpenDiff { path: abs.clone(), staged });
                 ui.close();
             }
             ui.separator();
             match kind {
                 RowKind::Conflict => {
-                    if ui.button("Accept Current (ours)").clicked() {
+                    if ui.button("현재 변경 수락 (ours)").clicked() {
                         let p2 = path_owned.clone();
-                        self.mutate("Accept ours", move |p| repo::resolve_conflict(p, &p2, true));
+                        self.mutate("현재 변경 수락", move |p| repo::resolve_conflict(p, &p2, true));
                         ui.close();
                     }
-                    if ui.button("Accept Incoming (theirs)").clicked() {
+                    if ui.button("수신 변경 수락 (theirs)").clicked() {
                         let p2 = path_owned.clone();
-                        self.mutate("Accept theirs", move |p| repo::resolve_conflict(p, &p2, false));
+                        self.mutate("수신 변경 수락", move |p| repo::resolve_conflict(p, &p2, false));
                         ui.close();
                     }
-                    if ui.button("Mark as Resolved").clicked() {
+                    if ui.button("해결됨으로 표시").clicked() {
                         let ps = vec![path_owned.clone()];
-                        self.mutate("Mark resolved", move |p| repo::stage(p, &ps));
+                        self.mutate("해결됨으로 표시", move |p| repo::stage(p, &ps));
                         ui.close();
                     }
                 }
                 RowKind::Staged => {
-                    if ui.button("Unstage").clicked() {
+                    if ui.button("스테이징 취소").clicked() {
                         let ps = vec![path_owned.clone()];
-                        self.mutate("Unstage", move |p| repo::unstage(p, &ps));
+                        self.mutate("스테이징 취소", move |p| repo::unstage(p, &ps));
                         ui.close();
                     }
                 }
                 RowKind::Changed | RowKind::Untracked => {
-                    if ui.button("Stage").clicked() {
+                    if ui.button("스테이징").clicked() {
                         let ps = vec![path_owned.clone()];
-                        self.mutate("Stage", move |p| repo::stage(p, &ps));
+                        self.mutate("스테이징", move |p| repo::stage(p, &ps));
                         ui.close();
                     }
-                    if ui.button(if kind == RowKind::Untracked { "Delete File…" } else { "Discard Changes…" }).clicked() {
+                    if ui.button(if kind == RowKind::Untracked { "파일 삭제…" } else { "변경 사항 취소…" }).clicked() {
                         self.confirm =
                             Some(Confirm::Discard { paths: vec![path_owned.clone()], untracked: kind == RowKind::Untracked });
                         ui.close();
@@ -1162,7 +1162,7 @@ impl GitPanel {
                 }
             }
             ui.separator();
-            if ui.button("Copy Path").clicked() {
+            if ui.button("경로 복사").clicked() {
                 ui.ctx().copy_text(path_owned.clone());
                 ui.close();
             }
@@ -1174,39 +1174,39 @@ impl GitPanel {
         let id = Id::new(("kiln_git_confirm", &self.root));
         let (title, msg, ok, danger) = match &c {
             Confirm::Discard { paths, untracked: false } => (
-                "Discard changes?".to_string(),
-                format!("Changes to {} will be lost. This cannot be undone.", paths.join(", ")),
-                "Discard",
+                "변경 사항을 취소할까요?".to_string(),
+                format!("{}의 변경 사항이 사라집니다. 이 작업은 되돌릴 수 없습니다.", paths.join(", ")),
+                "변경 사항 취소",
                 true,
             ),
             Confirm::Discard { paths, untracked: true } => (
-                "Delete untracked file?".to_string(),
-                format!("{} will be permanently deleted.", paths.join(", ")),
-                "Delete",
+                "추적되지 않은 파일을 삭제할까요?".to_string(),
+                format!("{}이(가) 영구적으로 삭제됩니다.", paths.join(", ")),
+                "삭제",
                 true,
             ),
             Confirm::DiscardAll => (
-                "Discard all changes?".to_string(),
-                "All unstaged changes to tracked files will be lost. Untracked files are kept.".to_string(),
-                "Discard All",
+                "모든 변경 사항을 취소할까요?".to_string(),
+                "추적 중인 파일의 스테이징되지 않은 변경 사항이 모두 사라집니다. 추적되지 않은 파일은 유지됩니다.".to_string(),
+                "모두 취소",
                 true,
             ),
             Confirm::DeleteBranch { name, .. } => (
-                format!("Delete branch \"{name}\"?"),
-                "The local branch will be deleted. Commits not merged elsewhere may be lost when forced.".to_string(),
-                "Delete Branch",
+                format!("\"{name}\" 브랜치를 삭제할까요?"),
+                "로컬 브랜치가 삭제됩니다. 강제로 삭제하면 다른 곳에 병합되지 않은 커밋을 잃을 수 있습니다.".to_string(),
+                "브랜치 삭제",
                 true,
             ),
             Confirm::DropStash { message, .. } => (
-                "Drop stash?".to_string(),
-                format!("\"{message}\" will be permanently removed."),
-                "Drop",
+                "스태시를 삭제할까요?".to_string(),
+                format!("\"{message}\"이(가) 영구적으로 제거됩니다."),
+                "삭제",
                 true,
             ),
             Confirm::AbortOp(op) => (
-                format!("Abort {}?", op.label().to_lowercase()),
-                "The repository will return to its state before the operation started.".to_string(),
-                "Abort",
+                format!("{} 작업을 중단할까요?", op.label()),
+                "저장소가 작업 시작 전 상태로 돌아갑니다.".to_string(),
+                "중단",
                 true,
             ),
         };
@@ -1215,7 +1215,7 @@ impl GitPanel {
         let r = confirm_modal(ctx, id, &title, &msg, ok, danger, |ui| {
             if is_branch {
                 ui.add_space(8.0);
-                checkbox_row(ui, &mut force, "Force delete even if not merged (-D)");
+                checkbox_row(ui, &mut force, "병합되지 않았어도 강제 삭제 (-D)");
             }
         });
         if let Confirm::DeleteBranch { name, .. } = &c {
@@ -1227,22 +1227,22 @@ impl GitPanel {
                 match c {
                     Confirm::Discard { paths, untracked } => {
                         if untracked {
-                            self.mutate("Delete", move |p| repo::clean_untracked(p, &paths));
+                            self.mutate("삭제", move |p| repo::clean_untracked(p, &paths));
                         } else {
-                            self.mutate("Discard", move |p| repo::discard(p, &paths));
+                            self.mutate("변경 사항 취소", move |p| repo::discard(p, &paths));
                         }
                     }
                     Confirm::DiscardAll => {
-                        self.mutate("Discard all", |p| repo::discard(p, &[".".to_string()]));
+                        self.mutate("모두 취소", |p| repo::discard(p, &[".".to_string()]));
                     }
                     Confirm::DeleteBranch { name, .. } => {
-                        self.submit(JobKind::Mutate, "Delete branch", move |p| repo::delete_branch(p, &name, force));
+                        self.submit(JobKind::Mutate, "브랜치 삭제", move |p| repo::delete_branch(p, &name, force));
                     }
                     Confirm::DropStash { index, .. } => {
-                        self.submit(JobKind::Mutate, "Drop stash", move |p| repo::stash_drop(p, index));
+                        self.submit(JobKind::Mutate, "스태시 삭제", move |p| repo::stash_drop(p, index));
                     }
                     Confirm::AbortOp(op) => {
-                        self.submit(JobKind::Mutate, "Abort", move |p| repo::abort_op(p, op));
+                        self.submit(JobKind::Mutate, "중단", move |p| repo::abort_op(p, op));
                     }
                 }
             }

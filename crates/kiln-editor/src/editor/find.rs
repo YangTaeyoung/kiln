@@ -206,7 +206,7 @@ impl Editor {
                             ui.painter().rect_filled(r.shrink2(vec2(0.0, 3.0)), 3.0, t.bg_hover);
                         }
                         ui_kit::paint_icon(ui.painter(), r.shrink(1.0), chevron, t.text_dim);
-                        if resp.on_hover_text("Toggle Replace").clicked() {
+                        if resp.on_hover_text("바꾸기 전환").clicked() {
                             self.find.replace_open = !self.find.replace_open;
                         }
                         let focused = ui.memory(|m| m.has_focus(qid));
@@ -214,7 +214,7 @@ impl Editor {
                             ui.set_width(field_w - 8.0);
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 1.0;
-                                let te = ui_kit::bare_text_edit(&mut self.find.query, qid, "Find", self.find.error)
+                                let te = ui_kit::bare_text_edit(&mut self.find.query, qid, "찾기", self.find.error)
                                     .desired_width(field_w - 8.0 - 3.0 * 23.0 - 6.0);
                                 let out = te.show(ui);
                                 if self.find.focus_query {
@@ -232,13 +232,13 @@ impl Editor {
                                     self.find.select_query = false;
                                 }
                                 let o = &mut self.find.opts;
-                                if ui_kit::option_chip(ui, "Aa", "Match Case", o.case_sensitive).clicked() {
+                                if ui_kit::option_chip(ui, "Aa", "대/소문자 구분", o.case_sensitive).clicked() {
                                     o.case_sensitive = !o.case_sensitive;
                                 }
-                                if ui_kit::option_chip(ui, "ab", "Match Whole Word", o.whole_word).clicked() {
+                                if ui_kit::option_chip(ui, "ab", "단어 단위로", o.whole_word).clicked() {
                                     o.whole_word = !o.whole_word;
                                 }
-                                if ui_kit::option_chip(ui, ".*", "Use Regular Expression", o.regex).clicked() {
+                                if ui_kit::option_chip(ui, ".*", "정규식 사용", o.regex).clicked() {
                                     o.regex = !o.regex;
                                 }
                             });
@@ -247,14 +247,14 @@ impl Editor {
                         let label = if self.find.query.is_empty() {
                             String::new()
                         } else if self.find.error {
-                            "Invalid".to_owned()
+                            "잘못됨".to_owned()
                         } else if n == 0 {
-                            "No results".to_owned()
+                            "결과 없음".to_owned()
                         } else {
                             let more = if n >= MATCH_LIMIT { "+" } else { "" };
                             match self.find.current {
-                                Some(i) => format!("{} of {n}{more}", i + 1),
-                                None => format!("? of {n}{more}"),
+                                Some(i) => format!("{}/{n}{more}", i + 1),
+                                None => format!("?/{n}{more}"),
                             }
                         };
                         let (lr, _) = ui.allocate_exact_size(vec2(64.0, row_h), egui::Sense::hover());
@@ -267,13 +267,13 @@ impl Editor {
                             color,
                         );
                         let has = n > 0;
-                        if ui_kit::icon_toggle(ui, Icon::ArrowUp, "Previous Match (Shift+Enter)", false, has).clicked() {
+                        if ui_kit::icon_toggle(ui, Icon::ArrowUp, "이전 일치 항목 (Shift+Enter)", false, has).clicked() {
                             next = Some(false);
                         }
-                        if ui_kit::icon_toggle(ui, Icon::ArrowDown, "Next Match (Enter)", false, has).clicked() {
+                        if ui_kit::icon_toggle(ui, Icon::ArrowDown, "다음 일치 항목 (Enter)", false, has).clicked() {
                             next = Some(true);
                         }
-                        if ui_kit::icon_button(ui, Icon::Close, "Close (Escape)").clicked() {
+                        if ui_kit::icon_button(ui, Icon::Close, "닫기 (Escape)").clicked() {
                             close = true;
                         }
                     });
@@ -285,15 +285,15 @@ impl Editor {
                             ui_kit::field_frame(focused).show(ui, |ui| {
                                 ui.set_width(field_w - 8.0);
                                 ui.add(
-                                    ui_kit::bare_text_edit(&mut self.find.replacement, rid, "Replace", false)
+                                    ui_kit::bare_text_edit(&mut self.find.replacement, rid, "바꾸기", false)
                                         .desired_width(field_w - 8.0),
                                 );
                             });
                             let can = !self.find.matches.is_empty() && !self.read_only;
-                            if ui_kit::icon_toggle(ui, Icon::ReplaceOne, "Replace (Enter)", false, can).clicked() {
+                            if ui_kit::icon_toggle(ui, Icon::ReplaceOne, "바꾸기 (Enter)", false, can).clicked() {
                                 do_replace = true;
                             }
-                            if ui_kit::icon_toggle(ui, Icon::ReplaceAll, "Replace All (Cmd/Ctrl+Alt+Enter)", false, can).clicked() {
+                            if ui_kit::icon_toggle(ui, Icon::ReplaceAll, "모두 바꾸기 (Cmd/Ctrl+Alt+Enter)", false, can).clicked() {
                                 do_replace_all = true;
                             }
                         });
@@ -359,15 +359,15 @@ impl Editor {
                     let bad = !text.is_empty() && parsed.is_none();
                     ui_kit::field_frame(focused).show(ui, |ui| {
                         ui.set_width(width - 16.0 - 8.0);
-                        let out = ui.add(ui_kit::bare_text_edit(&mut text, id, "Line[:Column]", bad).desired_width(width - 30.0));
+                        let out = ui.add(ui_kit::bare_text_edit(&mut text, id, "줄[:열]", bad).desired_width(width - 30.0));
                         if !focused && !out.lost_focus() {
                             out.request_focus();
                         }
                     });
                     let head = self.sel.head;
                     let hint = match parse_goto(&text) {
-                        Some((l, c)) => format!("Go to line {l}{}", c.map(|c| format!(", column {c}")).unwrap_or_default()),
-                        None => format!("Current line: {}. Type a line number between 1 and {n}.", head.line + 1),
+                        Some((l, c)) => format!("{l}줄{}로 이동", c.map(|c| format!(", {c}열")).unwrap_or_default()),
+                        None => format!("현재 줄: {}. 1에서 {n} 사이의 줄 번호를 입력하세요.", head.line + 1),
                     };
                     ui.add_space(2.0);
                     ui.label(egui::RichText::new(hint).size(11.5).color(t.text_dim));

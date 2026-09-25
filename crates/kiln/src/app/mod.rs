@@ -189,7 +189,7 @@ impl KilnApp {
         };
         app.restore(&persisted, ctx);
         if let Some(p) = open_path {
-            let p = p.canonicalize().unwrap_or(p);
+            let p = normalize_path(p.canonicalize().unwrap_or(p));
             if let Some(i) = app.workspaces.iter().position(|w| w.root == p) {
                 app.active = i;
             } else {
@@ -931,6 +931,15 @@ fn os_notify(title: &str, body: &str) {
             let _ = (&title, &body);
         }
     });
+}
+
+/// Windows 확장 경로 접두(`\\?\`)를 떼어 일반 경로로 만든다.
+fn normalize_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => p,
+    }
 }
 
 fn short_path(p: &Path) -> String {

@@ -120,7 +120,7 @@ impl TypedConfirm {
             ui.add_space(6.0);
             ui.label(&self.message);
             ui.add_space(6.0);
-            ui.label(dim(format!("Type \"{}\" to confirm:", self.expected)));
+            ui.label(dim(format!("확인하려면 \"{}\"을(를) 입력하세요:", self.expected)));
             let r = ui.add(
                 egui::TextEdit::singleline(&mut self.input)
                     .desired_width(f32::INFINITY)
@@ -147,7 +147,7 @@ impl TypedConfirm {
                     {
                         result = Some(true);
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button("취소").clicked() {
                         result = Some(false);
                     }
                 });

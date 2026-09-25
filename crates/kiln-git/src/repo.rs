@@ -34,10 +34,10 @@ pub enum RepoOp {
 impl RepoOp {
     pub fn label(self) -> &'static str {
         match self {
-            RepoOp::Merge => "Merging",
-            RepoOp::Rebase => "Rebasing",
-            RepoOp::CherryPick => "Cherry-picking",
-            RepoOp::Revert => "Reverting",
+            RepoOp::Merge => "병합",
+            RepoOp::Rebase => "리베이스",
+            RepoOp::CherryPick => "체리픽",
+            RepoOp::Revert => "되돌리기",
         }
     }
 
@@ -153,7 +153,7 @@ pub fn commit(root: &Path, message: &str, amend: bool) -> GitResult<String> {
         return git_combined(root, &["commit", "--amend", "--no-edit"]);
     }
     if message.trim().is_empty() {
-        return Err(GitError::Failed("Commit message is empty".into()));
+        return Err(GitError::Failed("커밋 메시지가 비어 있습니다".into()));
     }
     let mut args = vec!["commit", "--cleanup=strip", "-F", "-"];
     if amend {
@@ -246,10 +246,10 @@ pub fn checkout_name(root: &Path, name: &str) -> GitResult<String> {
 pub fn create_branch(root: &Path, name: &str) -> GitResult<String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(GitError::Failed("Branch name is empty".into()));
+        return Err(GitError::Failed("브랜치 이름이 비어 있습니다".into()));
     }
     git(root, Mode::Read, &["check-ref-format", "--branch", name])
-        .map_err(|_| GitError::Failed(format!("'{name}' is not a valid branch name")))?;
+        .map_err(|_| GitError::Failed(format!("'{name}'은(는) 올바른 브랜치 이름이 아닙니다")))?;
     git_combined(root, &["switch", "-c", name])
 }
 
@@ -272,7 +272,7 @@ pub fn pull(root: &Path) -> GitResult<String> {
 pub fn push(root: &Path) -> GitResult<String> {
     let st = status(root)?;
     let Some(head) = st.branch.head.clone() else {
-        return Err(GitError::Failed("Cannot push a detached HEAD".into()));
+        return Err(GitError::Failed("분리된 HEAD는 Push할 수 없습니다".into()));
     };
     if st.branch.upstream.is_some() {
         return git_combined(root, &["push"]);
@@ -282,7 +282,7 @@ pub fn push(root: &Path) -> GitResult<String> {
         .lines()
         .find(|r| *r == "origin")
         .or_else(|| remotes.lines().next())
-        .ok_or_else(|| GitError::Failed("No remote configured. Add one with `git remote add origin <url>`.".into()))?
+        .ok_or_else(|| GitError::Failed("설정된 원격이 없습니다. `git remote add origin <url>`로 추가하세요.".into()))?
         .to_string();
     git_combined(root, &["push", "-u", &remote, &head])
 }
@@ -497,7 +497,7 @@ pub enum HunkAction {
 pub fn apply_hunk(root: &Path, file: &FileDiff, hunk_index: usize, action: HunkAction) -> GitResult<()> {
     let patch = file
         .hunk_patch(hunk_index)
-        .ok_or_else(|| GitError::Failed("hunk not found".into()))?;
+        .ok_or_else(|| GitError::Failed("헝크를 찾을 수 없습니다".into()))?;
     let args: &[&str] = match action {
         HunkAction::Stage => &["apply", "--cached", "--whitespace=nowarn", "-"],
         HunkAction::Unstage => &["apply", "--cached", "-R", "--whitespace=nowarn", "-"],

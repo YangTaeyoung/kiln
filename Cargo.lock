@@ -2668,6 +2668,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "env_logger",
+ "image",
  "kiln-common",
  "kiln-daemon",
  "kiln-db",
@@ -2714,6 +2715,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

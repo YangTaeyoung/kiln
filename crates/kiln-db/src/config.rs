@@ -190,13 +190,13 @@ impl ConnConfig {
         let input = input.trim();
         let (scheme, rest) = input
             .split_once(':')
-            .ok_or_else(|| "URL has no scheme".to_string())?;
+            .ok_or_else(|| "URL에 스킴이 없습니다".to_string())?;
         let driver = match scheme.to_ascii_lowercase().as_str() {
             "postgres" | "postgresql" => Driver::Postgres,
             "mysql" => Driver::MySql,
             "mariadb" => Driver::MariaDb,
             "sqlite" | "sqlite3" | "file" => Driver::Sqlite,
-            other => return Err(format!("unsupported scheme '{other}'")),
+            other => return Err(format!("지원하지 않는 스킴 '{other}'")),
         };
         let mut cfg = ConnConfig {
             driver,
@@ -207,14 +207,14 @@ impl ConnConfig {
             let path = rest.trim_start_matches("//");
             let path = path.split('?').next().unwrap_or("");
             if path.is_empty() {
-                return Err("sqlite URL has no path".into());
+                return Err("sqlite URL에 경로가 없습니다".into());
             }
             cfg.file = percent_decode(path);
             cfg.host.clear();
             cfg.name = cfg.display_name();
             return Ok((cfg, None));
         }
-        let url = url::Url::parse(input).map_err(|e| format!("invalid URL: {e}"))?;
+        let url = url::Url::parse(input).map_err(|e| format!("잘못된 URL: {e}"))?;
         cfg.host = url.host_str().unwrap_or("localhost").to_string();
         cfg.port = url.port().unwrap_or(driver.default_port());
         cfg.user = percent_decode(url.username());
@@ -282,7 +282,7 @@ impl Secrets {
         log::warn!("keychain unavailable, keeping passwords in memory only: {err}");
         *self.use_keychain.lock() = false;
         *self.warning.lock() = Some(format!(
-            "OS keychain unavailable ({err}); passwords are kept in memory for this session only"
+            "OS 키체인을 사용할 수 없습니다({err}). 비밀번호는 이번 세션 동안 메모리에만 보관됩니다"
         ));
     }
 

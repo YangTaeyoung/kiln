@@ -79,9 +79,9 @@ impl DbTab {
             }
             Kind::Console(c) => {
                 if c.is_running() {
-                    format!("{name} console …")
+                    format!("{name} 콘솔 …")
                 } else {
-                    format!("{name} console")
+                    format!("{name} 콘솔")
                 }
             }
         }

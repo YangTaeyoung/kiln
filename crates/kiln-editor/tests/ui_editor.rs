@@ -134,7 +134,7 @@ fn find_and_replace_bar_via_shortcuts() {
         h.event(Event::Text(c.to_string()));
     }
     h.run();
-    h.get_by_label("Match Case").click();
+    h.get_by_label("대/소문자 구분").click();
     h.run();
     // 바꾸기 입력칸으로 이동해 입력한다.
     let rid = h.state().id().with("find-replace");
@@ -144,7 +144,7 @@ fn find_and_replace_bar_via_shortcuts() {
         h.event(Event::Text(c.to_string()));
     }
     h.run();
-    h.get_by_label("Replace All (Cmd/Ctrl+Alt+Enter)").click();
+    h.get_by_label("모두 바꾸기 (Cmd/Ctrl+Alt+Enter)").click();
     h.run();
     assert_eq!(h.state().text(), "let bar = bar + FOO;\n");
     h.key_press(Key::Escape);

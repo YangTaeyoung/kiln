@@ -268,7 +268,7 @@ impl QuickOpen {
             let out = egui::TextEdit::singleline(&mut self.query)
                 .id(id)
                 .frame(egui::Frame::NONE)
-                .hint_text(egui::RichText::new("Search files by name").color(t.text_faint))
+                .hint_text(egui::RichText::new("이름으로 파일 검색").color(t.text_faint))
                 .font(FontId::proportional(14.5))
                 .text_color(t.text)
                 .desired_width(inner.width())
@@ -288,11 +288,11 @@ impl QuickOpen {
         if n == 0 {
             let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::hover());
             let msg = if self.index.as_ref().is_some_and(|i| !i.is_done()) && self.file_count() == 0 {
-                "Indexing files…"
+                "파일 색인 중…"
             } else if self.query.trim().is_empty() {
-                "No files"
+                "파일 없음"
             } else {
-                "No matching files"
+                "일치하는 파일 없음"
             };
             ui.painter().text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(13.0), t.text_dim);
             return None;
@@ -353,7 +353,7 @@ impl QuickOpen {
                     hl(&mut job, dir, 0, t.text_dim, 12.0, &m.indices);
                 }
                 if m.index == u32::MAX && self.query.trim().is_empty() {
-                    job.append("   recently opened", 0.0, TextFormat { font_id: FontId::proportional(11.0), color: t.text_faint, ..Default::default() });
+                    job.append("   최근에 연 파일", 0.0, TextFormat { font_id: FontId::proportional(11.0), color: t.text_faint, ..Default::default() });
                 }
                 job.wrap.max_width = rect.width() - 44.0;
                 job.wrap.max_rows = 1;
@@ -380,14 +380,14 @@ impl QuickOpen {
         p.line_segment([pos2(rect.left(), rect.top() + 2.0), pos2(rect.right(), rect.top() + 2.0)], Stroke::new(1.0, t.border));
         let count = self.file_count();
         let left = if self.query.trim().is_empty() {
-            format!("{} files", fmt_count(count))
+            format!("파일 {}개", fmt_count(count))
         } else {
-            format!("{} of {} files", fmt_count(self.total), fmt_count(count))
+            format!("파일 {}개 중 {}개", fmt_count(count), fmt_count(self.total))
         };
-        let left = if self.is_indexing() { format!("{left} · indexing…") } else { left };
+        let left = if self.is_indexing() { format!("{left} · 색인 중…") } else { left };
         p.text(pos2(rect.left() + 8.0, rect.center().y + 2.0), Align2::LEFT_CENTER, left, FontId::proportional(11.0), t.text_faint);
         let mut x = rect.right() - 8.0;
-        for (keys, label) in [(&["Esc"][..], "close"), (&["Enter"][..], "open"), (&["↓", "↑"][..], "navigate")] {
+        for (keys, label) in [(&["Esc"][..], "닫기"), (&["Enter"][..], "열기"), (&["↓", "↑"][..], "이동")] {
             let g = p.layout_no_wrap(label.to_owned(), FontId::proportional(11.0), t.text_faint);
             x -= g.size().x;
             p.galley(pos2(x, rect.center().y + 2.0 - g.size().y / 2.0), g, t.text_faint);

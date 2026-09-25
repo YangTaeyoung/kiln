@@ -24,7 +24,7 @@ impl BranchStatus {
         match (&self.head, &self.oid) {
             (Some(h), _) => h.clone(),
             (None, Some(o)) => format!("({})", &o[..o.len().min(8)]),
-            (None, None) => "(no branch)".into(),
+            (None, None) => "(브랜치 없음)".into(),
         }
     }
 }
@@ -76,16 +76,16 @@ impl StatusEntry {
         PathBuf::from(&self.path)
     }
 
-    /// 충돌 종류 설명(`both modified` 등).
+    /// 충돌 종류 설명(`양쪽 수정` 등).
     pub fn conflict_label(&self) -> &'static str {
         match (self.index, self.worktree) {
-            ('D', 'D') => "both deleted",
-            ('A', 'U') => "added by us",
-            ('U', 'D') => "deleted by them",
-            ('U', 'A') => "added by them",
-            ('D', 'U') => "deleted by us",
-            ('A', 'A') => "both added",
-            _ => "both modified",
+            ('D', 'D') => "양쪽 삭제",
+            ('A', 'U') => "현재 쪽 추가",
+            ('U', 'D') => "상대 쪽 삭제",
+            ('U', 'A') => "상대 쪽 추가",
+            ('D', 'U') => "현재 쪽 삭제",
+            ('A', 'A') => "양쪽 추가",
+            _ => "양쪽 수정",
         }
     }
 }

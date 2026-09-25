@@ -36,6 +36,7 @@ fn settle<S>(h: &mut Harness<'_, S>, mut busy: impl FnMut(&mut S) -> bool) {
 
 fn theme(ui: &egui::Ui) {
     Theme::current().apply(ui.ctx());
+    common::install_korean_font(ui.ctx());
     ui.ctx().global_style_mut(|s| s.visuals.text_cursor.blink = false);
 }
 
@@ -134,17 +135,17 @@ fn git_panel_stage_all_and_commit_with_keyboard_shortcut() {
     let mut h = panel_harness(r.path.clone(), vec2(380.0, 900.0));
     settle(&mut h, |s| s.panel.is_busy());
 
-    h.get_by_label("Stage all changes").click();
+    h.get_by_label("모든 변경 사항 스테이징").click();
     h.run_steps(1);
     settle(&mut h, |s| s.panel.is_busy());
     assert_eq!(h.state().panel.status().unwrap().staged().count(), 4);
 
-    h.get_by_label("Unstage all").click();
+    h.get_by_label("모두 스테이징 취소").click();
     h.run_steps(1);
     settle(&mut h, |s| s.panel.is_busy());
     assert_eq!(h.state().panel.status().unwrap().staged().count(), 0);
 
-    h.get_by_label("Stage all changes").click();
+    h.get_by_label("모든 변경 사항 스테이징").click();
     h.run_steps(1);
     settle(&mut h, |s| s.panel.is_busy());
 
@@ -193,7 +194,7 @@ fn git_panel_branch_picker_lists_and_creates_branches() {
     let r = panel_repo();
     let mut h = panel_harness(r.path.clone(), vec2(380.0, 700.0));
     settle(&mut h, |s| s.panel.is_busy());
-    h.get_by_label_contains("Branch main").click();
+    h.get_by_label_contains("브랜치 main").click();
     h.run_steps(3);
     std::thread::sleep(Duration::from_millis(200));
     h.run_steps(3);
@@ -202,7 +203,7 @@ fn git_panel_branch_picker_lists_and_creates_branches() {
 
     h.get_by_role(egui::accesskit::Role::TextInput).type_text("topic/new-thing");
     h.run_steps(2);
-    h.get_by_label_contains("Create branch").click();
+    h.get_by_label_contains("새 브랜치").click();
     h.run_steps(1);
     settle(&mut h, |s| s.panel.is_busy());
     assert_eq!(h.state().panel.status().unwrap().branch.head.as_deref(), Some("topic/new-thing"));
@@ -214,7 +215,7 @@ fn git_panel_reports_not_a_repository() {
     let mut h = panel_harness(dir.path().to_path_buf(), vec2(320.0, 260.0));
     settle(&mut h, |s| s.panel.is_busy());
     assert!(matches!(h.state().panel.error(), Some(kiln_git::GitError::NotARepo)));
-    assert!(h.query_by_label("Initialize Repository").is_some());
+    assert!(h.query_by_label("저장소 초기화").is_some());
     h.snapshot("git_panel_not_repo");
 }
 
@@ -255,7 +256,7 @@ fn diff_view_unified_and_split_modes_render_file_diff() {
     assert_eq!(h.state().files()[0].hunks.len(), 2);
     h.snapshot("diff_view_unified");
 
-    h.get_by_label("Split").click();
+    h.get_by_label("나란히").click();
     h.run_steps(2);
     assert_eq!(h.state().mode(), DiffMode::SideBySide);
     h.snapshot("diff_view_split");
@@ -266,7 +267,7 @@ fn diff_view_stage_hunk_button_stages_only_that_hunk() {
     let r = diff_repo();
     let mut h = diff_harness(DiffView::for_file(&r.path, &r.path.join("src/main.rs"), false), vec2(760.0, 520.0));
     settle(&mut h, |v| v.is_loading());
-    h.get_by_label("Stage Hunk 2").click();
+    h.get_by_label("헝크 스테이징 2").click();
     h.run_steps(1);
     settle(&mut h, |v| v.is_loading());
     let staged = kiln_git::repo::file_diff(&r.path, "src/main.rs", true).unwrap().unwrap();
@@ -278,7 +279,7 @@ fn diff_view_stage_hunk_button_stages_only_that_hunk() {
     let mut hs = diff_harness(DiffView::for_file(&r.path, &r.path.join("src/main.rs"), true), vec2(760.0, 320.0));
     settle(&mut hs, |v| v.is_loading());
     hs.snapshot("diff_view_staged");
-    hs.get_by_label("Unstage Hunk 1").click();
+    hs.get_by_label("헝크 스테이징 취소 1").click();
     hs.run_steps(1);
     settle(&mut hs, |v| v.is_loading());
     assert!(kiln_git::repo::file_diff(&r.path, "src/main.rs", true).unwrap().is_none());
@@ -424,7 +425,7 @@ fn pr_panel_lists_filters_and_opens_prs() {
     assert_eq!(h.state().panel.items().len(), 4);
     h.snapshot("pr_panel_open");
 
-    h.get_by_label("All").click();
+    h.get_by_label("전체").click();
     h.run_steps(1);
     settle(&mut h, |s| s.panel.is_loading());
     assert_eq!(h.state().panel.filter(), PrFilter::All);
@@ -448,15 +449,15 @@ fn pr_panel_create_form_prefills_and_submits() {
         panel,
     );
     settle(&mut h, |p| p.is_loading());
-    h.get_by_label_contains("New").click();
+    h.get_by_label("새 PR").click();
     h.run_steps(1);
     settle(&mut h, |p| p.is_loading());
     assert!(h.query_all_by_value("Add diff view").next().is_some(), "title prefilled from commits");
     h.snapshot("pr_create_form");
 
-    h.get_by_label("Create as draft").click();
+    h.get_by_label("초안으로 만들기").click();
     h.run_steps(1);
-    h.get_by_label("Create Draft PR").click();
+    h.get_by_label("초안 PR 만들기").click();
     h.run_steps(1);
     settle(&mut h, |p| p.is_loading());
     assert!(backend.calls().iter().any(|c| c == "create Add diff view -> main draft=true"), "{:?}", backend.calls());
@@ -486,7 +487,7 @@ fn pr_view_renders_conversation_checks_and_files() {
     h.run_steps(2);
     h.snapshot("pr_view_checks");
 
-    h.get_by_label_contains("Files changed").click();
+    h.get_by_label_contains("변경된 파일").click();
     h.run_steps(1);
     settle(&mut h, |v| v.is_loading());
     assert!(backend.calls().contains(&"diff 14507".to_string()));
@@ -499,28 +500,28 @@ fn pr_view_review_and_merge_actions_call_backend() {
     let mut h = pr_view_harness(backend.clone(), vec2(900.0, 1400.0));
     settle(&mut h, |v| v.is_loading());
 
-    h.get_by_label("Approve").scroll_to_me();
+    h.get_by_label("승인").scroll_to_me();
     h.run_steps(3);
     h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();
     h.run_steps(1);
     h.get_by_role(egui::accesskit::Role::MultilineTextInput).type_text("Looks good");
     h.run_steps(1);
-    h.get_by_label("Approve").click();
+    h.get_by_label("승인").click();
     h.run_steps(1);
     settle(&mut h, |v| v.is_loading());
     assert!(backend.calls().iter().any(|c| c == "review 14507 Approve Looks good"), "{:?}", backend.calls());
 
-    h.get_by_label("Merge…").click();
+    h.get_by_label("병합…").click();
     h.run_steps(2);
-    h.get_by_label("Rebase and merge").click();
+    h.get_by_label("리베이스 후 병합").click();
     h.run_steps(3);
     h.snapshot("pr_view_merge_dialog");
-    h.get_by_label("Confirm Merge").click();
+    h.get_by_label("병합 확인").click();
     h.run_steps(1);
     settle(&mut h, |v| v.is_loading());
     assert!(backend.calls().iter().any(|c| c == "merge 14507 Rebase delete=true"), "{:?}", backend.calls());
 
-    h.get_by_label_contains("Checkout").click();
+    h.get_by_label_contains("체크아웃").click();
     h.run_steps(1);
     settle(&mut h, |v| v.is_loading());
     assert!(backend.calls().contains(&"checkout 14507".to_string()));

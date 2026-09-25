@@ -72,7 +72,7 @@ impl ValueViewer {
         let theme = Theme::current();
         let Some(cell) = cell else {
             ui.add_space(20.0);
-            ui.vertical_centered(|ui| ui.label(dim("Select a cell to view its value")));
+            ui.vertical_centered(|ui| ui.label(dim("값을 보려면 셀을 선택하세요")));
             return None;
         };
         let fp = fingerprint(cell.value);
@@ -89,10 +89,10 @@ impl ValueViewer {
         let meta = match cell.value {
             None => "DEFAULT".to_string(),
             Some(Value::Null) => "NULL".to_string(),
-            Some(Value::Bytes(b)) => format!("{} bytes", b.len()),
+            Some(Value::Bytes(b)) => format!("{}바이트", b.len()),
             Some(v) => {
                 let t = v.to_text().unwrap_or_default();
-                format!("{} chars", t.chars().count())
+                format!("{}자", t.chars().count())
             }
         };
         ui.label(dim(meta));
@@ -103,8 +103,8 @@ impl ValueViewer {
         if can_edit {
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(self.dirty, egui::Button::new("Apply"))
-                    .on_hover_text("Write this text into the cell (pending until Submit)")
+                    .add_enabled(self.dirty, egui::Button::new("적용"))
+                    .on_hover_text("이 텍스트를 셀에 씁니다 (제출 전까지 보류)")
                     .clicked()
                 {
                     let text = if cell.class == TypeClass::Json {
@@ -118,7 +118,7 @@ impl ValueViewer {
                     self.dirty = false;
                 }
                 if ui
-                    .add_enabled(self.dirty, egui::Button::new("Reset"))
+                    .add_enabled(self.dirty, egui::Button::new("초기화"))
                     .clicked()
                 {
                     self.text = render_text(cell.value);

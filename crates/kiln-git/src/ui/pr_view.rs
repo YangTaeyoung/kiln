@@ -164,7 +164,7 @@ impl PrView {
             self.diff_load = None;
             match r {
                 Ok(text) => {
-                    let mut v = DiffView::from_patch(&self.root, &format!("#{} changes", self.number), text);
+                    let mut v = DiffView::from_patch(&self.root, &format!("#{} 변경 사항", self.number), text);
                     if let Some(ts) = self.now_override {
                         v.set_now(ts);
                     }
@@ -181,10 +181,10 @@ impl PrView {
             match r {
                 Ok(out) => {
                     let title = match kind {
-                        ActionKind::Checkout => "Checked out pull request branch",
-                        ActionKind::Review => "Review submitted",
-                        ActionKind::Merge => "Pull request merged",
-                        ActionKind::Ready => "Marked as ready for review",
+                        ActionKind::Checkout => "풀 리퀘스트 브랜치를 체크아웃했습니다",
+                        ActionKind::Review => "리뷰를 제출했습니다",
+                        ActionKind::Merge => "풀 리퀘스트를 병합했습니다",
+                        ActionKind::Ready => "리뷰 준비 완료로 표시했습니다",
                     };
                     if kind == ActionKind::Review {
                         self.review_body.clear();
@@ -196,7 +196,7 @@ impl PrView {
                         self.started = false;
                     }
                 }
-                Err(e) => self.action_msg = Some((BannerKind::Error, "Action failed".into(), Some(e.to_string()))),
+                Err(e) => self.action_msg = Some((BannerKind::Error, "작업 실패".into(), Some(e.to_string()))),
             }
         }
     }
@@ -217,9 +217,9 @@ impl PrView {
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
             if let Some(e) = self.error.clone() {
                 egui::Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
-                    banner(ui, BannerKind::Error, &format!("Could not load pull request #{}", self.number), Some(&e), false);
+                    banner(ui, BannerKind::Error, &format!("풀 리퀘스트 #{}을(를) 불러올 수 없습니다", self.number), Some(&e), false);
                     ui.add_space(6.0);
-                    if tool_button(ui, Some(Icon::Refresh), "Retry").clicked() {
+                    if tool_button(ui, Some(Icon::Refresh), "다시 시도").clicked() {
                         self.refresh();
                     }
                 });
@@ -230,7 +230,7 @@ impl PrView {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     spinner(ui, 14.0);
-                    ui.label(dim(format!("Loading pull request #{}…", self.number)));
+                    ui.label(dim(format!("풀 리퀘스트 #{} 불러오는 중…", self.number)));
                 });
                 return;
             }
@@ -253,7 +253,7 @@ impl PrView {
                 PrTab::Files => {
                     if let Some(e) = self.diff_error.clone() {
                         egui::Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
-                            banner(ui, BannerKind::Error, "Could not load diff", Some(&e), false);
+                            banner(ui, BannerKind::Error, "diff를 불러올 수 없습니다", Some(&e), false);
                         });
                     } else if let Some(d) = &mut self.diff {
                         d.ui(ui);
@@ -262,7 +262,7 @@ impl PrView {
                         ui.horizontal(|ui| {
                             ui.add_space(16.0);
                             spinner(ui, 14.0);
-                            ui.label(dim("Loading changes…"));
+                            ui.label(dim("변경 사항 불러오는 중…"));
                         });
                     }
                 }
@@ -289,14 +289,15 @@ impl PrView {
                 ui.add_space(4.0);
                 ui.label(RichText::new(&d.author.login).strong().size(12.5).color(t.text));
                 let verb = match state {
-                    PrState::Merged => "merged",
-                    _ => "wants to merge",
+                    PrState::Merged => "병합했습니다",
+                    _ => "병합하려고 합니다",
                 };
                 let n = d.commits.len();
-                ui.label(dim(format!("{verb} {n} commit{} into", if n == 1 { "" } else { "s" })));
-                outline_badge(ui, &d.base_ref_name, t.accent);
-                ui.label(dim("from"));
+                ui.label(dim("님이"));
                 outline_badge(ui, &d.head_ref_name, t.accent);
+                ui.label(dim("에서"));
+                outline_badge(ui, &d.base_ref_name, t.accent);
+                ui.label(dim(format!("(으)로 커밋 {n}개를 {verb}")));
                 ui.add_space(6.0);
                 ui.label(RichText::new(format!("+{}", d.additions)).color(t.green).size(12.0).monospace());
                 ui.label(RichText::new(format!("−{}", d.deletions)).color(t.red).size(12.0).monospace());
@@ -310,14 +311,14 @@ impl PrView {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.add_enabled_ui(!busy, |ui| {
-                    if tool_button(ui, Some(Icon::Download), "Checkout").on_hover_text("gh pr checkout").clicked() {
+                    if tool_button(ui, Some(Icon::Download), "체크아웃").on_hover_text("gh pr checkout").clicked() {
                         let n = d.number;
                         self.run(ui.ctx(), ActionKind::Checkout, move |b| b.checkout(n));
                     }
-                    if tool_button(ui, Some(Icon::External), "Open in Browser").clicked() {
+                    if tool_button(ui, Some(Icon::External), "브라우저에서 열기").clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(&d.url));
                     }
-                    if state == PrState::Open && d.is_draft && tool_button(ui, Some(Icon::Check), "Ready for Review").clicked() {
+                    if state == PrState::Open && d.is_draft && tool_button(ui, Some(Icon::Check), "리뷰 준비 완료").clicked() {
                         let n = d.number;
                         self.run(ui.ctx(), ActionKind::Ready, move |b| b.mark_ready(n).map(|_| String::new()));
                     }
@@ -328,21 +329,21 @@ impl PrView {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if state == PrState::Open {
                         let enabled = !busy && !d.is_draft;
-                        let r = ui.add_enabled_ui(enabled, |ui| primary_button(ui, "Merge…", None)).inner;
-                        let r = if d.is_draft { r.on_disabled_hover_text("Draft pull requests cannot be merged") } else { r };
+                        let r = ui.add_enabled_ui(enabled, |ui| primary_button(ui, "병합…", None)).inner;
+                        let r = if d.is_draft { r.on_disabled_hover_text("초안 풀 리퀘스트는 병합할 수 없습니다") } else { r };
                         if r.clicked() {
                             self.merge = Some(MergeDialog { method: MergeMethod::Squash, delete_branch: true });
                         }
                     }
-                    if icon_button(ui, Icon::Refresh, "Refresh").clicked() {
+                    if icon_button(ui, Icon::Refresh, "새로 고침").clicked() {
                         self.refresh();
                     }
                     if let Some(c) = d.checks() {
                         let (icon, col) = checks_icon(c);
                         let label = match c {
-                            ChecksState::Pass => "Checks passing",
-                            ChecksState::Fail => "Checks failing",
-                            ChecksState::Pending => "Checks pending",
+                            ChecksState::Pass => "검사 통과",
+                            ChecksState::Fail => "검사 실패",
+                            ChecksState::Pending => "검사 진행 중",
                         };
                         ui.label(RichText::new(label).size(12.0).color(col));
                         icon_label(ui, icon, col, 14.0);
@@ -364,9 +365,9 @@ impl PrView {
                 ui.spacing_mut().item_spacing.x = 18.0;
                 let comments = d.comments.len() + d.reviews.iter().filter(|r| !r.body.trim().is_empty()).count();
                 let tabs = [
-                    (PrTab::Conversation, "Conversation", comments),
-                    (PrTab::Checks, "Checks", d.status_check_rollup.len()),
-                    (PrTab::Files, "Files changed", d.changed_files as usize),
+                    (PrTab::Conversation, "대화", comments),
+                    (PrTab::Checks, "검사", d.status_check_rollup.len()),
+                    (PrTab::Files, "변경된 파일", d.changed_files as usize),
                 ];
                 for (tab, label, count) in tabs {
                     let sel = self.tab == tab;
@@ -392,9 +393,9 @@ impl PrView {
         let Some(d) = self.detail.clone() else { return };
         let now = self.now();
         // 설명
-        comment_card(ui, &d.author.login, parse_iso8601(&d.created_at).unwrap_or(0), now, "opened this pull request", t.accent, |ui| {
+        comment_card(ui, &d.author.login, parse_iso8601(&d.created_at).unwrap_or(0), now, "님이 이 풀 리퀘스트를 열었습니다", t.accent, |ui| {
             if self.body.is_empty() {
-                ui.label(faint("No description provided."));
+                ui.label(faint("설명이 없습니다."));
             } else {
                 self.body.show(ui);
             }
@@ -402,13 +403,13 @@ impl PrView {
         for item in &self.timeline {
             ui.add_space(10.0);
             let accent = match item.kind.as_str() {
-                "approved" => t.green,
-                "requested changes" => t.red,
+                "님이 승인했습니다" => t.green,
+                "님이 변경을 요청했습니다" => t.red,
                 _ => t.border,
             };
             comment_card(ui, &item.author, item.when, now, &item.kind, accent, |ui| {
                 if item.body.is_empty() {
-                    ui.label(faint("No comment."));
+                    ui.label(faint("댓글이 없습니다."));
                 } else {
                     item.body.show(ui);
                 }
@@ -424,11 +425,11 @@ impl PrView {
                 .inner_margin(Margin::same(10))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new("Add your review").size(13.0).strong().color(t.text));
+                    ui.label(RichText::new("리뷰 작성").size(13.0).strong().color(t.text));
                     ui.add_space(4.0);
                     ui.add(
                         egui::TextEdit::multiline(&mut self.review_body)
-                            .hint_text("Leave a comment (Markdown supported)")
+                            .hint_text("댓글 남기기 (Markdown 지원)")
                             .desired_rows(4)
                             .desired_width(f32::INFINITY)
                             .frame(input_frame()),
@@ -438,14 +439,14 @@ impl PrView {
                     let has_body = !self.review_body.trim().is_empty();
                     ui.horizontal(|ui| {
                         let n = d.number;
-                        if ui.add_enabled_ui(!busy && has_body, |ui| secondary_button(ui, "Comment")).inner.clicked() {
+                        if ui.add_enabled_ui(!busy && has_body, |ui| secondary_button(ui, "댓글")).inner.clicked() {
                             let body = self.review_body.clone();
                             self.run(ui.ctx(), ActionKind::Review, move |b| b.review(n, ReviewKind::Comment, &body).map(|_| String::new()));
                         }
                         if ui
-                            .add_enabled_ui(!busy && has_body, |ui| secondary_button(ui, "Request Changes"))
+                            .add_enabled_ui(!busy && has_body, |ui| secondary_button(ui, "변경 요청"))
                             .inner
-                            .on_disabled_hover_text("Write a comment explaining the requested changes")
+                            .on_disabled_hover_text("요청하는 변경 사항을 설명하는 댓글을 작성하세요")
                             .clicked()
                         {
                             let body = self.review_body.clone();
@@ -453,7 +454,7 @@ impl PrView {
                                 b.review(n, ReviewKind::RequestChanges, &body).map(|_| String::new())
                             });
                         }
-                        if ui.add_enabled_ui(!busy, |ui| primary_button(ui, "Approve", None)).inner.clicked() {
+                        if ui.add_enabled_ui(!busy, |ui| primary_button(ui, "승인", None)).inner.clicked() {
                             let body = self.review_body.clone();
                             self.run(ui.ctx(), ActionKind::Review, move |b| b.review(n, ReviewKind::Approve, &body).map(|_| String::new()));
                         }
@@ -466,7 +467,7 @@ impl PrView {
         let t = theme();
         let Some(d) = &self.detail else { return };
         if d.status_check_rollup.is_empty() {
-            empty_state(ui, "No checks", "This pull request has no status checks.");
+            empty_state(ui, "검사 없음", "이 풀 리퀘스트에는 상태 검사가 없습니다.");
             return;
         }
         let mut items: Vec<_> = d.status_check_rollup.iter().collect();
@@ -486,20 +487,20 @@ impl PrView {
             }
         }
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{} checks", items.len())).size(14.0).strong().color(t.text));
+            ui.label(RichText::new(format!("검사 {}개", items.len())).size(14.0).strong().color(t.text));
             ui.add_space(8.0);
             if fail > 0 {
                 icon_label(ui, Icon::XCircle, t.red, 13.0);
-                ui.label(RichText::new(format!("{fail} failing")).color(t.red).size(12.0));
+                ui.label(RichText::new(format!("실패 {fail}")).color(t.red).size(12.0));
             }
             if pend > 0 {
                 icon_label(ui, Icon::PendingCircle, t.yellow, 13.0);
-                ui.label(RichText::new(format!("{pend} pending")).color(t.yellow).size(12.0));
+                ui.label(RichText::new(format!("진행 중 {pend}")).color(t.yellow).size(12.0));
             }
             icon_label(ui, Icon::CheckCircle, t.green, 13.0);
-            ui.label(RichText::new(format!("{pass} passing")).color(t.green).size(12.0));
+            ui.label(RichText::new(format!("통과 {pass}")).color(t.green).size(12.0));
             if skip > 0 {
-                ui.label(RichText::new(format!("{skip} skipped")).color(t.text_faint).size(12.0));
+                ui.label(RichText::new(format!("건너뜀 {skip}")).color(t.text_faint).size(12.0));
             }
         });
         ui.add_space(8.0);
@@ -535,7 +536,7 @@ impl PrView {
                     let gal = p.layout_job(job);
                     p.galley(egui::pos2(rect.left() + 32.0, rect.center().y - gal.size().y / 2.0), gal, t.text);
                     if let Some(url) = c.url() {
-                        p.text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, "Details", FontId::proportional(12.0), t.accent);
+                        p.text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, "세부 정보", FontId::proportional(12.0), t.accent);
                         if resp.clicked() {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
                         }
@@ -552,8 +553,8 @@ impl PrView {
         let mut method = m.method;
         let mut delete = m.delete_branch;
         let head = d.head_ref_name.clone();
-        let msg = format!("Merge #{} \"{}\" into {}.", d.number, d.title, d.base_ref_name);
-        let r = confirm_modal(ctx, Id::new(("pr_merge", self.number)), "Merge pull request", &msg, "Confirm Merge", false, |ui| {
+        let msg = format!("#{} \"{}\"을(를) {}(으)로 병합합니다.", d.number, d.title, d.base_ref_name);
+        let r = confirm_modal(ctx, Id::new(("pr_merge", self.number)), "풀 리퀘스트 병합", &msg, "병합 확인", false, |ui| {
             ui.add_space(10.0);
             for mm in [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase] {
                 if radio_row(ui, method == mm, mm.label()) {
@@ -561,10 +562,10 @@ impl PrView {
                 }
             }
             ui.add_space(6.0);
-            checkbox_row(ui, &mut delete, &format!("Delete branch \"{head}\" after merge"));
+            checkbox_row(ui, &mut delete, &format!("병합 후 \"{head}\" 브랜치 삭제"));
             if d.mergeable == "CONFLICTING" {
                 ui.add_space(6.0);
-                ui.label(RichText::new("⚠ This branch has conflicts that must be resolved").color(t.orange).size(12.0));
+                ui.label(RichText::new("⚠ 이 브랜치에 해결해야 할 충돌이 있습니다").color(t.orange).size(12.0));
             }
         });
         m.method = method;
@@ -592,11 +593,11 @@ fn readable_on(bg: Color32) -> Color32 {
 
 fn fmt_duration(s: i64) -> String {
     if s < 60 {
-        format!("{s}s")
+        format!("{s}초")
     } else if s < 3600 {
-        format!("{}m {}s", s / 60, s % 60)
+        format!("{}분 {}초", s / 60, s % 60)
     } else {
-        format!("{}h {}m", s / 3600, (s % 3600) / 60)
+        format!("{}시간 {}분", s / 3600, (s % 3600) / 60)
     }
 }
 
@@ -606,18 +607,18 @@ fn build_timeline(d: &PrDetail) -> Vec<TimelineItem> {
         v.push(TimelineItem {
             author: c.author.login.clone(),
             when: parse_iso8601(&c.created_at).unwrap_or(0),
-            kind: "commented".into(),
+            kind: "님이 댓글을 남겼습니다".into(),
             body: Markdown::parse(&c.body),
         });
     }
     for r in &d.reviews {
         let kind = match r.state.as_str() {
-            "APPROVED" => "approved",
-            "CHANGES_REQUESTED" => "requested changes",
-            "DISMISSED" => "review dismissed",
-            _ => "reviewed",
+            "APPROVED" => "님이 승인했습니다",
+            "CHANGES_REQUESTED" => "님이 변경을 요청했습니다",
+            "DISMISSED" => "님의 리뷰가 취소되었습니다",
+            _ => "님이 리뷰했습니다",
         };
-        if r.body.trim().is_empty() && kind == "reviewed" {
+        if r.body.trim().is_empty() && kind == "님이 리뷰했습니다" {
             continue;
         }
         v.push(TimelineItem {

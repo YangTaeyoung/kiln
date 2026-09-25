@@ -235,7 +235,7 @@ fn submit_rolls_back_everything_when_one_statement_fails() {
     let err = m
         .block_on(m.submit_changes(id, &t, &det.columns, &missing))
         .unwrap_err();
-    assert!(err.error.message.contains("expected 1 affected row"));
+    assert!(err.error.message.contains("영향받은 행이 1개여야"));
 }
 
 #[test]

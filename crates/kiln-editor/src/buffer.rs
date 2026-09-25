@@ -95,8 +95,8 @@ impl Indent {
 
     pub fn label(self) -> String {
         match self {
-            Indent::Spaces(n) => format!("Spaces: {n}"),
-            Indent::Tabs => "Tabs".into(),
+            Indent::Spaces(n) => format!("공백: {n}"),
+            Indent::Tabs => "탭".into(),
         }
     }
 }

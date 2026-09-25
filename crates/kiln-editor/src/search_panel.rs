@@ -270,8 +270,8 @@ impl SearchPanel {
             ui.painter().rect_filled(chev, 3.0, t.bg_hover);
         }
         ui_kit::paint_icon(ui.painter(), chev.shrink(1.0), if self.show_replace { Icon::ChevronDown } else { Icon::ChevronRight }, t.text_dim);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Toggle Replace"));
-        if resp.on_hover_text("Toggle Replace").clicked() {
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "바꾸기 전환"));
+        if resp.on_hover_text("바꾸기 전환").clicked() {
             self.show_replace = !self.show_replace;
         }
         let fx = left + 20.0;
@@ -282,7 +282,7 @@ impl SearchPanel {
         }
         let more = Rect::from_min_size(pos2(right - 22.0, y + 2.0), vec2(22.0, 22.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(more), |ui| {
-            if ui_kit::icon_toggle(ui, Icon::Selection, "Toggle Search Details", self.show_filters, true).clicked() {
+            if ui_kit::icon_toggle(ui, Icon::Selection, "검색 세부 정보 전환", self.show_filters, true).clicked() {
                 self.show_filters = !self.show_filters;
             }
         });
@@ -293,14 +293,14 @@ impl SearchPanel {
             let btn = Rect::from_min_size(pos2(right - 22.0, y + 2.0), vec2(22.0, 22.0));
             let can = !self.results.is_empty() && self.replace_task.is_none() && self.handle.is_none();
             ui.scope_builder(egui::UiBuilder::new().max_rect(btn), |ui| {
-                if ui_kit::icon_toggle(ui, Icon::ReplaceAll, "Replace All", false, can).clicked() {
+                if ui_kit::icon_toggle(ui, Icon::ReplaceAll, "모두 바꾸기", false, can).clicked() {
                     self.confirm_replace = true;
                 }
             });
             y += field_h + gap;
         }
         if self.show_filters {
-            for (label, kind) in [("files to include", FieldKind::Include), ("files to exclude", FieldKind::Exclude)] {
+            for (label, kind) in [("포함할 파일", FieldKind::Include), ("제외할 파일", FieldKind::Exclude)] {
                 ui.painter().text(pos2(fx, y + 7.0), Align2::LEFT_CENTER, label, FontId::proportional(11.0), t.text_dim);
                 y += 15.0;
                 let r = Rect::from_min_max(pos2(fx, y), pos2(right, y + field_h));
@@ -322,10 +322,10 @@ impl SearchPanel {
         let chips_w = if kind == FieldKind::Query { 3.0 * 23.0 + 2.0 } else { 0.0 };
         let inner = Rect::from_min_max(pos2(rect.left() + 7.0, rect.top() + 1.0), pos2(rect.right() - 3.0 - chips_w, rect.bottom() - 1.0));
         let (text, hint) = match kind {
-            FieldKind::Query => (&mut self.query, "Search"),
-            FieldKind::Replace => (&mut self.replacement, "Replace"),
-            FieldKind::Include => (&mut self.include, "e.g. *.rs, src/**"),
-            FieldKind::Exclude => (&mut self.exclude, "e.g. *.lock, tests"),
+            FieldKind::Query => (&mut self.query, "검색"),
+            FieldKind::Replace => (&mut self.replacement, "바꾸기"),
+            FieldKind::Include => (&mut self.include, "예: *.rs, src/**"),
+            FieldKind::Exclude => (&mut self.exclude, "예: *.lock, tests"),
         };
         let mut submit = false;
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
@@ -343,13 +343,13 @@ impl SearchPanel {
             ui.scope_builder(egui::UiBuilder::new().max_rect(chips).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                 ui.spacing_mut().item_spacing.x = 1.0;
                 let o = &mut self.opts;
-                if ui_kit::option_chip(ui, "Aa", "Match Case", o.case_sensitive).clicked() {
+                if ui_kit::option_chip(ui, "Aa", "대/소문자 구분", o.case_sensitive).clicked() {
                     o.case_sensitive = !o.case_sensitive;
                 }
-                if ui_kit::option_chip(ui, "ab", "Match Whole Word", o.whole_word).clicked() {
+                if ui_kit::option_chip(ui, "ab", "단어 단위로", o.whole_word).clicked() {
                     o.whole_word = !o.whole_word;
                 }
-                if ui_kit::option_chip(ui, ".*", "Use Regular Expression", o.regex).clicked() {
+                if ui_kit::option_chip(ui, ".*", "정규식 사용", o.regex).clicked() {
                     o.regex = !o.regex;
                 }
             });
@@ -363,21 +363,19 @@ impl SearchPanel {
         let x = rect.left() + 12.0;
         let (text, color) = if let Some(e) = &self.error {
             let msg = e.lines().last().unwrap_or(e).trim();
-            (format!("Invalid pattern: {}", msg.trim_start_matches("error: ")), t.red)
+            (format!("잘못된 패턴: {}", msg.trim_start_matches("error: ")), t.red)
         } else if let Some(s) = &self.replace_status {
             (s.clone(), t.green)
         } else if self.handle.is_some() || self.changed_at.is_some() && !self.query.is_empty() {
             let found: usize = self.results.iter().map(|f| f.match_count()).sum();
-            if found > 0 { (format!("Searching… {} results so far", fmt_count(found)), t.text_dim) } else { ("Searching…".to_owned(), t.text_dim) }
+            if found > 0 { (format!("검색 중… 지금까지 결과 {}개", fmt_count(found)), t.text_dim) } else { ("검색 중…".to_owned(), t.text_dim) }
         } else if let Some(s) = &self.summary {
             if s.matches == 0 {
-                ("No results found".to_owned(), t.text_dim)
+                ("결과가 없습니다".to_owned(), t.text_dim)
             } else {
-                let res = if s.matches == 1 { "result" } else { "results" };
-                let files = if s.files == 1 { "file" } else { "files" };
-                let mut msg = format!("{} {res} in {} {files}", fmt_count(s.matches), fmt_count(s.files));
+                let mut msg = format!("파일 {}개에서 결과 {}개", fmt_count(s.files), fmt_count(s.matches));
                 if s.truncated {
-                    msg.push_str(" — showing first results only");
+                    msg.push_str(" — 앞부분 결과만 표시");
                 }
                 (msg, if s.truncated { t.yellow } else { t.text_dim })
             }
@@ -507,24 +505,22 @@ impl SearchPanel {
                 ui.set_width(360.0);
                 ui.label(
                     egui::RichText::new(format!(
-                        "Replace {} occurrence{} across {} file{}?",
-                        fmt_count(matches),
-                        if matches == 1 { "" } else { "s" },
+                        "파일 {}개에서 {}개 항목을 바꿀까요?",
                         fmt_count(files),
-                        if files == 1 { "" } else { "s" }
+                        fmt_count(matches)
                     ))
                     .size(14.0)
                     .strong()
                     .color(t.text),
                 );
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(format!("with “{}”. Files are written to disk immediately.", self.replacement)).size(12.0).color(t.text_dim));
+                ui.label(egui::RichText::new(format!("“{}”(으)로 바꿉니다. 파일은 즉시 디스크에 기록됩니다.", self.replacement)).size(12.0).color(t.text_dim));
                 ui.add_space(14.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui_kit::flat_button(ui, "Replace", true).clicked() {
+                    if ui_kit::flat_button(ui, "바꾸기", true).clicked() {
                         confirm = true;
                     }
-                    if ui_kit::flat_button(ui, "Cancel", false).clicked() {
+                    if ui_kit::flat_button(ui, "취소", false).clicked() {
                         cancel = true;
                     }
                 });
@@ -550,7 +546,7 @@ impl SearchPanel {
         match res {
             Ok((files, n)) => {
                 self.start(ctx);
-                self.replace_status = Some(format!("Replaced {} occurrence{} in {} file{}", fmt_count(n), if n == 1 { "" } else { "s" }, files, if files == 1 { "" } else { "s" }));
+                self.replace_status = Some(format!("파일 {}개에서 {}개 항목을 바꿨습니다", files, fmt_count(n)));
             }
             Err(e) => self.error = Some(e),
         }

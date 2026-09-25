@@ -465,7 +465,7 @@ impl TableView {
             self.details_job = None;
             match r {
                 Ok(d) => self.details = Some(d),
-                Err(e) => self.status = Some((format!("Failed to load structure: {e}"), true)),
+                Err(e) => self.status = Some((format!("구조를 불러오지 못했습니다: {e}"), true)),
             }
             self.refresh_details_on_data();
         }
@@ -525,8 +525,8 @@ impl TableView {
         {
             self.export_job = None;
             self.status = Some(match r {
-                Ok(n) => (format!("Exported {} rows", thousands(n as i64)), false),
-                Err(e) => (format!("Export failed: {e}"), true),
+                Ok(n) => (format!("{}행을 내보냈습니다", thousands(n as i64)), false),
+                Err(e) => (format!("내보내기 실패: {e}"), true),
             });
         }
     }
@@ -547,7 +547,7 @@ impl TableView {
         self.submit_job = None;
         match r {
             Ok(n) => {
-                self.status = Some((format!("Committed · {n} row(s) affected"), false));
+                self.status = Some((format!("커밋됨 · {n}행 영향"), false));
                 if let Some(d) = &mut self.data {
                     d.revert_all();
                 }
@@ -556,7 +556,7 @@ impl TableView {
             Err(e) => {
                 self.status = Some((
                     format!(
-                        "Transaction rolled back — statement #{} failed: {}",
+                        "트랜잭션 롤백됨 — 문 #{} 실패: {}",
                         e.index + 1,
                         e.error
                     ),
@@ -625,7 +625,7 @@ impl TableView {
         };
         let m2 = m.clone();
         let (id, t, cols) = (self.conn, self.t.clone(), det.columns.clone());
-        self.status = Some(("Submitting…".into(), false));
+        self.status = Some(("제출 중…".into(), false));
         self.submit_job = Some(m.spawn(async move { m2.submit_changes(id, &t, &cols, &cs).await }));
     }
 
@@ -668,8 +668,8 @@ impl TableView {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for (s, label) in [
-                        (SubTab::Data, "Data"),
-                        (SubTab::Structure, "Structure"),
+                        (SubTab::Data, "데이터"),
+                        (SubTab::Structure, "구조"),
                         (SubTab::Ddl, "DDL"),
                     ] {
                         let sel = self.sub == s;
@@ -705,7 +705,7 @@ impl TableView {
                             .color(theme.text_dim),
                     );
                     if self.is_view {
-                        ui.label(RichText::new("VIEW").size(10.0).color(theme.green));
+                        ui.label(RichText::new("뷰").size(10.0).color(theme.green));
                     }
                 });
             });
@@ -720,9 +720,9 @@ impl TableView {
             && self.details.is_some()
         {
             let why = if self.is_view {
-                "Read-only: this is a view."
+                "읽기 전용: 뷰입니다."
             } else {
-                "Read-only: table has no primary key, so rows cannot be identified for editing."
+                "읽기 전용: 기본 키가 없어 편집할 행을 식별할 수 없습니다."
             };
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
@@ -785,7 +785,7 @@ impl TableView {
                 if self.load_job.is_some() {
                     ui.add(egui::Spinner::new().size(18.0));
                 } else {
-                    ui.label(dim("No data"));
+                    ui.label(dim("데이터 없음"));
                 }
             });
             return;
@@ -844,7 +844,7 @@ impl TableView {
             GridEvent::SortBy(c) => {
                 if data.pending() > 0 {
                     self.status = Some((
-                        "Submit or revert pending changes before sorting".into(),
+                        "정렬하기 전에 보류 중인 변경 사항을 제출하거나 되돌리세요".into(),
                         true,
                     ));
                     return;
@@ -940,28 +940,28 @@ impl TableView {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if tool_button(ui, "⟳", self.load_job.is_none() && pending == 0, false)
-                        .on_hover_text("Reload page")
+                        .on_hover_text("페이지 다시 불러오기")
                         .clicked()
                     {
                         self.reload(m, true);
                     }
                     ui.separator();
-                    if tool_button(ui, "+ Row", editable, false)
-                        .on_hover_text("Add row")
+                    if tool_button(ui, "+ 행", editable, false)
+                        .on_hover_text("행 추가")
                         .clicked()
                     {
                         self.add_row();
                     }
-                    if tool_button(ui, "− Row", editable && has_sel, false)
-                        .on_hover_text("Delete selected rows (⌘⌫)")
+                    if tool_button(ui, "− 행", editable && has_sel, false)
+                        .on_hover_text("선택한 행 삭제 (⌘⌫)")
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
                         let rows = self.grid.sel.rows(d.n_rows());
                         d.delete_rows(&rows);
                     }
-                    if tool_button(ui, "🗐 Duplicate", editable && has_sel, false)
-                        .on_hover_text("Duplicate selected rows (⌘D)")
+                    if tool_button(ui, "🗐 복제", editable && has_sel, false)
+                        .on_hover_text("선택한 행 복제 (⌘D)")
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
@@ -970,9 +970,9 @@ impl TableView {
                     }
                     ui.separator();
                     let submit_label = if pending > 0 {
-                        format!("✔ Submit ({pending})")
+                        format!("✔ 제출 ({pending})")
                     } else {
-                        "✔ Submit".into()
+                        "✔ 제출".into()
                     };
                     if tool_button(
                         ui,
@@ -980,13 +980,13 @@ impl TableView {
                         pending > 0 && self.submit_job.is_none(),
                         true,
                     )
-                    .on_hover_text("Commit all changes in one transaction (⌘↩)")
+                    .on_hover_text("모든 변경 사항을 하나의 트랜잭션으로 커밋 (⌘↩)")
                     .clicked()
                     {
                         self.submit(m);
                     }
-                    if tool_button(ui, "⟲ Revert", pending > 0, false)
-                        .on_hover_text("Discard all pending changes")
+                    if tool_button(ui, "⟲ 되돌리기", pending > 0, false)
+                        .on_hover_text("보류 중인 변경 사항 모두 취소")
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
@@ -997,17 +997,17 @@ impl TableView {
                         ui::spinner(ui);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toggle_button(ui, "Value", self.show_viewer)
-                            .on_hover_text("Toggle value viewer")
+                        if toggle_button(ui, "값", self.show_viewer)
+                            .on_hover_text("값 뷰어 전환")
                             .clicked()
                         {
                             self.show_viewer = !self.show_viewer;
                         }
-                        ui.menu_button(RichText::new("Export ⏷").size(12.0), |ui| {
+                        ui.menu_button(RichText::new("내보내기 ⏷").size(12.0), |ui| {
                             for f in [ExportFormat::Csv, ExportFormat::Json] {
                                 if ui
                                     .button(format!(
-                                        "All rows to {}…",
+                                        "모든 행을 {}로…",
                                         f.extension().to_uppercase()
                                     ))
                                     .clicked()
@@ -1037,11 +1037,11 @@ impl TableView {
         };
         // 오른쪽에서 왼쪽 순서로 배치된다.
         let last = tool_button(ui, "⏭", can_nav && has_next && total_pages.is_some(), false)
-            .on_hover_text("Last page");
-        let next = tool_button(ui, "▶", can_nav && has_next, false).on_hover_text("Next page");
+            .on_hover_text("마지막 페이지");
+        let next = tool_button(ui, "▶", can_nav && has_next, false).on_hover_text("다음 페이지");
         let start = self.page * self.page_size;
         let range = if loaded == 0 {
-            "0 rows".to_string()
+            "0행".to_string()
         } else {
             format!(
                 "{}–{}",
@@ -1050,8 +1050,8 @@ impl TableView {
             )
         };
         let of = match (self.total, self.count_job.is_some()) {
-            (Some(t), _) => format!(" of {}", thousands(t)),
-            (None, true) => " of …".into(),
+            (Some(t), _) => format!(" / 총 {}", thousands(t)),
+            (None, true) => " / 총 …".into(),
             _ => String::new(),
         };
         ui.label(
@@ -1060,12 +1060,12 @@ impl TableView {
                 .color(theme.text_dim),
         );
         let prev =
-            tool_button(ui, "◀", can_nav && self.page > 0, false).on_hover_text("Previous page");
+            tool_button(ui, "◀", can_nav && self.page > 0, false).on_hover_text("이전 페이지");
         let first =
-            tool_button(ui, "⏮", can_nav && self.page > 0, false).on_hover_text("First page");
+            tool_button(ui, "⏮", can_nav && self.page > 0, false).on_hover_text("첫 페이지");
         let mut size = self.page_size;
         egui::ComboBox::from_id_salt(("db-page-size", self.conn, &self.t.table))
-            .selected_text(RichText::new(format!("{size} / page")).size(12.0))
+            .selected_text(RichText::new(format!("페이지당 {size}")).size(12.0))
             .width(92.0)
             .show_ui(ui, |ui| {
                 for s in PAGE_SIZES {
@@ -1116,10 +1116,10 @@ impl TableView {
                         (
                             "WHERE",
                             &mut self.filter,
-                            "e.g. id > 100 AND name LIKE 'a%'",
+                            "예: id > 100 AND name LIKE 'a%'",
                             "where",
                         ),
-                        ("ORDER BY", &mut self.order, "e.g. created_at DESC", "order"),
+                        ("ORDER BY", &mut self.order, "예: created_at DESC", "order"),
                     ] {
                         ui.label(
                             RichText::new(label)
@@ -1149,13 +1149,13 @@ impl TableView {
                     }
                     let dirty = self.filter.trim() != self.applied_filter
                         || self.order.trim() != self.applied_order;
-                    if tool_button(ui, "Apply", dirty, dirty).clicked() {
+                    if tool_button(ui, "적용", dirty, dirty).clicked() {
                         apply = true;
                     }
                     if apply {
                         if self.pending_changes() > 0 {
                             self.status = Some((
-                                "Submit or revert pending changes before filtering".into(),
+                                "필터링하기 전에 보류 중인 변경 사항을 제출하거나 되돌리세요".into(),
                                 true,
                             ));
                         } else {
@@ -1183,14 +1183,14 @@ impl TableView {
                 ui.horizontal_centered(|ui| {
                     if let Some(d) = &self.data {
                         ui.label(dim(format!(
-                            "{} rows · {} ms",
+                            "{}행 · {} ms",
                             thousands(d.rs.len() as i64),
                             self.last_load_ms
                         )));
                         let p = d.pending();
                         if p > 0 {
                             ui.label(
-                                RichText::new(format!("• {p} pending"))
+                                RichText::new(format!("• 보류 {p}건"))
                                     .size(11.5)
                                     .color(theme.yellow),
                             );
@@ -1198,7 +1198,7 @@ impl TableView {
                         if let Some((r, c)) = self.grid.sel.cursor
                             && c < d.rs.columns.len()
                         {
-                            ui.label(dim(format!("row {} · {}", r + 1, d.rs.columns[c].name)));
+                            ui.label(dim(format!("{}행 · {}", r + 1, d.rs.columns[c].name)));
                         }
                     }
                     if let Some((msg, err)) = &self.status {
@@ -1236,7 +1236,7 @@ impl TableView {
         );
         let m2 = m.clone();
         let id = self.conn;
-        self.status = Some(("Exporting…".into(), false));
+        self.status = Some(("내보내는 중…".into(), false));
         self.export_job = Some(m.spawn(async move { m2.export_query(id, &sql, &path, fmt).await }));
     }
 
@@ -1252,12 +1252,12 @@ impl TableView {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(12).show(ui, |ui| {
-                    section(ui, &format!("Columns ({})", det.columns.len()));
+                    section(ui, &format!("컬럼 ({})", det.columns.len()));
                     egui::Grid::new("cols")
                         .striped(true)
                         .spacing(egui::vec2(18.0, 5.0))
                         .show(ui, |ui| {
-                            for h in ["", "Name", "Type", "Nullable", "Default", "References"] {
+                            for h in ["", "이름", "타입", "NULL 허용", "기본값", "참조"] {
                                 ui.label(
                                     RichText::new(h).size(11.5).strong().color(theme.text_dim),
                                 );
@@ -1278,12 +1278,12 @@ impl TableView {
                                     RichText::new(&c.data_type).monospace().color(theme.purple),
                                 );
                                 ui.label(if c.nullable {
-                                    dim("yes")
+                                    dim("예")
                                 } else {
                                     RichText::new("NOT NULL").size(11.5).color(theme.orange)
                                 });
                                 let def = if c.auto_increment && c.default.is_none() {
-                                    "auto".to_string()
+                                    "자동".to_string()
                                 } else {
                                     c.default.clone().unwrap_or_default()
                                 };
@@ -1297,12 +1297,12 @@ impl TableView {
                             }
                         });
                     ui.add_space(14.0);
-                    section(ui, &format!("Indexes ({})", det.indexes.len()));
+                    section(ui, &format!("인덱스 ({})", det.indexes.len()));
                     egui::Grid::new("idx")
                         .striped(true)
                         .spacing(egui::vec2(18.0, 5.0))
                         .show(ui, |ui| {
-                            for h in ["Name", "Columns", "Kind"] {
+                            for h in ["이름", "컬럼", "종류"] {
                                 ui.label(
                                     RichText::new(h).size(11.5).strong().color(theme.text_dim),
                                 );
@@ -1312,22 +1312,22 @@ impl TableView {
                                 ui.label(RichText::new(&ix.name).monospace());
                                 ui.label(RichText::new(ix.columns.join(", ")).monospace());
                                 ui.label(dim(if ix.primary {
-                                    "primary"
+                                    "기본 키"
                                 } else if ix.unique {
-                                    "unique"
+                                    "고유"
                                 } else {
-                                    "index"
+                                    "인덱스"
                                 }));
                                 ui.end_row();
                             }
                         });
                     ui.add_space(14.0);
-                    section(ui, &format!("Foreign keys ({})", det.foreign_keys.len()));
+                    section(ui, &format!("외래 키 ({})", det.foreign_keys.len()));
                     egui::Grid::new("fks")
                         .striped(true)
                         .spacing(egui::vec2(18.0, 5.0))
                         .show(ui, |ui| {
-                            for h in ["Name", "Columns", "References", "On update", "On delete"] {
+                            for h in ["이름", "컬럼", "참조", "ON UPDATE", "ON DELETE"] {
                                 ui.label(
                                     RichText::new(h).size(11.5).strong().color(theme.text_dim),
                                 );
@@ -1373,11 +1373,11 @@ impl TableView {
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            if tool_button(ui, "Copy", true, false).clicked() {
+                            if tool_button(ui, "복사", true, false).clicked() {
                                 ui.ctx().copy_text(ddl.clone());
-                                self.status = Some(("DDL copied".into(), false));
+                                self.status = Some(("DDL을 복사했습니다".into(), false));
                             }
-                            if tool_button(ui, "⟳ Refresh", self.ddl_job.is_none(), false).clicked()
+                            if tool_button(ui, "⟳ 새로 고침", self.ddl_job.is_none(), false).clicked()
                             {
                                 let m2 = m.clone();
                                 let (id, t) = (self.conn, self.t.clone());
