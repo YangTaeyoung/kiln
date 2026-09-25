@@ -885,6 +885,11 @@ impl KilnApp {
     }
 
     #[doc(hidden)]
+    pub fn debug_image_count(&self) -> usize {
+        self.conn.textures.len()
+    }
+
+    #[doc(hidden)]
     pub fn debug_pane_count(&self) -> usize {
         let ws = &self.workspaces[self.active];
         match &ws.tabs[ws.active_tab].kind {

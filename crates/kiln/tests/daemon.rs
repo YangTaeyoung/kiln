@@ -213,3 +213,81 @@ fn exit_code_is_reported() {
         assert!(Instant::now() < deadline);
     }
 }
+
+fn png_b64(w: u32, h: u32) -> String {
+    use base64::Engine;
+    let img = image::RgbaImage::from_pixel(w, h, image::Rgba([0, 200, 0, 255]));
+    let mut out = Vec::new();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+    base64::engine::general_purpose::STANDARD.encode(out)
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_image_is_sent_once_and_placed_in_frames_across_upgrade() {
+    let d = Daemon::start("image");
+    let c = d.client();
+    let dir = PathBuf::from(format!("/tmp/kt-{}-image", std::process::id()));
+    std::fs::write(dir.join("img.seq"), format!("\x1b]1337;File=inline=1:{}\x07", png_b64(32, 34))).unwrap();
+    c.send(ClientMsg::CellSize { width: 8, height: 17 });
+    let s = create(&c, "/bin/sh", &[]);
+    c.send(ClientMsg::Attach { session: s, cols: 80, rows: 24 });
+    type_line(&c, s, &format!("cat {}/img.seq; echo after-image", dir.display()));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (mut got_image, mut placement) = (None, None);
+    while Instant::now() < deadline && (got_image.is_none() || placement.is_none()) {
+        match c.rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(ServerMsg::Image { id, width, height, rgba, .. }) => {
+                assert_eq!((width, height), (32, 34));
+                assert_eq!(rgba.len(), 32 * 34 * 4);
+                got_image = Some(id);
+            }
+            Ok(ServerMsg::Frame(f)) => {
+                if let Some(p) = f.images.first() {
+                    placement = Some(*p);
+                }
+            }
+            _ => {}
+        }
+    }
+    let id = got_image.expect("image data");
+    let p = placement.expect("placement");
+    assert_eq!(p.id, id);
+    assert_eq!((p.cols, p.rows), (4, 2));
+    wait_for(&c, s, "after-image");
+
+    // 업그레이드 후에도 이미지가 다시 전달되고 같은 자리에 있다.
+    c.send(ClientMsg::Upgrade { req: 1, exe: exe().to_string_lossy().into_owned() });
+    std::thread::sleep(Duration::from_millis(300));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let c2 = loop {
+        if let Ok(c2) = Client::connect(&d.socket, None) {
+            break c2;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    c2.send(ClientMsg::Attach { session: s, cols: 80, rows: 24 });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut again = false;
+    while Instant::now() < deadline && !again {
+        if let Ok(ServerMsg::Image { id: i2, .. }) = c2.rx.recv_timeout(Duration::from_millis(200)) {
+            again = i2 == id;
+        }
+    }
+    assert!(again, "image not restored after upgrade");
+}
+
+#[test]
+fn read_range_returns_scrollback_text() {
+    let d = Daemon::start("range");
+    let c = d.client();
+    let s = create(&c, "/bin/sh", &["-c", "i=0; while [ $i -lt 60 ]; do echo row-$i; i=$((i+1)); done; sleep 30"]);
+    wait_for(&c, s, "row-59");
+    let text = match c.request(|req| ClientMsg::ReadRange { req, session: s, start: (-30, 0), end: (-20, 79) }, Duration::from_secs(5)).unwrap() {
+        ServerMsg::Text { text, .. } => text,
+        m => panic!("{m:?}"),
+    };
+    assert!(text.lines().count() >= 10, "{text}");
+    assert!(text.contains("row-"), "{text}");
+}

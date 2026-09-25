@@ -2,11 +2,13 @@
 //!
 //! 프레임 형식: 4바이트 little-endian 길이 + postcard 페이로드.
 //! enum 변형은 뒤에만 추가한다(postcard 는 변형 인덱스로 인코딩한다).
+//! `ClientMsg::Hello`/`ClientMsg::Upgrade`/`ServerMsg::Hello` 의 위치와 필드는 버전과 무관하게 고정이다.
+//! 그래서 프로토콜 버전이 다른 데몬에도 인사와 업그레이드 요청은 보낼 수 있다.
 
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-pub const PROTO_VERSION: u32 = 1;
+pub const PROTO_VERSION: u32 = 2;
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
 
 pub type SessionId = u64;
@@ -44,6 +46,10 @@ pub enum ClientMsg {
     Ping { req: u32 },
     ClearAttention { session: SessionId },
     Search { req: u32, session: SessionId, query: String, backward: bool },
+    /// 그리드 좌표(0 = 화면 맨 윗줄, 음수 = 스크롤백) 구간의 텍스트.
+    ReadRange { req: u32, session: SessionId, start: (i32, u16), end: (i32, u16) },
+    /// 클라이언트 셀 픽셀 크기(이미지 배치 계산용).
+    CellSize { width: u16, height: u16 },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -70,6 +76,8 @@ pub enum ServerMsg {
     Pong { req: u32 },
     Upgrading,
     SearchResult { req: u32, found: bool },
+    /// 이미지 픽셀(RGBA8). 프레임의 `images` 가 참조하기 전에 한 번 보낸다.
+    Image { session: SessionId, id: u32, width: u32, height: u32, rgba: Vec<u8> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -134,6 +142,8 @@ pub struct Line {
     pub cells: Vec<Cell>,
     /// 결합 문자(zero-width) — (열, 문자열).
     pub combining: Vec<(u16, String)>,
+    /// OSC 8 하이퍼링크 — (시작 열, 끝 열(포함), URI).
+    pub links: Vec<(u16, u16, String)>,
 }
 
 impl Line {
@@ -196,6 +206,17 @@ pub struct Frame {
     pub mode: u32,
     pub display_offset: u32,
     pub history: u32,
+    pub images: Vec<ImagePlacement>,
+}
+
+/// 화면 위 이미지 위치. `row` 가 음수면 이미지 윗부분이 화면 위로 잘린다.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImagePlacement {
+    pub id: u32,
+    pub row: i32,
+    pub col: u16,
+    pub cols: u16,
+    pub rows: u16,
 }
 
 /// 메시지 하나를 길이 접두 프레임으로 쓴다.
@@ -268,11 +289,12 @@ mod tests {
             cols: 3,
             rows: 1,
             full: true,
-            lines: vec![(0, Line { cells: vec![Cell { c: '한', fg: Color::Idx(2), bg: Color::Rgb(1, 2, 3), flags: flags::WIDE }, Cell { c: ' ', flags: flags::SPACER, ..Default::default() }, Cell::default()], combining: vec![] })],
+            lines: vec![(0, Line { cells: vec![Cell { c: '한', fg: Color::Idx(2), bg: Color::Rgb(1, 2, 3), flags: flags::WIDE }, Cell { c: ' ', flags: flags::SPACER, ..Default::default() }, Cell::default()], combining: vec![], links: vec![(0, 1, "https://a".into())] })],
             cursor: Some(Cursor { col: 1, row: 0, shape: CursorShape::Beam }),
             mode: mode::APP_CURSOR,
             display_offset: 0,
             history: 10,
+            images: vec![ImagePlacement { id: 1, row: -2, col: 0, cols: 10, rows: 5 }],
         });
         let bytes = encode(&f);
         let back: ServerMsg = read_msg(&mut &bytes[..]).unwrap().unwrap();
@@ -283,6 +305,17 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    /// 버전이 달라도 인사·업그레이드 메시지의 인코딩은 v1 과 같아야 한다.
+    #[test]
+    fn hello_and_upgrade_encoding_is_stable() {
+        let hello_c = encode(&ClientMsg::Hello { proto: 1, build: "b".into(), client: "c".into() });
+        assert_eq!(&hello_c[4..], &[0, 1, 1, b'b', 1, b'c']);
+        let up = encode(&ClientMsg::Upgrade { req: 1, exe: "x".into() });
+        assert_eq!(&up[4..], &[11, 1, 1, b'x']);
+        let hello = encode(&ServerMsg::Hello { proto: 1, build: "b".into(), pid: 2, can_upgrade: true });
+        assert_eq!(&hello[4..], &[0, 1, 1, b'b', 2, 1]);
     }
 
     #[test]

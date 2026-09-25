@@ -223,6 +223,27 @@ impl TermView {
         if out.is_empty() { None } else { Some(out) }
     }
 
+    /// 선택 영역을 복사한다. 화면 밖(스크롤백)까지 걸치면 데몬에서 텍스트를 받아 복사한다.
+    pub fn copy_selection(&mut self, ctx: &egui::Context, conn: &mut Conn) {
+        let Some(sel) = self.selection else { return };
+        let Some(screen) = conn.screens.get(&self.session) else { return };
+        let (a, b) = sel.ordered();
+        let off = screen.display_offset as i64;
+        let visible = a.line + off >= 0 && b.line + off < screen.rows as i64;
+        if visible {
+            if let Some(t) = self.selection_text(screen) {
+                ctx.copy_text(t);
+            }
+            return;
+        }
+        let last = screen.cols.saturating_sub(1);
+        let (start, end) = match sel.mode {
+            SelMode::Line => ((a.line as i32, 0), (b.line as i32, last)),
+            _ => ((a.line as i32, a.col), (b.line as i32, b.col)),
+        };
+        conn.copy_range(self.session, start, end);
+    }
+
     pub fn has_selection(&self) -> bool {
         self.selection.is_some_and(|s| s.anchor != s.head || s.mode != SelMode::Cell)
     }
@@ -246,6 +267,7 @@ impl TermView {
         }
 
         let cell = self.cell_size(ui.ctx(), settings);
+        conn.set_cell_px(cell.x.round().max(1.0) as u16, cell.y.round().max(1.0) as u16);
         let pad = vec2(8.0, 4.0);
         let inner = rect.shrink2(pad);
         let cols = ((inner.width() / cell.x).floor() as u16).max(2);
@@ -296,6 +318,19 @@ impl TermView {
             }
         }
         painter.extend(shapes);
+
+        // 인라인 이미지(비율 유지, 셀 영역 안에 왼쪽 위 정렬).
+        for im in &screen.images {
+            let Some(tex) = conn.textures.get(&(self.session, im.id)) else { continue };
+            let area = Rect::from_min_size(
+                pos2(inner.min.x + im.col as f32 * cell.x, inner.min.y + im.row as f32 * cell.y),
+                vec2(im.cols as f32 * cell.x, im.rows as f32 * cell.y),
+            );
+            let size = tex.size_vec2();
+            let scale = (area.width() / size.x.max(1.0)).min(area.height() / size.y.max(1.0));
+            let r = Rect::from_min_size(area.min, size * scale);
+            painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
 
         // 선택 영역.
         if let Some(sel) = self.selection {
@@ -407,7 +442,6 @@ impl TermView {
         let sid = self.session;
         let mut bytes: Vec<u8> = Vec::new();
         let is_mac = cfg!(target_os = "macos");
-        let screen_text = |v: &TermView, conn: &Conn| conn.screens.get(&sid).and_then(|sc| v.selection_text(sc));
         for ev in events {
             match ev {
                 egui::Event::Text(t) => {
@@ -439,11 +473,9 @@ impl TermView {
                 }
                 egui::Event::Copy => {
                     if is_mac || mods.shift {
-                        if let Some(t) = screen_text(self, conn) {
-                            ui.ctx().copy_text(t);
-                        }
-                    } else if let Some(t) = screen_text(self, conn).filter(|_| self.has_selection()) {
-                        ui.ctx().copy_text(t);
+                        self.copy_selection(ui.ctx(), conn);
+                    } else if self.has_selection() {
+                        self.copy_selection(ui.ctx(), conn);
                         self.selection = None;
                     } else {
                         bytes.push(0x03);
@@ -600,8 +632,10 @@ impl TermView {
         if mods.command
             && let Some(p) = resp.hover_pos() {
                 let (c, r) = to_cell(p);
-                let text = screen.lines[r as usize].text();
-                if let Some((start, end, target)) = find_link(&text, c as usize, cwd) {
+                let line = &screen.lines[r as usize];
+                let osc8 = line.links.iter().find(|(s, e, _)| (*s..=*e).contains(&c)).map(|(s, e, u)| (*s as usize, *e as usize + 1, link_target(u)));
+                let text = line.text();
+                if let Some((start, end, target)) = osc8.or_else(|| find_link(&text, c as usize, cwd)) {
                     let painter = ui.painter();
                     let y = origin.y + (r as f32 + 1.0) * cell.y - 1.0;
                     painter.line_segment([pos2(origin.x + start as f32 * cell.x, y), pos2(origin.x + end as f32 * cell.x, y)], Stroke::new(1.0, Color32::from_rgb(0x6c, 0x9e, 0xff)));
@@ -682,6 +716,15 @@ fn word_bounds(line: &Line, col: u16) -> (u16, u16) {
         b += 1;
     }
     (a as u16, b as u16)
+}
+
+/// OSC 8 URI 를 열 대상으로 바꾼다(`file://` 는 로컬 파일).
+fn link_target(uri: &str) -> LinkTarget {
+    if let Some(rest) = uri.strip_prefix("file://") {
+        let path = &rest[rest.find('/').unwrap_or(0)..];
+        return LinkTarget::File { path: std::path::PathBuf::from(path), line: None, col: None };
+    }
+    LinkTarget::Url(uri.to_string())
 }
 
 /// `text` 의 `col` 위치에 있는 URL 또는 파일 경로(존재하는 파일만)를 찾는다.
@@ -847,6 +890,16 @@ fn build_row(ctx: &egui::Context, line: &Line, cell: Vec2, font: &FontId, pal: &
     }
     if !text_run.is_empty() {
         flush(&mut shapes, &mut text_run, run_start, run_style);
+    }
+    for (a, b, _) in &line.links {
+        let fg = line.cells.get(*a as usize).map(|c| resolve(c).0).unwrap_or(pal.fg).gamma_multiply(0.6);
+        let (x0, x1) = (*a as f32 * cell.x, (*b as f32 + 1.0) * cell.x);
+        let y = cell.y - 1.5;
+        let mut x = x0;
+        while x < x1 {
+            shapes.push(Shape::line_segment([pos2(x, y), pos2((x + 2.0).min(x1), y)], Stroke::new(1.0, fg)));
+            x += 4.0;
+        }
     }
     shapes
 }

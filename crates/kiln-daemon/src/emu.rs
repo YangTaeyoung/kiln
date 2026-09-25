@@ -200,6 +200,62 @@ impl Emu {
         }
     }
 
+    /// 이미지 표식(보이지 않는 하이퍼링크)을 커서 위치에 쓰고 커서를 옮긴다.
+    pub fn place_image(&mut self, id: u32, cols: u16, rows: u16, cursor: crate::images::CursorMove) {
+        use crate::images::CursorMove;
+        let mut seq = format!("\x1b]8;id=kiln-img-{id};{IMAGE_URI}{id}\x1b\\ \x1b]8;;\x1b\\");
+        match cursor {
+            CursorMove::Below => {
+                seq.push('\r');
+                seq.push_str(&"\n".repeat(rows.max(1) as usize));
+            }
+            CursorMove::RightOfLastRow => {
+                seq.push_str(&"\n".repeat(rows.saturating_sub(1) as usize));
+                if cols > 1 {
+                    seq.push_str(&format!("\x1b[{}C", cols - 1));
+                }
+            }
+            CursorMove::Stay => seq.push('\x08'),
+        }
+        self.advance(seq.as_bytes());
+    }
+
+    /// 화면(및 위로 `lookback` 줄)에서 이미지 표식을 찾아 (id, 화면 행, 열) 을 돌려준다.
+    pub fn image_markers(&self, lookback: usize) -> Vec<(u32, i32, u16)> {
+        let grid = self.term.grid();
+        let offset = grid.display_offset() as i32;
+        let rows = self.term.screen_lines() as i32;
+        let cols = self.term.columns();
+        let top = (-offset - lookback as i32).max(-(grid.history_size() as i32));
+        let mut out = Vec::new();
+        for l in top..(rows - offset) {
+            let row = &grid[GLine(l)];
+            for c in 0..cols {
+                let tc = &row[Column(c)];
+                if tc.extra.is_none() {
+                    continue;
+                }
+                if let Some(h) = tc.hyperlink() {
+                    if let Some(id) = h.uri().strip_prefix(IMAGE_URI).and_then(|v| v.parse().ok()) {
+                        out.push((id, l + offset, c as u16));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// 그리드 좌표 구간의 텍스트.
+    pub fn read_range(&self, start: (i32, u16), end: (i32, u16)) -> String {
+        let grid = self.term.grid();
+        let top = -(grid.history_size() as i32);
+        let bottom = self.term.screen_lines() as i32 - 1;
+        let last_col = self.term.columns().saturating_sub(1);
+        let clamp = |(l, c): (i32, u16)| Point::new(GLine(l.clamp(top, bottom)), Column((c as usize).min(last_col)));
+        let (a, b) = if (start.0, start.1) <= (end.0, end.1) { (start, end) } else { (end, start) };
+        self.term.bounds_to_string(clamp(a), clamp(b))
+    }
+
     pub fn dump(&mut self) -> Dump {
         let (cols, rows) = self.size();
         let mode = self.term.mode().bits();
@@ -355,19 +411,33 @@ fn convert_flags(f: Flags) -> u16 {
     o
 }
 
+pub const IMAGE_URI: &str = "kiln-img:";
+
 fn convert_row(grid: &Grid<TCell>, line: GLine, cols: usize) -> Line {
     let row = &grid[line];
     let mut cells = Vec::with_capacity(cols);
     let mut combining = Vec::new();
+    let mut links: Vec<(u16, u16, String)> = Vec::new();
     for c in 0..cols {
         let tc = &row[Column(c)];
+        if tc.extra.is_some() {
+            if let Some(h) = tc.hyperlink() {
+                let uri = h.uri();
+                if !uri.starts_with(IMAGE_URI) {
+                    match links.last_mut() {
+                        Some((_, end, u)) if *end + 1 == c as u16 && u == uri => *end = c as u16,
+                        _ => links.push((c as u16, c as u16, uri.to_string())),
+                    }
+                }
+            }
+        }
         cells.push(Cell { c: tc.c, fg: convert_color(tc.fg), bg: convert_color(tc.bg), flags: convert_flags(tc.flags) });
         if let Some(z) = tc.zerowidth()
             && !z.is_empty() {
                 combining.push((c as u16, z.iter().collect()));
             }
     }
-    Line { cells, combining }
+    Line { cells, combining, links }
 }
 
 #[cfg(test)]
@@ -415,6 +485,38 @@ mod tests {
         assert!(r.visible_line(0).text().starts_with("alt-ui"));
         r.advance(b"\x1b[?1049l");
         assert!(r.visible_line(0).text().starts_with("primary"));
+    }
+
+    #[test]
+    fn osc8_links_are_reported_per_run() {
+        let mut e = Emu::new(30, 3);
+        e.advance(b"see \x1b]8;;https://kiln.dev\x1b\\docs\x1b]8;;\x1b\\ ok");
+        assert_eq!(e.visible_line(0).links, vec![(4, 7, "https://kiln.dev".to_string())]);
+    }
+
+    #[test]
+    fn image_marker_moves_with_scroll_and_cursor_goes_below() {
+        let mut e = Emu::new(20, 5);
+        e.advance(b"x\r\n");
+        e.place_image(9, 4, 2, crate::images::CursorMove::Below);
+        assert_eq!(e.image_markers(10), vec![(9, 1, 0)]);
+        assert_eq!(e.cursor().map(|c| (c.row, c.col)), Some((3, 0)));
+        assert!(e.visible_line(1).links.is_empty());
+        for _ in 0..3 {
+            e.advance(b"\r\n");
+        }
+        // 표식이 화면 위로 밀려도 lookback 범위에 있으면 음수 행으로 찾는다.
+        assert_eq!(e.image_markers(10), vec![(9, -1, 0)]);
+    }
+
+    #[test]
+    fn read_range_includes_scrollback() {
+        let mut e = Emu::new(20, 3);
+        for i in 0..10 {
+            e.advance(format!("line{i}\r\n").as_bytes());
+        }
+        let t = e.read_range((-5, 0), (0, 19));
+        assert!(t.contains("line3") && t.contains("line7"), "{t}");
     }
 
     #[test]

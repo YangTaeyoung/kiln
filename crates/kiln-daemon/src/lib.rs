@@ -3,6 +3,7 @@
 
 pub mod client;
 pub mod emu;
+pub mod images;
 pub mod osc;
 pub mod procinfo;
 pub mod pty;

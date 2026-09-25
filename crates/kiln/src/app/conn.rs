@@ -19,6 +19,7 @@ pub struct Screen {
     /// 프레임을 받을 때마다 증가한다.
     pub version: u64,
     pub row_versions: Vec<u64>,
+    pub images: Vec<ImagePlacement>,
 }
 
 impl Screen {
@@ -40,6 +41,7 @@ impl Screen {
         self.mode = f.mode;
         self.display_offset = f.display_offset;
         self.history = f.history;
+        self.images = f.images;
     }
 }
 
@@ -75,6 +77,11 @@ pub struct Conn {
     pub daemon_build: String,
     upgrade_requested: bool,
     pub sessions_listed: bool,
+    /// (세션, 이미지 id) → 텍스처.
+    pub textures: HashMap<(SessionId, u32), egui::TextureHandle>,
+    /// 응답이 오면 클립보드로 복사할 ReadRange 요청.
+    pending_copy: std::collections::HashSet<u32>,
+    cell_px: (u16, u16),
 }
 
 impl Conn {
@@ -94,6 +101,9 @@ impl Conn {
             daemon_build: String::new(),
             upgrade_requested: false,
             sessions_listed: false,
+            textures: HashMap::new(),
+            pending_copy: Default::default(),
+            cell_px: (0, 0),
         };
         c.try_connect();
         c
@@ -117,6 +127,9 @@ impl Conn {
             daemon_build: String::new(),
             upgrade_requested: false,
             sessions_listed: false,
+            textures: HashMap::new(),
+            pending_copy: Default::default(),
+            cell_px: (0, 0),
         }
     }
 
@@ -141,6 +154,11 @@ impl Conn {
                     return;
                 }
                 c.send(ClientMsg::ListSessions { req: c.next_req() });
+                if self.cell_px != (0, 0) {
+                    c.send(ClientMsg::CellSize { width: self.cell_px.0, height: self.cell_px.1 });
+                }
+                // 재연결 후 이미지를 다시 받는다.
+                self.textures.clear();
                 for (sid, (cols, rows)) in &self.attached {
                     c.send(ClientMsg::Attach { session: *sid, cols: *cols, rows: *rows });
                 }
@@ -217,7 +235,19 @@ impl Conn {
             ServerMsg::Error { message, .. } => self.events.push(ConnEvent::Error(message)),
             ServerMsg::Upgrading => self.events.push(ConnEvent::Upgrading),
             ServerMsg::SearchResult { found, .. } => self.events.push(ConnEvent::SearchResult { found }),
-            ServerMsg::Hello { .. } | ServerMsg::Text { .. } | ServerMsg::Pong { .. } => {}
+            ServerMsg::Text { req, text } => {
+                if self.pending_copy.remove(&req) {
+                    self.ctx.copy_text(text);
+                }
+            }
+            ServerMsg::Image { session, id, width, height, rgba } => {
+                if rgba.len() == (width * height * 4) as usize {
+                    let img = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
+                    let tex = self.ctx.load_texture(format!("kiln-img-{session}-{id}"), img, egui::TextureOptions::LINEAR);
+                    self.textures.insert((session, id), tex);
+                }
+            }
+            ServerMsg::Hello { .. } | ServerMsg::Pong { .. } => {}
         }
     }
 
@@ -258,11 +288,27 @@ impl Conn {
         }
     }
 
+    /// 그리드 구간 텍스트를 요청하고, 응답이 오면 클립보드에 복사한다.
+    pub fn copy_range(&mut self, session: SessionId, start: (i32, u16), end: (i32, u16)) {
+        let req = self.next_req();
+        self.pending_copy.insert(req);
+        self.send(ClientMsg::ReadRange { req, session, start, end });
+    }
+
+    /// 셀 픽셀 크기가 바뀌면 데몬에 알린다(이미지 크기 계산용).
+    pub fn set_cell_px(&mut self, w: u16, h: u16) {
+        if self.cell_px != (w, h) {
+            self.cell_px = (w, h);
+            self.send(ClientMsg::CellSize { width: w, height: h });
+        }
+    }
+
     pub fn kill(&mut self, sid: SessionId) {
         self.detach(sid);
         self.send(ClientMsg::Kill { session: sid });
         self.screens.remove(&sid);
         self.infos.remove(&sid);
+        self.textures.retain(|(s, _), _| *s != sid);
     }
 
     pub fn is_alive(&self, sid: SessionId) -> bool {

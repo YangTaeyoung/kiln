@@ -3,6 +3,7 @@
 #[cfg(unix)]
 use crate::emu::Dump;
 use crate::emu::Emu;
+use crate::images::{Decoded, ImageScanner, ImageState, Segment};
 use crate::osc::{OscEvent, OscScanner};
 use crate::pty::{Pty, ReadResult};
 use crate::transport::{Conn, Listener};
@@ -11,13 +12,12 @@ use alacritty_terminal::event::Event;
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use kiln_proto::*;
 use parking_lot::{Mutex, RwLock};
-#[cfg(unix)]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub struct Session {
@@ -27,6 +27,37 @@ pub struct Session {
     input: Sender<Vec<u8>>,
     info: Mutex<SessionInfo>,
     generation: AtomicU64,
+    images: Mutex<SessionImages>,
+}
+
+/// 세션이 표시 중인 이미지. 오래된 것부터 버린다.
+#[derive(Default)]
+struct SessionImages {
+    map: HashMap<u32, Arc<Decoded>>,
+    order: std::collections::VecDeque<u32>,
+    state: ImageState,
+    next: u32,
+}
+
+const MAX_IMAGES: usize = 64;
+
+impl SessionImages {
+    fn insert(&mut self, d: Decoded) -> u32 {
+        self.next += 1;
+        let id = self.next;
+        self.map.insert(id, Arc::new(d));
+        self.order.push_back(id);
+        while self.order.len() > MAX_IMAGES {
+            if let Some(old) = self.order.pop_front() {
+                self.map.remove(&old);
+            }
+        }
+        id
+    }
+
+    fn max_rows(&self) -> usize {
+        self.map.values().map(|d| d.rows as usize).max().unwrap_or(0)
+    }
 }
 
 struct Client {
@@ -45,6 +76,8 @@ struct AttachState {
     mode: u32,
     offset: u32,
     full: bool,
+    images: Vec<ImagePlacement>,
+    images_sent: std::collections::HashSet<u32>,
 }
 
 pub struct Daemon {
@@ -55,14 +88,49 @@ pub struct Daemon {
     upgrading: AtomicBool,
     readers_running: AtomicUsize,
     socket: String,
+    cell_w: AtomicU32,
+    cell_h: AtomicU32,
 }
 
+/// 업그레이드 상태 파일 v1(접두 없음).
 #[cfg(unix)]
 #[derive(Serialize, Deserialize)]
 struct UpgradeState {
     next_session: u64,
     listener_fd: i32,
     sessions: Vec<SavedSession>,
+}
+
+/// 업그레이드 상태 파일 v2: `STATE_MAGIC_V2` 접두 + 이 구조체.
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
+struct UpgradeStateV2 {
+    base: UpgradeState,
+    images: Vec<SavedImages>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct SavedImages {
+    session: SessionId,
+    next: u32,
+    images: Vec<(u32, Decoded)>,
+}
+
+#[cfg(unix)]
+const STATE_MAGIC_V2: &[u8] = b"KILNUP2\n";
+
+impl SessionImages {
+    fn save(&self, session: SessionId) -> SavedImages {
+        SavedImages { session, next: self.next, images: self.order.iter().filter_map(|id| self.map.get(id).map(|d| (*id, (**d).clone()))).collect() }
+    }
+
+    fn load(&mut self, saved: SavedImages) {
+        self.next = saved.next;
+        for (id, d) in saved.images {
+            self.map.insert(id, Arc::new(d));
+            self.order.push_back(id);
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -88,6 +156,8 @@ impl Daemon {
             upgrading: AtomicBool::new(false),
             readers_running: AtomicUsize::new(0),
             socket,
+            cell_w: AtomicU32::new(8),
+            cell_h: AtomicU32::new(17),
         })
     }
 
@@ -147,7 +217,7 @@ impl Daemon {
         let (tx, rx) = unbounded::<Vec<u8>>();
         let mut writer = pty.writer()?;
         let reader = pty.reader()?;
-        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1) });
+        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), images: Mutex::new(SessionImages::default()) });
         self.sessions.write().insert(id, sess.clone());
         std::thread::Builder::new().name(format!("pty-w-{id}")).spawn(move || {
             while let Ok(data) = rx.recv() {
@@ -170,6 +240,7 @@ impl Daemon {
         let mut buf = vec![0u8; 64 * 1024];
         let mut osc = OscScanner::default();
         let mut osc_events = Vec::new();
+        let mut img_scan = ImageScanner::default();
         let mut eof = false;
         loop {
             if self.upgrading.load(Ordering::SeqCst) {
@@ -179,7 +250,13 @@ impl Daemon {
                 Ok(ReadResult::Data(n)) => {
                     let data = &buf[..n];
                     osc.feed(data, &mut osc_events);
-                    let events = sess.emu.lock().advance(data);
+                    let mut events = Vec::new();
+                    for seg in img_scan.feed(data) {
+                        match seg {
+                            Segment::Bytes(a, b) => events.extend(sess.emu.lock().advance(&data[a..b])),
+                            Segment::Image(cmd) => self.handle_image(&sess, cmd),
+                        }
+                    }
                     sess.generation.fetch_add(1, Ordering::SeqCst);
                     self.handle_events(&sess, events, &mut osc_events);
                     self.wake_attached(sess.id);
@@ -215,6 +292,38 @@ impl Daemon {
         self.wake_attached(sess.id);
     }
 
+    fn geometry(&self, sess: &Session) -> crate::images::Geometry {
+        let (cols, rows) = sess.emu.lock().size();
+        crate::images::Geometry { cell_w: self.cell_w.load(Ordering::Relaxed), cell_h: self.cell_h.load(Ordering::Relaxed), cols, rows }
+    }
+
+    fn handle_image(&self, sess: &Session, cmd: crate::images::ImageCmd) {
+        use crate::images::Action;
+        let g = self.geometry(sess);
+        let action = sess.images.lock().state.handle(cmd, &g);
+        let show = |d: Decoded| {
+            let (cols, rows, cursor) = (d.cols, d.rows, d.cursor);
+            let id = sess.images.lock().insert(d);
+            sess.emu.lock().place_image(id, cols, rows, cursor);
+        };
+        match action {
+            Action::None => {}
+            Action::Show(d) => show(d),
+            Action::Reply(r) => {
+                let _ = sess.input.send(r);
+            }
+            Action::ShowAndReply(d, r) => {
+                show(d);
+                let _ = sess.input.send(r);
+            }
+            Action::DeleteAll => {
+                let mut im = sess.images.lock();
+                im.map.clear();
+                im.order.clear();
+            }
+        }
+    }
+
     fn handle_events(&self, sess: &Session, events: Vec<Event>, osc: &mut Vec<OscEvent>) {
         let mut updated = false;
         for e in events {
@@ -242,7 +351,8 @@ impl Daemon {
                 }
                 Event::TextAreaSizeRequest(f) => {
                     let (cols, rows) = sess.emu.lock().size();
-                    let ws = alacritty_terminal::event::WindowSize { num_lines: rows, num_cols: cols, cell_width: 8, cell_height: 16 };
+                    let (cw, ch) = (self.cell_w.load(Ordering::Relaxed) as u16, self.cell_h.load(Ordering::Relaxed) as u16);
+                    let ws = alacritty_terminal::event::WindowSize { num_lines: rows, num_cols: cols, cell_width: cw, cell_height: ch };
                     let _ = sess.input.send(f(ws).into_bytes());
                 }
                 Event::ColorRequest(idx, f) => {
@@ -464,6 +574,14 @@ impl Daemon {
                     }
                 }
             }
+            ClientMsg::ReadRange { req, session, start, end } => match self.session(session) {
+                Some(s) => reply(ServerMsg::Text { req, text: s.emu.lock().read_range(start, end) }),
+                None => reply(ServerMsg::Error { req, message: format!("no session {session}") }),
+            },
+            ClientMsg::CellSize { width, height } => {
+                self.cell_w.store(width.max(1) as u32, Ordering::Relaxed);
+                self.cell_h.store(height.max(1) as u32, Ordering::Relaxed);
+            }
             ClientMsg::ReadText { req, session, history } => match self.session(session) {
                 Some(s) => reply(ServerMsg::Text { req, text: s.emu.lock().text(history as usize) }),
                 None => reply(ServerMsg::Error { req, message: format!("no session {session}") }),
@@ -512,15 +630,21 @@ impl Daemon {
             let ids: Vec<SessionId> = client.attached.lock().keys().copied().collect();
             for sid in ids {
                 let Some(sess) = self.session(sid) else { continue };
-                let frame = {
+                let (frame, images) = {
                     let mut attached = client.attached.lock();
                     let Some(st) = attached.get_mut(&sid) else { continue };
                     build_frame(&sess, st)
                 };
-                if let Some(f) = frame
-                    && client.out.send(ServerMsg::Frame(f)).is_err() {
+                for m in images {
+                    if client.out.send(m).is_err() {
                         return;
                     }
+                }
+                if let Some(f) = frame
+                    && client.out.send(ServerMsg::Frame(f)).is_err()
+                {
+                    return;
+                }
             }
         }
     }
@@ -537,20 +661,25 @@ impl Daemon {
             std::thread::sleep(Duration::from_millis(10));
         }
         let mut saved = Vec::new();
+        let mut images = Vec::new();
         let sessions: Vec<Arc<Session>> = self.sessions.read().values().cloned().collect();
         for s in &sessions {
             let dump = s.emu.lock().dump();
             let fd = s.pty.raw_fd();
             crate::pty::set_cloexec(fd, false)?;
             saved.push(SavedSession { info: s.info.lock().clone(), fd, pid: s.pty.pid() as i32, dump });
+            images.push(s.images.lock().save(s.id));
         }
         crate::pty::set_cloexec(listener_fd, false)?;
-        let state = UpgradeState { next_session: self.next_session.load(Ordering::SeqCst), listener_fd, sessions: saved };
+        let n = saved.len();
+        let state = UpgradeStateV2 { base: UpgradeState { next_session: self.next_session.load(Ordering::SeqCst), listener_fd, sessions: saved }, images };
         let path = std::path::Path::new(&self.socket).with_file_name(format!("upgrade-{}.state", std::process::id()));
-        std::fs::write(&path, postcard::to_stdvec(&state)?)?;
+        let mut bytes = STATE_MAGIC_V2.to_vec();
+        bytes.extend(postcard::to_stdvec(&state)?);
+        std::fs::write(&path, bytes)?;
         // 클라이언트 연결을 닫아 재연결을 유도한다.
         self.clients.lock().clear();
-        log::info!("exec {exe} for upgrade with {} sessions", state.sessions.len());
+        log::info!("exec {exe} for upgrade with {n} sessions");
         let err = exec(exe, &["daemon", "--foreground", "--restore", &path.to_string_lossy()]);
         // exec 실패: 원래 상태로 되돌린다.
         let _ = std::fs::remove_file(&path);
@@ -587,10 +716,11 @@ fn line_hash(l: &Line) -> u64 {
     h.finish()
 }
 
-fn build_frame(sess: &Session, st: &mut AttachState) -> Option<Frame> {
+/// 바뀐 줄만 담은 프레임과, 프레임이 처음 참조하는 이미지 데이터 메시지.
+fn build_frame(sess: &Session, st: &mut AttachState) -> (Option<Frame>, Vec<ServerMsg>) {
     let generation = sess.generation.load(Ordering::SeqCst);
     if !st.full && generation == st.generation {
-        return None;
+        return (None, Vec::new());
     }
     let emu = sess.emu.lock();
     let (cols, rows) = emu.size();
@@ -613,16 +743,34 @@ fn build_frame(sess: &Session, st: &mut AttachState) -> Option<Frame> {
     let mode = emu.mode_bits();
     let offset = emu.display_offset() as u32;
     let history = emu.history() as u32;
+    let mut image_msgs = Vec::new();
+    let mut images = Vec::new();
+    {
+        let im = sess.images.lock();
+        if !im.map.is_empty() {
+            for (id, row, col) in emu.image_markers(im.max_rows()) {
+                let Some(d) = im.map.get(&id) else { continue };
+                if row + (d.rows as i32) <= 0 || row >= rows as i32 {
+                    continue;
+                }
+                if st.images_sent.insert(id) {
+                    image_msgs.push(ServerMsg::Image { session: sess.id, id, width: d.width, height: d.height, rgba: d.rgba.clone() });
+                }
+                images.push(ImagePlacement { id, row, col, cols: d.cols, rows: d.rows });
+            }
+        }
+    }
     drop(emu);
     st.generation = generation;
-    if !full && lines.is_empty() && cursor == st.cursor && mode == st.mode && offset == st.offset {
-        return None;
+    if !full && lines.is_empty() && cursor == st.cursor && mode == st.mode && offset == st.offset && images == st.images {
+        return (None, image_msgs);
     }
     st.full = false;
     st.cursor = cursor;
     st.mode = mode;
     st.offset = offset;
-    Some(Frame { session: sess.id, cols, rows, full, lines, cursor, mode, display_offset: offset, history })
+    st.images = images.clone();
+    (Some(Frame { session: sess.id, cols, rows, full, lines, cursor, mode, display_offset: offset, history, images }), image_msgs)
 }
 
 pub struct RunOptions {
@@ -676,12 +824,22 @@ fn restore(daemon: &Arc<Daemon>, path: &str) -> anyhow::Result<Listener> {
     use std::os::fd::FromRawFd;
     let bytes = std::fs::read(path)?;
     let _ = std::fs::remove_file(path);
-    let state: UpgradeState = postcard::from_bytes(&bytes)?;
+    let (state, mut images) = match bytes.strip_prefix(STATE_MAGIC_V2) {
+        Some(rest) => {
+            let v2: UpgradeStateV2 = postcard::from_bytes(rest)?;
+            (v2.base, v2.images)
+        }
+        None => (postcard::from_bytes::<UpgradeState>(&bytes)?, Vec::new()),
+    };
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
     for s in state.sessions {
         let pty = Pty::from_raw(s.fd, s.pid)?;
         let emu = Emu::restore(s.dump);
-        daemon.install(s.info.id, pty, emu, s.info)?;
+        let id = s.info.id;
+        daemon.install(id, pty, emu, s.info)?;
+        if let (Some(sess), Some(pos)) = (daemon.session(id), images.iter().position(|i| i.session == id)) {
+            sess.images.lock().load(images.swap_remove(pos));
+        }
     }
     crate::pty::set_cloexec(state.listener_fd, true)?;
     // SAFETY: 이전 프로세스에서 상속한 리스닝 소켓 fd.

@@ -154,19 +154,19 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Cmd::UpgradeDaemon) => {
-            let c = Client::connect(&kiln_proto::socket_name(), None)?;
-            let old = c.server_pid;
-            c.send(ClientMsg::Upgrade { req: c.next_req(), exe: exe().to_string_lossy().into_owned() });
+            let socket = kiln_proto::socket_name();
+            let old = Client::connect(&socket, None).map(|c| c.server_pid).ok();
+            kiln_daemon::client::request_upgrade(&socket, &exe())?;
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            std::thread::sleep(Duration::from_millis(100));
             loop {
-                if let Ok(n) = Client::connect(&kiln_proto::socket_name(), None)
-                    && n.server_build == kiln_daemon::build_id() {
-                        println!("daemon upgraded (pid {} → {}, build {})", old, n.server_pid, n.server_build);
+                if let Ok(n) = Client::connect(&socket, None) {
+                    if n.server_build == kiln_daemon::build_id() {
+                        println!("daemon upgraded (pid {} → {}, build {})", old.map(|p| p.to_string()).unwrap_or_else(|| "?".into()), n.server_pid, n.server_build);
                         return Ok(());
                     }
+                }
                 if std::time::Instant::now() > deadline {
-                    anyhow::bail!("upgrade did not complete; see {}", kiln_daemon::client::daemon_log_path(&kiln_proto::socket_name()).display());
+                    anyhow::bail!("upgrade did not complete; see {}", kiln_daemon::client::daemon_log_path(&socket).display());
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }

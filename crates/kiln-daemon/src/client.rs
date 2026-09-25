@@ -29,7 +29,7 @@ impl Client {
         let (server_build, server_pid, can_upgrade) = match hello {
             ServerMsg::Hello { proto, build, pid, can_upgrade } => {
                 if proto != PROTO_VERSION {
-                    return Err(std::io::Error::other(format!("protocol mismatch: daemon {proto}, client {PROTO_VERSION}")));
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{PROTO_MISMATCH}: daemon {proto}, client {PROTO_VERSION}")));
                 }
                 (build, pid, can_upgrade)
             }
@@ -68,11 +68,15 @@ impl Client {
     }
 
     /// 데몬이 없으면 `exe daemon` 을 분리 실행한 뒤 연결한다.
+    /// 프로토콜 버전이 다른 데몬이면 `exe` 로 업그레이드시킨 뒤 연결한다.
     pub fn connect_or_spawn(socket: &str, exe: &Path, notify: Option<Notify>) -> anyhow::Result<Client> {
-        if let Ok(c) = Client::connect(socket, notify.clone()) {
-            return Ok(c);
+        match Client::connect(socket, notify.clone()) {
+            Ok(c) => return Ok(c),
+            Err(e) if is_proto_mismatch(&e) => {
+                request_upgrade(socket, exe)?;
+            }
+            Err(_) => spawn_daemon(exe, socket)?,
         }
-        spawn_daemon(exe, socket)?;
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             match Client::connect(socket, notify.clone()) {
@@ -115,6 +119,36 @@ impl Client {
                 return Ok(m);
             }
         }
+    }
+}
+
+pub const PROTO_MISMATCH: &str = "protocol mismatch";
+
+pub fn is_proto_mismatch(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::InvalidData && e.to_string().starts_with(PROTO_MISMATCH)
+}
+
+/// 버전에 상관없이 인코딩이 고정된 Hello/Upgrade 만 써서 데몬에 업그레이드를 요청한다.
+pub fn request_upgrade(socket: &str, exe: &Path) -> std::io::Result<()> {
+    let Conn { mut reader, mut writer } = transport::connect(socket)?;
+    write_msg(&mut writer, &ClientMsg::Hello { proto: PROTO_VERSION, build: crate::build_id().into(), client: "kiln-upgrade".into() })?;
+    let hello: ServerMsg = read_msg(&mut reader)?.ok_or_else(|| std::io::Error::other("daemon closed"))?;
+    match hello {
+        ServerMsg::Hello { can_upgrade: true, .. } => {
+            write_msg(&mut writer, &ClientMsg::Upgrade { req: 0, exe: exe.to_string_lossy().into_owned() })?;
+            // 데몬이 교체되며 연결이 닫힐 때까지 기다린다.
+            let mut sink = [0u8; 4096];
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                match std::io::Read::read(&mut reader, &mut sink) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            Ok(())
+        }
+        ServerMsg::Hello { .. } => Err(std::io::Error::other("daemon cannot upgrade in place")),
+        _ => Err(std::io::Error::other("unexpected hello")),
     }
 }
 

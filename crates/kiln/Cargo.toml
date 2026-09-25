@@ -35,5 +35,6 @@ libc = "0.2"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
 tempfile.workspace = true
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }

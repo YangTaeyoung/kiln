@@ -139,3 +139,30 @@ fn git_and_db_panels_render() {
     let _ = cmd();
     shutdown(&base);
 }
+
+#[test]
+fn inline_image_and_osc8_link_render() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("image");
+    use base64::Engine;
+    let mut img = image::RgbaImage::new(160, 90);
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        *p = image::Rgba([(x * 255 / 160) as u8, (y * 255 / 90) as u8, 200, 255]);
+    }
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let seq = format!(
+        "\x1b]1337;File=inline=1:{}\x07\x1b]8;;https://github.com/YangTaeyoung\x1b\\OSC8 링크\x1b]8;;\x1b\\\n",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    );
+    std::fs::write(proj.join("demo.seq"), seq).unwrap();
+    let mut h = Harness::builder().with_size([1280.0, 800.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| !t.trim().is_empty())));
+    h.event(egui::Event::Text("clear; cat demo.seq".into()));
+    h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("OSC8"))));
+    assert!(pump_until(&mut h, 5, |h| h.state().debug_image_count() > 0), "image texture not loaded");
+    h.run_steps(5);
+    save_shot(&mut h, "app_inline_image");
+    shutdown(&base);
+}
