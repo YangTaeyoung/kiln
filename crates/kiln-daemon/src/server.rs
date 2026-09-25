@@ -558,7 +558,7 @@ impl Daemon {
                 proto: PROTO_VERSION,
                 build: build_id().to_string(),
                 pid: std::process::id(),
-                can_upgrade: cfg!(unix),
+                can_upgrade: true,
             }),
             ClientMsg::Ping { req } => reply(ServerMsg::Pong { req }),
             ClientMsg::ListSessions { req } => reply(ServerMsg::Sessions { req, sessions: self.list() }),
@@ -943,6 +943,24 @@ fn wait_for_exit(pid: u32, timeout: Duration) {
     }
 }
 
+/// 같은 이름의 데몬이 하나만 돌도록 배타적으로 연 잠금 파일을 쥔다(네임드 파이프는 중복 리슨을 막지 않는다).
+#[cfg(windows)]
+fn acquire_instance_lock(socket: &str) -> anyhow::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let path = crate::ptyhost::registry_path(socket).with_extension("lock");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        match std::fs::OpenOptions::new().create(true).write(true).share_mode(0).open(&path) {
+            Ok(f) => return Ok(f),
+            Err(e) if Instant::now() > deadline => anyhow::bail!("another daemon is running ({e})"),
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
 fn restore_hosted(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<()> {
     let state: HostedState = postcard::from_bytes(bytes)?;
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
@@ -968,6 +986,8 @@ pub fn run(opts: RunOptions) -> anyhow::Result<()> {
     if let Some(pid) = opts.wait_pid {
         wait_for_exit(pid, Duration::from_secs(10));
     }
+    #[cfg(windows)]
+    let _instance_lock = acquire_instance_lock(&opts.socket)?;
     let daemon = Daemon::new(opts.socket.clone());
     let state = match &opts.restore {
         Some(path) => {

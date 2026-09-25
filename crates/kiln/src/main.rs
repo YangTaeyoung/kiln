@@ -93,8 +93,15 @@ fn main() -> anyhow::Result<()> {
             app::run(cli.path)
         }
         Some(Cmd::Daemon { foreground: _, restore, socket, wait_pid }) => {
-            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
             let socket = socket.unwrap_or_else(kiln_proto::socket_name);
+            // 분리 실행(WMI 등)에서는 표준 에러가 없으므로 로그 파일에 직접 쓴다.
+            let log_path = kiln_daemon::client::daemon_log_path(&socket);
+            let mut logger = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+            if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+                logger.target(env_logger::Target::Pipe(Box::new(f)));
+            }
+            logger.init();
+            log::info!("daemon start pid {} args {:?}", std::process::id(), std::env::args().collect::<Vec<_>>());
             kiln_daemon::server::run(kiln_daemon::server::RunOptions { socket, restore, wait_pid })
         }
         Some(Cmd::PtyHost { endpoint, session, spec }) => {

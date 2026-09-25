@@ -157,6 +157,7 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
     // 종료 코드를 넘겼으면 끝낸다. 아무도 가져가지 않으면 10분 뒤 끝낸다.
     {
         let shared = shared.clone();
+        #[cfg(unix)]
         let endpoint = endpoint.to_string();
         std::thread::spawn(move || {
             let mut exited_at: Option<Instant> = None;

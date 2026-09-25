@@ -60,14 +60,53 @@ mod imp {
 
     impl Listener {
         pub fn bind(name: &str) -> io::Result<Self> {
+            use interprocess::os::windows::local_socket::ListenerOptionsExt;
+            use interprocess::os::windows::security_descriptor::SecurityDescriptor;
             let n = name.to_ns_name::<GenericNamespaced>()?;
-            Ok(Listener(ListenerOptions::new().name(n).create_sync()?))
+            let mut opts = ListenerOptions::new().name(n);
+            // 권한 상승 여부와 무관하게 같은 사용자만 접근하도록 현재 사용자 SID 에 전체 권한을 준다.
+            if let Some(sid) = current_user_sid() {
+                let sddl = widestring::U16CString::from_str(format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)")).map_err(io::Error::other)?;
+                opts = opts.security_descriptor(SecurityDescriptor::deserialize(&sddl)?);
+            }
+            Ok(Listener(opts.create_sync()?))
         }
 
         pub fn accept(&self) -> io::Result<Conn> {
             let s = self.0.accept()?;
             let (r, w) = s.split();
             Ok(Conn { reader: Box::new(r), writer: Box::new(w) })
+        }
+    }
+
+    /// 현재 프로세스 토큰의 사용자 SID 문자열(예: S-1-5-21-...).
+    fn current_user_sid() -> Option<String> {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LocalFree};
+        use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+        use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        // SAFETY: 토큰 정보를 충분한 버퍼에 받아 SID 를 문자열로 바꾸고 할당을 해제한다.
+        unsafe {
+            let mut token: HANDLE = std::ptr::null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+                return None;
+            }
+            let mut len = 0u32;
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len);
+            let mut buf = vec![0u8; len as usize];
+            let ok = GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len);
+            CloseHandle(token);
+            if ok == 0 {
+                return None;
+            }
+            let user = &*(buf.as_ptr() as *const TOKEN_USER);
+            let mut out: *mut u16 = std::ptr::null_mut();
+            if ConvertSidToStringSidW(user.User.Sid, &mut out) == 0 {
+                return None;
+            }
+            let s = widestring::U16CStr::from_ptr_str(out).to_string_lossy();
+            LocalFree(out.cast());
+            Some(s)
         }
     }
 
