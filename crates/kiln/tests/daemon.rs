@@ -127,13 +127,11 @@ fn hot_upgrade_keeps_processes_screen_and_io() {
     let deadline = Instant::now() + Duration::from_secs(10);
     let c2 = loop {
         std::thread::sleep(Duration::from_millis(100));
-        if let Ok(c2) = Client::connect(&d.socket, None) {
-            if let Ok(ServerMsg::Sessions { sessions, .. }) = c2.request(|req| ClientMsg::ListSessions { req }, Duration::from_secs(2)) {
-                if sessions.iter().any(|i| i.id == s) {
+        if let Ok(c2) = Client::connect(&d.socket, None)
+            && let Ok(ServerMsg::Sessions { sessions, .. }) = c2.request(|req| ClientMsg::ListSessions { req }, Duration::from_secs(2))
+                && sessions.iter().any(|i| i.id == s) {
                     break c2;
                 }
-            }
-        }
         assert!(Instant::now() < deadline, "daemon did not come back");
     };
     assert_eq!(c2.server_pid, daemon_pid, "exec 는 같은 pid 를 유지한다");
@@ -157,14 +155,13 @@ fn osc_notification_sets_attention_and_is_broadcast() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut got = false;
     while Instant::now() < deadline && !got {
-        if let Ok(m) = c.rx.recv_timeout(Duration::from_millis(200)) {
-            if let ServerMsg::Notification { session, title, body } = m {
+        if let Ok(m) = c.rx.recv_timeout(Duration::from_millis(200))
+            && let ServerMsg::Notification { session, title, body } = m {
                 assert_eq!(session, s);
                 assert_eq!(title, "Claude");
                 assert_eq!(body, "needs input");
                 got = true;
             }
-        }
     }
     assert!(got, "notification not received");
     let list = match c.request(|req| ClientMsg::ListSessions { req }, Duration::from_secs(5)).unwrap() {
@@ -208,12 +205,11 @@ fn exit_code_is_reported() {
     let s = create(&c, "/bin/sh", &["-c", "exit 7"]);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(ServerMsg::SessionExited { session, code }) = c.rx.recv_timeout(Duration::from_millis(200)) {
-            if session == s {
+        if let Ok(ServerMsg::SessionExited { session, code }) = c.rx.recv_timeout(Duration::from_millis(200))
+            && session == s {
                 assert_eq!(code, Some(7));
                 break;
             }
-        }
         assert!(Instant::now() < deadline);
     }
 }

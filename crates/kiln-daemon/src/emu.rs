@@ -362,11 +362,10 @@ fn convert_row(grid: &Grid<TCell>, line: GLine, cols: usize) -> Line {
     for c in 0..cols {
         let tc = &row[Column(c)];
         cells.push(Cell { c: tc.c, fg: convert_color(tc.fg), bg: convert_color(tc.bg), flags: convert_flags(tc.flags) });
-        if let Some(z) = tc.zerowidth() {
-            if !z.is_empty() {
+        if let Some(z) = tc.zerowidth()
+            && !z.is_empty() {
                 combining.push((c as u16, z.iter().collect()));
             }
-        }
     }
     Line { cells, combining }
 }

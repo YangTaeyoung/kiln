@@ -70,7 +70,7 @@ impl Palette {
         }
         let theme = kiln_common::Theme::current();
         let mut scored: Vec<(i32, Item<A>)> = items.into_iter().filter_map(|it| fuzzy_score(&self.query, &it.label).map(|s| (s, it))).collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|x| std::cmp::Reverse(x.0));
         let n = scored.len();
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.open = false;

@@ -85,12 +85,11 @@ pub fn encode_key(key: Key, m: Modifiers, term_mode: u32, option_as_meta: bool) 
             if m.ctrl && !m.mac_cmd {
                 return ctrl_key(key, m, kitty, mp);
             }
-            if m.alt && option_as_meta {
-                if let Some(c) = key_char(key) {
+            if m.alt && option_as_meta
+                && let Some(c) = key_char(key) {
                     let c = if m.shift { c.to_ascii_uppercase() } else { c };
                     return Some(vec![0x1b, c as u8]);
                 }
-            }
             return None;
         }
     };

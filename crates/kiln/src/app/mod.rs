@@ -26,7 +26,8 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title("Kiln")
             .with_inner_size([1360.0, 860.0])
-            .with_min_inner_size([640.0, 400.0]),
+            .with_min_inner_size([640.0, 400.0])
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../../../../assets/Kiln.png")).unwrap_or_default()),
         ..Default::default()
     };
     eframe::run_native("Kiln", options, Box::new(move |cc| Ok(Box::new(KilnApp::new(&cc.egui_ctx, path)))))
@@ -393,11 +394,10 @@ impl KilnApp {
                     for t in ws.tabs {
                         if let TabKind::Terminal(tt) = t.kind {
                             for p in tt.root.panes() {
-                                if let Some(pane) = self.panes.remove(&p) {
-                                    if let Some(s) = pane.session {
+                                if let Some(pane) = self.panes.remove(&p)
+                                    && let Some(s) = pane.session {
                                         self.conn.kill(s);
                                     }
-                                }
                             }
                         }
                     }
@@ -409,11 +409,10 @@ impl KilnApp {
                 }
             }
             Action::RenameWorkspace(i, name) => {
-                if let Some(w) = self.workspaces.get_mut(i) {
-                    if !name.trim().is_empty() {
+                if let Some(w) = self.workspaces.get_mut(i)
+                    && !name.trim().is_empty() {
                         w.name = name.trim().to_string();
                     }
-                }
             }
             Action::NewTermTab => {
                 let cwd = self.focused_session().and_then(|s| self.conn.infos.get(&s)).and_then(|i| i.cwd.clone())
@@ -455,8 +454,8 @@ impl KilnApp {
                 }
             }
             Action::ClosePane(p, force) => {
-                if !force && self.settings.confirm_close_running {
-                    if let Some(proc_name) = self.pane_is_busy(p) {
+                if !force && self.settings.confirm_close_running
+                    && let Some(proc_name) = self.pane_is_busy(p) {
                         self.confirm = Some(Confirm {
                             title: "실행 중인 프로세스".into(),
                             body: format!("이 창에서 `{proc_name}` 이(가) 실행 중입니다. 종료하면 프로세스도 함께 종료됩니다."),
@@ -465,17 +464,15 @@ impl KilnApp {
                         });
                         return;
                     }
-                }
-                if let Some(pane) = self.panes.remove(&p) {
-                    if let Some(s) = pane.session {
+                if let Some(pane) = self.panes.remove(&p)
+                    && let Some(s) = pane.session {
                         self.conn.kill(s);
                     }
-                }
                 let ws = &mut self.workspaces[self.active];
                 let mut remove_tab = None;
                 for (i, t) in ws.tabs.iter_mut().enumerate() {
-                    if let TabKind::Terminal(tt) = &mut t.kind {
-                        if tt.root.panes().contains(&p) {
+                    if let TabKind::Terminal(tt) = &mut t.kind
+                        && tt.root.panes().contains(&p) {
                             if tt.root.remove(p) {
                                 if tt.focused == p {
                                     tt.focused = tt.root.panes()[0];
@@ -484,7 +481,6 @@ impl KilnApp {
                                 remove_tab = Some(i);
                             }
                         }
-                    }
                 }
                 if let Some(i) = remove_tab {
                     ws.tabs.remove(i);
@@ -515,11 +511,10 @@ impl KilnApp {
                             }
                         }
                         for p in panes {
-                            if let Some(pane) = self.panes.remove(&p) {
-                                if let Some(s) = pane.session {
+                            if let Some(pane) = self.panes.remove(&p)
+                                && let Some(s) = pane.session {
                                     self.conn.kill(s);
                                 }
-                            }
                         }
                     }
                     TabKind::Tool(t) => {
@@ -552,11 +547,10 @@ impl KilnApp {
                 self.focus_terminal = true;
             }
             Action::SelectTab(i) => {
-                if let Some(ws) = self.ws() {
-                    if i < ws.tabs.len() {
+                if let Some(ws) = self.ws()
+                    && i < ws.tabs.len() {
                         ws.active_tab = i;
                     }
-                }
                 self.focus_terminal = true;
             }
             Action::NextTab(d) => {
@@ -567,11 +561,10 @@ impl KilnApp {
                 self.focus_terminal = true;
             }
             Action::Navigate(nav) => {
-                if let Some(tt) = self.active_term_tab() {
-                    if let Some(n) = layout::neighbor(&tt.rects, tt.focused, nav) {
+                if let Some(tt) = self.active_term_tab()
+                    && let Some(n) = layout::neighbor(&tt.rects, tt.focused, nav) {
                         tt.focused = n;
                     }
-                }
                 self.focus_terminal = true;
             }
             Action::Equalize => {
@@ -749,8 +742,8 @@ impl KilnApp {
         for e in std::mem::take(&mut self.conn.events) {
             match e {
                 ConnEvent::Created { req, session } => {
-                    if let Some(pid) = self.pending_creates.remove(&req) {
-                        if let Some(p) = self.panes.get_mut(&pid) {
+                    if let Some(pid) = self.pending_creates.remove(&req)
+                        && let Some(p) = self.panes.get_mut(&pid) {
                             p.session = Some(session);
                             p.pending = None;
                             p.view = Some(TermView::new(session));
@@ -758,7 +751,6 @@ impl KilnApp {
                                 self.conn.input(session, input.into_bytes());
                             }
                         }
-                    }
                 }
                 ConnEvent::Notification { session, title, body } => {
                     let focused_here = self.window_focused && self.focused_session() == Some(session);
@@ -786,11 +778,10 @@ impl KilnApp {
                 }
                 ConnEvent::Upgrading => self.toast("데몬 업그레이드 중 — 세션은 유지됩니다", ToastKind::Info),
                 ConnEvent::SearchResult { found } => {
-                    if let Some(p) = self.focused_pane() {
-                        if let Some(v) = self.panes.get_mut(&p).and_then(|p| p.view.as_mut()) {
+                    if let Some(p) = self.focused_pane()
+                        && let Some(v) = self.panes.get_mut(&p).and_then(|p| p.view.as_mut()) {
                             v.set_search_result(found);
                         }
-                    }
                 }
             }
         }
@@ -957,15 +948,14 @@ impl eframe::App for KilnApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.conn.pump();
         let focused_now = ctx.input(|i| i.viewport().focused.unwrap_or(true));
-        if focused_now && !self.window_focused {
-            if let Some(ws) = self.workspaces.get_mut(self.active) {
+        if focused_now && !self.window_focused
+            && let Some(ws) = self.workspaces.get_mut(self.active) {
                 for t in &mut ws.tabs {
                     if let TabKind::Tool(x) = &mut t.kind {
                         x.on_focus_regained();
                     }
                 }
             }
-        }
         self.window_focused = focused_now;
         self.handle_conn_events(ctx);
         let quick_open = self.workspaces.get(self.active).is_some_and(|w| w.tools.quick_is_open());

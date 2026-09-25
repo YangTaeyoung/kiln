@@ -32,14 +32,13 @@ impl Default for Palette {
 }
 
 impl Palette {
-    pub fn resolve(&self, c: Color, is_fg: bool) -> Color32 {
+    pub fn resolve(&self, c: Color, _is_fg: bool) -> Color32 {
         match c {
             Color::DefaultFg => self.fg,
             Color::DefaultBg => self.bg,
             Color::Rgb(r, g, b) => Color32::from_rgb(r, g, b),
             Color::Idx(i) => self.indexed(i),
         }
-        .gamma_multiply(if is_fg { 1.0 } else { 1.0 })
     }
 
     pub fn indexed(&self, i: u8) -> Color32 {
@@ -173,11 +172,10 @@ impl TermView {
     }
 
     fn cell_size(&mut self, ctx: &egui::Context, s: &TermSettings) -> Vec2 {
-        if let Some((fs, v)) = self.metrics {
-            if fs == s.font_size * s.line_height {
+        if let Some((fs, v)) = self.metrics
+            && fs == s.font_size * s.line_height {
                 return v;
             }
-        }
         let font = FontId::monospace(s.font_size);
         let (w, h) = ctx.fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
         let v = vec2(w, (h * s.line_height).round());
@@ -342,12 +340,11 @@ impl TermView {
                 match (c.shape, focused) {
                     (CursorShape::Block, true) => {
                         painter.rect_filled(crect, 1.0, color);
-                        if let Some(ch) = screen.lines.get(c.row as usize).and_then(|l| l.cells.get(c.col as usize)) {
-                            if ch.c != ' ' {
+                        if let Some(ch) = screen.lines.get(c.row as usize).and_then(|l| l.cells.get(c.col as usize))
+                            && ch.c != ' ' {
                                 let g = painter.layout_no_wrap(ch.c.to_string(), font.clone(), self.palette.bg);
                                 painter.galley(pos2(pos.x + (w - g.size().x) / 2.0, pos.y + (cell.y - g.size().y) / 2.0), g, self.palette.bg);
                             }
-                        }
                     }
                     (CursorShape::Beam, _) => {
                         painter.rect_filled(Rect::from_min_size(pos, vec2(2.0, cell.y)), 0.0, color);
@@ -600,8 +597,8 @@ impl TermView {
         }
 
         // Cmd(Ctrl)+클릭 링크.
-        if mods.command {
-            if let Some(p) = resp.hover_pos() {
+        if mods.command
+            && let Some(p) = resp.hover_pos() {
                 let (c, r) = to_cell(p);
                 let text = screen.lines[r as usize].text();
                 if let Some((start, end, target)) = find_link(&text, c as usize, cwd) {
@@ -614,7 +611,6 @@ impl TermView {
                     }
                 }
             }
-        }
     }
 
     fn search_ui(&mut self, ui: &mut egui::Ui, conn: &mut Conn, rect: Rect) {

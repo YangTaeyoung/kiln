@@ -119,13 +119,12 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Some(v) = std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+        if bytes[i] == b'%' && i + 2 < bytes.len()
+            && let Some(v) = std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
                 out.push(v);
                 i += 3;
                 continue;
             }
-        }
         out.push(bytes[i]);
         i += 1;
     }

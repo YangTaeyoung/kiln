@@ -91,10 +91,13 @@ pub trait ToolTab {
 }
 
 /// 도구 탭을 만든다. 같은 키의 탭이 열려 있으면 `reuse` 가 호출된다.
+type MakeTab = Box<dyn FnOnce(&egui::Context) -> Result<Box<dyn ToolTab>, String>>;
+type ReuseTab = Box<dyn FnOnce(&mut dyn ToolTab)>;
+
 pub struct TabFactory {
     pub key: String,
-    make: Box<dyn FnOnce(&egui::Context) -> Result<Box<dyn ToolTab>, String>>,
-    reuse: Option<Box<dyn FnOnce(&mut dyn ToolTab)>>,
+    make: MakeTab,
+    reuse: Option<ReuseTab>,
 }
 
 impl TabFactory {
@@ -368,12 +371,11 @@ impl WorkspaceTools {
 
     /// 매 프레임: 저장소 요약 갱신, 파일 트리 git 색상 반영.
     pub fn tick(&mut self, active: bool) {
-        if let Some(t) = &mut self.summary_task {
-            if let Some(r) = t.take() {
+        if let Some(t) = &mut self.summary_task
+            && let Some(r) = t.take() {
                 self.summary = r;
                 self.summary_task = None;
             }
-        }
         let period = if active { Duration::from_secs(15) } else { Duration::from_secs(60) };
         if self.summary_task.is_none() && self.summary_at.is_none_or(|t| t.elapsed() > period) {
             self.summary_at = Some(Instant::now());

@@ -98,11 +98,10 @@ impl KilnApp {
         let procs: Vec<(String, bool)> = {
             let mut v: Vec<(String, bool)> = Vec::new();
             for inf in &infos {
-                if let Some(p) = &inf.fg_process {
-                    if !shells().contains(&p.as_str()) && !v.iter().any(|(n, _)| n == p) {
+                if let Some(p) = &inf.fg_process
+                    && !shells().contains(&p.as_str()) && !v.iter().any(|(n, _)| n == p) {
                         v.push((p.clone(), inf.attention));
                     }
-                }
             }
             v
         };
@@ -250,15 +249,14 @@ impl KilnApp {
                     (theme.red, "데몬 재연결 중…".to_string())
                 };
                 ui.label(RichText::new(format!("● {text}")).size(11.0).color(dot)).on_hover_text(format!("build {}", self.conn.daemon_build));
-                if let Some(ws) = self.workspaces.get(self.active) {
-                    if let Some(s) = ws.tools.summary() {
+                if let Some(ws) = self.workspaces.get(self.active)
+                    && let Some(s) = ws.tools.summary() {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         let (r, _) = ui.allocate_exact_size(vec2(12.0, 14.0), Sense::hover());
                         icons::paint(ui.painter(), r, icons::Icon::Branch, theme.text_dim);
                         ui.label(RichText::new(s.branch).size(11.0).color(theme.text_dim));
                         ui.spacing_mut().item_spacing.x = 14.0;
                     }
-                }
                 let unread = self.unread.len();
                 if unread > 0 && ui.add(egui::Button::new(RichText::new(format!("알림 {unread}")).size(11.0).color(theme.orange)).frame(false)).on_hover_text("최근 알림으로 이동 (⇧⌘U)").clicked() {
                     self.actions.push(Action::JumpUnread);
@@ -462,11 +460,10 @@ impl KilnApp {
                     if out.restart {
                         self.actions.push(Action::RestartPane(*pid));
                     }
-                    if out.clicked && attention {
-                        if let Some(s) = pane.session {
+                    if out.clicked && attention
+                        && let Some(s) = pane.session {
                             self.conn.send(kiln_proto::ClientMsg::ClearAttention { session: s });
                         }
-                    }
                 }
                 _ => {
                     child.painter().rect_filled(*rect, 0.0, theme.bg);
@@ -493,15 +490,14 @@ impl KilnApp {
             if hovered {
                 ui.ctx().set_cursor_icon(if dir == Dir::Horizontal { CursorIcon::ResizeHorizontal } else { CursorIcon::ResizeVertical });
             }
-            if resp.dragged() {
-                if let Some(p) = resp.interact_pointer_pos() {
+            if resp.dragged()
+                && let Some(p) = resp.interact_pointer_pos() {
                     let r = match dir {
                         Dir::Horizontal => (p.x - parent.left()) / parent.width(),
                         Dir::Vertical => (p.y - parent.top()) / parent.height(),
                     };
                     ratio_change = Some((path, r));
                 }
-            }
             if resp.double_clicked() {
                 ratio_change = Some((path, 0.5));
             }
@@ -583,11 +579,10 @@ impl KilnApp {
                     });
                 });
             });
-            if ok {
-                if let Some(c) = self.confirm.take() {
+            if ok
+                && let Some(c) = self.confirm.take() {
                     self.actions.push(c.action);
                 }
-            }
         }
         if close_confirm {
             self.confirm = None;

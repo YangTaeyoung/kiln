@@ -41,7 +41,7 @@ fn save_shot(h: &mut Harness<'_, KilnApp>, name: &str) {
     img.save(dir.join(format!("{name}.png"))).unwrap();
 }
 
-fn shutdown(base: &PathBuf) {
+fn shutdown(base: &std::path::Path) {
     if let Ok(c) = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None) {
         c.send(kiln_proto::ClientMsg::Shutdown);
         std::thread::sleep(Duration::from_millis(100));

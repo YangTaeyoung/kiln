@@ -105,11 +105,10 @@ pub fn install(ctx: &egui::Context) {
             defs.families.entry(fam).or_default().push(name.to_owned());
         }
     };
-    if let Some(p) = find_nerd_font() {
-        if let Ok(b) = std::fs::read(&p) {
+    if let Some(p) = find_nerd_font()
+        && let Ok(b) = std::fs::read(&p) {
             add("nerd", b, 0);
         }
-    }
     for (p, idx) in cjk_candidates() {
         if let Ok(b) = std::fs::read(&p) {
             add("cjk", b, idx);

@@ -160,12 +160,11 @@ fn main() -> anyhow::Result<()> {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             std::thread::sleep(Duration::from_millis(100));
             loop {
-                if let Ok(n) = Client::connect(&kiln_proto::socket_name(), None) {
-                    if n.server_build == kiln_daemon::build_id() {
+                if let Ok(n) = Client::connect(&kiln_proto::socket_name(), None)
+                    && n.server_build == kiln_daemon::build_id() {
                         println!("daemon upgraded (pid {} → {}, build {})", old, n.server_pid, n.server_build);
                         return Ok(());
                     }
-                }
                 if std::time::Instant::now() > deadline {
                     anyhow::bail!("upgrade did not complete; see {}", kiln_daemon::client::daemon_log_path(&kiln_proto::socket_name()).display());
                 }

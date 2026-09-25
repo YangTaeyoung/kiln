@@ -517,11 +517,10 @@ impl Daemon {
                     let Some(st) = attached.get_mut(&sid) else { continue };
                     build_frame(&sess, st)
                 };
-                if let Some(f) = frame {
-                    if client.out.send(ServerMsg::Frame(f)).is_err() {
+                if let Some(f) = frame
+                    && client.out.send(ServerMsg::Frame(f)).is_err() {
                         return;
                     }
-                }
             }
         }
     }
