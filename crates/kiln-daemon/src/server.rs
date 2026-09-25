@@ -360,6 +360,8 @@ impl Daemon {
                 attention: false,
                 last_notification: None,
             };
+            // 크기를 한 번 바꿨다 되돌려 전체 화면 앱이 다시 그리게 한다(SIGWINCH).
+            let _ = h.resize(119, 32);
             let _ = h.resize(120, 32);
             log::info!("adopted session {} from {}", r.session, r.endpoint);
             let _ = self.install(r.session, AnyPty::Host(h), Emu::new(120, 32), info);

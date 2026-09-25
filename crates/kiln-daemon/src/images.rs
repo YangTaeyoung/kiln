@@ -412,10 +412,21 @@ impl ImageState {
         let err = |m: &str| -> Action {
             if id != 0 && quiet < 2 { Action::Reply(format!("\x1b_Gi={id};{m}\x1b\\").into_bytes()) } else { Action::None }
         };
-        if args.get("t").is_some_and(|t| t != "d") {
-            return err("EINVAL:only direct transmission is supported");
-        }
         let Some(raw) = b64(payload) else { return err("EINVAL:bad base64") };
+        let medium = args.get("t").map(String::as_str).unwrap_or("d");
+        let raw = match medium {
+            "d" => raw,
+            "f" | "t" | "s" => {
+                let size: usize = args.get("S").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let offset: u64 = args.get("O").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let name = String::from_utf8_lossy(&raw).into_owned();
+                match read_medium(medium, &name, offset, size) {
+                    Ok(v) => v,
+                    Err(e) => return err(&format!("EBADF:{e}")),
+                }
+            }
+            _ => return err("EINVAL:unknown transmission medium"),
+        };
         let raw = if args.get("o").map(String::as_str) == Some("z") {
             match miniz_oxide::inflate::decompress_to_vec_zlib(&raw) {
                 Ok(v) => v,
@@ -458,6 +469,99 @@ impl ImageState {
         let dec = finalize(img, cols, rows, g, cursor);
         let ok = if id != 0 && quiet == 0 { format!("\x1b_Gi={id};OK\x1b\\").into_bytes() } else { Vec::new() };
         if ok.is_empty() { Action::Show(dec) } else { Action::ShowAndReply(dec, ok) }
+    }
+}
+
+const MAX_MEDIUM: usize = 64 * 1024 * 1024;
+
+/// kitty 의 파일(`f`), 임시 파일(`t`, 읽은 뒤 삭제), 공유 메모리(`s`) 전송 데이터를 읽는다.
+fn read_medium(medium: &str, name: &str, offset: u64, size: usize) -> std::io::Result<Vec<u8>> {
+    match medium {
+        "f" | "t" => {
+            use std::io::{Read, Seek, SeekFrom};
+            let path = std::path::Path::new(name);
+            if medium == "t" {
+                // 임시 파일은 임시 디렉토리 안의, 프로토콜 표식이 들어간 이름만 받는다.
+                let in_tmp = path.starts_with(std::env::temp_dir()) || path.starts_with("/tmp") || path.starts_with("/dev/shm");
+                if !in_tmp || !name.contains("tty-graphics-protocol") {
+                    return Err(std::io::Error::other("temp file outside temp dir"));
+                }
+            }
+            let mut f = std::fs::File::open(path)?;
+            f.seek(SeekFrom::Start(offset))?;
+            let mut out = Vec::new();
+            let limit = if size > 0 { size.min(MAX_MEDIUM) } else { MAX_MEDIUM };
+            f.take(limit as u64).read_to_end(&mut out)?;
+            if medium == "t" {
+                let _ = std::fs::remove_file(path);
+            }
+            Ok(out)
+        }
+        "s" => read_shm(name, size),
+        _ => Err(std::io::Error::other("unknown medium")),
+    }
+}
+
+#[cfg(unix)]
+fn read_shm(name: &str, size: usize) -> std::io::Result<Vec<u8>> {
+    use std::ffi::CString;
+    let cname = CString::new(name).map_err(std::io::Error::other)?;
+    // SAFETY: 공유 메모리를 읽기 전용으로 열어 복사한 뒤 매핑을 풀고 이름을 지운다.
+    unsafe {
+        let fd = libc::shm_open(cname.as_ptr(), libc::O_RDONLY, 0);
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let len = if size > 0 {
+            size
+        } else {
+            let mut st: libc::stat = std::mem::zeroed();
+            if libc::fstat(fd, &mut st) != 0 {
+                libc::close(fd);
+                return Err(std::io::Error::last_os_error());
+            }
+            st.st_size as usize
+        };
+        let len = len.min(MAX_MEDIUM);
+        let p = libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ, libc::MAP_SHARED, fd, 0);
+        libc::close(fd);
+        if p == libc::MAP_FAILED {
+            return Err(std::io::Error::last_os_error());
+        }
+        let out = std::slice::from_raw_parts(p as *const u8, len).to_vec();
+        libc::munmap(p, len);
+        libc::shm_unlink(cname.as_ptr());
+        Ok(out)
+    }
+}
+
+#[cfg(windows)]
+fn read_shm(name: &str, size: usize) -> std::io::Result<Vec<u8>> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Memory::{FILE_MAP_READ, MEMORY_BASIC_INFORMATION, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile, VirtualQuery};
+    let wname: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: 이름 있는 파일 매핑을 읽기 전용으로 열어 복사한 뒤 닫는다.
+    unsafe {
+        let h = OpenFileMappingW(FILE_MAP_READ, 0, wname.as_ptr());
+        if h.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let view = MapViewOfFile(h, FILE_MAP_READ, 0, 0, 0);
+        if view.Value.is_null() {
+            CloseHandle(h);
+            return Err(std::io::Error::last_os_error());
+        }
+        let len = if size > 0 {
+            size
+        } else {
+            let mut info: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+            VirtualQuery(view.Value, &mut info, std::mem::size_of::<MEMORY_BASIC_INFORMATION>());
+            info.RegionSize
+        };
+        let out = std::slice::from_raw_parts(view.Value as *const u8, len.min(MAX_MEDIUM)).to_vec();
+        UnmapViewOfFile(view);
+        CloseHandle(h);
+        Ok(out)
     }
 }
 
@@ -714,6 +818,30 @@ mod tests {
         }
         let rgb = enc(&[255u8, 0, 0, 0, 255, 0]);
         assert!(matches!(st.handle(ImageCmd::Kitty(format!("a=T,f=24,s=2,v=1;{rgb}").into_bytes()), &geom()), Action::Show(_)));
+    }
+
+    #[test]
+    fn kitty_file_and_temp_file_transmission() {
+        let mut st = ImageState::default();
+        let dir = std::env::temp_dir();
+        let f = dir.join(format!("kiln-img-{}.png", std::process::id()));
+        std::fs::write(&f, png(20, 20)).unwrap();
+        let path = enc(f.to_string_lossy().as_bytes());
+        assert!(matches!(st.handle(ImageCmd::Kitty(format!("a=T,f=100,t=f;{path}").into_bytes()), &geom()), Action::Show(_)));
+        assert!(f.exists(), "t=f 는 파일을 지우지 않는다");
+        let t = dir.join(format!("tty-graphics-protocol-{}.png", std::process::id()));
+        std::fs::write(&t, png(20, 20)).unwrap();
+        let tpath = enc(t.to_string_lossy().as_bytes());
+        assert!(matches!(st.handle(ImageCmd::Kitty(format!("a=T,f=100,t=t;{tpath}").into_bytes()), &geom()), Action::Show(_)));
+        assert!(!t.exists(), "t=t 는 읽은 뒤 지운다");
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn kitty_temp_medium_rejects_paths_outside_temp() {
+        let mut st = ImageState::default();
+        let p = enc(b"/etc/hosts");
+        assert!(matches!(st.handle(ImageCmd::Kitty(format!("a=T,f=100,t=t,i=4;{p}").into_bytes()), &geom()), Action::Reply(_)));
     }
 
     #[test]
