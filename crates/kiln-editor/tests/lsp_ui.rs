@@ -58,6 +58,9 @@ fn fixture(root: &Path) -> LspManager {
 fn harness(lsp: LspManager) -> Harness<'static, State> {
     let h = Harness::builder().with_size(egui::vec2(460.0, 260.0)).wgpu().build_ui_state(
         |ui, s: &mut State| {
+            if !common::fonts_ready(ui.ctx()) {
+                return;
+            }
             let ev = diagnostics_ui(ui, &s.lsp);
             s.events.extend(ev);
         },

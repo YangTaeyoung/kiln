@@ -27,6 +27,9 @@ fn setup(text: &str) -> (tempfile::TempDir, PathBuf, Harness<'static, Editor>) {
     assert!(ed.lsp_attached());
     let h = Harness::builder().with_size(egui::vec2(820.0, 420.0)).wgpu().build_ui_state(
         |ui, ed: &mut Editor| {
+            if !common::fonts_ready(ui.ctx()) {
+                return;
+            }
             ed.ui(ui);
         },
         ed,
@@ -243,6 +246,9 @@ fn editor_without_server_shows_injected_diagnostics() {
     );
     let mut h = Harness::builder().with_size(egui::vec2(500.0, 120.0)).wgpu().build_ui_state(
         |ui, ed: &mut Editor| {
+            if !common::fonts_ready(ui.ctx()) {
+                return;
+            }
             ed.ui(ui);
         },
         ed,

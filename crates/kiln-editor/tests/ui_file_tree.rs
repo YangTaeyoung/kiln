@@ -60,6 +60,9 @@ fn harness(root: &Path) -> Harness<'static, State> {
     tree.set_use_trash(false);
     let h = Harness::builder().with_size(egui::vec2(300.0, 440.0)).wgpu().build_ui_state(
         |ui, s: &mut State| {
+            if !common::fonts_ready(ui.ctx()) {
+                return;
+            }
             let ev = s.tree.ui(ui);
             s.events.extend(ev);
         },

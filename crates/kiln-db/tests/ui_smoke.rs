@@ -5,7 +5,7 @@ mod common;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use kiln_db::{ConnConfig, ConnId, DbManager, DbPanel, DbTab, Driver, Value};
+use kiln_db::{DbManager, DbPanel, DbTab, Value};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -26,96 +26,7 @@ fn save_png<S>(h: &mut Harness<'_, S>, name: &str) {
     }
 }
 
-fn sqlite_fixture() -> (tempfile::TempDir, DbManager, ConnId) {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("shop.db");
-    std::fs::write(&path, b"").unwrap();
-    let m = DbManager::in_memory();
-    let id = m.add(
-        ConnConfig {
-            name: "shop.db".into(),
-            driver: Driver::Sqlite,
-            file: path.to_string_lossy().into_owned(),
-            color: Some([0x6c, 0x9e, 0xff]),
-            ..Default::default()
-        },
-        None,
-    );
-    let ddl = r#"
-        CREATE TABLE customers (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            email VARCHAR(120) UNIQUE,
-            vip BOOLEAN DEFAULT 0,
-            balance DECIMAL(10,2),
-            notes TEXT,
-            created DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX idx_customers_name ON customers(name);
-        CREATE TABLE orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer_id INTEGER NOT NULL REFERENCES customers(id),
-            total REAL NOT NULL,
-            payload JSON,
-            receipt BLOB
-        );
-        CREATE VIEW vip_customers AS SELECT id, name FROM customers WHERE vip = 1;
-        CREATE TABLE audit_log (at TEXT, message TEXT);
-    "#;
-    for r in kiln_db::sql::split_statements(ddl, Driver::Sqlite) {
-        m.block_on(m.query(id, &ddl[r], None)).unwrap();
-    }
-    let names = [
-        "Ada Lovelace",
-        "Alan Turing",
-        "Grace Hopper",
-        "Edsger Dijkstra",
-        "Barbara Liskov",
-        "Donald Knuth",
-        "Ken Thompson",
-        "Margaret Hamilton",
-        "Linus Torvalds",
-        "Frances Allen",
-        "John McCarthy",
-        "Leslie Lamport",
-    ];
-    for (i, n) in names.iter().enumerate() {
-        let i = i + 1;
-        let notes = if i % 3 == 0 {
-            "NULL".to_string()
-        } else {
-            format!("'note {i}\nsecond line'")
-        };
-        m.block_on(m.query(
-            id,
-            &format!(
-                "INSERT INTO customers (id, name, email, vip, balance, notes, created) VALUES ({i}, '{n}', '{}@example.com', {}, {}.{:02}, {notes}, '2024-0{}-1{} 09:3{}:00')",
-                n.split(' ').next().unwrap().to_lowercase(),
-                i % 2,
-                i * 137 % 5000,
-                i * 7 % 100,
-                i % 9 + 1,
-                i % 10,
-                i % 10
-            ),
-            None,
-        ))
-        .unwrap();
-        m.block_on(m.query(
-            id,
-            &format!(
-                "INSERT INTO orders (customer_id, total, payload, receipt) VALUES ({i}, {}.5, '{{\"items\":[{i},{}],\"gift\":{}}}', X'CAFEBABE{:02X}')",
-                i * 13,
-                i + 1,
-                if i % 2 == 0 { "true" } else { "false" },
-                i
-            ),
-            None,
-        ))
-        .unwrap();
-    }
-    (dir, m, id)
-}
+use common::sqlite_fixture;
 
 /// 조건이 참이 될 때까지 프레임을 진행한다.
 fn step_until<S>(
@@ -140,9 +51,10 @@ fn step_until<S>(
     }
 }
 
-fn themed(ctx: &egui::Context) {
+/// 테마와 글꼴을 적용한다. 글꼴이 아직 준비되지 않은 프레임이면 `false`.
+fn themed(ctx: &egui::Context) -> bool {
     kiln_common::Theme::current().apply(ctx);
-    common::install_korean_font(ctx);
+    common::install_korean_font(ctx)
 }
 
 struct PanelState {
@@ -163,7 +75,9 @@ fn panel_tree_expands_and_emits_open_table_event() {
         .wgpu()
         .build_ui_state(
             |ui, s: &mut PanelState| {
-                themed(ui.ctx());
+                if !themed(ui.ctx()) {
+                    return;
+                }
                 let ev = s.panel.ui(ui);
                 s.events.extend(ev);
             },
@@ -203,7 +117,9 @@ fn tab_harness(tab: DbTab, size: egui::Vec2) -> Harness<'static, TabState> {
         .wgpu()
         .build_ui_state(
             |ui, s: &mut TabState| {
-                themed(ui.ctx());
+                if !themed(ui.ctx()) {
+                    return;
+                }
                 s.tab.ui(ui);
             },
             TabState { tab },
@@ -238,7 +154,7 @@ fn click_at<S>(h: &mut Harness<'_, S>, p: egui::Pos2, double: bool) {
 /// 헤더 이름과 행 번호로 셀 중심 좌표를 구한다.
 fn cell_pos<S>(h: &Harness<'_, S>, column: &str, row: usize) -> egui::Pos2 {
     let hdr = h.get_by_label(column).rect();
-    egui::pos2(hdr.center().x, hdr.max.y + row as f32 * 22.0 + 11.0)
+    egui::pos2(hdr.center().x, hdr.max.y + row as f32 * 26.0 + 13.0)
 }
 
 #[test]
@@ -350,7 +266,9 @@ fn connection_dialog_renders_with_all_fields() {
         .wgpu()
         .build_ui_state(
             |ui, s: &mut PanelState| {
-                themed(ui.ctx());
+                if !themed(ui.ctx()) {
+                    return;
+                }
                 egui::Panel::left("left").exact_size(300.0).show(ui, |ui| {
                     let ev = s.panel.ui(ui);
                     s.events.extend(ev);
@@ -441,7 +359,7 @@ fn pending_insert_delete_and_edit_states_render_and_revert() {
     // 3행 삭제 표시.
     let p = cell_pos(&h, "name", 2);
     click_at(&mut h, p, false);
-    h.get_by_label("− 행").click();
+    h.get_by_label("행 삭제").click();
     h.step();
     // 2행 balance 편집.
     let p = cell_pos(&h, "balance", 1);
@@ -452,7 +370,7 @@ fn pending_insert_delete_and_edit_states_render_and_revert() {
     h.key_press(Key::Enter);
     h.step();
     // 새 행 추가 후 name 입력.
-    h.get_by_label("+ 행").click();
+    h.get_by_label("행 추가").click();
     h.step();
     let p = cell_pos(&h, "name", 12);
     click_at(&mut h, p, true);
@@ -466,7 +384,7 @@ fn pending_insert_delete_and_edit_states_render_and_revert() {
     h.hover_at(egui::pos2(-5.0, -5.0));
     h.step();
     save_png(&mut h, "table_pending_states");
-    h.get_by_label("⟲ 되돌리기").click();
+    h.get_by_label("되돌리기").click();
     h.step();
     assert_eq!(h.state().tab.pending_changes(), 0);
 }

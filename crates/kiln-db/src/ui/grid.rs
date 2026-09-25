@@ -6,11 +6,13 @@ use egui::{
     Align2, Color32, CursorIcon, EventFilter, FontId, Id, Key, Pos2, Rect, Sense, Stroke,
     StrokeKind, Ui, Vec2, pos2, vec2,
 };
-use kiln_common::Theme;
+use kiln_common::icons::Icon;
+use kiln_common::widgets::{lerp_color, tint};
+use kiln_common::{Theme, fonts};
 
-pub(crate) const ROW_H: f32 = 22.0;
-pub(crate) const HEADER_H: f32 = 26.0;
-const PAD_X: f32 = 6.0;
+pub(crate) const ROW_H: f32 = 26.0;
+pub(crate) const HEADER_H: f32 = 32.0;
+const PAD_X: f32 = 8.0;
 const MIN_COL_W: f32 = 36.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,7 +284,7 @@ impl GridState {
 
 fn gutter_width(n_rows: usize) -> f32 {
     let digits = (n_rows.max(1) as f64).log10().floor() as usize + 1;
-    (digits.max(2) as f32) * 7.5 + 14.0
+    (digits.max(2) as f32) * 7.5 + 20.0
 }
 
 fn cell_job(text: &str, width: f32, font: FontId, color: Color32, italics: bool) -> LayoutJob {
@@ -326,9 +328,10 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
     let content_w = acc + 40.0;
     let widths = st.col_widths.clone();
     let content_h = HEADER_H + n_rows as f32 * ROW_H + 4.0;
-    let mono = FontId::monospace(12.0);
-    let head_font = FontId::proportional(12.5);
-    let small = FontId::proportional(10.5);
+    let mono = FontId::monospace(12.5);
+    let head_font = fonts::semibold(12.5);
+    let small = FontId::monospace(10.5);
+    let grid_line = tint(theme.border, if theme.dark { 0.55 } else { 0.8 });
     let editable = src.editable();
 
     // 키보드 처리(포커스가 그리드에 있을 때).
@@ -379,10 +382,10 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                 painter.rect_filled(row_rect, 0.0, base);
                 match rs {
                     RowState::Inserted => {
-                        painter.rect_filled(row_rect, 0.0, theme.green.gamma_multiply(0.16));
+                        painter.rect_filled(row_rect, 0.0, tint(theme.green, if theme.dark { 0.10 } else { 0.08 }));
                     }
                     RowState::Deleted => {
-                        painter.rect_filled(row_rect, 0.0, theme.red.gamma_multiply(0.16));
+                        painter.rect_filled(row_rect, 0.0, tint(theme.red, if theme.dark { 0.10 } else { 0.07 }));
                     }
                     RowState::Normal => {}
                 }
@@ -390,21 +393,21 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                     let cr = cell_rect(r, c);
                     let cell = src.cell(r, c);
                     if cell.edited && rs != RowState::Deleted {
-                        painter.rect_filled(cr, 0.0, theme.yellow.gamma_multiply(0.22));
+                        painter.rect_filled(cr, 0.0, tint(theme.yellow, if theme.dark { 0.16 } else { 0.14 }));
+                        painter.rect_filled(
+                            Rect::from_min_size(cr.min + vec2(0.0, 3.0), vec2(2.0, cr.height() - 6.0)),
+                            1.0,
+                            theme.yellow,
+                        );
                     }
                     if st.sel.contains(r, c) {
-                        painter.rect_filled(
-                            cr,
-                            0.0,
-                            theme
-                                .bg_selected
-                                .gamma_multiply(if has_focus { 1.0 } else { 0.7 }),
-                        );
+                        let a = if has_focus { 1.0 } else { 0.6 };
+                        painter.rect_filled(cr, 0.0, theme.accent_soft(((if theme.dark { 38.0 } else { 30.0 }) * a) as u8));
                     }
                     let (color, italics) = match cell.kind {
                         CellKind::Value => (
                             if rs == RowState::Deleted {
-                                theme.text_dim
+                                theme.text_faint
                             } else {
                                 theme.text
                             },
@@ -432,24 +435,16 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                         painter.hline(
                             text_rect.x_range(),
                             cr.center().y,
-                            Stroke::new(1.0, theme.red.gamma_multiply(0.8)),
+                            Stroke::new(1.0, tint(theme.red, 0.8)),
                         );
                     }
                 }
-                painter.hline(
-                    screen_vp.x_range(),
-                    y + ROW_H - 0.5,
-                    Stroke::new(1.0, theme.border.gamma_multiply(0.45)),
-                );
+                painter.hline(screen_vp.x_range(), y + ROW_H - 0.5, Stroke::new(1.0, grid_line));
             }
             // 열 구분선.
             for x in &xs[c_first..=c_last.min(n_cols)] {
                 let x = origin.x + x - 0.5;
-                painter.vline(
-                    x,
-                    screen_vp.y_range(),
-                    Stroke::new(1.0, theme.border.gamma_multiply(0.45)),
-                );
+                painter.vline(x, screen_vp.y_range(), Stroke::new(1.0, grid_line));
             }
             // 커서 셀 테두리.
             if let Some((r, c)) = st.sel.cursor
@@ -459,16 +454,9 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                 && r < last
             {
                 painter.rect_stroke(
-                    cell_rect(r, c).shrink(0.5),
-                    0.0,
-                    Stroke::new(
-                        1.5,
-                        if has_focus {
-                            theme.accent
-                        } else {
-                            theme.text_faint
-                        },
-                    ),
+                    cell_rect(r, c).shrink(1.0),
+                    3.0,
+                    Stroke::new(1.5, if has_focus { theme.accent } else { tint(theme.accent, 0.45) }),
                     StrokeKind::Inside,
                 );
             }
@@ -581,21 +569,15 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
             if let Some(ed) = &mut st.editing {
                 if ed.row < n_rows && ed.col < n_cols {
                     let cr = cell_rect(ed.row, ed.col);
-                    painter.rect_filled(cr, 0.0, theme.bg_elevated);
+                    painter.rect_filled(cr, 3.0, theme.bg_input);
                     let te_id = st.id.with("editor");
                     let te = egui::TextEdit::singleline(&mut ed.text)
                         .id(te_id)
                         .font(mono.clone())
-                        .frame(egui::Frame::NONE)
-                        .margin(vec2(PAD_X - 1.0, 3.0))
+                        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(PAD_X as i8 - 1, 5)))
                         .desired_width(cr.width());
                     let r = ui.put(cr, te);
-                    painter.rect_stroke(
-                        cr,
-                        0.0,
-                        Stroke::new(1.5, theme.accent),
-                        StrokeKind::Inside,
-                    );
+                    painter.rect_stroke(cr, 3.0, Stroke::new(1.5, theme.accent), StrokeKind::Inside);
                     if !ed.focus_requested {
                         r.request_focus();
                         ed.focus_requested = true;
@@ -636,14 +618,14 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
             let gx = screen_vp.min.x;
             let g_rect =
                 Rect::from_min_size(pos2(gx, screen_vp.min.y), vec2(gutter, screen_vp.height()));
-            painter.rect_filled(g_rect, 0.0, theme.bg_panel);
+            painter.rect_filled(g_rect, 0.0, theme.bg);
             for r in first..last {
                 let y = origin.y + HEADER_H + r as f32 * ROW_H;
                 let rr = Rect::from_min_size(pos2(gx, y), vec2(gutter, ROW_H));
                 let rs = src.row_state(r);
                 let touched = st.sel.row_touched(r);
                 if touched {
-                    painter.rect_filled(rr, 0.0, theme.bg_hover);
+                    painter.rect_filled(rr, 0.0, theme.accent_soft(if theme.dark { 24 } else { 18 }));
                 }
                 let (label, color) = match rs {
                     RowState::Inserted => ("+".to_string(), theme.green),
@@ -651,25 +633,21 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                     RowState::Normal => (
                         (r + 1).to_string(),
                         if touched {
-                            theme.text_dim
+                            theme.accent
                         } else {
                             theme.text_faint
                         },
                     ),
                 };
                 painter.text(
-                    pos2(rr.max.x - 6.0, rr.center().y),
+                    pos2(rr.max.x - 8.0, rr.center().y),
                     Align2::RIGHT_CENTER,
                     label,
-                    FontId::monospace(10.5),
+                    FontId::monospace(11.0),
                     color,
                 );
             }
-            painter.vline(
-                g_rect.max.x - 0.5,
-                g_rect.y_range(),
-                Stroke::new(1.0, theme.border),
-            );
+            painter.vline(g_rect.max.x - 0.5, g_rect.y_range(), Stroke::new(1.0, theme.border));
             let g_resp = ui.interact(g_rect, st.id.with("gutter"), Sense::click_and_drag());
             if (g_resp.clicked() || g_resp.drag_started() || g_resp.dragged())
                 && let Some(p) = ptr
@@ -694,7 +672,7 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
             let hy = screen_vp.min.y;
             let h_rect =
                 Rect::from_min_size(pos2(screen_vp.min.x, hy), vec2(screen_vp.width(), HEADER_H));
-            painter.rect_filled(h_rect, 0.0, theme.bg_panel);
+            painter.rect_filled(h_rect, 0.0, theme.bg_elevated);
             for c in c_first..c_last {
                 let x0 = origin.x + xs[c];
                 let hr = Rect::from_min_size(pos2(x0, hy), vec2(widths[c], HEADER_H));
@@ -715,20 +693,15 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                 let mut x = hr.min.x + PAD_X;
                 if h.pk || h.fk {
                     let (glyph, col) = if h.pk {
-                        ("🔑", theme.yellow)
+                        (super::Glyph::Common(Icon::Key), theme.yellow)
                     } else {
-                        ("🔗", theme.blue)
+                        (super::Glyph::Link, theme.blue)
                     };
-                    let g = hp.text(
-                        pos2(x, hr.center().y),
-                        Align2::LEFT_CENTER,
-                        glyph,
-                        FontId::proportional(12.0),
-                        col,
-                    );
-                    x = g.max.x + 4.0;
+                    let ir = Rect::from_min_size(pos2(x, hr.center().y - 6.5), vec2(13.0, 13.0));
+                    super::paint_glyph(&hp, ir, glyph, col);
+                    x = ir.max.x + 5.0;
                 }
-                let right_reserve = if h.sort.is_some() { 16.0 } else { 4.0 };
+                let right_reserve = if h.sort.is_some() { 20.0 } else { 4.0 };
                 let name_g = hp.layout_job(cell_job(
                     h.name,
                     (hr.max.x - x - right_reserve).max(8.0),
@@ -762,15 +735,10 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                     );
                 }
                 if let Some(desc) = h.sort {
-                    hp.text(
-                        pos2(hr.max.x - 6.0, hr.center().y),
-                        Align2::RIGHT_CENTER,
-                        if desc { "▼" } else { "▲" },
-                        FontId::monospace(9.0),
-                        theme.accent,
-                    );
+                    let ar = Rect::from_center_size(pos2(hr.max.x - 11.0, hr.center().y), vec2(12.0, 12.0));
+                    kiln_common::icons::paint(&hp, ar, if desc { Icon::ArrowDown } else { Icon::ArrowUp }, theme.accent);
                 }
-                hp.vline(hr.max.x - 0.5, hr.y_range(), Stroke::new(1.0, theme.border));
+                hp.vline(hr.max.x - 0.5, hr.y_range().shrink(8.0), Stroke::new(1.0, theme.border_strong));
                 if hresp.clicked() {
                     events.push(GridEvent::SortBy(c));
                 }
@@ -822,7 +790,7 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
             }
             // 헤더 왼쪽 모서리.
             let corner = Rect::from_min_size(pos2(gx, hy), vec2(gutter, HEADER_H));
-            painter.rect_filled(corner, 0.0, theme.bg_panel);
+            painter.rect_filled(corner, 0.0, theme.bg_elevated);
             painter.vline(
                 corner.max.x - 0.5,
                 corner.y_range(),
@@ -859,13 +827,9 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
     events
 }
 
+/// 홀수 행 바탕: 본문 바탕에 글자색을 아주 조금 섞는다.
 fn zebra(theme: Theme) -> Color32 {
-    let b = theme.bg;
-    Color32::from_rgb(
-        b.r().saturating_add(5),
-        b.g().saturating_add(5),
-        b.b().saturating_add(7),
-    )
+    lerp_color(theme.bg, theme.text, if theme.dark { 0.022 } else { 0.018 })
 }
 
 fn handle_keys(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource, events: &mut Vec<GridEvent>) {

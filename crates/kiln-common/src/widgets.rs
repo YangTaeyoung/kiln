@@ -118,43 +118,148 @@ pub enum ButtonKind {
 
 /// 모서리가 둥근 버튼.
 pub fn button(ui: &mut Ui, label: &str, kind: ButtonKind) -> Response {
+    button_with(ui, None, label, kind, false)
+}
+
+/// 아이콘을 앞에 붙일 수 있는 둥근 버튼. `compact` 면 높이 26, 아니면 30.
+/// 비활성 UI 안에서는 흐리게 그리고 클릭되지 않는다.
+pub fn button_with(ui: &mut Ui, icon: Option<Icon>, label: &str, kind: ButtonKind, compact: bool) -> Response {
     let t = Theme::current();
-    let font = fonts::medium(13.0);
+    let enabled = ui.is_enabled();
+    let font = fonts::medium(if compact { 12.5 } else { 13.0 });
     let g = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
-    let size = vec2(g.size().x + 26.0, 30.0);
+    let icon_w = if icon.is_some() { if label.is_empty() { 14.0 } else { 20.0 } } else { 0.0 };
+    let pad = if compact { 20.0 } else { 26.0 };
+    let size = vec2(g.size().x + icon_w + pad, if compact { 26.0 } else { 30.0 });
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let hovered = resp.hovered();
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    if !ui.is_rect_visible(rect) {
+        return resp;
+    }
+    let hovered = resp.hovered() && enabled;
+    let pressed = resp.is_pointer_button_down_on() && enabled;
     let (fill, stroke, fg) = match kind {
         ButtonKind::Primary => (if hovered { lerp_color(t.accent, Color32::WHITE, 0.08) } else { t.accent }, t.accent, t.accent_fg),
         ButtonKind::Danger => (if hovered { lerp_color(t.red, Color32::WHITE, 0.08) } else { t.red }, t.red, Color32::WHITE),
-        ButtonKind::Secondary => (if hovered { t.bg_hover } else { t.bg_elevated }, t.border_strong, t.text),
-        ButtonKind::Ghost => (if hovered { t.bg_hover } else { Color32::TRANSPARENT }, Color32::TRANSPARENT, t.text_dim),
+        ButtonKind::Secondary => (if pressed { t.bg_selected } else if hovered { t.bg_hover } else { t.bg_elevated }, t.border_strong, t.text),
+        ButtonKind::Ghost => (if pressed { t.bg_selected } else if hovered { t.bg_hover } else { Color32::TRANSPARENT }, Color32::TRANSPARENT, if hovered { t.text } else { t.text_dim }),
+    };
+    let (fill, fg) = if enabled {
+        (fill, fg)
+    } else {
+        match kind {
+            ButtonKind::Primary | ButtonKind::Danger => (fill.gamma_multiply(0.4), fg.gamma_multiply(0.7)),
+            _ => (fill, t.text_faint),
+        }
     };
     ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
-    if stroke != Color32::TRANSPARENT && kind == ButtonKind::Secondary {
+    if kind == ButtonKind::Secondary {
         ui.painter().rect_stroke(rect, CornerRadius::same(7), Stroke::new(1.0, stroke), StrokeKind::Inside);
     }
-    ui.painter().galley(rect.center() - g.size() / 2.0, g, fg);
+    let content_w = g.size().x + icon_w;
+    let mut x = rect.center().x - content_w / 2.0;
+    if let Some(i) = icon {
+        let ir = Rect::from_center_size(pos2(x + 7.0, rect.center().y), Vec2::splat(14.0));
+        icons::paint(ui.painter(), ir, i, fg);
+        x += icon_w;
+    }
+    ui.painter().galley(pos2(x, rect.center().y - g.size().y / 2.0), g, fg);
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     resp
 }
 
-/// 아이콘만 있는 버튼. `active` 면 강조 배경.
+/// 아이콘만 있는 버튼. `active` 면 강조 배경. 툴팁 문자열이 접근성 이름이 된다.
 pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: &str) -> Response {
     let t = Theme::current();
+    let enabled = ui.is_enabled();
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-    let (bg, fg) = if active {
-        (t.accent_soft(if t.dark { 46 } else { 32 }), t.accent)
-    } else if resp.hovered() {
-        (t.bg_hover, t.text)
-    } else {
-        (Color32::TRANSPARENT, t.text_dim)
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(7), bg);
-    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), Vec2::splat(size * 0.56)), icon, fg);
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, active, tip));
+    if ui.is_rect_visible(rect) {
+        let (bg, fg) = if !enabled {
+            (Color32::TRANSPARENT, t.text_faint)
+        } else if active {
+            (t.accent_soft(if t.dark { 46 } else { 32 }), t.accent)
+        } else if resp.hovered() {
+            (t.bg_hover, t.text)
+        } else {
+            (Color32::TRANSPARENT, t.text_dim)
+        };
+        ui.painter().rect_filled(rect, CornerRadius::same(7), bg);
+        icons::paint(ui.painter(), Rect::from_center_size(rect.center(), Vec2::splat(size * 0.56)), icon, fg);
+    }
     if tip.is_empty() { resp } else { resp.on_hover_text(tip) }
+}
+
+/// 입력칸 프레임: bg_input 바탕, 1px 테두리, 모서리 7. 포커스면 강조색, 오류면 빨간 테두리.
+pub fn input_frame(focused: bool, error: bool) -> egui::Frame {
+    let t = Theme::current();
+    let stroke = if error {
+        t.red
+    } else if focused {
+        t.accent
+    } else {
+        t.border_strong
+    };
+    egui::Frame::new()
+        .fill(t.bg_input)
+        .stroke(Stroke::new(1.0, stroke))
+        .corner_radius(CornerRadius::same(7))
+        .inner_margin(egui::Margin::symmetric(8, 4))
+}
+
+/// 색을 불투명도 `a`(0~1)로 섞는다.
+pub fn tint(c: Color32, a: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (a.clamp(0.0, 1.0) * 255.0) as u8)
+}
+
+/// 둥근 알약 배지. 글자색 `fg`, 바탕은 `fg` 를 옅게 깐다.
+pub fn pill(ui: &mut Ui, text: &str, fg: Color32) -> Response {
+    let t = Theme::current();
+    let g = ui.painter().layout_no_wrap(text.to_string(), fonts::medium(11.0), fg);
+    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 14.0, 18.0), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, CornerRadius::same(9), tint(fg, if t.dark { 0.16 } else { 0.12 }));
+        ui.painter().galley(rect.center() - g.size() / 2.0, g, fg);
+    }
+    resp
+}
+
+/// 작은 섹션 제목(세미볼드 12.5, 흐린 글자).
+pub fn section_title(ui: &mut Ui, text: &str) -> Response {
+    let t = Theme::current();
+    ui.label(egui::RichText::new(text).font(fonts::semibold(12.5)).color(t.text_dim))
+}
+
+/// 목록 행 배경: 선택은 bg_selected, 호버는 bg_hover, 모서리 6.
+pub fn paint_row(painter: &egui::Painter, rect: Rect, selected: bool, hovered: bool) {
+    let t = Theme::current();
+    if selected {
+        painter.rect_filled(rect, CornerRadius::same(6), t.bg_selected);
+    } else if hovered {
+        painter.rect_filled(rect, CornerRadius::same(6), t.bg_hover);
+    }
+}
+
+/// 빈 상태: 가운데 아이콘, 한 줄 안내, 선택적 동작 버튼. 버튼이 눌리면 true.
+pub fn empty_state(ui: &mut Ui, icon: Icon, text: &str, action: Option<&str>) -> bool {
+    let t = Theme::current();
+    let mut clicked = false;
+    ui.vertical_centered(|ui| {
+        ui.add_space(28.0);
+        let (r, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
+        ui.painter().rect_filled(r, CornerRadius::same(10), t.bg_hover);
+        icons::paint(ui.painter(), Rect::from_center_size(r.center(), Vec2::splat(20.0)), icon, t.text_faint);
+        ui.add_space(10.0);
+        ui.add(egui::Label::new(egui::RichText::new(text).font(fonts::medium(13.0)).color(t.text_dim)).wrap());
+        if let Some(a) = action {
+            ui.add_space(10.0);
+            clicked = button_with(ui, None, a, ButtonKind::Secondary, true).clicked();
+        }
+        ui.add_space(20.0);
+    });
+    clicked
 }
 
 /// 상태 점(주의가 필요하면 부드럽게 깜박인다).

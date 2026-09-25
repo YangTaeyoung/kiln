@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use egui::{Align, Color32, CornerRadius, FontId, Id, Layout, Margin, RichText, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Align, Color32, CornerRadius, FontId, Id, Layout, Margin, RichText, Sense, Ui, pos2, vec2};
 use kiln_common::Task;
 
 use super::panel::one_line_job;
@@ -13,7 +13,7 @@ use crate::cmd::{GitError, GitResult};
 use crate::gh::{GhBackend, PrBackend, PrCreate, PrCreateDefaults, PrFilter, PrItem};
 use crate::util::{now_unix, parse_iso8601, short_relative_time};
 
-const PR_ROW_H: f32 = 46.0;
+const PR_ROW_H: f32 = 50.0;
 
 struct CreateForm {
     defaults: Option<Task<GitResult<PrCreateDefaults>>>,
@@ -169,11 +169,20 @@ impl PrPanel {
         egui::Frame::new().fill(t.bg_panel).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-            egui::Frame::new().inner_margin(Margin { left: 10, right: 10, top: 8, bottom: 8 }).show(ui, |ui| {
+            egui::Frame::new().inner_margin(Margin { left: 12, right: 12, top: 10, bottom: 10 }).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("풀 리퀘스트").size(14.0).strong().color(t.text));
+                    ui.label(RichText::new("풀 리퀘스트").font(kiln_common::fonts::semibold(13.5)).color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if self.form.is_none() && primary_button(ui, "새 PR", None).on_hover_text("풀 리퀘스트 새로 만들기").clicked()
+                        if self.form.is_none()
+                            && kiln_common::widgets::button_with(
+                                ui,
+                                Some(kiln_common::icons::Icon::Plus),
+                                "새 PR",
+                                kiln_common::widgets::ButtonKind::Primary,
+                                true,
+                            )
+                            .on_hover_text("풀 리퀘스트 새로 만들기")
+                            .clicked()
                         {
                             self.open_create_form();
                         }
@@ -184,18 +193,21 @@ impl PrPanel {
                         }
                     });
                 });
-                ui.add_space(4.0);
+                ui.add_space(8.0);
                 let mut f = self.filter;
                 let opts: Vec<(PrFilter, &str)> = PrFilter::ALL.iter().map(|f| (*f, f.label())).collect();
                 if segmented(ui, &mut f, &opts) {
                     self.set_filter(f);
                 }
-                ui.add_space(4.0);
+                ui.add_space(8.0);
+                let sid = Id::new("kiln_pr_search");
+                let focused = ui.memory(|m| m.has_focus(sid));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search)
+                        .id(sid)
                         .hint_text("제목, 작성자, 브랜치, #번호로 필터")
                         .desired_width(f32::INFINITY)
-                        .frame(input_frame()),
+                        .frame(kiln_common::widgets::input_frame(focused, false)),
                 );
                 if let Some(url) = self.created.clone() {
                     ui.add_space(4.0);
@@ -204,11 +216,13 @@ impl PrPanel {
                     }
                 }
             });
-            ui.add(egui::Separator::default().spacing(0.0));
+            let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+            ui.painter().rect_filled(line.shrink2(vec2(12.0, 0.0)), 0.0, t.border);
+            ui.add_space(4.0);
 
             if self.form.is_some() {
                 egui::ScrollArea::vertical().id_salt("pr_form").auto_shrink([false, false]).show(ui, |ui| {
-                    egui::Frame::new().inner_margin(Margin::same(10)).show(ui, |ui| self.ui_form(ui));
+                    egui::Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| self.ui_form(ui));
                 });
                 return;
             }
@@ -280,18 +294,15 @@ impl PrPanel {
                     let w = ui.available_width();
                     let (rect, resp) = ui.allocate_exact_size(vec2(w, PR_ROW_H), Sense::click());
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("#{} {}", p.number, p.title)));
-                    if resp.hovered() {
-                        ui.painter().rect_filled(rect, CornerRadius::ZERO, t.bg_hover);
-                    }
-                    ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, alpha(t.border, 0.6)));
+                    kiln_common::widgets::paint_row(ui.painter(), rect.shrink2(vec2(6.0, 1.0)), false, resp.hovered());
                     let pr_state = p.pr_state();
                     let sc = pr_state_color(pr_state, p.is_draft);
                     let painter = ui.painter();
                     // 상태 아이콘
-                    paint_icon(painter, egui::Rect::from_center_size(rect.left_top() + vec2(16.0, 14.0), vec2(14.0, 14.0)), Icon::PullRequest, sc);
+                    paint_icon(painter, egui::Rect::from_center_size(rect.left_top() + vec2(22.0, 16.0), vec2(15.0, 15.0)), Icon::PullRequest, sc);
                     // 오른쪽 배지들
-                    let mut rx = rect.right() - 10.0;
-                    let y1 = rect.top() + 14.0;
+                    let mut rx = rect.right() - 16.0;
+                    let y1 = rect.top() + 16.0;
                     if let Some(c) = p.checks() {
                         let (icon, c) = checks_icon(c);
                         let r = egui::Rect::from_center_size(pos2(rx - 7.0, y1), vec2(14.0, 14.0));
@@ -299,9 +310,9 @@ impl PrPanel {
                         rx = r.left() - 8.0;
                     }
                     let mut chip = |label: &str, fg: Color32| {
-                        let g = painter.layout_no_wrap(label.to_string(), FontId::proportional(10.5), fg);
-                        let br = egui::Rect::from_min_size(pos2(rx - g.size().x - 10.0, y1 - 8.0), vec2(g.size().x + 10.0, 16.0));
-                        painter.rect(br, CornerRadius::same(8), alpha(fg, 0.12), Stroke::new(1.0, alpha(fg, 0.45)), egui::StrokeKind::Inside);
+                        let g = painter.layout_no_wrap(label.to_string(), kiln_common::fonts::medium(11.0), fg);
+                        let br = egui::Rect::from_min_size(pos2(rx - g.size().x - 12.0, y1 - 9.0), vec2(g.size().x + 12.0, 18.0));
+                        painter.rect_filled(br, CornerRadius::same(9), alpha(fg, if t.dark { 0.16 } else { 0.12 }));
                         painter.galley(br.center() - g.size() / 2.0, g, fg);
                         rx = br.left() - 5.0;
                     };
@@ -314,22 +325,22 @@ impl PrPanel {
                     if pr_state != crate::gh::PrState::Open {
                         chip(if pr_state == crate::gh::PrState::Merged { "병합됨" } else { "닫힘" }, sc);
                     }
-                    let x0 = rect.left() + 30.0;
-                    let title_job = one_line_job(&[(&p.title, 13.0, t.text)], (rx - x0 - 4.0).max(40.0));
+                    let x0 = rect.left() + 38.0;
+                    let title_job = one_line_job(&[(&p.title, 13.5, t.text)], (rx - x0 - 4.0).max(40.0));
                     let g = painter.layout_job(title_job);
                     painter.galley(pos2(x0, y1 - g.size().y / 2.0), g, t.text);
                     let updated = parse_iso8601(&p.updated_at).map(|ts| short_relative_time(ts, now)).unwrap_or_default();
                     let meta = format!("#{} · {} · {} › {} · {}", p.number, p.author.login, p.head_ref_name, p.base_ref_name, updated);
                     let adds = format!("+{}", p.additions);
                     let dels = format!("−{}", p.deletions);
-                    let ga = painter.layout_no_wrap(dels.clone(), FontId::monospace(10.5), t.red);
-                    let r_d = egui::Rect::from_min_size(pos2(rect.right() - 10.0 - ga.size().x, rect.top() + 26.0), ga.size());
+                    let ga = painter.layout_no_wrap(dels.clone(), FontId::monospace(11.0), t.red);
+                    let r_d = egui::Rect::from_min_size(pos2(rect.right() - 16.0 - ga.size().x, rect.top() + 29.0), ga.size());
                     painter.galley(r_d.min, ga, t.red);
-                    let gb = painter.layout_no_wrap(adds, FontId::monospace(10.5), t.green);
-                    let r_a = egui::Rect::from_min_size(pos2(r_d.left() - 6.0 - gb.size().x, rect.top() + 26.0), gb.size());
+                    let gb = painter.layout_no_wrap(adds, FontId::monospace(11.0), t.green);
+                    let r_a = egui::Rect::from_min_size(pos2(r_d.left() - 6.0 - gb.size().x, rect.top() + 29.0), gb.size());
                     painter.galley(r_a.min, gb, t.green);
                     let g = painter.layout_job(one_line_job(&[(&meta, 11.0, t.text_faint)], (r_a.left() - x0 - 8.0).max(40.0)));
-                    painter.galley(pos2(x0, rect.top() + 26.0), g, t.text_faint);
+                    painter.galley(pos2(x0, rect.top() + 29.0), g, t.text_faint);
                     if resp.clicked() {
                         events.push(GitEvent::OpenPr(p.number));
                     }
@@ -344,7 +355,7 @@ impl PrPanel {
         let Some(form) = &mut self.form else { return };
         let mut close = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("새 풀 리퀘스트").size(14.0).strong().color(t.text));
+            ui.label(RichText::new("새 풀 리퀘스트").font(kiln_common::fonts::semibold(14.0)).color(t.text));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if icon_button(ui, Icon::Close, "취소").clicked() {
                     close = true;
@@ -378,22 +389,25 @@ impl PrPanel {
                 egui::ComboBox::from_id_salt(Id::new("pr_create_base"))
                     .selected_text(RichText::new(&form.req.base).size(12.5))
                     .width(140.0)
+                    .icon(|ui, rect, visuals, _open| {
+                        paint_icon(ui.painter(), rect.expand(2.0), Icon::ChevronDown, visuals.fg_stroke.color);
+                    })
                     .show_ui(ui, |ui| {
                         for b in &form.bases {
                             ui.selectable_value(&mut form.req.base, b.clone(), b);
                         }
                     });
             });
-            ui.add_space(6.0);
-            ui.label(RichText::new("제목").size(11.5).color(t.text_dim));
+            ui.add_space(10.0);
+            ui.label(RichText::new("제목").font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
             ui.add(
                 egui::TextEdit::singleline(&mut form.req.title)
                     .hint_text("풀 리퀘스트 제목")
                     .desired_width(f32::INFINITY)
                     .frame(input_frame()),
             );
-            ui.add_space(4.0);
-            ui.label(RichText::new("설명").size(11.5).color(t.text_dim));
+            ui.add_space(8.0);
+            ui.label(RichText::new("설명").font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
             ui.add(
                 egui::TextEdit::multiline(&mut form.req.body)
                     .hint_text("변경 사항을 설명하세요 (Markdown 지원)")

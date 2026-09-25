@@ -8,11 +8,13 @@ use crate::manager::{HistoryEntry, Job};
 use crate::sql::{apply_auto_limit, returns_rows, split_statements, statement_at};
 use crate::ui::grid::{GridEvent, GridState, grid_ui};
 use crate::ui::highlight::SqlHighlighter;
-use crate::ui::{self, dim, thousands, toggle_button, tool_button};
+use crate::ui::{self, dim, faint, thousands, toggle_button_icon, tool_button_icon};
 use crate::{ConnId, ConsoleSession, DbManager, Driver, ResultSet};
 use egui::text::{CCursor, CCursorRange};
 use egui::{Key, Modifiers, RichText, Ui};
-use kiln_common::Theme;
+use kiln_common::icons::Icon;
+use kiln_common::widgets;
+use kiln_common::{Theme, fonts};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -361,7 +363,12 @@ impl ConsoleView {
                 egui::Panel::right(egui::Id::new(("db-console-history", self.conn)))
                     .resizable(true)
                     .default_size(280.0)
-                    .frame(egui::Frame::new().fill(theme.bg_panel).inner_margin(8))
+                    .frame(
+                        egui::Frame::new()
+                            .fill(theme.bg_panel)
+                            .stroke(egui::Stroke::new(1.0, theme.border))
+                            .inner_margin(10),
+                    )
                     .show(ui, |ui| self.history_ui(ui, m));
             }
             let editor_h = (ui.available_height() * 0.42).clamp(90.0, 600.0);
@@ -378,38 +385,41 @@ impl ConsoleView {
     fn toolbar(&mut self, ui: &mut Ui, m: &DbManager) {
         let theme = Theme::current();
         egui::Frame::new()
-            .fill(theme.bg_panel)
-            .inner_margin(egui::Margin::symmetric(8, 4))
+            .inner_margin(egui::Margin { left: 10, right: 10, top: 8, bottom: 8 })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
                     let running = self.running.is_some();
-                    if tool_button(ui, "▶ 실행", !running, true)
+                    if tool_button_icon(ui, Some(Icon::Play), "실행", !running, true)
                         .on_hover_text("커서 위치 또는 선택 영역의 문 실행 (⌘↩)")
                         .clicked()
                     {
                         let s = self.current_statements();
                         self.run(m, s, false);
                     }
-                    if tool_button(ui, "⏩ 모두 실행", !running, false)
+                    if ui::secondary_button(ui, None, "모두 실행", !running)
                         .on_hover_text("모든 문 실행 (⌘⇧↩)")
                         .clicked()
                     {
                         let s = self.all_statements();
                         self.run(m, s, false);
                     }
-                    if tool_button(ui, "■ 취소", running, false).clicked() {
+                    if tool_button_icon(ui, Some(Icon::Stop), "취소", running, false).clicked() {
                         self.cancel(m);
                     }
-                    if tool_button(ui, "실행 계획", !running, false)
+                    if tool_button_icon(ui, Some(Icon::Sparkle), "실행 계획", !running, false)
                         .on_hover_text("현재 문의 쿼리 실행 계획 표시")
                         .clicked()
                     {
                         let s = self.current_statements();
                         self.run(m, s, true);
                     }
-                    ui.separator();
-                    ui.checkbox(&mut self.auto_limit, RichText::new("행 제한").size(12.0))
+                    let (r, _) = ui.allocate_exact_size(egui::vec2(13.0, 18.0), egui::Sense::hover());
+                    ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, theme.border_strong));
+                    widgets::toggle(ui, &mut self.auto_limit)
                         .on_hover_text("LIMIT이 없는 SELECT 문에 LIMIT 추가");
+                    ui.add_space(2.0);
+                    ui.label(RichText::new("행 제한").size(12.5).color(theme.text_dim));
                     ui.add_enabled(
                         self.auto_limit,
                         egui::DragValue::new(&mut self.limit)
@@ -417,6 +427,7 @@ impl ConsoleView {
                             .speed(10.0),
                     );
                     if running && let Some(r) = &self.running {
+                        ui.add_space(6.0);
                         ui::spinner(ui);
                         ui.label(dim(format!(
                             "{:.1}s · {}/{}",
@@ -426,24 +437,28 @@ impl ConsoleView {
                         )));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toggle_button(ui, "기록", self.show_history).clicked() {
+                        if toggle_button_icon(ui, Some(Icon::History), "기록", self.show_history).clicked() {
                             self.show_history = !self.show_history;
                         }
-                        if toggle_button(ui, "값", self.show_viewer).clicked() {
+                        if toggle_button_icon(ui, Some(Icon::Eye), "값", self.show_viewer).clicked() {
                             self.show_viewer = !self.show_viewer;
                         }
+                        ui.add_space(6.0);
                         let name = m
                             .get(self.conn)
                             .map(|c| c.display_name())
                             .unwrap_or_default();
                         let status = m.status(self.conn);
-                        ui.label(RichText::new(name).size(12.0).color(theme.text_dim));
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                        ui::paint_dot(ui, rect.center(), ui::status_color(&status));
+                        let g = ui.painter().layout_no_wrap(name, fonts::medium(12.0), theme.text);
+                        let (pr, _) = ui.allocate_exact_size(egui::vec2(g.size().x + 32.0, 26.0), egui::Sense::hover());
+                        ui.painter().rect_filled(pr, 13.0, theme.bg_hover);
+                        ui::paint_dot(ui, egui::pos2(pr.left() + 13.0, pr.center().y), ui::status_color(&status));
+                        ui.painter().galley(egui::pos2(pr.left() + 22.0, pr.center().y - g.size().y / 2.0), g, theme.text);
                     });
                 });
             });
+        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        ui.painter().rect_filled(r, 0.0, theme.border);
     }
 
     fn editor_ui(&mut self, ui: &mut Ui) {
@@ -471,8 +486,7 @@ impl ConsoleView {
                 let out = egui::TextEdit::multiline(&mut self.sql)
                     .id(te_id)
                     .code_editor()
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::vec2(12.0, 8.0))
+                    .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(14, 10)))
                     .desired_width(f32::INFINITY)
                     .desired_rows(8)
                     .lock_focus(true)
@@ -500,10 +514,10 @@ impl ConsoleView {
         let theme = Theme::current();
         // 결과 탭 막대.
         egui::Frame::new()
-            .fill(theme.bg_panel)
-            .inner_margin(egui::Margin::symmetric(8, 3))
+            .inner_margin(egui::Margin { left: 10, right: 10, top: 6, bottom: 6 })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
                     let n = self.results.len();
                     for i in 0..n {
                         let t = &self.results[i];
@@ -513,34 +527,24 @@ impl ConsoleView {
                             Err(_) => (format!("#{} · 오류", i + 1), theme.red),
                         };
                         let sel = self.active == i;
-                        let r = ui.add(
-                            egui::Button::new(RichText::new(label).size(11.5).color(if sel { color } else { color.gamma_multiply(0.8) }))
-                                .fill(if sel { theme.bg_elevated } else { egui::Color32::TRANSPARENT })
-                                .corner_radius(4.0),
-                        );
+                        let r = ui::tab_chip(ui, &label, sel, color);
                         if r.clicked() {
                             self.active = i;
                         }
                         r.on_hover_text(crate::value::one_line(&t.run.sql, 300));
                     }
                     let out_sel = self.active == usize::MAX;
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("출력").size(11.5).color(if out_sel { theme.text } else { theme.text_dim }))
-                                .fill(if out_sel { theme.bg_elevated } else { egui::Color32::TRANSPARENT })
-                                .corner_radius(4.0),
-                        )
-                        .clicked()
-                    {
+                    if ui::tab_chip(ui, "출력", out_sel, theme.text).clicked() {
                         self.active = usize::MAX;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
                         let exportable = self
                             .results
                             .get(self.active)
                             .is_some_and(|t| matches!(&t.run.outcome, Ok(o) if o.has_rows));
                         ui.add_enabled_ui(exportable && self.export_job.is_none(), |ui| {
-                            ui.menu_button(RichText::new("내보내기 ⏷").size(12.0), |ui| {
+                            ui::menu_button(ui, Some(Icon::Download), "내보내기", |ui| {
                                 for f in [ExportFormat::Csv, ExportFormat::Json] {
                                     if ui.button(format!("모든 행을 {}로…", f.extension().to_uppercase())).clicked() {
                                         ui.close();
@@ -552,15 +556,17 @@ impl ConsoleView {
                         if let Some(t) = self.results.get(self.active)
                             && let Ok(o) = &t.run.outcome
                         {
-                            ui.label(dim(format!("{} ms", t.run.elapsed_ms)));
+                            ui.label(faint(format!("{} ms", t.run.elapsed_ms)));
                             if o.truncated {
-                                ui.label(RichText::new("제한됨").size(11.0).color(theme.yellow))
+                                widgets::pill(ui, "제한됨", theme.yellow)
                                     .on_hover_text("행이 더 있습니다. 가져오려면 제한을 늘리거나 끄세요");
                             }
                         }
                     });
                 });
             });
+        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        ui.painter().rect_filled(r, 0.0, theme.border);
         if self.active == usize::MAX || self.results.is_empty() {
             self.output_ui(ui);
             return;
@@ -573,7 +579,7 @@ impl ConsoleView {
                 let e = e.clone();
                 let offset = tab.run.offset;
                 let sql = tab.run.sql.clone();
-                egui::Frame::new().inner_margin(12).show(ui, |ui| {
+                egui::Frame::new().inner_margin(16).show(ui, |ui| {
                     ui::banner(ui, &e.to_string(), true);
                     if let Some(p) = e.position {
                         let char_off = self.sql[..offset.min(self.sql.len())].chars().count()
@@ -586,34 +592,23 @@ impl ConsoleView {
                             .map(|l| l.chars().count())
                             .unwrap_or(0)
                             + 1;
-                        ui.add_space(6.0);
-                        ui.label(dim(format!("{line}줄, {col}열")));
+                        ui.add_space(8.0);
+                        widgets::pill(ui, &format!("{line}줄, {col}열"), theme.red);
                     }
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(crate::value::one_line(&sql, 500))
-                            .monospace()
-                            .size(12.0)
-                            .color(theme.text_dim),
-                    );
+                    ui.add_space(10.0);
+                    code_block(ui, &crate::value::one_line(&sql, 500));
                 });
             }
             Ok(o) if !o.has_rows => {
                 let (aff, ms, sql) = (o.affected, tab.run.elapsed_ms, tab.run.sql.clone());
-                egui::Frame::new().inner_margin(12).show(ui, |ui| {
-                    ui.label(
-                        RichText::new(format!("✔ {aff}행 영향받음"))
-                            .color(theme.green)
-                            .size(13.0),
-                    );
-                    ui.label(dim(format!("{ms} ms")));
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(crate::value::one_line(&sql, 500))
-                            .monospace()
-                            .size(12.0)
-                            .color(theme.text_dim),
-                    );
+                egui::Frame::new().inner_margin(16).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui::glyph_label(ui, Icon::Check, theme.green, 16.0);
+                        ui.label(RichText::new(format!("{aff}행 영향받음")).font(fonts::semibold(14.0)).color(theme.text));
+                        ui.label(faint(format!("{ms} ms")));
+                    });
+                    ui.add_space(10.0);
+                    code_block(ui, &crate::value::one_line(&sql, 500));
                 });
             }
             Ok(_) => {
@@ -641,7 +636,12 @@ impl ConsoleView {
             egui::Panel::right(egui::Id::new(("db-console-viewer", self.conn)))
                 .resizable(true)
                 .default_size(300.0)
-                .frame(egui::Frame::new().fill(theme.bg_panel).inner_margin(8))
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme.bg_panel)
+                        .stroke(egui::Stroke::new(1.0, theme.border))
+                        .inner_margin(12),
+                )
                 .show(ui, |ui| {
                     let vc = cell.map(|(r, c)| ViewerCell {
                         row: r,
@@ -676,16 +676,21 @@ impl ConsoleView {
             .auto_shrink([false, false])
             .stick_to_bottom(true)
             .show(ui, |ui| {
-                egui::Frame::new().inner_margin(10).show(ui, |ui| {
+                egui::Frame::new().inner_margin(14).show(ui, |ui| {
                     if self.messages.is_empty() {
-                        ui.label(dim("아직 출력이 없습니다"));
+                        widgets::empty_state(ui, Icon::Terminal, "아직 출력이 없습니다", None);
                     }
+                    ui.spacing_mut().item_spacing.y = 4.0;
                     for (msg, err) in &self.messages {
-                        ui.label(RichText::new(msg).monospace().size(12.0).color(if *err {
-                            theme.red
-                        } else {
-                            theme.text_dim
-                        }));
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(8.0, 14.0), egui::Sense::hover());
+                            ui.painter().circle_filled(r.center(), 2.5, if *err { theme.red } else { theme.text_faint });
+                            ui.label(RichText::new(msg).font(fonts::mono(12.0)).color(if *err {
+                                theme.red
+                            } else {
+                                theme.text_dim
+                            }));
+                        });
                     }
                 });
             });
@@ -693,13 +698,16 @@ impl ConsoleView {
 
     fn history_ui(&mut self, ui: &mut Ui, m: &DbManager) {
         let theme = Theme::current();
-        ui.label(RichText::new("기록").strong());
-        ui.add(
-            egui::TextEdit::singleline(&mut self.history_filter)
-                .hint_text("검색")
-                .desired_width(f32::INFINITY),
+        ui.label(RichText::new("기록").font(fonts::semibold(13.0)).color(theme.text));
+        ui.add_space(6.0);
+        let w = ui.available_width();
+        ui::text_field(
+            ui,
+            egui::TextEdit::singleline(&mut self.history_filter).hint_text(RichText::new("검색").color(theme.text_faint)),
+            egui::Id::new(("db-console-history-filter", self.conn)),
+            w,
         );
-        ui.add_space(4.0);
+        ui.add_space(6.0);
         let filter = self.history_filter.to_lowercase();
         let entries = m.history(self.conn);
         let mut pick: Option<(String, bool)> = None;
@@ -719,20 +727,21 @@ impl ConsoleView {
                                 .to_string()
                         })
                         .unwrap_or_default();
-                    let (rect, resp) = ui::tree_row(ui, 38.0, false, &e.sql);
+                    let (rect, resp) = ui::tree_row(ui, 44.0, false, &e.sql);
                     let p = ui.painter();
+                    p.circle_filled(rect.min + egui::vec2(10.0, 14.0), 3.0, if e.ok { theme.green } else { theme.red });
                     p.text(
-                        rect.min + egui::vec2(6.0, 4.0),
+                        rect.min + egui::vec2(20.0, 6.0),
                         egui::Align2::LEFT_TOP,
                         crate::value::one_line(&e.sql, 60),
-                        egui::FontId::monospace(11.5),
-                        if e.ok { theme.text } else { theme.red },
+                        fonts::mono(12.0),
+                        theme.text,
                     );
                     p.text(
-                        rect.min + egui::vec2(6.0, 21.0),
+                        rect.min + egui::vec2(20.0, 25.0),
                         egui::Align2::LEFT_TOP,
                         format!("{when} · {} ms", e.elapsed_ms),
-                        egui::FontId::proportional(10.5),
+                        fonts::regular(11.0),
                         theme.text_faint,
                     );
                     let resp = resp.on_hover_text(&e.sql);
@@ -767,4 +776,18 @@ impl ConsoleView {
         let id = self.conn;
         self.export_job = Some(m.spawn(async move { m2.export_query(id, &sql, &path, fmt).await }));
     }
+}
+
+/// 둥근 테두리 안의 SQL 한 덩어리.
+fn code_block(ui: &mut Ui, sql: &str) {
+    let theme = Theme::current();
+    egui::Frame::new()
+        .fill(theme.bg_panel)
+        .stroke(egui::Stroke::new(1.0, theme.border))
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(egui::Label::new(RichText::new(sql).font(fonts::mono(12.0)).color(theme.text_dim)).wrap());
+        });
 }

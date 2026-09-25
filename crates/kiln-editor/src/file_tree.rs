@@ -161,9 +161,9 @@ struct FsWatch {
     watched: HashSet<PathBuf>,
 }
 
-const ROW_H: f32 = 22.0;
-const HEADER_H: f32 = 30.0;
-const INDENT: f32 = 12.0;
+const ROW_H: f32 = 28.0;
+const HEADER_H: f32 = 36.0;
+const INDENT: f32 = 14.0;
 /// 감시 이벤트 디바운스(초, egui 시각 기준).
 const DEBOUNCE_QUIET: f64 = 0.08;
 const DEBOUNCE_MAX: f64 = 0.3;
@@ -709,12 +709,16 @@ impl FileTree {
 
         if let Some((msg, at)) = &self.error {
             if at.elapsed() < Duration::from_secs(5) {
-                let r = Rect::from_min_max(pos2(full.left() + 6.0, full.bottom() - 34.0), pos2(full.right() - 6.0, full.bottom() - 6.0));
                 let p = ui.painter();
-                p.rect_filled(r, 4.0, t.red.gamma_multiply(0.18));
-                p.rect_stroke(r, 4.0, Stroke::new(1.0, t.red.gamma_multiply(0.6)), egui::StrokeKind::Inside);
-                let galley = p.layout(msg.clone(), FontId::proportional(11.5), t.text, r.width() - 16.0);
-                p.galley(pos2(r.left() + 8.0, r.center().y - galley.size().y / 2.0), galley, t.text);
+                let galley = p.layout(msg.clone(), FontId::proportional(12.5), t.text, full.width() - 52.0);
+                let h = (galley.size().y + 16.0).max(36.0);
+                let r = Rect::from_min_max(pos2(full.left() + 8.0, full.bottom() - 8.0 - h), pos2(full.right() - 8.0, full.bottom() - 8.0));
+                p.add(t.shadow().as_shape(r, 8));
+                p.rect_filled(r, 8.0, t.bg_elevated);
+                p.rect_filled(r, 8.0, kiln_common::widgets::tint(t.red, if t.dark { 0.14 } else { 0.08 }));
+                p.rect_stroke(r, 8.0, Stroke::new(1.0, kiln_common::widgets::tint(t.red, 0.45)), egui::StrokeKind::Inside);
+                ui_kit::paint_icon(p, Rect::from_center_size(pos2(r.left() + 17.0, r.center().y), vec2(14.0, 14.0)), Icon::Warning, t.red);
+                p.galley(pos2(r.left() + 32.0, r.center().y - galley.size().y / 2.0), galley, t.text);
                 ui.ctx().request_repaint_after(Duration::from_millis(500));
             } else {
                 self.error = None;
@@ -728,11 +732,11 @@ impl FileTree {
 
     fn header_ui(&mut self, ui: &mut Ui, rect: Rect, actions: &mut Vec<Action>) {
         let t = Theme::current();
-        let name = self.root.file_name().map(|n| n.to_string_lossy().to_uppercase()).unwrap_or_else(|| self.root.display().to_string());
+        let name = self.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| self.root.display().to_string());
         let p = ui.painter();
-        p.text(pos2(rect.left() + 12.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(11.0), t.text_dim);
+        p.text(pos2(rect.left() + 14.0, rect.center().y), Align2::LEFT_CENTER, name, kiln_common::fonts::semibold(13.0), t.text);
         let hovered = ui.rect_contains_pointer(ui.max_rect()) || ui.memory(|m| m.has_focus(self.id));
-        let btns = Rect::from_min_max(pos2(rect.right() - 5.0 * 23.0 - 6.0, rect.top() + 4.0), pos2(rect.right() - 6.0, rect.bottom() - 4.0));
+        let btns = Rect::from_min_max(pos2(rect.right() - 5.0 * 25.0 - 8.0, rect.top() + 5.0), pos2(rect.right() - 8.0, rect.bottom() - 5.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(btns).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.spacing_mut().item_spacing.x = 1.0;
             if !hovered {
@@ -771,36 +775,36 @@ impl FileTree {
         let t = Theme::current();
         let row = self.rows[i].clone();
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-        let indent_x = rect.left() + 8.0 + row.depth as f32 * INDENT;
+        let indent_x = rect.left() + 10.0 + row.depth as f32 * INDENT;
         let p = ui.painter();
         // 들여쓰기 안내선
         for d in 0..row.depth {
-            let x = (rect.left() + 8.0 + d as f32 * INDENT + 7.0).round() + 0.5;
-            p.line_segment([pos2(x, rect.top()), pos2(x, rect.bottom())], Stroke::new(1.0, t.border.gamma_multiply(0.7)));
+            let x = (rect.left() + 10.0 + d as f32 * INDENT + 7.0).round() + 0.5;
+            p.line_segment([pos2(x, rect.top()), pos2(x, rect.bottom())], Stroke::new(1.0, t.border));
         }
         match row.kind {
             RowKind::NewEntry { is_dir } => {
-                let icon_rect = Rect::from_center_size(pos2(indent_x + 24.0, rect.center().y), vec2(16.0, 16.0));
+                let icon_rect = Rect::from_center_size(pos2(indent_x + 25.0, rect.center().y), vec2(16.0, 16.0));
                 if is_dir {
                     ui_kit::paint_icon(p, icon_rect, Icon::Folder, t.text_dim);
                 } else {
                     let name = self.create.as_ref().map(|c| c.text.clone()).unwrap_or_default();
                     ui_kit::paint_file_badge(p, icon_rect, &name);
                 }
-                let edit_rect = Rect::from_min_max(pos2(indent_x + 34.0, rect.top() + 1.0), pos2(rect.right() - 6.0, rect.bottom() - 1.0));
+                let edit_rect = Rect::from_min_max(pos2(indent_x + 36.0, rect.top() + 2.0), pos2(rect.right() - 8.0, rect.bottom() - 2.0));
                 self.inline_edit(ui, edit_rect, true);
             }
             RowKind::Entry(e) => {
                 let selected = self.selected.as_deref() == Some(e.path.as_path());
                 ui_kit::paint_row_bg(p, rect, selected, focused, resp.hovered());
                 let chevron_rect = Rect::from_center_size(pos2(indent_x + 7.0, rect.center().y), vec2(12.0, 12.0));
-                let icon_rect = Rect::from_center_size(pos2(indent_x + 24.0, rect.center().y), vec2(16.0, 16.0));
+                let icon_rect = Rect::from_center_size(pos2(indent_x + 25.0, rect.center().y), vec2(16.0, 16.0));
                 let expanded = e.is_dir && self.expanded.contains(&e.path);
                 let dim = if e.ignored { 0.55 } else { 1.0 };
                 if e.is_dir {
                     let chev = if expanded { Icon::ChevronDown } else { Icon::ChevronRight };
-                    ui_kit::paint_icon(p, chevron_rect, chev, t.text_dim.gamma_multiply(dim));
-                    let folder_color = Color32::from_rgb(0x8f, 0xa6, 0xc8).gamma_multiply(dim);
+                    ui_kit::paint_icon(p, chevron_rect, chev, t.text_faint.gamma_multiply(dim));
+                    let folder_color = kiln_common::widgets::lerp_color(t.text_dim, t.accent, 0.35).gamma_multiply(dim);
                     ui_kit::paint_icon(p, icon_rect, if expanded { Icon::FolderOpen } else { Icon::Folder }, folder_color);
                 } else {
                     ui_kit::paint_file_badge(p, icon_rect, &e.name);
@@ -812,20 +816,23 @@ impl FileTree {
                     color = t.text_faint;
                 }
                 let renaming = self.rename.as_ref().is_some_and(|r| r.path == e.path);
-                let text_left = indent_x + 34.0;
+                let text_left = indent_x + 38.0;
                 if renaming {
-                    let edit_rect = Rect::from_min_max(pos2(text_left - 2.0, rect.top() + 1.0), pos2(rect.right() - 6.0, rect.bottom() - 1.0));
+                    let edit_rect = Rect::from_min_max(pos2(text_left - 6.0, rect.top() + 2.0), pos2(rect.right() - 8.0, rect.bottom() - 2.0));
                     self.inline_edit(ui, edit_rect, false);
                 } else {
-                    let right_reserved = if deco.and_then(|d| d.badge).is_some() || dir_dot.is_some() { 22.0 } else { 6.0 };
+                    let right_reserved = if deco.and_then(|d| d.badge).is_some() || dir_dot.is_some() { 30.0 } else { 10.0 };
                     let clip = Rect::from_min_max(pos2(text_left, rect.top()), pos2(rect.right() - right_reserved, rect.bottom()));
                     let pc = ui.painter().with_clip_rect(clip.intersect(ui.clip_rect()));
-                    pc.text(pos2(text_left, rect.center().y), Align2::LEFT_CENTER, &e.name, FontId::proportional(13.0), color);
+                    pc.text(pos2(text_left, rect.center().y), Align2::LEFT_CENTER, &e.name, FontId::proportional(13.5), color);
                     let p = ui.painter();
                     if let Some(b) = deco.and_then(|d| d.badge) {
-                        p.text(pos2(rect.right() - 12.0, rect.center().y), Align2::CENTER_CENTER, b, FontId::monospace(11.0), deco.map(|d| d.color).unwrap_or(t.text_dim));
+                        let c = deco.map(|d| d.color).unwrap_or(t.text_dim);
+                        let br = Rect::from_center_size(pos2(rect.right() - 20.0, rect.center().y), vec2(18.0, 17.0));
+                        p.rect_filled(br, 5.0, kiln_common::widgets::tint(c, if t.dark { 0.16 } else { 0.12 }));
+                        p.text(br.center(), Align2::CENTER_CENTER, b, kiln_common::fonts::semibold(11.0), c);
                     } else if let Some(c) = dir_dot {
-                        p.circle_filled(pos2(rect.right() - 12.0, rect.center().y), 3.0, c.gamma_multiply(0.85));
+                        p.circle_filled(pos2(rect.right() - 20.0, rect.center().y), 3.0, c.gamma_multiply(0.85));
                     }
                 }
                 let label = e.name.clone();
@@ -882,16 +889,16 @@ impl FileTree {
         let first_focus = *focus_req;
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             egui::Frame::new()
-                .fill(t.bg)
+                .fill(t.bg_input)
                 .stroke(Stroke::new(1.0, t.accent))
-                .corner_radius(3)
-                .inner_margin(egui::Margin { left: 4, right: 4, top: 0, bottom: 0 })
+                .corner_radius(6)
+                .inner_margin(egui::Margin { left: 6, right: 4, top: 1, bottom: 0 })
                 .show(ui, |ui| {
                     let out = egui::TextEdit::singleline(text)
                         .id(id)
                         .frame(egui::Frame::NONE)
-                        .font(FontId::proportional(13.0))
-                        .desired_width(rect.width() - 10.0)
+                        .font(FontId::proportional(13.5))
+                        .desired_width(rect.width() - 12.0)
                         .margin(vec2(0.0, 2.0))
                         .return_key(None)
                         .show(ui);
@@ -1010,31 +1017,24 @@ impl FileTree {
         let mut confirm = false;
         let mut cancel = false;
         let modal = egui::Modal::new(self.id.with("delete"))
-            .backdrop_color(Color32::from_black_alpha(110))
-            .frame(
-                egui::Frame::new()
-                    .fill(t.bg_elevated)
-                    .stroke(Stroke::new(1.0, t.border))
-                    .corner_radius(8)
-                    .inner_margin(18)
-                    .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(120) }),
-            )
+            .backdrop_color(ui_kit::backdrop())
+            .frame(ui_kit::modal_frame())
             .show(ui.ctx(), |ui| {
-                ui.set_width(340.0);
+                ui.set_width((ui.ctx().content_rect().width() - 72.0).clamp(200.0, 360.0));
                 let what = if is_dir { "폴더" } else { "파일" };
                 let verb = if self.use_trash { "휴지통으로 이동할까요" } else { "영구 삭제할까요" };
-                ui.label(egui::RichText::new(format!("{what} “{name}”을(를) {verb}?")).size(14.0).strong().color(t.text));
-                ui.add_space(4.0);
+                ui.add(egui::Label::new(egui::RichText::new(format!("{what} “{name}”을(를) {verb}?")).font(kiln_common::fonts::semibold(15.0)).color(t.text)).wrap());
+                ui.add_space(6.0);
                 let sub = if self.use_trash {
                     if is_dir { "폴더와 그 안의 내용은 휴지통에서 복원할 수 있습니다." } else { "휴지통에서 복원할 수 있습니다." }
                 } else {
                     "이 작업은 되돌릴 수 없습니다."
                 };
-                ui.label(egui::RichText::new(sub).size(12.0).color(t.text_dim));
-                ui.add_space(14.0);
+                ui.label(egui::RichText::new(sub).size(13.0).color(t.text_dim));
+                ui.add_space(18.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = if self.use_trash { "휴지통으로 이동" } else { "삭제" };
-                    if ui_kit::flat_button(ui, label, true).clicked() {
+                    if ui_kit::danger_button(ui, label).clicked() {
                         confirm = true;
                     }
                     if ui_kit::flat_button(ui, "취소", false).clicked() {

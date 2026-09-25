@@ -43,6 +43,8 @@ pub struct Highlighter {
     /// `[dirty_end, data_end)` 줄은 이전 계산 결과가 남아 있어 수렴 비교에 쓰인다.
     data_end: usize,
     scratch: String,
+    /// 캐시를 계산할 때 쓴 앱 테마 이름. 테마가 바뀌면 전체를 다시 계산한다.
+    theme: &'static str,
     /// 마지막 `ensure` 호출에서 실제로 계산한 줄 수.
     pub last_work: usize,
 }
@@ -57,6 +59,7 @@ impl Highlighter {
             dirty_end: 0,
             data_end: 0,
             scratch: String::new(),
+            theme: kiln_common::Theme::current().name,
             last_work: 0,
         };
         h.reset(line_count);
@@ -79,6 +82,7 @@ impl Highlighter {
 
     /// 모든 캐시를 비운다.
     pub fn reset(&mut self, line_count: usize) {
+        self.theme = kiln_common::Theme::current().name;
         self.starts = vec![None; line_count.max(1)];
         self.spans = vec![Vec::new(); line_count.max(1)];
         if let Some(s) = self.syntax {
@@ -121,6 +125,9 @@ impl Highlighter {
     /// `upto` 줄(미포함)까지 강조를 계산한다. 시간 예산을 넘기면 멈추고 `false` 를 돌려준다.
     pub fn ensure<S: AsRef<str>>(&mut self, lines: &[S], upto: usize, deadline: Option<Instant>) -> bool {
         self.last_work = 0;
+        if self.syntax.is_some() && self.theme != kiln_common::Theme::current().name {
+            self.reset(lines.len());
+        }
         let upto = upto.min(lines.len());
         let Some(_) = self.syntax else {
             self.valid = lines.len();

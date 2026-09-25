@@ -6,7 +6,7 @@ fn ui_symbols_exist_in_default_fonts() {
     kiln_common::fonts::install(&ctx);
     let mut out = ctx.run_ui(Default::default(), |_| {});
     out.textures_delta.clear();
-    let used = ['✓', '✗', '✕', '↑', '↓', '×', '●', '…', '⌘', '⇧', '⌥'];
+    let used = ['✓', '✗', '↑', '↓', '×', '●', '…', '⌘', '⇧', '⌥', '↩', '⋯'];
     let missing: Vec<char> = ctx.fonts_mut(|f| used.iter().copied().filter(|c| !f.has_glyph(&egui::FontId::proportional(13.0), *c)).collect());
     let mut out = ctx.run_ui(Default::default(), |_| {});
     out.textures_delta.clear();

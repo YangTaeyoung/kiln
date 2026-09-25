@@ -11,8 +11,8 @@ use super::{Diagnostic, LspManager, Severity};
 use crate::EditorEvent;
 use crate::ui_kit::{self, Icon};
 
-const ROW_H: f32 = 22.0;
-const HEADER_H: f32 = 28.0;
+const ROW_H: f32 = 28.0;
+const HEADER_H: f32 = 40.0;
 
 #[derive(Clone, Copy)]
 enum Row {
@@ -34,19 +34,20 @@ pub fn severity_color(s: Severity) -> Color32 {
 /// 심각도 아이콘을 `center` 에 그린다.
 pub fn paint_severity(p: &Painter, center: Pos2, s: Severity, size: f32) {
     let color = severity_color(s);
+    let cut = Theme::current().bg;
     let r = size / 2.0;
     match s {
         Severity::Error => {
             p.circle_filled(center, r, color);
             let d = r * 0.42;
-            let st = Stroke::new(1.4, Color32::from_black_alpha(220));
+            let st = Stroke::new(1.4, cut);
             p.line_segment([center + vec2(-d, -d), center + vec2(d, d)], st);
             p.line_segment([center + vec2(d, -d), center + vec2(-d, d)], st);
         }
         Severity::Warning => ui_kit::paint_icon(p, Rect::from_center_size(center, vec2(size, size)), Icon::Warning, color),
         Severity::Information => {
             p.circle_filled(center, r, color);
-            let dark = Color32::from_black_alpha(220);
+            let dark = cut;
             p.circle_filled(center + vec2(0.0, -r * 0.45), 1.0, dark);
             p.line_segment([center + vec2(0.0, -r * 0.1), center + vec2(0.0, r * 0.55)], Stroke::new(1.5, dark));
         }
@@ -85,26 +86,28 @@ pub fn diagnostics_ui(ui: &mut Ui, lsp: &LspManager) -> Vec<EditorEvent> {
     let header = Rect::from_min_size(full.min, vec2(full.width(), HEADER_H));
     {
         let p = ui.painter();
-        p.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, t.border));
+        p.line_segment([header.left_bottom() + vec2(12.0, 0.0), header.right_bottom() - vec2(12.0, 0.0)], Stroke::new(1.0, t.border));
         let mut x = header.left() + 12.0;
         let cy = header.center().y;
         let count = |s: Severity| files.iter().flat_map(|(_, d)| d).filter(|d| d.severity == s).count();
         let total: usize = files.iter().map(|(_, d)| d.len()).sum();
         if total == 0 {
-            p.circle_filled(pos2(x + 6.0, cy), 6.0, t.green.gamma_multiply(0.9));
-            let dark = Color32::from_black_alpha(220);
-            p.add(egui::Shape::line(
-                vec![pos2(x + 3.2, cy + 0.2), pos2(x + 5.3, cy + 2.3), pos2(x + 8.9, cy - 2.2)],
-                Stroke::new(1.5, dark),
-            ));
-            p.text(pos2(x + 16.0, cy), Align2::LEFT_CENTER, "문제 없음", FontId::proportional(12.0), t.text);
+            let g = p.layout_no_wrap("문제 없음".to_owned(), kiln_common::fonts::medium(12.0), t.green);
+            let chip = Rect::from_min_size(pos2(x, cy - 12.0), vec2(g.size().x + 32.0, 24.0));
+            p.rect_filled(chip, 12.0, kiln_common::widgets::tint(t.green, if t.dark { 0.14 } else { 0.10 }));
+            kiln_common::icons::paint(p, Rect::from_center_size(pos2(chip.left() + 13.0, cy), vec2(13.0, 13.0)), kiln_common::icons::Icon::Check, t.green);
+            p.galley(pos2(chip.left() + 23.0, cy - g.size().y / 2.0), g, t.green);
             let body = Rect::from_min_max(pos2(full.left(), header.bottom()), full.max);
+            let c = body.center() - vec2(0.0, 14.0);
+            let tile = Rect::from_center_size(c - vec2(0.0, 20.0), vec2(40.0, 40.0));
+            p.rect_filled(tile, 10.0, t.bg_hover);
+            kiln_common::icons::paint(p, tile.shrink(10.0), kiln_common::icons::Icon::Check, t.text_faint);
             p.text(
-                body.center() - vec2(0.0, 10.0),
+                c + vec2(0.0, 18.0),
                 Align2::CENTER_CENTER,
                 "작업 공간에서 발견된 문제가 없습니다",
-                FontId::proportional(12.5),
-                t.text_faint,
+                kiln_common::fonts::medium(13.0),
+                t.text_dim,
             );
         } else {
             for s in [Severity::Error, Severity::Warning, Severity::Information, Severity::Hint] {
@@ -112,14 +115,20 @@ pub fn diagnostics_ui(ui: &mut Ui, lsp: &LspManager) -> Vec<EditorEvent> {
                 if n == 0 && s > Severity::Warning {
                     continue;
                 }
-                paint_severity(p, pos2(x + 6.0, cy), s, 12.0);
-                let g = p.layout_no_wrap(format!("{} {n}", severity_label(s)), FontId::proportional(12.0), if n > 0 { t.text } else { t.text_faint });
+                let g = p.layout_no_wrap(format!("{} {n}", severity_label(s)), kiln_common::fonts::medium(12.0), if n > 0 { t.text } else { t.text_faint });
                 let w = g.size().x;
-                p.galley(pos2(x + 16.0, cy - g.size().y / 2.0), g, t.text);
-                x += 16.0 + w + 16.0;
+                let chip = Rect::from_min_size(pos2(x, cy - 12.0), vec2(w + 32.0, 24.0));
+                if n > 0 {
+                    p.rect_filled(chip, 12.0, kiln_common::widgets::tint(severity_color(s), if t.dark { 0.13 } else { 0.09 }));
+                } else {
+                    p.rect_stroke(chip, 12.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                }
+                paint_severity(p, pos2(chip.left() + 13.0, cy), s, 12.0);
+                p.galley(pos2(chip.left() + 23.0, cy - g.size().y / 2.0), g, t.text);
+                x = chip.right() + 6.0;
             }
             let files_text = format!("파일 {}개", files.len());
-            p.text(pos2(header.right() - 12.0, cy), Align2::RIGHT_CENTER, files_text, FontId::proportional(11.5), t.text_faint);
+            p.text(pos2(header.right() - 14.0, cy), Align2::RIGHT_CENTER, files_text, kiln_common::fonts::medium(12.0), t.text_faint);
         }
     }
 
@@ -190,9 +199,9 @@ fn file_row(ui: &Ui, rect: Rect, path: &Path, root: &Path, diags: &[Diagnostic],
     let t = Theme::current();
     let p = ui.painter();
     let chevron = if collapsed { Icon::ChevronRight } else { Icon::ChevronDown };
-    ui_kit::paint_icon(p, Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(12.0, 12.0)), chevron, t.text_dim);
+    ui_kit::paint_icon(p, Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(12.0, 12.0)), chevron, t.text_faint);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    ui_kit::paint_file_badge(p, Rect::from_center_size(pos2(rect.left() + 32.0, rect.center().y), vec2(16.0, 16.0)), &name);
+    ui_kit::paint_file_badge(p, Rect::from_center_size(pos2(rect.left() + 36.0, rect.center().y), vec2(16.0, 16.0)), &name);
     let rel = path.strip_prefix(root).unwrap_or(path);
     let dir = rel.parent().map(|d| d.to_string_lossy().replace('\\', "/")).unwrap_or_default();
 
@@ -200,45 +209,45 @@ fn file_row(ui: &Ui, rect: Rect, path: &Path, root: &Path, diags: &[Diagnostic],
     let warnings = diags.iter().filter(|d| d.severity == Severity::Warning).count();
     let others = diags.len() - errors - warnings;
     let other_sev = diags.iter().map(|d| d.severity).filter(|s| *s > Severity::Warning).min().unwrap_or(Severity::Information);
-    let mut x = rect.right() - 10.0;
+    let mut x = rect.right() - 12.0;
     for (n, s) in [(others, other_sev), (warnings, Severity::Warning), (errors, Severity::Error)] {
         if n == 0 {
             continue;
         }
         let text = n.to_string();
-        let w = 20.0 + text.len() as f32 * 6.5;
-        let pill = Rect::from_min_max(pos2(x - w, rect.center().y - 8.0), pos2(x, rect.center().y + 8.0));
+        let w = 22.0 + text.len() as f32 * 6.5;
+        let pill = Rect::from_min_max(pos2(x - w, rect.center().y - 9.0), pos2(x, rect.center().y + 9.0));
         let c = severity_color(s);
-        p.rect_filled(pill, 8.0, c.gamma_multiply(0.16));
-        p.circle_filled(pos2(pill.left() + 8.0, pill.center().y), 3.0, c);
-        p.text(pos2(pill.left() + 14.0, pill.center().y), Align2::LEFT_CENTER, text, FontId::proportional(10.5), t.text);
+        p.rect_filled(pill, 9.0, kiln_common::widgets::tint(c, if t.dark { 0.16 } else { 0.11 }));
+        p.circle_filled(pos2(pill.left() + 9.0, pill.center().y), 3.0, c);
+        p.text(pos2(pill.left() + 15.0, pill.center().y), Align2::LEFT_CENTER, text, kiln_common::fonts::medium(11.0), t.text);
         x = pill.left() - 4.0;
     }
 
     let mut job = LayoutJob::default();
-    job.append(&name, 0.0, TextFormat { font_id: FontId::proportional(13.0), color: t.text, ..Default::default() });
+    job.append(&name, 0.0, TextFormat { font_id: kiln_common::fonts::medium(13.0), color: t.text, ..Default::default() });
     if !dir.is_empty() {
-        job.append(&format!("  {dir}"), 0.0, TextFormat { font_id: FontId::proportional(11.5), color: t.text_faint, ..Default::default() });
+        job.append(&format!("  {dir}"), 0.0, TextFormat { font_id: FontId::proportional(12.0), color: t.text_faint, ..Default::default() });
     }
-    job.wrap.max_width = (x - rect.left() - 50.0).max(20.0);
+    job.wrap.max_width = (x - rect.left() - 54.0).max(20.0);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     let g = ui.painter().layout_job(job);
-    ui.painter().galley(pos2(rect.left() + 44.0, rect.center().y - g.size().y / 2.0), g, t.text);
+    ui.painter().galley(pos2(rect.left() + 50.0, rect.center().y - g.size().y / 2.0), g, t.text);
 }
 
 fn diag_row(ui: &Ui, rect: Rect, d: &Diagnostic) {
     let t = Theme::current();
     let p = ui.painter();
-    paint_severity(p, pos2(rect.left() + 42.0, rect.center().y), d.severity, 12.0);
+    paint_severity(p, pos2(rect.left() + 46.0, rect.center().y), d.severity, 12.0);
     let loc = format!("{}:{}", d.range.start.line + 1, d.range.start.character + 1);
     let loc_g = p.layout_no_wrap(loc, FontId::monospace(11.0), t.text_faint);
     let loc_w = loc_g.size().x;
-    p.galley(pos2(rect.right() - 10.0 - loc_w, rect.center().y - loc_g.size().y / 2.0), loc_g, t.text_faint);
+    p.galley(pos2(rect.right() - 16.0 - loc_w, rect.center().y - loc_g.size().y / 2.0), loc_g, t.text_faint);
 
     let first_line = d.message.lines().next().unwrap_or("");
     let mut job = LayoutJob::default();
-    job.append(first_line, 0.0, TextFormat { font_id: FontId::proportional(12.5), color: t.text, ..Default::default() });
+    job.append(first_line, 0.0, TextFormat { font_id: FontId::proportional(13.0), color: t.text, ..Default::default() });
     let tail = match (&d.source, &d.code) {
         (Some(s), Some(c)) => format!("  {s}({c})"),
         (Some(s), None) => format!("  {s}"),
@@ -246,11 +255,11 @@ fn diag_row(ui: &Ui, rect: Rect, d: &Diagnostic) {
         (None, None) => String::new(),
     };
     if !tail.is_empty() {
-        job.append(&tail, 0.0, TextFormat { font_id: FontId::proportional(11.5), color: t.text_faint, ..Default::default() });
+        job.append(&tail, 0.0, TextFormat { font_id: FontId::proportional(12.0), color: t.text_faint, ..Default::default() });
     }
-    job.wrap.max_width = (rect.width() - 56.0 - loc_w - 20.0).max(20.0);
+    job.wrap.max_width = (rect.width() - 60.0 - loc_w - 26.0).max(20.0);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     let g = p.layout_job(job);
-    p.galley(pos2(rect.left() + 54.0, rect.center().y - g.size().y / 2.0), g, t.text);
+    p.galley(pos2(rect.left() + 60.0, rect.center().y - g.size().y / 2.0), g, t.text);
 }

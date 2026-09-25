@@ -39,6 +39,9 @@ fn harness(ed: Editor) -> Harness<'static, Editor> {
         .wgpu()
         .build_ui_state(
             |ui, ed: &mut Editor| {
+                if !common::fonts_ready(ui.ctx()) {
+                    return;
+                }
                 ed.ui(ui);
             },
             ed,

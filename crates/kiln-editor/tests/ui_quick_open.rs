@@ -48,6 +48,9 @@ fn harness(root: &Path) -> Harness<'static, State> {
     qo.open(root);
     let h = Harness::builder().with_size(egui::vec2(760.0, 480.0)).wgpu().build_ui_state(
         |ui, s: &mut State| {
+            if !common::fonts_ready(ui.ctx()) {
+                return;
+            }
             let t = kiln_common::Theme::current();
             ui.painter().rect_filled(ui.max_rect(), 0.0, t.bg);
             if let Some(p) = s.qo.ui(ui.ctx()) {

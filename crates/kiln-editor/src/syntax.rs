@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use egui::Color32;
 use kiln_common::Theme;
@@ -12,35 +12,65 @@ use syntect::highlighting::{
 };
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-/// 하이라이트에 필요한 전역 자산.
+/// 하이라이트에 필요한 전역 자산(문법 세트).
 pub struct SyntaxAssets {
     pub set: SyntaxSet,
-    pub theme: SynTheme,
 }
 
 static ASSETS: OnceLock<SyntaxAssets> = OnceLock::new();
-static HIGHLIGHTER: OnceLock<Highlighter<'static>> = OnceLock::new();
+/// 테마 이름별 syntect 하이라이터. 테마마다 한 번 만들어 프로세스가 끝날 때까지 둔다.
+static HIGHLIGHTERS: Mutex<Vec<(&'static str, &'static Highlighter<'static>)>> = Mutex::new(Vec::new());
 
-/// 문법 세트와 테마를 (필요하면 로드해서) 돌려준다.
+/// 문법 세트를 (필요하면 로드해서) 돌려준다.
 pub fn assets() -> &'static SyntaxAssets {
-    ASSETS.get_or_init(|| SyntaxAssets {
-        set: two_face::syntax::extra_newlines(),
-        theme: build_theme(&Theme::current()),
-    })
+    ASSETS.get_or_init(|| SyntaxAssets { set: two_face::syntax::extra_newlines() })
 }
 
-/// 전역 테마로 만든 syntect 하이라이터.
+/// 현재 앱 테마(`Theme::current()`)에 맞춘 syntect 하이라이터.
 pub fn highlighter() -> &'static Highlighter<'static> {
-    HIGHLIGHTER.get_or_init(|| Highlighter::new(&assets().theme))
+    highlighter_for(&Theme::current())
+}
+
+/// 주어진 앱 테마에 맞춘 syntect 하이라이터. 밝은 테마면 밝은 배경용 색 규칙을 쓴다.
+pub fn highlighter_for(t: &Theme) -> &'static Highlighter<'static> {
+    let mut list = HIGHLIGHTERS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, h)) = list.iter().find(|(n, _)| *n == t.name) {
+        return h;
+    }
+    let theme: &'static SynTheme = Box::leak(Box::new(build_theme(t)));
+    let h: &'static Highlighter<'static> = Box::leak(Box::new(Highlighter::new(theme)));
+    list.push((t.name, h));
+    h
 }
 
 /// 백그라운드 스레드에서 문법 세트를 미리 로드한다.
 pub fn prewarm() {
     if ASSETS.get().is_none() {
         std::thread::spawn(|| {
+            let _ = assets();
             let _ = highlighter();
         });
     }
+}
+
+/// 구문 강조용 색 묶음. 밝은 테마는 GitHub 라이트 팔레트로 바꾼다.
+fn syntax_palette(t: &Theme) -> Theme {
+    if t.dark {
+        return *t;
+    }
+    let hex = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+    let mut p = *t;
+    p.text = hex(0x1f2328);
+    p.text_dim = hex(0x4b535d);
+    p.text_faint = hex(0x6e7781);
+    p.green = hex(0x0a3069);
+    p.orange = hex(0x0550ae);
+    p.purple = hex(0xcf222e);
+    p.blue = hex(0x8250df);
+    p.yellow = hex(0x953800);
+    p.red = hex(0x116329);
+    p.ansi[6] = hex(0x0550ae);
+    p
 }
 
 fn c(c: Color32) -> Color {
@@ -52,10 +82,12 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
 }
 
-/// Kiln 팔레트로 syntect 테마를 구성한다.
+/// Kiln 팔레트로 syntect 테마를 구성한다. 어두운 테마는 밝은 글자색, 밝은 테마(`!t.dark`)는
+/// 흰 바탕에서 대비가 충분한 GitHub 라이트 계열 색을 쓴다.
 pub fn build_theme(t: &Theme) -> SynTheme {
-    let cyan = Color32::from_rgb(0x56, 0xb6, 0xc2);
-    let comment = mix(t.text_faint, t.text_dim, 0.25);
+    let t = &syntax_palette(t);
+    let cyan = t.ansi[6];
+    let comment = if t.dark { mix(t.text_faint, t.text_dim, 0.25) } else { mix(t.text_faint, t.text_dim, 0.45) };
     let operator = mix(t.text_dim, cyan, 0.35);
     let rules: &[(&str, Color32, FontStyle)] = &[
         ("comment, punctuation.definition.comment", comment, FontStyle::ITALIC),

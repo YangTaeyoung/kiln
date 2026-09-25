@@ -303,12 +303,14 @@ impl GitPanel {
                 self.ui_unavailable(ui);
                 return;
             }
-            egui::Frame::new().inner_margin(Margin { left: 10, right: 10, top: 8, bottom: 6 }).show(ui, |ui| {
+            egui::Frame::new().inner_margin(Margin { left: 12, right: 12, top: 10, bottom: 10 }).show(ui, |ui| {
                 self.ui_header(ui);
                 self.ui_banners(ui);
                 self.ui_commit_box(ui);
             });
-            ui.add(egui::Separator::default().spacing(0.0));
+            let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+            ui.painter().rect_filled(line.shrink2(vec2(12.0, 0.0)), 0.0, t.border);
+            ui.add_space(4.0);
             egui::ScrollArea::vertical().id_salt("git_panel_scroll").auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 self.ui_sections(ui, &mut events);
@@ -331,7 +333,7 @@ impl GitPanel {
                 });
             }
             Some(GitError::NotARepo) => {
-                empty_state(ui, "Git 저장소 없음", "이 폴더는 Git으로 추적되고 있지 않습니다.");
+                empty_state_icon(ui, Icon::Branch, "Git 저장소 없음", "이 폴더는 Git으로 추적되고 있지 않습니다.");
                 let root = self.root.clone();
                 ui.vertical_centered(|ui| {
                     if primary_button(ui, "저장소 초기화", None).clicked() {
@@ -341,7 +343,7 @@ impl GitPanel {
                 });
             }
             Some(GitError::GitMissing) => {
-                empty_state(ui, "Git을 찾을 수 없음", "Git을 설치하고 PATH에 있는지 확인하세요.");
+                empty_state_icon(ui, Icon::Warning, "Git을 찾을 수 없음", "Git을 설치하고 PATH에 있는지 확인하세요.");
             }
             Some(e) => {
                 let msg = e.to_string();
@@ -369,22 +371,25 @@ impl GitPanel {
         let detached = br.is_detached();
         let resp = {
             let w = ui.available_width();
-            let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
             let hovered = resp.hovered();
             ui.painter().rect(
                 rect,
-                CornerRadius::same(5),
+                CornerRadius::same(8),
                 if hovered { t.bg_hover } else { t.bg_elevated },
-                Stroke::new(1.0, t.border),
+                Stroke::new(1.0, if hovered { t.border_strong } else { t.border }),
                 egui::StrokeKind::Inside,
             );
             let p = ui.painter();
-            paint_icon(p, Rect::from_center_size(rect.left_center() + vec2(16.0, 0.0), vec2(15.0, 15.0)), Icon::Branch, if detached { t.orange } else { t.accent });
+            let chip = Rect::from_center_size(rect.left_center() + vec2(18.0, 0.0), vec2(22.0, 22.0));
+            let ic = if detached { t.orange } else { t.accent };
+            p.rect_filled(chip, CornerRadius::same(6), alpha(ic, if t.dark { 0.16 } else { 0.12 }));
+            paint_icon(p, chip.shrink(4.0), Icon::Branch, ic);
             let name_rect = p.text(
-                rect.left_center() + vec2(30.0, 0.0),
+                rect.left_center() + vec2(36.0, 0.0),
                 Align2::LEFT_CENTER,
                 &label,
-                FontId::proportional(13.5),
+                kiln_common::fonts::semibold(13.5),
                 t.text,
             );
             if let Some(up) = &br.upstream {
@@ -392,11 +397,11 @@ impl GitPanel {
                     pos2(name_rect.right() + 8.0, rect.center().y),
                     Align2::LEFT_CENTER,
                     up.to_string(),
-                    FontId::proportional(11.5),
+                    FontId::proportional(12.0),
                     t.text_faint,
                 );
             } else if detached {
-                p.text(pos2(name_rect.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, "분리된 HEAD", FontId::proportional(11.5), t.orange);
+                p.text(pos2(name_rect.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, "분리된 HEAD", FontId::proportional(12.0), t.orange);
             }
             paint_icon(p, Rect::from_center_size(rect.right_center() - vec2(14.0, 0.0), vec2(12.0, 12.0)), Icon::ChevronDown, t.text_dim);
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("브랜치 {label}")));
@@ -404,10 +409,10 @@ impl GitPanel {
         };
         self.ui_branch_popup(ui, &resp);
 
-        ui.add_space(4.0);
+        ui.add_space(8.0);
         // 동기화 버튼
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().item_spacing.x = 6.0;
             ui.add_enabled_ui(!busy, |ui| {
                 if tool_button(ui, Some(Icon::Refresh), "Fetch").on_hover_text("git fetch --all --prune").clicked() {
                     self.submit(JobKind::Sync, "Fetch", repo::fetch);
@@ -472,17 +477,18 @@ impl GitPanel {
             .frame(
                 egui::Frame::new()
                     .fill(t.bg_elevated)
-                    .stroke(Stroke::new(1.0, t.border))
-                    .corner_radius(CornerRadius::same(6))
+                    .stroke(Stroke::new(1.0, t.border_strong))
+                    .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::same(6))
-                    .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(120) }),
+                    .shadow(t.shadow()),
             )
             .show(|ui| {
                 ui.set_width(width - 12.0);
+                let focused = ui.memory(|m| m.focused()).is_some();
                 let te = egui::TextEdit::singleline(&mut self.picker.filter)
                     .hint_text("브랜치 필터 또는 새로 만들기…")
                     .desired_width(f32::INFINITY)
-                    .frame(input_frame());
+                    .frame(kiln_common::widgets::input_frame(focused, false));
                 let r = ui.add(te);
                 if self.picker.focus_filter {
                     r.request_focus();
@@ -520,15 +526,18 @@ impl GitPanel {
                         if items.is_empty() {
                             continue;
                         }
-                        ui.add_space(4.0);
-                        ui.label(RichText::new(if remote { "원격" } else { "로컬" }).size(10.5).color(t.text_faint));
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(if remote { "원격" } else { "로컬" }).font(kiln_common::fonts::semibold(11.5)).color(t.text_faint));
+                        });
                         ui.add_space(2.0);
                         for b in items {
                             let color = if b.current { t.accent } else { t.text };
                             let detail = if !b.track.is_empty() { Some(b.track.as_str()) } else { None };
                             let resp = branch_row(ui, &b.name, detail, b.current, color);
                             if !remote && !b.current && resp.hovered() {
-                                let r = Rect::from_center_size(resp.rect.right_center() - vec2(14.0, 0.0), vec2(20.0, 20.0));
+                                let r = Rect::from_center_size(resp.rect.right_center() - vec2(16.0, 0.0), vec2(22.0, 22.0));
                                 if icon_button_at(ui, r, resp.id.with("del"), Icon::Trash, "브랜치 삭제").clicked() {
                                     action = Some(BranchAction::Delete(b.name.clone()));
                                     continue;
@@ -569,15 +578,15 @@ impl GitPanel {
             };
             let mut abort = false;
             egui::Frame::new()
-                .fill(alpha(theme().orange, 0.10))
-                .stroke(Stroke::new(1.0, alpha(theme().orange, 0.5)))
-                .corner_radius(CornerRadius::same(5))
-                .inner_margin(Margin::symmetric(8, 6))
+                .fill(alpha(theme().orange, if theme().dark { 0.10 } else { 0.07 }))
+                .stroke(Stroke::new(1.0, alpha(theme().orange, 0.35)))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::symmetric(10, 8))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("⚠").color(theme().orange));
-                        ui.add(egui::Label::new(RichText::new(&title).size(12.5).color(theme().text)).wrap());
+                        icon_label(ui, Icon::Warning, theme().orange, 16.0);
+                        ui.add(egui::Label::new(RichText::new(&title).font(kiln_common::fonts::medium(12.5)).color(theme().text)).wrap());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if tool_button(ui, None, "중단").clicked() {
                                 abort = true;
@@ -606,7 +615,7 @@ impl GitPanel {
         let conflicts = snap.status.conflicted_count();
         let branch = snap.status.branch.display_name();
         let busy = self.worker.as_ref().is_some_and(|w| w.is_busy());
-        ui.add_space(8.0);
+        ui.add_space(10.0);
 
         let te_id = Id::new(("kiln_git_commit_msg", &self.root));
         let focused = ui.memory(|m| m.has_focus(te_id));
@@ -618,7 +627,7 @@ impl GitPanel {
             .desired_rows(3)
             .desired_width(f32::INFINITY)
             .font(FontId::proportional(13.0))
-            .frame(input_frame());
+            .frame(kiln_common::widgets::input_frame(focused, false).inner_margin(Margin::symmetric(10, 8)));
         let te_resp = ui.add(te);
 
         // 제목 길이 표시(입력창 오른쪽 아래)
@@ -641,13 +650,13 @@ impl GitPanel {
             );
             ui.interact(r, te_id.with("len"), Sense::hover()).on_hover_text(tip);
         }
-        ui.add_space(4.0);
+        ui.add_space(8.0);
 
         let can_commit = !busy && conflicts == 0 && (staged > 0 || merging) && !self.message.trim().is_empty();
         let can_amend = !busy && has_head && conflicts == 0;
         let row_w = ui.available_width();
-        ui.allocate_ui_with_layout(vec2(row_w, 28.0), Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
+        ui.allocate_ui_with_layout(vec2(row_w, 30.0), Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
             let push_clicked = ui
                 .add_enabled_ui(can_commit, |ui| secondary_button(ui, "커밋 및 Push"))
                 .inner
@@ -812,7 +821,7 @@ impl GitPanel {
         let t = theme();
         if let Some(mut msg) = self.stash_input.take() {
             let mut keep = true;
-            egui::Frame::new().inner_margin(Margin { left: 18, right: 8, top: 4, bottom: 6 }).show(ui, |ui| {
+            egui::Frame::new().inner_margin(Margin { left: 12, right: 12, top: 4, bottom: 6 }).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut msg)
@@ -847,11 +856,9 @@ impl GitPanel {
             let w = ui.available_width();
             let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
             let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
-            if hovered {
-                ui.painter().rect_filled(rect, CornerRadius::ZERO, t.bg_hover);
-            }
+            row_bg(ui, rect, false, hovered);
             let p = ui.painter();
-            paint_icon(p, Rect::from_center_size(rect.left_center() + vec2(24.0, 0.0), vec2(13.0, 13.0)), Icon::Stash, t.text_faint);
+            paint_icon(p, Rect::from_center_size(rect.left_center() + vec2(24.0, 0.0), vec2(14.0, 14.0)), Icon::Stash, t.text_faint);
             let msg = s.message.split_once(": ").map(|(_, m)| m).unwrap_or(&s.message);
             let right_reserved = if hovered { 80.0 } else { 70.0 };
             let job = one_line_job(
@@ -860,17 +867,17 @@ impl GitPanel {
             );
             let g = p.layout_job(job);
             p.galley(pos2(rect.left() + 34.0, rect.center().y - g.size().y / 2.0), g, t.text);
-            p.text(rect.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, &s.reference, FontId::monospace(10.5), t.text_faint);
+            p.text(rect.right_center() - vec2(14.0, 0.0), Align2::RIGHT_CENTER, &s.reference, FontId::monospace(11.0), t.text_faint);
             if hovered {
-                let mut x = rect.right() - 8.0;
+                let mut x = rect.right() - 10.0;
                 let mut btn = |ui: &mut Ui, icon: Icon, tip: &str| {
-                    let r = Rect::from_center_size(pos2(x - 10.0, rect.center().y), vec2(20.0, 20.0));
-                    x -= 22.0;
+                    let r = Rect::from_center_size(pos2(x - 11.0, rect.center().y), vec2(22.0, 22.0));
+                    x -= 24.0;
                     icon_button_at(ui, r, resp.id.with(tip), icon, tip).clicked()
                 };
                 ui.painter().rect_filled(
-                    Rect::from_min_max(pos2(rect.right() - 76.0, rect.top()), rect.max),
-                    CornerRadius::ZERO,
+                    Rect::from_min_max(pos2(rect.right() - 84.0, rect.top() + 1.0), rect.max - vec2(4.0, 1.0)),
+                    CornerRadius::same(6),
                     t.bg_hover,
                 );
                 let idx = s.index;
@@ -895,7 +902,7 @@ impl GitPanel {
         }
         let now = self.now();
         let lanes_max = snap.graph.iter().map(|g| g.width).max().unwrap_or(1).min(8);
-        let graph_w = 12.0 + lanes_max as f32 * LANE_W;
+        let graph_w = 18.0 + lanes_max as f32 * LANE_W;
         let colors = [t.accent, t.green, t.purple, t.orange, t.yellow, t.blue, t.red];
         for (i, c) in snap.log.iter().enumerate() {
             let w = ui.available_width();
@@ -904,16 +911,14 @@ impl GitPanel {
             if !ui.is_rect_visible(rect) {
                 continue;
             }
-            if resp.hovered() {
-                ui.painter().rect_filled(rect, CornerRadius::ZERO, t.bg_hover);
-            }
+            row_bg(ui, rect, false, resp.hovered());
             if resp.clicked() {
                 events.push(GitEvent::OpenCommit(c.sha.clone()));
             }
             let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
             // 그래프
             if let Some(g) = snap.graph.get(i) {
-                let lx = |lane: usize| rect.left() + 12.0 + lane.min(lanes_max) as f32 * LANE_W;
+                let lx = |lane: usize| rect.left() + 18.0 + lane.min(lanes_max) as f32 * LANE_W;
                 let top = rect.top();
                 let mid = rect.top() + 13.0;
                 let bot = rect.bottom();
@@ -950,16 +955,16 @@ impl GitPanel {
                 if label.is_empty() {
                     continue;
                 }
-                let g = p.layout_no_wrap(label.to_string(), FontId::proportional(10.5), fg);
-                let br = Rect::from_min_size(pos2(x, y1 - 8.0), vec2(g.size().x + 10.0, 16.0));
+                let g = p.layout_no_wrap(label.to_string(), kiln_common::fonts::medium(11.0), fg);
+                let br = Rect::from_min_size(pos2(x, y1 - 9.0), vec2(g.size().x + 12.0, 18.0));
                 if br.right() > rect.right() - 60.0 {
                     break;
                 }
-                p.rect(br, CornerRadius::same(8), alpha(fg, 0.14), Stroke::new(1.0, alpha(fg, 0.45)), egui::StrokeKind::Inside);
+                p.rect_filled(br, CornerRadius::same(9), alpha(fg, if t.dark { 0.16 } else { 0.12 }));
                 p.galley(br.center() - g.size() / 2.0, g, fg);
                 x = br.right() + 4.0;
             }
-            let job = one_line_job(&[(&c.subject, 12.5, t.text)], (rect.right() - 8.0 - x).max(20.0));
+            let job = one_line_job(&[(&c.subject, 13.0, t.text)], (rect.right() - 8.0 - x).max(20.0));
             let g = p.layout_job(job);
             p.galley(pos2(x, y1 - g.size().y / 2.0), g, t.text);
             let meta = format!("{} · {} · {}", c.author, relative_time(c.date, now), c.short());
@@ -971,7 +976,7 @@ impl GitPanel {
         if snap.log.len() >= self.log_limit {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.add_space(12.0);
+                ui.add_space(14.0);
                 if tool_button(ui, None, "커밋 더 불러오기").clicked() {
                     self.log_limit += LOG_PAGE;
                     self.refresh();
@@ -992,11 +997,7 @@ impl GitPanel {
         let staged = kind == RowKind::Staged;
         let is_sel = self.selected.as_ref().is_some_and(|(p, s)| p == &e.path && *s == staged);
         let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
-        if is_sel {
-            ui.painter().rect_filled(rect, CornerRadius::ZERO, t.bg_selected);
-        } else if hovered {
-            ui.painter().rect_filled(rect, CornerRadius::ZERO, t.bg_hover);
-        }
+        row_bg(ui, rect, is_sel, hovered);
         let letter = match kind {
             RowKind::Conflict => 'C',
             RowKind::Untracked => 'U',
@@ -1016,7 +1017,7 @@ impl GitPanel {
         };
         let name = if e.path.ends_with('/') { format!("{name}/") } else { name.to_string() };
         let p = ui.painter();
-        let right_pad = if hovered { 90.0 } else { 26.0 };
+        let right_pad = if hovered { 100.0 } else { 34.0 };
         let mut parts: Vec<(&str, f32, Color32)> = Vec::new();
         let name_color = if letter == 'D' { t.text_dim } else { t.text };
         parts.push((&name, 13.0, name_color));
@@ -1044,17 +1045,19 @@ impl GitPanel {
                 s.format.strikethrough = Stroke::new(1.0, t.text_dim);
             }
         let g = p.layout_job(job);
-        p.galley(pos2(rect.left() + 22.0, rect.center().y - g.size().y / 2.0), g, t.text);
-        p.text(rect.right_center() - vec2(12.0, 0.0), Align2::CENTER_CENTER, letter, FontId::monospace(12.0), color);
+        p.galley(pos2(rect.left() + 24.0, rect.center().y - g.size().y / 2.0), g, t.text);
+        let chip = Rect::from_center_size(rect.right_center() - vec2(20.0, 0.0), vec2(20.0, 18.0));
+        p.rect_filled(chip, CornerRadius::same(5), alpha(color, if t.dark { 0.14 } else { 0.11 }));
+        p.text(chip.center(), Align2::CENTER_CENTER, letter, kiln_common::fonts::semibold(11.0), color);
 
         let abs = self.abs_path(&e.path);
         let mut handled = false;
         if hovered {
-            let mut x = rect.right() - 24.0;
+            let mut x = rect.right() - 34.0;
             let row_id = resp.id;
             let mut btn = |ui: &mut Ui, icon: Icon, tip: &str| -> bool {
-                let r = Rect::from_center_size(pos2(x - 11.0, rect.center().y), vec2(20.0, 20.0));
-                x -= 22.0;
+                let r = Rect::from_center_size(pos2(x - 11.0, rect.center().y), vec2(22.0, 22.0));
+                x -= 24.0;
                 ui.add_enabled_ui(!busy, |ui| icon_button_at(ui, r, row_id.with(tip), icon, tip)).inner.clicked()
             };
             let paths = vec![e.path.clone()];
@@ -1266,23 +1269,26 @@ enum BranchAction {
     Delete(String),
 }
 
+/// 목록 행 배경(좌우를 조금 들인 둥근 사각형).
+fn row_bg(ui: &Ui, rect: Rect, selected: bool, hovered: bool) {
+    kiln_common::widgets::paint_row(ui.painter(), rect.shrink2(vec2(6.0, 1.0)), selected, hovered);
+}
+
 fn hint_row(ui: &mut Ui, text: &str) {
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
-    ui.painter().text(rect.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, text, FontId::proportional(12.0), theme().text_faint);
+    ui.painter().text(rect.left_center() + vec2(24.0, 0.0), Align2::LEFT_CENTER, text, FontId::proportional(12.5), theme().text_faint);
 }
 
 fn branch_row(ui: &mut Ui, name: &str, detail: Option<&str>, current: bool, color: Color32) -> egui::Response {
     let t = theme();
     let w = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(4), t.bg_hover);
-    }
+    kiln_common::widgets::paint_row(ui.painter(), rect, current, resp.hovered());
     let p = ui.painter();
     if current {
-        paint_icon(p, Rect::from_center_size(rect.left_center() + vec2(10.0, 0.0), vec2(12.0, 12.0)), Icon::Check, t.accent);
+        paint_icon(p, Rect::from_center_size(rect.left_center() + vec2(12.0, 0.0), vec2(12.0, 12.0)), Icon::Check, t.accent);
     }
     let mut parts: Vec<(&str, f32, Color32)> = vec![(name, 13.0, color)];
     let d;
@@ -1291,7 +1297,7 @@ fn branch_row(ui: &mut Ui, name: &str, detail: Option<&str>, current: bool, colo
         parts.push((&d, 11.0, t.text_faint));
     }
     let g = p.layout_job(one_line_job(&parts, w - 50.0));
-    p.galley(pos2(rect.left() + 22.0, rect.center().y - g.size().y / 2.0), g, t.text);
+    p.galley(pos2(rect.left() + 26.0, rect.center().y - g.size().y / 2.0), g, t.text);
     resp
 }
 

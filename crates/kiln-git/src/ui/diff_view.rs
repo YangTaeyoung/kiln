@@ -15,9 +15,9 @@ use crate::diff::{DiffLine, FileChange, FileDiff, LineKind, parse_diff};
 use crate::repo::{self, CommitDetail, HunkAction};
 use crate::util::{now_unix, relative_time};
 
-const LINE_H: f32 = 19.0;
-const HUNK_H: f32 = 26.0;
-const FILE_H: f32 = 34.0;
+const LINE_H: f32 = 20.0;
+const HUNK_H: f32 = 30.0;
+const FILE_H: f32 = 44.0;
 const NOTE_H: f32 = 30.0;
 const GAP_H: f32 = 12.0;
 const FONT_SIZE: f32 = 12.5;
@@ -331,8 +331,8 @@ impl DiffView {
         let t = theme();
         let now = self.now();
         egui::Frame::new()
-            .fill(t.bg_panel)
-            .inner_margin(Margin { left: 12, right: 10, top: 8, bottom: 8 })
+            .fill(t.bg)
+            .inner_margin(Margin { left: 16, right: 12, top: 10, bottom: 10 })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 if let Some(c) = self.commit.clone() {
@@ -348,22 +348,21 @@ impl DiffView {
                                 Some(i) => (path[..i].to_string(), path[i + 1..].to_string()),
                                 None => (String::new(), path.clone()),
                             };
-                            ui.label(RichText::new(name).size(14.0).strong().color(t.text));
+                            ui.label(RichText::new(name).font(kiln_common::fonts::semibold(14.0)).color(t.text));
                             if !dir.is_empty() {
-                                ui.label(RichText::new(dir).size(12.0).color(t.text_faint));
+                                ui.label(RichText::new(dir).size(12.5).color(t.text_faint));
                             }
                             let (lbl, c) = if *staged { ("스테이징됨", t.green) } else { ("작업 트리", t.yellow) };
                             outline_badge(ui, lbl, c);
                         }
                         Source::Commit(_) => {}
                         Source::Patch { title, .. } => {
-                            ui.label(RichText::new(title).size(13.0).strong().color(t.text));
+                            ui.label(RichText::new(title).font(kiln_common::fonts::semibold(14.0)).color(t.text));
                         }
                     }
                     let (a, d) = self.files.iter().fold((0, 0), |(a, d), f| (a + f.added(), d + f.removed()));
                     if !self.files.is_empty() && self.commit.is_none() {
-                        ui.label(RichText::new(format!("+{a}")).color(t.green).size(12.0).monospace());
-                        ui.label(RichText::new(format!("−{d}")).color(t.red).size(12.0).monospace());
+                        diff_stat(ui, a, d);
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let mut mode = self.mode;
@@ -378,40 +377,42 @@ impl DiffView {
                     });
                 });
             });
-        ui.add(egui::Separator::default().spacing(0.0));
+        let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+        ui.painter().rect_filled(line, 0.0, t.border);
     }
 
     fn ui_file_list(&mut self, ui: &mut Ui) {
         let t = theme();
-        ui.add_space(6.0);
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
-            ui.add_space(10.0);
-            ui.label(RichText::new(format!("파일 {}개", self.files.len())).size(10.5).color(t.text_faint));
+            ui.add_space(14.0);
+            ui.label(RichText::new(format!("파일 {}개", self.files.len())).font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
         });
-        ui.add_space(2.0);
+        ui.add_space(4.0);
         egui::ScrollArea::vertical().id_salt("diff_file_list").auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for (fi, f) in self.files.iter().enumerate() {
                 let w = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
-                if resp.hovered() {
-                    ui.painter().rect_filled(rect, CornerRadius::ZERO, t.bg_hover);
-                }
+                kiln_common::widgets::paint_row(ui.painter(), rect.shrink2(vec2(6.0, 1.0)), false, resp.hovered());
                 let p = ui.painter();
                 let letter = f.change.letter();
-                p.text(rect.left_center() + vec2(14.0, 0.0), Align2::CENTER_CENTER, letter, FontId::monospace(11.5), status_color(letter));
+                let lc = status_color(letter);
+                let chip = Rect::from_center_size(rect.left_center() + vec2(22.0, 0.0), vec2(18.0, 17.0));
+                p.rect_filled(chip, CornerRadius::same(5), alpha(lc, if t.dark { 0.14 } else { 0.11 }));
+                p.text(chip.center(), Align2::CENTER_CENTER, letter, kiln_common::fonts::semibold(10.5), lc);
                 let path = f.path();
                 let (dir, name) = match path.rfind('/') {
                     Some(i) => (&path[..i], &path[i + 1..]),
                     None => ("", path),
                 };
                 let stats = format!("+{} −{}", f.added(), f.removed());
-                let sg = p.layout_no_wrap(stats, FontId::monospace(10.5), t.text_faint);
+                let sg = p.layout_no_wrap(stats, FontId::monospace(11.0), t.text_faint);
                 let sw = sg.size().x;
-                p.galley(pos2(rect.right() - 8.0 - sw, rect.center().y - sg.size().y / 2.0), sg, t.text_faint);
+                p.galley(pos2(rect.right() - 14.0 - sw, rect.center().y - sg.size().y / 2.0), sg, t.text_faint);
                 let d = if dir.is_empty() { String::new() } else { format!("  {dir}") };
-                let g = p.layout_job(one_line_job(&[(name, 12.5, t.text), (&d, 11.0, t.text_faint)], w - 40.0 - sw));
-                p.galley(pos2(rect.left() + 26.0, rect.center().y - g.size().y / 2.0), g, t.text);
+                let g = p.layout_job(one_line_job(&[(name, 13.0, t.text), (&d, 11.5, t.text_faint)], w - 56.0 - sw));
+                p.galley(pos2(rect.left() + 38.0, rect.center().y - g.size().y / 2.0), g, t.text);
                 if resp.clicked()
                     && let Some(i) = self.rows.iter().position(|r| matches!(r, Row::File(x) if *x == fi))
                 {
@@ -467,35 +468,36 @@ impl DiffView {
                     Row::File(fi) => self.paint_file_header(ui, vis, fi),
                     Row::Hunk(fi, hi) => {
                         let h = &self.files[fi].hunks[hi];
-                        ui.painter().rect_filled(vis, CornerRadius::ZERO, alpha(t.accent, 0.08));
-                        ui.painter().hline(vis.x_range(), vis.top(), Stroke::new(1.0, alpha(t.accent, 0.18)));
+                        ui.painter().rect_filled(vis, CornerRadius::ZERO, alpha(t.accent, if t.dark { 0.07 } else { 0.05 }));
+                        ui.painter().hline(vis.x_range(), vis.top(), Stroke::new(1.0, alpha(t.accent, 0.14)));
+                        ui.painter().hline(vis.x_range(), vis.bottom() - 0.5, Stroke::new(1.0, alpha(t.accent, 0.10)));
                         let hdr = format!(
                             "@@ -{},{} +{},{} @@",
                             h.old_start, h.old_lines, h.new_start, h.new_lines
                         );
                         let job = one_line_job(
-                            &[(&hdr, 11.5, alpha(t.accent, 0.85)), (&format!("  {}", h.section()), 11.5, t.text_faint)],
+                            &[(&hdr, 12.0, t.accent), (&format!("  {}", h.section()), 12.0, t.text_dim)],
                             vis.width() - 260.0,
                         );
                         let g = ui.painter().layout_job(job);
-                        ui.painter().galley(pos2(vis.left() + 12.0, vis.center().y - g.size().y / 2.0), g, t.text);
+                        ui.painter().galley(pos2(vis.left() + 16.0, vis.center().y - g.size().y / 2.0), g, t.text);
                         if let Some(staged) = staged {
                             let busy = self.action.is_some();
                             let mut x = vis.right() - 10.0;
                             let mut hbtn = |ui: &mut Ui, label: &str, danger: bool| -> bool {
-                                let font = FontId::proportional(11.5);
+                                let font = kiln_common::fonts::medium(12.0);
                                 let gw = ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x;
-                                let r = Rect::from_min_size(pos2(x - gw - 16.0, vis.top() + 3.0), vec2(gw + 16.0, HUNK_H - 6.0));
+                                let r = Rect::from_min_size(pos2(x - gw - 20.0, vis.top() + 4.0), vec2(gw + 20.0, HUNK_H - 8.0));
                                 x = r.left() - 6.0;
                                 let resp = ui.interact(r, Id::new(("hunk_btn", fi, hi, label)), Sense::click());
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, !busy, format!("{label} {}", hi + 1)));
                                 let enabled = !busy;
                                 let (bg, fg) = if resp.hovered() && enabled {
-                                    (if danger { alpha(t.red, 0.25) } else { t.bg_hover }, t.text)
+                                    if danger { (alpha(t.red, 0.16), t.red) } else { (t.bg_hover, t.text) }
                                 } else {
                                     (t.bg_elevated, if enabled { t.text_dim } else { t.text_faint })
                                 };
-                                ui.painter().rect(r, CornerRadius::same(4), bg, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                                ui.painter().rect(r, CornerRadius::same(6), bg, Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);
                                 ui.painter().text(r.center(), Align2::CENTER_CENTER, label, font, fg);
                                 enabled && resp.clicked()
                             };
@@ -557,14 +559,14 @@ impl DiffView {
     fn paint_file_header(&self, ui: &Ui, vis: Rect, fi: usize) {
         let t = theme();
         let f = &self.files[fi];
-        let r = vis.shrink2(vec2(0.0, 2.0));
-        ui.painter().rect(r, CornerRadius::ZERO, t.bg_elevated, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        let r = Rect::from_min_max(pos2(vis.left() + 8.0, vis.top() + 8.0), pos2(vis.right() - 8.0, vis.bottom() - 4.0));
+        ui.painter().rect(r, CornerRadius::same(8), t.bg_elevated, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
         let letter = f.change.letter();
         let c = status_color(letter);
         let p = ui.painter();
-        let br = Rect::from_center_size(r.left_center() + vec2(20.0, 0.0), vec2(18.0, 18.0));
-        p.rect_filled(br, CornerRadius::same(4), alpha(c, 0.18));
-        p.text(br.center(), Align2::CENTER_CENTER, letter, FontId::monospace(11.5), c);
+        let br = Rect::from_center_size(r.left_center() + vec2(20.0, 0.0), vec2(20.0, 18.0));
+        p.rect_filled(br, CornerRadius::same(5), alpha(c, if t.dark { 0.16 } else { 0.12 }));
+        p.text(br.center(), Align2::CENTER_CENTER, letter, kiln_common::fonts::semibold(11.0), c);
         let mut parts: Vec<(&str, f32, Color32)> = vec![(f.path(), 13.0, t.text)];
         let from;
         if f.change == FileChange::Renamed
@@ -577,7 +579,7 @@ impl DiffView {
         p.galley(pos2(r.left() + 36.0, r.center().y - g.size().y / 2.0), g, t.text);
         let stats_d = format!("−{}", f.removed());
         let stats_a = format!("+{}", f.added());
-        let rr = p.text(r.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, stats_d, FontId::monospace(11.5), t.red);
+        let rr = p.text(r.right_center() - vec2(14.0, 0.0), Align2::RIGHT_CENTER, stats_d, FontId::monospace(11.5), t.red);
         p.text(pos2(rr.left() - 8.0, r.center().y), Align2::RIGHT_CENTER, stats_a, FontId::monospace(11.5), t.green);
     }
 }
@@ -678,8 +680,10 @@ fn split_rows(lines: &[DiffLine], fi: usize, hi: usize, rows: &mut Vec<Row>) {
 fn line_colors(kind: LineKind) -> (Color32, Color32, Color32, &'static str) {
     let t = theme();
     match kind {
-        LineKind::Add => (alpha(t.green, 0.10), alpha(t.green, 0.20), alpha(t.green, 0.38), "+"),
-        LineKind::Remove => (alpha(t.red, 0.10), alpha(t.red, 0.20), alpha(t.red, 0.40), "−"),
+        LineKind::Add if t.dark => (alpha(t.green, 0.10), alpha(t.green, 0.18), alpha(t.green, 0.34), "+"),
+        LineKind::Remove if t.dark => (alpha(t.red, 0.10), alpha(t.red, 0.18), alpha(t.red, 0.36), "−"),
+        LineKind::Add => (alpha(t.green, 0.08), alpha(t.green, 0.14), alpha(t.green, 0.24), "+"),
+        LineKind::Remove => (alpha(t.red, 0.07), alpha(t.red, 0.13), alpha(t.red, 0.22), "−"),
         LineKind::Context | LineKind::NoNewline => (Color32::TRANSPARENT, Color32::TRANSPARENT, Color32::TRANSPARENT, " "),
     }
 }
@@ -747,7 +751,7 @@ fn paint_split_side(ui: &Ui, rect: Rect, l: Option<&DiffLine>, left: bool, num_w
     let t = theme();
     let p = ui.painter();
     let Some(l) = l else {
-        p.rect_filled(rect, CornerRadius::ZERO, alpha(t.bg_panel, 0.7));
+        p.rect_filled(rect, CornerRadius::ZERO, t.bg_panel);
         return;
     };
     let (bg, gutter_bg, emph, sign) = line_colors(l.kind);
@@ -783,30 +787,27 @@ fn commit_header(
 ) {
     let t = theme();
     let (subject, body) = c.message.split_once('\n').unwrap_or((&c.message, ""));
-    ui.add(egui::Label::new(RichText::new(subject).size(16.0).strong().color(t.text)).wrap());
+    ui.add(egui::Label::new(RichText::new(subject).font(kiln_common::fonts::semibold(17.0)).color(t.text)).wrap());
     let body = body.trim();
     if !body.is_empty() {
         ui.add_space(2.0);
-        ui.add(egui::Label::new(RichText::new(body).size(12.5).color(t.text_dim)).wrap().selectable(true));
+        ui.add(egui::Label::new(RichText::new(body).size(13.0).color(t.text_dim)).wrap().selectable(true));
     }
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {
         let initial = c.author.chars().next().unwrap_or('?').to_uppercase().to_string();
         let (r, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-        ui.painter().circle_filled(r.center(), 10.0, alpha(t.accent, 0.3));
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, initial, FontId::proportional(11.0), t.text);
-        ui.label(RichText::new(&c.author).strong().size(12.5).color(t.text));
+        let ac = kiln_common::widgets::hue_color(&c.author);
+        ui.painter().circle_filled(r.center(), 10.0, alpha(ac, if t.dark { 0.28 } else { 0.2 }));
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, initial, kiln_common::fonts::semibold(11.0), t.text);
+        ui.label(RichText::new(&c.author).font(kiln_common::fonts::medium(13.0)).color(t.text));
         ui.label(dim(format!("{} 커밋함", relative_time(c.date, now))));
         if c.committer != c.author && !c.committer.is_empty() {
             ui.label(faint(format!("(커미터 {})", c.committer)));
         }
         ui.add_space(8.0);
         let short = &c.sha[..c.sha.len().min(10)];
-        if ui
-            .add(egui::Button::new(RichText::new(short).monospace().size(11.5).color(t.accent)).frame(false))
-            .on_hover_text("전체 SHA 복사")
-            .clicked()
-        {
+        if sha_chip(ui, short).on_hover_text("전체 SHA 복사").clicked() {
             ui.ctx().copy_text(c.sha.clone());
         }
         if !c.parents.is_empty() {
@@ -819,7 +820,25 @@ fn commit_header(
         }
         let (a, d) = stats.fold((0, 0), |(a, d), (x, y)| (a + x, d + y));
         ui.label(faint(format!("파일 {nfiles}개 변경됨")));
-        ui.label(RichText::new(format!("+{a}")).color(t.green).size(11.5).monospace());
-        ui.label(RichText::new(format!("−{d}")).color(t.red).size(11.5).monospace());
+        diff_stat(ui, a, d);
     });
+}
+
+/// 클릭하면 복사되는 SHA 칩(고정폭 글자, 호버 시 채움).
+fn sha_chip(ui: &mut Ui, short: &str) -> egui::Response {
+    let t = theme();
+    let g = ui.painter().layout_no_wrap(short.to_string(), FontId::monospace(11.5), t.accent);
+    let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 12.0, 20.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, short));
+    let bg = if resp.hovered() { alpha(t.accent, 0.18) } else { alpha(t.accent, if t.dark { 0.10 } else { 0.07 }) };
+    ui.painter().rect_filled(r, CornerRadius::same(6), bg);
+    ui.painter().galley(r.center() - g.size() / 2.0, g, t.accent);
+    resp
+}
+
+/// 추가·삭제 줄 수(+a −d).
+fn diff_stat(ui: &mut Ui, a: usize, d: usize) {
+    let t = theme();
+    ui.label(RichText::new(format!("+{a}")).color(t.green).size(12.0).monospace());
+    ui.label(RichText::new(format!("−{d}")).color(t.red).size(12.0).monospace());
 }

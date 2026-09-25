@@ -3,10 +3,12 @@
 use crate::edit::TableRef;
 use crate::manager::Job;
 use crate::meta::{TableDetails, TableInfo, TableKind};
-use crate::ui::{self, TypedConfirm, chevron, dim, icon_button, paint_dot, status_color, tree_row};
+use crate::ui::{self, Glyph, TypedConfirm, chevron, dim, faint, icon_button, status_color, tree_row};
 use crate::{ConnConfig, ConnId, ConnStatus, DbManager, DbResult, Driver, SslMode};
-use egui::{Align2, Color32, FontId, RichText, Ui, pos2, vec2};
-use kiln_common::Theme;
+use egui::{Align2, Color32, RichText, Ui, pos2, vec2};
+use kiln_common::icons::Icon;
+use kiln_common::widgets::{self, ButtonKind};
+use kiln_common::{Theme, fonts};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -118,7 +120,7 @@ pub struct DbPanel {
     events: Vec<DbEvent>,
 }
 
-const ROW_H: f32 = 21.0;
+const ROW_H: f32 = 26.0;
 const INDENT: f32 = 14.0;
 
 const COLOR_PRESETS: [[u8; 3]; 6] = [
@@ -162,16 +164,16 @@ impl DbPanel {
 
         egui::Frame::new()
             .fill(theme.bg_panel)
-            .inner_margin(egui::Margin::symmetric(6, 6))
+            .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 self.header(ui);
-                ui.add_space(4.0);
+                ui.add_space(6.0);
                 self.filter_box(ui);
-                ui.add_space(4.0);
+                ui.add_space(8.0);
                 if let Some(w) = self.manager.keychain_warning() {
                     ui::banner(ui, &w, true);
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                 }
                 egui::ScrollArea::vertical()
                     .id_salt("db-tree")
@@ -200,15 +202,14 @@ impl DbPanel {
     fn header(&mut self, ui: &mut Ui) {
         let theme = Theme::current();
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("데이터베이스")
-                    .size(11.0)
-                    .strong()
-                    .color(theme.text_dim),
-            );
+            ui.set_min_height(26.0);
+            ui.add_space(4.0);
+            ui.label(RichText::new("데이터베이스").font(fonts::semibold(13.0)).color(theme.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(RichText::new("+").size(15.0).color(theme.text_dim), |ui| {
-                    ui.set_min_width(180.0);
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let add = icon_button(ui, Icon::Plus, "새 연결");
+                egui::Popup::menu(&add).gap(4.0).show(|ui| {
+                    ui.set_min_width(190.0);
                     for d in Driver::ALL {
                         if ui.button(format!("{}…", d.label())).clicked() {
                             let cfg = ConnConfig {
@@ -232,10 +233,8 @@ impl DbPanel {
                         self.dialog = Some(d);
                         ui.close();
                     }
-                })
-                .response
-                .on_hover_text("연결 추가");
-                if icon_button(ui, "⟳", "모두 새로 고침").clicked() {
+                });
+                if icon_button(ui, Icon::Refresh, "모두 새로 고침").clicked() {
                     for (id, n) in self.nodes.iter_mut() {
                         if n.schemas.is_some() {
                             let m = self.manager.clone();
@@ -244,7 +243,7 @@ impl DbPanel {
                         }
                     }
                 }
-                if icon_button(ui, "⌨", "선택한 연결에 새 콘솔 열기").clicked()
+                if icon_button(ui, Icon::Terminal, "선택한 연결에 새 콘솔 열기").clicked()
                     && let Some(id) = self.selected_conn()
                 {
                     self.events.push(DbEvent::OpenConsole { conn: id });
@@ -255,22 +254,23 @@ impl DbPanel {
 
     fn filter_box(&mut self, ui: &mut Ui) {
         let theme = Theme::current();
-        egui::Frame::new()
-            .fill(theme.bg)
-            .stroke(egui::Stroke::new(1.0, theme.border))
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::symmetric(6, 2))
+        let id = egui::Id::new("db-filter");
+        let focused = ui.memory(|m| m.has_focus(id));
+        widgets::input_frame(focused, false)
+            .inner_margin(egui::Margin { left: 8, right: 4, top: 2, bottom: 2 })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("🔍").size(11.0).color(theme.text_faint));
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui::glyph_label(ui, Icon::Search, theme.text_faint, 14.0);
+                    let clear_w = if self.filter.is_empty() { 0.0 } else { 26.0 };
                     ui.add(
                         egui::TextEdit::singleline(&mut self.filter)
-                            .id_salt("db-filter")
-                            .frame(egui::Frame::NONE)
-                            .hint_text("테이블 필터")
-                            .desired_width(ui.available_width() - 18.0),
+                            .id(id)
+                            .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(0, 4)))
+                            .hint_text(RichText::new("테이블 필터").color(theme.text_faint))
+                            .desired_width(ui.available_width() - clear_w),
                     );
-                    if !self.filter.is_empty() && icon_button(ui, "×", "지우기").clicked() {
+                    if !self.filter.is_empty() && icon_button(ui, Icon::Close, "지우기").clicked() {
                         self.filter.clear();
                     }
                 });
@@ -355,14 +355,9 @@ impl DbPanel {
         let theme = Theme::current();
         let conns = self.manager.connections();
         if conns.is_empty() {
-            ui.add_space(24.0);
-            ui.vertical_centered(|ui| {
-                ui.label(dim("아직 연결이 없습니다"));
-                ui.add_space(6.0);
-                if ui::tool_button(ui, "연결 추가", true, true).clicked() {
-                    self.open_new_connection_dialog();
-                }
-            });
+            if widgets::empty_state(ui, Icon::Database, "아직 연결이 없습니다", Some("연결 추가")) {
+                self.open_new_connection_dialog();
+            }
             return;
         }
         let filter = self.filter.trim().to_lowercase();
@@ -371,39 +366,44 @@ impl DbPanel {
             let status = self.manager.status(id);
             let node = self.nodes.entry(id).or_default();
             let sel = self.selected == Some(NodeKey::Conn(id));
-            let (rect, resp) = tree_row(ui, ROW_H + 2.0, sel, &cfg.display_name());
+            let (rect, resp) = tree_row(ui, ROW_H + 4.0, sel, &cfg.display_name());
             let x0 = rect.min.x + 4.0;
             let cy = rect.center().y;
-            if let Some(c) = cfg.color {
-                ui.painter().rect_filled(
-                    egui::Rect::from_min_size(
-                        pos2(rect.min.x, rect.min.y + 3.0),
-                        vec2(3.0, rect.height() - 6.0),
-                    ),
-                    1.0,
-                    Color32::from_rgb(c[0], c[1], c[2]),
-                );
-            }
             chevron(ui, pos2(x0 + 5.0, cy), node.open, true);
-            paint_dot(ui, pos2(x0 + 17.0, cy), status_color(&status));
+            let tint = cfg.color.map(|c| Color32::from_rgb(c[0], c[1], c[2]));
+            let ir = egui::Rect::from_center_size(pos2(x0 + 22.0, cy), vec2(20.0, 20.0));
+            ui.painter().rect_filled(
+                ir,
+                6.0,
+                widgets::tint(tint.unwrap_or(theme.text_dim), if theme.dark { 0.16 } else { 0.12 }),
+            );
+            kiln_common::icons::paint(
+                ui.painter(),
+                egui::Rect::from_center_size(ir.center(), vec2(12.0, 12.0)),
+                Icon::Database,
+                tint.unwrap_or(theme.text_dim),
+            );
+            let dot = ir.right_bottom() - vec2(1.0, 1.0);
+            ui.painter().circle_filled(dot, 4.0, theme.bg_panel);
+            ui.painter().circle_filled(dot, 2.8, status_color(&status));
             let name_g = ui.painter().text(
-                pos2(x0 + 26.0, cy),
+                pos2(x0 + 38.0, cy),
                 Align2::LEFT_CENTER,
                 cfg.display_name(),
-                FontId::proportional(13.0),
+                fonts::medium(13.0),
                 theme.text,
             );
             ui.painter().text(
-                pos2(name_g.max.x + 6.0, cy),
+                pos2(name_g.max.x + 7.0, cy + 0.5),
                 Align2::LEFT_CENTER,
                 cfg.driver.label(),
-                FontId::proportional(11.0),
+                fonts::regular(11.5),
                 theme.text_faint,
             );
             if matches!(node.schemas, Some(Load::Loading(_))) || status == ConnStatus::Connecting {
                 ui.put(
-                    egui::Rect::from_center_size(pos2(rect.max.x - 12.0, cy), vec2(12.0, 12.0)),
-                    egui::Spinner::new().size(11.0),
+                    egui::Rect::from_center_size(pos2(rect.max.x - 14.0, cy), vec2(12.0, 12.0)),
+                    egui::Spinner::new().size(11.0).color(theme.text_dim),
                 );
             }
             let hover = match &status {
@@ -491,7 +491,7 @@ impl DbPanel {
                 }
                 Load::Failed(e) => {
                     let e = e.clone();
-                    info_row(ui, 1, &format!("⚠ {e}"), theme.red);
+                    info_row(ui, 1, &e, theme.red);
                 }
                 Load::Ready(list) => {
                     let single = list.len() == 1;
@@ -528,34 +528,48 @@ impl DbPanel {
         let theme = Theme::current();
         let mut close = false;
         let mut save = false;
-        let resp = egui::Modal::new(egui::Id::new("db-conn-dialog")).show(ctx, |ui| {
-            ui.set_width(440.0);
-            {
-                let w = &mut ui.visuals_mut().widgets;
-                w.inactive.bg_fill = theme.bg;
-                w.inactive.weak_bg_fill = theme.bg;
-                w.inactive.bg_stroke = egui::Stroke::new(1.0, theme.border);
-                w.hovered.bg_stroke = egui::Stroke::new(1.0, theme.text_faint);
-            }
-            ui.label(
-                RichText::new(if d.is_new {
-                    "새 연결"
-                } else {
-                    "연결 편집"
-                })
-                .size(15.0)
-                .strong(),
-            );
-            ui.add_space(8.0);
+        let fid = |k: &str| egui::Id::new(("db-conn-field", k));
+        let resp = egui::Modal::new(egui::Id::new("db-conn-dialog")).frame(ui::modal_frame()).show(ctx, |ui| {
+            ui.set_width(460.0);
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), egui::Sense::hover());
+                ui.painter().rect_filled(r, 8.0, theme.accent_soft(if theme.dark { 40 } else { 28 }));
+                kiln_common::icons::paint(
+                    ui.painter(),
+                    egui::Rect::from_center_size(r.center(), vec2(16.0, 16.0)),
+                    Icon::Database,
+                    theme.accent,
+                );
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.label(
+                        RichText::new(if d.is_new { "새 연결" } else { "연결 편집" })
+                            .font(fonts::semibold(15.0))
+                            .color(theme.text),
+                    );
+                    ui.label(faint(d.cfg.driver.label()));
+                });
+            });
+            ui.add_space(4.0);
             // URL 가져오기.
             ui.horizontal(|ui| {
-                ui.label(dim("URL"));
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut d.url)
-                        .hint_text("postgres://user:pass@host:5432/db")
-                        .desired_width(310.0),
+                ui.allocate_ui_with_layout(
+                    vec2(72.0, 28.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_min_width(72.0);
+                        ui.label(dim("URL"))
+                    },
                 );
-                if ui.button("가져오기").clicked()
+                let r = ui::text_field(
+                    ui,
+                    egui::TextEdit::singleline(&mut d.url)
+                        .hint_text(RichText::new("postgres://user:pass@host:5432/db").color(theme.text_faint)),
+                    fid("url"),
+                    290.0,
+                );
+                if ui::secondary_button(ui, None, "가져오기", true).clicked()
                     || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                 {
                     match ConnConfig::from_url(&d.url) {
@@ -574,25 +588,40 @@ impl DbPanel {
                 }
             });
             if let Some(e) = &d.url_error {
-                ui.label(RichText::new(e).color(theme.red).size(11.5));
+                ui.horizontal(|ui| {
+                    ui.add_space(80.0);
+                    ui.label(RichText::new(e).color(theme.red).size(11.5));
+                });
             }
-            ui.add_space(6.0);
+            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), egui::Sense::hover());
+            ui.painter().rect_filled(r, 0.0, theme.border);
+            let full = 372.0;
             egui::Grid::new("db-conn-grid")
                 .num_columns(2)
-                .spacing(vec2(10.0, 6.0))
+                .min_col_width(72.0)
+                .spacing(vec2(8.0, 8.0))
                 .show(ui, |ui| {
-                    ui.label("이름");
+                    let label = |ui: &mut Ui, s: &str| {
+                        ui.allocate_ui_with_layout(
+                            vec2(72.0, 28.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| ui.label(dim(s)),
+                        );
+                    };
+                    label(ui, "이름");
                     let hint = d.cfg.display_name();
-                    ui.add(
-                        egui::TextEdit::singleline(&mut d.cfg.name)
-                            .hint_text(hint)
-                            .desired_width(300.0),
+                    ui::text_field(
+                        ui,
+                        egui::TextEdit::singleline(&mut d.cfg.name).hint_text(RichText::new(hint).color(theme.text_faint)),
+                        fid("name"),
+                        full,
                     );
                     ui.end_row();
-                    ui.label("드라이버");
+                    label(ui, "드라이버");
                     egui::ComboBox::from_id_salt("db-driver")
                         .selected_text(d.cfg.driver.label())
-                        .width(300.0)
+                        .width(full)
+                        .height(240.0)
                         .show_ui(ui, |ui| {
                             for drv in Driver::ALL {
                                 if ui
@@ -608,12 +637,10 @@ impl DbPanel {
                         });
                     ui.end_row();
                     if d.cfg.driver == Driver::Sqlite {
-                        ui.label("파일");
+                        label(ui, "파일");
                         ui.horizontal(|ui| {
-                            ui.add(
-                                egui::TextEdit::singleline(&mut d.cfg.file).desired_width(230.0),
-                            );
-                            if ui.button("찾아보기…").clicked()
+                            ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.file), fid("file"), full - 96.0);
+                            if ui::secondary_button(ui, None, "찾아보기…", true).clicked()
                                 && let Some(p) = rfd::FileDialog::new()
                                     .add_filter("SQLite", &["db", "sqlite", "sqlite3", "db3"])
                                     .add_filter("모든 파일", &["*"])
@@ -624,37 +651,34 @@ impl DbPanel {
                         });
                         ui.end_row();
                     } else {
-                        ui.label("호스트");
+                        label(ui, "호스트");
                         ui.horizontal(|ui| {
-                            ui.add(
-                                egui::TextEdit::singleline(&mut d.cfg.host).desired_width(200.0),
-                            );
-                            ui.label("포트");
-                            ui.add(egui::DragValue::new(&mut d.cfg.port).range(1..=65535));
+                            ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.host), fid("host"), full - 124.0);
+                            ui.label(dim("포트"));
+                            ui.add_sized(vec2(78.0, 28.0), egui::DragValue::new(&mut d.cfg.port).range(1..=65535));
                         });
                         ui.end_row();
-                        ui.label("사용자");
-                        ui.add(egui::TextEdit::singleline(&mut d.cfg.user).desired_width(300.0));
+                        label(ui, "사용자");
+                        ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.user), fid("user"), full);
                         ui.end_row();
-                        ui.label("비밀번호");
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut d.password)
-                                .password(true)
-                                .desired_width(300.0),
+                        label(ui, "비밀번호");
+                        let r = ui::text_field(
+                            ui,
+                            egui::TextEdit::singleline(&mut d.password).password(true),
+                            fid("password"),
+                            full,
                         );
                         if r.changed() {
                             d.password_touched = true;
                         }
                         ui.end_row();
-                        ui.label("데이터베이스");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut d.cfg.database).desired_width(300.0),
-                        );
+                        label(ui, "데이터베이스");
+                        ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.database), fid("database"), full);
                         ui.end_row();
-                        ui.label("SSL 모드");
+                        label(ui, "SSL 모드");
                         egui::ComboBox::from_id_salt("db-ssl")
                             .selected_text(d.cfg.ssl_mode.label())
-                            .width(140.0)
+                            .width(160.0)
                             .show_ui(ui, |ui| {
                                 for m in SslMode::ALL {
                                     ui.selectable_value(&mut d.cfg.ssl_mode, m, m.label());
@@ -662,31 +686,42 @@ impl DbPanel {
                             });
                         ui.end_row();
                     }
-                    ui.label("타임아웃");
+                    label(ui, "타임아웃");
                     ui.horizontal(|ui| {
-                        ui.add(
+                        ui.add_sized(
+                            vec2(78.0, 28.0),
                             egui::DragValue::new(&mut d.cfg.connect_timeout_secs)
                                 .range(1..=120)
                                 .suffix(" s"),
                         );
                     });
                     ui.end_row();
-                    ui.label("색상");
+                    label(ui, "색상");
                     ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), egui::Sense::click());
                         let none_sel = d.cfg.color.is_none();
-                        if ui.selectable_label(none_sel, "없음").clicked() {
+                        ui.painter().circle_stroke(r.center(), 7.0, egui::Stroke::new(1.2, theme.text_faint));
+                        ui.painter().line_segment(
+                            [r.center() + vec2(-4.5, 4.5), r.center() + vec2(4.5, -4.5)],
+                            egui::Stroke::new(1.2, theme.text_faint),
+                        );
+                        if none_sel {
+                            ui.painter().circle_stroke(r.center(), 10.0, egui::Stroke::new(1.5, theme.accent));
+                        }
+                        if resp.on_hover_text("없음").clicked() {
                             d.cfg.color = None;
                         }
                         for c in COLOR_PRESETS {
                             let col = Color32::from_rgb(c[0], c[1], c[2]);
                             let (r, resp) =
-                                ui.allocate_exact_size(vec2(18.0, 18.0), egui::Sense::click());
-                            ui.painter().circle_filled(r.center(), 7.0, col);
+                                ui.allocate_exact_size(vec2(22.0, 22.0), egui::Sense::click());
+                            ui.painter().circle_filled(r.center(), 7.5, col);
                             if d.cfg.color == Some(c) {
                                 ui.painter().circle_stroke(
                                     r.center(),
-                                    8.5,
-                                    egui::Stroke::new(1.5, theme.text),
+                                    10.0,
+                                    egui::Stroke::new(1.5, theme.accent),
                                 );
                             }
                             if resp.clicked() {
@@ -697,16 +732,18 @@ impl DbPanel {
                     ui.end_row();
                 });
             if d.cfg.driver != Driver::Sqlite {
-                ui.add_space(4.0);
-                ui.checkbox(
-                    &mut d.cfg.save_password_in_file,
-                    "설정 파일에 비밀번호 저장 (평문)",
-                );
+                ui.horizontal(|ui| {
+                    ui.add_space(80.0);
+                    widgets::toggle(ui, &mut d.cfg.save_password_in_file);
+                    ui.label(RichText::new("설정 파일에 비밀번호 저장 (평문)").size(12.5).color(theme.text));
+                });
                 if !d.cfg.save_password_in_file {
-                    ui.label(dim("비밀번호는 OS 키체인에 저장됩니다."));
+                    ui.horizontal(|ui| {
+                        ui.add_space(80.0);
+                        ui.label(faint("비밀번호는 OS 키체인에 저장됩니다."));
+                    });
                 }
             }
-            ui.add_space(8.0);
             match (&d.test, &d.test_result) {
                 (Some(_), _) => {
                     ui.horizontal(|ui| {
@@ -715,23 +752,19 @@ impl DbPanel {
                     });
                 }
                 (None, Some(Ok(v))) => {
-                    ui.label(
-                        RichText::new(format!("✔ 연결됨 · {}", first_line(v, 90)))
-                            .color(theme.green)
-                            .size(12.0),
-                    );
+                    ui.horizontal(|ui| {
+                        ui::glyph_label(ui, Icon::Check, theme.green, 14.0);
+                        ui.label(RichText::new(format!("연결됨 · {}", first_line(v, 90))).color(theme.green).size(12.5));
+                    });
                 }
                 (None, Some(Err(e))) => {
-                    ui.label(RichText::new(format!("✖ {e}")).color(theme.red).size(12.0));
+                    ui::banner(ui, e, true);
                 }
                 _ => {}
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(d.test.is_none(), egui::Button::new("연결 테스트"))
-                    .clicked()
-                {
+                if ui::secondary_button(ui, Some(Icon::Plug), "연결 테스트", d.test.is_none()).clicked() {
                     let m = self.manager.clone();
                     let cfg = d.cfg.clone();
                     let pw = (!d.password.is_empty()).then(|| d.password.clone());
@@ -742,10 +775,10 @@ impl DbPanel {
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui::tool_button(ui, "저장", true, true).clicked() {
+                    if widgets::button(ui, "저장", ButtonKind::Primary).clicked() {
                         save = true;
                     }
-                    if ui.button("취소").clicked() {
+                    if widgets::button(ui, "취소", ButtonKind::Ghost).clicked() {
                         close = true;
                     }
                 });
@@ -828,24 +861,22 @@ impl DbPanel {
         let theme = Theme::current();
         let rect = ui.max_rect();
         egui::Area::new(egui::Id::new("db-panel-toast"))
-            .fixed_pos(pos2(rect.min.x + 8.0, rect.max.y - 40.0))
+            .fixed_pos(pos2(rect.min.x + 10.0, rect.max.y - 48.0))
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
                     .fill(theme.bg_elevated)
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        if *err { theme.red } else { theme.border },
-                    ))
-                    .corner_radius(5.0)
-                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .stroke(egui::Stroke::new(1.0, theme.border_strong))
+                    .corner_radius(10.0)
+                    .shadow(theme.shadow())
+                    .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
                         ui.set_max_width(rect.width() - 30.0);
-                        ui.label(
-                            RichText::new(msg.as_str())
-                                .color(if *err { theme.red } else { theme.text })
-                                .size(12.0),
-                        );
+                        ui.horizontal(|ui| {
+                            let (icon, c) = if *err { (Icon::Warning, theme.red) } else { (Icon::Check, theme.green) };
+                            ui::glyph_label(ui, icon, c, 14.0);
+                            ui.add(egui::Label::new(RichText::new(msg.as_str()).color(theme.text).size(12.5)).wrap());
+                        });
                     });
             });
         ui.ctx()
@@ -916,14 +947,25 @@ fn load_details(m: &DbManager, id: ConnId, t: TableRef) -> Load<TableDetails> {
 
 fn info_row(ui: &mut Ui, depth: usize, text: &str, color: Color32) {
     let (rect, _) = tree_row(ui, ROW_H, false, text);
+    let x = rect.min.x + 4.0 + depth as f32 * INDENT + 12.0;
+    if color == Theme::current().red {
+        ui::paint_glyph(
+            ui.painter(),
+            egui::Rect::from_center_size(pos2(x + 6.0, rect.center().y), vec2(13.0, 13.0)),
+            Glyph::Common(Icon::Warning),
+            color,
+        );
+    } else {
+        ui.put(
+            egui::Rect::from_center_size(pos2(x + 6.0, rect.center().y), vec2(11.0, 11.0)),
+            egui::Spinner::new().size(10.0).color(color),
+        );
+    }
     ui.painter().text(
-        pos2(
-            rect.min.x + 8.0 + depth as f32 * INDENT + 12.0,
-            rect.center().y,
-        ),
+        pos2(x + 18.0, rect.center().y),
         Align2::LEFT_CENTER,
         first_line(text, 80),
-        FontId::proportional(12.0),
+        fonts::regular(12.5),
         color,
     );
 }
@@ -935,7 +977,7 @@ fn node_row(
     depth: usize,
     expandable: bool,
     open: bool,
-    icon: &str,
+    icon: Glyph,
     icon_color: Color32,
     label: &str,
     suffix: &str,
@@ -947,26 +989,20 @@ fn node_row(
     let cy = rect.center().y;
     chevron(ui, pos2(x + 5.0, cy), open, expandable);
     let p = ui.painter();
-    p.text(
-        pos2(x + 18.0, cy),
-        Align2::CENTER_CENTER,
-        icon,
-        FontId::proportional(12.0),
-        icon_color,
-    );
+    ui::paint_glyph(p, egui::Rect::from_center_size(pos2(x + 19.0, cy), vec2(13.0, 13.0)), icon, icon_color);
     let g = p.text(
-        pos2(x + 28.0, cy),
+        pos2(x + 30.0, cy),
         Align2::LEFT_CENTER,
         label,
-        FontId::proportional(12.5),
+        fonts::regular(13.0),
         theme.text,
     );
     if !suffix.is_empty() {
         p.text(
-            pos2(g.max.x + 6.0, cy),
+            pos2(g.max.x + 7.0, cy + 0.5),
             Align2::LEFT_CENTER,
             suffix,
-            FontId::proportional(11.0),
+            fonts::regular(11.5),
             theme.text_faint,
         );
     }
@@ -999,7 +1035,7 @@ fn schema_ui(
         1,
         true,
         sc.open,
-        "🗄",
+        Glyph::Common(Icon::Database),
         theme.purple,
         &sc.name,
         if single { label } else { "" },
@@ -1034,7 +1070,7 @@ fn schema_ui(
         Load::Loading(_) => info_row(ui, 2, "불러오는 중…", theme.text_faint),
         Load::Failed(e) => {
             let e = e.clone();
-            info_row(ui, 2, &format!("⚠ {e}"), theme.red);
+            info_row(ui, 2, &e, theme.red);
         }
         Load::Ready(tables) => {
             let schema = sc.name.clone();
@@ -1057,7 +1093,7 @@ fn schema_ui(
                     2,
                     true,
                     show,
-                    if show { "📂" } else { "📁" },
+                    Glyph::Common(Icon::Folder),
                     theme.text_faint,
                     if is_view { "뷰" } else { "테이블" },
                     &matching.len().to_string(),
@@ -1102,8 +1138,8 @@ fn table_ui(
     let theme = Theme::current();
     let key = NodeKey::Table(id, schema.to_string(), t.info.name.clone());
     let (icon, color) = match t.info.kind {
-        TableKind::Table => ("⊞", theme.blue),
-        TableKind::View | TableKind::MaterializedView => ("👁", theme.green),
+        TableKind::Table => (Glyph::Common(Icon::Table), theme.blue),
+        TableKind::View | TableKind::MaterializedView => (Glyph::Common(Icon::Eye), theme.green),
     };
     let suffix = t
         .info
@@ -1232,17 +1268,17 @@ fn table_ui(
         Load::Loading(_) => info_row(ui, 4, "불러오는 중…", theme.text_faint),
         Load::Failed(e) => {
             let e = e.clone();
-            info_row(ui, 4, &format!("⚠ {e}"), theme.red);
+            info_row(ui, 4, &e, theme.red);
         }
         Load::Ready(det) => {
             for c in &det.columns {
                 let fk = det.fk_target(&c.name);
                 let (icon, col) = if c.is_pk() {
-                    ("🔑", theme.yellow)
+                    (Glyph::Common(Icon::Key), theme.yellow)
                 } else if fk.is_some() {
-                    ("🔗", theme.blue)
+                    (Glyph::Link, theme.blue)
                 } else {
-                    ("•", theme.text_faint)
+                    (Glyph::Dot, theme.text_faint)
                 };
                 let mut suffix = c.data_type.clone();
                 if !c.nullable {
@@ -1269,7 +1305,7 @@ fn table_ui(
                     4,
                     true,
                     t.indexes_open,
-                    "⚡",
+                    Glyph::Bolt,
                     theme.orange,
                     "인덱스",
                     &det.indexes.len().to_string(),
@@ -1293,7 +1329,7 @@ fn table_ui(
                             5,
                             false,
                             false,
-                            "⚡",
+                            Glyph::Bolt,
                             theme.orange,
                             &ix.name,
                             &suffix,
@@ -1308,7 +1344,7 @@ fn table_ui(
                     4,
                     true,
                     t.fks_open,
-                    "🔗",
+                    Glyph::Link,
                     theme.blue,
                     "외래 키",
                     &det.foreign_keys.len().to_string(),
@@ -1326,7 +1362,7 @@ fn table_ui(
                             fk.ref_columns.join(", ")
                         );
                         node_row(
-                            ui, 5, false, false, "🔗", theme.blue, &fk.name, &suffix, false,
+                            ui, 5, false, false, Glyph::Link, theme.blue, &fk.name, &suffix, false,
                         );
                     }
                 }

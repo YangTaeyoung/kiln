@@ -5,6 +5,7 @@ use egui::{
     Ui, pos2, vec2,
 };
 use kiln_common::Theme;
+use kiln_common::widgets::ButtonKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
@@ -123,7 +124,7 @@ pub fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
         }
         Icon::Warning => {
             p.add(Shape::convex_polygon(vec![pt(0.0, -6.5), pt(7.0, 6.0), pt(-7.0, 6.0)], color, Stroke::NONE));
-            let dark = Color32::from_black_alpha(220);
+            let dark = Theme::current().bg;
             p.line_segment([pt(0.0, -2.5), pt(0.0, 2.0)], Stroke::new(1.6 * s, dark));
             p.circle_filled(pt(0.0, 4.0), 0.9 * s, dark);
         }
@@ -144,23 +145,24 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
 pub fn icon_toggle(ui: &mut Ui, icon: Icon, tooltip: &str, on: bool, enabled: bool) -> Response {
     let t = Theme::current();
     let sense = if enabled { Sense::click() } else { Sense::hover() };
-    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), sense);
+    let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), sense);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
         if on {
-            p.rect_filled(rect, 4.0, t.accent.gamma_multiply(0.22));
-            p.rect_stroke(rect, 4.0, Stroke::new(1.0, t.accent.gamma_multiply(0.7)), StrokeKind::Inside);
+            p.rect_filled(rect, CornerRadius::same(6), t.accent_soft(if t.dark { 46 } else { 32 }));
         } else if enabled && resp.hovered() {
-            p.rect_filled(rect, 4.0, t.bg_hover);
+            p.rect_filled(rect, CornerRadius::same(6), t.bg_hover);
         }
         let color = if !enabled {
             t.text_faint
-        } else if on || resp.hovered() {
+        } else if on {
+            t.accent
+        } else if resp.hovered() {
             t.text
         } else {
             t.text_dim
         };
-        paint_icon(p, rect.shrink(3.0), icon, color);
+        paint_icon(p, rect.shrink(4.5), icon, color);
     }
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, tooltip));
     resp.on_hover_text(tooltip)
@@ -169,16 +171,15 @@ pub fn icon_toggle(ui: &mut Ui, icon: Icon, tooltip: &str, on: bool, enabled: bo
 /// 입력칸 안에 들어가는 작은 옵션 토글(`Aa`, `ab`, `.*`).
 pub fn option_chip(ui: &mut Ui, label: &str, tooltip: &str, on: bool) -> Response {
     let t = Theme::current();
-    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 20.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 20.0), Sense::click());
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
         if on {
-            p.rect_filled(rect, 3.0, t.accent.gamma_multiply(0.25));
-            p.rect_stroke(rect, 3.0, Stroke::new(1.0, t.accent), StrokeKind::Inside);
+            p.rect_filled(rect, CornerRadius::same(5), t.accent_soft(if t.dark { 56 } else { 36 }));
         } else if resp.hovered() {
-            p.rect_filled(rect, 3.0, t.bg_hover);
+            p.rect_filled(rect, CornerRadius::same(5), t.bg_hover);
         }
-        let color = if on || resp.hovered() { t.text } else { t.text_dim };
+        let color = if on { t.accent } else if resp.hovered() { t.text } else { t.text_dim };
         p.text(rect.center(), Align2::CENTER_CENTER, label, FontId::monospace(10.5), color);
         if label == "ab" {
             let y = rect.center().y + 6.0;
@@ -193,10 +194,10 @@ pub fn option_chip(ui: &mut Ui, label: &str, tooltip: &str, on: bool) -> Respons
 pub fn field_frame(focused: bool) -> egui::Frame {
     let t = Theme::current();
     egui::Frame::new()
-        .fill(t.bg)
-        .stroke(Stroke::new(1.0, if focused { t.accent.gamma_multiply(0.85) } else { t.border }))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(egui::Margin { left: 6, right: 2, top: 2, bottom: 2 })
+        .fill(t.bg_input)
+        .stroke(Stroke::new(1.0, if focused { t.accent } else { t.border_strong }))
+        .corner_radius(CornerRadius::same(7))
+        .inner_margin(egui::Margin { left: 8, right: 3, top: 2, bottom: 2 })
 }
 
 /// 테두리 없는 한 줄 입력칸. 에러 상태면 붉은 글자.
@@ -211,35 +212,21 @@ pub fn bare_text_edit<'t>(text: &'t mut String, id: egui::Id, hint: &str, error:
         .return_key(None)
 }
 
-/// 작은 글꼴의 평평한 텍스트 버튼.
+/// 작은 둥근 텍스트 버튼. `primary` 면 강조색으로 채운다.
 pub fn flat_button(ui: &mut Ui, label: &str, primary: bool) -> Response {
-    let t = Theme::current();
-    let font = FontId::proportional(12.0);
-    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, t.text);
-    let size = vec2(galley.size().x + 20.0, 24.0);
-    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    if ui.is_rect_visible(rect) {
-        let p = ui.painter();
-        let (fill, text) = if primary {
-            (if resp.hovered() { t.accent } else { t.accent.gamma_multiply(0.85) }, Color32::from_rgb(0x10, 0x14, 0x20))
-        } else {
-            (if resp.hovered() { t.bg_hover } else { t.bg_elevated }, t.text)
-        };
-        p.rect_filled(rect, 4.0, fill);
-        if !primary {
-            p.rect_stroke(rect, 4.0, Stroke::new(1.0, t.border), StrokeKind::Inside);
-        }
-        let pos = rect.center() - galley.size() / 2.0;
-        p.galley_with_override_text_color(pos, galley, text);
-    }
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-    resp
+    let kind = if primary { ButtonKind::Primary } else { ButtonKind::Secondary };
+    kiln_common::widgets::button_with(ui, None, label, kind, true)
+}
+
+/// 작은 둥근 위험 동작 버튼(빨간 바탕).
+pub fn danger_button(ui: &mut Ui, label: &str) -> Response {
+    kiln_common::widgets::button_with(ui, None, label, ButtonKind::Danger, true)
 }
 
 /// 파일 이름으로 고른 형식 배지(글자, 색).
 pub fn file_badge(name: &str) -> (&'static str, Color32) {
     let t = Theme::current();
-    let cyan = Color32::from_rgb(0x56, 0xb6, 0xc2);
+    let cyan = t.ansi[6];
     let lower = name.to_ascii_lowercase();
     let ext = lower.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
     match lower.as_str() {
@@ -307,18 +294,38 @@ pub fn paint_file_badge(p: &egui::Painter, rect: Rect, name: &str) {
     p.text(rect.center() + vec2(0.0, 0.5), Align2::CENTER_CENTER, label, FontId::monospace(size), color);
 }
 
-/// 행 배경(호버/선택)을 칠한다.
+/// 행 배경(호버/선택)을 좌우로 조금 들여 둥글게 칠한다. 포커스가 있는 선택은 강조색을 옅게 깐다.
 pub fn paint_row_bg(p: &egui::Painter, rect: Rect, selected: bool, focused: bool, hovered: bool) {
     let t = Theme::current();
+    let r = row_rect(rect);
     if selected {
-        let fill = if focused { t.bg_selected } else { t.bg_hover };
-        p.rect_filled(rect, 0.0, fill);
-        if focused {
-            p.rect_stroke(rect, 0.0, Stroke::new(1.0, t.accent.gamma_multiply(0.55)), StrokeKind::Inside);
-        }
+        let fill = if focused { t.accent_soft(if t.dark { 44 } else { 30 }) } else { t.bg_selected };
+        p.rect_filled(r, CornerRadius::same(6), fill);
     } else if hovered {
-        p.rect_filled(rect, 0.0, t.bg_hover.gamma_multiply(0.8));
+        p.rect_filled(r, CornerRadius::same(6), t.bg_hover);
     }
+}
+
+/// 목록 행 안쪽의 둥근 배경 영역.
+pub fn row_rect(rect: Rect) -> Rect {
+    Rect::from_min_max(pos2(rect.left() + 6.0, rect.top() + 1.0), pos2(rect.right() - 6.0, rect.bottom() - 1.0))
+}
+
+/// 모달 대화상자 프레임(둥근 모서리, 테두리, 그림자).
+pub fn modal_frame() -> egui::Frame {
+    let t = Theme::current();
+    egui::Frame::new()
+        .fill(t.bg_elevated)
+        .stroke(Stroke::new(1.0, t.border_strong))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(20)
+        .shadow(t.shadow())
+}
+
+/// 모달 뒤 배경을 어둡게 덮는 색.
+pub fn backdrop() -> Color32 {
+    let t = Theme::current();
+    Color32::from_black_alpha(if t.dark { 120 } else { 60 })
 }
 
 pub fn size_label(bytes: u64) -> String {

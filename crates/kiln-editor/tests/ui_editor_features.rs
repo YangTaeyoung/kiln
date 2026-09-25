@@ -29,6 +29,9 @@ fn main() {
 fn harness_sized(ed: Editor, w: f32, h: f32) -> Harness<'static, Editor> {
     let h = Harness::builder().with_size(egui::vec2(w, h)).wgpu().build_ui_state(
         |ui, ed: &mut Editor| {
+            if !common::fonts_ready(ui.ctx()) {
+                return;
+            }
             ed.ui(ui);
         },
         ed,

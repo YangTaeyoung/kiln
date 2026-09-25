@@ -23,7 +23,7 @@ use crate::ui_kit;
 
 const HOVER_DELAY: f64 = 0.4;
 const COMPLETION_ROWS: usize = 10;
-const COMPLETION_ROW_H: f32 = 22.0;
+const COMPLETION_ROW_H: f32 = 26.0;
 const LIST_ROWS: usize = 12;
 const TOAST_SECS: f64 = 3.0;
 
@@ -1119,7 +1119,7 @@ impl Editor {
         let c = st.completion.as_ref().expect("completion");
         let n = c.shown.len();
         let visible = n.min(COMPLETION_ROWS);
-        let height = visible as f32 * COMPLETION_ROW_H + 8.0;
+        let height = visible as f32 * COMPLETION_ROW_H + 10.0;
         let below = inner.bottom() - row.bottom() > height + 8.0 || row.top() - inner.top() < height + 8.0;
         let (pivot, at) = if below { (Align2::LEFT_TOP, row.left_bottom() + vec2(-26.0, 2.0)) } else { (Align2::LEFT_BOTTOM, row.left_top() - vec2(26.0, 2.0)) };
         let rows: Vec<(usize, CompletionItem)> =
@@ -1133,7 +1133,7 @@ impl Editor {
             .fixed_pos(at)
             .constrain_to(ui.ctx().content_rect())
             .show(ui.ctx(), |ui| {
-                popup_frame().inner_margin(4).show(ui, |ui| {
+                popup_frame().inner_margin(5).show(ui, |ui| {
                     let width = 440.0;
                     ui.set_width(width);
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -1141,23 +1141,23 @@ impl Editor {
                         let (r, resp) = ui.allocate_exact_size(vec2(width, COMPLETION_ROW_H), Sense::click());
                         let p = ui.painter();
                         if *k == selected {
-                            p.rect_filled(r, 4.0, t.bg_selected);
+                            p.rect_filled(r, 6.0, t.accent_soft(if t.dark { 44 } else { 30 }));
                         } else if resp.hovered() {
-                            p.rect_filled(r, 4.0, t.bg_hover);
+                            p.rect_filled(r, 6.0, t.bg_hover);
                         }
                         let (badge, color) = kind_badge(it.kind);
-                        let br = Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(18.0, 15.0));
-                        p.rect_filled(br, 3.0, color.gamma_multiply(0.18));
-                        p.text(br.center(), Align2::CENTER_CENTER, badge, FontId::monospace(10.0), color);
+                        let br = Rect::from_center_size(pos2(r.left() + 15.0, r.center().y), vec2(20.0, 17.0));
+                        p.rect_filled(br, 5.0, kiln_common::widgets::tint(color, if t.dark { 0.18 } else { 0.12 }));
+                        p.text(br.center(), Align2::CENTER_CENTER, badge, kiln_common::fonts::semibold(10.0), color);
                         let label_font = FontId::monospace(12.5);
                         let label = p.layout_no_wrap(it.label.clone(), label_font, t.text);
                         let lw = label.size().x;
-                        p.galley(pos2(r.left() + 28.0, r.center().y - label.size().y / 2.0), label, t.text);
+                        p.galley(pos2(r.left() + 32.0, r.center().y - label.size().y / 2.0), label, t.text);
                         if let Some(d) = &it.detail {
-                            let room = width - 28.0 - lw - 18.0;
+                            let room = width - 32.0 - lw - 18.0;
                             if room > 40.0 {
                                 let d = elide(d, (room / 6.6) as usize);
-                                p.text(pos2(r.right() - 8.0, r.center().y), Align2::RIGHT_CENTER, d, FontId::proportional(11.5), t.text_dim);
+                                p.text(pos2(r.right() - 10.0, r.center().y), Align2::RIGHT_CENTER, d, FontId::proportional(12.0), t.text_faint);
                             }
                         }
                         if resp.clicked() {
@@ -1207,10 +1207,11 @@ impl Editor {
             .fixed_pos(at)
             .constrain_to(ui.ctx().content_rect())
             .show(ui.ctx(), |ui| {
-                popup_frame().inner_margin(6).show(ui, |ui| {
+                popup_frame().inner_margin(8).show(ui, |ui| {
                     ui.set_width(width);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&title).size(12.5).strong().color(t.text));
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(&title).font(kiln_common::fonts::semibold(13.0)).color(t.text));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui_kit::icon_button(ui, ui_kit::Icon::Close, "닫기 (Escape)").clicked() {
                                 close = true;
@@ -1220,12 +1221,12 @@ impl Editor {
                     ui.add_space(2.0);
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                     for (k, label, preview, name) in &rows {
-                        let (r, resp) = ui.allocate_exact_size(vec2(width, 24.0), Sense::click());
+                        let (r, resp) = ui.allocate_exact_size(vec2(width, 28.0), Sense::click());
                         let p = ui.painter();
                         if *k == selected {
-                            p.rect_filled(r, 4.0, t.bg_selected);
+                            p.rect_filled(r, 6.0, t.accent_soft(if t.dark { 44 } else { 30 }));
                         } else if resp.hovered() {
-                            p.rect_filled(r, 4.0, t.bg_hover);
+                            p.rect_filled(r, 6.0, t.bg_hover);
                         }
                         ui_kit::paint_file_badge(p, Rect::from_center_size(pos2(r.left() + 14.0, r.center().y), vec2(18.0, 14.0)), name);
                         let lg = p.layout_no_wrap(label.clone(), FontId::proportional(12.0), t.text_dim);
@@ -1242,7 +1243,7 @@ impl Editor {
                     }
                     if n > visible {
                         ui.add_space(3.0);
-                        ui.label(RichText::new(format!("↑↓ 로 더 보기 ({}/{n})", selected + 1)).size(11.0).color(t.text_faint));
+                        ui.label(RichText::new(format!("↑↓ 로 더 보기 ({}/{n})", selected + 1)).size(11.5).color(t.text_faint));
                     }
                 });
             });
@@ -1278,10 +1279,10 @@ impl Editor {
             .fixed_pos(row.left_bottom() + vec2(-6.0, 2.0))
             .constrain_to(ui.ctx().content_rect())
             .show(ui.ctx(), |ui| {
-                popup_frame().inner_margin(6).show(ui, |ui| {
+                popup_frame().inner_margin(10).show(ui, |ui| {
                     ui.set_width(260.0);
-                    ui.label(RichText::new("이름 바꾸기").size(11.5).color(t.text_dim));
-                    ui.add_space(2.0);
+                    ui.label(RichText::new("이름 바꾸기").font(kiln_common::fonts::semibold(12.5)).color(t.text));
+                    ui.add_space(4.0);
                     let focused = ui.memory(|m| m.has_focus(id));
                     ui_kit::field_frame(focused).show(ui, |ui| {
                         ui.set_width(248.0);
@@ -1299,8 +1300,8 @@ impl Editor {
                             cancel = true;
                         }
                     });
-                    ui.add_space(2.0);
-                    ui.label(RichText::new("Enter 로 바꾸기, Esc 로 취소").size(11.0).color(t.text_faint));
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Enter 로 바꾸기, Esc 로 취소").size(11.5).color(t.text_faint));
                     let (enter, esc) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
                     if enter {
                         submit = true;
@@ -1329,8 +1330,8 @@ impl Editor {
             .fixed_pos(inner.right_bottom() - vec2(16.0, 12.0))
             .interactable(false)
             .show(ui.ctx(), |ui| {
-                popup_frame().inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
-                    ui.label(RichText::new(msg).size(12.0).color(t.text));
+                popup_frame().inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                    ui.label(RichText::new(msg).font(kiln_common::fonts::medium(12.5)).color(t.text));
                 });
             });
     }
@@ -1362,10 +1363,10 @@ fn popup_frame() -> Frame {
     let t = Theme::current();
     Frame::new()
         .fill(t.bg_elevated)
-        .stroke(Stroke::new(1.0, t.border))
-        .corner_radius(6)
-        .shadow(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: Color32::from_black_alpha(90) })
-        .inner_margin(8)
+        .stroke(Stroke::new(1.0, t.border_strong))
+        .corner_radius(10)
+        .shadow(t.shadow())
+        .inner_margin(10)
 }
 
 /// 완성 항목 종류 표시(글자, 색).
@@ -1432,7 +1433,7 @@ fn markdown_ui(ui: &mut Ui, md: &str) {
             if in_code {
                 let body = code.trim_end_matches('\n').to_owned();
                 code.clear();
-                Frame::new().fill(t.bg).corner_radius(4).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
+                Frame::new().fill(t.bg_hover).corner_radius(6).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
                     ui.add(egui::Label::new(RichText::new(body).monospace().size(12.5).color(t.text)).wrap());
                 });
                 in_code = false;
@@ -1458,7 +1459,7 @@ fn markdown_ui(ui: &mut Ui, md: &str) {
         }
         if let Some(h) = trimmed.strip_prefix('#') {
             flush_para(ui, &mut para);
-            ui.label(RichText::new(h.trim_start_matches('#').trim()).size(13.0).strong().color(t.text));
+            ui.label(RichText::new(h.trim_start_matches('#').trim()).font(kiln_common::fonts::semibold(13.5)).color(t.text));
             continue;
         }
         if let Some(item) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
@@ -1479,8 +1480,8 @@ fn inline_job(text: &str, color: Color32, size: f32) -> LayoutJob {
     let t = Theme::current();
     let mut job = LayoutJob::default();
     let normal = TextFormat { font_id: FontId::proportional(size), color, ..Default::default() };
-    let code = TextFormat { font_id: FontId::monospace(size - 0.5), color: t.orange, background: t.bg, ..Default::default() };
-    let bold = TextFormat { font_id: FontId::proportional(size), color: t.text.lerp_to_gamma(Color32::WHITE, 0.6), ..Default::default() };
+    let code = TextFormat { font_id: FontId::monospace(size - 0.5), color: t.orange, background: t.bg_hover, ..Default::default() };
+    let bold = TextFormat { font_id: kiln_common::fonts::semibold(size), color: t.text, ..Default::default() };
     let mut rest = text;
     while !rest.is_empty() {
         let next_code = rest.find('`');

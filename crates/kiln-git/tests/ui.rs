@@ -34,10 +34,12 @@ fn settle<S>(h: &mut Harness<'_, S>, mut busy: impl FnMut(&mut S) -> bool) {
     panic!("background work did not finish");
 }
 
-fn theme(ui: &egui::Ui) {
+/// 테마와 번들 글꼴을 적용한다. 글꼴이 아직 활성화되지 않은 프레임이면 false.
+fn theme(ui: &egui::Ui) -> bool {
     Theme::current().apply(ui.ctx());
     common::install_korean_font(ui.ctx());
     ui.ctx().global_style_mut(|s| s.visuals.text_cursor.blink = false);
+    common::fonts_ready(ui.ctx())
 }
 
 // ---------------------------------------------------------------- GitPanel
@@ -89,7 +91,9 @@ fn panel_harness(root: PathBuf, size: egui::Vec2) -> Harness<'static, PanelState
     panel.set_now(NOW);
     Harness::builder().with_size(size).with_pixels_per_point(1.5).wgpu().build_ui_state(
         |ui, s: &mut PanelState| {
-            theme(ui);
+            if !theme(ui) {
+                return;
+            }
             let ev = s.panel.ui(ui);
             s.events.extend(ev);
         },
@@ -224,7 +228,9 @@ fn git_panel_reports_not_a_repository() {
 fn diff_harness(view: DiffView, size: egui::Vec2) -> Harness<'static, DiffView> {
     Harness::builder().with_size(size).with_pixels_per_point(1.5).wgpu().build_ui_state(
         |ui, v: &mut DiffView| {
-            theme(ui);
+            if !theme(ui) {
+                return;
+            }
             v.ui(ui);
         },
         view,
@@ -413,7 +419,9 @@ fn pr_panel_lists_filters_and_opens_prs() {
     panel.set_now(common::BASE_TS);
     let mut h = Harness::builder().with_size(vec2(420.0, 520.0)).with_pixels_per_point(1.5).wgpu().build_ui_state(
         |ui, s: &mut PrPanelState| {
-            theme(ui);
+            if !theme(ui) {
+                return;
+            }
             let ev = s.panel.ui(ui);
             s.events.extend(ev);
         },
@@ -443,7 +451,9 @@ fn pr_panel_create_form_prefills_and_submits() {
     let panel = PrPanel::with_backend(backend.clone());
     let mut h = Harness::builder().with_size(vec2(420.0, 560.0)).with_pixels_per_point(1.5).wgpu().build_ui_state(
         |ui, p: &mut PrPanel| {
-            theme(ui);
+            if !theme(ui) {
+                return;
+            }
             p.ui(ui);
         },
         panel,
@@ -468,7 +478,9 @@ fn pr_view_harness(backend: Arc<FakeBackend>, size: egui::Vec2) -> Harness<'stat
     v.set_now(1_790_300_000);
     Harness::builder().with_size(size).with_pixels_per_point(1.5).wgpu().build_ui_state(
         |ui, v: &mut PrView| {
-            theme(ui);
+            if !theme(ui) {
+                return;
+            }
             v.ui(ui);
         },
         v,

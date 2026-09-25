@@ -19,7 +19,7 @@ use crate::ui_kit::{self, Icon};
 const PAD_LEFT: f32 = 6.0;
 const GUTTER_PAD_LEFT: f32 = 14.0;
 const GUTTER_PAD_RIGHT: f32 = 14.0;
-const BANNER_H: f32 = 30.0;
+const BANNER_H: f32 = 40.0;
 const HIGHLIGHT_BUDGET: Duration = Duration::from_millis(6);
 const IDLE_HIGHLIGHT_BUDGET: Duration = Duration::from_millis(3);
 const LOOKAHEAD_LINES: usize = 60;
@@ -183,10 +183,12 @@ impl Editor {
         let t = Theme::current();
         let p = ui.painter_at(rect);
         let c = rect.center();
-        ui_kit::paint_icon(&p, Rect::from_center_size(c - vec2(0.0, 34.0), vec2(28.0, 28.0)), Icon::Warning, t.yellow);
-        p.text(c, Align2::CENTER_CENTER, "바이너리 파일은 표시하지 않습니다", egui::FontId::proportional(15.0), t.text);
+        let tile = Rect::from_center_size(c - vec2(0.0, 44.0), vec2(48.0, 48.0));
+        p.rect_filled(tile, 12.0, t.bg_hover);
+        ui_kit::paint_icon(&p, tile.shrink(13.0), Icon::Warning, t.yellow);
+        p.text(c, Align2::CENTER_CENTER, "바이너리 파일은 표시하지 않습니다", kiln_common::fonts::semibold(15.0), t.text);
         p.text(
-            c + vec2(0.0, 22.0),
+            c + vec2(0.0, 24.0),
             Align2::CENTER_CENTER,
             format!("{} · {}", self.title(), ui_kit::size_label(self.file_len)),
             egui::FontId::proportional(12.0),
@@ -236,14 +238,15 @@ impl Editor {
                 B::SaveError => (t.red, format!("저장 실패: {}", self.save_error.clone().unwrap_or_default())),
             };
             let p = ui.painter();
-            p.rect_filled(rect, 0.0, accent.gamma_multiply(0.13));
-            p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, accent.gamma_multiply(0.35)));
-            p.rect_filled(Rect::from_min_size(rect.min, vec2(3.0, rect.height())), 0.0, accent);
-            let icon_rect = Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(15.0, 15.0));
+            let card = rect.shrink2(vec2(8.0, 4.0));
+            p.rect_filled(card, 8.0, t.bg_elevated);
+            p.rect_filled(card, 8.0, kiln_common::widgets::tint(accent, if t.dark { 0.13 } else { 0.08 }));
+            p.rect_stroke(card, 8.0, Stroke::new(1.0, kiln_common::widgets::tint(accent, 0.35)), StrokeKind::Inside);
+            let icon_rect = Rect::from_center_size(pos2(card.left() + 16.0, card.center().y), vec2(14.0, 14.0));
             ui_kit::paint_icon(p, icon_rect, Icon::Warning, accent);
-            let inner = Rect::from_min_max(pos2(rect.left() + 34.0, rect.top()), pos2(rect.right() - 8.0, rect.bottom()));
+            let inner = Rect::from_min_max(pos2(card.left() + 32.0, card.top()), pos2(card.right() - 4.0, card.bottom()));
             ui.scope_builder(UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)), |ui| {
-                ui.label(egui::RichText::new(msg).size(12.5).color(t.text));
+                ui.label(egui::RichText::new(msg).font(kiln_common::fonts::medium(12.5)).color(t.text));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| match b {
                     B::Conflict => {
                         if ui_kit::flat_button(ui, "내 변경 유지", false).clicked() {
@@ -566,7 +569,7 @@ impl Editor {
                     let levels = ind / tab;
                     for lv in 1..levels.clamp(1, 40) {
                         let x = (base_x + lv as f32 * unit_px).round() + 0.5;
-                        painter.line_segment([pos2(x, y), pos2(x, y + row_h)], Stroke::new(1.0, t.border.gamma_multiply(0.8)));
+                        painter.line_segment([pos2(x, y), pos2(x, y + row_h)], Stroke::new(1.0, t.border));
                     }
                 }
             }
@@ -583,17 +586,17 @@ impl Editor {
                     let x1 = text_x + self.seg_x(&g, i, r.start, c1);
                     let rr = Rect::from_min_max(pos2(x0, y + 2.0), pos2(x1.max(x0 + 2.0), y + row_h - 2.0));
                     if self.find.current == Some(mi) {
-                        painter.rect_filled(rr, 2.0, t.orange.gamma_multiply(0.45));
-                        painter.rect_stroke(rr, 2.0, Stroke::new(1.0, t.orange.gamma_multiply(0.9)), StrokeKind::Inside);
+                        painter.rect_filled(rr, 3.0, kiln_common::widgets::tint(t.orange, if t.dark { 0.42 } else { 0.30 }));
+                        painter.rect_stroke(rr, 3.0, Stroke::new(1.0, t.orange), StrokeKind::Inside);
                     } else {
-                        painter.rect_filled(rr, 2.0, t.yellow.gamma_multiply(0.22));
+                        painter.rect_filled(rr, 3.0, kiln_common::widgets::tint(t.yellow, if t.dark { 0.22 } else { 0.18 }));
                     }
                 }
                 mi += 1;
             }
 
             // 선택 영역
-            let fill = if has_focus { t.bg_selected } else { t.bg_selected.gamma_multiply(0.6) };
+            let fill = if has_focus { t.accent_soft(if t.dark { 64 } else { 48 }) } else { t.bg_selected };
             let mut si = sels.partition_point(|s| s.range().1.line < i);
             while si < sels.len() && sels[si].range().0.line <= i {
                 let (sa, sb) = sels[si].range();
@@ -625,8 +628,8 @@ impl Editor {
             if r.last && self.folds.is_folded_at(i) {
                 let x = text_x + g.size().x + char_w * 0.8;
                 let pill = Rect::from_min_size(pos2(x, y + 3.0), vec2(char_w * 2.6, row_h - 6.0));
-                painter.rect_filled(pill, 4.0, t.bg_hover);
-                painter.rect_stroke(pill, 4.0, Stroke::new(1.0, t.border), StrokeKind::Inside);
+                painter.rect_filled(pill, 5.0, t.accent_soft(if t.dark { 40 } else { 28 }));
+                painter.rect_stroke(pill, 5.0, Stroke::new(1.0, t.accent_soft(110)), StrokeKind::Inside);
                 painter.text(pill.center(), Align2::CENTER_CENTER, "⋯", font.clone(), t.text_dim);
                 self.view.fold_pills.push((pill, i));
             }

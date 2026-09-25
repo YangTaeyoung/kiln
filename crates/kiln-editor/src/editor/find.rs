@@ -181,10 +181,10 @@ impl Editor {
     /// 찾기 막대를 `area` 오른쪽 위에 그린다. 막대 영역을 돌려준다.
     pub(crate) fn find_bar_ui(&mut self, ui: &mut Ui, area: Rect) -> Rect {
         let t = Theme::current();
-        let width = (area.width() - 28.0).clamp(240.0, 470.0);
-        let row_h = 28.0;
-        let height = if self.find.replace_open { row_h * 2.0 + 14.0 } else { row_h + 10.0 };
-        let rect = Rect::from_min_size(pos2(area.right() - width - 18.0, area.top() + 6.0), vec2(width, height));
+        let width = (area.width() - 28.0).clamp(260.0, 500.0);
+        let row_h = 30.0;
+        let height = if self.find.replace_open { row_h * 2.0 + 18.0 } else { row_h + 12.0 };
+        let rect = Rect::from_min_size(pos2(area.right() - width - 14.0, area.top() + 10.0), vec2(width, height));
         let qid = self.find_query_id();
         let rid = self.find_replace_id();
         let mut close = false;
@@ -195,23 +195,23 @@ impl Editor {
         ui.scope_builder(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)), |ui| {
             egui::Frame::new()
                 .fill(t.bg_elevated)
-                .stroke(Stroke::new(1.0, t.border))
-                .corner_radius(6)
-                .shadow(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: egui::Color32::from_black_alpha(90) })
-                .inner_margin(egui::Margin { left: 4, right: 6, top: 5, bottom: 5 })
+                .stroke(Stroke::new(1.0, t.border_strong))
+                .corner_radius(10)
+                .shadow(t.shadow())
+                .inner_margin(egui::Margin { left: 5, right: 6, top: 6, bottom: 6 })
                 .show(ui, |ui| {
-                    ui.set_width(width - 10.0);
-                    ui.spacing_mut().item_spacing = vec2(3.0, 4.0);
-                    let fixed = 22.0 * 3.0 + 3.0 * 5.0 + 64.0;
-                    let field_w = (width - 10.0 - 20.0 - fixed).max(80.0);
+                    ui.set_width(width - 11.0);
+                    ui.spacing_mut().item_spacing = vec2(3.0, 6.0);
+                    let fixed = 24.0 * 3.0 + 3.0 * 5.0 + 60.0;
+                    let field_w = (width - 11.0 - 22.0 - fixed).max(80.0);
                     ui.horizontal(|ui| {
                         ui.set_height(row_h);
                         let chevron = if self.find.replace_open { Icon::ChevronDown } else { Icon::ChevronRight };
-                        let (r, resp) = ui.allocate_exact_size(vec2(16.0, row_h), egui::Sense::click());
+                        let (r, resp) = ui.allocate_exact_size(vec2(18.0, row_h), egui::Sense::click());
                         if resp.hovered() {
-                            ui.painter().rect_filled(r.shrink2(vec2(0.0, 3.0)), 3.0, t.bg_hover);
+                            ui.painter().rect_filled(r.shrink2(vec2(0.0, 5.0)), 5.0, t.bg_hover);
                         }
-                        ui_kit::paint_icon(ui.painter(), r.shrink(1.0), chevron, t.text_dim);
+                        ui_kit::paint_icon(ui.painter(), Rect::from_center_size(r.center(), vec2(13.0, 13.0)), chevron, if resp.hovered() { t.text } else { t.text_faint });
                         if resp.on_hover_text("바꾸기 전환").clicked() {
                             self.find.replace_open = !self.find.replace_open;
                         }
@@ -221,7 +221,7 @@ impl Editor {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 1.0;
                                 let te = ui_kit::bare_text_edit(&mut self.find.query, qid, "찾기", self.find.error)
-                                    .desired_width(field_w - 8.0 - 3.0 * 23.0 - 6.0);
+                                    .desired_width(field_w - 8.0 - 3.0 * 25.0 - 8.0);
                                 let out = te.show(ui);
                                 if self.find.focus_query {
                                     out.response.request_focus();
@@ -263,13 +263,13 @@ impl Editor {
                                 None => format!("?/{n}{more}"),
                             }
                         };
-                        let (lr, _) = ui.allocate_exact_size(vec2(64.0, row_h), egui::Sense::hover());
-                        let color = if n == 0 && !self.find.query.is_empty() { t.red.gamma_multiply(0.9) } else { t.text_dim };
+                        let (lr, _) = ui.allocate_exact_size(vec2(60.0, row_h), egui::Sense::hover());
+                        let color = if n == 0 && !self.find.query.is_empty() { t.red } else { t.text_dim };
                         ui.painter().text(
-                            lr.left_center() + vec2(4.0, 0.0),
+                            lr.left_center() + vec2(5.0, 0.0),
                             egui::Align2::LEFT_CENTER,
                             label,
-                            egui::FontId::proportional(11.5),
+                            kiln_common::fonts::medium(12.0),
                             color,
                         );
                         let has = n > 0;
@@ -286,7 +286,7 @@ impl Editor {
                     if self.find.replace_open {
                         ui.horizontal(|ui| {
                             ui.set_height(row_h);
-                            ui.add_space(16.0 + 3.0);
+                            ui.add_space(18.0 + 3.0);
                             let focused = ui.memory(|m| m.has_focus(rid));
                             ui_kit::field_frame(focused).show(ui, |ui| {
                                 ui.set_width(field_w - 8.0);
@@ -346,7 +346,7 @@ impl Editor {
         let t = Theme::current();
         let mut text = self.goto.take()?;
         let width = (area.width() - 40.0).clamp(200.0, 360.0);
-        let rect = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 6.0), vec2(width, 62.0));
+        let rect = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 10.0), vec2(width, 72.0));
         let id = self.goto_id();
         let n = self.buf.line_count();
         let mut commit = false;
@@ -354,9 +354,9 @@ impl Editor {
         ui.scope_builder(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)), |ui| {
             egui::Frame::new()
                 .fill(t.bg_elevated)
-                .stroke(Stroke::new(1.0, t.border))
-                .corner_radius(6)
-                .shadow(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: egui::Color32::from_black_alpha(90) })
+                .stroke(Stroke::new(1.0, t.border_strong))
+                .corner_radius(10)
+                .shadow(t.shadow())
                 .inner_margin(8)
                 .show(ui, |ui| {
                     ui.set_width(width - 16.0);
@@ -376,7 +376,7 @@ impl Editor {
                         None => format!("현재 줄: {}. 1에서 {n} 사이의 줄 번호를 입력하세요.", head.line + 1),
                     };
                     ui.add_space(2.0);
-                    ui.label(egui::RichText::new(hint).size(11.5).color(t.text_dim));
+                    ui.label(egui::RichText::new(hint).size(12.0).color(t.text_dim));
                     let (enter, esc) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
                     if focused && enter {
                         commit = true;

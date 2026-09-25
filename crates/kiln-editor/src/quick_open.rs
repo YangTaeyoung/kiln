@@ -11,7 +11,7 @@ use kiln_common::Theme;
 use crate::fuzzy::{FileIndex, FuzzyMatch, FuzzyWorker};
 use crate::ui_kit::{self, Icon};
 
-const ROW_H: f32 = 28.0;
+const ROW_H: f32 = 32.0;
 const MAX_ROWS: usize = 12;
 const RESULT_LIMIT: usize = 200;
 const REINDEX_AFTER: Duration = Duration::from_secs(10);
@@ -223,12 +223,12 @@ impl QuickOpen {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(t.bg_elevated)
-                    .stroke(Stroke::new(1.0, t.border))
-                    .corner_radius(8)
-                    .shadow(egui::Shadow { offset: [0, 10], blur: 30, spread: 0, color: Color32::from_black_alpha(140) })
-                    .inner_margin(6)
+                    .stroke(Stroke::new(1.0, t.border_strong))
+                    .corner_radius(14)
+                    .shadow(t.shadow())
+                    .inner_margin(egui::Margin { left: 8, right: 8, top: 4, bottom: 0 })
                     .show(ui, |ui| {
-                        ui.set_width(width - 12.0);
+                        ui.set_width(width - 16.0);
                         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                         self.input_ui(ui);
                         ui.add_space(6.0);
@@ -236,6 +236,7 @@ impl QuickOpen {
                         if let Some(i) = self.list_ui(ui) {
                             chosen = Some(i);
                         }
+                        ui.add_space(6.0);
                         self.footer_ui(ui);
                     });
             });
@@ -257,19 +258,17 @@ impl QuickOpen {
     fn input_ui(&mut self, ui: &mut egui::Ui) {
         let t = Theme::current();
         let id = self.id.with("input");
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
-        ui.painter().rect_filled(rect, 5.0, t.bg);
-        let focused = ui.memory(|m| m.has_focus(id));
-        let stroke = if focused { t.accent.gamma_multiply(0.8) } else { t.border };
-        ui.painter().rect_stroke(rect, 5.0, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
-        ui_kit::paint_icon(ui.painter(), Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(15.0, 15.0)), Icon::Search, t.text_dim);
-        let inner = Rect::from_min_max(pos2(rect.left() + 34.0, rect.top() + 4.0), pos2(rect.right() - 8.0, rect.bottom() - 4.0));
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::hover());
+        let divider_y = rect.bottom() - 0.5;
+        ui.painter().line_segment([pos2(rect.left() - 8.0, divider_y), pos2(rect.right() + 8.0, divider_y)], Stroke::new(1.0, t.border));
+        ui_kit::paint_icon(ui.painter(), Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), vec2(17.0, 17.0)), Icon::Search, t.text_faint);
+        let inner = Rect::from_min_max(pos2(rect.left() + 36.0, rect.top() + 6.0), pos2(rect.right() - 8.0, rect.bottom() - 6.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             let out = egui::TextEdit::singleline(&mut self.query)
                 .id(id)
                 .frame(egui::Frame::NONE)
                 .hint_text(egui::RichText::new("이름으로 파일 검색").color(t.text_faint))
-                .font(FontId::proportional(14.5))
+                .font(FontId::proportional(16.0))
                 .text_color(t.text)
                 .desired_width(inner.width())
                 .margin(vec2(0.0, 4.0))
@@ -286,7 +285,7 @@ impl QuickOpen {
         let t = Theme::current();
         let n = self.results.len();
         if n == 0 {
-            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
             let msg = if self.index.as_ref().is_some_and(|i| !i.is_done()) && self.file_count() == 0 {
                 "파일 색인 중…"
             } else if self.query.trim().is_empty() {
@@ -320,14 +319,17 @@ impl QuickOpen {
                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
                 let selected = i == self.selected;
                 let p = ui.painter();
+                let bg = rect.shrink2(vec2(0.0, 1.0));
                 if selected {
-                    p.rect_filled(rect, 5.0, t.bg_selected);
+                    p.rect_filled(bg, 8.0, t.bg_selected);
                 } else if resp.hovered() {
-                    p.rect_filled(rect, 5.0, t.bg_hover);
+                    p.rect_filled(bg, 8.0, t.bg_hover);
                 }
                 let name_start = m.path.rfind('/').map_or(0, |k| k + 1);
                 let name = &m.path[name_start..];
-                ui_kit::paint_file_badge(p, Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(16.0, 16.0)), name);
+                let icon_bg = Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(22.0, 22.0));
+                p.rect_filled(icon_bg, 6.0, if selected { t.bg_elevated } else { t.bg_hover });
+                ui_kit::paint_file_badge(p, icon_bg, name);
                 let name_char_start = m.path[..name_start].chars().count() as u32;
                 let mut job = LayoutJob::default();
                 let hl = |job: &mut LayoutJob, text: &str, offset: u32, base: Color32, size: f32, indices: &[u32]| {
@@ -340,7 +342,7 @@ impl QuickOpen {
                             TextFormat {
                                 font_id: FontId::proportional(size),
                                 color: if hit { t.accent } else { base },
-                                underline: if hit { Stroke::new(1.0, t.accent.gamma_multiply(0.6)) } else { Stroke::NONE },
+                                underline: Stroke::NONE,
                                 ..Default::default()
                             },
                         );
@@ -353,13 +355,13 @@ impl QuickOpen {
                     hl(&mut job, dir, 0, t.text_dim, 12.0, &m.indices);
                 }
                 if m.index == u32::MAX && self.query.trim().is_empty() {
-                    job.append("   최근에 연 파일", 0.0, TextFormat { font_id: FontId::proportional(11.0), color: t.text_faint, ..Default::default() });
+                    job.append("   최근에 연 파일", 0.0, TextFormat { font_id: FontId::proportional(11.5), color: t.text_faint, ..Default::default() });
                 }
-                job.wrap.max_width = rect.width() - 44.0;
+                job.wrap.max_width = rect.width() - 52.0;
                 job.wrap.max_rows = 1;
                 job.wrap.break_anywhere = true;
                 let galley = ui.painter().layout_job(job);
-                ui.painter().galley(pos2(rect.left() + 34.0, rect.center().y - galley.size().y / 2.0), galley, t.text);
+                ui.painter().galley(pos2(rect.left() + 40.0, rect.center().y - galley.size().y / 2.0), galley, t.text);
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &m.path));
                 if resp.clicked() {
                     clicked = Some(i);
@@ -375,9 +377,11 @@ impl QuickOpen {
 
     fn footer_ui(&self, ui: &mut egui::Ui) {
         let t = Theme::current();
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
         let p = ui.painter();
-        p.line_segment([pos2(rect.left(), rect.top() + 2.0), pos2(rect.right(), rect.top() + 2.0)], Stroke::new(1.0, t.border));
+        let band = Rect::from_min_max(pos2(rect.left() - 8.0, rect.top()), pos2(rect.right() + 8.0, rect.bottom()));
+        p.rect_filled(band, egui::CornerRadius { nw: 0, ne: 0, sw: 13, se: 13 }, t.bg_panel);
+        p.line_segment([band.left_top(), band.right_top()], Stroke::new(1.0, t.border));
         let count = self.file_count();
         let left = if self.query.trim().is_empty() {
             format!("파일 {}개", fmt_count(count))
@@ -385,28 +389,28 @@ impl QuickOpen {
             format!("파일 {}개 중 {}개", fmt_count(count), fmt_count(self.total))
         };
         let left = if self.is_indexing() { format!("{left} · 색인 중…") } else { left };
-        p.text(pos2(rect.left() + 8.0, rect.center().y + 2.0), Align2::LEFT_CENTER, left, FontId::proportional(11.0), t.text_faint);
-        let mut x = rect.right() - 8.0;
+        p.text(pos2(rect.left() + 6.0, rect.center().y), Align2::LEFT_CENTER, left, kiln_common::fonts::medium(12.0), t.text_faint);
+        let mut x = rect.right() - 4.0;
         for (keys, label) in [(&["Esc"][..], "닫기"), (&["Enter"][..], "열기"), (&["↓", "↑"][..], "이동")] {
-            let g = p.layout_no_wrap(label.to_owned(), FontId::proportional(11.0), t.text_faint);
+            let g = p.layout_no_wrap(label.to_owned(), kiln_common::fonts::medium(12.0), t.text_dim);
             x -= g.size().x;
-            p.galley(pos2(x, rect.center().y + 2.0 - g.size().y / 2.0), g, t.text_faint);
-            x -= 5.0;
+            p.galley(pos2(x, rect.center().y - g.size().y / 2.0), g, t.text_dim);
+            x -= 6.0;
             for k in keys {
-                let w = if k.len() > 1 { 8.0 + k.len() as f32 * 5.5 } else { 16.0 };
-                let r = Rect::from_min_max(pos2(x - w, rect.center().y - 6.0), pos2(x, rect.center().y + 10.0));
-                p.rect_filled(r, 3.0, t.bg_hover);
-                p.rect_stroke(r, 3.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                let w = if k.len() > 1 { 10.0 + k.len() as f32 * 5.5 } else { 18.0 };
+                let r = Rect::from_min_max(pos2(x - w, rect.center().y - 9.0), pos2(x, rect.center().y + 9.0));
+                p.rect_filled(r, 4.0, t.bg_hover);
+                p.rect_stroke(r, 4.0, Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);
                 match *k {
                     "↑" => ui_kit::paint_icon(p, r.shrink(3.0), Icon::ArrowUp, t.text_dim),
                     "↓" => ui_kit::paint_icon(p, r.shrink(3.0), Icon::ArrowDown, t.text_dim),
                     _ => {
-                        p.text(r.center(), Align2::CENTER_CENTER, *k, FontId::proportional(10.0), t.text_dim);
+                        p.text(r.center(), Align2::CENTER_CENTER, *k, kiln_common::fonts::medium(10.5), t.text_dim);
                     }
                 }
                 x = r.left() - 3.0;
             }
-            x -= 10.0;
+            x -= 14.0;
         }
     }
 }

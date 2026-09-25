@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{Align2, Color32, FontId, Id, Key, Rect, ScrollArea, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Align2, FontId, Id, Key, Rect, ScrollArea, Sense, Stroke, Ui, pos2, vec2};
 use kiln_common::{Task, Theme};
 
 use crate::EditorEvent;
@@ -14,7 +14,7 @@ use crate::search::{FileMatches, SearchHandle, SearchMsg, SearchQuery, SearchSum
 use crate::ui_kit::{self, Icon};
 
 const DEBOUNCE: Duration = Duration::from_millis(150);
-const ROW_H: f32 = 22.0;
+const ROW_H: f32 = 26.0;
 const DEFAULT_MAX_RESULTS: usize = 10_000;
 const MSGS_PER_FRAME: usize = 2_000;
 
@@ -232,7 +232,7 @@ impl SearchPanel {
         self.poll_replace(ui.ctx());
         self.rebuild_rows();
 
-        let status_rect = Rect::from_min_size(pos2(full.left(), full.top() + inputs_h), vec2(full.width(), 24.0));
+        let status_rect = Rect::from_min_size(pos2(full.left(), full.top() + inputs_h), vec2(full.width(), 28.0));
         self.status_ui(ui, status_rect);
 
         let list_rect = Rect::from_min_max(pos2(full.left(), status_rect.bottom()), full.max);
@@ -254,9 +254,9 @@ impl SearchPanel {
     /// 입력 영역을 그리고 높이를 돌려준다.
     fn inputs_ui(&mut self, ui: &mut Ui, full: Rect) -> f32 {
         let t = Theme::current();
-        let pad = 8.0;
-        let field_h = 26.0;
-        let gap = 5.0;
+        let pad = 10.0;
+        let field_h = 30.0;
+        let gap = 6.0;
         let mut y = full.top() + pad;
         let left = full.left() + pad;
         let right = full.right() - pad;
@@ -264,23 +264,23 @@ impl SearchPanel {
         let rid = self.id.with("replace");
 
         // 바꾸기 토글
-        let chev = Rect::from_min_size(pos2(left, y), vec2(16.0, field_h));
+        let chev = Rect::from_min_size(pos2(left, y + 5.0), vec2(18.0, field_h - 10.0));
         let resp = ui.interact(chev, self.id.with("toggle-replace"), Sense::click());
         if resp.hovered() {
-            ui.painter().rect_filled(chev, 3.0, t.bg_hover);
+            ui.painter().rect_filled(chev, 5.0, t.bg_hover);
         }
-        ui_kit::paint_icon(ui.painter(), chev.shrink(1.0), if self.show_replace { Icon::ChevronDown } else { Icon::ChevronRight }, t.text_dim);
+        ui_kit::paint_icon(ui.painter(), chev.shrink(2.0), if self.show_replace { Icon::ChevronDown } else { Icon::ChevronRight }, if resp.hovered() { t.text } else { t.text_faint });
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "바꾸기 전환"));
         if resp.on_hover_text("바꾸기 전환").clicked() {
             self.show_replace = !self.show_replace;
         }
-        let fx = left + 20.0;
-        let q_rect = Rect::from_min_max(pos2(fx, y), pos2(right - 24.0, y + field_h));
+        let fx = left + 22.0;
+        let q_rect = Rect::from_min_max(pos2(fx, y), pos2(right - 30.0, y + field_h));
         let submit = self.field(ui, q_rect, qid, FieldKind::Query);
         if submit {
             self.search_now = true;
         }
-        let more = Rect::from_min_size(pos2(right - 22.0, y + 2.0), vec2(22.0, 22.0));
+        let more = Rect::from_min_size(pos2(right - 25.0, y + 3.0), vec2(24.0, 24.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(more), |ui| {
             if ui_kit::icon_toggle(ui, Icon::Selection, "검색 세부 정보 전환", self.show_filters, true).clicked() {
                 self.show_filters = !self.show_filters;
@@ -288,9 +288,9 @@ impl SearchPanel {
         });
         y += field_h + gap;
         if self.show_replace {
-            let r_rect = Rect::from_min_max(pos2(fx, y), pos2(right - 24.0, y + field_h));
+            let r_rect = Rect::from_min_max(pos2(fx, y), pos2(right - 30.0, y + field_h));
             self.field(ui, r_rect, rid, FieldKind::Replace);
-            let btn = Rect::from_min_size(pos2(right - 22.0, y + 2.0), vec2(22.0, 22.0));
+            let btn = Rect::from_min_size(pos2(right - 25.0, y + 3.0), vec2(24.0, 24.0));
             let can = !self.results.is_empty() && self.replace_task.is_none() && self.handle.is_none();
             ui.scope_builder(egui::UiBuilder::new().max_rect(btn), |ui| {
                 if ui_kit::icon_toggle(ui, Icon::ReplaceAll, "모두 바꾸기", false, can).clicked() {
@@ -301,8 +301,8 @@ impl SearchPanel {
         }
         if self.show_filters {
             for (label, kind) in [("포함할 파일", FieldKind::Include), ("제외할 파일", FieldKind::Exclude)] {
-                ui.painter().text(pos2(fx, y + 7.0), Align2::LEFT_CENTER, label, FontId::proportional(11.0), t.text_dim);
-                y += 15.0;
+                ui.painter().text(pos2(fx + 1.0, y + 8.0), Align2::LEFT_CENTER, label, kiln_common::fonts::medium(12.0), t.text_dim);
+                y += 19.0;
                 let r = Rect::from_min_max(pos2(fx, y), pos2(right, y + field_h));
                 let id = self.id.with(label);
                 self.field(ui, r, id, kind);
@@ -316,11 +316,16 @@ impl SearchPanel {
         let t = Theme::current();
         let focused = ui.memory(|m| m.has_focus(id));
         let error = kind == FieldKind::Query && self.error.is_some();
-        let stroke = if error { t.red.gamma_multiply(0.8) } else if focused { t.accent.gamma_multiply(0.85) } else { t.border };
-        ui.painter().rect_filled(rect, 4.0, t.bg);
-        ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
-        let chips_w = if kind == FieldKind::Query { 3.0 * 23.0 + 2.0 } else { 0.0 };
-        let inner = Rect::from_min_max(pos2(rect.left() + 7.0, rect.top() + 1.0), pos2(rect.right() - 3.0 - chips_w, rect.bottom() - 1.0));
+        let stroke = if error { t.red } else if focused { t.accent } else { t.border_strong };
+        ui.painter().rect_filled(rect, 7.0, t.bg_input);
+        ui.painter().rect_stroke(rect, 7.0, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
+        let chips_w = if kind == FieldKind::Query { 3.0 * 25.0 + 2.0 } else { 0.0 };
+        let lead = if kind == FieldKind::Query || kind == FieldKind::Replace { 26.0 } else { 9.0 };
+        if lead > 10.0 {
+            let icon = if kind == FieldKind::Query { Icon::Search } else { Icon::ReplaceOne };
+            ui_kit::paint_icon(ui.painter(), Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(14.0, 14.0)), icon, t.text_faint);
+        }
+        let inner = Rect::from_min_max(pos2(rect.left() + lead, rect.top() + 1.0), pos2(rect.right() - 4.0 - chips_w, rect.bottom() - 1.0));
         let (text, hint) = match kind {
             FieldKind::Query => (&mut self.query, "검색"),
             FieldKind::Replace => (&mut self.replacement, "바꾸기"),
@@ -339,7 +344,7 @@ impl SearchPanel {
             }
         });
         if kind == FieldKind::Query {
-            let chips = Rect::from_min_max(pos2(rect.right() - 3.0 - chips_w, rect.top() + 3.0), pos2(rect.right() - 3.0, rect.bottom() - 3.0));
+            let chips = Rect::from_min_max(pos2(rect.right() - 4.0 - chips_w, rect.top() + 4.0), pos2(rect.right() - 4.0, rect.bottom() - 4.0));
             ui.scope_builder(egui::UiBuilder::new().max_rect(chips).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                 ui.spacing_mut().item_spacing.x = 1.0;
                 let o = &mut self.opts;
@@ -360,7 +365,7 @@ impl SearchPanel {
     fn status_ui(&self, ui: &Ui, rect: Rect) {
         let t = Theme::current();
         let p = ui.painter();
-        let x = rect.left() + 12.0;
+        let x = rect.left() + 14.0;
         let (text, color) = if let Some(e) = &self.error {
             let msg = e.lines().last().unwrap_or(e).trim();
             (format!("잘못된 패턴: {}", msg.trim_start_matches("error: ")), t.red)
@@ -382,7 +387,7 @@ impl SearchPanel {
         } else {
             (String::new(), t.text_dim)
         };
-        p.text(pos2(x, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(11.5), color);
+        p.text(pos2(x, rect.center().y), Align2::LEFT_CENTER, text, kiln_common::fonts::medium(12.0), color);
     }
 
     fn row_ui(&mut self, ui: &mut Ui, i: usize) -> Option<EditorEvent> {
@@ -396,28 +401,28 @@ impl SearchPanel {
                 let f = &self.results[fi];
                 let collapsed = self.collapsed.contains(&fi);
                 let p = ui.painter();
-                ui_kit::paint_icon(p, Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(12.0, 12.0)), if collapsed { Icon::ChevronRight } else { Icon::ChevronDown }, t.text_dim);
+                ui_kit::paint_icon(p, Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(12.0, 12.0)), if collapsed { Icon::ChevronRight } else { Icon::ChevronDown }, t.text_faint);
                 let name_start = f.rel.rfind('/').map_or(0, |k| k + 1);
                 let name = &f.rel[name_start..];
-                ui_kit::paint_file_badge(p, Rect::from_center_size(pos2(rect.left() + 32.0, rect.center().y), vec2(16.0, 16.0)), name);
+                ui_kit::paint_file_badge(p, Rect::from_center_size(pos2(rect.left() + 36.0, rect.center().y), vec2(16.0, 16.0)), name);
                 let count = f.match_count();
                 let pill_text = fmt_count(count);
-                let pill_w = 10.0 + pill_text.len() as f32 * 6.5;
-                let pill = Rect::from_center_size(pos2(rect.right() - 10.0 - pill_w / 2.0, rect.center().y), vec2(pill_w, 16.0));
+                let pill_w = 12.0 + pill_text.len() as f32 * 6.5;
+                let pill = Rect::from_center_size(pos2(rect.right() - 14.0 - pill_w / 2.0, rect.center().y), vec2(pill_w, 17.0));
                 let mut job = LayoutJob::default();
-                job.append(name, 0.0, TextFormat { font_id: FontId::proportional(13.0), color: t.text, ..Default::default() });
+                job.append(name, 0.0, TextFormat { font_id: kiln_common::fonts::medium(13.0), color: t.text, ..Default::default() });
                 let dir = f.rel[..name_start].trim_end_matches('/');
                 if !dir.is_empty() {
-                    job.append(&format!("  {dir}"), 0.0, TextFormat { font_id: FontId::proportional(11.5), color: t.text_faint, ..Default::default() });
+                    job.append(&format!("  {dir}"), 0.0, TextFormat { font_id: FontId::proportional(12.0), color: t.text_faint, ..Default::default() });
                 }
-                job.wrap.max_width = (pill.left() - rect.left() - 50.0).max(20.0);
+                job.wrap.max_width = (pill.left() - rect.left() - 54.0).max(20.0);
                 job.wrap.max_rows = 1;
                 job.wrap.break_anywhere = true;
                 let g = ui.painter().layout_job(job);
-                ui.painter().galley(pos2(rect.left() + 44.0, rect.center().y - g.size().y / 2.0), g, t.text);
+                ui.painter().galley(pos2(rect.left() + 50.0, rect.center().y - g.size().y / 2.0), g, t.text);
                 let p = ui.painter();
-                p.rect_filled(pill, 8.0, t.bg_hover);
-                p.text(pill.center(), Align2::CENTER_CENTER, pill_text, FontId::proportional(10.5), t.text_dim);
+                p.rect_filled(pill, 8.5, t.bg_hover);
+                p.text(pill.center(), Align2::CENTER_CENTER, pill_text, kiln_common::fonts::medium(11.0), t.text_dim);
                 let rel = f.rel.clone();
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &rel));
                 if resp.clicked() {
@@ -439,7 +444,7 @@ impl SearchPanel {
                 let hit = TextFormat {
                     font_id: FontId::proportional(12.5),
                     color: t.text,
-                    background: t.yellow.gamma_multiply(0.22),
+                    background: kiln_common::widgets::tint(t.yellow, if t.dark { 0.24 } else { 0.18 }),
                     ..Default::default()
                 };
                 let replacing = self.show_replace && !self.replacement.is_empty();
@@ -451,25 +456,25 @@ impl SearchPanel {
                     job.append(&m.preview[pos..r.start], 0.0, base.clone());
                     let matched = &m.preview[r.clone()];
                     if replacing {
-                        job.append(matched, 0.0, TextFormat { background: t.red.gamma_multiply(0.22), strikethrough: Stroke::new(1.0, t.red), color: t.text_dim, ..hit.clone() });
+                        job.append(matched, 0.0, TextFormat { background: kiln_common::widgets::tint(t.red, 0.18), strikethrough: Stroke::new(1.0, t.red), color: t.text_dim, ..hit.clone() });
                         let rep = match &self.preview_regex {
                             Some(re) => expand_replacement(re, matched, &self.replacement, self.opts.regex),
                             None => self.replacement.clone(),
                         };
-                        job.append(&rep, 0.0, TextFormat { background: t.green.gamma_multiply(0.22), ..hit.clone() });
+                        job.append(&rep, 0.0, TextFormat { background: kiln_common::widgets::tint(t.green, 0.18), ..hit.clone() });
                     } else {
                         job.append(matched, 0.0, hit.clone());
                     }
                     pos = r.end;
                 }
                 job.append(&m.preview[pos.min(m.preview.len())..], 0.0, base);
-                job.wrap.max_width = (rect.width() - 36.0 - num_w).max(20.0);
+                job.wrap.max_width = (rect.width() - 50.0 - num_w).max(20.0);
                 job.wrap.max_rows = 1;
                 job.wrap.break_anywhere = true;
                 let g = ui.painter().layout_job(job);
-                ui.painter().galley(pos2(rect.left() + 36.0, rect.center().y - g.size().y / 2.0), g, t.text);
+                ui.painter().galley(pos2(rect.left() + 50.0, rect.center().y - g.size().y / 2.0), g, t.text);
                 if resp.hovered() || selected {
-                    ui.painter().text(pos2(rect.right() - 10.0, rect.center().y), Align2::RIGHT_CENTER, lnum, FontId::monospace(10.5), t.text_faint);
+                    ui.painter().text(pos2(rect.right() - 16.0, rect.center().y), Align2::RIGHT_CENTER, lnum, FontId::monospace(11.0), t.text_faint);
                 }
                 let label = format!("{}:{}", f.rel, m.line);
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
@@ -492,30 +497,22 @@ impl SearchPanel {
         let mut confirm = false;
         let mut cancel = false;
         let modal = egui::Modal::new(self.id.with("confirm-replace"))
-            .backdrop_color(Color32::from_black_alpha(110))
-            .frame(
-                egui::Frame::new()
-                    .fill(t.bg_elevated)
-                    .stroke(Stroke::new(1.0, t.border))
-                    .corner_radius(8)
-                    .inner_margin(18)
-                    .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(120) }),
-            )
+            .backdrop_color(ui_kit::backdrop())
+            .frame(ui_kit::modal_frame())
             .show(ui.ctx(), |ui| {
-                ui.set_width(360.0);
+                ui.set_width((ui.ctx().content_rect().width() - 72.0).clamp(200.0, 360.0));
                 ui.label(
                     egui::RichText::new(format!(
                         "파일 {}개에서 {}개 항목을 바꿀까요?",
                         fmt_count(files),
                         fmt_count(matches)
                     ))
-                    .size(14.0)
-                    .strong()
+                    .font(kiln_common::fonts::semibold(15.0))
                     .color(t.text),
                 );
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(format!("“{}”(으)로 바꿉니다. 파일은 즉시 디스크에 기록됩니다.", self.replacement)).size(12.0).color(t.text_dim));
-                ui.add_space(14.0);
+                ui.add_space(6.0);
+                ui.add(egui::Label::new(egui::RichText::new(format!("“{}”(으)로 바꿉니다. 파일은 즉시 디스크에 기록됩니다.", self.replacement)).size(13.0).color(t.text_dim)).wrap());
+                ui.add_space(18.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui_kit::flat_button(ui, "바꾸기", true).clicked() {
                         confirm = true;

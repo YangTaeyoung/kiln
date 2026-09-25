@@ -5,7 +5,7 @@
 
 use egui::{CornerRadius, FontId, Margin, RichText, Stroke, Ui, vec2};
 
-use super::widgets::{alpha, theme};
+use super::widgets::theme;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Span {
@@ -187,8 +187,8 @@ impl Markdown {
                     egui::Frame::new()
                         .fill(t.bg)
                         .stroke(Stroke::new(1.0, t.border))
-                        .corner_radius(CornerRadius::same(5))
-                        .inner_margin(Margin::same(8))
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::symmetric(12, 10))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             egui::ScrollArea::horizontal().id_salt(text.len()).show(ui, |ui| {
@@ -205,7 +205,11 @@ impl Markdown {
                         let r = ui.available_rect_before_wrap();
                         inline(ui, spans, 13.0, false);
                         let used = ui.min_rect();
-                        ui.painter().vline(r.left() - 8.0, used.y_range(), Stroke::new(3.0, alpha(t.text_faint, 0.6)));
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_max(egui::pos2(r.left() - 10.0, used.top()), egui::pos2(r.left() - 7.0, used.bottom())),
+                            CornerRadius::same(2),
+                            t.border_strong,
+                        );
                     });
                 }
                 Block::Table(rows) => {
@@ -231,8 +235,9 @@ impl Markdown {
                     }
                     egui::Frame::new()
                         .fill(t.bg)
-                        .corner_radius(CornerRadius::same(4))
-                        .inner_margin(Margin::same(6))
+                        .stroke(Stroke::new(1.0, t.border))
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::symmetric(10, 8))
                         .show(ui, |ui| {
                             egui::ScrollArea::horizontal().id_salt(("md_table", s.len())).show(ui, |ui| {
                                 ui.add(egui::Label::new(RichText::new(s.trim_end()).monospace().size(11.5).color(t.text_dim)).extend());
@@ -240,7 +245,10 @@ impl Markdown {
                         });
                 }
                 Block::Rule => {
-                    ui.add(egui::Separator::default().spacing(8.0));
+                    ui.add_space(4.0);
+                    let r = ui.available_rect_before_wrap();
+                    ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0, t.border));
+                    ui.add_space(6.0);
                 }
             }
         }
@@ -423,14 +431,14 @@ fn inline(ui: &mut Ui, spans: &[Span], size: f32, heading: bool) {
             for s in spans {
                 let base = |txt: &str| {
                     let r = RichText::new(txt).size(size).color(t.text);
-                    if heading { r.strong() } else { r }
+                    if heading { r.font(kiln_common::fonts::semibold(size)) } else { r }
                 };
                 match s {
                     Span::Text(x) => {
                         ui.add(egui::Label::new(base(x)).wrap());
                     }
                     Span::Bold(x) => {
-                        ui.add(egui::Label::new(base(x).strong()).wrap());
+                        ui.add(egui::Label::new(base(x).font(kiln_common::fonts::semibold(size))).wrap());
                     }
                     Span::Italic(x) => {
                         ui.add(egui::Label::new(base(x).italics()).wrap());
@@ -443,8 +451,8 @@ fn inline(ui: &mut Ui, spans: &[Span], size: f32, heading: bool) {
                             egui::Label::new(
                                 RichText::new(x)
                                     .font(FontId::monospace(size - 1.0))
-                                    .color(t.orange)
-                                    .background_color(t.bg_elevated),
+                                    .color(t.text)
+                                    .background_color(t.bg_hover),
                             )
                             .wrap(),
                         );

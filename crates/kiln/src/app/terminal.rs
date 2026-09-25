@@ -403,24 +403,31 @@ impl TermView {
 
         // 스크롤백 위치 표시.
         if screen.display_offset > 0 && screen.history > 0 {
+            let t = kiln_common::Theme::current();
             let total = (screen.history + screen.rows as u32) as f32;
             let h = (rect.height() * screen.rows as f32 / total).max(24.0);
-            let top_frac = (screen.history - screen.display_offset) as f32 / total;
-            let y = rect.top() + top_frac * (rect.height() - h) / (1.0 - screen.rows as f32 / total).max(0.01) * (1.0 - screen.rows as f32 / total);
-            painter.rect_filled(Rect::from_min_size(pos2(rect.right() - 5.0, y), vec2(3.0, h)), 2.0, Color32::from_white_alpha(70));
-            let label = format!("↑ {} 줄", screen.display_offset);
-            let g = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::from_gray(200));
-            let br = Rect::from_min_size(pos2(rect.right() - g.size().x - 22.0, rect.top() + 6.0), g.size() + vec2(10.0, 4.0));
-            painter.rect_filled(br, 4.0, Color32::from_black_alpha(160));
-            painter.galley(br.min + vec2(5.0, 2.0), g, Color32::WHITE);
+            let top_frac = (screen.history - screen.display_offset) as f32 / (screen.history as f32).max(1.0);
+            let y = rect.top() + top_frac * (rect.height() - h);
+            painter.rect_filled(Rect::from_min_size(pos2(rect.right() - 6.0, y), vec2(3.0, h)), 2.0, t.text_faint);
+            let label = format!("{} 줄 위", screen.display_offset);
+            let g = painter.layout_no_wrap(label, kiln_common::fonts::medium(11.5), t.text);
+            let br = Rect::from_min_size(pos2(rect.right() - g.size().x - 34.0, rect.top() + 10.0), g.size() + vec2(16.0, 8.0));
+            painter.rect_filled(br, 8.0, t.bg_elevated);
+            painter.rect_stroke(br, 8.0, Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);
+            painter.galley(br.min + vec2(8.0, 4.0), g, t.text);
         }
 
         if let Some(code) = exited {
-            let msg = format!("프로세스 종료 (코드 {code}) — Enter: 새 셸   ⌘W: 닫기");
-            let g = painter.layout_no_wrap(msg, FontId::proportional(12.5), Color32::from_gray(230));
-            let r = Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 26.0), g.size() + vec2(24.0, 12.0));
-            painter.rect_filled(r, 6.0, Color32::from_rgba_unmultiplied(40, 42, 52, 235));
-            painter.galley(r.min + vec2(12.0, 6.0), g, Color32::WHITE);
+            let t = kiln_common::Theme::current();
+            let msg = format!("프로세스가 종료됐습니다 (코드 {code})");
+            let g = painter.layout_no_wrap(msg, kiln_common::fonts::medium(13.0), t.text);
+            let hint = painter.layout_no_wrap("↩ 새 셸   ·   ⌘W 닫기".to_string(), kiln_common::fonts::regular(12.0), t.text_dim);
+            let w = g.size().x.max(hint.size().x) + 36.0;
+            let r = Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 46.0), vec2(w, 56.0));
+            painter.rect_filled(r, 12.0, t.bg_elevated);
+            painter.rect_stroke(r, 12.0, Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);
+            painter.galley(pos2(r.center().x - g.size().x / 2.0, r.top() + 10.0), g, t.text);
+            painter.galley(pos2(r.center().x - hint.size().x / 2.0, r.top() + 31.0), hint, t.text_dim);
         }
 
         self.search_ui(ui, conn, rect);
@@ -645,7 +652,7 @@ impl TermView {
                 if let Some((start, end, target)) = osc8.or_else(|| find_link(&text, c as usize, cwd)) {
                     let painter = ui.painter();
                     let y = origin.y + (r as f32 + 1.0) * cell.y - 1.0;
-                    painter.line_segment([pos2(origin.x + start as f32 * cell.x, y), pos2(origin.x + end as f32 * cell.x, y)], Stroke::new(1.0, Color32::from_rgb(0x6c, 0x9e, 0xff)));
+                    painter.line_segment([pos2(origin.x + start as f32 * cell.x, y), pos2(origin.x + end as f32 * cell.x, y)], Stroke::new(1.0, kiln_common::Theme::current().accent));
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     if resp.clicked() {
                         out.open = Some(target);
@@ -655,43 +662,65 @@ impl TermView {
     }
 
     fn search_ui(&mut self, ui: &mut egui::Ui, conn: &mut Conn, rect: Rect) {
+        use kiln_common::icons::Icon;
+        use kiln_common::widgets;
         let Some(sb) = &mut self.search else { return };
+        let t = kiln_common::Theme::current();
         let mut close = false;
-        let area = egui::Area::new(ui.id().with(("term-search", self.session)))
-            .fixed_pos(pos2(rect.right() - 330.0, rect.top() + 8.0))
-            .order(egui::Order::Foreground);
+        let width = 340.0f32.min(rect.width() - 20.0);
+        let area = egui::Area::new(ui.id().with(("term-search", self.session))).fixed_pos(pos2(rect.right() - width - 12.0, rect.top() + 10.0)).order(egui::Order::Foreground);
         area.show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).inner_margin(6.0).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let te = ui.add(egui::TextEdit::singleline(&mut sb.query).hint_text("스크롤백 검색").desired_width(180.0));
-                    if sb.focus {
-                        te.request_focus();
-                        sb.focus = false;
-                    }
-                    let enter = te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let shift = ui.input(|i| i.modifiers.shift);
-                    let go = |backward: bool| {
-                        let req = conn.next_req();
-                        conn.send(kiln_proto::ClientMsg::Search { req, session: self.session, query: sb.query.clone(), backward });
-                    };
-                    if enter {
-                        go(!shift);
-                        te.request_focus();
-                    }
-                    if ui.small_button("↑").on_hover_text("이전 (Enter)").clicked() {
-                        go(true);
-                    }
-                    if ui.small_button("↓").on_hover_text("다음 (Shift+Enter)").clicked() {
-                        go(false);
-                    }
-                    if sb.last_found == Some(false) {
-                        ui.colored_label(Color32::from_rgb(0xf0, 0x6c, 0x75), "없음");
-                    }
-                    if ui.small_button("✕").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        close = true;
-                    }
+            egui::Frame::new()
+                .fill(t.bg_elevated)
+                .stroke(Stroke::new(1.0, t.border_strong))
+                .corner_radius(egui::CornerRadius::same(10))
+                .shadow(t.shadow())
+                .inner_margin(egui::Margin { left: 10, right: 6, top: 5, bottom: 5 })
+                .show(ui, |ui| {
+                    ui.set_width(width - 16.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        let (ir, _) = ui.allocate_exact_size(vec2(16.0, 26.0), Sense::hover());
+                        kiln_common::icons::paint(ui.painter(), Rect::from_center_size(ir.center(), vec2(13.0, 13.0)), Icon::Search, t.text_faint);
+                        ui.add_space(4.0);
+                        let te = ui.add(
+                            egui::TextEdit::singleline(&mut sb.query)
+                                .hint_text("스크롤백에서 찾기")
+                                .frame(egui::Frame::NONE)
+                                .font(kiln_common::fonts::regular(13.0))
+                                .desired_width(width - 150.0),
+                        );
+                        if sb.focus {
+                            te.request_focus();
+                            sb.focus = false;
+                        }
+                        let enter = te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        let shift = ui.input(|i| i.modifiers.shift);
+                        let go = |backward: bool| {
+                            let req = conn.next_req();
+                            conn.send(kiln_proto::ClientMsg::Search { req, session: self.session, query: sb.query.clone(), backward });
+                        };
+                        if enter {
+                            go(!shift);
+                            te.request_focus();
+                        }
+                        if sb.last_found == Some(false) {
+                            ui.label(egui::RichText::new("없음").size(12.0).color(t.red));
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if widgets::icon_button(ui, Icon::Close, 24.0, false, "닫기 (Esc)").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                close = true;
+                            }
+                            if widgets::icon_button(ui, Icon::ArrowDown, 24.0, false, "다음 (⇧↩)").clicked() {
+                                go(false);
+                            }
+                            let up = widgets::icon_button(ui, Icon::ArrowUp, 24.0, false, "이전 (↩)");
+                            if up.clicked() {
+                                go(true);
+                            }
+                        });
+                    });
                 });
-            });
         });
         if close {
             self.search = None;

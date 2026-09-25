@@ -19,11 +19,12 @@ fn hash_of(text: &str, wrap: f32, driver: Driver, font: f32) -> u64 {
     wrap.to_bits().hash(&mut h);
     driver.hash(&mut h);
     font.to_bits().hash(&mut h);
+    Theme::current().name.hash(&mut h);
     h.finish()
 }
 
 impl SqlHighlighter {
-    /// 강조된 LayoutJob. 입력이 같으면 캐시를 복제해 돌려준다.
+    /// 강조된 LayoutJob. 입력과 테마가 같으면 캐시를 복제해 돌려준다.
     pub fn job(
         &mut self,
         text: &str,

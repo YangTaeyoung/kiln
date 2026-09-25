@@ -36,6 +36,9 @@ fn harness(root: &Path) -> Harness<'static, State> {
     let panel = SearchPanel::new(root.to_path_buf());
     let h = Harness::builder().with_size(egui::vec2(340.0, 420.0)).wgpu().build_ui_state(
         |ui, s: &mut State| {
+            if !common::fonts_ready(ui.ctx()) {
+                return;
+            }
             let ev = s.panel.ui(ui);
             s.events.extend(ev);
         },

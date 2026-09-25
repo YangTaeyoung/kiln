@@ -78,8 +78,9 @@ fn grid_frame_time_with_100k_rows_by_20_columns() {
         .build_ui_state(
             |ui, t: &mut DbTab| {
                 kiln_common::Theme::current().apply(ui.ctx());
-                common::install_korean_font(ui.ctx());
-                t.ui(ui);
+                if common::install_korean_font(ui.ctx()) {
+                    t.ui(ui);
+                }
             },
             tab,
         );

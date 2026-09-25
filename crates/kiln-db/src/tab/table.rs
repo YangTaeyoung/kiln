@@ -10,11 +10,13 @@ use crate::ui::grid::{
     CellKind, CellView, GridEvent, GridSource, GridState, HeaderView, RowState, grid_ui,
 };
 use crate::ui::highlight::SqlHighlighter;
-use crate::ui::{self, dim, thousands, toggle_button, tool_button};
+use crate::ui::{self, Glyph, dim, faint, glyph_button, thousands, tool_button_icon};
 use crate::value::DISPLAY_MAX_CHARS;
 use crate::{ColumnInfo, ConnId, DbManager, Driver, ResultSet, TypeClass, Value};
 use egui::{Key, Modifiers, RichText, Ui};
-use kiln_common::Theme;
+use kiln_common::icons::Icon;
+use kiln_common::widgets;
+use kiln_common::{Theme, fonts};
 use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
@@ -650,7 +652,7 @@ impl TableView {
         }
         egui::Frame::new().fill(theme.bg).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
             self.sub_tabs(ui, m);
             match self.sub {
                 SubTab::Data => self.data_ui(ui, m),
@@ -663,49 +665,55 @@ impl TableView {
     fn sub_tabs(&mut self, ui: &mut Ui, m: &DbManager) {
         let theme = Theme::current();
         egui::Frame::new()
-            .fill(theme.bg_panel)
-            .inner_margin(egui::Margin::symmetric(8, 3))
+            .inner_margin(egui::Margin { left: 10, right: 10, top: 8, bottom: 4 })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    for (s, label) in [
-                        (SubTab::Data, "데이터"),
-                        (SubTab::Structure, "구조"),
-                        (SubTab::Ddl, "DDL"),
-                    ] {
-                        let sel = self.sub == s;
-                        let r = ui.add(
-                            egui::Button::new(RichText::new(label).size(12.0).color(if sel {
-                                theme.text
-                            } else {
-                                theme.text_dim
-                            }))
-                            .fill(if sel {
-                                theme.bg_elevated
-                            } else {
-                                egui::Color32::TRANSPARENT
-                            })
-                            .corner_radius(4.0),
-                        );
-                        if r.clicked() {
-                            self.sub = s;
-                            if s == SubTab::Ddl && self.ddl.is_none() && self.ddl_job.is_none() {
-                                let m2 = m.clone();
-                                let (id, t) = (self.conn, self.t.clone());
-                                self.ddl_job =
-                                    Some(m.spawn(async move { m2.table_ddl(id, &t).await }));
-                            }
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let mut sub = self.sub;
+                    if ui::segmented(
+                        ui,
+                        &mut sub,
+                        &[(SubTab::Data, "데이터"), (SubTab::Structure, "구조"), (SubTab::Ddl, "DDL")],
+                    ) {
+                        self.sub = sub;
+                        if sub == SubTab::Ddl && self.ddl.is_none() && self.ddl_job.is_none() {
+                            let m2 = m.clone();
+                            let (id, t) = (self.conn, self.t.clone());
+                            self.ddl_job = Some(m.spawn(async move { m2.table_ddl(id, &t).await }));
                         }
                     }
-                    ui.separator();
-                    let name = self.t.sql_name(self.driver);
-                    ui.label(
-                        RichText::new(name)
-                            .monospace()
-                            .size(12.0)
-                            .color(theme.text_dim),
+                    ui.add_space(4.0);
+                    ui::glyph_label(
+                        ui,
+                        if self.is_view { Icon::Eye } else { Icon::Table },
+                        if self.is_view { theme.green } else { theme.blue },
+                        14.0,
                     );
+                    ui.label(RichText::new(self.t.sql_name(self.driver)).font(fonts::mono(12.5)).color(theme.text));
                     if self.is_view {
-                        ui.label(RichText::new("뷰").size(10.0).color(theme.green));
+                        widgets::pill(ui, "뷰", theme.green);
+                    }
+                    if self.sub == SubTab::Data {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            if ui::toggle_button_icon(ui, Some(Icon::Eye), "값", self.show_viewer)
+                                .on_hover_text("값 뷰어 전환")
+                                .clicked()
+                            {
+                                self.show_viewer = !self.show_viewer;
+                            }
+                            ui::menu_button(ui, Some(Icon::Download), "내보내기", |ui| {
+                                for f in [ExportFormat::Csv, ExportFormat::Json] {
+                                    if ui
+                                        .button(format!("모든 행을 {}로…", f.extension().to_uppercase()))
+                                        .clicked()
+                                    {
+                                        ui.close();
+                                        self.export(m, f);
+                                    }
+                                }
+                            });
+                        });
                     }
                 });
             });
@@ -724,24 +732,23 @@ impl TableView {
             } else {
                 "읽기 전용: 기본 키가 없어 편집할 행을 식별할 수 없습니다."
             };
-            ui.horizontal(|ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(format!("🔒 {why}"))
-                        .size(11.5)
-                        .color(theme.text_dim),
-                );
-            });
+            egui::Frame::new()
+                .inner_margin(egui::Margin { left: 12, right: 10, top: 0, bottom: 6 })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui::glyph_label(ui, Glyph::Lock, theme.text_faint, 12.0);
+                        ui.label(faint(why));
+                    });
+                });
         }
         if let Some(e) = &self.load_error {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.add_space(8.0);
-                ui::banner(ui, e, true);
-            });
+            egui::Frame::new()
+                .inner_margin(egui::Margin { left: 10, right: 10, top: 2, bottom: 8 })
+                .show(ui, |ui| ui::banner(ui, e, true));
         }
         // 상태 줄.
-        let status_h = 22.0;
+        let status_h = 28.0;
         let avail = ui.available_rect_before_wrap();
         let grid_rect =
             egui::Rect::from_min_max(avail.min, egui::pos2(avail.max.x, avail.max.y - status_h));
@@ -763,7 +770,12 @@ impl TableView {
                 .resizable(true)
                 .default_size(320.0)
                 .min_size(200.0)
-                .frame(egui::Frame::new().fill(theme.bg_panel).inner_margin(8))
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme.bg_panel)
+                        .stroke(egui::Stroke::new(1.0, theme.border))
+                        .inner_margin(12),
+                )
                 .show(ui, |ui| {
                     let cell = cell_info.as_ref().map(|c| ViewerCell {
                         row: c.0,
@@ -783,7 +795,7 @@ impl TableView {
         let Some(data) = &self.data else {
             ui.centered_and_justified(|ui| {
                 if self.load_job.is_some() {
-                    ui.add(egui::Spinner::new().size(18.0));
+                    ui.add(egui::Spinner::new().size(18.0).color(theme.text_dim));
                 } else {
                     ui.label(dim("데이터 없음"));
                 }
@@ -795,7 +807,7 @@ impl TableView {
             let r = ui.max_rect();
             ui.put(
                 egui::Rect::from_center_size(r.center(), egui::vec2(24.0, 24.0)),
-                egui::Spinner::new().size(18.0),
+                egui::Spinner::new().size(18.0).color(theme.text_dim),
             );
         }
         for ev in events {
@@ -930,29 +942,30 @@ impl TableView {
     }
 
     fn toolbar(&mut self, ui: &mut Ui, m: &DbManager) {
-        let theme = Theme::current();
         let pending = self.pending_changes();
         let editable = self.data.as_ref().is_some_and(|d| d.editable);
         let has_sel = !self.grid.sel.ranges.is_empty();
         egui::Frame::new()
-            .fill(theme.bg_panel)
-            .inner_margin(egui::Margin::symmetric(8, 4))
+            .inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 4 })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if tool_button(ui, "⟳", self.load_job.is_none() && pending == 0, false)
-                        .on_hover_text("페이지 다시 불러오기")
-                        .clicked()
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if glyph_button(
+                        ui,
+                        Glyph::Common(Icon::Refresh),
+                        "페이지 다시 불러오기",
+                        self.load_job.is_none() && pending == 0,
+                        false,
+                    )
+                    .clicked()
                     {
                         self.reload(m, true);
                     }
-                    ui.separator();
-                    if tool_button(ui, "+ 행", editable, false)
-                        .on_hover_text("행 추가")
-                        .clicked()
-                    {
+                    toolbar_sep(ui);
+                    if tool_button_icon(ui, Some(Icon::Plus), "행 추가", editable, false).clicked() {
                         self.add_row();
                     }
-                    if tool_button(ui, "− 행", editable && has_sel, false)
+                    if tool_button_icon(ui, Some(Icon::Minus), "행 삭제", editable && has_sel, false)
                         .on_hover_text("선택한 행 삭제 (⌘⌫)")
                         .clicked()
                         && let Some(d) = &mut self.data
@@ -960,7 +973,7 @@ impl TableView {
                         let rows = self.grid.sel.rows(d.n_rows());
                         d.delete_rows(&rows);
                     }
-                    if tool_button(ui, "🗐 복제", editable && has_sel, false)
+                    if tool_button_icon(ui, Some(Icon::Copy), "복제", editable && has_sel, false)
                         .on_hover_text("선택한 행 복제 (⌘D)")
                         .clicked()
                         && let Some(d) = &mut self.data
@@ -968,14 +981,15 @@ impl TableView {
                         let rows = self.grid.sel.rows(d.n_rows());
                         d.duplicate(&rows);
                     }
-                    ui.separator();
+                    toolbar_sep(ui);
                     let submit_label = if pending > 0 {
-                        format!("✔ 제출 ({pending})")
+                        format!("제출 ({pending})")
                     } else {
-                        "✔ 제출".into()
+                        "제출".into()
                     };
-                    if tool_button(
+                    if tool_button_icon(
                         ui,
+                        Some(Icon::Check),
                         &submit_label,
                         pending > 0 && self.submit_job.is_none(),
                         true,
@@ -985,7 +999,7 @@ impl TableView {
                     {
                         self.submit(m);
                     }
-                    if tool_button(ui, "⟲ 되돌리기", pending > 0, false)
+                    if tool_button_icon(ui, Some(Icon::Undo), "되돌리기", pending > 0, false)
                         .on_hover_text("보류 중인 변경 사항 모두 취소")
                         .clicked()
                         && let Some(d) = &mut self.data
@@ -997,27 +1011,6 @@ impl TableView {
                         ui::spinner(ui);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toggle_button(ui, "값", self.show_viewer)
-                            .on_hover_text("값 뷰어 전환")
-                            .clicked()
-                        {
-                            self.show_viewer = !self.show_viewer;
-                        }
-                        ui.menu_button(RichText::new("내보내기 ⏷").size(12.0), |ui| {
-                            for f in [ExportFormat::Csv, ExportFormat::Json] {
-                                if ui
-                                    .button(format!(
-                                        "모든 행을 {}로…",
-                                        f.extension().to_uppercase()
-                                    ))
-                                    .clicked()
-                                {
-                                    ui.close();
-                                    self.export(m, f);
-                                }
-                            }
-                        });
-                        ui.separator();
                         self.pager(ui, m, pending);
                     });
                 });
@@ -1026,6 +1019,7 @@ impl TableView {
 
     fn pager(&mut self, ui: &mut Ui, m: &DbManager, pending: usize) {
         let theme = Theme::current();
+        ui.spacing_mut().item_spacing.x = 2.0;
         let can_nav = pending == 0 && self.load_job.is_none();
         let total_pages = self
             .total
@@ -1036,9 +1030,8 @@ impl TableView {
             None => loaded == self.page_size,
         };
         // 오른쪽에서 왼쪽 순서로 배치된다.
-        let last = tool_button(ui, "⏭", can_nav && has_next && total_pages.is_some(), false)
-            .on_hover_text("마지막 페이지");
-        let next = tool_button(ui, "▶", can_nav && has_next, false).on_hover_text("다음 페이지");
+        let last = glyph_button(ui, Glyph::Last, "마지막 페이지", can_nav && has_next && total_pages.is_some(), false);
+        let next = glyph_button(ui, Glyph::Common(Icon::ChevronRight), "다음 페이지", can_nav && has_next, false);
         let start = self.page * self.page_size;
         let range = if loaded == 0 {
             "0행".to_string()
@@ -1054,19 +1047,20 @@ impl TableView {
             (None, true) => " / 총 …".into(),
             _ => String::new(),
         };
+        ui.add_space(4.0);
         ui.label(
             RichText::new(format!("{range}{of}"))
-                .size(12.0)
+                .font(fonts::medium(12.0))
                 .color(theme.text_dim),
         );
-        let prev =
-            tool_button(ui, "◀", can_nav && self.page > 0, false).on_hover_text("이전 페이지");
-        let first =
-            tool_button(ui, "⏮", can_nav && self.page > 0, false).on_hover_text("첫 페이지");
+        ui.add_space(4.0);
+        let prev = glyph_button(ui, Glyph::ChevronLeft, "이전 페이지", can_nav && self.page > 0, false);
+        let first = glyph_button(ui, Glyph::First, "첫 페이지", can_nav && self.page > 0, false);
+        ui.add_space(6.0);
         let mut size = self.page_size;
         egui::ComboBox::from_id_salt(("db-page-size", self.conn, &self.t.table))
             .selected_text(RichText::new(format!("페이지당 {size}")).size(12.0))
-            .width(92.0)
+            .width(104.0)
             .show_ui(ui, |ui| {
                 for s in PAGE_SIZES {
                     ui.selectable_value(&mut size, s, s.to_string());
@@ -1101,16 +1095,11 @@ impl TableView {
     fn filter_bar(&mut self, ui: &mut Ui, m: &DbManager) {
         let theme = Theme::current();
         egui::Frame::new()
-            .fill(theme.bg_panel)
-            .inner_margin(egui::Margin {
-                left: 8,
-                right: 8,
-                top: 0,
-                bottom: 5,
-            })
+            .inner_margin(egui::Margin { left: 10, right: 10, top: 2, bottom: 8 })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let w = ((ui.available_width() - 150.0) / 2.0).max(120.0);
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let w = ((ui.available_width() - 190.0) / 2.0).max(120.0);
                     let mut apply = false;
                     for (label, text, hint, id) in [
                         (
@@ -1121,26 +1110,24 @@ impl TableView {
                         ),
                         ("ORDER BY", &mut self.order, "예: created_at DESC", "order"),
                     ] {
-                        ui.label(
-                            RichText::new(label)
-                                .monospace()
-                                .size(11.0)
-                                .color(theme.purple),
-                        );
-                        let r = egui::Frame::new()
-                            .fill(theme.bg)
-                            .stroke(egui::Stroke::new(1.0, theme.border))
-                            .corner_radius(3.0)
-                            .inner_margin(egui::Margin::symmetric(5, 2))
+                        let fid = egui::Id::new((id, self.conn, &self.t.table));
+                        let focused = ui.memory(|mm| mm.has_focus(fid));
+                        let r = widgets::input_frame(focused, false)
+                            .inner_margin(egui::Margin { left: 8, right: 6, top: 2, bottom: 2 })
                             .show(ui, |ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(text)
-                                        .id_salt((id, self.conn, &self.t.table))
-                                        .font(egui::TextStyle::Monospace)
-                                        .frame(egui::Frame::NONE)
-                                        .hint_text(RichText::new(hint).size(11.5))
-                                        .desired_width(w - 20.0),
-                                )
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
+                                    ui.label(RichText::new(label).font(fonts::mono(11.0)).color(theme.purple));
+                                    ui.add(
+                                        egui::TextEdit::singleline(text)
+                                            .id(fid)
+                                            .font(egui::TextStyle::Monospace)
+                                            .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(0, 4)))
+                                            .hint_text(RichText::new(hint).size(12.0).color(theme.text_faint))
+                                            .desired_width(ui.available_width().min(w - 16.0 - if label == "WHERE" { 52.0 } else { 70.0 })),
+                                    )
+                                })
+                                .inner
                             })
                             .inner;
                         if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
@@ -1149,7 +1136,12 @@ impl TableView {
                     }
                     let dirty = self.filter.trim() != self.applied_filter
                         || self.order.trim() != self.applied_order;
-                    if tool_button(ui, "적용", dirty, dirty).clicked() {
+                    let r = if dirty {
+                        tool_button_icon(ui, Some(Icon::Filter), "적용", true, true)
+                    } else {
+                        ui::secondary_button(ui, Some(Icon::Filter), "적용", false)
+                    };
+                    if r.clicked() {
                         apply = true;
                     }
                     if apply {
@@ -1166,7 +1158,7 @@ impl TableView {
             });
         ui.painter().hline(
             ui.max_rect().x_range(),
-            ui.min_rect().max.y,
+            ui.min_rect().max.y - 0.5,
             egui::Stroke::new(1.0, theme.border),
         );
     }
@@ -1174,39 +1166,38 @@ impl TableView {
     fn status_bar(&mut self, ui: &mut Ui) {
         let theme = Theme::current();
         let r = ui.max_rect();
-        ui.painter().rect_filled(r, 0.0, theme.bg_panel);
+        ui.painter().rect_filled(r, 0.0, theme.bg);
         ui.painter()
-            .hline(r.x_range(), r.min.y, egui::Stroke::new(1.0, theme.border));
+            .hline(r.x_range(), r.min.y + 0.5, egui::Stroke::new(1.0, theme.border));
         ui.scope_builder(
-            egui::UiBuilder::new().max_rect(r.shrink2(egui::vec2(8.0, 2.0))),
+            egui::UiBuilder::new().max_rect(r.shrink2(egui::vec2(12.0, 2.0))),
             |ui| {
                 ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
                     if let Some(d) = &self.data {
-                        ui.label(dim(format!(
+                        ui.label(faint(format!(
                             "{}행 · {} ms",
                             thousands(d.rs.len() as i64),
                             self.last_load_ms
                         )));
-                        let p = d.pending();
-                        if p > 0 {
-                            ui.label(
-                                RichText::new(format!("• 보류 {p}건"))
-                                    .size(11.5)
-                                    .color(theme.yellow),
-                            );
-                        }
                         if let Some((r, c)) = self.grid.sel.cursor
                             && c < d.rs.columns.len()
                         {
-                            ui.label(dim(format!("{}행 · {}", r + 1, d.rs.columns[c].name)));
+                            ui.label(faint(format!("{}행 · {}", r + 1, d.rs.columns[c].name)));
+                        }
+                        let p = d.pending();
+                        if p > 0 {
+                            widgets::pill(ui, &format!("보류 {p}건"), theme.yellow);
                         }
                     }
                     if let Some((msg, err)) = &self.status {
-                        ui.separator();
+                        let c = if *err { theme.red } else { theme.green };
+                        let (dr, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dr.center(), 3.0, c);
                         ui.label(
                             RichText::new(crate::value::one_line(msg, 240))
-                                .size(11.5)
-                                .color(if *err { theme.red } else { theme.green }),
+                                .size(12.0)
+                                .color(if *err { theme.red } else { theme.text_dim }),
                         )
                         .on_hover_text(msg.as_str());
                     }
@@ -1244,112 +1235,77 @@ impl TableView {
         let theme = Theme::current();
         let Some(det) = &self.details else {
             ui.centered_and_justified(|ui| {
-                ui.add(egui::Spinner::new());
+                ui.add(egui::Spinner::new().color(theme.text_dim));
             });
             return;
         };
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, theme.border);
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                egui::Frame::new().inner_margin(12).show(ui, |ui| {
-                    section(ui, &format!("컬럼 ({})", det.columns.len()));
-                    egui::Grid::new("cols")
-                        .striped(true)
-                        .spacing(egui::vec2(18.0, 5.0))
-                        .show(ui, |ui| {
-                            for h in ["", "이름", "타입", "NULL 허용", "기본값", "참조"] {
-                                ui.label(
-                                    RichText::new(h).size(11.5).strong().color(theme.text_dim),
-                                );
+                egui::Frame::new().inner_margin(16).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    section(ui, "컬럼", det.columns.len());
+                    card(ui, "cols", &["", "이름", "타입", "NULL 허용", "기본값", "참조"], |ui| {
+                        for c in &det.columns {
+                            let fk = det.fk_target(&c.name);
+                            if c.is_pk() {
+                                ui::glyph_label(ui, Icon::Key, theme.yellow, 13.0).on_hover_text("기본 키");
+                            } else if fk.is_some() {
+                                ui::glyph_label(ui, Glyph::Link, theme.blue, 13.0).on_hover_text("외래 키");
+                            } else {
+                                ui.label("");
+                            }
+                            ui.label(RichText::new(&c.name).font(fonts::mono(12.5)).color(theme.text));
+                            ui.label(RichText::new(&c.data_type).font(fonts::mono(12.0)).color(theme.purple));
+                            if c.nullable {
+                                ui.label(faint("예"));
+                            } else {
+                                widgets::pill(ui, "NOT NULL", theme.orange);
+                            }
+                            let def = if c.auto_increment && c.default.is_none() {
+                                "자동".to_string()
+                            } else {
+                                c.default.clone().unwrap_or_default()
+                            };
+                            ui.label(RichText::new(def).font(fonts::mono(12.0)).color(theme.text_dim));
+                            ui.label(RichText::new(fk.unwrap_or_default()).font(fonts::mono(12.0)).color(theme.blue));
+                            ui.end_row();
+                        }
+                    });
+                    ui.add_space(20.0);
+                    section(ui, "인덱스", det.indexes.len());
+                    card(ui, "idx", &["이름", "컬럼", "종류"], |ui| {
+                        for ix in &det.indexes {
+                            ui.label(RichText::new(&ix.name).font(fonts::mono(12.5)).color(theme.text));
+                            ui.label(RichText::new(ix.columns.join(", ")).font(fonts::mono(12.0)).color(theme.text_dim));
+                            if ix.primary {
+                                widgets::pill(ui, "기본 키", theme.yellow);
+                            } else if ix.unique {
+                                widgets::pill(ui, "고유", theme.blue);
+                            } else {
+                                ui.label(faint("인덱스"));
                             }
                             ui.end_row();
-                            for c in &det.columns {
-                                let fk = det.fk_target(&c.name);
-                                let key = if c.is_pk() {
-                                    RichText::new("🔑").color(theme.yellow)
-                                } else if fk.is_some() {
-                                    RichText::new("🔗").color(theme.blue)
-                                } else {
-                                    RichText::new("")
-                                };
-                                ui.label(key);
-                                ui.label(RichText::new(&c.name).monospace());
-                                ui.label(
-                                    RichText::new(&c.data_type).monospace().color(theme.purple),
-                                );
-                                ui.label(if c.nullable {
-                                    dim("예")
-                                } else {
-                                    RichText::new("NOT NULL").size(11.5).color(theme.orange)
-                                });
-                                let def = if c.auto_increment && c.default.is_none() {
-                                    "자동".to_string()
-                                } else {
-                                    c.default.clone().unwrap_or_default()
-                                };
-                                ui.label(RichText::new(def).monospace().color(theme.text_dim));
-                                ui.label(
-                                    RichText::new(fk.unwrap_or_default())
-                                        .monospace()
-                                        .color(theme.blue),
-                                );
-                                ui.end_row();
-                            }
-                        });
-                    ui.add_space(14.0);
-                    section(ui, &format!("인덱스 ({})", det.indexes.len()));
-                    egui::Grid::new("idx")
-                        .striped(true)
-                        .spacing(egui::vec2(18.0, 5.0))
-                        .show(ui, |ui| {
-                            for h in ["이름", "컬럼", "종류"] {
-                                ui.label(
-                                    RichText::new(h).size(11.5).strong().color(theme.text_dim),
-                                );
-                            }
-                            ui.end_row();
-                            for ix in &det.indexes {
-                                ui.label(RichText::new(&ix.name).monospace());
-                                ui.label(RichText::new(ix.columns.join(", ")).monospace());
-                                ui.label(dim(if ix.primary {
-                                    "기본 키"
-                                } else if ix.unique {
-                                    "고유"
-                                } else {
-                                    "인덱스"
-                                }));
-                                ui.end_row();
-                            }
-                        });
-                    ui.add_space(14.0);
-                    section(ui, &format!("외래 키 ({})", det.foreign_keys.len()));
-                    egui::Grid::new("fks")
-                        .striped(true)
-                        .spacing(egui::vec2(18.0, 5.0))
-                        .show(ui, |ui| {
-                            for h in ["이름", "컬럼", "참조", "ON UPDATE", "ON DELETE"] {
-                                ui.label(
-                                    RichText::new(h).size(11.5).strong().color(theme.text_dim),
-                                );
-                            }
-                            ui.end_row();
-                            for fk in &det.foreign_keys {
-                                ui.label(RichText::new(&fk.name).monospace());
-                                ui.label(RichText::new(fk.columns.join(", ")).monospace());
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{}({})",
-                                        fk.ref_table,
-                                        fk.ref_columns.join(", ")
-                                    ))
-                                    .monospace()
+                        }
+                    });
+                    ui.add_space(20.0);
+                    section(ui, "외래 키", det.foreign_keys.len());
+                    card(ui, "fks", &["이름", "컬럼", "참조", "ON UPDATE", "ON DELETE"], |ui| {
+                        for fk in &det.foreign_keys {
+                            ui.label(RichText::new(&fk.name).font(fonts::mono(12.5)).color(theme.text));
+                            ui.label(RichText::new(fk.columns.join(", ")).font(fonts::mono(12.0)).color(theme.text_dim));
+                            ui.label(
+                                RichText::new(format!("{}({})", fk.ref_table, fk.ref_columns.join(", ")))
+                                    .font(fonts::mono(12.0))
                                     .color(theme.blue),
-                                );
-                                ui.label(dim(&fk.on_update));
-                                ui.label(dim(&fk.on_delete));
-                                ui.end_row();
-                            }
-                        });
+                            );
+                            ui.label(faint(&fk.on_update));
+                            ui.label(faint(&fk.on_delete));
+                            ui.end_row();
+                        }
+                    });
                 });
             });
     }
@@ -1359,51 +1315,69 @@ impl TableView {
         match &self.ddl {
             None => {
                 ui.centered_and_justified(|ui| {
-                    ui.add(egui::Spinner::new());
+                    ui.add(egui::Spinner::new().color(theme.text_dim));
                 });
             }
             Some(Err(e)) => {
                 let e = e.clone();
-                ui::banner(ui, &e, true);
+                egui::Frame::new().inner_margin(12).show(ui, |ui| ui::banner(ui, &e, true));
             }
             Some(Ok(ddl)) => {
                 let ddl = ddl.clone();
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, 0.0, theme.border);
                 egui::Frame::new()
-                    .fill(theme.bg_panel)
-                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .inner_margin(egui::Margin { left: 16, right: 16, top: 12, bottom: 16 })
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if tool_button(ui, "복사", true, false).clicked() {
-                                ui.ctx().copy_text(ddl.clone());
-                                self.status = Some(("DDL을 복사했습니다".into(), false));
-                            }
-                            if tool_button(ui, "⟳ 새로 고침", self.ddl_job.is_none(), false).clicked()
-                            {
-                                let m2 = m.clone();
-                                let (id, t) = (self.conn, self.t.clone());
-                                self.ddl_job =
-                                    Some(m.spawn(async move { m2.table_ddl(id, &t).await }));
-                            }
-                        });
-                    });
-                let driver = self.driver;
-                let hl = &mut self.ddl_hl;
-                egui::ScrollArea::both()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
-                            let job = hl.job(buf.as_str(), wrap, driver, 12.5);
-                            ui.fonts_mut(|f| f.layout_job(job))
-                        };
-                        let mut s = ddl.as_str();
-                        ui.add(
-                            egui::TextEdit::multiline(&mut s)
-                                .code_editor()
-                                .frame(egui::Frame::NONE)
-                                .margin(egui::vec2(12.0, 10.0))
-                                .desired_width(f32::INFINITY)
-                                .layouter(&mut layouter),
-                        );
+                        ui.set_min_size(ui.available_size());
+                        egui::Frame::new()
+                            .fill(theme.bg_panel)
+                            .stroke(egui::Stroke::new(1.0, theme.border))
+                            .corner_radius(10.0)
+                            .show(ui, |ui| {
+                                ui.set_min_size(ui.available_size());
+                                egui::Frame::new()
+                                    .inner_margin(egui::Margin { left: 12, right: 8, top: 6, bottom: 6 })
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("CREATE 문").font(fonts::semibold(12.5)).color(theme.text_dim));
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                ui.spacing_mut().item_spacing.x = 4.0;
+                                                if glyph_button(ui, Glyph::Common(Icon::Refresh), "새로 고침", self.ddl_job.is_none(), false)
+                                                    .clicked()
+                                                {
+                                                    let m2 = m.clone();
+                                                    let (id, t) = (self.conn, self.t.clone());
+                                                    self.ddl_job = Some(m.spawn(async move { m2.table_ddl(id, &t).await }));
+                                                }
+                                                if ui::secondary_button(ui, Some(Icon::Copy), "복사", true).clicked() {
+                                                    ui.ctx().copy_text(ddl.clone());
+                                                    self.status = Some(("DDL을 복사했습니다".into(), false));
+                                                }
+                                            });
+                                        });
+                                    });
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+                                ui.painter().rect_filled(rect, 0.0, theme.border);
+                                let driver = self.driver;
+                                let hl = &mut self.ddl_hl;
+                                egui::ScrollArea::both()
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
+                                            let job = hl.job(buf.as_str(), wrap, driver, 12.5);
+                                            ui.fonts_mut(|f| f.layout_job(job))
+                                        };
+                                        let mut s = ddl.as_str();
+                                        ui.add(
+                                            egui::TextEdit::multiline(&mut s)
+                                                .code_editor()
+                                                .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(14, 12)))
+                                                .desired_width(f32::INFINITY)
+                                                .layouter(&mut layouter),
+                                        );
+                                    });
+                            });
                     });
             }
         }
@@ -1428,10 +1402,45 @@ fn sort_from_order(order: &str, cols: &[ColumnInfo], driver: Driver) -> Option<(
     })
 }
 
-fn section(ui: &mut Ui, title: &str) {
+/// 구조 화면 섹션 제목과 개수.
+fn section(ui: &mut Ui, title: &str, count: usize) {
     let theme = Theme::current();
-    ui.label(RichText::new(title).size(12.5).strong().color(theme.text));
-    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.label(RichText::new(title).font(fonts::semibold(13.0)).color(theme.text));
+        ui.label(RichText::new(count.to_string()).font(fonts::medium(12.0)).color(theme.text_faint));
+    });
+    ui.add_space(8.0);
+}
+
+/// 둥근 테두리 카드 안의 표. 첫 줄은 흐린 세미볼드 머리글.
+fn card(ui: &mut Ui, id: &str, headers: &[&str], body: impl FnOnce(&mut Ui)) {
+    let theme = Theme::current();
+    egui::Frame::new()
+        .fill(theme.bg_panel)
+        .stroke(egui::Stroke::new(1.0, theme.border))
+        .corner_radius(10.0)
+        .inner_margin(egui::Margin { left: 14, right: 14, top: 10, bottom: 10 })
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            egui::Grid::new(id)
+                .spacing(egui::vec2(22.0, 10.0))
+                .min_row_height(20.0)
+                .show(ui, |ui| {
+                    for h in headers {
+                        ui.label(RichText::new(*h).font(fonts::semibold(12.0)).color(theme.text_faint));
+                    }
+                    ui.end_row();
+                    body(ui);
+                });
+        });
+}
+
+/// 툴바 구분선.
+fn toolbar_sep(ui: &mut Ui) {
+    let theme = Theme::current();
+    let (r, _) = ui.allocate_exact_size(egui::vec2(9.0, 18.0), egui::Sense::hover());
+    ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, theme.border_strong));
 }
 
 /// 선택 영역을 지정 형식 문자열로 만든다.
