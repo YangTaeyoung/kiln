@@ -22,6 +22,20 @@ enum Cmd {
         foreground: bool,
         #[arg(long)]
         restore: Option<String>,
+        #[arg(long)]
+        socket: Option<String>,
+        #[arg(long)]
+        wait_pid: Option<u32>,
+    },
+    /// (내부용) 세션 하나의 PTY 를 소유하는 호스트 프로세스.
+    #[command(hide = true)]
+    PtyHost {
+        #[arg(long)]
+        endpoint: String,
+        #[arg(long)]
+        session: u64,
+        #[arg(long)]
+        spec: String,
     },
     /// 데몬의 세션 목록.
     Ls {
@@ -78,9 +92,16 @@ fn main() -> anyhow::Result<()> {
             env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
             app::run(cli.path)
         }
-        Some(Cmd::Daemon { foreground: _, restore }) => {
+        Some(Cmd::Daemon { foreground: _, restore, socket, wait_pid }) => {
             env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-            kiln_daemon::server::run(kiln_daemon::server::RunOptions { socket: kiln_proto::socket_name(), restore })
+            let socket = socket.unwrap_or_else(kiln_proto::socket_name);
+            kiln_daemon::server::run(kiln_daemon::server::RunOptions { socket, restore, wait_pid })
+        }
+        Some(Cmd::PtyHost { endpoint, session, spec }) => {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(spec)?;
+            let spec: SpawnSpec = postcard::from_bytes(&bytes)?;
+            kiln_daemon::ptyhost::run_host(&endpoint, spec, session)
         }
         Some(Cmd::Ls { json }) => {
             let c = connect()?;

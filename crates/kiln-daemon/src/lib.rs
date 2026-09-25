@@ -7,6 +7,7 @@ pub mod images;
 pub mod osc;
 pub mod procinfo;
 pub mod pty;
+pub mod ptyhost;
 pub mod server;
 pub mod transport;
 
