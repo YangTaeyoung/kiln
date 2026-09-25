@@ -291,3 +291,18 @@ fn read_range_returns_scrollback_text() {
     assert!(text.lines().count() >= 10, "{text}");
     assert!(text.contains("row-"), "{text}");
 }
+
+#[test]
+fn launcher_session_markers_do_not_leak_into_shells() {
+    // SAFETY: 이 테스트 프로세스가 띄우는 데몬에만 영향을 준다.
+    unsafe {
+        std::env::set_var("CLAUDECODE", "1");
+        std::env::set_var("CLAUDE_CODE_CHILD_SESSION", "1");
+    }
+    let d = Daemon::start("scrub");
+    let c = d.client();
+    let s = create(&c, "/bin/sh", &["-c", "echo marker=[$CLAUDECODE$CLAUDE_CODE_CHILD_SESSION] kiln=[$KILN_SESSION]; sleep 5"]);
+    let t = wait_for(&c, s, "marker=");
+    assert!(t.contains("marker=[]"), "{t}");
+    assert!(!t.contains("kiln=[]"), "{t}");
+}

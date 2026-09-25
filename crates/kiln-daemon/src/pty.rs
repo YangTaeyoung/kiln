@@ -29,6 +29,45 @@ fn which_exists(exe: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 데몬을 띄운 쪽(다른 터미널, 에이전트 CLI)의 세션 표식. 새 셸에 물려주지 않는다.
+fn scrubbed(key: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "CLAUDECODE",
+        "CLAUDE_PID",
+        "CLAUDE_EFFORT",
+        "TERM_SESSION_ID",
+        "WT_SESSION",
+        "WT_PROFILE_ID",
+        "__CFBundleIdentifier",
+        "KITTY_WINDOW_ID",
+        "KITTY_PID",
+        "WEZTERM_PANE",
+        "ALACRITTY_WINDOW_ID",
+        "GHOSTTY_RESOURCES_DIR",
+        "TMUX",
+        "TMUX_PANE",
+        "ZELLIJ",
+    ];
+    const PREFIX: &[&str] = &[
+        "CLAUDE_CODE_SESSION",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_BRIDGE_",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_CODE_MESSAGING_",
+        "ITERM_",
+        "LC_TERMINAL",
+        "VSCODE_",
+        "CMUX_",
+    ];
+    EXACT.contains(&key) || PREFIX.iter().any(|p| key.starts_with(p))
+}
+
+/// 현재 환경에서 새 셸에 넘기지 않을 변수 이름들.
+fn scrub_keys() -> Vec<String> {
+    std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).filter(|k| scrubbed(k)).collect()
+}
+
 fn base_env(session: u64) -> Vec<(String, String)> {
     vec![
         ("TERM".into(), "xterm-256color".into()),
@@ -37,6 +76,21 @@ fn base_env(session: u64) -> Vec<(String, String)> {
         ("TERM_PROGRAM_VERSION".into(), env!("CARGO_PKG_VERSION").into()),
         ("KILN_SESSION".into(), session.to_string()),
     ]
+}
+
+#[cfg(test)]
+mod scrub_tests {
+    use super::scrubbed;
+
+    #[test]
+    fn agent_and_terminal_markers_are_scrubbed_but_user_config_is_kept() {
+        for k in ["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "ITERM_SESSION_ID", "VSCODE_PID", "TERM_SESSION_ID", "TMUX"] {
+            assert!(scrubbed(k), "{k}");
+        }
+        for k in ["ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK", "PATH", "HOME", "LANG"] {
+            assert!(!scrubbed(k), "{k}");
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -92,6 +146,9 @@ mod imp {
                 .or_else(|| std::env::var("HOME").ok());
             if let Some(cwd) = cwd {
                 cmd.current_dir(cwd);
+            }
+            for k in scrub_keys() {
+                cmd.env_remove(k);
             }
             for (k, v) in base_env(session) {
                 cmd.env(k, v);
@@ -274,6 +331,9 @@ mod imp {
                 .or_else(|| std::env::var("USERPROFILE").ok());
             if let Some(cwd) = cwd {
                 cmd.cwd(cwd);
+            }
+            for k in scrub_keys() {
+                cmd.env_remove(k);
             }
             for (k, v) in base_env(session) {
                 cmd.env(k, v);
