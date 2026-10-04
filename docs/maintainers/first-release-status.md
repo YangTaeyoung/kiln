@@ -13,12 +13,18 @@ Follow the [release runbook](releases.md); future publication still needs the ow
 - Final ZIP SHA-256: `8e624f2c22f86f40a12151a08901f93502aaf2dbb9f1ba972b61a6d7d85ee091`.
 - Archive EdDSA verification, extracted deep code-signature verification,
   stapling and Gatekeeper assessment passed.
-- The release assets are uploaded to a draft. Downloaded bytes match the local
-  archive; EdDSA, code signing, stapling and Gatekeeper checks passed again.
-  Publication is waiting for the final remote CI run.
+- [Kiln 0.1.0](https://github.com/YangTaeyoung/kiln/releases/tag/v0.1.0) is published
+  as the latest stable release. Downloaded bytes match the local archive; EdDSA,
+  code signing, stapling and Gatekeeper checks passed again. Anonymous access to
+  the ZIP and the stable update feed passed after publication. The feed bytes
+  match the signed release metadata exactly.
 
 ## Verification performed
 
+- [Remote CI](https://github.com/YangTaeyoung/kiln/actions/runs/37207407794) passed
+  on `2e94fd077bda08b4e5ef5ec6f974ea5f20d933c7`: compile, application units, Git
+  integrations, GUI/session integration and release-script validation. This commit
+  differs from the release tag only in the test fixture and this handoff.
 - Application unit tests: 137 passed. GUI integration: 28 passed, one intentionally
   ignored documentation-image generator. Git suites: 135 passed.
 - The first remote CI run passed application unit tests but exposed a test fixture
@@ -37,10 +43,13 @@ Follow the [release runbook](releases.md); future publication still needs the ow
   replacement. Save-failure handling was verified with the GUI harness; it was **not**
   exercised through the live AppKit/Sparkle termination loop.
 - Native UI automation later lost its connection. Do not present the final installed
-  app's live update-menu result as verified until it is checked after publication.
+  app's live update-menu result as verified: the published feed was verified over
+  HTTP, but the official app's post-publication menu result remains unobserved.
 - Final notarized app installed at `/Applications/Kiln.app` after normal GUI exit.
   Daemon replacement preserved all session IDs and shell PIDs in the before/after snapshot.
-  The updater fixtures and previous installed backup were removed.
+  The updater fixtures, duplicate build/extracted apps and previous installed backup
+  were removed. Only the latest production app bundle remains installed. The GUI
+  was left closed after the owner-assisted normal exit; opening Kiln starts it again.
 
 ## Public-source audit
 
