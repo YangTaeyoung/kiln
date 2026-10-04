@@ -82,7 +82,8 @@ pub fn ui_repo() -> Repo {
     Repo::git_in(&r.path, &["merge", "-q", "--no-ff", "-m", "Merge branch 'feature/diff-view'", "feature/diff-view"], ts);
     r.git(&["tag", "-a", "v0.2.0", "-m", "Release 0.2"]);
     let remote = r.tempdir().join("origin.git");
-    Repo::git_in(r.tempdir(), &["init", "-q", "--bare", "origin.git"], 0);
+    // The shared-history warning depends on remote HEAD, not the machine's Git defaults.
+    Repo::git_in(r.tempdir(), &["init", "-q", "--bare", "-b", "main", "origin.git"], 0);
     r.git(&["remote", "add", "origin", remote.to_str().unwrap()]);
     r.git(&["push", "-q", "-u", "origin", "main"]);
     r.write("src/log.rs", "pub struct Log;\n");

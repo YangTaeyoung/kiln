@@ -1,80 +1,59 @@
-# First public release handoff
+# First public release verification
 
-Recorded on **2026-10-04**. This is a checkpoint, not proof that publication is complete.
-Recheck live GitHub and local state before resuming. Follow the [release runbook](releases.md).
+Recorded on **2026-10-04**. Recheck live GitHub before making another release.
+Follow the [release runbook](releases.md); future publication still needs the owner's authorization.
 
-## User-authorized scope
+## Source and distribution
 
-Publish Kiln as `YangTaeyoung/kiln`, public, MIT; provide a notarized macOS build,
-automatic updates, a GitHub Release, concise English README and linked documentation.
-The owner explicitly approved creating the Sparkle update-signing key in the local
-Keychain. The private key must not be uploaded or written into the repository.
+- Public repository: [YangTaeyoung/kiln](https://github.com/YangTaeyoung/kiln), MIT.
+- Release tag: `v0.1.0`, source commit `9a328f79258e2a8f268713e11e68b32d22e00c30`.
+- The macOS Apple Silicon archive includes the direct Git-history actions,
+  readable workspace task names and clearer quit-dialog wording.
+- Notarization submission `b53de846-3e9c-4edb-95e9-bcf6f40a40b4`: **Accepted**.
+- Final ZIP SHA-256: `8e624f2c22f86f40a12151a08901f93502aaf2dbb9f1ba972b61a6d7d85ee091`.
+- Archive EdDSA verification, extracted deep code-signature verification,
+  stapling and Gatekeeper assessment passed.
+- The release assets are uploaded to a draft. Downloaded bytes match the local
+  archive; EdDSA, code signing, stapling and Gatekeeper checks passed again.
+  Publication is waiting for the final remote CI run.
 
-## Ready locally
+## Verification performed
 
-- GitHub CLI authenticated as `YangTaeyoung`; the target repository did not exist
-  at the initial check. No public repository or release was created in this checkpoint.
-- Developer ID identity `Taeyoung Yang (G54PSSU8W5)` is present.
-- Sparkle 2.10.0 is pinned by SHA-256. Its public update key is recorded in
-  `scripts/release-config.json`; the private key is in Keychain account `dev.kiln.app`.
-- Updater initialization, manual check and automatic-check preference are implemented.
-- The bundle/release scripts cover nested signing, notarization, stapling,
-  final archive signing, appcast and checksums.
-- MIT LICENSE, English README, synthetic product screenshot, docs, CI and maintainer
-  entry points are prepared. Local review logs/captures and credential files are ignored.
-- Application unit tests (137), GUI integration tests (28), and the Git suites passed.
-- Keychain profile `kiln-notary` now authenticates successfully. The temporary plaintext
-  credential assignment was removed after secure Keychain storage; no password was logged.
-- The latest production candidate was notarized: submission
-  `df9a295c-811f-456f-84e6-814f847d7992`, **Accepted**. The refreshed final ZIP passed
-  EdDSA, extracted code-signature, staple and Gatekeeper checks. Its SHA-256 is
-  `194550a41c23bd9ec9770ff1991ea18f69d0fd4a4a42e5b115d752508f34951d`.
-  It includes direct Git-history actions and the readable workspace task labels.
-- Native local fixture 0.0.1 to 0.0.2 updated/relaunched, preserving both shell PIDs
-  and replacing the menu companion executable. A fresh native fixture then passed update cancellation: the quit dialog was dismissed
-  with Escape, retaining the same GUI PID, visible agent draft, version 0.0.1 and
-  shell PID. The native automation connection failed before preserve/relaunch;
-  that remaining step is awaiting owner-assisted verification. Earlier fixtures
-  were removed; the current isolated fixture remains only for this check.
-- Workspace task labels now use task names, folder distinctions and local ordinals instead
-  of internal pane IDs. Three focused regressions and a 180px rendered review passed,
-  including long folder names with a shared prefix. Design and DX reviewers passed.
-- Git detail panels now embed the interactive history directly. Right-click actions,
-  range selection, branch filtering and operation review share the full history engine;
-  there is no separate edit mode. Inline tests exercised reword with draft preservation,
-  cherry-pick, reviewed drop and squash cancellation in temporary repositories.
-  Design and DX reviews passed. The notarized build is installed and running.
-- `/Applications/Kiln.app` is the retained production installation. The GUI was normally
-  closed and relaunched; all three live terminal session IDs and PIDs were preserved.
-  The old menu companion was explicitly replaced after detecting that it still mapped
-  the old executable and icon. GUI, daemon and companion now map the installed bundle.
-  Duplicate build apps and orphan GUI-test daemons were removed. The current signed
-  distribution ZIP remains in `target/distribution/0.1.0/`; recreate the build app from
-  the archive or rebuild before preparing any future updater fixture.
-- Relative documentation links and release-script syntax passed validation. A credential
-  pattern scan found no matches in 413 historical text blobs. This is a limited scan,
-  not a substitute for reviewing private content and the final staged source.
-- No release commit or tag has been created. The existing working tree contains the
-  accumulated application improvements; preserve them when resuming.
+- Application unit tests: 137 passed. GUI integration: 28 passed, one intentionally
+  ignored documentation-image generator. Git suites: 135 passed.
+- The first remote CI run passed application unit tests but exposed a test fixture
+  dependency on the host Git default branch. The fixture now explicitly initializes
+  its remote with `main`; all Git suites passed locally with `init.defaultBranch=master`.
+  This test-only correction does not change the signed release executable.
+- The quit-copy change additionally passed the agent-workflow and recovery-navigation
+  integrations and the minimum-window confirmation test at 130% scale.
+- Independent design and developer-workflow reviews passed. Git documentation was
+  corrected to distinguish reviewed squash/drop/cherry-pick protection from other actions.
+- Native Sparkle fixture: 0.0.1 offered 0.0.2; cancellation retained the same GUI,
+  visible agent request, installed version and shell PID. A subsequent owner-assisted
+  preserve-and-exit completed installation and relaunched 0.0.2. The owner's screenshot
+  showed the request restored. The original shell PID survived and accepted input again.
+- An earlier native fixture verified clean update/relaunch and menu-companion executable
+  replacement. Save-failure handling was verified with the GUI harness; it was **not**
+  exercised through the live AppKit/Sparkle termination loop.
+- Native UI automation later lost its connection. Do not present the final installed
+  app's live update-menu result as verified until it is checked after publication.
+- Final notarized app installed at `/Applications/Kiln.app` after normal GUI exit.
+  Daemon replacement preserved all session IDs and shell PIDs in the before/after snapshot.
+  The updater fixtures and previous installed backup were removed.
 
-## Required to finish
+## Public-source audit
 
-1. Recheck `notarytool history --keychain-profile kiln-notary` before submitting.
-   Credential setup initially returned an agreement-related 403 despite active
-   agreements; storing securely without pre-validation followed by a real history
-   request succeeded. Do not assume an account error is fixed without that request.
-2. Complete native Sparkle update/relaunch verification. The production updater
-   intentionally skips processes with `KILN_CONFIG_DIR` or `KILN_SOCKET`; ordinary
-   isolated GUI tests therefore do not exercise Sparkle. Use a dedicated macOS test
-   account or the [isolated updater harness](updater-validation.md), not the real workspace.
-   Verify unsaved-work cancellation/retry, helper replacement and session/PID survival.
-3. Build the committed release source with license notices, notarize, staple and
-   verify its final archive before publication.
-4. Audit the staged files and Git history for private data, commit the reviewed source,
-   then create the public repository and publish the release and update feed.
-5. Verify downloaded release bytes and the installed updater, then update this handoff
-   with the actual release URL, commit/tag and successful verification evidence.
+Current source and 413 historical text blobs were scanned for credential patterns
+and private paths. Reachable image history was inspected using OCR and visual review
+(282 PNGs); suspicious matches were checked against fixture code. The README image
+uses synthetic Acme data. No blocking private content was found in that review.
+This is evidence of the performed audit, not a guarantee of absence of all secrets.
+Unused brand-review exports and local captures are excluded from source.
 
-The installed Kiln now matches this notarized candidate; it has not been published.
-Do not report automatic updates, notarization, GitHub publication, or downloaded-build
-Gatekeeper acceptance as end-to-end verified until those steps are actually complete.
+## Signing continuity
+
+Public signing identifiers, pinned Sparkle version and public update key live in
+`scripts/release-config.json`. The existing Keychain signing key and `kiln-notary`
+profile are working. Never export or rotate the private key for a routine release.
+See [signing setup](signing.md) and [native updater validation](updater-validation.md).
