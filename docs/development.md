@@ -29,3 +29,21 @@ framework is downloaded and checksum-verified during bundling.
 Do not replace a running user's session daemon with a test process. Keep local
 captures, logs, credentials and build artifacts out of commits. For distribution,
 follow the [release runbook](maintainers/releases.md).
+
+## Terminal IME regressions
+
+The small [egui-winit patch](../vendor/egui-winit/KILN-PATCH.md) preserves native
+composition cancellation. Keep its provenance, licenses and backend regression
+when updating dependencies. Validate both event conversion and terminal delivery:
+
+```sh
+cargo test --locked -p egui-winit --lib kiln_ime_tests
+cargo test --locked -p kiln --lib ime_
+cargo test --locked -p kiln --test gui ime_commits_reach_only_the_focused_pty_once_and_cancellation_sends_nothing
+```
+
+Native checks should cover Korean composition, Backspace-to-empty, Enter,
+Escape, Korean/Latin input-source changes, another tab/panel, app blur/return,
+search, and the quick-terminal window. Confirm there are no leftover glyphs or
+unexpected committed characters. Event replay tests do not establish native IME
+latency or candidate-popup behavior.

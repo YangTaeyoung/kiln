@@ -143,6 +143,8 @@ pub struct TermView {
     selection: Option<Selection>,
     selecting: bool,
     preedit: String,
+    preedit_range: Option<std::ops::Range<usize>>,
+    last_input_pass: Option<(egui::ViewportId, u64)>,
     scroll_accum: f32,
     last_mouse_cell: Option<(u16, u16)>,
     mouse_capture: MouseCapture,
@@ -213,6 +215,8 @@ impl TermView {
             selection: None,
             selecting: false,
             preedit: String::new(),
+            preedit_range: None,
+            last_input_pass: None,
             scroll_accum: 0.0,
             last_mouse_cell: None,
             mouse_capture: MouseCapture::default(),
@@ -230,7 +234,13 @@ impl TermView {
         }
     }
 
+    fn clear_preedit(&mut self) {
+        self.preedit.clear();
+        self.preedit_range = None;
+    }
+
     pub fn open_search(&mut self) {
+        self.clear_preedit();
         if self.search.is_none() {
             self.search = Some(SearchBar { query: String::new(), focus: true, last_found: None });
         } else if let Some(s) = &mut self.search {
@@ -240,12 +250,14 @@ impl TermView {
 
     /// Open command history and selectable output from the terminal header.
     pub fn open_history(&mut self) {
+        self.clear_preedit();
         self.inspector = true;
         self.integration_help = false;
     }
 
     /// Setup is secondary to terminal work and lives in the terminal menu.
     pub fn open_integration_help(&mut self) {
+        self.clear_preedit();
         self.inspector = true;
         self.integration_help = true;
     }
@@ -352,10 +364,19 @@ impl TermView {
         let resp = ui.interact(rect, id, Sense::click_and_drag());
         ui.advance_cursor_after_rect(rect);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, kiln_common::i18n::tr("터미널 화면")));
-        if !self.inspector && (focus_request || resp.clicked() || resp.drag_started()) {
+        // request_focus interrupts native IME even when the widget already owns
+        // focus. Only request it for an actual transfer or an intentional click.
+        if (focus_request && !ui.memory(|m|m.has_focus(id))) || resp.clicked() || resp.drag_started() {
+            self.clear_preedit();
             resp.request_focus();
         }
+        let pass=(ui.ctx().viewport_id(),ui.ctx().cumulative_pass_nr());
+        if self.last_input_pass.is_some_and(|(viewport,last)|viewport!=pass.0 || last.saturating_add(1)<pass.1) {
+            // Hidden tabs cannot receive the backend's cancellation event.
+            self.clear_preedit();
+        }
         let focused = resp.has_focus();
+        if !focused {self.clear_preedit();}
         out.focused = focused;
         out.clicked = resp.clicked() || resp.drag_started();
         if focused {
@@ -419,8 +440,14 @@ impl TermView {
             return out;
         }
         let exited = conn.infos.get(&self.session).and_then(|i| i.exited);
-        if focused && !resp.context_menu_opened() && !self.inspector && self.search.as_ref().is_none_or(|s| !s.focus) {
+        let accepts_input=resp.has_focus() && ui.memory(|m|m.allows_interaction(ui.layer_id()))
+            && !resp.context_menu_opened() && !self.inspector && self.search.as_ref().is_none_or(|s|!s.focus);
+        if accepts_input {
+            self.last_input_pass=Some(pass);
             self.handle_keyboard(ui, conn, term_mode, settings, exited, &mut out);
+        } else {
+            self.clear_preedit();
+            self.last_input_pass=None;
         }
         self.handle_mouse(ui, &resp, conn, inner.min, cell, term_mode, &mut out, cwd);
         if settings.copy_on_select && !self.inspector && self.has_selection() && (resp.drag_stopped() || resp.double_clicked() || resp.triple_clicked()) {
@@ -496,22 +523,31 @@ impl TermView {
             let wide = screen.lines.get(c.row as usize).and_then(|l| l.cells.get(c.col as usize)).is_some_and(|x| x.flags & flags::WIDE != 0);
             let w = if wide { cell.x * 2.0 } else { cell.x };
             let crect = Rect::from_min_size(pos, vec2(w, cell.y));
-            if focused {
-                ui.ctx().output_mut(|o| {
-                    o.ime = Some(egui::output::IMEOutput { purpose: egui::IMEPurpose::Terminal, rect, cursor_rect: crect, should_interrupt_composition: false })
-                });
-            }
-            if !self.preedit.is_empty() {
-                let (fg, bg) = screen.lines.get(c.row as usize).and_then(|l| l.cells.get(c.col as usize))
-                    .map(|c| self.palette.cell_colors(c)).unwrap_or((self.palette.fg, self.palette.bg));
+            let mut ime_cursor_rect=crect;
+            if accepts_input && !self.preedit.is_empty() {
+                // Placeholder text is often dim. Composition is user input, so
+                // retain the row background but use the normal terminal foreground.
+                let fg=self.palette.fg;
+                let bg=screen.lines.get(c.row as usize).and_then(|l|l.cells.get(c.col as usize))
+                    .map(|c|self.palette.cell_colors(c).1).unwrap_or(self.palette.bg);
                 let line = preedit_line(&self.preedit, fg);
-                let r = Rect::from_min_size(pos, vec2((line.cells.len() as f32 * cell.x).max(cell.x), cell.y));
+                let width=(line.cells.len() as f32 * cell.x).max(cell.x);
+                let pos=pos2(pos.x.min(inner.right()-width).max(inner.left()),pos.y);
+                let r = Rect::from_min_size(pos, vec2(width, cell.y));
                 painter.rect_filled(r, 0.0, bg);
                 for mut shape in build_row(ui.ctx(), &line, cell, &font, &self.palette, &mut self.fit_cache) {
                     shape.translate(pos.to_vec2());
                     painter.add(shape);
                 }
                 painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, fg));
+                let range=preedit_columns(&self.preedit,self.preedit_range.as_ref());
+                let start=(pos.x+range.start as f32*cell.x).min(inner.right()-1.0);
+                let end=(pos.x+range.end as f32*cell.x).min(inner.right());
+                ime_cursor_rect=Rect::from_min_size(pos2(start,pos.y),vec2((end-start).max(1.0),cell.y));
+                if self.preedit_range.is_some() {
+                    if range.is_empty() {painter.line_segment([ime_cursor_rect.left_top(),ime_cursor_rect.left_bottom()],Stroke::new(1.0,fg));}
+                    else {painter.rect_stroke(ime_cursor_rect,0.0,Stroke::new(1.0,fg),egui::StrokeKind::Inside);}
+                }
             } else if screen.display_offset == 0 && (!settings.cursor_blink || !focused || ui.input(|i| (i.time * 2.0) as u64 % 2 == 0)) {
                 let color = self.palette.cursor;
                 match (c.shape, focused) {
@@ -535,6 +571,11 @@ impl TermView {
                         painter.rect_stroke(crect.shrink(0.5), 1.0, Stroke::new(1.0, color), egui::StrokeKind::Inside);
                     }
                 }
+            }
+            if accepts_input && exited.is_none() {
+                ui.ctx().output_mut(|o|o.ime=Some(egui::output::IMEOutput {
+                    purpose:egui::IMEPurpose::Terminal,rect,cursor_rect:ime_cursor_rect,should_interrupt_composition:false,
+                }));
             }
         }
 
@@ -637,11 +678,12 @@ impl TermView {
                         bytes.push(0x18);
                     }
                 }
-                egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => {
+                egui::Event::Ime(egui::ImeEvent::Preedit { text, active_range_chars }) => {
+                    self.preedit_range=if text.is_empty(){None}else{active_range_chars};
                     self.preedit = text;
                 }
                 egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
-                    self.preedit.clear();
+                    self.clear_preedit();
                     bytes.extend_from_slice(text.as_bytes());
                 }
                 _ => {}
@@ -1062,6 +1104,14 @@ pub fn find_link(text: &str, col: usize, cwd: Option<&str>) -> Option<(usize, us
     None
 }
 
+/// IME ranges are character offsets, while terminal positions are cell columns.
+fn preedit_columns(text:&str,range:Option<&std::ops::Range<usize>>)->std::ops::Range<usize> {
+    let end=text.chars().count();
+    let (start,end)=range.map(|r|(r.start.min(end),r.end.min(end).max(r.start.min(end)))).unwrap_or((end,end));
+    let columns=|n|text.chars().take(n).map(|c|c.width().unwrap_or(0)).sum();
+    columns(start)..columns(end)
+}
+
 /// Use the emulator's Unicode column widths so composition has the same glyph
 /// sizing, fallback fonts, and alignment as the text after it is committed.
 fn preedit_line(text: &str, fg: Color32) -> Line {
@@ -1228,6 +1278,68 @@ pub fn modifiers_none() -> Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ime_overlay_does_not_survive_window_blur_or_a_hidden_tab() {
+        use egui_kittest::Harness;
+        let mut emu=kiln_daemon::emu::Emu::new(80,3);
+        emu.advance(b"Ask Codex to do anything\r");
+        let mut conn=Conn::offline(egui::Context::default());
+        conn.screens.insert(1,Screen{cols:80,rows:3,lines:(0..3).map(|r|emu.visible_line(r)).collect(),row_versions:vec![1;3],cursor:Some(kiln_proto::Cursor{col:0,row:0,shape:CursorShape::Beam}),..Default::default()});
+        let mut installed=false;
+        let mut h=Harness::builder().with_size([760.0,200.0]).build_ui_state(move|ui,s:&mut(TermView,Conn,bool)| {
+            if !installed {kiln_common::fonts::install(ui.ctx());installed=true;return;}
+            if s.2 {s.0.ui(ui,&mut s.1,&TermSettings::default(),true,None);}
+        },(TermView::new(1),conn,true));
+        h.run_steps(3);
+        h.event(egui::Event::Ime(egui::ImeEvent::Preedit{text:"ㅇ".into(),active_range_chars:Some(1..1)}));
+        h.run_steps(2);
+        assert_eq!(h.state().0.preedit,"ㅇ");
+        h.input_mut().focused=false;h.step();
+        assert!(h.state().0.preedit.is_empty(),"window blur must remove the marked-text overlay");
+        h.input_mut().focused=true;h.run_steps(2);
+        h.event(egui::Event::Ime(egui::ImeEvent::Preedit{text:"한".into(),active_range_chars:Some(1..1)}));h.run_steps(2);
+        h.state_mut().2=false;h.run_steps(2);
+        // Cancellation occurred while this view was not drawn, as with another tab.
+        h.event(egui::Event::Ime(egui::ImeEvent::Preedit{text:String::new(),active_range_chars:None}));h.step();
+        h.state_mut().2=true;h.run_steps(2);
+        assert!(h.state().0.preedit.is_empty(),"returning to a hidden tab must not resurrect old composition");
+        assert!(!h.output().shapes.iter().any(|shape|matches!(&shape.shape,Shape::Text(t) if t.galley.job.text.contains('한') || t.galley.job.text.contains('ㅇ'))));
+        h.render().unwrap().save("/tmp/kiln-ime-clean-placeholder.png").unwrap();
+    }
+
+    #[test]
+    fn ime_caret_uses_character_ranges_and_does_not_interrupt_ongoing_input() {
+        use egui_kittest::Harness;
+        let mut emu=kiln_daemon::emu::Emu::new(40,3);
+        emu.advance(b"\x1b[2mAsk Codex to do anything\r");
+        let mut conn=Conn::offline(egui::Context::default());
+        conn.screens.insert(1,Screen{cols:40,rows:3,lines:(0..3).map(|r|emu.visible_line(r)).collect(),row_versions:vec![1;3],cursor:Some(kiln_proto::Cursor{col:0,row:0,shape:CursorShape::Beam}),..Default::default()});
+        let mut installed=false;
+        let mut h=Harness::builder().with_size([760.0,200.0]).build_ui_state(move|ui,s:&mut(TermView,Conn)| {
+            if !installed {kiln_common::fonts::install(ui.ctx());installed=true;return;}
+            s.0.ui(ui,&mut s.1,&TermSettings::default(),true,None);
+        },(TermView::new(1),conn));
+        h.run_steps(3);
+        let original=h.output().platform_output.ime.unwrap().cursor_rect;
+        let cell=h.state().0.metrics.unwrap().1;
+        for (text,range,start,width) in [("한",1..1,2.0,1.0),("한",0..1,0.0,2.0*cell.x),("a한b",1..2,1.0,2.0*cell.x),("e\u{301}",2..2,1.0,1.0)] {
+            h.event(egui::Event::Ime(egui::ImeEvent::Preedit{text:text.into(),active_range_chars:Some(range)}));
+            h.run_steps(3);
+            let output=h.output().platform_output.ime.unwrap();
+            assert!(!output.should_interrupt_composition,"an already-focused terminal must not interrupt native IME on redraw");
+            assert!((output.cursor_rect.left()-original.left()-start*cell.x).abs()<0.01);
+            assert!((output.cursor_rect.width()-width).abs()<0.01);
+            assert_eq!(h.state().0.preedit,text);
+        }
+        assert_eq!(preedit_columns("한",Some(&(90..99))),2..2);
+        h.event(egui::Event::Ime(egui::ImeEvent::Preedit{text:"한".into(),active_range_chars:Some(0..1)}));h.run_steps(2);
+        let glyph=h.output().shapes.iter().find_map(|shape|match &shape.shape {Shape::Text(t) if t.galley.job.text=="한"=>Some(t),_=>None}).unwrap();
+        assert_eq!(glyph.galley.job.sections[0].format.color,h.state().0.palette.fg,"composition must not inherit dim placeholder text");
+        h.render().unwrap().save("/tmp/kiln-ime-active-composition.png").unwrap();
+        h.state_mut().0.open_search();h.run_steps(2);
+        assert!(h.state().0.preedit.is_empty(),"opening search cancels the terminal overlay");
+    }
 
     #[test]
     fn ime_typography_matches_committed_terminal_cells() {

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 license = "MIT"
 
@@ -39,3 +39,7 @@ opt-level = 3
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Preserve native IME cancellation until upstream forwards Disabled as empty Preedit.
+[patch.crates-io]
+egui-winit = { path = "vendor/egui-winit" }

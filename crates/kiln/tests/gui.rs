@@ -1157,3 +1157,60 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
         assert_eq!(h.state().debug_focused_session(),Some(session));
     }
 }
+
+#[test]
+fn ime_commits_reach_only_the_focused_pty_once_and_cancellation_sends_nothing() {
+    use kiln::app::Action;
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let (base,proj)=setup("ime-pty-lifecycle");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);}}
+    let _cleanup=Cleanup(base.clone());
+    let capture_script=base.join("capture.py");
+    std::fs::write(&capture_script,r#"import os, sys, termios, tty
+old = termios.tcgetattr(0)
+try:
+    tty.setraw(0)
+    with open(sys.argv[1], 'wb', buffering=0) as output:
+        while True:
+            data = os.read(0, 4096)
+            if not data or data == b'\x04': break
+            output.write(data)
+finally:
+    termios.tcsetattr(0, termios.TCSANOW, old)
+"#).unwrap();
+    let mut h=Harness::builder().with_size([1280.0,800.0]).build_eframe(|cc| {
+        let mut app=KilnApp::new(&cc.egui_ctx,Some(proj));app.debug_set_shell("/bin/sh".into());app
+    });
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
+    let first=h.state().debug_focused_session().unwrap();
+    let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    let captured=base.join("first.bin");
+    client.send(kiln_proto::ClientMsg::Input{session:first,data:format!("python3 '{}' '{}'\r",capture_script.display(),captured.display()).into_bytes()});
+    assert!(pump_until(&mut h,10,|_|captured.exists()));
+    let preedit=|text:&str|egui::Event::Ime(egui::ImeEvent::Preedit{text:text.into(),active_range_chars:Some(text.chars().count()..text.chars().count())});
+    h.event(preedit("ㅎ"));h.step();h.event(preedit("한"));h.run_steps(2);
+    assert!(std::fs::read(&captured).unwrap().is_empty(),"composition must remain local");
+    h.event(preedit(""));h.event(egui::Event::Ime(egui::ImeEvent::Commit("한".into())));h.step();
+    h.event(preedit("글"));h.step();h.event(preedit(""));h.event(egui::Event::Ime(egui::ImeEvent::Commit("글".into())));h.step();
+    h.event(egui::Event::Text("a".into()));h.key_press(egui::Key::Backspace);h.key_press(egui::Key::Enter);
+    let expected="한글a\u{7f}\r".as_bytes();
+    assert!(pump_until(&mut h,5,|_|std::fs::read(&captured).unwrap()==expected),"committed text and following keys must arrive exactly once");
+    h.event(preedit("잔"));h.run_steps(2);
+    h.state_mut().debug_queue_action(Action::NewPage);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some_and(|s|s!=first)&&h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
+    let second=h.state().debug_focused_session().unwrap();
+    let captured_second=base.join("second.bin");
+    client.send(kiln_proto::ClientMsg::Input{session:second,data:format!("python3 '{}' '{}'\r",capture_script.display(),captured_second.display()).into_bytes()});
+    assert!(pump_until(&mut h,10,|_|captured_second.exists()));
+    // Native cancellation arrives after focus transfer; it must not become text.
+    h.event(preedit(""));h.event(egui::Event::Text("x".into()));
+    assert!(pump_until(&mut h,5,|_|std::fs::read(&captured_second).unwrap()==b"x"));
+    h.state_mut().debug_queue_action(Action::NextPage(-1));h.run_steps(3);
+    assert_eq!(h.state().debug_focused_session(),Some(first));
+    assert!(!h.output().shapes.iter().any(|shape|matches!(&shape.shape,egui::Shape::Text(t) if t.galley.job.text.contains('잔'))),"old tab must not restore an IME overlay");
+    h.event(preedit(""));h.key_press(egui::Key::Escape);
+    let mut expected=expected.to_vec();expected.push(0x1b);
+    assert!(pump_until(&mut h,5,|_|std::fs::read(&captured).unwrap()==expected));
+    assert_eq!(std::fs::read(&captured_second).unwrap(),b"x");
+}

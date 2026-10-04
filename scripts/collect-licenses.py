@@ -5,8 +5,8 @@ root=pathlib.Path(__file__).resolve().parent.parent
 metadata=json.loads(subprocess.check_output(['cargo','metadata','--locked','--format-version','1'],cwd=root))
 sections=[]
 for package in sorted(metadata['packages'],key=lambda p:(p['name'],p['version'])):
-    if package['source'] is None: continue
     base=pathlib.Path(package['manifest_path']).parent
+    if package['source'] is None and root/'vendor' not in base.parents: continue
     texts=[]
     for pattern in ('LICENSE*','LICENCE*','COPYING*','NOTICE*'):
         for path in sorted(base.glob(pattern)):

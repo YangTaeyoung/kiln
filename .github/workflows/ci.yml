@@ -19,6 +19,8 @@ jobs:
         run: |
           python3 scripts/check-localizations.py
           cargo test --locked -p kiln-common -p kiln-i18n-macros
+      - name: Native IME cancellation regression
+        run: cargo test --locked -p egui-winit --lib kiln_ime_tests
       - name: Application unit tests
         run: cargo test --locked -p kiln --lib
       - name: Git integration tests
