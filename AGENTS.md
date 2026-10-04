@@ -16,6 +16,7 @@ the user's shells, agents, builds, or servers.
   setup, never passwords or private keys.
 - [Native updater validation](docs/maintainers/updater-validation.md) — isolated
   old/new fixtures, cancellation, relaunch and session survival checks.
+- [0.1.4 release verification](docs/maintainers/0.1.4-status.md) — foreground identity, branded session surfaces, signed artifacts and observed live update.
 - [0.1.3 release verification](docs/maintainers/0.1.3-status.md) — menu template, agent identity and native punctuation regression.
 - [0.1.2 release verification](docs/maintainers/0.1.2-status.md) — IME cancellation, artifact checks and native observation boundary.
 - [0.1.1 release verification](docs/maintainers/0.1.1-status.md) — published artifact evidence and user update boundary.
