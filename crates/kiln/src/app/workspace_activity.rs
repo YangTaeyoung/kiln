@@ -30,6 +30,7 @@ pub(super) struct WorkspaceTask {
     pub qualifier: String,
     pub duplicate_index: usize,
     pub phase: TaskPhase,
+    pub agent: Option<kiln_accounts::Tool>,
     pub updated: u64,
     /// Only real command/notification records have a last-activity timestamp.
     pub recorded: Option<u64>,
@@ -68,7 +69,7 @@ impl KilnApp {
                         .filter(|s:&String|!s.is_empty()).unwrap_or_else(||kiln_common::i18n::tr("터미널").into());
                 }
                 let recorded=Some(command_time.max(notice_time)).filter(|time|*time>0);
-                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),duplicate_index:0,phase:phase(info,telemetry),updated:info.created_unix.max(command_time).max(notice_time),recorded});
+                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),duplicate_index:0,phase:phase(info,telemetry),agent:super::ui::session_agent(info),updated:info.created_unix.max(command_time).max(notice_time),recorded});
                 locations.push(info.cwd.as_deref().map(|cwd| {
                     let cwd=Path::new(cwd);
                     cwd.strip_prefix(&self.workspaces[index].root).ok().filter(|p|!p.as_os_str().is_empty())
@@ -154,6 +155,7 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
         response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel,true,chosen,&label));
         if chosen || response.hovered() {ui.painter().rect_filled(rect,4,if response.hovered(){theme.bg_hover}else{theme.bg_panel});}
         let (icon,color)=task.phase.appearance(theme);
+        let color=if task.phase==TaskPhase::Running {super::ui::running_color(task.agent,theme)}else{color};
         let center=pos2(rect.left()+17.0,rect.top()+13.0);
         if task.phase==TaskPhase::Running {super::ui::paint_running(ui,center,color);}
         else {icons::paint(ui.painter(),egui::Rect::from_center_size(center,vec2(13.0,13.0)),icon,color);}
@@ -195,7 +197,7 @@ mod tests {
     #[test]
     fn duplicate_names_keep_human_distinctions_when_activity_order_changes() {
         use egui_kittest::{Harness,kittest::Queryable};
-        let task=|pane,title:&str|WorkspaceTask{pane,title:title.into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Unknown,updated:0,recorded:None};
+        let task=|pane,title:&str|WorkspaceTask{pane,title:title.into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None};
         let mut tasks=vec![task(1004,"터미널"),task(1001,"터미널"),
             task(1051,"동일한 긴 작업 제목으로 프론트와 백엔드 API 연결 상태 확인"),
             task(1062,"동일한 긴 작업 제목으로 프론트와 백엔드 API 연결 상태 확인")];
@@ -231,16 +233,18 @@ mod tests {
         info.exited=Some(1); assert_eq!(phase(&info,Some(&t)),TaskPhase::Failed);
         info.exited=None;info.attention=false;t.activity=AgentActivity::Unknown;info.title="⠼ API 구현".into();
         assert_eq!(phase(&info,Some(&t)),TaskPhase::Running);
+        info.title="◑ Claude task".into(); assert_eq!(phase(&info,Some(&t)),TaskPhase::Running);
+        info.title="✳ Claude task".into(); assert_eq!(phase(&info,Some(&t)),TaskPhase::Unknown);
     }
 
     #[test]
     fn workspace_task_rows_are_bounded_and_open_the_selected_split() {
         use egui_kittest::{Harness,kittest::Queryable};
         let tasks=vec![
-            WorkspaceTask{pane:11,title:"결제 API 인증 방식 확인".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Waiting,updated:0,recorded:None},
-            WorkspaceTask{pane:12,title:"프론트·백엔드 로그인 연결 구현".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Running,updated:0,recorded:None},
-            WorkspaceTask{pane:13,title:"캐시 무효화 문제 수정".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Done,updated:0,recorded:None},
-            WorkspaceTask{pane:14,title:"아주 긴 최근 작업 제목이 좁은 작업 공간 목록을 밀어내면 안 됩니다".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Unknown,updated:0,recorded:None},
+            WorkspaceTask{pane:11,title:"결제 API 인증 방식 확인".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Waiting,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:12,title:"프론트·백엔드 로그인 연결 구현".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Running,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:13,title:"캐시 무효화 문제 수정".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Done,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:14,title:"아주 긴 최근 작업 제목이 좁은 작업 공간 목록을 밀어내면 안 됩니다".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None},
         ];
         for width in [180.0,280.0] {
             let tasks=tasks.clone(); let mut installed=false;

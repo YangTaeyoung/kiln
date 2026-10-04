@@ -18,6 +18,14 @@ New default zsh sessions receive shell integration for command boundaries and
 working-directory tracking. Existing shells may require a new session before
 new integration behavior applies. Plain shells and external agents that do not
 report activity are shown as open sessions rather than falsely marked complete.
+Kiln also recognizes the standalone activity markers in Codex and Claude Code
+terminal titles, including Claude Code 2.1.289's `◐`/`◑` frames. These show running
+activity without hooks. Claude's `✳` marker is not treated as completion: it can
+also appear when a dialog is open. Explicit waiting/failure signals take priority.
+
+Running indicators use orange for Claude and blue for Codex in the sidebar, tab
+and panel header. Unidentified sessions use a neutral indicator. For a split tab,
+the focused pane wins equal-priority states; warnings still take priority.
 
 Run `kiln status` to inspect the session daemon and `kiln ls --json` to list sessions.
 Do not use `shutdown-daemon` as a way to refresh the GUI: it terminates sessions.

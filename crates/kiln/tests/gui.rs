@@ -1107,3 +1107,53 @@ fn menu_bar_settings_request_reveals_existing_gui() {
     assert!(h.query_by_label("언어").is_some());
     assert!(!kiln::native_actions::take_settings_request());
 }
+
+#[test]
+fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
+    use kiln::app::Action;
+    let _serial = SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let (base,proj) = setup("claude-title-status");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);}}
+    let _cleanup=Cleanup(base.clone());
+    let mut h=Harness::builder().with_size([1280.0,800.0]).build_eframe(|cc| {
+        let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));
+        app.debug_set_shell("/bin/sh".into());app
+    });
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    let original=h.state().debug_focused_session().unwrap();
+    h.state_mut().debug_queue_action(Action::NewPage);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some_and(|s|s!=original)&&h.state().debug_focused_text().is_some_and(|text|!text.trim().is_empty())));
+    let session=h.state().debug_focused_session().unwrap();
+    let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    // Replay the actual OSC title tokens emitted by Claude 2.1.289 through a PTY,
+    // without hooks, process-name guesses or artificial telemetry.
+    let theme=kiln_common::theme::Theme::current();
+    for (frame,label,color) in [('◐',"작업 중",Some(theme.orange)),('◑',"작업 중",Some(theme.orange)),('✳',"세션 열림",None),('⠼',"작업 중",Some(theme.blue)),('◐',"작업 중",Some(theme.orange))] {
+        client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{frame} Claude lifecycle\\007'\r").into_bytes()});
+        let expected=format!("Claude lifecycle · {label}");
+        assert!(pump_until(&mut h,5,|h| {
+            let arcs:Vec<_>=h.output().shapes.iter().filter_map(|shape|match &shape.shape {
+                egui::Shape::Path(path) if path.points.len()==33 && path.stroke.width==1.7 => Some(&path.stroke.color),
+                _=>None,
+            }).collect();
+            h.query_by_label(&expected).is_some() && match color {
+                Some(color)=>arcs.len()==3 && arcs.iter().all(|actual|**actual==egui::epaint::ColorMode::Solid(color)),
+                None=>arcs.is_empty(),
+            }
+        }),"missing {expected} with expected agent color");
+        h.run_steps(2);
+        let arcs:Vec<_>=h.output().shapes.iter().filter_map(|shape|match &shape.shape {
+            egui::Shape::Path(path) if path.points.len()==33 && path.stroke.width==1.7 => Some(&path.stroke.color),
+            _=>None,
+        }).collect();
+        if let Some(color)=color {
+            assert_eq!(arcs.len(),3,"sidebar, tab and panel header must each animate");
+            assert!(arcs.iter().all(|actual|**actual==egui::epaint::ColorMode::Solid(color)),"agent colors must agree across all surfaces");
+        } else {assert!(arcs.is_empty(),"idle must stop animating");}
+        if frame=='◑' || frame=='⠼' {
+            h.render().unwrap().save(format!("/tmp/kiln-agent-color-{}.png",if frame=='◑'{"claude"}else{"codex"})).unwrap();
+        }
+        assert_eq!(h.state().debug_focused_session(),Some(session));
+    }
+}

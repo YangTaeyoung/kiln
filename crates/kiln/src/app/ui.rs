@@ -44,24 +44,52 @@ pub(super) fn title_activity(title: &str, activity: kiln_proto::AgentActivity, e
     if let Some(code) = exited {
         return if code == 0 { kiln_proto::AgentActivity::Done } else { kiln_proto::AgentActivity::Failed };
     }
-    if activity == kiln_proto::AgentActivity::Unknown && stable_terminal_title(title) != title.trim() {
+    if activity == kiln_proto::AgentActivity::Unknown && terminal_title_marker(title).is_some_and(|(running, _)| running) {
         kiln_proto::AgentActivity::Running
     } else { activity }
 }
 
-/// OSC titles may begin with Codex's animated activity token. Activity already
+/// OSC titles may begin with an agent's animated activity token. Activity already
 /// has a fixed-size icon in Kiln; don't let fallback glyph advances resize tabs.
 /// Only a standalone leading token is removed, never characters in the title.
 /// https://github.com/openai/codex/blob/main/codex-rs/tui/src/chatwidget/status_surfaces.rs
 fn stable_terminal_title(title: &str) -> &str {
+    terminal_title_marker(title).map(|(_, title)| title).unwrap_or_else(|| title.trim())
+}
+
+/// Codex emits braille frames. Claude Code 2.1.289 emits ◐/◑ while
+/// animating and ✳ otherwise (verified in its installed title renderer).
+/// Idle alone is not completion: Claude also stops animating for dialogs.
+fn terminal_title_marker(title: &str) -> Option<(bool, &str)> {
     let title = title.trim();
-    let Some(first) = title.chars().next() else { return title };
-    if !"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains(first) { return title; }
+    let first = title.chars().next()?;
+    let running = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◑".contains(first);
+    if !running && first != '✳' { return None; }
     let rest = &title[first.len_utf8()..];
-    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) { return title; }
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) { return None; }
     let rest = rest.trim_start();
     // Older/custom Codex title configurations separate activity with ` | `.
-    rest.strip_prefix("| ").unwrap_or(rest).trim_start()
+    Some((running, rest.strip_prefix("| ").unwrap_or(rest).trim_start()))
+}
+
+/// Prefer an identified foreground agent; wrappers often report only the shell,
+/// so recognize the same standalone OSC tokens used for activity as a fallback.
+pub(super) fn session_agent(info: &kiln_proto::SessionInfo) -> Option<kiln_accounts::Tool> {
+    info.fg_process.as_deref().and_then(super::rotation::tool_for).or_else(|| {
+        terminal_title_marker(&info.title)?;
+        match info.title.trim().chars().next()? {
+            '◐' | '◑' | '✳' => Some(kiln_accounts::Tool::Claude),
+            _ => Some(kiln_accounts::Tool::Codex),
+        }
+    })
+}
+
+pub(super) fn running_color(agent: Option<kiln_accounts::Tool>, theme: &Theme) -> Color32 {
+    match agent {
+        Some(kiln_accounts::Tool::Claude) => theme.orange,
+        Some(kiln_accounts::Tool::Codex) => theme.blue,
+        None => theme.text_dim,
+    }
 }
 
 /// 터미널 제목 중 보여줄 만한 것만 고른다. 셸 기본 제목(`user@host:경로`)이나 경로만 있는 제목은 버린다.
@@ -154,10 +182,37 @@ mod tab_tests {
     }
 
     #[test]
+    fn agent_colors_follow_process_or_standalone_title_markers() {
+        use kiln_accounts::Tool::{Claude,Codex};
+        use kiln_proto::SessionInfo;
+        for (title,process,expected) in [
+            ("◐ Work", "zsh (kiro-cli-term)", Some(Claude)),
+            ("◑ Work", "zsh (kiro-cli-term)", Some(Claude)),
+            ("✳ Work", "zsh", Some(Claude)),
+            ("⠼ Work", "zsh (kiro-cli-term)", Some(Codex)),
+            ("⠼ Work", "claude", Some(Claude)),
+            ("Work", "codex", Some(Codex)),
+            ("Work", "claude", Some(Claude)),
+            ("◐project", "zsh", None),
+            ("Work ◑", "zsh", None),
+            ("Work on claude integration", "zsh", None),
+        ] {
+            let info=SessionInfo{title:title.into(),fg_process:Some(process.into()),..Default::default()};
+            assert_eq!(super::session_agent(&info),expected,"{title} / {process}");
+        }
+        for theme in super::Theme::ALL {
+            assert_eq!(super::running_color(Some(Claude),&theme),theme.orange);
+            assert_eq!(super::running_color(Some(Codex),&theme),theme.blue);
+            assert_eq!(super::running_color(None,&theme),theme.text_dim);
+            assert_ne!(theme.orange,theme.blue);
+        }
+    }
+
+    #[test]
     fn animated_terminal_title_frames_keep_identical_tab_text() {
         let title = "애니 실시간 업데이트 방식 조사 | personal";
         let expected = meaningful_title(title, "codex", None).unwrap();
-        for frame in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".chars() {
+        for frame in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◑✳".chars() {
             for separator in [" ", "  ", " | "] {
                 let actual = meaningful_title(&format!("{frame}{separator}{title}"), "codex", None).unwrap();
                 assert_eq!(actual, expected);
@@ -172,6 +227,15 @@ mod tab_tests {
         use kiln_proto::AgentActivity::*;
         assert_eq!(super::title_activity("⠼ 작업",Unknown,None),Running);
         assert_eq!(super::title_activity("작업",Unknown,None),Unknown);
+        for title in ["◐ Claude task", "◑ Claude task"] {
+            assert_eq!(super::title_activity(title, Unknown, None), Running);
+            for state in [Waiting, Failed, Done] { assert_eq!(super::title_activity(title,state,None),state); }
+            assert_eq!(super::title_activity(title,Unknown,Some(0)),Done);
+            assert_eq!(super::title_activity(title,Running,Some(1)),Failed);
+        }
+        for title in ["✳ Claude task", "◐project", "project ◑", "plain title"] {
+            assert_eq!(super::title_activity(title, Unknown, None), Unknown);
+        }
         assert_eq!(super::title_activity("⠼ 작업",Unknown,Some(0)),Done);
         assert_eq!(super::title_activity("⠼ 작업",Running,Some(0)),Done);
         assert_eq!(super::title_activity("⠼ 작업",Running,Some(1)),Failed);
@@ -209,7 +273,7 @@ mod tab_tests {
                 }, State{title:format!("⠋ {text}"),..Default::default()});
                 h.run_steps(3);
                 let expected=h.state().geometry.clone().unwrap();
-                for frame in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".chars() {
+                for frame in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◑✳".chars() {
                     h.state_mut().title=format!("{frame} {text}");
                     h.step();
                     assert_eq!(h.state().geometry.as_ref(),Some(&expected),"{frame} at {max_width}px: {text}");
@@ -255,7 +319,7 @@ impl KilnApp {
                         (Some(0),_) => (t.text_dim,false,kiln_common::i18n::tr("종료됨")),
                         (Some(_),_) => (t.red,false,kiln_common::i18n::tr("오류 종료")),
                         (_,kiln_proto::AgentActivity::Waiting)=>(t.orange,true,kiln_common::i18n::tr("입력 필요")),
-                        (_,kiln_proto::AgentActivity::Running) if !i.attention => (t.blue,true,kiln_common::i18n::tr("실행 중")),
+                        (_,kiln_proto::AgentActivity::Running) if !i.attention => (running_color(session_agent(i),&t),true,kiln_common::i18n::tr("실행 중")),
                         (_,kiln_proto::AgentActivity::Done)=>(t.green,false,kiln_common::i18n::tr("완료")),
                         (_,kiln_proto::AgentActivity::Failed)=>(t.red,false,kiln_common::i18n::tr("실패")),
                         _ if i.attention=>(t.orange,true,kiln_common::i18n::tr("확인 필요")),
@@ -328,11 +392,11 @@ impl KilnApp {
                 AgentActivity::Failed => Some((5,Icon::Warning,self.theme.red,kiln_common::i18n::tr("실패"))),
                 AgentActivity::Waiting => Some((4,Icon::Bell,self.theme.orange,kiln_common::i18n::tr("입력 필요"))),
                 _ if info.is_some_and(|info|info.attention) => Some((3,Icon::Bell,self.theme.orange,kiln_common::i18n::tr("확인 필요"))),
-                AgentActivity::Running => Some((2,Icon::Play,self.theme.blue,kiln_common::i18n::tr("실행 중"))),
+                AgentActivity::Running => Some((2,Icon::Play,running_color(info.and_then(session_agent),&self.theme),kiln_common::i18n::tr("실행 중"))),
                 AgentActivity::Done => Some((1,Icon::Check,self.theme.green,kiln_common::i18n::tr("완료"))),
                 _ => None,
             };
-            if let Some(state)=state {if best.as_ref().is_none_or(|old|state.0>old.0){best=Some(state);}}
+            if let Some(state)=state {if best.as_ref().is_none_or(|old|state.0>old.0 || (state.0==old.0 && id==page.focused)){best=Some(state);}}
         }
         best.map(|(_,icon,color,label)|(icon,color,label))
     }
