@@ -14,3 +14,6 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICON_TMP/Kiln.iconset" -o assets/Kiln.icns
 magick assets/Kiln.png -define icon:auto-resize=256,128,64,48,32,16 assets/Kiln.ico
+
+# Menu bar uses a transparent template, never the Dock icon tile.
+magick -background none -density 288 assets/KilnStatusTemplate.svg -resize 54x54 assets/KilnStatusTemplate.png

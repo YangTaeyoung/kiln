@@ -455,13 +455,15 @@ pub fn run() -> anyhow::Result<()> {
                 let path = exe
                     .parent()
                     .and_then(|p| p.parent())
-                    .map(|p| p.join("Resources/Kiln.icns"));
+                    .map(|p| p.join("Resources/KilnStatusTemplate.png"));
                 if let Some(path) = path {
                     if let Some(image) = NSImage::initWithContentsOfFile(
                         NSImage::alloc(),
                         &NSString::from_str(&path.to_string_lossy()),
                     ) {
                         image.setSize(NSSize::new(18.0, 18.0));
+                        // AppKit derives light/dark menu ink from this alpha mask.
+                        image.setTemplate(true);
                         button.setImage(Some(&image));
                         icon_loaded = true;
                         button.setImagePosition(NSCellImagePosition::NSImageLeft);
@@ -539,6 +541,19 @@ pub fn run() -> anyhow::Result<()> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn menu_template_has_transparent_corners_and_an_enlarged_symbol() {
+        let image=image::load_from_memory(include_bytes!("../../../assets/KilnStatusTemplate.png")).unwrap().into_rgba8();
+        assert_eq!(image.dimensions(),(54,54));
+        for (x,y) in [(0,0),(53,0),(0,53),(53,53),(27,27)] {assert_eq!(image.get_pixel(x,y)[3],0,"the tile and inner opening must stay transparent");}
+        let pixels:Vec<_>=image.enumerate_pixels().filter(|(_,_,p)|p[3]>128).collect();
+        let extent=|horizontal:bool| {
+            let coordinates:Vec<_>=pixels.iter().map(|(x,y,_)|if horizontal{*x}else{*y}).collect();
+            coordinates.iter().max().unwrap()-coordinates.iter().min().unwrap()
+        };
+        assert!(extent(true)>=46 && extent(false)>=46,"symbol should fill the 18pt slot, not inherit the Dock tile's padding");
+    }
+
     use super::*;
     fn session(id: u64) -> SessionInfo {
         SessionInfo { id, pid: id as u32 + 100, created_unix: id + 1000, ..Default::default() }

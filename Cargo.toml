@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 license = "MIT"
 
@@ -40,6 +40,7 @@ opt-level = 3
 [profile.dev.package."*"]
 opt-level = 2
 
-# Preserve native IME cancellation until upstream forwards Disabled as empty Preedit.
+# Reviewed native IME cancellation and macOS post-composition trigger patches.
 [patch.crates-io]
 egui-winit = { path = "vendor/egui-winit" }
+winit = { path = "vendor/winit" }

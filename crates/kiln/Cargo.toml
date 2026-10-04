@@ -44,6 +44,7 @@ global-hotkey = "0.8"
 libc = "0.2"
 
 [dev-dependencies]
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 tempfile.workspace = true
@@ -53,3 +54,8 @@ egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
 objc2 = "0.5.2"
 objc2-app-kit = { version = "0.2.2", default-features = false, features = ["NSApplication", "NSWindow", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSRunningApplication", "NSImage", "NSButton", "NSControl", "NSResponder", "NSView", "NSCell", "NSAlert", "NSEvent"] }
 objc2-foundation = { version = "0.2.2", default-features = false, features = ["NSArray", "NSThread", "NSTimer", "NSDate", "NSString"] }
+
+[[test]]
+name = "native_ime"
+path = "tests/native_ime.rs"
+harness = false

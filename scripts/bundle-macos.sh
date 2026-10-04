@@ -13,6 +13,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/kiln "$APP/Contents/MacOS/kiln"
 if [ -f assets/Kiln.icns ]; then cp assets/Kiln.icns "$APP/Contents/Resources/Kiln.icns"; fi
+cp assets/KilnStatusTemplate.png "$APP/Contents/Resources/KilnStatusTemplate.png"
 python3 scripts/collect-licenses.py "$APP/Contents/Resources/THIRD_PARTY_LICENSES.txt"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

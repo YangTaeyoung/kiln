@@ -69,7 +69,7 @@ impl KilnApp {
                         .filter(|s:&String|!s.is_empty()).unwrap_or_else(||kiln_common::i18n::tr("터미널").into());
                 }
                 let recorded=Some(command_time.max(notice_time)).filter(|time|*time>0);
-                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),duplicate_index:0,phase:phase(info,telemetry),agent:super::ui::session_agent(info),updated:info.created_unix.max(command_time).max(notice_time),recorded});
+                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),duplicate_index:0,phase:phase(info,telemetry),agent:self.conn.session_agent(session),updated:info.created_unix.max(command_time).max(notice_time),recorded});
                 locations.push(info.cwd.as_deref().map(|cwd| {
                     let cwd=Path::new(cwd);
                     cwd.strip_prefix(&self.workspaces[index].root).ok().filter(|p|!p.as_os_str().is_empty())
@@ -151,14 +151,22 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
     for task in tasks.iter().take(if expanded {usize::MAX}else{3}) {
         let (rect,response)=ui.allocate_exact_size(vec2(ui.available_width(),40.0),Sense::click());
         let chosen=selected==Some(task.pane);
-        let label=format!("{} · {}",task.title,task.phase.label());
+        let agent_name=match task.agent {Some(kiln_accounts::Tool::Claude)=>"Claude Code",Some(kiln_accounts::Tool::Codex)=>"Codex",None=>""};
+        let label=if agent_name.is_empty(){format!("{} · {}",task.title,task.phase.label())}else{format!("{} · {agent_name} · {}",task.title,task.phase.label())};
         response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel,true,chosen,&label));
         if chosen || response.hovered() {ui.painter().rect_filled(rect,4,if response.hovered(){theme.bg_hover}else{theme.bg_panel});}
         let (icon,color)=task.phase.appearance(theme);
         let color=if task.phase==TaskPhase::Running {super::ui::running_color(task.agent,theme)}else{color};
         let center=pos2(rect.left()+17.0,rect.top()+13.0);
         if task.phase==TaskPhase::Running {super::ui::paint_running(ui,center,color);}
-        else {icons::paint(ui.painter(),egui::Rect::from_center_size(center,vec2(13.0,13.0)),icon,color);}
+        else {
+            let (icon, size, ink) = match task.agent {
+                Some(kiln_accounts::Tool::Claude) => (Icon::Claude, 16.0, theme.orange),
+                Some(kiln_accounts::Tool::Codex) => (Icon::Codex, 16.0, theme.blue),
+                None => (icon, 13.0, color),
+            };
+            icons::paint(ui.painter(),egui::Rect::from_center_size(center,vec2(size,size)),icon,ink);
+        }
         let x=rect.left()+30.0;
         let text_color=if chosen || matches!(task.phase,TaskPhase::Running|TaskPhase::Waiting|TaskPhase::Failed|TaskPhase::Attention){theme.text}else{theme.text_dim};
         let width=rect.right()-x-8.0;
@@ -180,7 +188,7 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
         if rect.right()-x > age_width+70.0 {ui.painter().text(pos2(rect.right()-8.0,rect.top()+26.0),Align2::RIGHT_CENTER,&age,fonts::regular(11.0),theme.text_dim);}
         widgets::focus_ring(ui,&response,4);
         if response.clicked() {reveal=Some(task.pane);}
-        response.on_hover_text(kiln_common::trf!("{}\n{}{}\n클릭하여 작업으로 이동",task.title,task.phase.label(),if age.is_empty(){String::new()}else{kiln_common::trf!("\n최근 명령·알림 기록: {age}")}));
+        response.on_hover_text(kiln_common::trf!("{}\n{}{}\n클릭하여 작업으로 이동",if agent_name.is_empty(){task.title.clone()}else{format!("{} · {agent_name}",task.title)},task.phase.label(),if age.is_empty(){String::new()}else{kiln_common::trf!("\n최근 명령·알림 기록: {age}")}));
     }
     if tasks.len()>3 {
         let text=if expanded {kiln_common::i18n::tr("간단히 보기").into()} else {kiln_common::trf!("작업 {}개 모두 보기",tasks.len())};
@@ -194,6 +202,30 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn idle_and_waiting_rows_identify_agents_at_narrow_and_wide_widths() {
+        use egui_kittest::{Harness,kittest::Queryable};
+        use kiln_accounts::Tool;
+        for theme in [Theme::KILN_DARK,Theme::KILN_LIGHT] {
+            for width in [180.0,300.0] {
+                let task=|pane,title:&str,agent,phase|WorkspaceTask {pane,title:title.into(),qualifier:String::new(),duplicate_index:0,phase,agent,updated:0,recorded:None};
+                let tasks=vec![task(1,"용량 정리",Some(Tool::Claude),TaskPhase::Unknown),
+                    task(2,"API 연결",Some(Tool::Codex),TaskPhase::Unknown),
+                    task(3,"변경 승인",Some(Tool::Claude),TaskPhase::Waiting)];
+                let mut installed=false;
+                let mut h=Harness::builder().with_size([width,150.0]).build_ui(move|ui| {
+                    if !installed {fonts::install(ui.ctx());theme.apply(ui.ctx());installed=true;return;}
+                    task_rows(ui,&tasks,Some(1),&theme);
+                });
+                h.run_steps(3);
+                h.get_by_label("용량 정리 · Claude Code · 세션 열림");
+                h.get_by_label("API 연결 · Codex · 세션 열림");
+                h.get_by_label("변경 승인 · Claude Code · 입력 대기");
+                h.render().unwrap().save(format!("/tmp/kiln-agent-rows-{}-{}.png",theme.name,width as u32)).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn duplicate_names_keep_human_distinctions_when_activity_order_changes() {
         use egui_kittest::{Harness,kittest::Queryable};

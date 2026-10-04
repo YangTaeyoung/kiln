@@ -1131,7 +1131,8 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
     let theme=kiln_common::theme::Theme::current();
     for (frame,label,color) in [('◐',"작업 중",Some(theme.orange)),('◑',"작업 중",Some(theme.orange)),('✳',"세션 열림",None),('⠼',"작업 중",Some(theme.blue)),('◐',"작업 중",Some(theme.orange))] {
         client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{frame} Claude lifecycle\\007'\r").into_bytes()});
-        let expected=format!("Claude lifecycle · {label}");
+        let agent=if frame=='⠼'{"Codex"}else{"Claude Code"};
+        let expected=format!("Claude lifecycle · {agent} · {label}");
         assert!(pump_until(&mut h,5,|h| {
             let arcs:Vec<_>=h.output().shapes.iter().filter_map(|shape|match &shape.shape {
                 egui::Shape::Path(path) if path.points.len()==33 && path.stroke.width==1.7 => Some(&path.stroke.color),
@@ -1156,6 +1157,19 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
         }
         assert_eq!(h.state().debug_focused_session(),Some(session));
     }
+    // The idle OSC title has NO brand marker. Identity must survive that real
+    // PTY transition and the two native Codex approval-title blink phases.
+    for (title,label) in [("⠋ Task | personal","작업 중"),("Task | personal","세션 열림"),
+        ("[ ! ] Action Required | Task | personal","입력 대기"),("[ . ] Action Required | Task | personal","입력 대기"),
+        ("Task | personal","세션 열림")] {
+        client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{title}\\007'\r").into_bytes()});
+        let expected=format!("Task | personal · Codex · {label}");
+        assert!(pump_until(&mut h,5,|h|h.query_by_label(&expected).is_some()),"missing {expected}");
+        if label!="작업 중" {
+            assert!(!h.output().shapes.iter().any(|shape|matches!(&shape.shape,egui::Shape::Path(path) if path.points.len()==33 && path.stroke.width==1.7)),"idle/waiting must stop busy animations");
+        }
+    }
+
 }
 
 #[test]
@@ -1194,7 +1208,13 @@ finally:
     h.event(preedit(""));h.event(egui::Event::Ime(egui::ImeEvent::Commit("한".into())));h.step();
     h.event(preedit("글"));h.step();h.event(preedit(""));h.event(egui::Event::Ime(egui::ImeEvent::Commit("글".into())));h.step();
     h.event(egui::Event::Text("a".into()));h.key_press(egui::Key::Backspace);h.key_press(egui::Key::Enter);
-    let expected="한글a\u{7f}\r".as_bytes();
+    // A trigger can arrive in the SAME native batch as the composition commit.
+    for trigger in ["?","5"] {
+        h.event(preedit("한"));h.step();
+        h.event(preedit(""));h.event(egui::Event::Ime(egui::ImeEvent::Commit("한".into())));
+        h.event(egui::Event::Text(trigger.into()));h.step();
+    }
+    let expected="한글a\u{7f}\r한?한5".as_bytes();
     assert!(pump_until(&mut h,5,|_|std::fs::read(&captured).unwrap()==expected),"committed text and following keys must arrive exactly once");
     h.event(preedit("잔"));h.run_steps(2);
     h.state_mut().debug_queue_action(Action::NewPage);

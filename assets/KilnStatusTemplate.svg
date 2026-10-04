@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="256 244 512 512">
+  <title>Kiln menu bar symbol</title>
+  <desc>The Dock icon's kiln mouth, enlarged on a transparent monochrome canvas.</desc>
+  <path d="M280 724V500A232 232 0 0 1 699.390 363.220L594.559 451.010A96 96 0 0 0 416 500V724Q416 736 404 736H292Q280 736 280 724Z M728.802 417.412A232 232 0 0 1 744 500V724Q744 736 732 736H620Q608 736 608 724V518.576Z" fill="black"/>
+  <rect x="461" y="665" width="102" height="71" rx="9" fill="black"/>
+</svg>

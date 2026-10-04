@@ -70,6 +70,7 @@ pub struct Conn {
     pub screens: HashMap<SessionId, Screen>,
     pub infos: HashMap<SessionId, SessionInfo>,
     pub telemetry: HashMap<SessionId, SessionTelemetry>,
+    observed_agents: HashMap<SessionId, kiln_accounts::Tool>,
     pub command_outputs: HashMap<(SessionId, u64), (String, bool)>,
     /// 붙어 있는 세션과 요청한 크기.
     attached: HashMap<SessionId, (u16, u16)>,
@@ -102,6 +103,7 @@ impl Conn {
             screens: HashMap::new(),
             infos: HashMap::new(),
             telemetry: HashMap::new(),
+            observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
             attached: HashMap::new(),
             closing_sessions: Default::default(),
@@ -134,6 +136,7 @@ impl Conn {
             screens: HashMap::new(),
             infos: HashMap::new(),
             telemetry: HashMap::new(),
+            observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
             attached: HashMap::new(),
             closing_sessions: Default::default(),
@@ -238,15 +241,19 @@ impl Conn {
                 self.screens.entry(f.session).or_default().apply(f);
             }
             ServerMsg::Sessions { sessions, .. } => {
-                self.infos = sessions.into_iter().filter(|s|!self.closing_sessions.contains(&s.id)).map(|s| (s.id, s)).collect();
+                let live: std::collections::HashSet<_> = sessions.iter().map(|s|s.id).collect();
+                for info in sessions.into_iter().filter(|s|!self.closing_sessions.contains(&s.id)).collect::<Vec<_>>() { self.update_info(info); }
+                self.infos.retain(|id,_|live.contains(id));
+                self.observed_agents.retain(|id,_|self.infos.contains_key(id));
                 self.sessions_listed = true;
             }
             ServerMsg::SessionUpdated(i) => {
                 if self.closing_sessions.contains(&i.id) { return; }
-                self.infos.insert(i.id, i);
+                self.update_info(i);
             }
             ServerMsg::SessionExited { session, code } => {
                 if self.closing_sessions.contains(&session) { return; }
+                self.observed_agents.remove(&session);
                 if let Some(i) = self.infos.get_mut(&session) {
                     i.exited = Some(code.unwrap_or(-1));
                 }
@@ -295,6 +302,31 @@ impl Conn {
             }
             ServerMsg::Hello { .. } | ServerMsg::Pong { .. } => {}
         }
+    }
+
+    fn update_info(&mut self, info: SessionInfo) {
+        let agent = if info.exited.is_some() { None } else {
+            super::ui::session_agent(&info).or_else(|| {
+                let previous = self.infos.get(&info.id)?;
+                // Wrapped agents can keep the same shell foreground name. Only
+                // retain identity when an observed spinner becomes the SAME idle
+                // title, not across arbitrary commands or shell-title changes.
+                (previous.pid == info.pid && previous.created_unix == info.created_unix
+                    && previous.fg_process == info.fg_process
+                    && !super::ui::stable_terminal_title(&info.title).is_empty()
+                    && super::ui::stable_terminal_title(&previous.title) == super::ui::stable_terminal_title(&info.title))
+                    .then(|| self.observed_agents.get(&info.id).copied()).flatten()
+            })
+        };
+        if let Some(agent) = agent { self.observed_agents.insert(info.id, agent); }
+        else { self.observed_agents.remove(&info.id); }
+        self.infos.insert(info.id, info);
+    }
+
+    pub(super) fn session_agent(&self, session: SessionId) -> Option<kiln_accounts::Tool> {
+        let info = self.infos.get(&session)?;
+        if info.exited.is_some() { return None; }
+        super::ui::session_agent(info).or_else(|| self.observed_agents.get(&session).copied())
     }
 
     pub fn send(&self, m: ClientMsg) {
@@ -414,6 +446,7 @@ impl Conn {
         self.send(ClientMsg::Kill { session: sid });
         self.screens.remove(&sid);
         self.infos.remove(&sid);
+        self.observed_agents.remove(&sid);
         self.textures.retain(|(s, _), _| *s != sid);
         true
     }
@@ -439,6 +472,41 @@ pub fn daemon_exe() -> std::path::PathBuf {
 #[cfg(test)]
 mod terminal_focus_tests {
     use super::*;
+    #[test]
+    fn wrapped_agent_identity_survives_idle_and_clears_on_real_changes() {
+        use kiln_accounts::Tool;
+        let mut conn=Conn::offline(egui::Context::default());
+        let mut info=SessionInfo {id:7,pid:10,created_unix:20,fg_process:Some("zsh (kiro-cli-term)".into()),title:"⠋ Task | personal".into(),..Default::default()};
+        conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        assert_eq!(conn.session_agent(7),Some(Tool::Codex));
+        info.title="Task | personal".into();
+        conn.handle(ServerMsg::Sessions{req:1,sessions:vec![info.clone()]});
+        assert_eq!(conn.session_agent(7),Some(Tool::Codex));
+        for title in ["[ ! ] Action Required | Task | personal","[ . ] Action Required | Task | personal"] {
+            info.title=title.into();conn.handle(ServerMsg::SessionUpdated(info.clone()));
+            assert_eq!(conn.session_agent(7),Some(Tool::Codex));
+        }
+        info.title="Task | personal".into();conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        assert_eq!(conn.session_agent(7),Some(Tool::Codex),"waiting returns to the same idle title");
+        info.title="✳ Task | personal".into();conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        assert_eq!(conn.session_agent(7),Some(Tool::Claude));
+        info.title="user@host:~/dev/personal".into();conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        assert_eq!(conn.session_agent(7),None);
+        info.title="⠋ Task | personal".into();conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        info.title="Task | personal".into();info.fg_process=Some("vim".into());conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        assert_eq!(conn.session_agent(7),None);
+        info.title="⠋ Task | personal".into();conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        info.title="Task | personal".into();info.pid=99;conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        assert_eq!(conn.session_agent(7),None);
+        info.title="⠋ Task | personal".into();conn.handle(ServerMsg::SessionUpdated(info.clone()));
+        conn.handle(ServerMsg::SessionExited{session:7,code:Some(0)});
+        assert_eq!(conn.session_agent(7),None);
+        conn.handle(ServerMsg::Sessions{req:2,sessions:vec![]});
+        assert!(conn.observed_agents.is_empty());
+        info.title="Fix Codex and Claude docs".into();info.exited=None;
+        conn.handle(ServerMsg::SessionUpdated(info));assert_eq!(conn.session_agent(7),None);
+    }
+
     #[test]
     fn observation_requires_current_focus_and_known_child_window_focus() {
         let ctx=egui::Context::default();

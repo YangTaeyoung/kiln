@@ -34,10 +34,15 @@ follow the [release runbook](maintainers/releases.md).
 
 The small [egui-winit patch](../vendor/egui-winit/KILN-PATCH.md) preserves native
 composition cancellation. Keep its provenance, licenses and backend regression
-when updating dependencies. Validate both event conversion and terminal delivery:
+when updating dependencies. The [winit patch](../vendor/winit/KILN-PATCH.md)
+repairs macOS post-composition trigger loss and duplicate spaces. Its hidden-window
+callback test runs AppKit on the main thread with deterministic IME callbacks;
+it does not change the system input source or automate the user's keyboard.
+Validate native callbacks, event conversion and terminal delivery:
 
 ```sh
 cargo test --locked -p egui-winit --lib kiln_ime_tests
+cargo test --locked -p kiln --test native_ime
 cargo test --locked -p kiln --lib ime_
 cargo test --locked -p kiln --test gui ime_commits_reach_only_the_focused_pty_once_and_cancellation_sends_nothing
 ```

@@ -44,7 +44,9 @@ pub(super) fn title_activity(title: &str, activity: kiln_proto::AgentActivity, e
     if let Some(code) = exited {
         return if code == 0 { kiln_proto::AgentActivity::Done } else { kiln_proto::AgentActivity::Failed };
     }
-    if activity == kiln_proto::AgentActivity::Unknown && terminal_title_marker(title).is_some_and(|(running, _)| running) {
+    if activity == kiln_proto::AgentActivity::Unknown && action_required_title(title).is_some() {
+        kiln_proto::AgentActivity::Waiting
+    } else if activity == kiln_proto::AgentActivity::Unknown && terminal_title_marker(title).is_some_and(|(running, _)| running) {
         kiln_proto::AgentActivity::Running
     } else { activity }
 }
@@ -53,8 +55,19 @@ pub(super) fn title_activity(title: &str, activity: kiln_proto::AgentActivity, e
 /// has a fixed-size icon in Kiln; don't let fallback glyph advances resize tabs.
 /// Only a standalone leading token is removed, never characters in the title.
 /// https://github.com/openai/codex/blob/main/codex-rs/tui/src/chatwidget/status_surfaces.rs
-fn stable_terminal_title(title: &str) -> &str {
-    terminal_title_marker(title).map(|(_, title)| title).unwrap_or_else(|| title.trim())
+pub(super) fn stable_terminal_title(title: &str) -> &str {
+    action_required_title(title).or_else(|| terminal_title_marker(title).map(|(_, title)| title)).unwrap_or_else(|| title.trim())
+}
+
+fn action_required_title(title: &str) -> Option<&str> {
+    let title=title.trim();
+    for prefix in ["[ ! ] Action Required", "[ . ] Action Required"] {
+        if let Some(rest)=title.strip_prefix(prefix) {
+            if rest.is_empty() { return Some(""); }
+            if let Some(rest)=rest.strip_prefix(" | ") { return Some(rest.trim()); }
+        }
+    }
+    None
 }
 
 /// Codex emits braille frames. Claude Code 2.1.289 emits ◐/◑ while
@@ -76,6 +89,9 @@ fn terminal_title_marker(title: &str) -> Option<(bool, &str)> {
 /// so recognize the same standalone OSC tokens used for activity as a fallback.
 pub(super) fn session_agent(info: &kiln_proto::SessionInfo) -> Option<kiln_accounts::Tool> {
     info.fg_process.as_deref().and_then(super::rotation::tool_for).or_else(|| {
+        if action_required_title(&info.title).is_some() {
+            return Some(kiln_accounts::Tool::Codex);
+        }
         terminal_title_marker(&info.title)?;
         match info.title.trim().chars().next()? {
             '◐' | '◑' | '✳' => Some(kiln_accounts::Tool::Claude),
@@ -193,6 +209,9 @@ mod tab_tests {
             ("⠼ Work", "claude", Some(Claude)),
             ("Work", "codex", Some(Codex)),
             ("Work", "claude", Some(Claude)),
+            ("[ ! ] Action Required | Work", "zsh (kiro-cli-term)", Some(Codex)),
+            ("[ . ] Action Required | Work", "zsh (kiro-cli-term)", Some(Codex)),
+            ("[ ! ] Action Requiredness", "zsh", None),
             ("◐project", "zsh", None),
             ("Work ◑", "zsh", None),
             ("Work on claude integration", "zsh", None),
@@ -284,9 +303,12 @@ mod tab_tests {
 
     #[test]
     fn title_cleanup_preserves_braille_content_and_user_tab_names() {
-        for title in ["⠼braille", "점자 ⠹ 문서", "⠼⠹", "일반  작업 | personal", "[ ! ] Action Required"] {
+        for title in ["⠼braille", "점자 ⠹ 문서", "⠼⠹", "일반  작업 | personal"] {
             assert_eq!(stable_terminal_title(title), title);
         }
+        assert_eq!(stable_terminal_title("[ ! ] Action Required | Work"),"Work");
+        assert_eq!(stable_terminal_title("[ . ] Action Required | Work"),"Work");
+        assert_eq!(stable_terminal_title("[ ! ] Action Required"),"");
         // Explicit page titles bypass meaningful_title and must remain unchanged.
         assert_eq!(distinct_tab_titles(&["⠼ 내 작업".into()]), ["⠼ 내 작업"]);
     }
@@ -319,7 +341,7 @@ impl KilnApp {
                         (Some(0),_) => (t.text_dim,false,kiln_common::i18n::tr("종료됨")),
                         (Some(_),_) => (t.red,false,kiln_common::i18n::tr("오류 종료")),
                         (_,kiln_proto::AgentActivity::Waiting)=>(t.orange,true,kiln_common::i18n::tr("입력 필요")),
-                        (_,kiln_proto::AgentActivity::Running) if !i.attention => (running_color(session_agent(i),&t),true,kiln_common::i18n::tr("실행 중")),
+                        (_,kiln_proto::AgentActivity::Running) if !i.attention => (running_color(session.and_then(|sid|self.conn.session_agent(sid)),&t),true,kiln_common::i18n::tr("실행 중")),
                         (_,kiln_proto::AgentActivity::Done)=>(t.green,false,kiln_common::i18n::tr("완료")),
                         (_,kiln_proto::AgentActivity::Failed)=>(t.red,false,kiln_common::i18n::tr("실패")),
                         _ if i.attention=>(t.orange,true,kiln_common::i18n::tr("확인 필요")),
