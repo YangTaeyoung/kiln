@@ -9,7 +9,7 @@ const MAX_NOTIFICATIONS: usize = 200;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum NotificationCategory { #[default] Attention, Completed, Error, Info }
 impl NotificationCategory {
-    fn label(self) -> &'static str { match self { Self::Attention=>"확인 필요", Self::Completed=>"완료", Self::Error=>"오류", Self::Info=>"안내" } }
+    fn label(self) -> &'static str { match self { Self::Attention=>kiln_common::i18n::tr("확인 필요"), Self::Completed=>kiln_common::i18n::tr("완료"), Self::Error=>kiln_common::i18n::tr("오류"), Self::Info=>kiln_common::i18n::tr("안내") } }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -59,7 +59,7 @@ impl NotificationCenter {
     pub fn push_activity(&mut self, activity: kiln_proto::AgentActivity, session: u64, workspace: String, body: &str) {
         use kiln_proto::AgentActivity;
         let category = match activity { AgentActivity::Waiting=>NotificationCategory::Attention,AgentActivity::Done=>NotificationCategory::Completed,AgentActivity::Failed=>NotificationCategory::Error,_=>return };
-        self.push(activity.label(),body,if category==NotificationCategory::Error {ToastKind::Error}else{ToastKind::Notify},Some(session),workspace);
+        self.push(kiln_common::i18n::tr(activity.label()),body,if category==NotificationCategory::Error {ToastKind::Error}else{ToastKind::Notify},Some(session),workspace);
         if let Some(item)=self.items.last_mut(){item.category=category;}
     }
 
@@ -73,10 +73,10 @@ impl NotificationCenter {
 fn age(timestamp: u64) -> String {
     let elapsed = now().saturating_sub(timestamp);
     match elapsed {
-        0..=59 => "방금".into(),
-        60..=3599 => format!("{}분 전", elapsed / 60),
-        3600..=86399 => format!("{}시간 전", elapsed / 3600),
-        _ => format!("{}일 전", elapsed / 86400),
+        0..=59 => kiln_common::i18n::tr("방금").into(),
+        60..=3599 => kiln_common::trf!("{}분 전", elapsed / 60),
+        3600..=86399 => kiln_common::trf!("{}시간 전", elapsed / 3600),
+        _ => kiln_common::trf!("{}일 전", elapsed / 86400),
     }
 }
 
@@ -97,10 +97,10 @@ fn notification_row(ui: &mut egui::Ui, item: &mut Notification, available: bool,
         if available && response.hovered(){ui.painter().rect_filled(rect,4,t.bg_hover);ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);}
         ui.painter().galley(egui::pos2(rect.left()+4.0,rect.center().y-galley.size().y/2.0),galley,t.text);
         widgets::focus_ring(ui,&response,4);
-        if available && response.on_hover_text("세션으로 이동").clicked(){item.read=true;action=RowAction::Reveal;}
+        if available && response.on_hover_text(kiln_common::i18n::tr("세션으로 이동")).clicked(){item.read=true;action=RowAction::Reveal;}
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if widgets::icon_button(ui, Icon::Close, 24.0, false, "알림 지우기").clicked() { action = RowAction::Dismiss; }
-            if widgets::icon_button(ui, Icon::Check, 24.0, item.read, if item.read { "읽지 않음으로 표시" } else { "읽음으로 표시" }).clicked() { item.read = !item.read; }
+            if widgets::icon_button(ui, Icon::Close, 24.0, false, kiln_common::i18n::tr("알림 지우기")).clicked() { action = RowAction::Dismiss; }
+            if widgets::icon_button(ui, Icon::Check, 24.0, item.read, if item.read { kiln_common::i18n::tr("읽지 않음으로 표시") } else { kiln_common::i18n::tr("읽음으로 표시") }).clicked() { item.read = !item.read; }
         });
     });
     if !item.body.is_empty() && item.body != item.title {
@@ -110,10 +110,10 @@ fn notification_row(ui: &mut egui::Ui, item: &mut Notification, available: bool,
         let context = if item.workspace.is_empty() { age(item.timestamp) } else { format!("{} · {}", item.workspace, age(item.timestamp)) };
         ui.label(RichText::new(context).size(11.5).color(t.text_dim));
         if item.title != item.category.label() { ui.label(RichText::new(item.category.label()).size(11.5).color(color)); }
-        if item.session.is_some() && !available { ui.label(RichText::new("세션 연결 안 됨").size(11.5).color(t.text_dim)); }
+        if item.session.is_some() && !available { ui.label(RichText::new(kiln_common::i18n::tr("세션 연결 안 됨")).size(11.5).color(t.text_dim)); }
         if item.rotate_tool.is_some() && item.session.is_some() {
             ui.add_enabled_ui(can_rotate, |ui| {
-                if widgets::button(ui, "다음 계정으로 전환", ButtonKind::Secondary).clicked() { item.read = true; action = RowAction::Rotate; }
+                if widgets::button(ui, kiln_common::i18n::tr("다음 계정으로 전환"), ButtonKind::Secondary).clicked() { item.read = true; action = RowAction::Rotate; }
             });
         }
     });
@@ -137,18 +137,18 @@ impl KilnApp {
             .backdrop_color(Color32::from_black_alpha(if t.dark { 120 } else { 50 })).show(ctx, |ui| {
                 ui.set_width(width);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("알림").font(fonts::semibold(22.0)));
+                    ui.label(RichText::new(kiln_common::i18n::tr("알림")).font(fonts::semibold(22.0)));
                     if self.notifications.unread_count() > 0 { widgets::pill(ui, &self.notifications.unread_count().to_string(), t.accent); }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        close = widgets::icon_button(ui, Icon::Close, 30.0, false, "알림 닫기 (Esc)").clicked();
+                        close = widgets::icon_button(ui, Icon::Close, 30.0, false, kiln_common::i18n::tr("알림 닫기 (Esc)")).clicked();
                     });
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    widgets::segmented(ui, &mut self.notifications.unread_only, &[(false, "전체"), (true, "읽지 않음")]);
-                let filter = widgets::icon_button(ui, Icon::Filter, 28.0, self.notifications.category.is_some(), "알림 종류 필터");
+                    widgets::segmented(ui, &mut self.notifications.unread_only, &[(false, kiln_common::i18n::tr("전체")), (true, kiln_common::i18n::tr("읽지 않음"))]);
+                let filter = widgets::icon_button(ui, Icon::Filter, 28.0, self.notifications.category.is_some(), kiln_common::i18n::tr("알림 종류 필터"));
                 egui::Popup::menu(&filter).show(|ui| {
-                    ui.selectable_value(&mut self.notifications.category, None, "모든 종류");
+                    ui.selectable_value(&mut self.notifications.category, None, kiln_common::i18n::tr("모든 종류"));
                     for c in [NotificationCategory::Attention, NotificationCategory::Completed, NotificationCategory::Error, NotificationCategory::Info] {
                         ui.selectable_value(&mut self.notifications.category, Some(c), c.label());
                     }
@@ -156,7 +156,7 @@ impl KilnApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_enabled_ui(self.notifications.unread_count() > 0, |ui| {
-                            mark_all = widgets::icon_button(ui, Icon::Check, 28.0, false, "모두 읽음").clicked();
+                            mark_all = widgets::icon_button(ui, Icon::Check, 28.0, false, kiln_common::i18n::tr("모두 읽음")).clicked();
                         });
                     });
                 });
@@ -188,7 +188,7 @@ impl KilnApp {
                     if visible == 0 {
                         ui.add_space(36.0);
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new(if self.notifications.category.is_some() { "현재 필터에 맞는 알림이 없습니다" } else if self.notifications.unread_only { "모든 알림을 확인했습니다" } else { "아직 알림이 없습니다" }).font(fonts::semibold(15.0)));
+                            ui.label(RichText::new(if self.notifications.category.is_some() { kiln_common::i18n::tr("현재 필터에 맞는 알림이 없습니다") } else if self.notifications.unread_only { kiln_common::i18n::tr("모든 알림을 확인했습니다") } else { kiln_common::i18n::tr("아직 알림이 없습니다") }).font(fonts::semibold(15.0)));
                         });
                         ui.add_space(36.0);
                     }
@@ -196,11 +196,11 @@ impl KilnApp {
                 widgets::divider(ui);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if widgets::icon_button(ui, Icon::Bell, 28.0, self.settings.do_not_disturb, if self.settings.do_not_disturb { "방해 금지 끄기" } else { "방해 금지 켜기" }).clicked() {
+                    if widgets::icon_button(ui, Icon::Bell, 28.0, self.settings.do_not_disturb, if self.settings.do_not_disturb { kiln_common::i18n::tr("방해 금지 끄기") } else { kiln_common::i18n::tr("방해 금지 켜기") }).clicked() {
                         self.settings.do_not_disturb = !self.settings.do_not_disturb;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::icon_button(ui, Icon::Trash, 28.0, false, "읽은 알림 지우기").clicked() {
+                        if widgets::icon_button(ui, Icon::Trash, 28.0, false, kiln_common::i18n::tr("읽은 알림 지우기")).clicked() {
                             self.notifications.items.retain(|item| !item.read);
                         }
                     });

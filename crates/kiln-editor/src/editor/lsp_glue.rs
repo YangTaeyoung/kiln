@@ -368,7 +368,7 @@ impl Editor {
             if st.hover.as_ref().is_some_and(|h| h.text.is_none() && h.diags.is_empty()) {
                 st.hover = None;
                 if !from_mouse {
-                    st.toast = Some(("표시할 정보가 없습니다".into(), st.now));
+                    st.toast = Some((kiln_common::i18n::tr("표시할 정보가 없습니다").into(), st.now));
                 }
             }
         }
@@ -395,7 +395,7 @@ impl Editor {
                         self.update_completion_filter();
                     }
                 }
-                Err(e) => self.toast(format!("자동 완성 실패: {e}")),
+                Err(e) => self.toast(kiln_common::trf!("자동 완성 실패: {e}")),
             }
         }
 
@@ -406,12 +406,12 @@ impl Editor {
             st.definition_req = None;
             match res {
                 Ok(locs) if locs.len() == 1 => self.navigate(&locs[0]),
-                Ok(locs) if locs.is_empty() => self.toast("정의를 찾을 수 없습니다"),
+                Ok(locs) if locs.is_empty() => self.toast(kiln_common::i18n::tr("정의를 찾을 수 없습니다")),
                 Ok(locs) => {
-                    let title = format!("정의 {}개", locs.len());
+                    let title = kiln_common::trf!("정의 {}개", locs.len());
                     self.show_list(title, locs);
                 }
-                Err(e) => self.toast(format!("정의로 이동 실패: {e}")),
+                Err(e) => self.toast(kiln_common::trf!("정의로 이동 실패: {e}")),
             }
         }
 
@@ -421,12 +421,12 @@ impl Editor {
         {
             st.references_req = None;
             match res {
-                Ok(locs) if locs.is_empty() => self.toast("참조가 없습니다"),
+                Ok(locs) if locs.is_empty() => self.toast(kiln_common::i18n::tr("참조가 없습니다")),
                 Ok(locs) => {
-                    let title = format!("참조 {}개", locs.len());
+                    let title = kiln_common::trf!("참조 {}개", locs.len());
                     self.show_list(title, locs);
                 }
-                Err(e) => self.toast(format!("참조 찾기 실패: {e}")),
+                Err(e) => self.toast(kiln_common::trf!("참조 찾기 실패: {e}")),
             }
         }
 
@@ -436,7 +436,7 @@ impl Editor {
         {
             st.rename_req = None;
             match res {
-                Ok(edit) if edit.changes.is_empty() => self.toast("바꿀 항목이 없습니다"),
+                Ok(edit) if edit.changes.is_empty() => self.toast(kiln_common::i18n::tr("바꿀 항목이 없습니다")),
                 Ok(edit) => {
                     let mgr = st.mgr.clone();
                     let path = st.path.clone();
@@ -447,12 +447,12 @@ impl Editor {
                             self.lsp_flush();
                             let files = edit.changes.len();
                             let n: usize = edit.changes.iter().map(|(_, e)| e.len()).sum();
-                            self.toast(format!("{files}개 파일에서 {n}곳을 바꿨습니다"));
+                            self.toast(kiln_common::trf!("{files}개 파일에서 {n}곳을 바꿨습니다"));
                         }
-                        Err(e) => self.toast(format!("이름 바꾸기 실패: {e:#}")),
+                        Err(e) => self.toast(kiln_common::trf!("이름 바꾸기 실패: {e:#}")),
                     }
                 }
-                Err(e) => self.toast(format!("이름 바꾸기 실패: {e}")),
+                Err(e) => self.toast(kiln_common::trf!("이름 바꾸기 실패: {e}")),
             }
         }
 
@@ -467,8 +467,8 @@ impl Editor {
                     self.apply_lsp_edits(&edits);
                     self.lsp_flush();
                 }
-                Ok(_) => self.toast("문서가 바뀌어 서식을 적용하지 않았습니다"),
-                Err(e) => self.toast(format!("서식 실패: {e}")),
+                Ok(_) => self.toast(kiln_common::i18n::tr("문서가 바뀌어 서식을 적용하지 않았습니다")),
+                Err(e) => self.toast(kiln_common::trf!("서식 실패: {e}")),
             }
         }
 
@@ -516,7 +516,7 @@ impl Editor {
         match &self.lsp {
             Some(st) if st.opened => true,
             Some(_) => {
-                self.toast("이 파일에 연결된 언어 서버가 없습니다");
+                self.toast(kiln_common::i18n::tr("이 파일에 연결된 언어 서버가 없습니다"));
                 false
             }
             None => false,
@@ -551,7 +551,7 @@ impl Editor {
         if st.opened {
             st.hover_req = Some((st.mgr.hover(&st.path, pos), anchor, from_mouse));
         } else if st.hover.is_none() && !from_mouse {
-            st.toast = Some(("이 파일에 연결된 언어 서버가 없습니다".into(), st.now));
+            st.toast = Some((kiln_common::i18n::tr("이 파일에 연결된 언어 서버가 없습니다").into(), st.now));
         }
     }
 
@@ -598,7 +598,7 @@ impl Editor {
         let (a, b) = self.buf.word_at(self.sel.head);
         let word = self.buf.text_range(a, b);
         if word.is_empty() || !word.chars().all(is_ident) {
-            self.toast("이름을 바꿀 기호 위에 커서를 두세요");
+            self.toast(kiln_common::i18n::tr("이름을 바꿀 기호 위에 커서를 두세요"));
             return;
         }
         let st = self.lsp.as_mut().expect("lsp");
@@ -1059,7 +1059,7 @@ impl Editor {
                         if let Some(md) = &text {
                             markdown_ui(ui, md);
                         } else if diags.is_empty() {
-                            ui.label(RichText::new("불러오는 중…").size(12.0).color(t.text_dim));
+                            ui.label(RichText::new(kiln_common::i18n::tr("불러오는 중…")).size(12.0).color(t.text_dim));
                         }
                     });
                 });
@@ -1213,7 +1213,7 @@ impl Editor {
                         ui.add_space(4.0);
                         ui.label(RichText::new(&title).font(kiln_common::fonts::semibold(13.0)).color(t.text));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui_kit::icon_button(ui, ui_kit::Icon::Close, "닫기 (Escape)").clicked() {
+                            if ui_kit::icon_button(ui, ui_kit::Icon::Close, kiln_common::i18n::tr("닫기 (Escape)")).clicked() {
                                 close = true;
                             }
                         });
@@ -1243,7 +1243,7 @@ impl Editor {
                     }
                     if n > visible {
                         ui.add_space(3.0);
-                        ui.label(RichText::new(format!("↑↓ 로 더 보기 ({}/{n})", selected + 1)).size(11.5).color(t.text_faint));
+                        ui.label(RichText::new(kiln_common::trf!("↑↓ 로 더 보기 ({}/{n})", selected + 1)).size(11.5).color(t.text_faint));
                     }
                 });
             });
@@ -1281,12 +1281,12 @@ impl Editor {
             .show(ui.ctx(), |ui| {
                 popup_frame().inner_margin(10).show(ui, |ui| {
                     ui.set_width(260.0);
-                    ui.label(RichText::new("이름 바꾸기").font(kiln_common::fonts::semibold(12.5)).color(t.text));
+                    ui.label(RichText::new(kiln_common::i18n::tr("이름 바꾸기")).font(kiln_common::fonts::semibold(12.5)).color(t.text));
                     ui.add_space(4.0);
                     let focused = ui.memory(|m| m.has_focus(id));
                     ui_kit::field_frame(focused).show(ui, |ui| {
                         ui.set_width(248.0);
-                        let out = ui_kit::bare_text_edit(&mut r.text, id, "새 이름", false).desired_width(240.0).show(ui);
+                        let out = ui_kit::bare_text_edit(&mut r.text, id, kiln_common::i18n::tr("새 이름"), false).desired_width(240.0).show(ui);
                         if first {
                             out.response.request_focus();
                             let mut state = out.state.clone();
@@ -1301,7 +1301,7 @@ impl Editor {
                         }
                     });
                     ui.add_space(4.0);
-                    ui.label(RichText::new("Enter 로 바꾸기, Esc 로 취소").size(11.5).color(t.text_faint));
+                    ui.label(RichText::new(kiln_common::i18n::tr("Enter 로 바꾸기, Esc 로 취소")).size(11.5).color(t.text_faint));
                     let (enter, esc) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
                     if enter {
                         submit = true;

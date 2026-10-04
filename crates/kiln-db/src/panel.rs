@@ -41,7 +41,7 @@ impl<T> Load<T> {
                     Err(e) => Load::Failed(e.to_string()),
                 };
             } else if !job.is_running() {
-                *self = Load::Failed("취소됨".into());
+                *self = Load::Failed(kiln_common::i18n::tr("취소됨").into());
             }
         }
     }
@@ -206,15 +206,15 @@ impl DbPanel {
         ui.horizontal(|ui| {
             ui.set_min_height(26.0);
             ui.add_space(4.0);
-            ui.label(RichText::new("데이터베이스").font(fonts::semibold(13.0)).color(theme.text));
+            ui.label(RichText::new(kiln_common::i18n::tr("데이터베이스")).font(fonts::semibold(13.0)).color(theme.text));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                let add = icon_button(ui, Icon::Plus, "새 연결");
+                let add = icon_button(ui, Icon::Plus, kiln_common::i18n::tr("새 연결"));
                 egui::Popup::menu(&add).gap(4.0).show(|ui| {
                     ui.set_min_width(190.0);
                     for d in Driver::ALL {
                         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width().max(190.0), 32.0), Sense::click());
-                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{} 연결", d.label())));
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, kiln_common::trf!("{} 연결", d.label())));
                         if resp.hovered() {
                             ui.painter().rect_filled(r, 6.0, theme.bg_hover);
                         }
@@ -226,14 +226,14 @@ impl DbPanel {
                         }
                     }
                     ui.separator();
-                    if ui.button("URL에서 가져오기…").clicked() {
+                    if ui.button(kiln_common::i18n::tr("URL에서 가져오기…")).clicked() {
                         let mut d = ConnDialog::new(ConnConfig::default(), String::new(), true);
                         d.url = "postgres://user:password@localhost:5432/db".into();
                         self.dialog = Some(d);
                         ui.close();
                     }
                 });
-                if icon_button(ui, Icon::Refresh, "모두 새로 고침").clicked() {
+                if icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("모두 새로 고침")).clicked() {
                     for (id, n) in self.nodes.iter_mut() {
                         if n.schemas.is_some() {
                             let m = self.manager.clone();
@@ -242,7 +242,7 @@ impl DbPanel {
                         }
                     }
                 }
-                if icon_button(ui, Icon::Terminal, "선택한 연결에 새 콘솔 열기").clicked()
+                if icon_button(ui, Icon::Terminal, kiln_common::i18n::tr("선택한 연결에 새 콘솔 열기")).clicked()
                     && let Some(id) = self.selected_conn()
                 {
                     self.events.push(DbEvent::OpenConsole { conn: id });
@@ -266,10 +266,10 @@ impl DbPanel {
                         egui::TextEdit::singleline(&mut self.filter)
                             .id(id)
                             .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(0, 4)))
-                            .hint_text(RichText::new("테이블 필터").color(theme.text_faint))
+                            .hint_text(RichText::new(kiln_common::i18n::tr("테이블 필터")).color(theme.text_faint))
                             .desired_width(ui.available_width() - clear_w),
                     );
-                    if !self.filter.is_empty() && icon_button(ui, Icon::Close, "지우기").clicked() {
+                    if !self.filter.is_empty() && icon_button(ui, Icon::Close, kiln_common::i18n::tr("지우기")).clicked() {
                         self.filter.clear();
                     }
                 });
@@ -311,7 +311,7 @@ impl DbPanel {
                             Ok(ddl) => {
                                 ctx.copy_text(ddl);
                                 self.toast =
-                                    Some(("DDL을 클립보드에 복사했습니다".into(), false, Instant::now()));
+                                    Some((kiln_common::i18n::tr("DDL을 클립보드에 복사했습니다").into(), false, Instant::now()));
                             }
                             Err(e) => self.toast = Some((e.to_string(), true, Instant::now())),
                         }
@@ -322,7 +322,7 @@ impl DbPanel {
                     if let Some(r) = job.poll() {
                         match r {
                             Ok(()) => {
-                                self.toast = Some(("완료".into(), false, Instant::now()));
+                                self.toast = Some((kiln_common::i18n::tr("완료").into(), false, Instant::now()));
                                 reload.push((*conn, schema.clone()));
                             }
                             Err(e) => self.toast = Some((e.to_string(), true, Instant::now())),
@@ -366,9 +366,9 @@ impl DbPanel {
         if conns.is_empty() {
             ui.add_space(28.0);
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("데이터베이스에 연결하세요").font(fonts::semibold(15.0)).color(theme.text));
+                ui.label(RichText::new(kiln_common::i18n::tr("데이터베이스에 연결하세요")).font(fonts::semibold(15.0)).color(theme.text));
                 ui.add_space(4.0);
-                ui.label(RichText::new("연결할 데이터베이스 종류를 고르세요").size(12.5).color(theme.text_faint));
+                ui.label(RichText::new(kiln_common::i18n::tr("연결할 데이터베이스 종류를 고르세요")).size(12.5).color(theme.text_faint));
             });
             ui.add_space(16.0);
             if let Some(d) = driver_cards(ui, None) {
@@ -376,7 +376,7 @@ impl DbPanel {
             }
             ui.add_space(12.0);
             ui.vertical_centered(|ui| {
-                if widgets::button_with(ui, None, "URL에서 가져오기…", widgets::ButtonKind::Ghost, true).clicked() {
+                if widgets::button_with(ui, None, kiln_common::i18n::tr("URL에서 가져오기…"), widgets::ButtonKind::Ghost, true).clicked() {
                     let mut d = ConnDialog::new(ConnConfig::default(), String::new(), true);
                     d.url = "postgres://user:password@localhost:5432/db".into();
                     self.dialog = Some(d);
@@ -442,51 +442,51 @@ impl DbPanel {
             resp.context_menu(|ui| {
                 ui.set_min_width(180.0);
                 if status == ConnStatus::Connected {
-                    if ui.button("연결 끊기").clicked() {
+                    if ui.button(kiln_common::i18n::tr("연결 끊기")).clicked() {
                         self.manager.disconnect(id);
                         node.schemas = None;
                         node.open = false;
                         ui.close();
                     }
-                } else if ui.button("연결").clicked() {
+                } else if ui.button(kiln_common::i18n::tr("연결")).clicked() {
                     node.open = true;
                     node.schemas = Some(load_schemas(&self.manager, id));
                     ui.close();
                 }
-                if ui.button("새 콘솔").clicked() {
+                if ui.button(kiln_common::i18n::tr("새 콘솔")).clicked() {
                     self.events.push(DbEvent::OpenConsole { conn: id });
                     ui.close();
                 }
-                if ui.button("새로 고침").clicked() {
+                if ui.button(kiln_common::i18n::tr("새로 고침")).clicked() {
                     node.schemas = Some(load_schemas(&self.manager, id));
                     node.open = true;
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("편집…").clicked() {
+                if ui.button(kiln_common::i18n::tr("편집…")).clicked() {
                     let pw = self.manager.password(id).unwrap_or_default();
                     self.dialog = Some(ConnDialog::new(cfg.clone(), pw, false));
                     ui.close();
                 }
-                if ui.button("이름 복사").clicked() {
+                if ui.button(kiln_common::i18n::tr("이름 복사")).clicked() {
                     ui.ctx().copy_text(cfg.display_name());
                     ui.close();
                 }
                 ui.separator();
                 if ui
-                    .button(RichText::new("연결 삭제…").color(theme.red))
+                    .button(RichText::new(kiln_common::i18n::tr("연결 삭제…")).color(theme.red))
                     .clicked()
                 {
                     self.confirm = Some((
                         TypedConfirm {
-                            title: "연결 삭제".into(),
-                            message: format!(
+                            title: kiln_common::i18n::tr("연결 삭제").into(),
+                            message: kiln_common::trf!(
                                 "\"{}\" 연결 설정과 저장된 비밀번호를 삭제할까요? 데이터베이스의 데이터는 유지됩니다.",
                                 cfg.display_name()
                             ),
                             expected: cfg.display_name(),
                             input: String::new(),
-                            action_label: "연결 삭제".into(),
+                            action_label: kiln_common::i18n::tr("연결 삭제").into(),
                         },
                         ConfirmKind::DeleteConn(id),
                     ));
@@ -505,7 +505,7 @@ impl DbPanel {
             match schemas {
                 Load::Idle => {}
                 Load::Loading(_) => {
-                    info_row(ui, 1, "연결 중…", theme.text_faint);
+                    info_row(ui, 1, kiln_common::i18n::tr("연결 중…"), theme.text_faint);
                 }
                 Load::Failed(e) => {
                     let e = e.clone();
@@ -559,7 +559,7 @@ impl DbPanel {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(
-                        RichText::new(if d.is_new { "새 연결" } else { "연결 편집" })
+                        RichText::new(if d.is_new { kiln_common::i18n::tr("새 연결") } else { kiln_common::i18n::tr("연결 편집") })
                             .font(fonts::semibold(15.0))
                             .color(theme.text),
                     );
@@ -586,7 +586,7 @@ impl DbPanel {
                     fid("url"),
                     (width-170.0).max(100.0),
                 );
-                if ui::secondary_button(ui, None, "가져오기", true).clicked()
+                if ui::secondary_button(ui, None, kiln_common::i18n::tr("가져오기"), true).clicked()
                     || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                 {
                     match ConnConfig::from_url(&d.url) {
@@ -625,7 +625,7 @@ impl DbPanel {
                             |ui| ui.label(dim(s)),
                         );
                     };
-                    label(ui, "연결 이름");
+                    label(ui, kiln_common::i18n::tr("연결 이름"));
                     let hint = d.cfg.display_name();
                     ui::text_field(
                         ui,
@@ -634,7 +634,7 @@ impl DbPanel {
                         full,
                     );
                     ui.end_row();
-                    label(ui, "DB 종류");
+                    label(ui, kiln_common::i18n::tr("DB 종류"));
                     if let Some(drv) = driver_chips(ui, d.cfg.driver, full) {
                         if d.cfg.port == d.cfg.driver.default_port() {
                             d.cfg.port = drv.default_port();
@@ -643,13 +643,13 @@ impl DbPanel {
                     }
                     ui.end_row();
                     if d.cfg.driver == Driver::Sqlite {
-                        label(ui, "파일");
+                        label(ui, kiln_common::i18n::tr("파일"));
                         ui.horizontal(|ui| {
                             ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.file), fid("file"), full - 96.0);
-                            if ui::secondary_button(ui, None, "찾아보기…", true).clicked()
+                            if ui::secondary_button(ui, None, kiln_common::i18n::tr("찾아보기…"), true).clicked()
                                 && let Some(p) = rfd::FileDialog::new()
                                     .add_filter("SQLite", &["db", "sqlite", "sqlite3", "db3"])
-                                    .add_filter("모든 파일", &["*"])
+                                    .add_filter(kiln_common::i18n::tr("모든 파일"), &["*"])
                                     .pick_file()
                             {
                                 d.cfg.file = p.to_string_lossy().into_owned();
@@ -657,17 +657,17 @@ impl DbPanel {
                         });
                         ui.end_row();
                     } else {
-                        label(ui, "호스트");
+                        label(ui, kiln_common::i18n::tr("호스트"));
                         ui.horizontal(|ui| {
                             ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.host), fid("host"), full - 124.0);
-                            ui.label(dim("포트"));
+                            ui.label(dim(kiln_common::i18n::tr("포트")));
                             ui.add_sized(vec2(78.0, 28.0), egui::DragValue::new(&mut d.cfg.port).range(1..=65535));
                         });
                         ui.end_row();
-                        label(ui, "사용자");
+                        label(ui, kiln_common::i18n::tr("사용자"));
                         ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.user), fid("user"), full);
                         ui.end_row();
-                        label(ui, "비밀번호");
+                        label(ui, kiln_common::i18n::tr("비밀번호"));
                         let r = ui::text_field(
                             ui,
                             egui::TextEdit::singleline(&mut d.password).password(true),
@@ -678,10 +678,10 @@ impl DbPanel {
                             d.password_touched = true;
                         }
                         ui.end_row();
-                        label(ui, "데이터베이스");
+                        label(ui, kiln_common::i18n::tr("데이터베이스"));
                         ui::text_field(ui, egui::TextEdit::singleline(&mut d.cfg.database), fid("database"), full);
                         ui.end_row();
-                        label(ui, "SSL 모드");
+                        label(ui, kiln_common::i18n::tr("SSL 모드"));
                         egui::ComboBox::from_id_salt("db-ssl")
                             .selected_text(d.cfg.ssl_mode.label())
                             .width(160.0)
@@ -692,7 +692,7 @@ impl DbPanel {
                             });
                         ui.end_row();
                     }
-                    label(ui, "타임아웃");
+                    label(ui, kiln_common::i18n::tr("타임아웃"));
                     ui.horizontal(|ui| {
                         ui.add_sized(
                             vec2(78.0, 28.0),
@@ -702,7 +702,7 @@ impl DbPanel {
                         );
                     });
                     ui.end_row();
-                    label(ui, "색상");
+                    label(ui, kiln_common::i18n::tr("색상"));
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), egui::Sense::click());
@@ -715,7 +715,7 @@ impl DbPanel {
                         if none_sel {
                             ui.painter().circle_stroke(r.center(), 10.0, egui::Stroke::new(1.5, theme.accent));
                         }
-                        if resp.on_hover_text("없음").clicked() {
+                        if resp.on_hover_text(kiln_common::i18n::tr("없음")).clicked() {
                             d.cfg.color = None;
                         }
                         for c in COLOR_PRESETS {
@@ -741,30 +741,30 @@ impl DbPanel {
                 ui.horizontal(|ui| {
                     ui.add_space(80.0);
                     widgets::toggle(ui, &mut d.cfg.save_password_in_file);
-                    ui.label(RichText::new("설정 파일에 비밀번호 저장 (평문)").size(12.5).color(theme.text));
+                    ui.label(RichText::new(kiln_common::i18n::tr("설정 파일에 비밀번호 저장 (평문)")).size(12.5).color(theme.text));
                 });
                 if !d.cfg.save_password_in_file {
                     ui.horizontal(|ui| {
                         ui.add_space(80.0);
-                        ui.label(faint("비밀번호는 OS 키체인에 저장됩니다."));
+                        ui.label(faint(kiln_common::i18n::tr("비밀번호는 OS 키체인에 저장됩니다.")));
                     });
                 }
             }
             });
             d.invalidate_changed_test();
             egui::ScrollArea::vertical().id_salt("db-connection-result").max_height(48.0).show(ui,|ui| {
-            if d.test_stale {ui.label(dim("설정이 변경되었습니다. 다시 테스트하세요."));}
+            if d.test_stale {ui.label(dim(kiln_common::i18n::tr("설정이 변경되었습니다. 다시 테스트하세요.")));}
             match (&d.test, &d.test_result) {
                 (Some(_), _) => {
                     ui.horizontal(|ui| {
                         ui::spinner(ui);
-                        ui.label(dim("연결 테스트 중…"));
+                        ui.label(dim(kiln_common::i18n::tr("연결 테스트 중…")));
                     });
                 }
                 (None, Some(Ok(v))) => {
                     ui.horizontal(|ui| {
                         ui::glyph_label(ui, Icon::Check, theme.green, 14.0);
-                        ui.label(RichText::new(format!("연결 테스트 성공 · {}", first_line(v, 90))).color(theme.green).size(12.5));
+                        ui.label(RichText::new(kiln_common::trf!("연결 테스트 성공 · {}", first_line(v, 90))).color(theme.green).size(12.5));
                     });
                 }
                 (None, Some(Err(e))) => {
@@ -775,7 +775,7 @@ impl DbPanel {
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui::secondary_button(ui, Some(Icon::Plug), "연결 테스트", d.test.is_none()).clicked() {
+                if ui::secondary_button(ui, Some(Icon::Plug), kiln_common::i18n::tr("연결 테스트"), d.test.is_none()).clicked() {
                     let m = self.manager.clone();
                     let cfg = d.cfg.clone();
                     let pw = (!d.password.is_empty()).then(|| d.password.clone());
@@ -788,10 +788,10 @@ impl DbPanel {
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::button(ui, "저장", ButtonKind::Primary).clicked() {
+                    if widgets::button(ui, kiln_common::i18n::tr("저장"), ButtonKind::Primary).clicked() {
                         save = true;
                     }
-                    if widgets::button(ui, "취소", ButtonKind::Ghost).clicked() {
+                    if widgets::button(ui, kiln_common::i18n::tr("취소"), ButtonKind::Ghost).clicked() {
                         close = true;
                     }
                 });
@@ -1047,8 +1047,8 @@ fn schema_ui(
     let theme = Theme::current();
     let key = NodeKey::Schema(id, sc.name.clone());
     let label = match driver {
-        Driver::Postgres => "스키마",
-        Driver::MySql | Driver::MariaDb => "데이터베이스",
+        Driver::Postgres => kiln_common::i18n::tr("스키마"),
+        Driver::MySql | Driver::MariaDb => kiln_common::i18n::tr("데이터베이스"),
         Driver::Sqlite => "",
     };
     let resp = node_row(
@@ -1067,15 +1067,15 @@ fn schema_ui(
         sc.open = !sc.open;
     }
     resp.context_menu(|ui| {
-        if ui.button("새로 고침").clicked() {
+        if ui.button(kiln_common::i18n::tr("새로 고침")).clicked() {
             sc.tables = load_tables(m, id, &sc.name);
             ui.close();
         }
-        if ui.button("새 콘솔").clicked() {
+        if ui.button(kiln_common::i18n::tr("새 콘솔")).clicked() {
             events.push(DbEvent::OpenConsole { conn: id });
             ui.close();
         }
-        if ui.button("이름 복사").clicked() {
+        if ui.button(kiln_common::i18n::tr("이름 복사")).clicked() {
             ui.ctx().copy_text(sc.name.clone());
             ui.close();
         }
@@ -1088,7 +1088,7 @@ fn schema_ui(
     }
     match &mut sc.tables {
         Load::Idle => {}
-        Load::Loading(_) => info_row(ui, 2, "불러오는 중…", theme.text_faint),
+        Load::Loading(_) => info_row(ui, 2, kiln_common::i18n::tr("불러오는 중…"), theme.text_faint),
         Load::Failed(e) => {
             let e = e.clone();
             info_row(ui, 2, &e, theme.red);
@@ -1116,7 +1116,7 @@ fn schema_ui(
                     show,
                     Glyph::Common(Icon::Folder),
                     theme.text_faint,
-                    if is_view { "뷰" } else { "테이블" },
+                    if is_view { kiln_common::i18n::tr("뷰") } else { kiln_common::i18n::tr("테이블") },
                     &matching.len().to_string(),
                     false,
                 );
@@ -1202,7 +1202,7 @@ fn table_ui(
     }
     resp.context_menu(|ui| {
         ui.set_min_width(180.0);
-        if ui.button("테이블 열기").clicked() {
+        if ui.button(kiln_common::i18n::tr("테이블 열기")).clicked() {
             events.push(DbEvent::OpenTable {
                 conn: id,
                 schema: Some(schema.to_string()),
@@ -1210,21 +1210,21 @@ fn table_ui(
             });
             ui.close();
         }
-        if ui.button("새 콘솔").clicked() {
+        if ui.button(kiln_common::i18n::tr("새 콘솔")).clicked() {
             events.push(DbEvent::OpenConsole { conn: id });
             ui.close();
         }
         ui.separator();
-        if ui.button("이름 복사").clicked() {
+        if ui.button(kiln_common::i18n::tr("이름 복사")).clicked() {
             ui.ctx().copy_text(t.info.name.clone());
             ui.close();
         }
-        if ui.button("전체 이름 복사").clicked() {
+        if ui.button(kiln_common::i18n::tr("전체 이름 복사")).clicked() {
             let d = m.driver(id).unwrap_or(Driver::Postgres);
             ui.ctx().copy_text(tref.sql_name(d));
             ui.close();
         }
-        if ui.button("DDL 복사").clicked() {
+        if ui.button(kiln_common::i18n::tr("DDL 복사")).clicked() {
             let m2 = m.clone();
             let tr = tref.clone();
             actions.push(PendingAction::CopyDdl(
@@ -1232,46 +1232,46 @@ fn table_ui(
             ));
             ui.close();
         }
-        if ui.button("새로 고침").clicked() {
+        if ui.button(kiln_common::i18n::tr("새로 고침")).clicked() {
             t.details = load_details(m, id, tref.clone());
             ui.close();
         }
         ui.separator();
         if t.info.kind == TableKind::Table
             && ui
-                .button(RichText::new("모든 행 삭제…").color(theme.orange))
+                .button(RichText::new(kiln_common::i18n::tr("모든 행 삭제…")).color(theme.orange))
                 .clicked()
         {
             *confirm = Some((
                 TypedConfirm {
-                    title: "모든 행 삭제".into(),
-                    message: format!(
+                    title: kiln_common::i18n::tr("모든 행 삭제").into(),
+                    message: kiln_common::trf!(
                         "{}의 모든 행을 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
                         t.info.name
                     ),
                     expected: t.info.name.clone(),
                     input: String::new(),
-                    action_label: "모든 행 삭제".into(),
+                    action_label: kiln_common::i18n::tr("모든 행 삭제").into(),
                 },
                 ConfirmKind::Truncate(id, tref.clone()),
             ));
             ui.close();
         }
-        if ui.button(RichText::new(if t.info.kind==TableKind::Table {"테이블 삭제…"}else{"뷰 삭제…"}).color(theme.red)).clicked() {
+        if ui.button(RichText::new(if t.info.kind==TableKind::Table {kiln_common::i18n::tr("테이블 삭제…")}else{kiln_common::i18n::tr("뷰 삭제…")}).color(theme.red)).clicked() {
             *confirm = Some((
                 TypedConfirm {
-                    title: format!(
+                    title: kiln_common::trf!(
                         "{} 삭제",
                         if t.info.kind == TableKind::Table {
-                            "테이블"
+                            kiln_common::i18n::tr("테이블")
                         } else {
-                            "뷰"
+                            kiln_common::i18n::tr("뷰")
                         }
                     ),
-                    message: format!("다음 객체를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.\n{}", t.info.name),
+                    message: kiln_common::trf!("다음 객체를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.\n{}", t.info.name),
                     expected: t.info.name.clone(),
                     input: String::new(),
-                    action_label: if t.info.kind==TableKind::Table {"테이블 삭제".into()}else{"뷰 삭제".into()},
+                    action_label: if t.info.kind==TableKind::Table {kiln_common::i18n::tr("테이블 삭제").into()}else{kiln_common::i18n::tr("뷰 삭제").into()},
                 },
                 ConfirmKind::Drop(id, tref.clone(), t.info.kind),
             ));
@@ -1286,7 +1286,7 @@ fn table_ui(
     }
     match &mut t.details {
         Load::Idle => {}
-        Load::Loading(_) => info_row(ui, 4, "불러오는 중…", theme.text_faint),
+        Load::Loading(_) => info_row(ui, 4, kiln_common::i18n::tr("불러오는 중…"), theme.text_faint),
         Load::Failed(e) => {
             let e = e.clone();
             info_row(ui, 4, &e, theme.red);
@@ -1308,13 +1308,13 @@ fn table_ui(
                 let r = node_row(ui, 4, false, false, icon, col, &c.name, &suffix, false);
                 let mut tip = format!("{} {}", c.name, c.data_type);
                 if let Some(d) = &c.default {
-                    tip.push_str(&format!("\n기본값 {d}"));
+                    tip.push_str(&kiln_common::trf!("\n기본값 {d}"));
                 }
                 if let Some(f) = fk {
-                    tip.push_str(&format!("\n참조 {f}"));
+                    tip.push_str(&kiln_common::trf!("\n참조 {f}"));
                 }
                 r.on_hover_text(tip).context_menu(|ui| {
-                    if ui.button("이름 복사").clicked() {
+                    if ui.button(kiln_common::i18n::tr("이름 복사")).clicked() {
                         ui.ctx().copy_text(c.name.clone());
                         ui.close();
                     }
@@ -1328,7 +1328,7 @@ fn table_ui(
                     t.indexes_open,
                     Glyph::Bolt,
                     theme.orange,
-                    "인덱스",
+                    kiln_common::i18n::tr("인덱스"),
                     &det.indexes.len().to_string(),
                     false,
                 );
@@ -1338,9 +1338,9 @@ fn table_ui(
                 if t.indexes_open {
                     for ix in &det.indexes {
                         let kind = if ix.primary {
-                            "기본 키"
+                            kiln_common::i18n::tr("기본 키")
                         } else if ix.unique {
-                            "고유"
+                            kiln_common::i18n::tr("고유")
                         } else {
                             ""
                         };
@@ -1367,7 +1367,7 @@ fn table_ui(
                     t.fks_open,
                     Glyph::Link,
                     theme.blue,
-                    "외래 키",
+                    kiln_common::i18n::tr("외래 키"),
                     &det.foreign_keys.len().to_string(),
                     false,
                 );

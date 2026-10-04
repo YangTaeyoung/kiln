@@ -195,7 +195,7 @@ impl ServerHandle {
         if let Err(mpsc::SendError(Cmd::Request { cb, .. })) =
             self.tx.send(Cmd::Request { method: method.to_owned(), params, cb })
         {
-            cb(Err("언어 서버가 종료되었습니다".to_owned()));
+            cb(Err(kiln_common::i18n::tr("언어 서버가 종료되었습니다").to_owned()));
         }
     }
 
@@ -217,9 +217,9 @@ impl ServerHandle {
     pub fn status_text(&self) -> Option<String> {
         let name = &self.name;
         Some(match self.status() {
-            Status::Starting => format!("{name}: 시작 중"),
-            Status::Restarting => format!("{name}: 중단됨 — 다시 시작 중"),
-            Status::Failed(_) => format!("{name}: 실행 실패"),
+            Status::Starting => kiln_common::trf!("{name}: 시작 중"),
+            Status::Restarting => kiln_common::trf!("{name}: 중단됨 — 다시 시작 중"),
+            Status::Failed(_) => kiln_common::trf!("{name}: 실행 실패"),
             Status::Stopped => return None,
             Status::Ready => {
                 let progress = self.state.progress.lock();
@@ -292,7 +292,7 @@ impl Supervisor {
                 }
                 Exit::Crashed => {
                     self.set_not_ready();
-                    self.state.fail_pending("언어 서버가 중단되었습니다");
+                    self.state.fail_pending(kiln_common::i18n::tr("언어 서버가 중단되었습니다"));
                     self.state.progress.lock().clear();
                     let _ = proc.child.kill();
                     let _ = proc.child.wait();
@@ -301,7 +301,7 @@ impl Supervisor {
                     }
                     restarts += 1;
                     if restarts > MAX_RESTARTS {
-                        self.fail_forever("여러 번 중단되어 다시 시작하지 않습니다".to_owned());
+                        self.fail_forever(kiln_common::i18n::tr("여러 번 중단되어 다시 시작하지 않습니다").to_owned());
                         return;
                     }
                     *self.state.status.lock() = Status::Restarting;
@@ -324,8 +324,8 @@ impl Supervisor {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("{}: {e}", self.exe.display()))?;
-        let stdin = child.stdin.take().ok_or("stdin 없음")?;
-        let stdout = child.stdout.take().ok_or("stdout 없음")?;
+        let stdin = child.stdin.take().ok_or(kiln_common::i18n::tr("stdin 없음"))?;
+        let stdout = child.stdout.take().ok_or(kiln_common::i18n::tr("stdout 없음"))?;
         self.generation += 1;
         let reader = Reader {
             generation: self.generation,
@@ -349,7 +349,7 @@ impl Supervisor {
         self.state.pending.lock().insert(id, cb);
         let ok = self.write(proc, &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
         if !ok && let Some(cb) = self.state.pending.lock().remove(&id) {
-            cb(Err("언어 서버에 쓸 수 없습니다".to_owned()));
+            cb(Err(kiln_common::i18n::tr("언어 서버에 쓸 수 없습니다").to_owned()));
         }
         ok
     }
@@ -412,7 +412,7 @@ impl Supervisor {
             let _ = init_tx.send(r);
         });
         if !self.send_request(proc, "initialize", params, cb) {
-            return Err("initialize 를 보낼 수 없습니다".into());
+            return Err(kiln_common::i18n::tr("initialize 를 보낼 수 없습니다").into());
         }
         let deadline = Instant::now() + INIT_TIMEOUT;
         let result = loop {
@@ -420,13 +420,13 @@ impl Supervisor {
                 break r?;
             }
             if Instant::now() > deadline {
-                return Err("initialize 응답 시간 초과".into());
+                return Err(kiln_common::i18n::tr("initialize 응답 시간 초과").into());
             }
             match self.rx.recv_timeout(Duration::from_millis(20)) {
                 Ok(Cmd::Raw(v)) => {
                     self.write(proc, &v);
                 }
-                Ok(Cmd::ReaderExited(g)) if g == self.generation => return Err("초기화 중 종료".into()),
+                Ok(Cmd::ReaderExited(g)) if g == self.generation => return Err(kiln_common::i18n::tr("초기화 중 종료").into()),
                 Ok(Cmd::ReaderExited(_)) => {}
                 Ok(Cmd::Shutdown) => return Ok(false),
                 Ok(Cmd::DocNotify { .. }) => {}
@@ -437,7 +437,7 @@ impl Supervisor {
         };
         *self.state.caps.lock() = Caps::parse(result.get("capabilities").unwrap_or(&Value::Null));
         if !self.notify(proc, "initialized", json!({})) {
-            return Err("initialized 를 보낼 수 없습니다".into());
+            return Err(kiln_common::i18n::tr("initialized 를 보낼 수 없습니다").into());
         }
         // 열린 문서를 모두 열고 준비 상태로 바꾼다. 문서 목록 잠금 안에서 해 순서를 보장한다.
         let docs = self.shared.docs.lock();
@@ -447,7 +447,7 @@ impl Supervisor {
             }
             let params = super::did_open_params(path, doc);
             if !self.notify(proc, "textDocument/didOpen", params) {
-                return Err("didOpen 을 보낼 수 없습니다".into());
+                return Err(kiln_common::i18n::tr("didOpen 을 보낼 수 없습니다").into());
             }
         }
         self.state.generation.store(self.generation, Ordering::Release);
@@ -509,7 +509,7 @@ impl Supervisor {
         }
         let _ = proc.child.kill();
         let _ = proc.child.wait();
-        self.state.fail_pending("언어 서버가 종료되었습니다");
+        self.state.fail_pending(kiln_common::i18n::tr("언어 서버가 종료되었습니다"));
         self.state.progress.lock().clear();
         *self.state.status.lock() = Status::Stopped;
         self.shared.repaint();
@@ -604,7 +604,7 @@ impl Reader {
                     self.reply(id, Ok(res))
                 }
                 "window/showMessageRequest" => self.reply(id, Ok(Value::Null)),
-                _ => self.reply(id, Err((-32601, "지원하지 않는 메서드"))),
+                _ => self.reply(id, Err((-32601, kiln_common::i18n::tr("지원하지 않는 메서드")))),
             },
             Incoming::Notification { method, params } => match method.as_str() {
                 "textDocument/publishDiagnostics" => {

@@ -141,18 +141,18 @@ fn parse(bytes: &[u8]) -> GitResult<Vec<Worktree>> {
 pub fn create(root: &Path, request: &Create) -> GitResult<Worktree> {
     let fail = |msg: &str| GitError::Failed(msg.to_owned());
     if !request.path.is_absolute() {
-        return Err(fail("Worktree 폴더는 전체 경로로 입력하세요."));
+        return Err(fail(kiln_common::i18n::tr("Worktree 폴더는 전체 경로로 입력하세요.")));
     }
     if request.path.symlink_metadata().is_ok() {
-        return Err(fail("이미 존재하는 폴더입니다. 새 경로를 입력하세요."));
+        return Err(fail(kiln_common::i18n::tr("이미 존재하는 폴더입니다. 새 경로를 입력하세요.")));
     }
     let path = request
         .path
         .to_str()
-        .ok_or_else(|| fail("이 경로는 UTF-8 형식으로 표현할 수 없습니다."))?;
+        .ok_or_else(|| fail(kiln_common::i18n::tr("이 경로는 UTF-8 형식으로 표현할 수 없습니다.")))?;
     let branch = request.branch.trim();
     if branch.is_empty() || branch.starts_with('-') || branch.starts_with('@') {
-        return Err(fail("새 브랜치 이름을 확인하세요."));
+        return Err(fail(kiln_common::i18n::tr("새 브랜치 이름을 확인하세요.")));
     }
     cmd::git(root, Mode::Read, &["check-ref-format", "--branch", branch])?;
     if request.existing_branch {
@@ -163,7 +163,7 @@ pub fn create(root: &Path, request: &Create) -> GitResult<Worktree> {
         // Resolve before mutation, preventing option injection and ambiguous refs.
         let base = request.base.trim();
         if base.is_empty() {
-            return Err(fail("시작 브랜치 또는 커밋을 선택하세요."));
+            return Err(fail(kiln_common::i18n::tr("시작 브랜치 또는 커밋을 선택하세요.")));
         }
         let commit = cmd::git(
             root,

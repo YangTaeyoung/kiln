@@ -8,6 +8,8 @@ fonts, icons and trademarks retain their own terms.
   [Project](https://sparkle-project.org/).
 - **Pretendard**: [license](crates/kiln-common/fonts/Pretendard-LICENSE.txt).
 - **JetBrains Mono**: [SIL Open Font License](crates/kiln-common/fonts/JetBrainsMono-OFL.txt).
+- **Noto Sans CJK**: [SIL Open Font License](crates/kiln-common/fonts/NotoSansCJK-OFL.txt)
+  and [version/provenance](crates/kiln-common/fonts/README.md).
 - **GitHub Octicons**: [MIT license](crates/kiln-common/assets/OCTICONS-LICENSE).
 - **Lobe agent marks**: [MIT license](crates/kiln-common/assets/LOBE-ICONS-LICENSE)
   and [attribution](crates/kiln-common/assets/AGENT-MARKS.md).

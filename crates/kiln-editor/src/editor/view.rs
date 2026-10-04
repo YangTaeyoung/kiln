@@ -189,7 +189,7 @@ impl Editor {
         let tile = Rect::from_center_size(c - vec2(0.0, 44.0), vec2(48.0, 48.0));
         p.rect_filled(tile, 12.0, t.bg_hover);
         ui_kit::paint_icon(&p, tile.shrink(13.0), Icon::Warning, t.yellow);
-        p.text(c, Align2::CENTER_CENTER, "바이너리 파일은 표시하지 않습니다", kiln_common::fonts::semibold(15.0), t.text);
+        p.text(c, Align2::CENTER_CENTER, kiln_common::i18n::tr("바이너리 파일은 표시하지 않습니다"), kiln_common::fonts::semibold(15.0), t.text);
         p.text(
             c + vec2(0.0, 24.0),
             Align2::CENTER_CENTER,
@@ -233,15 +233,15 @@ impl Editor {
             let rect = Rect::from_min_size(pos2(full.left(), top), vec2(full.width(), BANNER_H));
             top += BANNER_H;
             let (accent, msg) = match b {
-                B::Conflict => (t.yellow, "저장하지 않은 편집 내용이 있는 동안 디스크의 파일이 변경되었습니다.".to_owned()),
-                B::Deleted => (t.red, "디스크에서 파일이 삭제되었습니다. 저장하면 다시 만들어집니다.".to_owned()),
-                B::Lossy => (t.yellow, "올바른 UTF-8 파일이 아닙니다 — 손상을 막기 위해 읽기 전용으로 열었습니다.".to_owned()),
+                B::Conflict => (t.yellow, kiln_common::i18n::tr("저장하지 않은 편집 내용이 있는 동안 디스크의 파일이 변경되었습니다.").to_owned()),
+                B::Deleted => (t.red, kiln_common::i18n::tr("디스크에서 파일이 삭제되었습니다. 저장하면 다시 만들어집니다.").to_owned()),
+                B::Lossy => (t.yellow, kiln_common::i18n::tr("올바른 UTF-8 파일이 아닙니다 — 손상을 막기 위해 읽기 전용으로 열었습니다.").to_owned()),
                 B::Large => (
                     t.blue,
-                    format!("큰 파일({}) — 구문 강조를 끕니다.", ui_kit::size_label(self.file_len)),
+                    kiln_common::trf!("큰 파일({}) — 구문 강조를 끕니다.", ui_kit::size_label(self.file_len)),
                 ),
                 B::SaveCopy => (t.green,self.save_copy_notice.clone().unwrap_or_default()),
-                B::SaveError => (t.red, format!("저장 실패: {}", self.save_error.clone().unwrap_or_default())),
+                B::SaveError => (t.red, kiln_common::trf!("저장 실패: {}", self.save_error.clone().unwrap_or_default())),
             };
             let p = ui.painter();
             let card = rect.shrink2(vec2(8.0, 4.0));
@@ -255,27 +255,27 @@ impl Editor {
                 ui.label(egui::RichText::new(msg).font(kiln_common::fonts::medium(12.5)).color(t.text));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| match b {
                     B::Conflict => {
-                        if ui_kit::flat_button(ui, "내 편집 유지", false).on_hover_text("다음 저장 시 디스크 파일을 내 편집 내용으로 덮어씁니다").clicked() {
+                        if ui_kit::flat_button(ui, kiln_common::i18n::tr("내 편집 유지"), false).on_hover_text(kiln_common::i18n::tr("다음 저장 시 디스크 파일을 내 편집 내용으로 덮어씁니다")).clicked() {
                             self.keep_local_changes();
                         }
-                        if ui_kit::flat_button(ui, "디스크 파일 불러오기…", true).on_hover_text("현재 편집 내용을 바꾸기 전에 확인합니다").clicked() {
+                        if ui_kit::flat_button(ui, kiln_common::i18n::tr("디스크 파일 불러오기…"), true).on_hover_text(kiln_common::i18n::tr("현재 편집 내용을 바꾸기 전에 확인합니다")).clicked() {
                             self.view.reload_confirm = true;
                         }
                     }
                     B::Lossy => {
-                        if ui_kit::flat_button(ui, "그래도 편집", false).clicked() {
+                        if ui_kit::flat_button(ui, kiln_common::i18n::tr("그래도 편집"), false).clicked() {
                             self.read_only = false;
                         }
                     }
                     B::Large => {
-                        if ui_kit::icon_button(ui, Icon::Close, "닫기").clicked() {
+                        if ui_kit::icon_button(ui, Icon::Close, kiln_common::i18n::tr("닫기")).clicked() {
                             self.large_banner = false;
                         }
                     }
-                    B::SaveCopy => {if ui_kit::flat_button(ui,"닫기",false).clicked(){self.save_copy_notice=None;}},
+                    B::SaveCopy => {if ui_kit::flat_button(ui,kiln_common::i18n::tr("닫기"),false).clicked(){self.save_copy_notice=None;}},
                     B::SaveError => {
-                        if ui_kit::flat_button(ui, "복사본 저장…", false).clicked(){self.choose_save_copy();}
-                        if ui_kit::icon_button(ui, Icon::Close, "닫기").clicked() {
+                        if ui_kit::flat_button(ui, kiln_common::i18n::tr("복사본 저장…"), false).clicked(){self.choose_save_copy();}
+                        if ui_kit::icon_button(ui, Icon::Close, kiln_common::i18n::tr("닫기")).clicked() {
                             self.save_error = None;
                         }
                     }
@@ -288,12 +288,12 @@ impl Editor {
             let mut cancel = false;
             let modal = egui::Modal::new(ui.id().with("reload-disk-confirm")).show(ui.ctx(), |ui| {
                 ui.set_max_width((ui.ctx().content_rect().width() - 48.0).clamp(220.0, 440.0));
-                ui.heading("내 편집을 디스크 내용으로 바꿀까요?");
-                ui.label("현재 편집 내용이 디스크 파일 내용으로 바뀝니다. 파일 자체를 덮어쓰지는 않습니다. 먼저 편집 내용을 복사본으로 저장할 수 있습니다.");
+                ui.heading(kiln_common::i18n::tr("내 편집을 디스크 내용으로 바꿀까요?"));
+                ui.label(kiln_common::i18n::tr("현재 편집 내용이 디스크 파일 내용으로 바뀝니다. 파일 자체를 덮어쓰지는 않습니다. 먼저 편집 내용을 복사본으로 저장할 수 있습니다."));
                 ui.horizontal_wrapped(|ui| {
-                    cancel = kiln_common::widgets::button(ui, "계속 편집", kiln_common::widgets::ButtonKind::Primary).clicked();
-                    if kiln_common::widgets::button(ui, "복사본 저장…", kiln_common::widgets::ButtonKind::Secondary).clicked() { self.choose_save_copy(); }
-                    replace = kiln_common::widgets::button(ui, "내 편집 버리고 불러오기", kiln_common::widgets::ButtonKind::Danger).clicked();
+                    cancel = kiln_common::widgets::button(ui, kiln_common::i18n::tr("계속 편집"), kiln_common::widgets::ButtonKind::Primary).clicked();
+                    if kiln_common::widgets::button(ui, kiln_common::i18n::tr("복사본 저장…"), kiln_common::widgets::ButtonKind::Secondary).clicked() { self.choose_save_copy(); }
+                    replace = kiln_common::widgets::button(ui, kiln_common::i18n::tr("내 편집 버리고 불러오기"), kiln_common::widgets::ButtonKind::Danger).clicked();
                 });
             });
             if replace {
@@ -881,52 +881,52 @@ impl Editor {
             ui.set_min_width(200.0);
             let ro = self.read_only;
             if lsp_on {
-                if ui.add(egui::Button::new("정의로 이동").shortcut_text("F12")).clicked() {
+                if ui.add(egui::Button::new(kiln_common::i18n::tr("정의로 이동")).shortcut_text("F12")).clicked() {
                     self.lsp_goto_definition();
                     ui.close();
                 }
-                if ui.add(egui::Button::new("참조 찾기").shortcut_text("Shift+F12")).clicked() {
+                if ui.add(egui::Button::new(kiln_common::i18n::tr("참조 찾기")).shortcut_text("Shift+F12")).clicked() {
                     self.lsp_find_references();
                     ui.close();
                 }
-                if ui.add_enabled(!ro, egui::Button::new("기호 이름 바꾸기").shortcut_text("F2")).clicked() {
+                if ui.add_enabled(!ro, egui::Button::new(kiln_common::i18n::tr("기호 이름 바꾸기")).shortcut_text("F2")).clicked() {
                     self.lsp_start_rename();
                     ui.close();
                 }
-                if ui.add_enabled(!ro, egui::Button::new("문서 서식")).clicked() {
+                if ui.add_enabled(!ro, egui::Button::new(kiln_common::i18n::tr("문서 서식"))).clicked() {
                     self.lsp_format();
                     ui.close();
                 }
                 ui.separator();
             }
-            if ui.add_enabled(!ro, egui::Button::new("잘라내기")).clicked() {
+            if ui.add_enabled(!ro, egui::Button::new(kiln_common::i18n::tr("잘라내기"))).clicked() {
                 let text = self.cut();
                 ui.ctx().copy_text(text);
                 ui.close();
             }
-            if ui.button("복사").clicked() {
+            if ui.button(kiln_common::i18n::tr("복사")).clicked() {
                 ui.ctx().copy_text(self.copy_text());
                 ui.close();
             }
             ui.separator();
-            if ui.button("모두 선택").clicked() {
+            if ui.button(kiln_common::i18n::tr("모두 선택")).clicked() {
                 self.select_all();
                 ui.close();
             }
-            if ui.add_enabled(!ro && self.comment.is_some(), egui::Button::new("줄 주석 전환")).clicked() {
+            if ui.add_enabled(!ro && self.comment.is_some(), egui::Button::new(kiln_common::i18n::tr("줄 주석 전환"))).clicked() {
                 self.toggle_comment();
                 ui.close();
             }
             ui.separator();
-            if ui.button("찾기…").clicked() {
+            if ui.button(kiln_common::i18n::tr("찾기…")).clicked() {
                 self.open_find(false);
                 ui.close();
             }
-            if ui.button("줄로 이동…").clicked() {
+            if ui.button(kiln_common::i18n::tr("줄로 이동…")).clicked() {
                 self.goto = Some(String::new());
                 ui.close();
             }
-            let wrap_label = if self.word_wrap { "자동 줄 바꿈 끄기" } else { "자동 줄 바꿈" };
+            let wrap_label = if self.word_wrap { kiln_common::i18n::tr("자동 줄 바꿈 끄기") } else { kiln_common::i18n::tr("자동 줄 바꿈") };
             if ui.add(egui::Button::new(wrap_label).shortcut_text("Alt+Z")).clicked() {
                 self.toggle_word_wrap();
                 ui.close();

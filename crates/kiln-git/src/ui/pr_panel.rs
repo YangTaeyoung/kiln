@@ -223,10 +223,10 @@ impl PrPanel {
                 ui.horizontal(|ui| {
                     if self.embedded {
                         if self.started && self.load.is_none() && self.error.is_none() {
-                            ui.label(faint(format!("풀 리퀘스트 {}개", self.items.len())));
+                            ui.label(faint(kiln_common::trf!("풀 리퀘스트 {}개", self.items.len())));
                         }
                     } else {
-                        ui.label(RichText::new("풀 리퀘스트").font(kiln_common::fonts::semibold(13.5)).color(t.text));
+                        ui.label(RichText::new(kiln_common::i18n::tr("풀 리퀘스트")).font(kiln_common::fonts::semibold(13.5)).color(t.text));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if !self.form_open
@@ -234,18 +234,18 @@ impl PrPanel {
                             && kiln_common::widgets::button_with(
                                 ui,
                                 Some(kiln_common::icons::Icon::Plus),
-                                if self.form.is_some() { "초안 이어 쓰기" } else { "새 PR" },
+                                if self.form.is_some() { kiln_common::i18n::tr("초안 이어 쓰기") } else { kiln_common::i18n::tr("새 PR") },
                                 kiln_common::widgets::ButtonKind::Primary,
                                 true,
                             )
-                            .on_hover_text("풀 리퀘스트 새로 만들기")
+                            .on_hover_text(kiln_common::i18n::tr("풀 리퀘스트 새로 만들기"))
                             .clicked()
                         {
                             self.open_create_form();
                         }
                         if self.load.is_some() {
                             spinner(ui, 12.0);
-                        } else if icon_button(ui, Icon::Refresh, "새로 고침").clicked() {
+                        } else if icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("새로 고침")).clicked() {
                             self.refresh();
                         }
                     });
@@ -262,13 +262,13 @@ impl PrPanel {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search)
                         .id(sid)
-                        .hint_text("제목, 작성자, 브랜치, #번호로 필터")
+                        .hint_text(kiln_common::i18n::tr("제목, 작성자, 브랜치, #번호로 필터"))
                         .desired_width(f32::INFINITY)
                         .frame(kiln_common::widgets::input_frame(focused, false)),
                 );
                 if let Some(url) = self.created.clone() {
                     ui.add_space(4.0);
-                    if banner(ui, BannerKind::Success, "풀 리퀘스트를 만들었습니다", Some(&url), true) {
+                    if banner(ui, BannerKind::Success, kiln_common::i18n::tr("풀 리퀘스트를 만들었습니다"), Some(&url), true) {
                         self.created = None;
                     }
                 }
@@ -291,7 +291,7 @@ impl PrPanel {
     fn ui_list(&mut self, ui: &mut Ui, events: &mut Vec<GitEvent>) {
         let t = theme();
         if let Some(e) = self.error.clone() {
-            if super::gh_widgets::gh_error_state(ui, &e, "풀 리퀘스트", events) == super::gh_widgets::ErrorAction::Retry {
+            if super::gh_widgets::gh_error_state(ui, &e, kiln_common::i18n::tr("풀 리퀘스트"), events) == super::gh_widgets::ErrorAction::Retry {
                 self.refresh();
             }
             return;
@@ -301,7 +301,7 @@ impl PrPanel {
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
                 spinner(ui, 14.0);
-                ui.label(dim("풀 리퀘스트 불러오는 중…"));
+                ui.label(dim(kiln_common::i18n::tr("풀 리퀘스트 불러오는 중…")));
             });
             return;
         }
@@ -320,11 +320,11 @@ impl PrPanel {
             .collect();
         if items.is_empty() {
             let msg = match self.filter {
-                PrFilter::Mine => "열려 있는 내 풀 리퀘스트가 없습니다",
-                PrFilter::ReviewRequested => "나에게 요청된 리뷰가 없습니다",
-                _ => "풀 리퀘스트 없음",
+                PrFilter::Mine => kiln_common::i18n::tr("열려 있는 내 풀 리퀘스트가 없습니다"),
+                PrFilter::ReviewRequested => kiln_common::i18n::tr("나에게 요청된 리뷰가 없습니다"),
+                _ => kiln_common::i18n::tr("풀 리퀘스트 없음"),
             };
-            empty_state(ui, msg, if q.is_empty() { "" } else { "다른 필터를 사용해 보세요." });
+            empty_state(ui, msg, if q.is_empty() { "" } else { kiln_common::i18n::tr("다른 필터를 사용해 보세요.") });
             return;
         }
         let now = self.now_override.unwrap_or_else(now_unix);
@@ -361,13 +361,13 @@ impl PrPanel {
                         rx = br.left() - 5.0;
                     };
                     if p.is_draft {
-                        chip("초안", t.text_dim);
+                        chip(kiln_common::i18n::tr("초안"), t.text_dim);
                     }
                     if let Some(r) = p.review() {
                         chip(r.label(), review_color(r));
                     }
                     if pr_state != crate::gh::PrState::Open {
-                        chip(if pr_state == crate::gh::PrState::Merged { "병합됨" } else { "닫힘" }, sc);
+                        chip(if pr_state == crate::gh::PrState::Merged { kiln_common::i18n::tr("병합됨") } else { kiln_common::i18n::tr("닫힘") }, sc);
                     }
                     let x0 = rect.left() + 38.0;
                     let title_job = one_line_job(&[(&p.title, 13.5, t.text)], (rx - x0 - 4.0).max(40.0));
@@ -397,11 +397,11 @@ impl PrPanel {
     fn ui_form(&mut self, ui: &mut Ui) {
         let t = theme();
         if self.discard_confirm {
-            ui.label("작성한 초안을 버릴까요? GitHub에는 전송되지 않습니다.");
+            ui.label(kiln_common::i18n::tr("작성한 초안을 버릴까요? GitHub에는 전송되지 않습니다."));
             let mut discard = false;
             ui.horizontal(|ui| {
-                if tool_button(ui, None, "계속 작성").clicked() { self.discard_confirm = false; }
-                if tool_button(ui, None, "초안 버리기").clicked() { discard = true; }
+                if tool_button(ui, None, kiln_common::i18n::tr("계속 작성")).clicked() { self.discard_confirm = false; }
+                if tool_button(ui, None, kiln_common::i18n::tr("초안 버리기")).clicked() { discard = true; }
             });
             if discard { self.form = None; self.form_open = false; self.discard_confirm = false; }
             return;
@@ -409,12 +409,12 @@ impl PrPanel {
         let Some(form) = &mut self.form else { return };
         let mut close = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("새 풀 리퀘스트").font(kiln_common::fonts::semibold(14.0)).color(t.text));
+            ui.label(RichText::new(kiln_common::i18n::tr("새 풀 리퀘스트")).font(kiln_common::fonts::semibold(14.0)).color(t.text));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, Icon::Close, "초안 보관하고 닫기").clicked() {
+                if icon_button(ui, Icon::Close, kiln_common::i18n::tr("초안 보관하고 닫기")).clicked() {
                     close = true;
                 }
-                if form.submit.is_none() && tool_button(ui, None, "초안 버리기…").clicked() { self.discard_confirm = true; }
+                if form.submit.is_none() && tool_button(ui, None, kiln_common::i18n::tr("초안 버리기…")).clicked() { self.discard_confirm = true; }
             });
         });
         if close {
@@ -423,7 +423,7 @@ impl PrPanel {
         }
         ui.add_space(4.0);
         if let Some(e) = form.error.clone() {
-            if banner(ui, BannerKind::Error, "풀 리퀘스트를 만들 수 없습니다", Some(&e), true) {
+            if banner(ui, BannerKind::Error, kiln_common::i18n::tr("풀 리퀘스트를 만들 수 없습니다"), Some(&e), true) {
                 form.error = None;
             }
             ui.add_space(4.0);
@@ -431,7 +431,7 @@ impl PrPanel {
         if form.defaults.is_some() {
             ui.horizontal(|ui| {
                 spinner(ui, 12.0);
-                ui.label(dim("브랜치 커밋으로 준비하는 중…"));
+                ui.label(dim(kiln_common::i18n::tr("브랜치 커밋으로 준비하는 중…")));
             });
             return;
         }
@@ -440,7 +440,7 @@ impl PrPanel {
             let head_width=ui.painter().layout_no_wrap(form.head.clone(),kiln_common::fonts::medium(11.0),t.accent).size().x;
             let stacked=head_width+240.0>ui.available_width();
             let render_base=|ui:&mut Ui, form:&mut CreateForm, width:f32| {
-                ui.label(dim("→ 대상"));
+                ui.label(dim(kiln_common::i18n::tr("→ 대상")));
                 egui::ComboBox::from_id_salt(Id::new("pr_create_base"))
                     .selected_text(RichText::new(&form.req.base).size(12.5)).truncate()
                     .width(width)
@@ -458,41 +458,41 @@ impl PrPanel {
             };
             if stacked {
                 ui.horizontal(|ui| {
-                    ui.label(dim("원본"));
+                    ui.label(dim(kiln_common::i18n::tr("원본")));
                     ui.add(egui::Label::new(RichText::new(&form.head).font(kiln_common::fonts::medium(11.0)).color(t.accent)).truncate()).on_hover_text(&form.head);
                 });
                 let width=(ui.available_width()-55.0).max(80.0);
                 ui.horizontal(|ui|render_base(ui,form,width));
             } else {
                 ui.horizontal(|ui| {
-                    ui.label(dim("원본"));
+                    ui.label(dim(kiln_common::i18n::tr("원본")));
                     outline_badge(ui, if form.head.is_empty() { "?" } else { &form.head }, t.accent);
                     render_base(ui,form,140.0);
                 });
             }
             ui.add_space(10.0);
-            ui.label(RichText::new("제목").font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
+            ui.label(RichText::new(kiln_common::i18n::tr("제목")).font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
             ui.add(
                 egui::TextEdit::singleline(&mut form.req.title)
-                    .hint_text("풀 리퀘스트 제목")
+                    .hint_text(kiln_common::i18n::tr("풀 리퀘스트 제목"))
                     .desired_width(f32::INFINITY)
                     .frame(input_frame()),
             );
             ui.add_space(8.0);
-            ui.label(RichText::new("설명").font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
+            ui.label(RichText::new(kiln_common::i18n::tr("설명")).font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
             ui.add(
                 egui::TextEdit::multiline(&mut form.req.body)
-                    .hint_text("변경 사항을 설명하세요 (Markdown 지원)")
+                    .hint_text(kiln_common::i18n::tr("변경 사항을 설명하세요 (Markdown 지원)"))
                     .desired_rows(8)
                     .desired_width(f32::INFINITY)
                     .frame(input_frame()),
             );
             ui.add_space(4.0);
-            checkbox_row(ui, &mut form.req.draft, "초안으로 만들기");
+            checkbox_row(ui, &mut form.req.draft, kiln_common::i18n::tr("초안으로 만들기"));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let can = !form.req.title.trim().is_empty() && !form.req.base.is_empty() && !submitting;
-                let label = if form.req.draft { "초안 PR 만들기" } else { "풀 리퀘스트 만들기" };
+                let label = if form.req.draft { kiln_common::i18n::tr("초안 PR 만들기") } else { kiln_common::i18n::tr("풀 리퀘스트 만들기") };
                 if ui.add_enabled_ui(can, |ui| primary_button(ui, label, None)).inner.clicked() {
                     let b = self.backend.clone();
                     let mut req = form.req.clone();
@@ -502,7 +502,7 @@ impl PrPanel {
                 }
                 if submitting {
                     spinner(ui, 12.0);
-                    ui.label(dim("만드는 중…"));
+                    ui.label(dim(kiln_common::i18n::tr("만드는 중…")));
                 }
             });
         });

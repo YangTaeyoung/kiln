@@ -148,7 +148,7 @@ impl Rotator {
                 *tries += 1;
                 *since = Instant::now();
             } else if job.started.elapsed() > Duration::from_secs(20) {
-                out.push(RotationEvent::Failed { tool: job.tool, error: "에이전트를 종료하지 못했습니다. 직접 종료한 뒤 이어서 실행하세요.".into() });
+                out.push(RotationEvent::Failed { tool: job.tool, error: kiln_common::i18n::tr("에이전트를 종료하지 못했습니다. 직접 종료한 뒤 이어서 실행하세요.").into() });
                 done.push(i);
             }
         }

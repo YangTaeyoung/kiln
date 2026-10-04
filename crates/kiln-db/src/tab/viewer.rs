@@ -73,7 +73,7 @@ impl ValueViewer {
     pub fn ui(&mut self, ui: &mut Ui, cell: Option<ViewerCell<'_>>) -> Option<String> {
         let theme = Theme::current();
         let Some(cell) = cell else {
-            widgets::empty_state(ui, Icon::Table, "값을 보려면 셀을 선택하세요", None);
+            widgets::empty_state(ui, Icon::Table, kiln_common::i18n::tr("값을 보려면 셀을 선택하세요"), None);
             return None;
         };
         let fp = fingerprint(cell.value);
@@ -93,13 +93,13 @@ impl ValueViewer {
         let meta = match cell.value {
             None => "DEFAULT".to_string(),
             Some(Value::Null) => "NULL".to_string(),
-            Some(Value::Bytes(b)) => format!("{}바이트", b.len()),
+            Some(Value::Bytes(b)) => kiln_common::trf!("{}바이트", b.len()),
             Some(v) => {
                 let t = v.to_text().unwrap_or_default();
-                format!("{}자", t.chars().count())
+                kiln_common::trf!("{}자", t.chars().count())
             }
         };
-        ui.label(faint(format!("{}행 · {meta}", cell.row + 1)));
+        ui.label(faint(kiln_common::trf!("{}행 · {meta}", cell.row + 1)));
         ui.add_space(8.0);
         let is_bytes = matches!(cell.value, Some(Value::Bytes(_)));
         let can_edit = cell.editable && !is_bytes;
@@ -108,9 +108,9 @@ impl ValueViewer {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 if ui
-                    .add_enabled_ui(self.dirty, |ui| widgets::button_with(ui, None, "셀에 반영", ButtonKind::Primary, true))
+                    .add_enabled_ui(self.dirty, |ui| widgets::button_with(ui, None, kiln_common::i18n::tr("셀에 반영"), ButtonKind::Primary, true))
                     .inner
-                    .on_hover_text("DB에 제출하기 전까지 임시 변경으로 유지됩니다")
+                    .on_hover_text(kiln_common::i18n::tr("DB에 제출하기 전까지 임시 변경으로 유지됩니다"))
                     .clicked()
                 {
                     let text = if cell.class == TypeClass::Json {
@@ -123,7 +123,7 @@ impl ValueViewer {
                     apply = Some(text);
                     self.dirty = false;
                 }
-                if ui::secondary_button(ui, None, "초기화", self.dirty).clicked()
+                if ui::secondary_button(ui, None, kiln_common::i18n::tr("초기화"), self.dirty).clicked()
                 {
                     self.text = render_text(cell.value);
                     self.dirty = false;

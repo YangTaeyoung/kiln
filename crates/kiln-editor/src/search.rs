@@ -208,14 +208,14 @@ pub fn run_search(
     let include = match build_globs(&query.include) {
         Ok(g) => g,
         Err(e) => {
-            let _ = tx.send(SearchMsg::Error(format!("포함할 파일: {e}")));
+            let _ = tx.send(SearchMsg::Error(kiln_common::trf!("포함할 파일: {e}")));
             return;
         }
     };
     let exclude = match build_globs(&query.exclude) {
         Ok(g) => g,
         Err(e) => {
-            let _ = tx.send(SearchMsg::Error(format!("제외할 파일: {e}")));
+            let _ = tx.send(SearchMsg::Error(kiln_common::trf!("제외할 파일: {e}")));
             return;
         }
     };

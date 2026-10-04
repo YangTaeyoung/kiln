@@ -170,7 +170,7 @@ impl RepoPicker {
                 if let (Some(ws), Some(c)) = (workspace, current)
                     && &c.repo != ws
                 {
-                    let label = format!("작업 폴더 저장소로 돌아가기 ({ws})");
+                    let label = kiln_common::trf!("작업 폴더 저장소로 돌아가기 ({ws})");
                     if tool_button(ui, Some(Icon::Repo), &label).clicked() {
                         action = Some(RepoPickerAction::UseWorkspace);
                     }
@@ -181,7 +181,7 @@ impl RepoPicker {
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
                         .id(sid)
-                        .hint_text("저장소 필터 · Enter로 GitHub 전체 검색")
+                        .hint_text(kiln_common::i18n::tr("저장소 필터 · Enter로 GitHub 전체 검색"))
                         .desired_width(f32::INFINITY)
                         .frame(kiln_common::widgets::input_frame(focused, false)),
                 );
@@ -222,21 +222,21 @@ impl RepoPicker {
                     ui.add_space(4.0);
                 }
                 if let Some(e) = self.error.clone()
-                    && banner(ui, BannerKind::Warning, "저장소 목록을 불러올 수 없습니다", Some(&e), true)
+                    && banner(ui, BannerKind::Warning, kiln_common::i18n::tr("저장소 목록을 불러올 수 없습니다"), Some(&e), true)
                 {
                     self.error = None;
                 }
                 let (title, items, loading): (String, Vec<RepoListItem>, bool) = match &self.search {
-                    Some((sq, v)) => (format!("\"{sq}\" 검색 결과"), v.clone(), self.search_task.is_some()),
+                    Some((sq, v)) => (kiln_common::trf!("\"{sq}\" 검색 결과"), v.clone(), self.search_task.is_some()),
                     None => {
-                        let name = self.owner.clone().or_else(|| self.viewer.as_ref().map(|v| v.login.clone())).unwrap_or_else(|| "내".into());
+                        let name = self.owner.clone().or_else(|| self.viewer.as_ref().map(|v| v.login.clone())).unwrap_or_else(|| kiln_common::i18n::tr("내").into());
                         let list = self.lists.get(&self.owner).cloned().unwrap_or_default();
                         let ql = q.to_lowercase();
                         let list: Vec<RepoListItem> = list
                             .into_iter()
                             .filter(|r| ql.is_empty() || r.name_with_owner.to_lowercase().contains(&ql) || r.description.to_lowercase().contains(&ql))
                             .collect();
-                        (format!("{name}의 저장소"), list, self.list_task.is_some())
+                        (kiln_common::trf!("{name}의 저장소"), list, self.list_task.is_some())
                     }
                 };
                 ui.horizontal(|ui| {
@@ -252,7 +252,7 @@ impl RepoPicker {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
-                            ui.label(faint(if q.is_empty() { "표시할 저장소가 없습니다 · 이름으로 검색하세요" } else { "일치하는 저장소가 없습니다 · Enter로 GitHub에서 검색" }));
+                            ui.label(faint(if q.is_empty() { kiln_common::i18n::tr("표시할 저장소가 없습니다 · 이름으로 검색하세요") } else { kiln_common::i18n::tr("일치하는 저장소가 없습니다 · Enter로 GitHub에서 검색") }));
                         });
                         ui.add_space(8.0);
                     }
@@ -289,9 +289,9 @@ fn current_card(ui: &mut Ui, c: &RepoInfo) {
                 icon_label(ui, if c.is_private { Icon::Lock } else { Icon::Repo }, t.text_dim, 14.0);
                 ui.label(RichText::new(c.repo.full_name()).font(kiln_common::fonts::semibold(13.0)).color(t.text));
                 let vis = match c.visibility.as_str() {
-                    "PRIVATE" => "비공개",
-                    "INTERNAL" => "내부",
-                    _ => "공개",
+                    "PRIVATE" => kiln_common::i18n::tr("비공개"),
+                    "INTERNAL" => kiln_common::i18n::tr("내부"),
+                    _ => kiln_common::i18n::tr("공개"),
                 };
                 outline_badge(ui, vis, t.text_dim);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -309,7 +309,7 @@ fn owner_chip(ui: &mut Ui, label: &str, sel: bool) -> egui::Response {
     let t = theme();
     let g = ui.painter().layout_no_wrap(label.to_string(), kiln_common::fonts::medium(11.5), t.text);
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 30.0, 22.0), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, format!("소유자 {label}")));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, kiln_common::trf!("소유자 {label}")));
     if ui.is_rect_visible(rect) {
         let fill = if sel { alpha(t.accent, 0.16) } else if resp.hovered() { t.bg_hover } else { egui::Color32::TRANSPARENT };
         let stroke = if sel { alpha(t.accent, 0.6) } else { t.border };
@@ -332,7 +332,7 @@ fn repo_row(ui: &mut Ui, it: &RepoListItem, is_current: bool, now: i64) -> RowAc
     let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_current, &it.name_with_owner));
     let clone_rect = Rect::from_center_size(pos2(rect.right() - 18.0, rect.center().y), vec2(24.0, 24.0));
-    let clone = icon_button_at(ui, clone_rect, resp.id.with("clone"), Icon::Download, &format!("{} 새 프로젝트로 복제", it.name_with_owner));
+    let clone = icon_button_at(ui, clone_rect, resp.id.with("clone"), Icon::Download, &kiln_common::trf!("{} 새 프로젝트로 복제", it.name_with_owner));
     if ui.is_rect_visible(rect) {
         kiln_common::widgets::paint_row(ui.painter(), rect, is_current, resp.hovered() || clone.hovered());
         let p = ui.painter();

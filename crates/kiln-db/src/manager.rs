@@ -384,7 +384,7 @@ impl DbManager {
         }
         let cfg = self
             .get(id)
-            .ok_or_else(|| DbError::msg("연결을 찾을 수 없습니다"))?;
+            .ok_or_else(|| DbError::msg(kiln_common::i18n::tr("연결을 찾을 수 없습니다")))?;
         self.set_status(id, ConnStatus::Connecting);
         let pw = self.password(id);
         match driver::connect_pool(&cfg, pw.as_deref()).await {
@@ -456,7 +456,7 @@ impl DbManager {
 
     fn driver_or_err(&self, id: ConnId) -> DbResult<Driver> {
         self.driver(id)
-            .ok_or_else(|| DbError::msg("연결을 찾을 수 없습니다"))
+            .ok_or_else(|| DbError::msg(kiln_common::i18n::tr("연결을 찾을 수 없습니다")))
     }
 
     // ---------- 데이터 ----------
@@ -530,7 +530,7 @@ impl DbManager {
         let rs = self.query(id, &count_sql(d, t, filter), None).await?.result;
         rs.scalar_string()
             .and_then(|s| s.parse().ok())
-            .ok_or_else(|| DbError::msg("COUNT(*)가 값을 반환하지 않았습니다"))
+            .ok_or_else(|| DbError::msg(kiln_common::i18n::tr("COUNT(*)가 값을 반환하지 않았습니다")))
     }
 
     /// 변경 묶음을 한 트랜잭션으로 제출한다. 반환값은 영향받은 행 수.

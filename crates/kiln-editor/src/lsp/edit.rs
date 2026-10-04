@@ -68,12 +68,12 @@ pub fn apply_text_edits(text: &str, edits: &[TextEdit]) -> String {
 
 /// 디스크의 파일에 편집을 적용한다. BOM 과 주된 줄 끝(CRLF/LF)을 유지한다.
 pub fn apply_edits_to_file(path: &Path, edits: &[TextEdit]) -> anyhow::Result<()> {
-    let bytes = std::fs::read(path).with_context(|| format!("{}을(를) 읽을 수 없습니다", path.display()))?;
+    let bytes = std::fs::read(path).with_context(|| kiln_common::trf!("{}을(를) 읽을 수 없습니다", path.display()))?;
     let (bom, body) = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         Some(rest) => (true, rest),
         None => (false, &bytes[..]),
     };
-    let text = std::str::from_utf8(body).with_context(|| format!("{}은(는) UTF-8 파일이 아닙니다", path.display()))?;
+    let text = std::str::from_utf8(body).with_context(|| kiln_common::trf!("{}은(는) UTF-8 파일이 아닙니다", path.display()))?;
     let crlf = text.matches("\r\n").count();
     let lf = text.matches('\n').count();
     let use_crlf = crlf > 0 && crlf * 2 >= lf;
@@ -94,7 +94,7 @@ pub fn apply_edits_to_file(path: &Path, edits: &[TextEdit]) -> anyhow::Result<()
         data.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
     }
     data.extend_from_slice(out.as_bytes());
-    std::fs::write(path, data).with_context(|| format!("{}에 쓸 수 없습니다", path.display()))
+    std::fs::write(path, data).with_context(|| kiln_common::trf!("{}에 쓸 수 없습니다", path.display()))
 }
 
 /// 서버에 보낸 문서 내용의 줄 단위 사본.
@@ -141,7 +141,7 @@ impl Mirror {
         let suffix = self.lines[bl][bc..].to_owned();
         let mut new_lines: Vec<String> = text.split('\n').map(str::to_owned).collect();
         new_lines[0].insert_str(0, &prefix);
-        new_lines.last_mut().expect("split 은 최소 한 조각").push_str(&suffix);
+        new_lines.last_mut().expect(kiln_common::i18n::tr("split 은 최소 한 조각")).push_str(&suffix);
         self.lines.splice(al..=bl, new_lines);
     }
 

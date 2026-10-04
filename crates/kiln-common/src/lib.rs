@@ -11,3 +11,7 @@ pub mod widgets;
 
 pub use task::Task;
 pub use theme::Theme;
+
+extern crate self as kiln_common;
+pub mod i18n;
+pub use kiln_i18n_macros::trf;

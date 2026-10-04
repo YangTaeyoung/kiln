@@ -10,36 +10,36 @@ pub fn now_unix() -> i64 {
 pub fn relative_time(ts: i64, now: i64) -> String {
     let d = (now - ts).max(0);
     let (n, unit) = if d < 45 {
-        return "방금".into();
+        return kiln_common::i18n::tr("방금").into();
     } else if d < 3600 {
-        ((d + 30) / 60, "분")
+        ((d + 30) / 60, kiln_common::i18n::tr("분"))
     } else if d < 86_400 {
-        ((d + 1800) / 3600, "시간")
+        ((d + 1800) / 3600, kiln_common::i18n::tr("시간"))
     } else if d < 86_400 * 30 {
-        ((d + 43_200) / 86_400, "일")
+        ((d + 43_200) / 86_400, kiln_common::i18n::tr("일"))
     } else if d < 86_400 * 365 {
-        ((d + 86_400 * 15) / (86_400 * 30), "개월")
+        ((d + 86_400 * 15) / (86_400 * 30), kiln_common::i18n::tr("개월"))
     } else {
-        (d / (86_400 * 365), "년")
+        (d / (86_400 * 365), kiln_common::i18n::tr("년"))
     };
-    format!("{}{unit} 전", n.max(1))
+    kiln_common::trf!("{}{unit} 전", n.max(1))
 }
 
 /// 짧은 상대 시간(`3시간`, `2일`).
 pub fn short_relative_time(ts: i64, now: i64) -> String {
     let d = (now - ts).max(0);
     if d < 60 {
-        "방금".into()
+        kiln_common::i18n::tr("방금").into()
     } else if d < 3600 {
-        format!("{}분", d / 60)
+        kiln_common::trf!("{}분", d / 60)
     } else if d < 86_400 {
-        format!("{}시간", d / 3600)
+        kiln_common::trf!("{}시간", d / 3600)
     } else if d < 86_400 * 30 {
-        format!("{}일", d / 86_400)
+        kiln_common::trf!("{}일", d / 86_400)
     } else if d < 86_400 * 365 {
-        format!("{}개월", d / (86_400 * 30))
+        kiln_common::trf!("{}개월", d / (86_400 * 30))
     } else {
-        format!("{}년", d / (86_400 * 365))
+        kiln_common::trf!("{}년", d / (86_400 * 365))
     }
 }
 

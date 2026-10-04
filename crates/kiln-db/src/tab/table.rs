@@ -490,12 +490,12 @@ impl TableView {
     fn check_recovered_draft(&mut self, m: &DbManager) {
         if self.recovery_check.is_some() { return; }
         let Some(data)=&self.data else{return};
-        if data.pk.is_empty() {self.status=Some(("기본 키 정보를 읽은 뒤 비교할 수 있습니다.".into(),true));return;}
+        if data.pk.is_empty() {self.status=Some((kiln_common::i18n::tr("기본 키 정보를 읽은 뒤 비교할 수 있습니다.").into(),true));return;}
         let rows=affected_rows(data,self.pending_cell().as_ref().map(|(r,_,_)|*r));
         let Some(details)=&self.details else{return};
         let columns=details.columns.clone();
         let mapping:Option<Vec<usize>>=data.rs.columns.iter().map(|col|columns.iter().position(|c|c.name==col.name)).collect();
-        let Some(mapping)=mapping else{self.status=Some(("테이블 구조가 변경되었습니다. 초안을 내보내세요.".into(),true));return};
+        let Some(mapping)=mapping else{self.status=Some((kiln_common::i18n::tr("테이블 구조가 변경되었습니다. 초안을 내보내세요.").into(),true));return};
         let keys:Vec<Vec<(usize,Value)>>=rows.iter().map(|&row|data.pk.iter().map(|&col|(mapping[col],data.rs.rows[row][col].clone())).collect()).collect();
         let (id,t)=(self.conn,self.t.clone());let m2=m.clone();self.recovery_conflicts.clear();
         self.recovery_check=Some(m.spawn(async move { m2.fetch_original_rows(id,&t,&columns,&keys).await }));
@@ -503,9 +503,9 @@ impl TableView {
 
     fn export_recovery(&mut self) {
         let Some(draft)=self.recovery_draft() else{return};
-        let Some(path)=rfd::FileDialog::new().set_file_name(format!("{}-draft.json",self.t.table)).add_filter("Kiln DB 초안",&["json"]).save_file() else{return};
+        let Some(path)=rfd::FileDialog::new().set_file_name(format!("{}-draft.json",self.t.table)).add_filter(kiln_common::i18n::tr("Kiln DB 초안"),&["json"]).save_file() else{return};
         let result=self.write_recovery(&path,&draft);
-        self.status=Some(match result{Ok(())=>(format!("초안 내보냄: {} · DB에 적용되지 않았습니다",path.display()),false),Err(e)=>(format!("초안 내보내기 실패: {e}"),true)});
+        self.status=Some(match result{Ok(())=>(kiln_common::trf!("초안 내보냄: {} · DB에 적용되지 않았습니다",path.display()),false),Err(e)=>(kiln_common::trf!("초안 내보내기 실패: {e}"),true)});
     }
 
     fn write_recovery(&self,path:&std::path::Path,draft:&TableDraft)->Result<(),String>{
@@ -525,7 +525,7 @@ impl TableView {
             data.rs.display[conflict.row]=current.iter().map(|v|v.display(DISPLAY_MAX_CHARS).into_boxed_str()).collect();
             data.rs.rows[conflict.row]=current;
         }
-        self.status=Some(("선택한 행을 정리했습니다. 최신 DB와 다시 비교한 뒤 제출하세요.".into(),false));
+        self.status=Some((kiln_common::i18n::tr("선택한 행을 정리했습니다. 최신 DB와 다시 비교한 뒤 제출하세요.").into(),false));
     }
 
     fn load_details(&mut self, m: &DbManager) {
@@ -573,7 +573,7 @@ impl TableView {
             self.details_job = None;
             match r {
                 Ok(d) => self.details = Some(d),
-                Err(e) => self.status = Some((format!("구조를 불러오지 못했습니다: {e}"), true)),
+                Err(e) => self.status = Some((kiln_common::trf!("구조를 불러오지 못했습니다: {e}"), true)),
             }
             self.refresh_details_on_data();
         }
@@ -633,8 +633,8 @@ impl TableView {
         {
             self.export_job = None;
             self.status = Some(match r {
-                Ok(n) => (format!("{}행을 내보냈습니다", thousands(n as i64)), false),
-                Err(e) => (format!("내보내기 실패: {e}"), true),
+                Ok(n) => (kiln_common::trf!("{}행을 내보냈습니다", thousands(n as i64)), false),
+                Err(e) => (kiln_common::trf!("내보내기 실패: {e}"), true),
             });
         }
     }
@@ -655,7 +655,7 @@ impl TableView {
         self.submit_job = None;
         match r {
             Ok(n) => {
-                self.status = Some((format!("커밋됨 · {n}행 영향"), false));
+                self.status = Some((kiln_common::trf!("커밋됨 · {n}행 영향"), false));
                 if let Some(d) = &mut self.data {
                     d.revert_all();
                 }
@@ -663,7 +663,7 @@ impl TableView {
             }
             Err(e) => {
                 self.status = Some((
-                    format!(
+                    kiln_common::trf!(
                         "{}번째 SQL 실행 실패. 이 트랜잭션의 변경은 되돌렸습니다: {}",
                         e.index + 1,
                         e.error
@@ -680,7 +680,7 @@ impl TableView {
             if self.grid.editing.is_some() { return; }
         }
         if self.recovery_review {
-            self.status = Some(("복원된 초안은 먼저 최신 DB와 비교해야 제출할 수 있습니다.".into(), true));
+            self.status = Some((kiln_common::i18n::tr("복원된 초안은 먼저 최신 DB와 비교해야 제출할 수 있습니다.").into(), true));
             return;
         }
         let (Some(data), Some(det)) = (&self.data, &self.details) else {
@@ -741,7 +741,7 @@ impl TableView {
         };
         let m2 = m.clone();
         let (id, t, cols) = (self.conn, self.t.clone(), det.columns.clone());
-        self.status = Some(("DB에 변경 적용 중…".into(), false));
+        self.status = Some((kiln_common::i18n::tr("DB에 변경 적용 중…").into(), false));
         self.submit_job = Some(m.spawn(async move { m2.submit_changes(id, &t, &cols, &cs).await }));
     }
 
@@ -754,20 +754,20 @@ impl TableView {
                 Ok(fresh) => {
                     let pending=self.pending_cell().as_ref().map(|(r,_,_)|*r);
                     match self.data.as_ref().map(|data|find_recovery_conflicts(data,&fresh,pending)) {
-                        Some(Ok(conflicts)) if conflicts.is_empty()=>{self.recovery_review=false;self.status=Some(("변경할 원본 행이 최신 DB와 일치합니다. 검토 후 직접 제출하세요.".into(),false));}
-                        Some(Ok(conflicts))=>{self.status=Some((format!("DB의 원본 {}개 행이 변경되었습니다. 행별로 해결하거나 초안을 내보내세요.",conflicts.len()),true));self.recovery_conflicts=conflicts;}
+                        Some(Ok(conflicts)) if conflicts.is_empty()=>{self.recovery_review=false;self.status=Some((kiln_common::i18n::tr("변경할 원본 행이 최신 DB와 일치합니다. 검토 후 직접 제출하세요.").into(),false));}
+                        Some(Ok(conflicts))=>{self.status=Some((kiln_common::trf!("DB의 원본 {}개 행이 변경되었습니다. 행별로 해결하거나 초안을 내보내세요.",conflicts.len()),true));self.recovery_conflicts=conflicts;}
                         Some(Err(e))=>self.status=Some((e,true)),None=>{},
                     }
                 }
-                Err(e) => self.status = Some((format!("초안 비교 실패: {e}"), true)),
+                Err(e) => self.status = Some((kiln_common::trf!("초안 비교 실패: {e}"), true)),
             }
         }
         if self.recovery_check.is_some() { ui.ctx().request_repaint_after(std::time::Duration::from_millis(60)); }
         if self.recovery_review && self.pending_changes() > 0 {
             ui.horizontal_wrapped(|ui| {
-                ui.label("복원된 DB 초안 · 아직 DB에 적용되지 않았습니다.");
-                if ui.add_enabled(self.recovery_check.is_none(), egui::Button::new("최신 DB와 비교")).clicked() { self.check_recovered_draft(m); }
-                if ui.button("초안 내보내기…").clicked(){self.export_recovery();}
+                ui.label(kiln_common::i18n::tr("복원된 DB 초안 · 아직 DB에 적용되지 않았습니다."));
+                if ui.add_enabled(self.recovery_check.is_none(), egui::Button::new(kiln_common::i18n::tr("최신 DB와 비교"))).clicked() { self.check_recovered_draft(m); }
+                if ui.button(kiln_common::i18n::tr("초안 내보내기…")).clicked(){self.export_recovery();}
             });
         } else if self.pending_changes() == 0 { self.recovery_review = false; }
         if !self.recovery_conflicts.is_empty() {
@@ -775,8 +775,8 @@ impl TableView {
             egui::ScrollArea::vertical().id_salt(self.grid.id.with("recovery-conflicts")).max_height(150.0).show(ui,|ui|{
                 for (index,conflict) in self.recovery_conflicts.iter().enumerate(){
                     ui.group(|ui|{ui.label(&conflict.description);ui.horizontal_wrapped(|ui|{
-                        if ui.button("이 행의 초안 버리기").clicked(){resolve=Some((index,false));}
-                        if conflict.current.is_some() && ui.button("내 편집을 최신 행에 재적용").clicked(){resolve=Some((index,true));}
+                        if ui.button(kiln_common::i18n::tr("이 행의 초안 버리기")).clicked(){resolve=Some((index,false));}
+                        if conflict.current.is_some() && ui.button(kiln_common::i18n::tr("내 편집을 최신 행에 재적용")).clicked(){resolve=Some((index,true));}
                     });});
                 }
             });
@@ -818,7 +818,7 @@ impl TableView {
                     if ui::segmented(
                         ui,
                         &mut sub,
-                        &[(SubTab::Data, "데이터"), (SubTab::Structure, "구조"), (SubTab::Ddl, "DDL")],
+                        &[(SubTab::Data, kiln_common::i18n::tr("데이터")), (SubTab::Structure, kiln_common::i18n::tr("구조")), (SubTab::Ddl, "DDL")],
                     ) {
                         self.sub = sub;
                         if sub == SubTab::Ddl && self.ddl.is_none() && self.ddl_job.is_none() {
@@ -836,21 +836,21 @@ impl TableView {
                     );
                     ui.label(RichText::new(self.t.sql_name(self.driver)).font(fonts::mono(12.5)).color(theme.text));
                     if self.is_view {
-                        widgets::pill(ui, "뷰", theme.green);
+                        widgets::pill(ui, kiln_common::i18n::tr("뷰"), theme.green);
                     }
                     if self.sub == SubTab::Data {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
-                            if ui::toggle_button_icon(ui, Some(Icon::Eye), "셀 내용", self.show_viewer)
-                                .on_hover_text("선택한 셀의 전체 내용 보기")
+                            if ui::toggle_button_icon(ui, Some(Icon::Eye), kiln_common::i18n::tr("셀 내용"), self.show_viewer)
+                                .on_hover_text(kiln_common::i18n::tr("선택한 셀의 전체 내용 보기"))
                                 .clicked()
                             {
                                 self.show_viewer = !self.show_viewer;
                             }
-                            ui::menu_button(ui, Some(Icon::Download), "내보내기", |ui| {
+                            ui::menu_button(ui, Some(Icon::Download), kiln_common::i18n::tr("내보내기"), |ui| {
                                 for f in [ExportFormat::Csv, ExportFormat::Json] {
                                     if ui
-                                        .button(format!("모든 행을 {}로…", f.extension().to_uppercase()))
+                                        .button(kiln_common::trf!("모든 행을 {}로…", f.extension().to_uppercase()))
                                         .clicked()
                                     {
                                         ui.close();
@@ -873,9 +873,9 @@ impl TableView {
             && self.details.is_some()
         {
             let why = if self.is_view {
-                "읽기 전용: 뷰입니다."
+                kiln_common::i18n::tr("읽기 전용: 뷰입니다.")
             } else {
-                "읽기 전용: 기본 키가 없어 편집할 행을 식별할 수 없습니다."
+                kiln_common::i18n::tr("읽기 전용: 기본 키가 없어 편집할 행을 식별할 수 없습니다.")
             };
             egui::Frame::new()
                 .inner_margin(egui::Margin { left: 12, right: 10, top: 0, bottom: 6 })
@@ -942,7 +942,7 @@ impl TableView {
                 if self.load_job.is_some() {
                     ui.add(egui::Spinner::new().size(18.0).color(theme.text_dim));
                 } else {
-                    ui.label(dim("데이터 없음"));
+                    ui.label(dim(kiln_common::i18n::tr("데이터 없음")));
                 }
             });
             return;
@@ -1002,7 +1002,7 @@ impl TableView {
             GridEvent::SortBy(c) => {
                 if data.pending() > 0 {
                     self.status = Some((
-                        "정렬하기 전에 보류 중인 변경 사항을 제출하거나 되돌리세요".into(),
+                        kiln_common::i18n::tr("정렬하기 전에 보류 중인 변경 사항을 제출하거나 되돌리세요").into(),
                         true,
                     ));
                     return;
@@ -1099,7 +1099,7 @@ impl TableView {
                     if glyph_button(
                         ui,
                         Glyph::Common(Icon::Refresh),
-                        "페이지 다시 불러오기",
+                        kiln_common::i18n::tr("페이지 다시 불러오기"),
                         self.load_job.is_none() && pending == 0,
                         false,
                     )
@@ -1108,19 +1108,19 @@ impl TableView {
                         self.reload(m, true);
                     }
                     toolbar_sep(ui);
-                    if tool_button_icon(ui, Some(Icon::Plus), "행 추가", editable, false).clicked() {
+                    if tool_button_icon(ui, Some(Icon::Plus), kiln_common::i18n::tr("행 추가"), editable, false).clicked() {
                         self.add_row();
                     }
-                    if tool_button_icon(ui, Some(Icon::Minus), "행 삭제", editable && has_sel, false)
-                        .on_hover_text("선택한 행 삭제 (⌘⌫)")
+                    if tool_button_icon(ui, Some(Icon::Minus), kiln_common::i18n::tr("행 삭제"), editable && has_sel, false)
+                        .on_hover_text(kiln_common::i18n::tr("선택한 행 삭제 (⌘⌫)"))
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
                         let rows = self.grid.sel.rows(d.n_rows());
                         d.delete_rows(&rows);
                     }
-                    if tool_button_icon(ui, Some(Icon::Copy), "복제", editable && has_sel, false)
-                        .on_hover_text("선택한 행 복제 (⌘D)")
+                    if tool_button_icon(ui, Some(Icon::Copy), kiln_common::i18n::tr("복제"), editable && has_sel, false)
+                        .on_hover_text(kiln_common::i18n::tr("선택한 행 복제 (⌘D)"))
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
@@ -1129,9 +1129,9 @@ impl TableView {
                     }
                     toolbar_sep(ui);
                     let submit_label = if pending > 0 {
-                        format!("제출 ({pending})")
+                        kiln_common::trf!("제출 ({pending})")
                     } else {
-                        "제출".into()
+                        kiln_common::i18n::tr("제출").into()
                     };
                     if tool_button_icon(
                         ui,
@@ -1140,13 +1140,13 @@ impl TableView {
                         pending > 0 && self.submit_job.is_none(),
                         true,
                     )
-                    .on_hover_text("모든 변경 사항을 하나의 트랜잭션으로 커밋 (⌘↩)")
+                    .on_hover_text(kiln_common::i18n::tr("모든 변경 사항을 하나의 트랜잭션으로 커밋 (⌘↩)"))
                     .clicked()
                     {
                         self.submit(m);
                     }
-                    if tool_button_icon(ui, Some(Icon::Undo), "되돌리기", pending > 0, false)
-                        .on_hover_text("보류 중인 변경 사항 모두 취소")
+                    if tool_button_icon(ui, Some(Icon::Undo), kiln_common::i18n::tr("되돌리기"), pending > 0, false)
+                        .on_hover_text(kiln_common::i18n::tr("보류 중인 변경 사항 모두 취소"))
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
@@ -1177,11 +1177,11 @@ impl TableView {
             None => loaded == self.page_size,
         };
         // 오른쪽에서 왼쪽 순서로 배치된다.
-        let last = glyph_button(ui, Glyph::Last, "마지막 페이지", can_nav && has_next && total_pages.is_some(), false);
-        let next = glyph_button(ui, Glyph::Common(Icon::ChevronRight), "다음 페이지", can_nav && has_next, false);
+        let last = glyph_button(ui, Glyph::Last, kiln_common::i18n::tr("마지막 페이지"), can_nav && has_next && total_pages.is_some(), false);
+        let next = glyph_button(ui, Glyph::Common(Icon::ChevronRight), kiln_common::i18n::tr("다음 페이지"), can_nav && has_next, false);
         let start = self.page * self.page_size;
         let range = if loaded == 0 {
-            "0행".to_string()
+            kiln_common::i18n::tr("0행").to_string()
         } else {
             format!(
                 "{}–{}",
@@ -1190,8 +1190,8 @@ impl TableView {
             )
         };
         let of = match (self.total, self.count_job.is_some()) {
-            (Some(t), _) => format!(" / 총 {}", thousands(t)),
-            (None, true) => " / 총 …".into(),
+            (Some(t), _) => kiln_common::trf!(" / 총 {}", thousands(t)),
+            (None, true) => kiln_common::i18n::tr(" / 총 …").into(),
             _ => String::new(),
         };
         ui.add_space(4.0);
@@ -1201,12 +1201,12 @@ impl TableView {
                 .color(theme.text_dim),
         );
         ui.add_space(4.0);
-        let prev = glyph_button(ui, Glyph::ChevronLeft, "이전 페이지", can_nav && self.page > 0, false);
-        let first = glyph_button(ui, Glyph::First, "첫 페이지", can_nav && self.page > 0, false);
+        let prev = glyph_button(ui, Glyph::ChevronLeft, kiln_common::i18n::tr("이전 페이지"), can_nav && self.page > 0, false);
+        let first = glyph_button(ui, Glyph::First, kiln_common::i18n::tr("첫 페이지"), can_nav && self.page > 0, false);
         ui.add_space(6.0);
         let mut size = self.page_size;
         egui::ComboBox::from_id_salt(("db-page-size", self.conn, &self.t.table))
-            .selected_text(RichText::new(format!("페이지당 {size}")).size(12.0))
+            .selected_text(RichText::new(kiln_common::trf!("페이지당 {size}")).size(12.0))
             .width(104.0)
             .show_ui(ui, |ui| {
                 for s in PAGE_SIZES {
@@ -1254,10 +1254,10 @@ impl TableView {
                         (
                             "WHERE",
                             &mut self.filter,
-                            "예: id > 100 AND name LIKE 'a%'",
+                            kiln_common::i18n::tr("예: id > 100 AND name LIKE 'a%'"),
                             "where",
                         ),
-                        ("ORDER BY", &mut self.order, "예: created_at DESC", "order"),
+                        ("ORDER BY", &mut self.order, kiln_common::i18n::tr("예: created_at DESC"), "order"),
                     ] {
                         let fid = egui::Id::new((id, self.conn, &self.t.table));
                         let focused = ui.memory(|mm| mm.has_focus(fid));
@@ -1287,9 +1287,9 @@ impl TableView {
                     let dirty = self.filter.trim() != self.applied_filter
                         || self.order.trim() != self.applied_order;
                     let r = if dirty {
-                        tool_button_icon(ui, Some(Icon::Filter), "적용", true, true)
+                        tool_button_icon(ui, Some(Icon::Filter), kiln_common::i18n::tr("적용"), true, true)
                     } else {
-                        ui::secondary_button(ui, Some(Icon::Filter), "적용", false)
+                        ui::secondary_button(ui, Some(Icon::Filter), kiln_common::i18n::tr("적용"), false)
                     };
                     if r.clicked() {
                         apply = true;
@@ -1297,7 +1297,7 @@ impl TableView {
                     if apply {
                         if self.pending_changes() > 0 {
                             self.status = Some((
-                                "필터링하기 전에 보류 중인 변경 사항을 제출하거나 되돌리세요".into(),
+                                kiln_common::i18n::tr("필터링하기 전에 보류 중인 변경 사항을 제출하거나 되돌리세요").into(),
                                 true,
                             ));
                         } else {
@@ -1326,7 +1326,7 @@ impl TableView {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     if let Some(d) = &self.data {
-                        ui.label(faint(format!(
+                        ui.label(faint(kiln_common::trf!(
                             "{}행 · {} ms",
                             thousands(d.rs.len() as i64),
                             self.last_load_ms
@@ -1334,11 +1334,11 @@ impl TableView {
                         if let Some((r, c)) = self.grid.sel.cursor
                             && c < d.rs.columns.len()
                         {
-                            ui.label(faint(format!("{}행 · {}", r + 1, d.rs.columns[c].name)));
+                            ui.label(faint(kiln_common::trf!("{}행 · {}", r + 1, d.rs.columns[c].name)));
                         }
                         let p = d.pending();
                         if p > 0 {
-                            widgets::pill(ui, &format!("보류 {p}건"), theme.yellow);
+                            widgets::pill(ui, &kiln_common::trf!("보류 {p}건"), theme.yellow);
                         }
                     }
                     if let Some((msg, err)) = &self.status {
@@ -1378,7 +1378,7 @@ impl TableView {
         );
         let m2 = m.clone();
         let id = self.conn;
-        self.status = Some(("내보내는 중…".into(), false));
+        self.status = Some((kiln_common::i18n::tr("내보내는 중…").into(), false));
         self.export_job = Some(m.spawn(async move { m2.export_query(id, &sql, &path, fmt).await }));
     }
 
@@ -1397,26 +1397,26 @@ impl TableView {
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(16).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    section(ui, "컬럼", det.columns.len());
-                    card(ui, "cols", &["", "이름", "타입", "NULL 허용", "기본값", "참조"], |ui| {
+                    section(ui, kiln_common::i18n::tr("컬럼"), det.columns.len());
+                    card(ui, "cols", &["", kiln_common::i18n::tr("이름"), kiln_common::i18n::tr("타입"), kiln_common::i18n::tr("NULL 허용"), kiln_common::i18n::tr("기본값"), kiln_common::i18n::tr("참조")], |ui| {
                         for c in &det.columns {
                             let fk = det.fk_target(&c.name);
                             if c.is_pk() {
-                                ui::glyph_label(ui, Icon::Key, theme.yellow, 13.0).on_hover_text("기본 키");
+                                ui::glyph_label(ui, Icon::Key, theme.yellow, 13.0).on_hover_text(kiln_common::i18n::tr("기본 키"));
                             } else if fk.is_some() {
-                                ui::glyph_label(ui, Glyph::Link, theme.blue, 13.0).on_hover_text("외래 키");
+                                ui::glyph_label(ui, Glyph::Link, theme.blue, 13.0).on_hover_text(kiln_common::i18n::tr("외래 키"));
                             } else {
                                 ui.label("");
                             }
                             ui.label(RichText::new(&c.name).font(fonts::mono(12.5)).color(theme.text));
                             ui.label(RichText::new(&c.data_type).font(fonts::mono(12.0)).color(theme.purple));
                             if c.nullable {
-                                ui.label(faint("예"));
+                                ui.label(faint(kiln_common::i18n::tr("예")));
                             } else {
                                 widgets::pill(ui, "NOT NULL", theme.orange);
                             }
                             let def = if c.auto_increment && c.default.is_none() {
-                                "자동".to_string()
+                                kiln_common::i18n::tr("자동").to_string()
                             } else {
                                 c.default.clone().unwrap_or_default()
                             };
@@ -1426,24 +1426,24 @@ impl TableView {
                         }
                     });
                     ui.add_space(20.0);
-                    section(ui, "인덱스", det.indexes.len());
-                    card(ui, "idx", &["이름", "컬럼", "종류"], |ui| {
+                    section(ui, kiln_common::i18n::tr("인덱스"), det.indexes.len());
+                    card(ui, "idx", &[kiln_common::i18n::tr("이름"), kiln_common::i18n::tr("컬럼"), kiln_common::i18n::tr("종류")], |ui| {
                         for ix in &det.indexes {
                             ui.label(RichText::new(&ix.name).font(fonts::mono(12.5)).color(theme.text));
                             ui.label(RichText::new(ix.columns.join(", ")).font(fonts::mono(12.0)).color(theme.text_dim));
                             if ix.primary {
-                                widgets::pill(ui, "기본 키", theme.yellow);
+                                widgets::pill(ui, kiln_common::i18n::tr("기본 키"), theme.yellow);
                             } else if ix.unique {
-                                widgets::pill(ui, "고유", theme.blue);
+                                widgets::pill(ui, kiln_common::i18n::tr("고유"), theme.blue);
                             } else {
-                                ui.label(faint("인덱스"));
+                                ui.label(faint(kiln_common::i18n::tr("인덱스")));
                             }
                             ui.end_row();
                         }
                     });
                     ui.add_space(20.0);
-                    section(ui, "외래 키", det.foreign_keys.len());
-                    card(ui, "fks", &["이름", "컬럼", "참조", "ON UPDATE", "ON DELETE"], |ui| {
+                    section(ui, kiln_common::i18n::tr("외래 키"), det.foreign_keys.len());
+                    card(ui, "fks", &[kiln_common::i18n::tr("이름"), kiln_common::i18n::tr("컬럼"), kiln_common::i18n::tr("참조"), "ON UPDATE", "ON DELETE"], |ui| {
                         for fk in &det.foreign_keys {
                             ui.label(RichText::new(&fk.name).font(fonts::mono(12.5)).color(theme.text));
                             ui.label(RichText::new(fk.columns.join(", ")).font(fonts::mono(12.0)).color(theme.text_dim));
@@ -1491,19 +1491,19 @@ impl TableView {
                                     .inner_margin(egui::Margin { left: 12, right: 8, top: 6, bottom: 6 })
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
-                                            ui.label(RichText::new("CREATE 문").font(fonts::semibold(12.5)).color(theme.text_dim));
+                                            ui.label(RichText::new(kiln_common::i18n::tr("CREATE 문")).font(fonts::semibold(12.5)).color(theme.text_dim));
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                                if glyph_button(ui, Glyph::Common(Icon::Refresh), "새로 고침", self.ddl_job.is_none(), false)
+                                                if glyph_button(ui, Glyph::Common(Icon::Refresh), kiln_common::i18n::tr("새로 고침"), self.ddl_job.is_none(), false)
                                                     .clicked()
                                                 {
                                                     let m2 = m.clone();
                                                     let (id, t) = (self.conn, self.t.clone());
                                                     self.ddl_job = Some(m.spawn(async move { m2.table_ddl(id, &t).await }));
                                                 }
-                                                if ui::secondary_button(ui, Some(Icon::Copy), "복사", true).clicked() {
+                                                if ui::secondary_button(ui, Some(Icon::Copy), kiln_common::i18n::tr("복사"), true).clicked() {
                                                     ui.ctx().copy_text(ddl.clone());
-                                                    self.status = Some(("DDL을 복사했습니다".into(), false));
+                                                    self.status = Some((kiln_common::i18n::tr("DDL을 복사했습니다").into(), false));
                                                 }
                                             });
                                         });
@@ -1687,20 +1687,20 @@ fn affected_rows(data:&TableData,pending:Option<usize>)->BTreeSet<usize>{
     data.edits.keys().map(|(row,_)|*row).chain(data.deleted.iter().copied()).chain(pending).filter(|row|*row<data.rs.rows.len()).collect()
 }
 fn find_recovery_conflicts(data:&TableData,fresh:&ResultSet,pending:Option<usize>)->Result<Vec<RecoveryConflict>,String>{
-    if data.pk.is_empty(){return Err("기본 키가 없어 행을 안전하게 비교할 수 없습니다. 초안을 내보내세요.".into());}
-    let map:Vec<usize>=data.rs.columns.iter().map(|col|fresh.columns.iter().position(|c|c.name==col.name).ok_or_else(||format!("컬럼 {}이 없어졌습니다. 초안을 내보내세요.",col.name))).collect::<Result<_,_>>()?;
+    if data.pk.is_empty(){return Err(kiln_common::i18n::tr("기본 키가 없어 행을 안전하게 비교할 수 없습니다. 초안을 내보내세요.").into());}
+    let map:Vec<usize>=data.rs.columns.iter().map(|col|fresh.columns.iter().position(|c|c.name==col.name).ok_or_else(||kiln_common::trf!("컬럼 {}이 없어졌습니다. 초안을 내보내세요.",col.name))).collect::<Result<_,_>>()?;
     let mut conflicts=Vec::new();
     for row in affected_rows(data,pending){
         let original=&data.rs.rows[row];
         let matches:Vec<_>=fresh.rows.iter().filter(|values|data.pk.iter().all(|&col|values.get(map[col])==original.get(col))).collect();
         let key=data.pk.iter().map(|&col|format!("{}={}",data.rs.columns[col].name,original[col].display(80))).collect::<Vec<_>>().join(", ");
-        if matches.len()>1{return Err(format!("기본 키가 중복된 행: {key}. 안전한 비교를 중단했습니다."));}
+        if matches.len()>1{return Err(kiln_common::trf!("기본 키가 중복된 행: {key}. 안전한 비교를 중단했습니다."));}
         let current=matches.first().map(|values|map.iter().map(|&col|values.get(col).cloned().unwrap_or(Value::Null)).collect::<Vec<_>>());
         if let Some(current)=&current {
             let differences=data.rs.columns.iter().enumerate().filter(|(col,_)|original[*col]!=current[*col]).map(|(col,c)|format!("{}: {} → {}",c.name,original[col].display(80),current[col].display(80))).collect::<Vec<_>>();
             if differences.is_empty(){continue;}
             conflicts.push(RecoveryConflict{row,current:Some(current.clone()),description:format!("{key} · {}",differences.join("; "))});
-        }else{conflicts.push(RecoveryConflict{row,current:None,description:format!("{key} · DB에서 삭제된 행")});}
+        }else{conflicts.push(RecoveryConflict{row,current:None,description:kiln_common::trf!("{key} · DB에서 삭제된 행")});}
     }
     Ok(conflicts)
 }

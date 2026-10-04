@@ -118,8 +118,8 @@ fn pushed_callout(ui: &mut Ui) {
         ui,
         t.yellow,
         Icon::Warning,
-        "이미 푸시된 커밋이 포함되어 있습니다",
-        "이력을 다시 쓰면 원격 브랜치와 달라집니다. 완료 후 강제 푸시(--force-with-lease)가 필요하며, 같은 브랜치를 쓰는 사람에게 영향을 줄 수 있습니다.",
+        kiln_common::i18n::tr("이미 푸시된 커밋이 포함되어 있습니다"),
+        kiln_common::i18n::tr("이력을 다시 쓰면 원격 브랜치와 달라집니다. 완료 후 강제 푸시(--force-with-lease)가 필요하며, 같은 브랜치를 쓰는 사람에게 영향을 줄 수 있습니다."),
     );
 }
 
@@ -149,9 +149,9 @@ fn autostash_row(ui: &mut Ui, dirty: bool, autostash: &mut bool) {
         return;
     }
     let t = Theme::current();
-    checkbox(ui, autostash, "커밋되지 않은 변경을 자동으로 stash 후 복원 (--autostash)");
+    checkbox(ui, autostash, kiln_common::i18n::tr("커밋되지 않은 변경을 자동으로 stash 후 복원 (--autostash)"));
     if !*autostash {
-        ui.label(RichText::new("변경 사항이 있으면 git이 작업을 거부할 수 있습니다.").font(fonts::regular(12.0)).color(t.text_faint));
+        ui.label(RichText::new(kiln_common::i18n::tr("변경 사항이 있으면 git이 작업을 거부할 수 있습니다.")).font(fonts::regular(12.0)).color(t.text_faint));
     }
 }
 
@@ -166,7 +166,7 @@ fn footer(ui: &mut Ui, confirm: &str, kind: ButtonKind, enabled: bool) -> (bool,
                 ok = true;
             }
         });
-        if button_with(ui, None, "취소", ButtonKind::Secondary, false).clicked() {
+        if button_with(ui, None, kiln_common::i18n::tr("취소"), ButtonKind::Secondary, false).clicked() {
             cancel = true;
         }
     });
@@ -195,16 +195,16 @@ impl ConfirmDialog {
     pub(crate) fn rewrite(op: Op, pushed: bool, dirty: bool) -> Self {
         let (title, body, confirm) = match &op {
             Op::Move { moving, .. } => (
-                "커밋 순서를 바꿀까요?",
-                format!("커밋 {}개를 옮기고 이후 커밋을 다시 적용합니다.", moving.len()),
-                "순서 이동",
+                kiln_common::i18n::tr("커밋 순서를 바꿀까요?"),
+                kiln_common::trf!("커밋 {}개를 옮기고 이후 커밋을 다시 적용합니다.", moving.len()),
+                kiln_common::i18n::tr("순서 이동"),
             ),
             Op::Fixup { moving, target } => (
-                "커밋을 합칠까요?",
-                format!("커밋 {}개를 {}에 픽스업으로 합칩니다. 대상 커밋의 메시지를 유지합니다.", moving.len(), short(target)),
-                "합치기",
+                kiln_common::i18n::tr("커밋을 합칠까요?"),
+                kiln_common::trf!("커밋 {}개를 {}에 픽스업으로 합칩니다. 대상 커밋의 메시지를 유지합니다.", moving.len(), short(target)),
+                kiln_common::i18n::tr("합치기"),
             ),
-            _ => ("이력을 다시 쓸까요?", "선택한 작업으로 현재 브랜치의 이력을 다시 씁니다.".to_string(), "계속"),
+            _ => (kiln_common::i18n::tr("이력을 다시 쓸까요?"), kiln_common::i18n::tr("선택한 작업으로 현재 브랜치의 이력을 다시 씁니다.").to_string(), kiln_common::i18n::tr("계속")),
         };
         Self { op, title: title.into(), body, confirm: confirm.into(), danger: false, pushed, dirty, autostash: dirty }
     }
@@ -250,12 +250,12 @@ impl ResetDialog {
     fn show(&mut self, ctx: &egui::Context, id: Id) -> DialogOutcome {
         let t = Theme::current();
         modal(ctx, id, 460.0, |ui| {
-            let who = self.branch.as_deref().map(|b| format!("브랜치 {b}")).unwrap_or_else(|| "HEAD".into());
-            title(ui, &format!("{who} 리셋"), Some(&format!("{} · {}", short(&self.sha), self.subject)));
+            let who = self.branch.as_deref().map(|b| kiln_common::trf!("브랜치 {b}")).unwrap_or_else(|| "HEAD".into());
+            title(ui, &kiln_common::trf!("{who} 리셋"), Some(&format!("{} · {}", short(&self.sha), self.subject)));
             let options = [
-                (ResetMode::Soft, "Soft", "커밋만 되돌립니다. 이후 커밋의 변경 내용은 스테이지된 상태로 남습니다."),
-                (ResetMode::Mixed, "Mixed", "커밋과 스테이지를 되돌립니다. 변경 내용은 작업 트리에 그대로 남습니다."),
-                (ResetMode::Hard, "Hard", "커밋·스테이지·작업 트리를 모두 이 커밋 상태로 맞춥니다."),
+                (ResetMode::Soft, "Soft", kiln_common::i18n::tr("커밋만 되돌립니다. 이후 커밋의 변경 내용은 스테이지된 상태로 남습니다.")),
+                (ResetMode::Mixed, "Mixed", kiln_common::i18n::tr("커밋과 스테이지를 되돌립니다. 변경 내용은 작업 트리에 그대로 남습니다.")),
+                (ResetMode::Hard, "Hard", kiln_common::i18n::tr("커밋·스테이지·작업 트리를 모두 이 커밋 상태로 맞춥니다.")),
             ];
             for (m, name, desc) in options {
                 if mode_card(ui, self.mode == m, name, desc, m == ResetMode::Hard) {
@@ -265,13 +265,13 @@ impl ResetDialog {
             }
             if self.mode == ResetMode::Hard {
                 ui.add_space(6.0);
-                let extra = if self.dirty { " 지금 작업 트리에 커밋되지 않은 변경이 있습니다." } else { "" };
+                let extra = if self.dirty { kiln_common::i18n::tr(" 지금 작업 트리에 커밋되지 않은 변경이 있습니다.") } else { "" };
                 callout(
                     ui,
                     t.red,
                     Icon::Warning,
-                    "데이터가 사라질 수 있습니다",
-                    &format!(
+                    kiln_common::i18n::tr("데이터가 사라질 수 있습니다"),
+                    &kiln_common::trf!(
                         "커밋되지 않은 변경은 복구할 수 없습니다. 이후 커밋은 되돌리기나 reflog로만 되살릴 수 있습니다.{extra}"
                     ),
                 );
@@ -282,9 +282,9 @@ impl ResetDialog {
             }
             let kind = if self.mode == ResetMode::Hard { ButtonKind::Danger } else { ButtonKind::Primary };
             let label = match self.mode {
-                ResetMode::Soft => "Soft 리셋",
-                ResetMode::Mixed => "Mixed 리셋",
-                ResetMode::Hard => "Hard 리셋",
+                ResetMode::Soft => kiln_common::i18n::tr("Soft 리셋"),
+                ResetMode::Mixed => kiln_common::i18n::tr("Mixed 리셋"),
+                ResetMode::Hard => kiln_common::i18n::tr("Hard 리셋"),
             };
             let (ok, cancel) = footer(ui, label, kind, true);
             if ok {
@@ -354,10 +354,10 @@ impl NameDialog {
         let t = Theme::current();
         modal(ctx, id, 420.0, |ui| {
             let (head, hint) = match self.kind {
-                NameKind::Branch => ("새 브랜치", "feature/my-change"),
-                NameKind::Tag => ("새 태그", "v1.2.0"),
+                NameKind::Branch => (kiln_common::i18n::tr("새 브랜치"), "feature/my-change"),
+                NameKind::Tag => (kiln_common::i18n::tr("새 태그"), "v1.2.0"),
             };
-            title(ui, head, Some(&format!("{}에서 만듭니다", short(&self.sha))));
+            title(ui, head, Some(&kiln_common::trf!("{}에서 만듭니다", short(&self.sha))));
             let name_id = id.with("name");
             let focused = ui.memory(|m| m.has_focus(name_id));
             let bad = self.name.contains(char::is_whitespace);
@@ -376,15 +376,15 @@ impl NameDialog {
                 }
             });
             if bad {
-                ui.label(RichText::new("이름에 공백을 쓸 수 없습니다").font(fonts::regular(12.0)).color(t.red));
+                ui.label(RichText::new(kiln_common::i18n::tr("이름에 공백을 쓸 수 없습니다")).font(fonts::regular(12.0)).color(t.red));
             }
             ui.add_space(4.0);
             match self.kind {
                 NameKind::Branch => {
-                    checkbox(ui, &mut self.switch, "만든 뒤 체크아웃");
+                    checkbox(ui, &mut self.switch, kiln_common::i18n::tr("만든 뒤 체크아웃"));
                 }
                 NameKind::Tag => {
-                    ui.label(RichText::new("메시지 (입력하면 주석 태그)").font(fonts::medium(12.0)).color(t.text_faint));
+                    ui.label(RichText::new(kiln_common::i18n::tr("메시지 (입력하면 주석 태그)")).font(fonts::medium(12.0)).color(t.text_faint));
                     kiln_common::widgets::input_frame(false, false).show(ui, |ui| {
                         ui.add(
                             egui::TextEdit::multiline(&mut self.message)
@@ -397,7 +397,7 @@ impl NameDialog {
                 }
             }
             let valid = !self.name.trim().is_empty() && !bad;
-            let label = if self.kind == NameKind::Branch { "브랜치 만들기" } else { "태그 만들기" };
+            let label = if self.kind == NameKind::Branch { kiln_common::i18n::tr("브랜치 만들기") } else { kiln_common::i18n::tr("태그 만들기") };
             let (ok, cancel) = footer(ui, label, ButtonKind::Primary, valid);
             let enter = valid && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift) && self.kind == NameKind::Branch;
             if ok || enter {
@@ -449,7 +449,7 @@ impl MessageDialog {
         }
         modal(ctx, id, 540.0, |ui| {
             let (head, sub, confirm) = match &self.kind {
-                MessageKind::Reword(sha) => ("커밋 메시지 수정", short(sha).to_string(), "메시지 수정"),
+                MessageKind::Reword(sha) => (kiln_common::i18n::tr("커밋 메시지 수정"), short(sha).to_string(), kiln_common::i18n::tr("메시지 수정")),
 
             };
             title(ui, head, Some(&sub));
@@ -458,7 +458,7 @@ impl MessageDialog {
                 return DialogOutcome::Open;
             }
             if let Some(e) = &self.error {
-                callout(ui, t.red, Icon::Warning, "메시지를 읽지 못했습니다", e);
+                callout(ui, t.red, Icon::Warning, kiln_common::i18n::tr("메시지를 읽지 못했습니다"), e);
             }
             let focused = ui.memory(|m| m.has_focus(id.with("msg")));
             kiln_common::widgets::input_frame(focused, false).inner_margin(Margin::symmetric(10, 8)).show(ui, |ui| {
@@ -477,9 +477,9 @@ impl MessageDialog {
             let subject_len = self.text.lines().next().map(|l| l.chars().count()).unwrap_or(0);
             ui.horizontal(|ui| {
                 let c = if subject_len > 72 { t.yellow } else { t.text_faint };
-                ui.label(RichText::new(format!("제목 {subject_len}자")).font(fonts::regular(12.0)).color(c));
+                ui.label(RichText::new(kiln_common::trf!("제목 {subject_len}자")).font(fonts::regular(12.0)).color(c));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new("첫 줄이 제목, 빈 줄 뒤가 본문입니다").font(fonts::regular(12.0)).color(t.text_faint));
+                    ui.label(RichText::new(kiln_common::i18n::tr("첫 줄이 제목, 빈 줄 뒤가 본문입니다")).font(fonts::regular(12.0)).color(t.text_faint));
                 });
             });
             if self.pushed {
@@ -624,15 +624,15 @@ impl RebaseDialog {
         let width = (ctx.content_rect().width() - 80.0).clamp(560.0, 900.0);
         modal(ctx, id, width, |ui| {
             let n = self.plan.as_ref().map(|p| p.steps.len()).unwrap_or(0);
-            let base = self.plan.as_ref().map(|p| p.base.as_deref().map(short).unwrap_or("루트").to_string()).unwrap_or_default();
-            title(ui, "대화형 리베이스", Some(&format!("{base} 위에 커밋 {n}개 · 위에서부터 차례로 적용")));
+            let base = self.plan.as_ref().map(|p| p.base.as_deref().map(short).unwrap_or(kiln_common::i18n::tr("루트")).to_string()).unwrap_or_default();
+            title(ui, kiln_common::i18n::tr("대화형 리베이스"), Some(&kiln_common::trf!("{base} 위에 커밋 {n}개 · 위에서부터 차례로 적용")));
             if self.task.is_some() {
                 ui.add(egui::Spinner::new().size(16.0).color(t.text_faint));
                 return DialogOutcome::Open;
             }
             if let Some(e) = self.error.clone() {
-                callout(ui, t.red, Icon::Warning, "리베이스를 준비하지 못했습니다", &e);
-                let (_, cancel) = footer(ui, "리베이스 시작", ButtonKind::Primary, false);
+                callout(ui, t.red, Icon::Warning, kiln_common::i18n::tr("리베이스를 준비하지 못했습니다"), &e);
+                let (_, cancel) = footer(ui, kiln_common::i18n::tr("리베이스 시작"), ButtonKind::Primary, false);
                 return if cancel { DialogOutcome::Cancel } else { DialogOutcome::Open };
             }
             let preview_w = 250.0;
@@ -660,7 +660,7 @@ impl RebaseDialog {
             });
             ui.add_space(6.0);
             ui.label(
-                RichText::new("손잡이를 끌어 순서를 바꾸세요. 단축키: P 유지 · R 메시지 수정 · E 편집 · S 스쿼시 · F 픽스업 · D 삭제 · Alt+↑↓ 이동")
+                RichText::new(kiln_common::i18n::tr("손잡이를 끌어 순서를 바꾸세요. 단축키: P 유지 · R 메시지 수정 · E 편집 · S 스쿼시 · F 픽스업 · D 삭제 · Alt+↑↓ 이동"))
                     .font(fonts::regular(11.5))
                     .color(t.text_faint),
             );
@@ -678,7 +678,7 @@ impl RebaseDialog {
                 ui.add_space(4.0);
                 autostash_row(ui, true, &mut self.autostash);
             }
-            let (ok, cancel) = footer(ui, "리베이스 시작", ButtonKind::Primary, invalid.is_none() && plan.is_some());
+            let (ok, cancel) = footer(ui, kiln_common::i18n::tr("리베이스 시작"), ButtonKind::Primary, invalid.is_none() && plan.is_some());
             if ok && let Some(p) = plan {
                 DialogOutcome::Run { op: Op::Rebase(p), autostash: self.autostash, pushed: self.pushed }
             } else if cancel {
@@ -755,7 +755,7 @@ impl RebaseDialog {
             let w = ui.available_width();
             for (i, s) in plan.steps.iter().enumerate() {
                 let (r, resp) = ui.allocate_exact_size(vec2(w, 36.0), Sense::click());
-                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, self.selected == Some(i), format!("리베이스: {}", s.subject)));
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, self.selected == Some(i), kiln_common::trf!("리베이스: {}", s.subject)));
                 rows.push((i, r));
                 if resp.clicked() {
                     click = Some(i);
@@ -770,7 +770,7 @@ impl RebaseDialog {
                 // 손잡이
                 let hr = Rect::from_min_size(r.min, vec2(24.0, r.height()));
                 let handle = ui.interact(hr, Id::new(("rebase-handle", &s.sha)), Sense::drag());
-                handle.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("순서 변경: {}", s.subject)));
+                handle.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, kiln_common::trf!("순서 변경: {}", s.subject)));
                 if handle.hovered() || handle.dragged() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
@@ -786,7 +786,7 @@ impl RebaseDialog {
                 // 동작 드롭다운
                 let ar = Rect::from_min_size(pos2(r.left() + 28.0, r.center().y - 12.0), vec2(112.0, 24.0));
                 let aresp = ui.interact(ar, Id::new(("rebase-action", &s.sha)), Sense::click());
-                aresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("동작: {}", s.subject)));
+                aresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, kiln_common::trf!("동작: {}", s.subject)));
                 let ac = action_color(s.action);
                 let fill = if aresp.hovered() { tint(ac, 0.22) } else { tint(ac, if t.dark { 0.14 } else { 0.10 }) };
                 ui.painter().rect(ar, CornerRadius::same(6), fill, Stroke::new(1.0, tint(ac, 0.35)), StrokeKind::Inside);
@@ -914,13 +914,13 @@ impl RebaseDialog {
         let pv = plan.preview();
         let dropped = plan.steps.iter().filter(|s| s.action == RebaseAction::Drop).count();
         let reordered = plan.steps.iter().map(|s| &s.sha).ne(self.original.iter());
-        inner.label(RichText::new("결과 미리보기").font(fonts::semibold(12.5)).color(t.text_dim));
-        let mut summary = format!("커밋 {}개 → {}개", plan.steps.len(), pv.len());
+        inner.label(RichText::new(kiln_common::i18n::tr("결과 미리보기")).font(fonts::semibold(12.5)).color(t.text_dim));
+        let mut summary = kiln_common::trf!("커밋 {}개 → {}개", plan.steps.len(), pv.len());
         if dropped > 0 {
-            summary.push_str(&format!(" · 삭제 {dropped}"));
+            summary.push_str(&kiln_common::trf!(" · 삭제 {dropped}"));
         }
         if reordered {
-            summary.push_str(" · 순서 변경");
+            summary.push_str(kiln_common::i18n::tr(" · 순서 변경"));
         }
         inner.label(RichText::new(summary).font(fonts::regular(12.0)).color(t.text_faint));
         inner.add_space(8.0);
@@ -945,9 +945,9 @@ impl RebaseDialog {
                 let tag = if !melded.is_empty() {
                     Some(format!("+{}", melded.len()))
                 } else if s.action == RebaseAction::Edit {
-                    Some("멈춤".to_string())
+                    Some(kiln_common::i18n::tr("멈춤").to_string())
                 } else if s.action == RebaseAction::Reword {
-                    Some("수정".to_string())
+                    Some(kiln_common::i18n::tr("수정").to_string())
                 } else {
                     None
                 };
@@ -967,7 +967,7 @@ impl RebaseDialog {
                 let _ = x;
             }
             if count == 0 {
-                ui.label(RichText::new("모든 커밋이 삭제됩니다").font(fonts::regular(12.5)).color(t.red));
+                ui.label(RichText::new(kiln_common::i18n::tr("모든 커밋이 삭제됩니다")).font(fonts::regular(12.5)).color(t.red));
             }
         });
         ui.allocate_rect(r, Sense::hover());
@@ -983,7 +983,7 @@ fn review_remote_label(remote:&str)->String {
     if let Some((scheme,rest))=remote.split_once("://") {
         if let Some((_,host))=rest.rsplit_once('@') {return format!("{scheme}://{host}");}
     }
-    if std::path::Path::new(remote).is_absolute() {return format!("로컬 원격 · {}",std::path::Path::new(remote).file_name().unwrap_or_default().to_string_lossy());}
+    if std::path::Path::new(remote).is_absolute() {return kiln_common::trf!("로컬 원격 · {}",std::path::Path::new(remote).file_name().unwrap_or_default().to_string_lossy());}
     remote.into()
 }
 
@@ -1008,53 +1008,53 @@ impl HistoryReviewDialog {
             match result {Ok(review)=>{self.message=review.message.clone();self.auto_push=review.pushed&&review.remote.is_some();self.review=Some(review);},Err(error)=>self.error=Some(error.to_string())}
         }
         let t=Theme::current();
-        let title_text=match self.action {ReviewAction::Squash=>"커밋 스쿼시 검토",ReviewAction::Drop=>"커밋 삭제 검토",ReviewAction::CherryPick=>"체리픽 검토"};
+        let title_text=match self.action {ReviewAction::Squash=>kiln_common::i18n::tr("커밋 스쿼시 검토"),ReviewAction::Drop=>kiln_common::i18n::tr("커밋 삭제 검토"),ReviewAction::CherryPick=>kiln_common::i18n::tr("체리픽 검토")};
         modal(ctx,id,(ctx.content_rect().width()-64.0).clamp(240.0,660.0),|ui|{
             title(ui,title_text,None);
-            if self.task.is_some(){ui.spinner();body_text(ui,"현재 브랜치와 원격 이력을 확인하고 있습니다. 아직 이력은 변경하지 않습니다.");return if footer(ui,"검토 중…",ButtonKind::Primary,false).1 {DialogOutcome::Cancel}else{DialogOutcome::Open};}
+            if self.task.is_some(){ui.spinner();body_text(ui,kiln_common::i18n::tr("현재 브랜치와 원격 이력을 확인하고 있습니다. 아직 이력은 변경하지 않습니다."));return if footer(ui,kiln_common::i18n::tr("검토 중…"),ButtonKind::Primary,false).1 {DialogOutcome::Cancel}else{DialogOutcome::Open};}
             let Some(review)=&self.review else {
-                body_text(ui,self.error.as_deref().unwrap_or("검토 정보를 읽지 못했습니다."));
-                body_text(ui,"저장하지 않은 파일·진행 중인 Git 작업·현재 브랜치를 확인한 뒤 다시 선택하세요.");
-                return if footer(ui,"실행할 수 없음",ButtonKind::Primary,false).1 {DialogOutcome::Cancel}else{DialogOutcome::Open};
+                body_text(ui,self.error.as_deref().unwrap_or(kiln_common::i18n::tr("검토 정보를 읽지 못했습니다.")));
+                body_text(ui,kiln_common::i18n::tr("저장하지 않은 파일·진행 중인 Git 작업·현재 브랜치를 확인한 뒤 다시 선택하세요."));
+                return if footer(ui,kiln_common::i18n::tr("실행할 수 없음"),ButtonKind::Primary,false).1 {DialogOutcome::Cancel}else{DialogOutcome::Open};
             };
             let rewrite=self.action!=ReviewAction::CherryPick;
             let risk=matches!(review.default_status,DefaultStatus::Unknown(_)|DefaultStatus::Merged{..}|DefaultStatus::DefaultBranch{..});
-            ui.add(egui::Label::new(RichText::new(format!("{}개 선택 · {}",review.commits.len(),review.branch)).strong()).truncate()).on_hover_text(&review.branch);
+            ui.add(egui::Label::new(RichText::new(kiln_common::trf!("{}개 선택 · {}",review.commits.len(),review.branch)).strong()).truncate()).on_hover_text(&review.branch);
             if let (Some(first),Some(last))=(review.commits.first(),review.commits.last()) {ui.add(egui::Label::new(if review.commits.len()==1 {first.subject.clone()}else{format!("{} → {}",first.subject,last.subject)}).truncate()).on_hover_text(format!("{}\n{}",first.subject,last.subject));}
-            if self.action==ReviewAction::Squash {ui.add(egui::Label::new(format!("합친 메시지: {}",self.message.lines().next().unwrap_or("(입력 필요)"))).truncate());}
+            if self.action==ReviewAction::Squash {ui.add(egui::Label::new(kiln_common::trf!("합친 메시지: {}",self.message.lines().next().unwrap_or(kiln_common::i18n::tr("(입력 필요)")))).truncate());}
             ui.spacing_mut().scroll.floating=false;
             egui::ScrollArea::vertical().id_salt("review-body").max_height((ctx.content_rect().height()-300.0).max(38.0)).show(ui,|ui|{
-                ui.label(RichText::new(format!("변경할 현재 브랜치: {}",review.branch)).strong());
-                body_text(ui,if rewrite {"선택한 커밋과 이후 커밋의 해시가 바뀝니다. 공유한 이력과 협업자의 작업에 영향을 줍니다. 실행 전에 원본 HEAD를 별도 백업 참조로 보관합니다."}else{"아래 커밋의 변경을 현재 브랜치에 새 커밋으로 적용합니다. 원본 브랜치는 변경하지 않습니다. 충돌이 나면 계속 진행하거나 중단할 수 있습니다."});
-                if self.action==ReviewAction::Drop {ui.colored_label(t.red,"선택한 커밋의 변경 내용을 현재 브랜치에서 제거합니다.");}
+                ui.label(RichText::new(kiln_common::trf!("변경할 현재 브랜치: {}",review.branch)).strong());
+                body_text(ui,if rewrite {kiln_common::i18n::tr("선택한 커밋과 이후 커밋의 해시가 바뀝니다. 공유한 이력과 협업자의 작업에 영향을 줍니다. 실행 전에 원본 HEAD를 별도 백업 참조로 보관합니다.")}else{kiln_common::i18n::tr("아래 커밋의 변경을 현재 브랜치에 새 커밋으로 적용합니다. 원본 브랜치는 변경하지 않습니다. 충돌이 나면 계속 진행하거나 중단할 수 있습니다.")});
+                if self.action==ReviewAction::Drop {ui.colored_label(t.red,kiln_common::i18n::tr("선택한 커밋의 변경 내용을 현재 브랜치에서 제거합니다."));}
                 if rewrite {match &review.default_status {
-                    DefaultStatus::DefaultBranch{branch}=>{ui.add(egui::Label::new(RichText::new(format!("주의: 기본 브랜치 {branch} 자체를 변경합니다.")).color(t.red)).wrap());},
-                    DefaultStatus::Merged{branch}=>{ui.add(egui::Label::new(RichText::new(format!("주의: 다시 쓸 이력이 기본 브랜치 {branch}에 포함되어 있습니다. 이미 공유한 이력을 바꿉니다.")).color(t.red)).wrap());},
-                    DefaultStatus::Unknown(reason)=>{ui.add(egui::Label::new(RichText::new(format!("기본 브랜치 포함 여부를 확인하지 못했습니다: {reason}")).color(t.orange)).wrap());},
-                    DefaultStatus::NotMerged=>{body_text(ui,"조회한 기본 브랜치 이력에는 포함되어 있지 않습니다.");},
+                    DefaultStatus::DefaultBranch{branch}=>{ui.add(egui::Label::new(RichText::new(kiln_common::trf!("주의: 기본 브랜치 {branch} 자체를 변경합니다.")).color(t.red)).wrap());},
+                    DefaultStatus::Merged{branch}=>{ui.add(egui::Label::new(RichText::new(kiln_common::trf!("주의: 다시 쓸 이력이 기본 브랜치 {branch}에 포함되어 있습니다. 이미 공유한 이력을 바꿉니다.")).color(t.red)).wrap());},
+                    DefaultStatus::Unknown(reason)=>{ui.add(egui::Label::new(RichText::new(kiln_common::trf!("기본 브랜치 포함 여부를 확인하지 못했습니다: {reason}")).color(t.orange)).wrap());},
+                    DefaultStatus::NotMerged=>{body_text(ui,kiln_common::i18n::tr("조회한 기본 브랜치 이력에는 포함되어 있지 않습니다."));},
                 }}
-                ui.separator();ui.label(format!("선택한 커밋 {}개",review.commits.len()));
+                ui.separator();ui.label(kiln_common::trf!("선택한 커밋 {}개",review.commits.len()));
                 for commit in &review.commits {ui.add(egui::Label::new(format!("{}  {}",short(&commit.sha),commit.subject)).wrap());}
                 if rewrite && review.affected_commits.len()>review.commits.len() {
-                    ui.collapsing(format!("이후 재작성되는 커밋 포함 {}개",review.affected_commits.len()),|ui|{for commit in &review.affected_commits{ui.add(egui::Label::new(format!("{}  {}",short(&commit.sha),commit.subject)).wrap());}});
+                    ui.collapsing(kiln_common::trf!("이후 재작성되는 커밋 포함 {}개",review.affected_commits.len()),|ui|{for commit in &review.affected_commits{ui.add(egui::Label::new(format!("{}  {}",short(&commit.sha),commit.subject)).wrap());}});
                 }
                 if self.action==ReviewAction::Squash {
-                    ui.separator();let label=ui.label("합친 커밋 메시지");
+                    ui.separator();let label=ui.label(kiln_common::i18n::tr("합친 커밋 메시지"));
                     ui.add(egui::TextEdit::multiline(&mut self.message).desired_rows(5).desired_width(f32::INFINITY)).labelled_by(label.id);
                 }
                 if rewrite && review.pushed {
                     ui.separator();
                     if let Some(remote)=&review.remote {
-                        ui.add(egui::Label::new(format!("원격 대상: {} · {}",review_remote_label(&remote.remote),remote.branch)).wrap()).on_hover_text(review_remote_label_full(&remote.remote));
-                        body_text(ui,"검토 이후 원격 커밋이 달라졌으면 푸시를 거부합니다. 충돌로 중단되면 자동으로 푸시하지 않습니다.");
-                    } else {body_text(ui,"원격 대상과 기준 커밋을 확인하지 못해 자동 푸시하지 않습니다.");}
+                        ui.add(egui::Label::new(kiln_common::trf!("원격 대상: {} · {}",review_remote_label(&remote.remote),remote.branch)).wrap()).on_hover_text(review_remote_label_full(&remote.remote));
+                        body_text(ui,kiln_common::i18n::tr("검토 이후 원격 커밋이 달라졌으면 푸시를 거부합니다. 충돌로 중단되면 자동으로 푸시하지 않습니다."));
+                    } else {body_text(ui,kiln_common::i18n::tr("원격 대상과 기준 커밋을 확인하지 못해 자동 푸시하지 않습니다."));}
                 }
             });
-            if rewrite && review.pushed && review.remote.is_some() {ui.checkbox(&mut self.auto_push,"성공 후 이 브랜치만 force-with-lease로 푸시");}
-            if rewrite && risk {ui.checkbox(&mut self.ack,"기본 브랜치·공유 이력에 미치는 영향을 확인했습니다");}
+            if rewrite && review.pushed && review.remote.is_some() {ui.checkbox(&mut self.auto_push,kiln_common::i18n::tr("성공 후 이 브랜치만 force-with-lease로 푸시"));}
+            if rewrite && risk {ui.checkbox(&mut self.ack,kiln_common::i18n::tr("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다"));}
             ui.add_space(10.0);
             let valid=(!rewrite||!risk||self.ack)&&(self.action!=ReviewAction::Squash||!self.message.trim().is_empty());
-            let label=match self.action {ReviewAction::Squash=>"스쿼시",ReviewAction::Drop=>"커밋 삭제",ReviewAction::CherryPick=>"현재 브랜치에 체리픽"};
+            let label=match self.action {ReviewAction::Squash=>kiln_common::i18n::tr("스쿼시"),ReviewAction::Drop=>kiln_common::i18n::tr("커밋 삭제"),ReviewAction::CherryPick=>kiln_common::i18n::tr("현재 브랜치에 체리픽")};
             let (ok,cancel)=footer(ui,label,if rewrite{ButtonKind::Danger}else{ButtonKind::Primary},valid);
             if ok {DialogOutcome::Run{op:Op::Reviewed{review:Box::new(review.clone()),message:self.message.clone(),auto_push:self.auto_push,ack_risk:self.ack},autostash:false,pushed:false}}
             else if cancel {DialogOutcome::Cancel}else{DialogOutcome::Open}

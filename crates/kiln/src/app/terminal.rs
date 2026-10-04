@@ -196,6 +196,14 @@ impl MouseCapture {
 }
 
 impl TermView {
+    /// Cached galleys reference the current font atlas; reinstalling fonts
+    /// invalidates their texture coordinates even when cell dimensions match.
+    pub fn invalidate_fonts(&mut self) {
+        self.metrics = None;
+        self.rows.clear();
+        self.fit_cache.clear();
+    }
+
     pub fn new(session: SessionId) -> Self {
         TermView {
             session,
@@ -343,7 +351,7 @@ impl TermView {
         let id = ui.id().with(("term", self.session));
         let resp = ui.interact(rect, id, Sense::click_and_drag());
         ui.advance_cursor_after_rect(rect);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "터미널 화면"));
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, kiln_common::i18n::tr("터미널 화면")));
         if !self.inspector && (focus_request || resp.clicked() || resp.drag_started()) {
             resp.request_focus();
         }
@@ -377,7 +385,7 @@ impl TermView {
 
         let screen_exists = conn.screens.contains_key(&self.session);
         if !screen_exists {
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "연결 중…", FontId::proportional(13.0), Color32::GRAY);
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, kiln_common::i18n::tr("연결 중…"), FontId::proportional(13.0), Color32::GRAY);
             return out;
         }
 
@@ -387,20 +395,20 @@ impl TermView {
         let app_handles_mouse = term_mode & (mode::MOUSE_CLICK | mode::MOUSE_DRAG | mode::MOUSE_MOTION) != 0;
         if !app_handles_mouse || ui.input(|i| i.modifiers.shift) || resp.context_menu_opened() {
             resp.context_menu(|ui| {
-                if ui.add_enabled(self.has_selection(), egui::Button::new("복사")).clicked() {
+                if ui.add_enabled(self.has_selection(), egui::Button::new(kiln_common::i18n::tr("복사"))).clicked() {
                     self.copy_selection(ui.ctx(), conn);
                     ui.close();
                 }
-                if ui.button("출력 검색").clicked() {
+                if ui.button(kiln_common::i18n::tr("출력 검색")).clicked() {
                     self.open_search();
                     ui.close();
                 }
-                if ui.button("명령 기록").clicked() {
+                if ui.button(kiln_common::i18n::tr("명령 기록")).clicked() {
                     self.open_history();
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("셸·에이전트 연동").clicked() {
+                if ui.button(kiln_common::i18n::tr("셸·에이전트 연동")).clicked() {
                     self.open_integration_help();
                     ui.close();
                 }
@@ -538,7 +546,7 @@ impl TermView {
             let top_frac = (screen.history - screen.display_offset) as f32 / (screen.history as f32).max(1.0);
             let y = rect.top() + top_frac * (rect.height() - h);
             painter.rect_filled(Rect::from_min_size(pos2(rect.right() - 6.0, y), vec2(3.0, h)), 2.0, t.text_faint);
-            let label = format!("{} 줄 위", screen.display_offset);
+            let label = kiln_common::trf!("{} 줄 위", screen.display_offset);
             let g = painter.layout_no_wrap(label, kiln_common::fonts::medium(11.5), t.text);
             let br = Rect::from_min_size(pos2(rect.right() - g.size().x - 34.0, rect.top() + 10.0), g.size() + vec2(16.0, 8.0));
             painter.rect_filled(br, 8.0, t.bg_elevated);
@@ -548,9 +556,9 @@ impl TermView {
 
         if let Some(code) = exited {
             let t = kiln_common::Theme::current();
-            let msg = format!("프로세스가 종료됐습니다 (코드 {code})");
+            let msg = kiln_common::trf!("프로세스가 종료됐습니다 (코드 {code})");
             let g = painter.layout_no_wrap(msg, kiln_common::fonts::medium(13.0), t.text);
-            let hint_text = settings.close_shortcut.as_ref().map(|shortcut| format!("↩ 새 셸   ·   {} 닫기", ui.ctx().format_shortcut(shortcut))).unwrap_or_else(|| "↩ 새 셸 시작".into());
+            let hint_text = settings.close_shortcut.as_ref().map(|shortcut| kiln_common::trf!("↩ 새 셸   ·   {} 닫기", ui.ctx().format_shortcut(shortcut))).unwrap_or_else(|| kiln_common::i18n::tr("↩ 새 셸 시작").into());
             let hint = painter.layout_no_wrap(hint_text, kiln_common::fonts::regular(12.0), t.text_dim);
             let w = g.size().x.max(hint.size().x) + 36.0;
             let r = Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 46.0), vec2(w, 56.0));
@@ -809,58 +817,58 @@ impl TermView {
             ui.spacing_mut().scroll.floating = false;
             ui.spacing_mut().scroll.dormant_handle_opacity = 0.65;
             ui.horizontal_wrapped(|ui| {
-                close = ui.button("← 터미널").clicked();
-                ui.label(egui::RichText::new("명령 기록").color(t.text).strong()).on_hover_text("최근 40개 명령 · 출력은 명령당 앞부분 128KiB. 데몬 재시작·업그레이드 시 기록이 사라집니다.");
-                if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Plug, 28.0, self.integration_help, "셸·에이전트 연동").clicked() {
+                close = ui.button(kiln_common::i18n::tr("← 터미널")).clicked();
+                ui.label(egui::RichText::new(kiln_common::i18n::tr("명령 기록")).color(t.text).strong()).on_hover_text(kiln_common::i18n::tr("최근 40개 명령 · 출력은 명령당 앞부분 128KiB. 데몬 재시작·업그레이드 시 기록이 사라집니다."));
+                if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Plug, 28.0, self.integration_help, kiln_common::i18n::tr("셸·에이전트 연동")).clicked() {
                     self.integration_help = !self.integration_help;
                 }
             });
             let body_height=(available_height-116.0).max(32.0);
             egui::ScrollArea::vertical().id_salt(("command-inspector",self.session)).max_height(body_height).auto_shrink([false,false]).show(ui, |ui| {
                 if self.integration_help {
-                    ui.label(if telemetry.shell_integration {"셸: 연결됨"} else {"셸: 명령 경계를 받지 못했습니다"});
-                    ui.label(format!("에이전트: {}",telemetry.activity.label()));
-                    ui.label("설정 → 터미널에서 기본 셸을 /bin/zsh로 지정하고, Kiln의 + 버튼으로 새 작업을 여세요. 새 터미널은 자동 연결됩니다. 기존 zsh에는 그다음 아래 명령을 직접 실행하세요. 셸 안에서 zsh만 실행하면 연결 파일이 생성되지 않습니다.");
-                    if ui.button("zsh 연결 명령 복사").clicked(){ctx.copy_text("source ~/.local/share/kiln/shell-integration-v1/integration.zsh".into());}
-                    ui.label("에이전트 상태는 훅에서 kiln activity running / waiting / done / failed로 알립니다. 명령을 실행할 수 있는 셸 프롬프트에서 테스트하세요.");
-                    if ui.button("연결 테스트 명령 복사").clicked(){ctx.copy_text(r"printf '\033]777;kiln-agent;waiting\007'".into());}
-                    ui.label("테스트 후 에이전트 상태가 ‘입력 필요’로 바뀌고 알림에 표시됩니다. kiln activity unknown으로 초기화할 수 있습니다.");
+                    ui.label(if telemetry.shell_integration {kiln_common::i18n::tr("셸: 연결됨")} else {kiln_common::i18n::tr("셸: 명령 경계를 받지 못했습니다")});
+                    ui.label(kiln_common::trf!("에이전트: {}",kiln_common::i18n::tr(telemetry.activity.label())));
+                    ui.label(kiln_common::i18n::tr("설정 → 터미널에서 기본 셸을 /bin/zsh로 지정하고, Kiln의 + 버튼으로 새 작업을 여세요. 새 터미널은 자동 연결됩니다. 기존 zsh에는 그다음 아래 명령을 직접 실행하세요. 셸 안에서 zsh만 실행하면 연결 파일이 생성되지 않습니다."));
+                    if ui.button(kiln_common::i18n::tr("zsh 연결 명령 복사")).clicked(){ctx.copy_text("source ~/.local/share/kiln/shell-integration-v1/integration.zsh".into());}
+                    ui.label(kiln_common::i18n::tr("에이전트 상태는 훅에서 kiln activity running / waiting / done / failed로 알립니다. 명령을 실행할 수 있는 셸 프롬프트에서 테스트하세요."));
+                    if ui.button(kiln_common::i18n::tr("연결 테스트 명령 복사")).clicked(){ctx.copy_text(r"printf '\033]777;kiln-agent;waiting\007'".into());}
+                    ui.label(kiln_common::i18n::tr("테스트 후 에이전트 상태가 ‘입력 필요’로 바뀌고 알림에 표시됩니다. kiln activity unknown으로 초기화할 수 있습니다."));
                     return;
                 } else if !telemetry.shell_integration {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label("셸을 연결하면 명령 기록이 표시됩니다.");
-                        if ui.link("연결 방법").clicked() { self.integration_help = true; }
+                        ui.label(kiln_common::i18n::tr("셸을 연결하면 명령 기록이 표시됩니다."));
+                        if ui.link(kiln_common::i18n::tr("연결 방법")).clicked() { self.integration_help = true; }
                     });
                 }
                 if self.inspector_record_expired {
-                    ui.label("선택한 명령 기록이 만료되어 현재 출력을 표시합니다.");
+                    ui.label(kiln_common::i18n::tr("선택한 명령 기록이 만료되어 현재 출력을 표시합니다."));
                     if !self.command_draft.is_empty() {
-                        ui.label("편집하던 명령은 아래에 남겨두었습니다. 복사한 뒤 다른 기록을 선택하세요.");
+                        ui.label(kiln_common::i18n::tr("편집하던 명령은 아래에 남겨두었습니다. 복사한 뒤 다른 기록을 선택하세요."));
                         ui.add(egui::TextEdit::multiline(&mut self.command_draft).desired_rows(2).desired_width(f32::INFINITY));
-                        if ui.button("명령 초안 복사").clicked(){ctx.copy_text(self.command_draft.clone());}
+                        if ui.button(kiln_common::i18n::tr("명령 초안 복사")).clicked(){ctx.copy_text(self.command_draft.clone());}
                     }
                 }
                 let old = self.inspected_command;
                 egui::ComboBox::from_id_salt(("command-picker",self.session)).width(ui.available_width()-16.0)
-                    .selected_text(self.inspected_command.and_then(|id| telemetry.commands.iter().find(|c|c.id==id)).map(|c| command_label(c)).unwrap_or_else(|| "현재 보이는 출력".into()))
+                    .selected_text(self.inspected_command.and_then(|id| telemetry.commands.iter().find(|c|c.id==id)).map(|c| command_label(c)).unwrap_or_else(|| kiln_common::i18n::tr("현재 보이는 출력").into()))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.inspected_command,None,"현재 보이는 출력");
+                        ui.selectable_value(&mut self.inspected_command,None,kiln_common::i18n::tr("현재 보이는 출력"));
                         for c in telemetry.commands.iter().rev() { ui.selectable_value(&mut self.inspected_command,Some(c.id),command_label(c)); }
                     });
                 ui.horizontal_wrapped(|ui| {
                     let index=self.inspected_command.and_then(|id|telemetry.commands.iter().position(|c|c.id==id));
                     let previous=index.map(|i|i.checked_sub(1)).unwrap_or_else(||telemetry.commands.len().checked_sub(1));
                     ui.add_enabled_ui(previous.is_some(), |ui| {
-                        if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::ArrowUp, 28.0, false, "이전 명령").clicked() { self.inspected_command=previous.map(|i|telemetry.commands[i].id); }
+                        if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::ArrowUp, 28.0, false, kiln_common::i18n::tr("이전 명령")).clicked() { self.inspected_command=previous.map(|i|telemetry.commands[i].id); }
                     });
                     let next=index.and_then(|i|telemetry.commands.get(i+1)).map(|c|c.id);
                     ui.add_enabled_ui(next.is_some(), |ui| {
-                        if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::ArrowDown, 28.0, false, "다음 명령").clicked() { self.inspected_command=next; }
+                        if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::ArrowDown, 28.0, false, kiln_common::i18n::tr("다음 명령")).clicked() { self.inspected_command=next; }
                     });
-                    if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Terminal, 28.0, self.inspected_command.is_none(), "현재 출력").clicked() { self.inspected_command=None; }
+                    if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Terminal, 28.0, self.inspected_command.is_none(), kiln_common::i18n::tr("현재 출력")).clicked() { self.inspected_command=None; }
                     if let Some(record) = self.inspected_command.and_then(|id| telemetry.commands.iter().find(|c| c.id == id)) {
                         ui.add_enabled_ui(record.output_available, |ui| {
-                            if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Refresh, 28.0, false, "명령 출력 다시 읽기").clicked() { conn.read_command_output(self.session, record.id); }
+                            if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Refresh, 28.0, false, kiln_common::i18n::tr("명령 출력 다시 읽기")).clicked() { conn.read_command_output(self.session, record.id); }
                         });
                     }
                 });
@@ -873,32 +881,32 @@ impl TermView {
                 let output = self.inspected_command.and_then(|id|conn.command_outputs.get(&(self.session,id)));
                 let display = if self.inspected_command.is_none() { screen_text.as_str() }
                     else if let Some((text, _)) = output { text.as_str() }
-                    else if command.is_some_and(|c| c.finished_unix.is_none()) { "실행 중인 명령입니다. ‘현재 출력’에서 진행 상황을 확인하세요." }
-                    else if command.is_some_and(|c| !c.output_available) { "보관된 출력이 없습니다. 명령 내용은 아래에서 확인할 수 있습니다." }
-                    else { "출력을 불러오는 중… 응답이 없으면 ‘명령 출력 다시 읽기’를 누르세요." };
-                if output.is_some_and(|x|x.1) { ui.label(egui::RichText::new("출력이 기록 제한(128KiB)을 초과해 앞부분만 보관했습니다.").color(t.orange)); }
-                let label = ui.label(if self.inspected_command.is_none() { "보이는 터미널 출력 · 읽기 전용" } else { "선택한 명령 출력 · 읽기 전용" });
+                    else if command.is_some_and(|c| c.finished_unix.is_none()) { kiln_common::i18n::tr("실행 중인 명령입니다. ‘현재 출력’에서 진행 상황을 확인하세요.") }
+                    else if command.is_some_and(|c| !c.output_available) { kiln_common::i18n::tr("보관된 출력이 없습니다. 명령 내용은 아래에서 확인할 수 있습니다.") }
+                    else { kiln_common::i18n::tr("출력을 불러오는 중… 응답이 없으면 ‘명령 출력 다시 읽기’를 누르세요.") };
+                if output.is_some_and(|x|x.1) { ui.label(egui::RichText::new(kiln_common::i18n::tr("출력이 기록 제한(128KiB)을 초과해 앞부분만 보관했습니다.")).color(t.orange)); }
+                let label = ui.label(if self.inspected_command.is_none() { kiln_common::i18n::tr("보이는 터미널 출력 · 읽기 전용") } else { kiln_common::i18n::tr("선택한 명령 출력 · 읽기 전용") });
                 let mut readonly: &str = display;
                 ui.add(egui::TextEdit::multiline(&mut readonly).font(egui::TextStyle::Monospace).desired_rows(8).desired_width(f32::INFINITY)).labelled_by(label.id);
                 if let Some(command)=command {
-                    ui.label(format!("작업 폴더: {}",command.cwd.as_deref().or(cwd).unwrap_or("확인 안 됨")));
-                    let label=ui.label("명령 편집 · 아래 실행 버튼을 눌러야 실행됩니다");
+                    ui.label(kiln_common::trf!("작업 폴더: {}",command.cwd.as_deref().or(cwd).unwrap_or(kiln_common::i18n::tr("확인 안 됨"))));
+                    let label=ui.label(kiln_common::i18n::tr("명령 편집 · 아래 실행 버튼을 눌러야 실행됩니다"));
                     ui.add(egui::TextEdit::multiline(&mut self.command_draft).desired_rows(2).desired_width(f32::INFINITY).code_editor()).labelled_by(label.id);
                 } else {
-                    let label=ui.label("터미널 입력 · 전송 후 터미널에서 Enter로 실행");
+                    let label=ui.label(kiln_common::i18n::tr("터미널 입력 · 전송 후 터미널에서 Enter로 실행"));
                     ui.add(egui::TextEdit::singleline(&mut self.accessible_input).desired_width(f32::INFINITY)).labelled_by(label.id);
-                    if ui.button("입력만 보내기").clicked() {
+                    if ui.button(kiln_common::i18n::tr("입력만 보내기")).clicked() {
                         let text=self.accessible_input.replace(['\r','\n']," ");
                         conn.input(self.session,text.into_bytes()); self.accessible_input.clear();
                     }
-                    if ui.button("터미널에 Enter 보내기").clicked() { conn.input(self.session,vec![b'\r']); }
+                    if ui.button(kiln_common::i18n::tr("터미널에 Enter 보내기")).clicked() { conn.input(self.session,vec![b'\r']); }
                 }
             });
             if !self.integration_help { ui.horizontal_wrapped(|ui| {
                 let output = if self.inspected_command.is_none(){Some(screen_text.as_str())}else{self.inspected_command.and_then(|id|conn.command_outputs.get(&(self.session,id))).map(|o|o.0.as_str())};
-                if ui.add_enabled(output.is_some(),egui::Button::new("출력 복사")).clicked(){ctx.copy_text(output.unwrap_or_default().to_owned());}
+                if ui.add_enabled(output.is_some(),egui::Button::new(kiln_common::i18n::tr("출력 복사"))).clicked(){ctx.copy_text(output.unwrap_or_default().to_owned());}
             if let Some(command)=self.inspected_command.and_then(|id|telemetry.commands.iter().find(|c|c.id==id)) {
-                if ui.add_enabled(!self.command_draft.trim().is_empty(),egui::Button::new("새 터미널에서 실행")).clicked() {
+                if ui.add_enabled(!self.command_draft.trim().is_empty(),egui::Button::new(kiln_common::i18n::tr("새 터미널에서 실행"))).clicked() {
                     out.command_to_run=Some((self.command_draft.clone(),command.cwd.clone())); close=true;
                 }
             }
@@ -931,7 +939,7 @@ impl TermView {
                         ui.add_space(4.0);
                         let te = ui.add(
                             egui::TextEdit::singleline(&mut sb.query)
-                                .hint_text("스크롤백에서 찾기")
+                                .hint_text(kiln_common::i18n::tr("스크롤백에서 찾기"))
                                 .frame(egui::Frame::NONE)
                                 .font(kiln_common::fonts::regular(13.0))
                                 .desired_width(width - 150.0),
@@ -951,16 +959,16 @@ impl TermView {
                             te.request_focus();
                         }
                         if sb.last_found == Some(false) {
-                            ui.label(egui::RichText::new("없음").size(12.0).color(t.red));
+                            ui.label(egui::RichText::new(kiln_common::i18n::tr("없음")).size(12.0).color(t.red));
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if widgets::icon_button(ui, Icon::Close, 24.0, false, "닫기 (Esc)").clicked() || ((te.has_focus() || te.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+                            if widgets::icon_button(ui, Icon::Close, 24.0, false, kiln_common::i18n::tr("닫기 (Esc)")).clicked() || ((te.has_focus() || te.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
                                 close = true;
                             }
-                            if widgets::icon_button(ui, Icon::ArrowDown, 24.0, false, "다음 (⇧↩)").clicked() {
+                            if widgets::icon_button(ui, Icon::ArrowDown, 24.0, false, kiln_common::i18n::tr("다음 (⇧↩)")).clicked() {
                                 go(false);
                             }
-                            let up = widgets::icon_button(ui, Icon::ArrowUp, 24.0, false, "이전 (↩)");
+                            let up = widgets::icon_button(ui, Icon::ArrowUp, 24.0, false, kiln_common::i18n::tr("이전 (↩)"));
                             if up.clicked() {
                                 go(true);
                             }
@@ -997,8 +1005,8 @@ fn word_bounds(line: &Line, col: u16) -> (u16, u16) {
 }
 
 fn command_label(command: &kiln_proto::CommandRecord) -> String {
-    let status=match (command.finished_unix,command.exit_code) { (None,_)=>"실행 중".into(),(_,Some(0))=>"성공".into(),(_,Some(code))=>format!("종료 {code}"),_=>"종료 코드 확인 안 됨".into() };
-    let text=if command.command.is_empty(){"명령 텍스트 확인 안 됨"}else{&command.command};
+    let status=match (command.finished_unix,command.exit_code) { (None,_)=>kiln_common::i18n::tr("실행 중").into(),(_,Some(0))=>kiln_common::i18n::tr("성공").into(),(_,Some(code))=>kiln_common::trf!("종료 {code}"),_=>kiln_common::i18n::tr("종료 코드 확인 안 됨").into() };
+    let text=if command.command.is_empty(){kiln_common::i18n::tr("명령 텍스트 확인 안 됨")}else{&command.command};
     format!("{} · {} · {}",command.id,status,text.chars().take(80).collect::<String>())
 }
 

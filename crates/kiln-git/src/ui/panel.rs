@@ -230,7 +230,7 @@ impl GitPanel {
                 match (&done.result, done.kind) {
                     (Ok(out), JobKind::Sync) => {
                         let msg = out.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
-                        self.banner = Some((BannerKind::Success, format!("{} 완료", done.label), Some(msg)));
+                        self.banner = Some((BannerKind::Success, kiln_common::trf!("{} 완료", done.label), Some(msg)));
                     }
                     (Ok(_), JobKind::Commit) => {
                         if self.submitted_message.take().as_deref() == Some(self.message.as_str()) { self.message.clear(); }
@@ -238,7 +238,7 @@ impl GitPanel {
                     }
                     (Ok(_), _) => {}
                     (Err(e), _) => {
-                        self.banner = Some((BannerKind::Error, format!("{} 실패", done.label), Some(e.to_string())));
+                        self.banner = Some((BannerKind::Error, kiln_common::trf!("{} 실패", done.label), Some(e.to_string())));
                     }
                 }
                 if done.kind == JobKind::Checkout && done.result.is_ok() {
@@ -343,28 +343,28 @@ impl GitPanel {
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     spinner(ui, 14.0);
-                    ui.label(dim("저장소 읽는 중…"));
+                    ui.label(dim(kiln_common::i18n::tr("저장소 읽는 중…")));
                 });
             }
             Some(GitError::NotARepo) => {
-                empty_state_icon(ui, Icon::Branch, "Git 저장소 없음", "이 폴더는 Git으로 추적되고 있지 않습니다.");
+                empty_state_icon(ui, Icon::Branch, kiln_common::i18n::tr("Git 저장소 없음"), kiln_common::i18n::tr("이 폴더는 Git으로 추적되고 있지 않습니다."));
                 let root = self.root.clone();
                 ui.vertical_centered(|ui| {
-                    if primary_button(ui, "저장소 초기화", None).clicked() {
+                    if primary_button(ui, kiln_common::i18n::tr("저장소 초기화"), None).clicked() {
                         let _ = git(&root, Mode::Write, &["init"]);
                         self.refresh();
                     }
                 });
             }
             Some(GitError::GitMissing) => {
-                empty_state_icon(ui, Icon::Warning, "Git을 찾을 수 없음", "Git을 설치하고 PATH에 있는지 확인하세요.");
+                empty_state_icon(ui, Icon::Warning, kiln_common::i18n::tr("Git을 찾을 수 없음"), kiln_common::i18n::tr("Git을 설치하고 PATH에 있는지 확인하세요."));
             }
             Some(e) => {
                 let msg = e.to_string();
                 egui::Frame::new().inner_margin(Margin::same(10)).show(ui, |ui| {
-                    banner(ui, BannerKind::Error, "저장소를 읽을 수 없습니다", Some(&msg), false);
+                    banner(ui, BannerKind::Error, kiln_common::i18n::tr("저장소를 읽을 수 없습니다"), Some(&msg), false);
                     ui.add_space(6.0);
-                    if tool_button(ui, Some(Icon::Refresh), "다시 시도").clicked() {
+                    if tool_button(ui, Some(Icon::Refresh), kiln_common::i18n::tr("다시 시도")).clicked() {
                         self.refresh();
                     }
                 });
@@ -415,11 +415,11 @@ impl GitPanel {
                     t.text_faint,
                 );
             } else if detached {
-                p.text(pos2(name_rect.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, "분리된 HEAD", FontId::proportional(12.0), t.orange);
+                p.text(pos2(name_rect.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, kiln_common::i18n::tr("분리된 HEAD"), FontId::proportional(12.0), t.orange);
             }
             paint_icon(p, Rect::from_center_size(rect.right_center() - vec2(14.0, 0.0), vec2(12.0, 12.0)), Icon::ChevronDown, t.text_dim);
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("브랜치 {label}")));
-            resp.on_hover_text("브랜치 전환")
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, kiln_common::trf!("브랜치 {label}")));
+            resp.on_hover_text(kiln_common::i18n::tr("브랜치 전환"))
         };
         self.ui_branch_popup(ui, &resp);
 
@@ -441,7 +441,7 @@ impl GitPanel {
                     "Push".into()
                 };
                 if tool_button(ui, Some(Icon::ArrowUp), &push_label)
-                    .on_hover_text(if br.upstream.is_none() { "원격 브랜치에 Push하고 추적 브랜치로 연결" } else { "git push" })
+                    .on_hover_text(if br.upstream.is_none() { kiln_common::i18n::tr("원격 브랜치에 Push하고 추적 브랜치로 연결") } else { "git push" })
                     .clicked()
                 {
                     self.submit(JobKind::Sync, "Push", repo::push);
@@ -498,7 +498,7 @@ impl GitPanel {
                 ui.set_width(width - 12.0);
                 let focused = ui.memory(|m| m.focused()).is_some();
                 let te = egui::TextEdit::singleline(&mut self.picker.filter)
-                    .hint_text("브랜치 필터 또는 새로 만들기…")
+                    .hint_text(kiln_common::i18n::tr("브랜치 필터 또는 새로 만들기…"))
                     .desired_width(f32::INFINITY)
                     .frame(kiln_common::widgets::input_frame(focused, false));
                 let r = ui.add(te);
@@ -511,7 +511,7 @@ impl GitPanel {
                 let exists = self.picker.list.iter().any(|b| !b.remote && b.name == filter);
                 ui.add_space(4.0);
                 if !filter.is_empty() && !exists {
-                    let resp = branch_row(ui, &format!("새 브랜치 \"{filter}\" 만들기"), None, false, t.accent);
+                    let resp = branch_row(ui, &kiln_common::trf!("새 브랜치 \"{filter}\" 만들기"), None, false, t.accent);
                     if resp.clicked() || (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
                         action = Some(BranchAction::Create(filter.clone()));
                     }
@@ -519,7 +519,7 @@ impl GitPanel {
                 if self.picker.load.is_some() && self.picker.list.is_empty() {
                     ui.horizontal(|ui| {
                         spinner(ui, 12.0);
-                        ui.label(dim("브랜치 불러오는 중…"));
+                        ui.label(dim(kiln_common::i18n::tr("브랜치 불러오는 중…")));
                     });
                 }
                 if let Some(e) = &self.picker.error {
@@ -541,7 +541,7 @@ impl GitPanel {
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
-                            ui.label(RichText::new(if remote { "원격" } else { "로컬" }).font(kiln_common::fonts::semibold(11.5)).color(t.text_faint));
+                            ui.label(RichText::new(if remote { kiln_common::i18n::tr("원격") } else { kiln_common::i18n::tr("로컬") }).font(kiln_common::fonts::semibold(11.5)).color(t.text_faint));
                         });
                         ui.add_space(2.0);
                         for b in items {
@@ -550,7 +550,7 @@ impl GitPanel {
                             let resp = branch_row(ui, &b.name, detail, b.current, color);
                             if !remote && !b.current && resp.hovered() {
                                 let r = Rect::from_center_size(resp.rect.right_center() - vec2(16.0, 0.0), vec2(22.0, 22.0));
-                                if icon_button_at(ui, r, resp.id.with("del"), Icon::Trash, "브랜치 삭제").clicked() {
+                                if icon_button_at(ui, r, resp.id.with("del"), Icon::Trash, kiln_common::i18n::tr("브랜치 삭제")).clicked() {
                                     action = Some(BranchAction::Delete(b.name.clone()));
                                     continue;
                                 }
@@ -566,10 +566,10 @@ impl GitPanel {
             egui::Popup::close_id(ui.ctx(), popup_id);
             match a {
                 BranchAction::Create(name) => {
-                    self.submit(JobKind::Checkout, "브랜치 만들기", move |p| repo::create_branch(p, &name));
+                    self.submit(JobKind::Checkout, kiln_common::i18n::tr("브랜치 만들기"), move |p| repo::create_branch(p, &name));
                 }
                 BranchAction::Checkout(b) => {
-                    self.submit(JobKind::Checkout, "체크아웃", move |p| repo::checkout(p, &b));
+                    self.submit(JobKind::Checkout, kiln_common::i18n::tr("체크아웃"), move |p| repo::checkout(p, &b));
                 }
                 BranchAction::Delete(name) => {
                     self.confirm = Some(Confirm::DeleteBranch { name, force: false });
@@ -587,9 +587,9 @@ impl GitPanel {
             ui.add_space(6.0);
             let conflicts = snap.status.conflicted_count();
             let title = if conflicts > 0 {
-                format!("{} 진행 중 — 충돌 {conflicts}개를 해결하고 커밋하세요", op.label())
+                kiln_common::trf!("{} 진행 중 — 충돌 {conflicts}개를 해결하고 커밋하세요", op.label())
             } else {
-                format!("{} 진행 중 — 모든 충돌을 해결했습니다. 커밋할 수 있습니다", op.label())
+                kiln_common::trf!("{} 진행 중 — 모든 충돌을 해결했습니다. 커밋할 수 있습니다", op.label())
             };
             let mut abort = false;
             egui::Frame::new()
@@ -603,7 +603,7 @@ impl GitPanel {
                         icon_label(ui, Icon::Warning, theme().orange, 16.0);
                         ui.add(egui::Label::new(RichText::new(&title).font(kiln_common::fonts::medium(12.5)).color(theme().text)).wrap());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if tool_button(ui, None, "중단").clicked() {
+                            if tool_button(ui, None, kiln_common::i18n::tr("중단")).clicked() {
                                 abort = true;
                             }
                         });
@@ -637,12 +637,12 @@ impl GitPanel {
 
         let te = egui::TextEdit::multiline(&mut self.message)
             .id(te_id)
-            .hint_text("커밋 메시지")
+            .hint_text(kiln_common::i18n::tr("커밋 메시지"))
             .desired_rows(3)
             .desired_width(f32::INFINITY)
             .font(FontId::proportional(13.0))
             .frame(kiln_common::widgets::input_frame(focused, false).inner_margin(Margin::symmetric(10, 8)));
-        let te_resp = ui.add(te).on_hover_text(format!("{}로 커밋", shortcut_label(ui.ctx())));
+        let te_resp = ui.add(te).on_hover_text(kiln_common::trf!("{}로 커밋", shortcut_label(ui.ctx())));
 
         // 제목 길이 표시(입력창 오른쪽 아래)
         let subject_len = self.message.lines().next().map(|l| l.chars().count()).unwrap_or(0);
@@ -654,7 +654,7 @@ impl GitPanel {
             } else {
                 t.text_faint
             };
-            let tip = if subject_len > SUBJECT_MAX { "제목 줄이 72자를 넘습니다" } else { "제목 줄 길이" };
+            let tip = if subject_len > SUBJECT_MAX { kiln_common::i18n::tr("제목 줄이 72자를 넘습니다") } else { kiln_common::i18n::tr("제목 줄 길이") };
             let r = ui.painter().text(
                 te_resp.rect.right_bottom() - vec2(8.0, 5.0),
                 Align2::RIGHT_BOTTOM,
@@ -672,39 +672,39 @@ impl GitPanel {
         ui.allocate_ui_with_layout(vec2(row_w, 30.0), Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let push_clicked = ui
-                .add_enabled_ui(can_commit, |ui| secondary_button(ui, "커밋 후 Push"))
+                .add_enabled_ui(can_commit, |ui| secondary_button(ui, kiln_common::i18n::tr("커밋 후 Push")))
                 .inner
-                .on_hover_text("커밋한 뒤 upstream 브랜치로 Push")
+                .on_hover_text(kiln_common::i18n::tr("커밋한 뒤 upstream 브랜치로 Push"))
                 .clicked();
             let amend_clicked = ui
-                .add_enabled_ui(can_amend, |ui| secondary_button(ui, "커밋 수정"))
+                .add_enabled_ui(can_amend, |ui| secondary_button(ui, kiln_common::i18n::tr("커밋 수정")))
                 .inner
-                .on_hover_text("마지막 커밋 수정 (입력란이 비어 있으면 기존 메시지 유지)")
+                .on_hover_text(kiln_common::i18n::tr("마지막 커밋 수정 (입력란이 비어 있으면 기존 메시지 유지)"))
                 .clicked();
             let w = ui.available_width().max(60.0);
-            let label = if staged > 0 { format!("커밋 ({staged})") } else { "커밋".into() };
+            let label = if staged > 0 { kiln_common::trf!("커밋 ({staged})") } else { kiln_common::i18n::tr("커밋").into() };
             let r = ui.add_enabled_ui(can_commit, |ui| primary_button(ui, &label, Some(w))).inner;
             let hint = if conflicts > 0 {
-                "먼저 병합 충돌을 해결하세요"
+                kiln_common::i18n::tr("먼저 병합 충돌을 해결하세요")
             } else if staged == 0 && !merging {
-                "커밋할 변경 사항을 스테이징하세요"
+                kiln_common::i18n::tr("커밋할 변경 사항을 스테이징하세요")
             } else if self.message.trim().is_empty() {
-                "커밋 메시지를 입력하세요"
+                kiln_common::i18n::tr("커밋 메시지를 입력하세요")
             } else {
-                "스테이징된 변경 사항 커밋"
+                kiln_common::i18n::tr("스테이징된 변경 사항 커밋")
             };
             let clicked = r.on_hover_text(hint).on_disabled_hover_text(hint).clicked();
             if (clicked || submit) && can_commit {
                 let msg = self.message.clone();
-                self.submit(JobKind::Commit, "커밋", move |p| repo::commit(p, &msg, false));
+                self.submit(JobKind::Commit, kiln_common::i18n::tr("커밋"), move |p| repo::commit(p, &msg, false));
             }
             if amend_clicked {
                 let msg = self.message.clone();
-                self.submit(JobKind::Commit, "커밋 수정", move |p| repo::commit(p, &msg, true));
+                self.submit(JobKind::Commit, kiln_common::i18n::tr("커밋 수정"), move |p| repo::commit(p, &msg, true));
             }
             if push_clicked {
                 let msg = self.message.clone();
-                self.submit(JobKind::Commit, "커밋 후 Push", move |p| {
+                self.submit(JobKind::Commit, kiln_common::i18n::tr("커밋 후 Push"), move |p| {
                     let out = repo::commit(p, &msg, false)?;
                     repo::push(p).map(|o| format!("{out}\n{o}"))
                 });
@@ -724,7 +724,7 @@ impl GitPanel {
 
         if !conflicts.is_empty() {
             let mut open = self.open[&Section::Conflicts];
-            section_header(ui, &mut open, "병합 충돌", Some(conflicts.len()), Some(t.orange), |_| {});
+            section_header(ui, &mut open, kiln_common::i18n::tr("병합 충돌"), Some(conflicts.len()), Some(t.orange), |_| {});
             self.open.insert(Section::Conflicts, open);
             if open {
                 for e in &conflicts {
@@ -736,14 +736,14 @@ impl GitPanel {
         if !staged.is_empty() {
             let mut open = self.open[&Section::Staged];
             let mut unstage_all = false;
-            section_header(ui, &mut open, "스테이징된 변경 사항", Some(staged.len()), None, |ui| {
-                if !staged.is_empty() && icon_button(ui, Icon::Minus, "모두 스테이징 취소").clicked() {
+            section_header(ui, &mut open, kiln_common::i18n::tr("스테이징된 변경 사항"), Some(staged.len()), None, |ui| {
+                if !staged.is_empty() && icon_button(ui, Icon::Minus, kiln_common::i18n::tr("모두 스테이징 취소")).clicked() {
                     unstage_all = true;
                 }
             });
             self.open.insert(Section::Staged, open);
             if unstage_all {
-                self.mutate("모두 스테이징 취소", repo::unstage_all);
+                self.mutate(kiln_common::i18n::tr("모두 스테이징 취소"), repo::unstage_all);
             }
             if open {
                 for e in &staged {
@@ -756,12 +756,12 @@ impl GitPanel {
             let mut open = self.open[&Section::Changes];
             let mut stage_all = false;
             let mut discard_all = false;
-            section_header(ui, &mut open, "변경 사항", Some(changes.len()), None, |ui| {
+            section_header(ui, &mut open, kiln_common::i18n::tr("변경 사항"), Some(changes.len()), None, |ui| {
                 if !changes.is_empty() {
-                    if icon_button(ui, Icon::Plus, "모든 변경 사항 스테이징").clicked() {
+                    if icon_button(ui, Icon::Plus, kiln_common::i18n::tr("모든 변경 사항 스테이징")).clicked() {
                         stage_all = true;
                     }
-                    if icon_button(ui, Icon::Discard, "스테이징 전 변경 버리기").clicked() {
+                    if icon_button(ui, Icon::Discard, kiln_common::i18n::tr("스테이징 전 변경 버리기")).clicked() {
                         discard_all = true;
                     }
                 }
@@ -769,7 +769,7 @@ impl GitPanel {
             self.open.insert(Section::Changes, open);
             if stage_all {
                 let paths: Vec<String> = changes.iter().map(|e| e.path.clone()).collect();
-                self.mutate("모두 스테이징", move |p| repo::stage(p, &paths));
+                self.mutate(kiln_common::i18n::tr("모두 스테이징"), move |p| repo::stage(p, &paths));
             }
             if discard_all {
                 self.confirm = Some(Confirm::DiscardAll);
@@ -784,15 +784,15 @@ impl GitPanel {
         if !untracked.is_empty() {
             let mut open = self.open[&Section::Untracked];
             let mut stage_u = false;
-            section_header(ui, &mut open, "새 파일", Some(untracked.len()), None, |ui| {
-                if icon_button(ui, Icon::Plus, "추적되지 않은 파일 모두 스테이징").clicked() {
+            section_header(ui, &mut open, kiln_common::i18n::tr("새 파일"), Some(untracked.len()), None, |ui| {
+                if icon_button(ui, Icon::Plus, kiln_common::i18n::tr("추적되지 않은 파일 모두 스테이징")).clicked() {
                     stage_u = true;
                 }
             });
             self.open.insert(Section::Untracked, open);
             if stage_u {
                 let paths: Vec<String> = untracked.iter().map(|e| e.path.clone()).collect();
-                self.mutate("추적되지 않은 파일 스테이징", move |p| repo::stage(p, &paths));
+                self.mutate(kiln_common::i18n::tr("추적되지 않은 파일 스테이징"), move |p| repo::stage(p, &paths));
             }
             if open {
                 for e in &untracked {
@@ -803,7 +803,7 @@ impl GitPanel {
 
         let dirty_tree = !staged.is_empty() || !changes.is_empty() || !untracked.is_empty();
         if !dirty_tree && conflicts.is_empty() {
-            hint_row(ui, "변경 사항 없음");
+            hint_row(ui, kiln_common::i18n::tr("변경 사항 없음"));
         }
 
         // Existing stashes retain their list; creating the first stash needs only an action.
@@ -811,14 +811,14 @@ impl GitPanel {
         let mut new_stash = false;
         let can_stash = dirty_tree && conflicts.is_empty() && !busy;
         if !snap.stashes.is_empty() {
-            section_header(ui, &mut open, "스태시", Some(snap.stashes.len()), None, |ui| {
-                if can_stash && icon_button(ui, Icon::Plus, "변경 사항 스태시…").clicked() {
+            section_header(ui, &mut open, kiln_common::i18n::tr("스태시"), Some(snap.stashes.len()), None, |ui| {
+                if can_stash && icon_button(ui, Icon::Plus, kiln_common::i18n::tr("변경 사항 스태시…")).clicked() {
                     new_stash = true;
                 }
             });
         } else if dirty_tree && self.stash_input.is_none() {
             egui::Frame::new().inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 0 }).show(ui, |ui| {
-                new_stash = ui.add_enabled_ui(can_stash, |ui| tool_button(ui, Some(Icon::Stash), "스태시 만들기")).inner.clicked();
+                new_stash = ui.add_enabled_ui(can_stash, |ui| tool_button(ui, Some(Icon::Stash), kiln_common::i18n::tr("스태시 만들기"))).inner.clicked();
             });
         }
         if new_stash {
@@ -832,9 +832,9 @@ impl GitPanel {
 
         // 커밋 로그
         let mut open = self.open[&Section::Commits];
-        section_header(ui, &mut open, "커밋 기록", None, None, |ui| {
-            if icon_button(ui, Icon::Open, "커밋 기록 크게 보기")
-                .on_hover_text("같은 기록을 넓은 탭에서 보기")
+        section_header(ui, &mut open, kiln_common::i18n::tr("커밋 기록"), None, None, |ui| {
+            if icon_button(ui, Icon::Open, kiln_common::i18n::tr("커밋 기록 크게 보기"))
+                .on_hover_text(kiln_common::i18n::tr("같은 기록을 넓은 탭에서 보기"))
                 .clicked()
             {
                 events.push(GitEvent::OpenHistory);
@@ -859,7 +859,7 @@ impl GitPanel {
                 ui.horizontal(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut msg)
-                            .hint_text("스태시 메시지 (선택 사항)")
+                            .hint_text(kiln_common::i18n::tr("스태시 메시지 (선택 사항)"))
                             .desired_width(ui.available_width() - 110.0)
                             .frame(input_frame()),
                     );
@@ -867,12 +867,12 @@ impl GitPanel {
                         r.request_focus();
                     }
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                    if tool_button(ui, None, "스태시").clicked() || enter {
+                    if tool_button(ui, None, kiln_common::i18n::tr("스태시")).clicked() || enter {
                         let m = msg.clone();
-                        self.submit(JobKind::Mutate, "스태시", move |p| repo::stash_push(p, &m));
+                        self.submit(JobKind::Mutate, kiln_common::i18n::tr("스태시"), move |p| repo::stash_push(p, &m));
                         keep = false;
                     }
-                    if icon_button(ui, Icon::Close, "취소").clicked() {
+                    if icon_button(ui, Icon::Close, kiln_common::i18n::tr("취소")).clicked() {
                         keep = false;
                     }
                 });
@@ -914,14 +914,14 @@ impl GitPanel {
                     t.bg_hover,
                 );
                 let idx = s.index;
-                if btn(ui, Icon::Trash, "스태시 삭제") {
+                if btn(ui, Icon::Trash, kiln_common::i18n::tr("스태시 삭제")) {
                     self.confirm = Some(Confirm::DropStash { index: idx, message: msg.to_string() });
                 }
-                if btn(ui, Icon::Pop, "스태시 팝 (적용 후 삭제)") {
-                    self.submit(JobKind::Mutate, "스태시 팝", move |p| repo::stash_pop(p, idx));
+                if btn(ui, Icon::Pop, kiln_common::i18n::tr("스태시 팝 (적용 후 삭제)")) {
+                    self.submit(JobKind::Mutate, kiln_common::i18n::tr("스태시 팝"), move |p| repo::stash_pop(p, idx));
                 }
-                if btn(ui, Icon::Apply, "스태시 적용") {
-                    self.submit(JobKind::Mutate, "스태시 적용", move |p| repo::stash_apply(p, idx));
+                if btn(ui, Icon::Apply, kiln_common::i18n::tr("스태시 적용")) {
+                    self.submit(JobKind::Mutate, kiln_common::i18n::tr("스태시 적용"), move |p| repo::stash_apply(p, idx));
                 }
             }
         }
@@ -931,7 +931,7 @@ impl GitPanel {
         let t = theme();
         let w = ui.available_width();
         let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
-        let label = format!("{}{}", if kind == RowKind::Staged { "스테이징됨: " } else { "" }, e.path);
+        let label = format!("{}{}", if kind == RowKind::Staged { kiln_common::i18n::tr("스테이징됨: ") } else { "" }, e.path);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
         if !ui.is_rect_visible(rect) {
             return;
@@ -965,7 +965,7 @@ impl GitPanel {
         parts.push((&name, 13.0, name_color));
         let dir_s;
         if let Some(orig) = &e.orig_path {
-            dir_s = format!("  {orig}에서");
+            dir_s = kiln_common::trf!("  {orig}에서");
             parts.push((&dir_s, 11.5, t.text_faint));
         } else if !dir.is_empty() {
             dir_s = format!("  {dir}");
@@ -973,7 +973,7 @@ impl GitPanel {
         }
         let sub_s;
         if e.submodule {
-            sub_s = "  서브모듈".to_string();
+            sub_s = kiln_common::i18n::tr("  서브모듈").to_string();
             parts.push((&sub_s, 11.0, t.purple));
         }
         let conf_s;
@@ -1005,42 +1005,42 @@ impl GitPanel {
             let paths = vec![e.path.clone()];
             match kind {
                 RowKind::Staged => {
-                    if btn(ui, Icon::Minus, "스테이징 취소") {
+                    if btn(ui, Icon::Minus, kiln_common::i18n::tr("스테이징 취소")) {
                         handled = true;
-                        self.mutate("스테이징 취소", move |p| repo::unstage(p, &paths));
+                        self.mutate(kiln_common::i18n::tr("스테이징 취소"), move |p| repo::unstage(p, &paths));
                     }
                 }
                 RowKind::Changed => {
-                    if btn(ui, Icon::Plus, "스테이징") {
+                    if btn(ui, Icon::Plus, kiln_common::i18n::tr("스테이징")) {
                         handled = true;
                         let ps = paths.clone();
-                        self.mutate("스테이징", move |p| repo::stage(p, &ps));
+                        self.mutate(kiln_common::i18n::tr("스테이징"), move |p| repo::stage(p, &ps));
                     }
-                    if btn(ui, Icon::Discard, "변경 버리기") {
+                    if btn(ui, Icon::Discard, kiln_common::i18n::tr("변경 버리기")) {
                         handled = true;
                         self.confirm = Some(Confirm::Discard { paths: paths.clone(), untracked: false });
                     }
                 }
                 RowKind::Untracked => {
-                    if btn(ui, Icon::Plus, "스테이징") {
+                    if btn(ui, Icon::Plus, kiln_common::i18n::tr("스테이징")) {
                         handled = true;
                         let ps = paths.clone();
-                        self.mutate("스테이징", move |p| repo::stage(p, &ps));
+                        self.mutate(kiln_common::i18n::tr("스테이징"), move |p| repo::stage(p, &ps));
                     }
-                    if btn(ui, Icon::Trash, "파일 삭제") {
+                    if btn(ui, Icon::Trash, kiln_common::i18n::tr("파일 삭제")) {
                         handled = true;
                         self.confirm = Some(Confirm::Discard { paths: paths.clone(), untracked: true });
                     }
                 }
                 RowKind::Conflict => {
-                    if btn(ui, Icon::Check, "해결됨으로 표시 (스테이징)") {
+                    if btn(ui, Icon::Check, kiln_common::i18n::tr("해결됨으로 표시 (스테이징)")) {
                         handled = true;
                         let ps = paths.clone();
-                        self.mutate("해결됨으로 표시", move |p| repo::stage(p, &ps));
+                        self.mutate(kiln_common::i18n::tr("해결됨으로 표시"), move |p| repo::stage(p, &ps));
                     }
                 }
             }
-            if btn(ui, Icon::Open, "파일 열기") {
+            if btn(ui, Icon::Open, kiln_common::i18n::tr("파일 열기")) {
                 handled = true;
                 events.push(GitEvent::OpenFile(abs.clone()));
             }
@@ -1059,47 +1059,47 @@ impl GitPanel {
         }
         let path_owned = e.path.clone();
         resp.context_menu(|ui| {
-            if ui.button("파일 열기").clicked() {
+            if ui.button(kiln_common::i18n::tr("파일 열기")).clicked() {
                 events.push(GitEvent::OpenFile(abs.clone()));
                 ui.close();
             }
-            if kind != RowKind::Conflict && kind != RowKind::Untracked && ui.button("변경 사항 열기").clicked() {
+            if kind != RowKind::Conflict && kind != RowKind::Untracked && ui.button(kiln_common::i18n::tr("변경 사항 열기")).clicked() {
                 events.push(GitEvent::OpenDiff { path: abs.clone(), staged });
                 ui.close();
             }
             ui.separator();
             match kind {
                 RowKind::Conflict => {
-                    if ui.button("현재 변경 수락 (ours)").clicked() {
+                    if ui.button(kiln_common::i18n::tr("현재 변경 수락 (ours)")).clicked() {
                         let p2 = path_owned.clone();
-                        self.mutate("현재 변경 수락", move |p| repo::resolve_conflict(p, &p2, true));
+                        self.mutate(kiln_common::i18n::tr("현재 변경 수락"), move |p| repo::resolve_conflict(p, &p2, true));
                         ui.close();
                     }
-                    if ui.button("수신 변경 수락 (theirs)").clicked() {
+                    if ui.button(kiln_common::i18n::tr("수신 변경 수락 (theirs)")).clicked() {
                         let p2 = path_owned.clone();
-                        self.mutate("수신 변경 수락", move |p| repo::resolve_conflict(p, &p2, false));
+                        self.mutate(kiln_common::i18n::tr("수신 변경 수락"), move |p| repo::resolve_conflict(p, &p2, false));
                         ui.close();
                     }
-                    if ui.button("해결됨으로 표시").clicked() {
+                    if ui.button(kiln_common::i18n::tr("해결됨으로 표시")).clicked() {
                         let ps = vec![path_owned.clone()];
-                        self.mutate("해결됨으로 표시", move |p| repo::stage(p, &ps));
+                        self.mutate(kiln_common::i18n::tr("해결됨으로 표시"), move |p| repo::stage(p, &ps));
                         ui.close();
                     }
                 }
                 RowKind::Staged => {
-                    if ui.button("스테이징 취소").clicked() {
+                    if ui.button(kiln_common::i18n::tr("스테이징 취소")).clicked() {
                         let ps = vec![path_owned.clone()];
-                        self.mutate("스테이징 취소", move |p| repo::unstage(p, &ps));
+                        self.mutate(kiln_common::i18n::tr("스테이징 취소"), move |p| repo::unstage(p, &ps));
                         ui.close();
                     }
                 }
                 RowKind::Changed | RowKind::Untracked => {
-                    if ui.button("스테이징").clicked() {
+                    if ui.button(kiln_common::i18n::tr("스테이징")).clicked() {
                         let ps = vec![path_owned.clone()];
-                        self.mutate("스테이징", move |p| repo::stage(p, &ps));
+                        self.mutate(kiln_common::i18n::tr("스테이징"), move |p| repo::stage(p, &ps));
                         ui.close();
                     }
-                    if ui.button(if kind == RowKind::Untracked { "파일 삭제…" } else { "변경 사항 취소…" }).clicked() {
+                    if ui.button(if kind == RowKind::Untracked { kiln_common::i18n::tr("파일 삭제…") } else { kiln_common::i18n::tr("변경 사항 취소…") }).clicked() {
                         self.confirm =
                             Some(Confirm::Discard { paths: vec![path_owned.clone()], untracked: kind == RowKind::Untracked });
                         ui.close();
@@ -1107,7 +1107,7 @@ impl GitPanel {
                 }
             }
             ui.separator();
-            if ui.button("경로 복사").clicked() {
+            if ui.button(kiln_common::i18n::tr("경로 복사")).clicked() {
                 ui.ctx().copy_text(path_owned.clone());
                 ui.close();
             }
@@ -1119,39 +1119,39 @@ impl GitPanel {
         let id = Id::new(("kiln_git_confirm", &self.root));
         let (title, msg, ok, danger) = match &c {
             Confirm::Discard { paths, untracked: false } => (
-                "선택한 파일의 변경을 버릴까요?".to_string(),
-                format!("{}의 변경 사항이 사라집니다. 이 작업은 되돌릴 수 없습니다.", paths.join(", ")),
-                "변경 버리기",
+                kiln_common::i18n::tr("선택한 파일의 변경을 버릴까요?").to_string(),
+                kiln_common::trf!("{}의 변경 사항이 사라집니다. 이 작업은 되돌릴 수 없습니다.", paths.join(", ")),
+                kiln_common::i18n::tr("변경 버리기"),
                 true,
             ),
             Confirm::Discard { paths, untracked: true } => (
-                "추적되지 않은 파일을 삭제할까요?".to_string(),
-                format!("다음 파일을 영구적으로 삭제합니다: {}", paths.join(", ")),
-                "삭제",
+                kiln_common::i18n::tr("추적되지 않은 파일을 삭제할까요?").to_string(),
+                kiln_common::trf!("다음 파일을 영구적으로 삭제합니다: {}", paths.join(", ")),
+                kiln_common::i18n::tr("삭제"),
                 true,
             ),
             Confirm::DiscardAll => (
-                "스테이징 전 변경을 버릴까요?".to_string(),
-                "추적 중인 파일의 스테이징되지 않은 변경 사항이 모두 사라집니다. 추적되지 않은 파일은 유지됩니다.".to_string(),
-                "변경 버리기",
+                kiln_common::i18n::tr("스테이징 전 변경을 버릴까요?").to_string(),
+                kiln_common::i18n::tr("추적 중인 파일의 스테이징되지 않은 변경 사항이 모두 사라집니다. 추적되지 않은 파일은 유지됩니다.").to_string(),
+                kiln_common::i18n::tr("변경 버리기"),
                 true,
             ),
             Confirm::DeleteBranch { name, .. } => (
-                format!("\"{name}\" 브랜치를 삭제할까요?"),
-                "로컬 브랜치가 삭제됩니다. 강제로 삭제하면 다른 곳에 병합되지 않은 커밋을 잃을 수 있습니다.".to_string(),
-                "브랜치 삭제",
+                kiln_common::trf!("\"{name}\" 브랜치를 삭제할까요?"),
+                kiln_common::i18n::tr("로컬 브랜치가 삭제됩니다. 강제로 삭제하면 다른 곳에 병합되지 않은 커밋을 잃을 수 있습니다.").to_string(),
+                kiln_common::i18n::tr("브랜치 삭제"),
                 true,
             ),
             Confirm::DropStash { message, .. } => (
-                "스태시를 삭제할까요?".to_string(),
-                format!("다음 스태시를 영구적으로 삭제합니다: \"{message}\""),
-                "삭제",
+                kiln_common::i18n::tr("스태시를 삭제할까요?").to_string(),
+                kiln_common::trf!("다음 스태시를 영구적으로 삭제합니다: \"{message}\""),
+                kiln_common::i18n::tr("삭제"),
                 true,
             ),
             Confirm::AbortOp(op) => (
-                format!("{} 작업을 중단할까요?", op.label()),
-                "저장소가 작업 시작 전 상태로 돌아갑니다.".to_string(),
-                "중단",
+                kiln_common::trf!("{} 작업을 중단할까요?", op.label()),
+                kiln_common::i18n::tr("저장소가 작업 시작 전 상태로 돌아갑니다.").to_string(),
+                kiln_common::i18n::tr("중단"),
                 true,
             ),
         };
@@ -1160,7 +1160,7 @@ impl GitPanel {
         let r = confirm_modal(ctx, id, &title, &msg, ok, danger, |ui| {
             if is_branch {
                 ui.add_space(8.0);
-                checkbox_row(ui, &mut force, "병합되지 않았어도 강제 삭제 (-D)");
+                checkbox_row(ui, &mut force, kiln_common::i18n::tr("병합되지 않았어도 강제 삭제 (-D)"));
             }
         });
         if let Confirm::DeleteBranch { name, .. } = &c {
@@ -1172,22 +1172,22 @@ impl GitPanel {
                 match c {
                     Confirm::Discard { paths, untracked } => {
                         if untracked {
-                            self.mutate("삭제", move |p| repo::clean_untracked(p, &paths));
+                            self.mutate(kiln_common::i18n::tr("삭제"), move |p| repo::clean_untracked(p, &paths));
                         } else {
-                            self.mutate("변경 버리기", move |p| repo::discard(p, &paths));
+                            self.mutate(kiln_common::i18n::tr("변경 버리기"), move |p| repo::discard(p, &paths));
                         }
                     }
                     Confirm::DiscardAll => {
-                        self.mutate("변경 버리기", |p| repo::discard(p, &[".".to_string()]));
+                        self.mutate(kiln_common::i18n::tr("변경 버리기"), |p| repo::discard(p, &[".".to_string()]));
                     }
                     Confirm::DeleteBranch { name, .. } => {
-                        self.submit(JobKind::Mutate, "브랜치 삭제", move |p| repo::delete_branch(p, &name, force));
+                        self.submit(JobKind::Mutate, kiln_common::i18n::tr("브랜치 삭제"), move |p| repo::delete_branch(p, &name, force));
                     }
                     Confirm::DropStash { index, .. } => {
-                        self.submit(JobKind::Mutate, "스태시 삭제", move |p| repo::stash_drop(p, index));
+                        self.submit(JobKind::Mutate, kiln_common::i18n::tr("스태시 삭제"), move |p| repo::stash_drop(p, index));
                     }
                     Confirm::AbortOp(op) => {
-                        self.submit(JobKind::Mutate, "중단", move |p| repo::abort_op(p, op));
+                        self.submit(JobKind::Mutate, kiln_common::i18n::tr("중단"), move |p| repo::abort_op(p, op));
                     }
                 }
             }

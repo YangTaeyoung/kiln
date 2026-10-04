@@ -21,7 +21,7 @@ pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
         *on = !*on;
         resp.mark_changed();
     }
-    let label = ui.data(|d| d.get_temp::<String>(ui.id().with("setting-label"))).unwrap_or_else(|| "전환".into());
+    let label = ui.data(|d| d.get_temp::<String>(ui.id().with("setting-label"))).unwrap_or_else(|| kiln_common::i18n::tr("전환").into());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, &label));
     focus_ring(ui, &resp, 10);
     let rect = rect.shrink2(vec2(1.0, 2.0));

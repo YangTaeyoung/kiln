@@ -24,7 +24,7 @@ impl BranchStatus {
         match (&self.head, &self.oid) {
             (Some(h), _) => h.clone(),
             (None, Some(o)) => format!("({})", &o[..o.len().min(8)]),
-            (None, None) => "(브랜치 없음)".into(),
+            (None, None) => kiln_common::i18n::tr("(브랜치 없음)").into(),
         }
     }
 }
@@ -79,13 +79,13 @@ impl StatusEntry {
     /// 충돌 종류 설명(`양쪽 수정` 등).
     pub fn conflict_label(&self) -> &'static str {
         match (self.index, self.worktree) {
-            ('D', 'D') => "양쪽 삭제",
-            ('A', 'U') => "현재 쪽 추가",
-            ('U', 'D') => "상대 쪽 삭제",
-            ('U', 'A') => "상대 쪽 추가",
-            ('D', 'U') => "현재 쪽 삭제",
-            ('A', 'A') => "양쪽 추가",
-            _ => "양쪽 수정",
+            ('D', 'D') => kiln_common::i18n::tr("양쪽 삭제"),
+            ('A', 'U') => kiln_common::i18n::tr("현재 쪽 추가"),
+            ('U', 'D') => kiln_common::i18n::tr("상대 쪽 삭제"),
+            ('U', 'A') => kiln_common::i18n::tr("상대 쪽 추가"),
+            ('D', 'U') => kiln_common::i18n::tr("현재 쪽 삭제"),
+            ('A', 'A') => kiln_common::i18n::tr("양쪽 추가"),
+            _ => kiln_common::i18n::tr("양쪽 수정"),
         }
     }
 }

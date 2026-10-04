@@ -339,12 +339,12 @@ impl GithubHub {
         let t = theme();
         let drafts = self.recovery_drafts();
         if !drafts.repositories.is_empty() {
-            egui::CollapsingHeader::new(format!("보관된 작성 초안 · 저장소 {}개", drafts.repositories.len()))
+            egui::CollapsingHeader::new(kiln_common::trf!("보관된 작성 초안 · 저장소 {}개", drafts.repositories.len()))
                 .id_salt("github_saved_drafts").show(ui, |ui| {
-                    ui.label(faint("전송 전 GitHub에서 이미 등록되었는지 확인하세요."));
+                    ui.label(faint(kiln_common::i18n::tr("전송 전 GitHub에서 이미 등록되었는지 확인하세요.")));
                     for (name, draft) in &drafts.repositories {
-                        for (exists, tab, title) in [(draft.pull_request.is_some(), HubTab::PullRequests, "풀 리퀘스트"), (draft.issue.is_some(), HubTab::Issues, "이슈")] {
-                            if exists && ui.add_enabled(!self.is_submitting(), egui::Button::new(format!("{name} · {title} 이어 쓰기"))).clicked() {
+                        for (exists, tab, title) in [(draft.pull_request.is_some(), HubTab::PullRequests, kiln_common::i18n::tr("풀 리퀘스트")), (draft.issue.is_some(), HubTab::Issues, kiln_common::i18n::tr("이슈"))] {
+                            if exists && ui.add_enabled(!self.is_submitting(), egui::Button::new(kiln_common::trf!("{name} · {title} 이어 쓰기"))).clicked() {
                                 if let Some(repo) = RepoRef::parse(name) {
                                     if self.workspace.as_ref().is_some_and(|w| w.repo == repo) { self.use_workspace_repo(); }
                                     else { self.select_repo(repo); }
@@ -364,19 +364,19 @@ impl GithubHub {
             .horizontal(|ui| {
                 let label = match &repo {
                     Some(r) => r.full_name(),
-                    None if self.detect.is_some() => "저장소 확인 중…".into(),
-                    None => "저장소 선택".into(),
+                    None if self.detect.is_some() => kiln_common::i18n::tr("저장소 확인 중…").into(),
+                    None => kiln_common::i18n::tr("저장소 선택").into(),
                 };
                 let chip = repo_chip(ui, &label, info.as_ref().is_some_and(|i| i.is_private), self.selected.is_some());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.is_busy_header() {
                         spinner(ui, 12.0);
-                    } else if icon_button(ui, Icon::Refresh, "모두 새로 고침").clicked() {
+                    } else if icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("모두 새로 고침")).clicked() {
                         self.refresh();
                     }
                     if let Some(i) = &info
                         && !i.url.is_empty()
-                        && icon_button(ui, Icon::External, "GitHub에서 열기").clicked()
+                        && icon_button(ui, Icon::External, kiln_common::i18n::tr("GitHub에서 열기")).clicked()
                     {
                         events.push(GitEvent::OpenUrl(i.url.clone()));
                     }
@@ -390,7 +390,7 @@ impl GithubHub {
                 chip
             })
             .inner;
-        if self.is_submitting() { ui.label(faint("전송 중에는 저장소를 바꿀 수 없습니다")); }
+        if self.is_submitting() { ui.label(faint(kiln_common::i18n::tr("전송 중에는 저장소를 바꿀 수 없습니다"))); }
         if chip.clicked() && !self.is_submitting() {
             self.picker.toggle(ui.ctx());
         }
@@ -413,8 +413,8 @@ impl GithubHub {
             let active = self.panels.as_ref().map(|p| p.actions.active_count() as u64).filter(|n| *n > 0);
             let mut tab = self.tab;
             let tabs = [
-                (HubTab::PullRequests, Icon::PullRequest, "풀 리퀘스트", info.as_ref().and_then(|i| i.open_prs)),
-                (HubTab::Issues, Icon::Issue, "이슈", info.as_ref().and_then(|i| i.open_issues)),
+                (HubTab::PullRequests, Icon::PullRequest, kiln_common::i18n::tr("풀 리퀘스트"), info.as_ref().and_then(|i| i.open_prs)),
+                (HubTab::Issues, Icon::Issue, kiln_common::i18n::tr("이슈"), info.as_ref().and_then(|i| i.open_issues)),
                 (HubTab::Actions, Icon::Actions, "Actions", active),
             ];
             if count_tabs(ui, &mut tab, &tabs) {
@@ -434,7 +434,7 @@ impl GithubHub {
                 ui.horizontal(|ui| {
                     ui.add_space(14.0);
                     spinner(ui, 14.0);
-                    ui.label(dim("GitHub 저장소 확인 중…"));
+                    ui.label(dim(kiln_common::i18n::tr("GitHub 저장소 확인 중…")));
                 });
                 return;
             }
@@ -449,12 +449,12 @@ impl GithubHub {
                     let clicked = empty_panel(
                         ui,
                         Icon::Repo,
-                        "GitHub 저장소를 찾을 수 없습니다",
+                        kiln_common::i18n::tr("GitHub 저장소를 찾을 수 없습니다"),
                         &no_repo_detail(&e),
                         None,
                         &[
-                            (None, "다른 저장소 선택…", kiln_common::widgets::ButtonKind::Primary),
-                            (Some(kiln_common::icons::Icon::Refresh), "다시 시도", kiln_common::widgets::ButtonKind::Secondary),
+                            (None, kiln_common::i18n::tr("다른 저장소 선택…"), kiln_common::widgets::ButtonKind::Primary),
+                            (Some(kiln_common::icons::Icon::Refresh), kiln_common::i18n::tr("다시 시도"), kiln_common::widgets::ButtonKind::Secondary),
                         ],
                     );
                     match clicked {
@@ -479,9 +479,9 @@ impl GithubHub {
 /// 저장소를 찾지 못한 이유를 사람이 읽을 문구로.
 fn no_repo_detail(e: &GitError) -> String {
     match e {
-        GitError::NotARepo => "이 폴더는 Git 저장소가 아닙니다. GitHub 저장소를 직접 선택할 수 있습니다.".into(),
+        GitError::NotARepo => kiln_common::i18n::tr("이 폴더는 Git 저장소가 아닙니다. GitHub 저장소를 직접 선택할 수 있습니다.").into(),
         GitError::Failed(m) if m.contains("no git remotes") || m.contains("none of the git remotes") => {
-            "GitHub 원격 저장소가 연결되어 있지 않습니다. GitHub 저장소를 직접 선택할 수 있습니다.".into()
+            kiln_common::i18n::tr("GitHub 원격 저장소가 연결되어 있지 않습니다. GitHub 저장소를 직접 선택할 수 있습니다.").into()
         }
         other => other.to_string(),
     }
@@ -494,7 +494,7 @@ fn repo_chip(ui: &mut Ui, label: &str, private: bool, overridden: bool) -> egui:
     let max_w = (ui.available_width() - 90.0).max(120.0);
     let w = (g.size().x + 52.0).min(max_w);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("저장소 {label}")));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, kiln_common::trf!("저장소 {label}")));
     if ui.is_rect_visible(rect) {
         let fill = if resp.hovered() { t.bg_hover } else { t.bg_elevated };
         let stroke = if overridden { alpha(t.accent, 0.6) } else { t.border };

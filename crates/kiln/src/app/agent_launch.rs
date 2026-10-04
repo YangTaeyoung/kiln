@@ -24,27 +24,27 @@ fn executable(name:&str)->Option<PathBuf>{
 }
 
 pub fn prepare(program:&str,context:&str,request:&str)->Result<Prepared,String>{
-    if !matches!(program,"codex"|"claude"){return Err("지원하지 않는 에이전트입니다.".into());}
-    let binary=executable(program).ok_or_else(||format!("{program}을 찾을 수 없습니다. 설치 후 다시 시작해 주세요."))?;
+    if !matches!(program,"codex"|"claude"){return Err(kiln_common::i18n::tr("지원하지 않는 에이전트입니다.").into());}
+    let binary=executable(program).ok_or_else(||kiln_common::trf!("{program}을 찾을 수 없습니다. 설치 후 다시 시작해 주세요."))?;
     prepare_in(&kiln_common::paths::config_dir().join("agent-requests"),&binary,context,request)
 }
 fn prepare_in(dir:&Path,binary:&Path,context:&str,request:&str)->Result<Prepared,String>{
-    if request.trim().is_empty(){return Err("요청을 입력해 주세요.".into());}
-    if request.chars().count()>MAX_REQUEST_CHARS{return Err("요청은 32,000자 이내로 입력해 주세요.".into());}
+    if request.trim().is_empty(){return Err(kiln_common::i18n::tr("요청을 입력해 주세요.").into());}
+    if request.chars().count()>MAX_REQUEST_CHARS{return Err(kiln_common::i18n::tr("요청은 32,000자 이내로 입력해 주세요.").into());}
     let payload=format!("{context}\n## 사용자 요청\n{request}");
-    if payload.contains('\0') || payload.len()>MAX_PAYLOAD_BYTES {return Err("요청과 저장소 정보가 너무 큽니다. 요청을 나누어 시작해 주세요.".into());}
+    if payload.contains('\0') || payload.len()>MAX_PAYLOAD_BYTES {return Err(kiln_common::i18n::tr("요청과 저장소 정보가 너무 큽니다. 요청을 나누어 시작해 주세요.").into());}
     // The shell starts in the workspace, which need not be the GUI process cwd.
-    let dir=std::path::absolute(dir).map_err(|e|format!("요청 폴더를 확인할 수 없습니다: {e}"))?;
-    let binary=std::path::absolute(binary).map_err(|e|format!("에이전트 경로를 확인할 수 없습니다: {e}"))?;
+    let dir=std::path::absolute(dir).map_err(|e|kiln_common::trf!("요청 폴더를 확인할 수 없습니다: {e}"))?;
+    let binary=std::path::absolute(binary).map_err(|e|kiln_common::trf!("에이전트 경로를 확인할 수 없습니다: {e}"))?;
     let mut builder=fs::DirBuilder::new();builder.recursive(true);
     #[cfg(unix)]{use std::os::unix::fs::DirBuilderExt;builder.mode(0o700);}
-    builder.create(&dir).map_err(|e|format!("요청을 보관할 수 없습니다: {e}"))?;
+    builder.create(&dir).map_err(|e|kiln_common::trf!("요청을 보관할 수 없습니다: {e}"))?;
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     let path=dir.join(format!("request-{now}-{}-{}.md",std::process::id(),SEQUENCE.fetch_add(1,Ordering::Relaxed)));
     let mut options=fs::OpenOptions::new();options.write(true).create_new(true);
     #[cfg(unix)]{use std::os::unix::fs::OpenOptionsExt;options.mode(0o600);}
     let result=(||{let mut file=options.open(&path)?;file.write_all(payload.as_bytes())?;file.sync_all()})();
-    if let Err(error)=result{let _=fs::remove_file(&path);return Err(format!("요청을 저장할 수 없습니다: {error}"));}
+    if let Err(error)=result{let _=fs::remove_file(&path);return Err(kiln_common::trf!("요청을 저장할 수 없습니다: {error}"));}
     // The durable request remains available to an explicitly retried launch after restart.
     #[cfg(not(windows))]
     let command=format!("/bin/sh -c {}",quote(&format!("request=$(/bin/cat {} && printf .) && exec {} \"${{request%.}}\"",quote(&path.to_string_lossy()),quote(&binary.to_string_lossy()))));

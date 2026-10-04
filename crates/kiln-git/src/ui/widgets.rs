@@ -199,7 +199,7 @@ pub(crate) fn banner(ui: &mut Ui, kind: BannerKind, title: &str, detail: Option<
                 ui.add(egui::Label::new(RichText::new(title).color(t.text).font(fonts::medium(12.5))).wrap());
                 if closable {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icon_button(ui, Icon::Close, "닫기").clicked() {
+                        if icon_button(ui, Icon::Close, kiln_common::i18n::tr("닫기")).clicked() {
                             closed = true;
                         }
                     });
@@ -301,10 +301,10 @@ pub(crate) fn review_color(r: ReviewDecision) -> Color32 {
 pub(crate) fn pr_state_badge(ui: &mut Ui, state: PrState, draft: bool) -> Response {
     let t = theme();
     let (label, c) = match (state, draft) {
-        (PrState::Open, true) => ("초안", t.text_dim),
-        (PrState::Open, false) => ("열림", t.green),
-        (PrState::Merged, _) => ("병합됨", t.purple),
-        (PrState::Closed, _) => ("닫힘", t.red),
+        (PrState::Open, true) => (kiln_common::i18n::tr("초안"), t.text_dim),
+        (PrState::Open, false) => (kiln_common::i18n::tr("열림"), t.green),
+        (PrState::Merged, _) => (kiln_common::i18n::tr("병합됨"), t.purple),
+        (PrState::Closed, _) => (kiln_common::i18n::tr("닫힘"), t.red),
     };
     outline_badge(ui, label, c)
 }
@@ -395,7 +395,7 @@ pub(crate) fn confirm_modal(
                 if ok.clicked() {
                     result = Some(true);
                 }
-                if secondary_button(ui, "취소").clicked() {
+                if secondary_button(ui, kiln_common::i18n::tr("취소")).clicked() {
                     result = Some(false);
                 }
             });

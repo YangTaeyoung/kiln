@@ -113,7 +113,7 @@ pub const REPO_VIEW_FIELDS: &str = "nameWithOwner,description,url,defaultBranchR
 
 pub fn parse_repo_view(json: &str) -> GitResult<RepoInfo> {
     let v: RepoViewJson = serde_json::from_str(json).map_err(|e| GitError::Parse(e.to_string()))?;
-    let repo = RepoRef::parse(&v.name_with_owner).ok_or_else(|| GitError::Parse(format!("저장소 이름: {}", v.name_with_owner)))?;
+    let repo = RepoRef::parse(&v.name_with_owner).ok_or_else(|| GitError::Parse(kiln_common::trf!("저장소 이름: {}", v.name_with_owner)))?;
     Ok(RepoInfo {
         repo,
         description: v.description.unwrap_or_default(),
@@ -221,9 +221,9 @@ impl IssueState {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Open => "열림",
-            Self::Completed => "완료됨",
-            Self::NotPlanned => "계획 없음",
+            Self::Open => kiln_common::i18n::tr("열림"),
+            Self::Completed => kiln_common::i18n::tr("완료됨"),
+            Self::NotPlanned => kiln_common::i18n::tr("계획 없음"),
         }
     }
 }
@@ -353,10 +353,10 @@ impl IssueFilter {
 
     pub fn label(self) -> &'static str {
         match self {
-            IssueFilter::Open => "열림",
-            IssueFilter::Mine => "내 이슈",
-            IssueFilter::Assigned => "나에게 할당",
-            IssueFilter::Closed => "닫힘",
+            IssueFilter::Open => kiln_common::i18n::tr("열림"),
+            IssueFilter::Mine => kiln_common::i18n::tr("내 이슈"),
+            IssueFilter::Assigned => kiln_common::i18n::tr("나에게 할당"),
+            IssueFilter::Closed => kiln_common::i18n::tr("닫힘"),
         }
     }
 
@@ -464,12 +464,12 @@ pub enum RunStatus {
 impl RunStatus {
     pub fn label(self) -> &'static str {
         match self {
-            RunStatus::Success => "성공",
-            RunStatus::Failure => "실패",
-            RunStatus::InProgress => "진행 중",
-            RunStatus::Queued => "대기",
-            RunStatus::Cancelled => "취소됨",
-            RunStatus::Skipped => "건너뜀",
+            RunStatus::Success => kiln_common::i18n::tr("성공"),
+            RunStatus::Failure => kiln_common::i18n::tr("실패"),
+            RunStatus::InProgress => kiln_common::i18n::tr("진행 중"),
+            RunStatus::Queued => kiln_common::i18n::tr("대기"),
+            RunStatus::Cancelled => kiln_common::i18n::tr("취소됨"),
+            RunStatus::Skipped => kiln_common::i18n::tr("건너뜀"),
         }
     }
 
@@ -497,14 +497,14 @@ impl RunItem {
     /// 표시용 이벤트 이름.
     pub fn event_label(&self) -> &str {
         match self.event.as_str() {
-            "push" => "푸시",
-            "pull_request" | "pull_request_target" => "풀 리퀘스트",
-            "schedule" => "예약",
-            "workflow_dispatch" => "수동 실행",
-            "issues" => "이슈",
-            "issue_comment" => "이슈 댓글",
-            "release" => "릴리스",
-            "dynamic" => "동적",
+            "push" => kiln_common::i18n::tr("푸시"),
+            "pull_request" | "pull_request_target" => kiln_common::i18n::tr("풀 리퀘스트"),
+            "schedule" => kiln_common::i18n::tr("예약"),
+            "workflow_dispatch" => kiln_common::i18n::tr("수동 실행"),
+            "issues" => kiln_common::i18n::tr("이슈"),
+            "issue_comment" => kiln_common::i18n::tr("이슈 댓글"),
+            "release" => kiln_common::i18n::tr("릴리스"),
+            "dynamic" => kiln_common::i18n::tr("동적"),
             other => other,
         }
     }
@@ -665,7 +665,7 @@ impl GithubBackend for GhBackend {
             args.extend(["--assignee", a.as_str()]);
         }
         let out = self.run_repo_stdin(repo, &args, &req.body)?;
-        issue_number_from_url(&out).ok_or_else(|| GitError::Parse(format!("이슈 URL을 찾을 수 없습니다: {}", out.trim())))
+        issue_number_from_url(&out).ok_or_else(|| GitError::Parse(kiln_common::trf!("이슈 URL을 찾을 수 없습니다: {}", out.trim())))
     }
 
     fn comment_issue(&self, repo: Option<&RepoRef>, number: u64, body: &str) -> GitResult<()> {

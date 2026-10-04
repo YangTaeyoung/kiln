@@ -49,12 +49,12 @@ impl ToolKind {
 
     pub fn label(&self) -> &'static str {
         match self {
-            ToolKind::Explorer => "파일",
-            ToolKind::Search => "검색",
-            ToolKind::Git => "소스 제어",
+            ToolKind::Explorer => kiln_common::i18n::tr("파일"),
+            ToolKind::Search => kiln_common::i18n::tr("검색"),
+            ToolKind::Git => kiln_common::i18n::tr("소스 제어"),
             ToolKind::PullRequests => "GitHub",
-            ToolKind::Database => "데이터베이스",
-            ToolKind::Problems => "문제",
+            ToolKind::Database => kiln_common::i18n::tr("데이터베이스"),
+            ToolKind::Problems => kiln_common::i18n::tr("문제"),
         }
     }
 
@@ -174,8 +174,7 @@ pub(super) fn diff_factory(root: PathBuf, path: PathBuf, staged: bool) -> TabFac
     TabFactory {
         key: format!("diff:{}:{staged}", path.display()),
         make: Box::new(move |_, _| {
-            let title = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            Ok(Box::new(DiffTab { persist: ToolP::Diff { root: root.clone(), path: path.clone(), staged }, view: DiffView::for_file(&root, &path, staged), title: format!("{title} ({})", if staged { "스테이징됨" } else { "변경" }), key: format!("diff:{}:{staged}", path.display()) }) as Box<dyn ToolTab>)
+            Ok(Box::new(DiffTab { persist: ToolP::Diff { root: root.clone(), path: path.clone(), staged }, view: DiffView::for_file(&root, &path, staged), key: format!("diff:{}:{staged}", path.display()) }) as Box<dyn ToolTab>)
         }),
         reuse: Some(Box::new(|_t| {})),
     }
@@ -185,8 +184,7 @@ fn commit_factory(root: PathBuf, sha: String) -> TabFactory {
     TabFactory {
         key: format!("commit:{}:{sha}", root.display()),
         make: Box::new(move |_, _| {
-            let short: String = sha.chars().take(8).collect();
-            Ok(Box::new(DiffTab { persist: ToolP::Commit { root: root.clone(), sha: sha.clone() }, view: DiffView::for_commit(&root, &sha), title: format!("커밋 {short}"), key: format!("commit:{}:{sha}",root.display()) }) as Box<dyn ToolTab>)
+            Ok(Box::new(DiffTab { persist: ToolP::Commit { root: root.clone(), sha: sha.clone() }, view: DiffView::for_commit(&root, &sha), key: format!("commit:{}:{sha}",root.display()) }) as Box<dyn ToolTab>)
         }),
         reuse: None,
     }
@@ -218,12 +216,7 @@ fn range_factory(root: PathBuf, from: String, to: Option<String>) -> TabFactory 
     TabFactory {
         key: key.clone(),
         make: Box::new(move |_, _| {
-            let short = |s: &str| s.chars().take(8).collect::<String>();
-            let title = match &to {
-                Some(to) => format!("{} → {}", short(&from), short(to)),
-                None => format!("{} → 작업 트리", short(&from)),
-            };
-            Ok(Box::new(DiffTab { persist: ToolP::Range { root: root.clone(), from: from.clone(), to: to.clone() }, view: DiffView::for_range(&root, &from, to.as_deref()), title, key: key.clone() }) as Box<dyn ToolTab>)
+            Ok(Box::new(DiffTab { persist: ToolP::Range { root: root.clone(), from: from.clone(), to: to.clone() }, view: DiffView::for_range(&root, &from, to.as_deref()), key: key.clone() }) as Box<dyn ToolTab>)
         }),
         reuse: None,
     }
@@ -291,7 +284,7 @@ impl ToolTab for EditorTab {
         Some(ToolP::Editor { path })
     }
     fn recovery_notice(&self) -> Option<String> {
-        (self.recovered && self.ed.is_dirty()).then(|| format!("{} — 복원된 미저장 파일{}", self.ed.path().display(), if self.ed.recovery_conflict() { " · 디스크 변경과 충돌: 저장 전 검토 필요" } else { "" }))
+        (self.recovered && self.ed.is_dirty()).then(|| kiln_common::trf!("{} — 복원된 미저장 파일{}", self.ed.path().display(), if self.ed.recovery_conflict() { kiln_common::i18n::tr(" · 디스크 변경과 충돌: 저장 전 검토 필요") } else { "" }))
     }
     fn discard_recovery(&mut self, discard: bool) { self.suppress_recovery = discard; }
     fn find(&mut self) {
@@ -307,7 +300,7 @@ impl ToolTab for EditorTab {
     }
     fn status_text(&self) -> Option<String> {
         let s = self.ed.status();
-        Some(format!("줄 {}, 열 {}   {}   {}   {}", s.line, s.col, s.language, s.encoding.label(), match s.line_ending {
+        Some(kiln_common::trf!("줄 {}, 열 {}   {}   {}   {}", s.line, s.col, s.language, s.encoding.label(), match s.line_ending {
             kiln_editor::LineEnding::Lf => "LF",
             kiln_editor::LineEnding::CrLf => "CRLF",
         }))
@@ -320,14 +313,31 @@ impl ToolTab for EditorTab {
 struct DiffTab {
     persist: ToolP,
     view: DiffView,
-    title: String,
     key: String,
+}
+
+// Derive app-owned title fragments at render time so open tabs follow locale changes.
+fn diff_title(persist: &ToolP) -> String {
+    let short = |value: &str| value.chars().take(8).collect::<String>();
+    match persist {
+        ToolP::Diff { path, staged, .. } => {
+            let name = path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
+            let state = if *staged { kiln_common::i18n::tr("스테이징됨") } else { kiln_common::i18n::tr("변경") };
+            format!("{name} ({state})")
+        }
+        ToolP::Commit { sha, .. } => { let short = short(sha); kiln_common::trf!("커밋 {short}") }
+        ToolP::Range { from, to, .. } => match to {
+            Some(to) => format!("{} → {}", short(from), short(to)),
+            None => kiln_common::trf!("{} → 작업 트리", short(from)),
+        },
+        _ => unreachable!("DiffTab only stores diff, commit, or range metadata"),
+    }
 }
 
 impl ToolTab for DiffTab {
     fn persist(&self) -> Option<ToolP> { Some(self.persist.clone()) }
     fn title(&self) -> String {
-        self.title.clone()
+        diff_title(&self.persist)
     }
     fn key(&self) -> String {
         self.key.clone()
@@ -355,7 +365,7 @@ impl ToolTab for PrTab {
     fn is_dirty(&self) -> bool { !self.view.review_draft().is_empty() }
     fn discard_recovery(&mut self, suppressed: bool) { self.suppress_recovery = suppressed; }
     fn recovery_notice(&self) -> Option<String> {
-        (self.recovered && self.is_dirty()).then(|| format!("{} — 복원된 미전송 초안", self.title()))
+        (self.recovered && self.is_dirty()).then(|| kiln_common::trf!("{} — 복원된 미전송 초안", self.title()))
     }
     fn persist(&self) -> Option<ToolP> {
         let root = self.root.clone(); let repo = self.repo.as_ref().map(RepoRef::full_name); let number = self.number;
@@ -385,7 +395,7 @@ struct HistoryTab {
 
 impl ToolTab for HistoryTab {
     fn title(&self) -> String {
-        "Git 로그".into()
+        kiln_common::i18n::tr("Git 로그").into()
     }
     fn key(&self) -> String {
         format!("git-history:{}",self.view.root().display())
@@ -433,7 +443,7 @@ impl ToolTab for IssueTab {
     fn is_dirty(&self) -> bool { !self.view.comment_draft().is_empty() }
     fn discard_recovery(&mut self, suppressed: bool) { self.suppress_recovery = suppressed; }
     fn recovery_notice(&self) -> Option<String> {
-        (self.recovered && self.is_dirty()).then(|| format!("{} — 복원된 미전송 초안", self.title()))
+        (self.recovered && self.is_dirty()).then(|| kiln_common::trf!("{} — 복원된 미전송 초안", self.title()))
     }
     fn persist(&self) -> Option<ToolP> {
         let root = self.root.clone(); let repo = self.repo.as_ref().map(RepoRef::full_name); let number = self.number;
@@ -497,7 +507,7 @@ impl ToolTab for DbTabW {
         Some(self.persist.clone())
     }
     fn recovery_notice(&self) -> Option<String> {
-        (self.recovered && self.tab.has_unsaved_changes()).then(|| format!("{} — 복원된 DB 초안 · 실행/제출되지 않음", self.tab.title()))
+        (self.recovered && self.tab.has_unsaved_changes()).then(|| kiln_common::trf!("{} — 복원된 DB 초안 · 실행/제출되지 않음", self.tab.title()))
     }
     fn discard_recovery(&mut self, discard: bool) { self.suppress_recovery = discard; }
     fn request_focus(&mut self) { self.tab.request_focus(); }
@@ -618,11 +628,11 @@ impl WorkspaceTools {
 
     pub fn unsaved_drafts(&self) -> Vec<String> {
         let mut items = self.repositories.unsaved();
-        if self.git.as_ref().is_some_and(|g| !g.commit_draft().is_empty()) { items.push("Git — 작성 중인 커밋 메시지".into()); }
+        if self.git.as_ref().is_some_and(|g| !g.commit_draft().is_empty()) { items.push(kiln_common::i18n::tr("Git — 작성 중인 커밋 메시지").into()); }
         if let Some(hub) = &self.hub {
             for (repo, drafts) in hub.recovery_drafts().repositories {
-                if drafts.pull_request.is_some() { items.push(format!("GitHub · {repo} — 작성 중인 풀 리퀘스트")); }
-                if drafts.issue.is_some() { items.push(format!("GitHub · {repo} — 작성 중인 이슈")); }
+                if drafts.pull_request.is_some() { items.push(kiln_common::trf!("GitHub · {repo} — 작성 중인 풀 리퀘스트")); }
+                if drafts.issue.is_some() { items.push(kiln_common::trf!("GitHub · {repo} — 작성 중인 이슈")); }
             }
         }
         items
@@ -783,7 +793,7 @@ impl WorkspaceTools {
         }
         let root = self.root.clone();
         if matches!(kind, ToolKind::Git | ToolKind::PullRequests) && self.repositories.loading() {
-            ui.horizontal(|ui| { ui.spinner(); ui.label("작업 공간의 저장소를 찾는 중…"); });
+            ui.horizontal(|ui| { ui.spinner(); ui.label(kiln_common::i18n::tr("작업 공간의 저장소를 찾는 중…")); });
             return Vec::new();
         }
         if matches!(kind, ToolKind::Git | ToolKind::PullRequests) && self.repositories.is_multi() {
@@ -796,10 +806,10 @@ impl WorkspaceTools {
             };
             if has_legacy || self.legacy_panel == Some(kind) {
                 ui.horizontal_wrapped(|ui| {
-                    if ui.selectable_label(self.legacy_panel != Some(kind), "전체 저장소").clicked() {
+                    if ui.selectable_label(self.legacy_panel != Some(kind), kiln_common::i18n::tr("전체 저장소")).clicked() {
                         self.legacy_panel = None;
                     }
-                    if ui.selectable_label(self.legacy_panel == Some(kind), "기존 초안 이어 쓰기").clicked() {
+                    if ui.selectable_label(self.legacy_panel == Some(kind), kiln_common::i18n::tr("기존 초안 이어 쓰기")).clicked() {
                         self.legacy_panel = Some(kind);
                     }
                 });
@@ -807,13 +817,13 @@ impl WorkspaceTools {
             if self.legacy_panel != Some(kind) {
                 return self.repositories.ui(ui, kind);
             }
-            ui.label(format!("기존 작업 위치: {}", root.display()));
+            ui.label(kiln_common::trf!("기존 작업 위치: {}", root.display()));
             if kind == ToolKind::Git {
                 // Even a moved/deleted root must leave the text editable and exportable.
-                egui::CollapsingHeader::new("보관된 커밋 메시지 편집").show(ui, |ui| {
+                egui::CollapsingHeader::new(kiln_common::i18n::tr("보관된 커밋 메시지 편집")).show(ui, |ui| {
                     let message = self.git().commit_message_mut();
                     ui.add(egui::TextEdit::multiline(message).desired_width(f32::INFINITY));
-                    if ui.button("커밋 메시지 복사").clicked() { ui.ctx().copy_text(message.clone()); }
+                    if ui.button(kiln_common::i18n::tr("커밋 메시지 복사")).clicked() { ui.ctx().copy_text(message.clone()); }
                 });
             }
             ui.separator();
@@ -1069,4 +1079,33 @@ mod recovery_tests {
   assert!(matches!(git_event_action(&b,None,GitEvent::OpenHistory),Some(Action::OpenTab(factory)) if factory.key==history_factory(b.clone()).key));
   let tab=HistoryTab{view:HistoryView::new(a.clone())};assert!(matches!(tab.persist(),Some(ToolP::RepositoryHistory{root}) if root==a));
  }
+}
+
+#[cfg(test)]
+mod language_title_tests {
+    use super::*;
+
+    #[test]
+    fn language_changes_refresh_diff_titles_without_changing_file_or_revision_data() {
+        let root = PathBuf::from("/workspace");
+        let metadata = [
+            ToolP::Diff { root: root.clone(), path: PathBuf::from("설정.txt"), staged: true },
+            ToolP::Commit { root: root.clone(), sha: "0123456789abcdef".into() },
+            ToolP::Range { root: root.clone(), from: "0123456789abcdef".into(), to: None },
+        ];
+        let korean = kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || metadata.iter().map(diff_title).collect::<Vec<_>>());
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                let titles = metadata.iter().map(diff_title).collect::<Vec<_>>();
+                assert!(titles[0].starts_with("설정.txt ("), "user file name must stay intact");
+                assert!(titles[1].contains("01234567"));
+                assert!(titles[2].contains("01234567"));
+                if language != kiln_common::i18n::Language::Korean {
+                    for (translated, source) in titles.iter().zip(&korean) { assert_ne!(translated, source, "stale title in {language:?}"); }
+                }
+                let range = ToolP::Range { root: root.clone(), from: "0123456789abcdef".into(), to: Some("fedcba9876543210".into()) };
+                assert_eq!(diff_title(&range), "01234567 → fedcba98");
+            });
+        }
+    }
 }

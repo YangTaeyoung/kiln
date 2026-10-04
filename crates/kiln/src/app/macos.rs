@@ -6,12 +6,19 @@
 //! resolving edits the user can retry logout.
 //! https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/AppArchitecture/Tasks/GracefulAppTermination.html
 
-use objc2::{sel, Encode};
+use kiln_common::i18n::tr;
+use objc2::{sel, Encode, ClassType, rc::Retained, runtime::ClassBuilder};
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 static TERMINATION_PENDING: AtomicBool = AtomicBool::new(false);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
 static APP_CONTEXT: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+static SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
+thread_local! {
+    static SETTINGS_MENU: RefCell<Option<(Retained<AnyObject>, Retained<NSMenuItem>)>> = const { RefCell::new(None) };
+}
 pub(super) fn take_termination_request() -> bool { TERMINATION_REQUESTED.swap(false, Ordering::SeqCst) }
+pub(super) fn take_settings_request() -> bool { SETTINGS_REQUESTED.swap(false, Ordering::SeqCst) }
 
 pub(super) fn reply_to_termination(allow: bool) {
     #[cfg(feature = "updater-test")]
@@ -21,8 +28,8 @@ pub(super) fn reply_to_termination(allow: bool) {
     }
 }
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
-use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
-use objc2_foundation::MainThreadMarker;
+use objc2_app_kit::{NSApplication, NSApplicationTerminateReply, NSMenuItem, NSEventModifierFlags};
+use objc2_foundation::{MainThreadMarker, NSObject, NSString};
 
 pub(super) fn install_quit_guard(ctx: &egui::Context) {
     let _ = APP_CONTEXT.set(ctx.clone());
@@ -30,6 +37,7 @@ pub(super) fn install_quit_guard(ctx: &egui::Context) {
         return;
     };
     let app = NSApplication::sharedApplication(main_thread);
+    install_settings_menu(&app, main_thread);
     // Preserve winit's delegate instance and every existing method. The public
     // optional delegate callback is added only when absent, including ancestors.
     if let Some(delegate) = unsafe { app.delegate() } {
@@ -41,6 +49,43 @@ pub(super) fn install_quit_guard(ctx: &egui::Context) {
             app.setDelegate(Some(&delegate));
         }
     }
+}
+
+extern "C" fn open_settings(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {
+    SETTINGS_REQUESTED.store(true, Ordering::SeqCst);
+    if let Some(ctx) = APP_CONTEXT.get() {
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
+}
+
+fn install_settings_menu(app: &NSApplication, mt: MainThreadMarker) {
+    if SETTINGS_MENU.with(|s| s.borrow().is_some()) { return; }
+    let Some(menu) = (unsafe { app.mainMenu() })
+        .and_then(|m| unsafe { m.itemAtIndex(0) })
+        .and_then(|m| unsafe { m.submenu() }) else { return; };
+    let mut builder = ClassBuilder::new("KilnSettingsMenuController", NSObject::class())
+        .expect("settings menu controller class");
+    unsafe {
+        builder.add_method(sel!(openKilnSettings:), open_settings as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject));
+        let controller: Retained<AnyObject> = objc2::msg_send_id![builder.register(), new];
+        let item = NSMenuItem::initWithTitle_action_keyEquivalent(mt.alloc(),
+            &NSString::from_str(tr("설정…")), Some(sel!(openKilnSettings:)), &NSString::from_str(","));
+        item.setKeyEquivalentModifierMask(NSEventModifierFlags::NSEventModifierFlagCommand);
+        item.setTarget(Some(&controller));
+        menu.insertItem_atIndex(&item, 1.min(menu.numberOfItems()));
+        SETTINGS_MENU.with(|s| *s.borrow_mut() = Some((controller, item)));
+    }
+}
+
+pub(super) fn refresh_settings_menu() {
+    SETTINGS_MENU.with(|s| {
+        if let Some((_, item)) = s.borrow().as_ref() {
+            unsafe { item.setTitle(&NSString::from_str(tr("설정…"))); }
+        }
+    });
 }
 
 /// AppKit sends this callback for Cmd-Q, menu/Dock Quit and normal OS termination requests.

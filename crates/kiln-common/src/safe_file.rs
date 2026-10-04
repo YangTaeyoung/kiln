@@ -11,17 +11,17 @@ fn replace_with(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) ->
         Ok(_) => fs::canonicalize(path)?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-            fs::canonicalize(parent)?.join(path.file_name().ok_or_else(|| io::Error::other("파일 이름이 없습니다"))?)
+            fs::canonicalize(parent)?.join(path.file_name().ok_or_else(|| io::Error::other(kiln_common::i18n::tr("파일 이름이 없습니다")))?)
         }
         Err(e) => return Err(e),
     };
     let metadata = match fs::metadata(&target) { Ok(m) => Some(m), Err(e) if e.kind()==io::ErrorKind::NotFound => None, Err(e)=>return Err(e) };
     if let Some(m) = &metadata {
-        if !m.is_file() || m.permissions().readonly() { return Err(io::Error::new(io::ErrorKind::PermissionDenied,"일반 쓰기 가능 파일만 안전하게 저장할 수 있습니다")); }
-        #[cfg(unix)] { use std::os::unix::fs::MetadataExt; if m.nlink()>1 { return Err(io::Error::other("하드 링크 파일은 별도 파일로 저장하세요. 기존 연결은 변경하지 않았습니다.")); } }
+        if !m.is_file() || m.permissions().readonly() { return Err(io::Error::new(io::ErrorKind::PermissionDenied,kiln_common::i18n::tr("일반 쓰기 가능 파일만 안전하게 저장할 수 있습니다"))); }
+        #[cfg(unix)] { use std::os::unix::fs::MetadataExt; if m.nlink()>1 { return Err(io::Error::other(kiln_common::i18n::tr("하드 링크 파일은 별도 파일로 저장하세요. 기존 연결은 변경하지 않았습니다."))); } }
     }
     let original = if metadata.is_some() { Some(fs::read(&target)?) } else { None };
-    let parent=target.parent().ok_or_else(|| io::Error::other("상위 폴더가 없습니다"))?;
+    let parent=target.parent().ok_or_else(|| io::Error::other(kiln_common::i18n::tr("상위 폴더가 없습니다")))?;
     static SEQ: std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
     let mut temp=None;
     for _ in 0..100 {
@@ -30,7 +30,7 @@ fn replace_with(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) ->
         #[cfg(unix)] {use std::os::unix::fs::OpenOptionsExt;opts.mode(0o600);}
         match opts.open(&candidate) { Ok(file)=>{temp=Some((candidate,file));break},Err(e) if e.kind()==io::ErrorKind::AlreadyExists=>continue,Err(e)=>return Err(e) }
     }
-    let (temp_path,mut file)=temp.ok_or_else(|| io::Error::other("임시 파일 생성 충돌"))?;
+    let (temp_path,mut file)=temp.ok_or_else(|| io::Error::other(kiln_common::i18n::tr("임시 파일 생성 충돌")))?;
     let result=(|| {
         write(&mut file)?;
         if let Some(m)=&metadata {
@@ -43,11 +43,11 @@ fn replace_with(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) ->
         }
         file.sync_all()?;
         let current=match fs::read(&target){Ok(b)=>Some(b),Err(e) if e.kind()==io::ErrorKind::NotFound=>None,Err(e)=>return Err(e)};
-        if current!=original {return Err(io::Error::other("저장 중 파일이 변경되어 덮어쓰기를 중단했습니다"));}
+        if current!=original {return Err(io::Error::other(kiln_common::i18n::tr("저장 중 파일이 변경되어 덮어쓰기를 중단했습니다")));}
         // A retargeted symlink must not silently save a different file.
-        if metadata.is_some() && fs::canonicalize(path)?!=target {return Err(io::Error::other("저장 중 파일 경로가 변경되었습니다"));}
+        if metadata.is_some() && fs::canonicalize(path)?!=target {return Err(io::Error::other(kiln_common::i18n::tr("저장 중 파일 경로가 변경되었습니다")));}
         fs::rename(&temp_path,&target)?;
-        #[cfg(unix)] File::open(parent)?.sync_all().map_err(|e|io::Error::other(format!("파일은 저장됐지만 디스크 동기화를 확인하지 못했습니다: {e}")))?;
+        #[cfg(unix)] File::open(parent)?.sync_all().map_err(|e|io::Error::other(kiln_common::trf!("파일은 저장됐지만 디스크 동기화를 확인하지 못했습니다: {e}")))?;
         Ok(())
     })();
     if result.is_err(){let _=fs::remove_file(&temp_path);}

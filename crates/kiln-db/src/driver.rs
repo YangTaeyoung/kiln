@@ -186,7 +186,7 @@ impl From<sqlx::Error> for DbError {
                     position,
                 }
             }
-            sqlx::Error::PoolTimedOut => DbError::msg("연결 시간이 초과되었습니다"),
+            sqlx::Error::PoolTimedOut => DbError::msg(kiln_common::i18n::tr("연결 시간이 초과되었습니다")),
             other => DbError::msg(other.to_string()),
         }
     }
@@ -489,7 +489,7 @@ macro_rules! driver_ops {
                     if st.expect_one && n != 1 {
                         return Err(ChangeError {
                             index,
-                            error: DbError::msg(format!(
+                            error: DbError::msg(kiln_common::trf!(
                                 "영향받은 행이 1개여야 하지만 {n}개입니다 (다른 곳에서 행이 변경되거나 삭제되었을 수 있음)"
                             )),
                         });
@@ -633,7 +633,7 @@ pub(crate) async fn connect_pool(cfg: &ConnConfig, password: Option<&str>) -> Db
             ),
             Driver::Sqlite => {
                 if cfg.file.trim().is_empty() {
-                    return Err(DbError::msg("SQLite 파일 경로가 비어 있습니다"));
+                    return Err(DbError::msg(kiln_common::i18n::tr("SQLite 파일 경로가 비어 있습니다")));
                 }
                 DbPool::Lite(
                     PoolOptions::<Sqlite>::new()
@@ -647,7 +647,7 @@ pub(crate) async fn connect_pool(cfg: &ConnConfig, password: Option<&str>) -> Db
     };
     match tokio::time::timeout(timeout, fut).await {
         Ok(r) => r,
-        Err(_) => Err(DbError::msg(format!(
+        Err(_) => Err(DbError::msg(kiln_common::trf!(
             "{}초 동안 연결하지 못했습니다",
             timeout.as_secs()
         ))),

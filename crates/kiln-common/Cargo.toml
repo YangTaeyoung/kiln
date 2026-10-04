@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+kiln-i18n-macros = { path = "../kiln-i18n-macros" }
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true

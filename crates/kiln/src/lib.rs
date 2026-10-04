@@ -1,6 +1,7 @@
 //! Kiln 앱 라이브러리(GUI). 실행 파일은 `main.rs`.
 
 pub mod app;
+pub mod native_actions;
 
 #[cfg(target_os = "macos")]
 pub mod status_bar;

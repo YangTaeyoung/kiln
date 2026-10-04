@@ -265,7 +265,7 @@ impl Conn {
                 }
             }
             ServerMsg::Created { req, session } => self.events.push(ConnEvent::Created { req, session }),
-            ServerMsg::Error { req, message } => self.events.push(ConnEvent::Error { req, message }),
+            ServerMsg::Error { req, message } => self.events.push(ConnEvent::Error { req, message: kiln_common::i18n::tr(&message).to_owned() }),
             ServerMsg::Upgrading => self.events.push(ConnEvent::Upgrading),
             ServerMsg::SearchResult { found, .. } => self.events.push(ConnEvent::SearchResult { found }),
             ServerMsg::Text { req, text } => {

@@ -9,6 +9,7 @@ the user's shells, agents, builds, or servers.
 - [Documentation index](docs/README.md)
 - [Architecture and code map](docs/architecture.md)
 - [Development and meaningful verification](docs/development.md)
+- [Localization and native menus](docs/localization.md) — catalog, font caches, and isolated session-control tests.
 - **[Release runbook](docs/maintainers/releases.md)** — versioning, signing,
   notarization, Sparkle updates, GitHub Release publication, and recovery.
 - [Signing setup](docs/maintainers/signing.md) — public identifiers and Keychain

@@ -25,10 +25,10 @@ pub(crate) fn gh_error_state(ui: &mut Ui, err: &GitError, subject: &str, events:
             let clicked = empty_panel(
                 ui,
                 Icon::Warning,
-                "GitHub CLI를 찾을 수 없습니다",
-                "GitHub 연결에는 gh가 필요합니다. 설치되어 있다면 실행 경로를 확인한 뒤 다시 시도하세요.",
+                kiln_common::i18n::tr("GitHub CLI를 찾을 수 없습니다"),
+                kiln_common::i18n::tr("GitHub 연결에는 gh가 필요합니다. 설치되어 있다면 실행 경로를 확인한 뒤 다시 시도하세요."),
                 None,
-                &[(None, "설치 안내 열기", ButtonKind::Primary), (Some(CI::Refresh), "다시 시도", ButtonKind::Secondary)],
+                &[(None, kiln_common::i18n::tr("설치 안내 열기"), ButtonKind::Primary), (Some(CI::Refresh), kiln_common::i18n::tr("다시 시도"), ButtonKind::Secondary)],
             );
             match clicked {
                 Some(0) => events.push(GitEvent::OpenUrl("https://cli.github.com".into())),
@@ -40,10 +40,10 @@ pub(crate) fn gh_error_state(ui: &mut Ui, err: &GitError, subject: &str, events:
             let clicked = empty_panel(
                 ui,
                 Icon::Lock,
-                "GitHub에 로그인하세요",
-                "로그인하면 이슈, Pull Request와 Actions를 이곳에서 확인할 수 있습니다. 터미널에서 로그인한 뒤 다시 시도하세요.",
+                kiln_common::i18n::tr("GitHub에 로그인하세요"),
+                kiln_common::i18n::tr("로그인하면 이슈, Pull Request와 Actions를 이곳에서 확인할 수 있습니다. 터미널에서 로그인한 뒤 다시 시도하세요."),
                 Some("gh auth login"),
-                &[(Some(CI::Terminal), "터미널에서 로그인", ButtonKind::Primary), (None, "다시 시도", ButtonKind::Secondary)],
+                &[(Some(CI::Terminal), kiln_common::i18n::tr("터미널에서 로그인"), ButtonKind::Primary), (None, kiln_common::i18n::tr("다시 시도"), ButtonKind::Secondary)],
             );
             match clicked {
                 Some(0) => events.push(GitEvent::RunInTerminal("gh auth login".into())),
@@ -52,8 +52,8 @@ pub(crate) fn gh_error_state(ui: &mut Ui, err: &GitError, subject: &str, events:
             }
         }
         other => {
-            let title = format!("{subject} 정보를 불러오지 못했습니다");
-            if empty_panel(ui, Icon::Warning, &title, &other.to_string(), None, &[(Some(CI::Refresh), "다시 시도", ButtonKind::Secondary)]).is_some() {
+            let title = kiln_common::trf!("{subject} 정보를 불러오지 못했습니다");
+            if empty_panel(ui, Icon::Warning, &title, &other.to_string(), None, &[(Some(CI::Refresh), kiln_common::i18n::tr("다시 시도"), ButtonKind::Secondary)]).is_some() {
                 action = ErrorAction::Retry;
             }
         }
@@ -257,7 +257,7 @@ pub(crate) fn multi_pick_popup(
                 ui.horizontal(|ui| {
                     ui.add_space(6.0);
                     spinner(ui, 12.0);
-                    ui.label(dim("불러오는 중…"));
+                    ui.label(dim(kiln_common::i18n::tr("불러오는 중…")));
                 });
             }
             if let Some(e) = error {
@@ -283,7 +283,7 @@ pub(crate) fn multi_pick_popup(
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.add_space(8.0);
-                        ui.label(faint("일치하는 항목이 없습니다"));
+                        ui.label(faint(kiln_common::i18n::tr("일치하는 항목이 없습니다")));
                     });
                     ui.add_space(6.0);
                 }
@@ -461,7 +461,7 @@ pub(crate) fn sidebar_heading(ui: &mut Ui, title: &str, editable: bool) -> Optio
         ui.label(RichText::new(title).font(fonts::semibold(12.0)).color(t.text_dim));
         if editable {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                out = Some(icon_button(ui, Icon::Plus, &format!("{title} 편집")));
+                out = Some(icon_button(ui, Icon::Plus, &kiln_common::trf!("{title} 편집")));
             });
         }
     });

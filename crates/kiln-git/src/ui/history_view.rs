@@ -65,21 +65,21 @@ pub(crate) enum Op {
 impl Op {
     fn label(&self) -> &'static str {
         match self {
-            Op::Checkout(_) => "체크아웃",
-            Op::Branch { .. } => "브랜치 만들기",
-            Op::Tag { .. } => "태그 만들기",
-            Op::CherryPick(_) => "체리픽",
-            Op::Revert(_) => "커밋 되돌리기(revert)",
-            Op::Reset(..) => "리셋",
-            Op::Reword { .. } => "메시지 수정",
-            Op::Move { .. } => "순서 이동",
-            Op::Fixup { .. } => "픽스업",
-            Op::Rebase(_) => "대화형 리베이스",
-            Op::Continue => "계속",
-            Op::Skip => "건너뛰기",
-            Op::Abort => "중단",
-            Op::Undo(_) | Op::UndoReviewed{..} => "되돌리기",
-            Op::Reviewed {review,..} => match review.action {crate::history_guard::ReviewAction::Squash=>"스쿼시",crate::history_guard::ReviewAction::Drop=>"커밋 삭제",crate::history_guard::ReviewAction::CherryPick=>"체리픽"},
+            Op::Checkout(_) => kiln_common::i18n::tr("체크아웃"),
+            Op::Branch { .. } => kiln_common::i18n::tr("브랜치 만들기"),
+            Op::Tag { .. } => kiln_common::i18n::tr("태그 만들기"),
+            Op::CherryPick(_) => kiln_common::i18n::tr("체리픽"),
+            Op::Revert(_) => kiln_common::i18n::tr("커밋 되돌리기(revert)"),
+            Op::Reset(..) => kiln_common::i18n::tr("리셋"),
+            Op::Reword { .. } => kiln_common::i18n::tr("메시지 수정"),
+            Op::Move { .. } => kiln_common::i18n::tr("순서 이동"),
+            Op::Fixup { .. } => kiln_common::i18n::tr("픽스업"),
+            Op::Rebase(_) => kiln_common::i18n::tr("대화형 리베이스"),
+            Op::Continue => kiln_common::i18n::tr("계속"),
+            Op::Skip => kiln_common::i18n::tr("건너뛰기"),
+            Op::Abort => kiln_common::i18n::tr("중단"),
+            Op::Undo(_) | Op::UndoReviewed{..} => kiln_common::i18n::tr("되돌리기"),
+            Op::Reviewed {review,..} => match review.action {crate::history_guard::ReviewAction::Squash=>kiln_common::i18n::tr("스쿼시"),crate::history_guard::ReviewAction::Drop=>kiln_common::i18n::tr("커밋 삭제"),crate::history_guard::ReviewAction::CherryPick=>kiln_common::i18n::tr("체리픽")},
         }
     }
 
@@ -109,7 +109,7 @@ impl Op {
             Op::UndoReviewed{old,head,branch} => {
                 let state=history::repo_state(root)?;
                 if state.head.as_deref()!=Some(&head)||state.branch.as_deref()!=Some(&branch)||crate::repo::in_progress_op(root).is_some() {
-                    return Err(crate::GitError::Failed("작업 이후 브랜치·HEAD가 변경되었거나 새 Git 작업이 진행 중이어서 되돌리지 않았습니다. 백업 참조와 현재 이력을 확인하세요.".into()));
+                    return Err(crate::GitError::Failed(kiln_common::i18n::tr("작업 이후 브랜치·HEAD가 변경되었거나 새 Git 작업이 진행 중이어서 되돌리지 않았습니다. 백업 참조와 현재 이력을 확인하세요.").into()));
                 }
                 tx(history::undo(root,&old))
             },
@@ -610,7 +610,7 @@ impl HistoryView {
                 Ok(OpResult::Guarded(result)) => {
                     let stopped = matches!(result.rewrite.outcome,history::Outcome::Stopped(_));
                     let push_failed=matches!(&d.op,Op::Reviewed{review,auto_push:true,..} if review.pushed)&&!result.pushed&&!stopped;
-                    let text = if stopped {format!("{label} 일시 중단 — 충돌을 해결하거나 중단하세요")} else if push_failed {format!("로컬 {label} 완료 · 원격 반영 실패")}else{format!("{label} 완료")};
+                    let text = if stopped {kiln_common::trf!("{label} 일시 중단 — 충돌을 해결하거나 중단하세요")} else if push_failed {kiln_common::trf!("로컬 {label} 완료 · 원격 반영 실패")}else{kiln_common::trf!("{label} 완료")};
                     self.events.push(HistoryEvent::Toast(text.clone()));
                     let undo_guard=match &d.op {Op::Reviewed{review,..}=>Some((review.branch.clone(),result.rewrite.new_head.clone())),_=>None};
                     self.notice = Some(Notice {undo_guard,text,detail:Some(result.notice),error:false,warn:stopped||push_failed,undo:if !stopped && !result.pushed {Some(result.rewrite.old_head)} else {None},force_push:false});
@@ -619,7 +619,7 @@ impl HistoryView {
                     history::Outcome::Done => {
                         let undo = (d.op.offers_undo() && rw.old_head != rw.new_head && !rw.old_head.is_empty())
                             .then(|| rw.old_head.clone());
-                        let text = format!("{label} 완료");
+                        let text = kiln_common::trf!("{label} 완료");
                         self.events.push(HistoryEvent::Toast(text.clone()));
                         self.notice = Some(Notice {
                             text,
@@ -632,9 +632,9 @@ impl HistoryView {
                     }
                     history::Outcome::Stopped(st) => {
                         let what = if st.conflicts.is_empty() {
-                            format!("편집 대기 중 · {}", st.op.label())
+                            kiln_common::trf!("편집 대기 중 · {}", st.op.label())
                         } else {
-                            format!("{} 중 충돌 {}개", st.op.label(), st.conflicts.len())
+                            kiln_common::trf!("{} 중 충돌 {}개", st.op.label(), st.conflicts.len())
                         };
                         self.notice = Some(Notice {
                             text: what,
@@ -647,18 +647,18 @@ impl HistoryView {
                     }
                 },
                 Ok(OpResult::Text(out)) => {
-                    let text = format!("{label} 완료");
+                    let text = kiln_common::trf!("{label} 완료");
                     self.events.push(HistoryEvent::Toast(text.clone()));
                     let force_push = d.pushed && matches!(d.op, Op::Continue);
                     let last = out.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_string);
                     self.notice = Some(Notice { text, detail: last, error: false, warn: false, undo: None, undo_guard:None, force_push });
                     if let Op::Branch { name, switch: false, .. } = &d.op {
-                        self.notice.as_mut().expect("notice").detail = Some(format!("'{name}' 브랜치를 만들었습니다"));
+                        self.notice.as_mut().expect("notice").detail = Some(kiln_common::trf!("'{name}' 브랜치를 만들었습니다"));
                     }
                 }
                 Err(e) => {
                     self.notice =
-                        Some(Notice { text: format!("{label} 실패"), detail: Some(e.to_string()), error: true, warn: false, undo: None, undo_guard:None, force_push: false });
+                        Some(Notice { text: kiln_common::trf!("{label} 실패"), detail: Some(e.to_string()), error: true, warn: false, undo: None, undo_guard:None, force_push: false });
                 }
             }
         }
@@ -832,7 +832,7 @@ impl HistoryView {
         ui.horizontal(|ui| {
             self.branch_menu(ui);
             ui.with_layout(Layout::right_to_left(Align::Center),|ui| {
-                if self.selected.len()>1 {ui.label(RichText::new(format!("{}개 선택",self.selected.len())).font(fonts::regular(11.0)).color(Theme::current().text_dim));}
+                if self.selected.len()>1 {ui.label(RichText::new(kiln_common::trf!("{}개 선택",self.selected.len())).font(fonts::regular(11.0)).color(Theme::current().text_dim));}
             });
         });
         let height=(ui.ctx().content_rect().height()*0.5).clamp(200.0,440.0);
@@ -904,32 +904,32 @@ impl HistoryView {
         let narrow = w < 900.0;
 
         let before = (self.search.clone(), self.author.clone(), self.path.clone());
-        search_field(&mut bar, "hist-search", &mut self.search, Icon::Search, "메시지 또는 해시 검색", if narrow { 170.0 } else { 240.0 });
+        search_field(&mut bar, "hist-search", &mut self.search, Icon::Search, kiln_common::i18n::tr("메시지 또는 해시 검색"), if narrow { 170.0 } else { 240.0 });
         self.branch_menu(&mut bar);
         self.author_menu(&mut bar);
-        search_field(&mut bar, "hist-path", &mut self.path, Icon::File, "경로", if narrow { 110.0 } else { 150.0 });
+        search_field(&mut bar, "hist-path", &mut self.path, Icon::File, kiln_common::i18n::tr("경로"), if narrow { 110.0 } else { 150.0 });
         if before != (self.search.clone(), self.author.clone(), self.path.clone()) {
             self.filter_changed = Some(Instant::now());
         }
         let mut fp = self.query.first_parent;
-        let resp = labeled_toggle(&mut bar, &mut fp, "첫 부모만");
+        let resp = labeled_toggle(&mut bar, &mut fp, kiln_common::i18n::tr("첫 부모만"));
         if resp.changed() {
             self.query.first_parent = fp;
             self.reload_log = true;
         }
         bar.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            if kiln_common::widgets::icon_button(ui, Icon::Refresh, 28.0, false, "새로 고침").clicked() {
+            if kiln_common::widgets::icon_button(ui, Icon::Refresh, 28.0, false, kiln_common::i18n::tr("새로 고침")).clicked() {
                 self.refresh();
             }
             if let Some(l) = self.busy_label() {
-                ui.label(RichText::new(format!("{l} 중…")).font(fonts::medium(12.0)).color(t.text_dim));
+                ui.label(RichText::new(kiln_common::trf!("{l} 중…")).font(fonts::medium(12.0)).color(t.text_dim));
                 ui.add(egui::Spinner::new().size(13.0).color(t.text_dim));
             } else if self.next.is_some() {
                 ui.add(egui::Spinner::new().size(13.0).color(t.text_faint));
             } else if !self.log.commits.is_empty() {
                 let n = self.log.commits.len();
-                let s = if self.log.exhausted { format!("커밋 {}", group_digits(n)) } else { format!("커밋 {}+", group_digits(n)) };
+                let s = if self.log.exhausted { kiln_common::trf!("커밋 {}", group_digits(n)) } else { kiln_common::trf!("커밋 {}+", group_digits(n)) };
                 ui.label(RichText::new(s).font(fonts::medium(11.5)).color(t.text_faint));
             }
         });
@@ -937,20 +937,20 @@ impl HistoryView {
 
     fn branch_menu(&mut self, ui: &mut Ui) {
         let label = match &self.query.branch {
-            BranchFilter::All => "모든 브랜치".to_string(),
-            BranchFilter::Current => "현재 브랜치".to_string(),
+            BranchFilter::All => kiln_common::i18n::tr("모든 브랜치").to_string(),
+            BranchFilter::Current => kiln_common::i18n::tr("현재 브랜치").to_string(),
             BranchFilter::Named(n) => n.clone(),
         };
         let active = self.query.branch != BranchFilter::All;
-        let resp = dropdown_button(ui, Icon::Branch, &label, active, "브랜치 필터").on_hover_text("조회할 브랜치를 선택합니다. 체리픽할 커밋을 찾을 때 사용하며 현재 작업 브랜치는 바뀌지 않습니다.");
+        let resp = dropdown_button(ui, Icon::Branch, &label, active, kiln_common::i18n::tr("브랜치 필터")).on_hover_text(kiln_common::i18n::tr("조회할 브랜치를 선택합니다. 체리픽할 커밋을 찾을 때 사용하며 현재 작업 브랜치는 바뀌지 않습니다."));
         let mut pick: Option<BranchFilter> = None;
         egui::Popup::menu(&resp).width(240.0).show(|ui| {
             ui.set_min_width(240.0);
-            if menu_item(ui, "모든 브랜치", None, self.query.branch == BranchFilter::All, true).clicked() {
+            if menu_item(ui, kiln_common::i18n::tr("모든 브랜치"), None, self.query.branch == BranchFilter::All, true).clicked() {
                 pick = Some(BranchFilter::All);
             }
             let cur = self.state.as_ref().and_then(|s| s.branch.clone()).unwrap_or_else(|| "HEAD".into());
-            if menu_item(ui, "현재 브랜치", Some(&cur), self.query.branch == BranchFilter::Current, true).clicked() {
+            if menu_item(ui, kiln_common::i18n::tr("현재 브랜치"), Some(&cur), self.query.branch == BranchFilter::Current, true).clicked() {
                 pick = Some(BranchFilter::Current);
             }
             let (locals, remotes) = self
@@ -960,7 +960,7 @@ impl HistoryView {
                 .unwrap_or_default();
             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                 if !locals.is_empty() {
-                    menu_heading(ui, "로컬");
+                    menu_heading(ui, kiln_common::i18n::tr("로컬"));
                     for b in &locals {
                         let sel = self.query.branch == BranchFilter::Named(b.clone());
                         if menu_item(ui, b, None, sel, true).clicked() {
@@ -969,7 +969,7 @@ impl HistoryView {
                     }
                 }
                 if !remotes.is_empty() {
-                    menu_heading(ui, "원격");
+                    menu_heading(ui, kiln_common::i18n::tr("원격"));
                     for b in &remotes {
                         let sel = self.query.branch == BranchFilter::Named(b.clone());
                         if menu_item(ui, b, None, sel, true).clicked() {
@@ -989,18 +989,18 @@ impl HistoryView {
     }
 
     fn author_menu(&mut self, ui: &mut Ui) {
-        let label = if self.author.trim().is_empty() { "모든 작성자".to_string() } else { self.author.clone() };
-        let resp = dropdown_button(ui, Icon::Filter, &label, !self.author.trim().is_empty(), "작성자 필터");
+        let label = if self.author.trim().is_empty() { kiln_common::i18n::tr("모든 작성자").to_string() } else { self.author.clone() };
+        let resp = dropdown_button(ui, Icon::Filter, &label, !self.author.trim().is_empty(), kiln_common::i18n::tr("작성자 필터"));
         let mut pick: Option<String> = None;
         egui::Popup::menu(&resp).width(240.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             ui.set_min_width(240.0);
             let mut s = self.author.clone();
-            search_field(ui, "hist-author-input", &mut s, Icon::Search, "이름 또는 이메일", 228.0);
+            search_field(ui, "hist-author-input", &mut s, Icon::Search, kiln_common::i18n::tr("이름 또는 이메일"), 228.0);
             if s != self.author {
                 pick = Some(s);
             }
             ui.add_space(4.0);
-            if menu_item(ui, "모든 작성자", None, self.author.trim().is_empty(), true).clicked() {
+            if menu_item(ui, kiln_common::i18n::tr("모든 작성자"), None, self.author.trim().is_empty(), true).clicked() {
                 pick = Some(String::new());
                 ui.close();
             }
@@ -1042,11 +1042,11 @@ impl HistoryView {
         let busy = self.runner.as_ref().is_some_and(|r| r.pending > 0);
         if compact {
             egui::Frame::new().fill(tint(c,0.10)).inner_margin(Margin::same(8)).show(ui,|ui| {
-                ui.label(RichText::new(format!("{} 진행 중 · 충돌 {}개",op.label(),st.conflicts.len())).font(fonts::medium(12.0)).color(c));
+                ui.label(RichText::new(kiln_common::trf!("{} 진행 중 · 충돌 {}개",op.label(),st.conflicts.len())).font(fonts::medium(12.0)).color(c));
                 ui.add_enabled_ui(!busy&&!self.external_busy,|ui|ui.horizontal_wrapped(|ui| {
-                    if button_with(ui,Some(Icon::Play),"계속",ButtonKind::Primary,true).clicked(){self.submit(Op::Continue,false,false);}
-                    if op!=RepoOp::Merge && button_with(ui,None,"건너뛰기",ButtonKind::Secondary,true).clicked(){self.submit(Op::Skip,false,false);}
-                    if button_with(ui,None,"중단",ButtonKind::Secondary,true).clicked(){self.submit(Op::Abort,false,false);}
+                    if button_with(ui,Some(Icon::Play),kiln_common::i18n::tr("계속"),ButtonKind::Primary,true).clicked(){self.submit(Op::Continue,false,false);}
+                    if op!=RepoOp::Merge && button_with(ui,None,kiln_common::i18n::tr("건너뛰기"),ButtonKind::Secondary,true).clicked(){self.submit(Op::Skip,false,false);}
+                    if button_with(ui,None,kiln_common::i18n::tr("중단"),ButtonKind::Secondary,true).clicked(){self.submit(Op::Abort,false,false);}
                 }));
             });
             return;
@@ -1060,26 +1060,26 @@ impl HistoryView {
                     let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                     kicons::paint(ui.painter(), r, Icon::Warning, c);
                     let title = if st.conflicts.is_empty() {
-                        format!("{} 진행 중 · 편집을 위해 멈춤", op.label())
+                        kiln_common::trf!("{} 진행 중 · 편집을 위해 멈춤", op.label())
                     } else {
-                        format!("{} 진행 중 · 충돌 {}개", op.label(), st.conflicts.len())
+                        kiln_common::trf!("{} 진행 중 · 충돌 {}개", op.label(), st.conflicts.len())
                     };
                     ui.label(RichText::new(title).font(fonts::semibold(13.0)).color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_enabled_ui(!busy, |ui| {
-                            if button_with(ui, None, "중단", ButtonKind::Secondary, true).clicked() {
+                            if button_with(ui, None, kiln_common::i18n::tr("중단"), ButtonKind::Secondary, true).clicked() {
                                 self.submit(Op::Abort, false, false);
                             }
-                            if button_with(ui, Some(Icon::Terminal), "터미널", ButtonKind::Ghost, true)
-                                .on_hover_text("터미널에서 git status 실행")
+                            if button_with(ui, Some(Icon::Terminal), kiln_common::i18n::tr("터미널"), ButtonKind::Ghost, true)
+                                .on_hover_text(kiln_common::i18n::tr("터미널에서 git status 실행"))
                                 .clicked()
                             {
                                 self.events.push(HistoryEvent::RunInTerminal("git status".into()));
                             }
-                            if op != RepoOp::Merge && button_with(ui, None, "건너뛰기", ButtonKind::Secondary, true).clicked() {
+                            if op != RepoOp::Merge && button_with(ui, None, kiln_common::i18n::tr("건너뛰기"), ButtonKind::Secondary, true).clicked() {
                                 self.submit(Op::Skip, false, false);
                             }
-                            if button_with(ui, Some(Icon::Play), "계속", ButtonKind::Primary, true).clicked() {
+                            if button_with(ui, Some(Icon::Play), kiln_common::i18n::tr("계속"), ButtonKind::Primary, true).clicked() {
                                 self.submit(Op::Continue, false, false);
                             }
                         });
@@ -1094,7 +1094,7 @@ impl HistoryView {
                             if r.clicked() {
                                 self.events.push(HistoryEvent::OpenFile(st.abs_path(&self.root, f)));
                             }
-                            r.on_hover_text("충돌 파일 열기");
+                            r.on_hover_text(kiln_common::i18n::tr("충돌 파일 열기"));
                         }
                     });
                 }
@@ -1116,14 +1116,14 @@ impl HistoryView {
         let p = ui.painter();
         p.hline(hr.x_range(), hr.bottom() - 0.5, Stroke::new(1.0, t.border));
         let hf = fonts::semibold(11.5);
-        p.text(pos2(hr.left() + GRAPH_PAD, hr.center().y), Align2::LEFT_CENTER, "커밋", hf.clone(), t.text_faint);
+        p.text(pos2(hr.left() + GRAPH_PAD, hr.center().y), Align2::LEFT_CENTER, kiln_common::i18n::tr("커밋"), hf.clone(), t.text_faint);
         if cols.show_author {
-            p.text(pos2(cols.author.min, hr.center().y), Align2::LEFT_CENTER, "작성자", hf.clone(), t.text_faint);
+            p.text(pos2(cols.author.min, hr.center().y), Align2::LEFT_CENTER, kiln_common::i18n::tr("작성자"), hf.clone(), t.text_faint);
         }
         if cols.show_date {
-            p.text(pos2(cols.date.min, hr.center().y), Align2::LEFT_CENTER, "날짜", hf.clone(), t.text_faint);
+            p.text(pos2(cols.date.min, hr.center().y), Align2::LEFT_CENTER, kiln_common::i18n::tr("날짜"), hf.clone(), t.text_faint);
         }
-        p.text(pos2(cols.hash.min, hr.center().y), Align2::LEFT_CENTER, "해시", hf, t.text_faint);
+        p.text(pos2(cols.hash.min, hr.center().y), Align2::LEFT_CENTER, kiln_common::i18n::tr("해시"), hf, t.text_faint);
 
         }
         if self.log.commits.is_empty() {
@@ -1135,14 +1135,14 @@ impl HistoryView {
                 ui.vertical_centered(|ui| {
                     ui.add(egui::Spinner::new().size(18.0).color(t.text_faint));
                     ui.add_space(8.0);
-                    ui.label(RichText::new("커밋을 불러오는 중…").color(t.text_dim).font(fonts::medium(13.0)));
+                    ui.label(RichText::new(kiln_common::i18n::tr("커밋을 불러오는 중…")).color(t.text_dim).font(fonts::medium(13.0)));
                 });
             } else if self.query.is_filtered() || self.query.branch != BranchFilter::All || self.query.first_parent {
-                if kiln_common::widgets::empty_state(ui, Icon::Filter, "조건에 맞는 커밋이 없습니다", Some("필터 초기화")) {
+                if kiln_common::widgets::empty_state(ui, Icon::Filter, kiln_common::i18n::tr("조건에 맞는 커밋이 없습니다"), Some(kiln_common::i18n::tr("필터 초기화"))) {
                     self.set_query(LogQuery::default());
                 }
             } else {
-                kiln_common::widgets::empty_state(ui, Icon::History, "아직 커밋이 없습니다", None);
+                kiln_common::widgets::empty_state(ui, Icon::History, kiln_common::i18n::tr("아직 커밋이 없습니다"), None);
             }
             return;
         }
@@ -1193,7 +1193,7 @@ impl HistoryView {
                     ui.painter().text(
                         pos2(r.left() + GRAPH_PAD, r.center().y),
                         Align2::LEFT_CENTER,
-                        "더 불러오는 중…",
+                        kiln_common::i18n::tr("더 불러오는 중…"),
                         fonts::regular(12.0),
                         t.text_faint,
                     );
@@ -1203,7 +1203,7 @@ impl HistoryView {
                 let id = Id::new(("hist-row", &c.sha));
                 let resp = ui.interact(r, id, Sense::click_and_drag());
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected.contains(&c.sha), &c.subject));
-                let resp=resp.on_hover_text("드래그: 커밋 범위 선택 · Shift 클릭: 범위 선택 · Option/Alt 드래그: 순서 이동");
+                let resp=resp.on_hover_text(kiln_common::i18n::tr("드래그: 커밋 범위 선택 · Shift 클릭: 범위 선택 · Option/Alt 드래그: 순서 이동"));
                 row_rects.push((i, r));
                 let is_sel = selected.contains(&c.sha);
                 let hovered = resp.hovered() && self.drag.is_none();
@@ -1340,19 +1340,19 @@ impl HistoryView {
         let area = egui::Area::new(Id::new("hist-drop-menu")).order(egui::Order::Foreground).fixed_pos(m.pos + vec2(8.0, 8.0)).show(ctx, |ui| {
             popup_frame().show(ui, |ui| {
                 ui.set_width(280.0);
-                let what = if m.moving.len() == 1 { "커밋 1개".to_string() } else { format!("커밋 {}개", m.moving.len()) };
-                ui.label(RichText::new(format!("{what}를 놓을 동작")).font(fonts::semibold(12.0)).color(t.text_faint));
+                let what = if m.moving.len() == 1 { kiln_common::i18n::tr("커밋 1개").to_string() } else { kiln_common::trf!("커밋 {}개", m.moving.len()) };
+                ui.label(RichText::new(kiln_common::trf!("{what}를 놓을 동작")).font(fonts::semibold(12.0)).color(t.text_faint));
                 ui.add_space(4.0);
-                let where_ = if m.place == DropPlace::Above { "위" } else { "아래" };
-                if ctx_item(ui, "여기로 순서 이동", Some(where_), true).clicked() {
+                let where_ = if m.place == DropPlace::Above { kiln_common::i18n::tr("위") } else { kiln_common::i18n::tr("아래") };
+                if ctx_item(ui, kiln_common::i18n::tr("여기로 순서 이동"), Some(where_), true).clicked() {
                     choice = Some(Op::Move { moving: m.moving.clone(), target: m.target.clone(), place: m.place });
                 }
-                let label = format!("이 커밋에 스쿼시(fixup) · {}", elide_str(&target_subject, 24));
+                let label = kiln_common::trf!("이 커밋에 스쿼시(fixup) · {}", elide_str(&target_subject, 24));
                 if ctx_item(ui, &label, None, true).clicked() {
                     choice = Some(Op::Fixup { moving: m.moving.clone(), target: m.target.clone() });
                 }
                 ui.add_space(2.0);
-                if ctx_item(ui, "취소", Some("Esc"), true).clicked() {
+                if ctx_item(ui, kiln_common::i18n::tr("취소"), Some("Esc"), true).clicked() {
                     close = true;
                 }
             });
@@ -1382,63 +1382,63 @@ impl HistoryView {
             let c = self.commit(&sha)?;
             let rewritable = self.rewritable(&sha);
             let is_head = head.as_deref() == Some(sha.as_str());
-            let why = "현재 브랜치의 첫 부모 줄(병합 이후)에 있는 커밋만 다시 쓸 수 있습니다";
+            let why = kiln_common::i18n::tr("현재 브랜치의 첫 부모 줄(병합 이후)에 있는 커밋만 다시 쓸 수 있습니다");
             menu_caption(ui, &format!("{} · {}", c.short(), elide_str(&c.subject, 34)));
-            let r = ctx_item(ui, "메시지 수정…", Some(if is_head { "amend" } else { "rebase" }), rewritable);
+            let r = ctx_item(ui, kiln_common::i18n::tr("메시지 수정…"), Some(if is_head { "amend" } else { "rebase" }), rewritable);
             if r.clicked() {act=Some(MenuAction::Reword(sha.clone()));}
             if !rewritable {r.on_disabled_hover_text(why);}
-            let cherry=ctx_item(ui, "체리픽", None, !self.linear.contains_key(&sha));
+            let cherry=ctx_item(ui, kiln_common::i18n::tr("체리픽"), None, !self.linear.contains_key(&sha));
             if cherry.clicked() {act=Some(MenuAction::Run(Op::CherryPick(vec![sha.clone()])));}
-            cherry.on_disabled_hover_text("현재 브랜치에 이미 포함된 커밋입니다. 다른 브랜치의 커밋을 선택하세요.");
-            let drop=menu_item_danger(ui, "커밋 삭제", rewritable);
+            cherry.on_disabled_hover_text(kiln_common::i18n::tr("현재 브랜치에 이미 포함된 커밋입니다. 다른 브랜치의 커밋을 선택하세요."));
+            let drop=menu_item_danger(ui, kiln_common::i18n::tr("커밋 삭제"), rewritable);
             if drop.clicked() {act=Some(MenuAction::DropCommits(vec![sha.clone()]));}
             drop.on_disabled_hover_text(why);
             menu_sep(ui);
-            if ctx_item(ui, "커밋 diff 열기", Some("↵"), true).clicked() {
+            if ctx_item(ui, kiln_common::i18n::tr("커밋 diff 열기"), Some("↵"), true).clicked() {
                 act = Some(MenuAction::OpenCommit(sha.clone()));
             }
-            if ctx_item(ui, "작업 트리와 비교", None, true).clicked() {
+            if ctx_item(ui, kiln_common::i18n::tr("작업 트리와 비교"), None, true).clicked() {
                 act = Some(MenuAction::CompareWorktree(sha.clone()));
             }
-            if ctx_item(ui, "해시 복사", Some(copy_shortcut(ui.ctx())), true).clicked() {
+            if ctx_item(ui, kiln_common::i18n::tr("해시 복사"), Some(copy_shortcut(ui.ctx())), true).clicked() {
                 act = Some(MenuAction::CopyHashes(vec![sha.clone()]));
             }
             menu_sep(ui);
-            ui.menu_button("고급 작업",|ui| {
+            ui.menu_button(kiln_common::i18n::tr("고급 작업"),|ui| {
                 let branches:Vec<_>=c.refs.iter().filter(|r|r.kind==RefKind::LocalBranch&&!r.current).collect();
                 for b in branches.iter().take(3) {
-                    if ctx_item(ui,&format!("'{}' 체크아웃",b.name),None,true).clicked(){act=Some(MenuAction::Run(Op::Checkout(b.name.clone())));}
+                    if ctx_item(ui,&kiln_common::trf!("'{}' 체크아웃",b.name),None,true).clicked(){act=Some(MenuAction::Run(Op::Checkout(b.name.clone())));}
                 }
-                if ctx_item(ui,"체크아웃",Some("분리된 HEAD"),!is_head).clicked(){act=Some(MenuAction::CheckoutDetached(sha.clone()));}
-                if ctx_item(ui,"여기서 브랜치 만들기…",None,true).clicked(){act=Some(MenuAction::NewBranch(sha.clone()));}
-                if ctx_item(ui,"태그 만들기…",None,true).clicked(){act=Some(MenuAction::NewTag(sha.clone()));}
+                if ctx_item(ui,kiln_common::i18n::tr("체크아웃"),Some(kiln_common::i18n::tr("분리된 HEAD")),!is_head).clicked(){act=Some(MenuAction::CheckoutDetached(sha.clone()));}
+                if ctx_item(ui,kiln_common::i18n::tr("여기서 브랜치 만들기…"),None,true).clicked(){act=Some(MenuAction::NewBranch(sha.clone()));}
+                if ctx_item(ui,kiln_common::i18n::tr("태그 만들기…"),None,true).clicked(){act=Some(MenuAction::NewTag(sha.clone()));}
                 menu_sep(ui);
-                if ctx_item(ui,"되돌리기(revert)",None,true).clicked(){act=Some(MenuAction::Run(Op::Revert(sha.clone())));}
-                if ctx_item(ui,"현재 브랜치를 여기로 리셋…",None,!is_head).clicked(){act=Some(MenuAction::Reset(sha.clone()));}
-                if ctx_item(ui,"이 커밋부터 대화형 리베이스…",None,rewritable).clicked(){act=Some(MenuAction::InteractiveFrom(sha.clone()));}
+                if ctx_item(ui,kiln_common::i18n::tr("되돌리기(revert)"),None,true).clicked(){act=Some(MenuAction::Run(Op::Revert(sha.clone())));}
+                if ctx_item(ui,kiln_common::i18n::tr("현재 브랜치를 여기로 리셋…"),None,!is_head).clicked(){act=Some(MenuAction::Reset(sha.clone()));}
+                if ctx_item(ui,kiln_common::i18n::tr("이 커밋부터 대화형 리베이스…"),None,rewritable).clicked(){act=Some(MenuAction::InteractiveFrom(sha.clone()));}
             });
         } else {
             let contiguous = self.contiguous_linear(&sel);
             let all_rewritable = sel.iter().all(|s| self.rewritable(s));
-            menu_caption(ui, &format!("커밋 {}개 선택됨", sel.len()));
-            let r = ctx_item(ui, "하나로 스쿼시…", None, contiguous || (self.query.is_filtered() && all_rewritable));
+            menu_caption(ui, &kiln_common::trf!("커밋 {}개 선택됨", sel.len()));
+            let r = ctx_item(ui, kiln_common::i18n::tr("하나로 스쿼시…"), None, contiguous || (self.query.is_filtered() && all_rewritable));
             if r.clicked() {
                 act = Some(MenuAction::Squash(sel.clone()));
             }
             if !contiguous {
-                r.on_disabled_hover_text("현재 브랜치의 연속된 커밋(병합 제외)만 합칠 수 있습니다");
+                r.on_disabled_hover_text(kiln_common::i18n::tr("현재 브랜치의 연속된 커밋(병합 제외)만 합칠 수 있습니다"));
             }
-            let r = menu_item_danger(ui, "선택 커밋 삭제", all_rewritable);
+            let r = menu_item_danger(ui, kiln_common::i18n::tr("선택 커밋 삭제"), all_rewritable);
             if r.clicked() {
                 act = Some(MenuAction::DropCommits(sel.clone()));
             }
             let mut oldest_first = sel.clone();
             oldest_first.reverse();
-            if ctx_item(ui, "체리픽(순서대로)", Some("오래된 순"), true).clicked() {
+            if ctx_item(ui, kiln_common::i18n::tr("체리픽(순서대로)"), Some(kiln_common::i18n::tr("오래된 순")), true).clicked() {
                 act = Some(MenuAction::Run(Op::CherryPick(oldest_first)));
             }
             menu_sep(ui);
-            if ctx_item(ui, "해시 복사", Some(copy_shortcut(ui.ctx())), true).clicked() {
+            if ctx_item(ui, kiln_common::i18n::tr("해시 복사"), Some(copy_shortcut(ui.ctx())), true).clicked() {
                 act = Some(MenuAction::CopyHashes(sel.clone()));
             }
         }
@@ -1463,13 +1463,13 @@ impl HistoryView {
                 let subject = c.map(|c| c.subject).unwrap_or_default();
                 let mut d = ConfirmDialog::plain(
                     Op::Checkout(sha.clone()),
-                    "커밋을 체크아웃할까요?",
-                    format!(
+                    kiln_common::i18n::tr("커밋을 체크아웃할까요?"),
+                    kiln_common::trf!(
                         "분리된 HEAD 상태로 체크아웃합니다: {} · {}. 이 상태에서 만든 커밋은 브랜치를 만들지 않으면 잃을 수 있습니다.",
                         short(&sha),
                         subject
                     ),
-                    "체크아웃",
+                    kiln_common::i18n::tr("체크아웃"),
                 );
                 d.danger = false;
                 self.dialog = Some(Dialog::Confirm(d));
@@ -1507,7 +1507,7 @@ impl HistoryView {
             MenuAction::CompareWorktree(sha) => self.events.push(HistoryEvent::OpenDiff { from: sha, to: None }),
             MenuAction::CopyHashes(shas) => {
                 ctx.copy_text(shas.join("\n"));
-                self.events.push(HistoryEvent::Toast(if shas.len() == 1 { "해시를 복사했습니다".into() } else { format!("해시 {}개를 복사했습니다", shas.len()) }));
+                self.events.push(HistoryEvent::Toast(if shas.len() == 1 { kiln_common::i18n::tr("해시를 복사했습니다").into() } else { kiln_common::trf!("해시 {}개를 복사했습니다", shas.len()) }));
             }
             MenuAction::OpenCommit(sha) => self.events.push(HistoryEvent::OpenCommit(sha)),
         }
@@ -1563,17 +1563,17 @@ impl HistoryView {
                                 ui.label(RichText::new(&n.text).font(fonts::semibold(13.0)).color(t.text));
                                 if let Some(d) = &n.detail {
                                     let full_detail=d;
-                                    let d: String = d.lines().take(4).map(|line|if line.starts_with("원본 보관: refs/kiln/backup/"){"원본 이력은 백업 참조에 보관했습니다. (마우스를 올려 참조 확인)"}else{line}).collect::<Vec<_>>().join("\n");
+                                    let d: String = d.lines().take(4).map(|line|if line.starts_with("원본 보관: refs/kiln/backup/"){kiln_common::i18n::tr("원본 이력은 백업 참조에 보관했습니다. (마우스를 올려 참조 확인)")}else{line}).collect::<Vec<_>>().join("\n");
                                     ui.add(egui::Label::new(RichText::new(d).font(fonts::regular(12.0)).color(t.text_dim)).wrap()).on_hover_text(full_detail);
                                 }
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                if kiln_common::widgets::icon_button(ui, Icon::Close, 24.0, false, "닫기").clicked() {
+                                if kiln_common::widgets::icon_button(ui, Icon::Close, 24.0, false, kiln_common::i18n::tr("닫기")).clicked() {
                                     close = true;
                                 }
                                 if let Some(old) = &n.undo
-                                    && button_with(ui, Some(Icon::Undo), "되돌리기", ButtonKind::Secondary, true)
+                                    && button_with(ui, Some(Icon::Undo), kiln_common::i18n::tr("되돌리기"), ButtonKind::Secondary, true)
                                         .on_hover_text(format!("git reset --keep {}", short(old)))
                                         .clicked()
                                 {
@@ -1581,7 +1581,7 @@ impl HistoryView {
                                     self.submit(op, false, false);
                                     close = true;
                                 }
-                                if n.force_push { ui.label(RichText::new("원격 이력이 달라졌습니다. 푸시 전 원격 상태를 다시 확인하세요.").color(t.orange)); }
+                                if n.force_push { ui.label(RichText::new(kiln_common::i18n::tr("원격 이력이 달라졌습니다. 푸시 전 원격 상태를 다시 확인하세요.")).color(t.orange)); }
                             });
                         });
                     });
@@ -1601,7 +1601,7 @@ impl HistoryView {
         }
         let Some(sha) = self.selected.first().cloned() else {
             ui.add_space(60.0);
-            kiln_common::widgets::empty_state(ui, Icon::History, "커밋을 선택하세요", None);
+            kiln_common::widgets::empty_state(ui, Icon::History, kiln_common::i18n::tr("커밋을 선택하세요"), None);
             return;
         };
         let info = self.detail_info.clone().filter(|d| d.sha == sha);
@@ -1651,19 +1651,19 @@ impl HistoryView {
                         ui.spacing_mut().item_spacing.y = 6.0;
                         person_row(ui, &info.author, &info.email, &format!("{} · {}", info.author_date_text, relative_time(info.author_date, now)));
                         if info.committer != info.author || info.committer_email != info.email {
-                            meta_row(ui, "커미터", &format!("{} · {}", info.committer, info.commit_date_text));
+                            meta_row(ui, kiln_common::i18n::tr("커미터"), &format!("{} · {}", info.committer, info.commit_date_text));
                         }
-                        let hash_resp = meta_link_row(ui, "해시", &info.sha, true);
+                        let hash_resp = meta_link_row(ui, kiln_common::i18n::tr("해시"), &info.sha, true);
                         if hash_resp.clicked() {
                             ui.ctx().copy_text(info.sha.clone());
-                            self.events.push(HistoryEvent::Toast("해시를 복사했습니다".into()));
+                            self.events.push(HistoryEvent::Toast(kiln_common::i18n::tr("해시를 복사했습니다").into()));
                         }
-                        hash_resp.on_hover_text("클릭해 복사");
+                        hash_resp.on_hover_text(kiln_common::i18n::tr("클릭해 복사"));
                         if info.parents.is_empty() {
-                            meta_row(ui, "부모", "없음(루트 커밋)");
+                            meta_row(ui, kiln_common::i18n::tr("부모"), kiln_common::i18n::tr("없음(루트 커밋)"));
                         }
                         for (k, p) in info.parents.iter().enumerate() {
-                            let label = if k == 0 { "부모" } else { "" };
+                            let label = if k == 0 { kiln_common::i18n::tr("부모") } else { "" };
                             let subject = self.commit(p).map(|c| c.subject.clone()).unwrap_or_default();
                             let r = meta_link_row(ui, label, &format!("{}  {}", short(p), subject), false);
                             if r.clicked() {
@@ -1679,7 +1679,7 @@ impl HistoryView {
                 let (adds, dels) = info.files.iter().fold((0u32, 0u32), |(a, d), f| (a + f.added.unwrap_or(0), d + f.removed.unwrap_or(0)));
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(RichText::new("변경된 파일").font(fonts::semibold(12.5)).color(t.text_dim));
+                    ui.label(RichText::new(kiln_common::i18n::tr("변경된 파일")).font(fonts::semibold(12.5)).color(t.text_dim));
                     count_badge(ui, info.files.len());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(RichText::new(format!("−{dels}")).font(fonts::mono(11.5)).color(t.red));
@@ -1698,14 +1698,14 @@ impl HistoryView {
                     }
                 }
                 if info.files.is_empty() {
-                    ui.label(RichText::new("변경된 파일이 없습니다").font(fonts::regular(12.5)).color(t.text_faint));
+                    ui.label(RichText::new(kiln_common::i18n::tr("변경된 파일이 없습니다")).font(fonts::regular(12.5)).color(t.text_faint));
                 }
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
-                    if button_with(ui, Some(Icon::Eye), "커밋 diff 열기", ButtonKind::Secondary, true).clicked() {
+                    if button_with(ui, Some(Icon::Eye), kiln_common::i18n::tr("커밋 diff 열기"), ButtonKind::Secondary, true).clicked() {
                         self.events.push(HistoryEvent::OpenCommit(info.sha.clone()));
                     }
-                    if button_with(ui, Some(Icon::Columns), "작업 트리와 비교", ButtonKind::Ghost, true).clicked() {
+                    if button_with(ui, Some(Icon::Columns), kiln_common::i18n::tr("작업 트리와 비교"), ButtonKind::Ghost, true).clicked() {
                         self.events.push(HistoryEvent::OpenDiff { from: info.sha.clone(), to: None });
                     }
                 });
@@ -1720,24 +1720,24 @@ impl HistoryView {
         let all_rw = sel.iter().all(|s| self.rewritable(s));
         egui::Frame::new().inner_margin(Margin { left: 18, right: 16, top: 16, bottom: 16 }).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(format!("커밋 {}개 선택됨", sel.len())).font(fonts::semibold(15.5)).color(t.text));
+            ui.label(RichText::new(kiln_common::trf!("커밋 {}개 선택됨", sel.len())).font(fonts::semibold(15.5)).color(t.text));
             ui.add_space(4.0);
-            let hint = if contiguous { "현재 브랜치의 연속 구간입니다" } else { "연속 구간이 아니거나 현재 브랜치 밖의 커밋이 있습니다" };
+            let hint = if contiguous { kiln_common::i18n::tr("현재 브랜치의 연속 구간입니다") } else { kiln_common::i18n::tr("연속 구간이 아니거나 현재 브랜치 밖의 커밋이 있습니다") };
             ui.label(RichText::new(hint).font(fonts::regular(12.5)).color(t.text_faint));
             ui.add_space(12.0);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 ui.add_enabled_ui(contiguous, |ui| {
-                    if button_with(ui, None, "스쿼시…", ButtonKind::Primary, true).clicked() {
+                    if button_with(ui, None, kiln_common::i18n::tr("스쿼시…"), ButtonKind::Primary, true).clicked() {
                         self.menu_action = Some(MenuAction::Squash(sel.clone()));
                     }
                 });
                 ui.add_enabled_ui(all_rw, |ui| {
-                    if button_with(ui, Some(Icon::Trash), "선택 삭제", ButtonKind::Secondary, true).clicked() {
+                    if button_with(ui, Some(Icon::Trash), kiln_common::i18n::tr("선택 삭제"), ButtonKind::Secondary, true).clicked() {
                         self.menu_action = Some(MenuAction::DropCommits(sel.clone()));
                     }
                 });
-                if button_with(ui, None, "순서대로 체리픽", ButtonKind::Secondary, true).clicked() {
+                if button_with(ui, None, kiln_common::i18n::tr("순서대로 체리픽"), ButtonKind::Secondary, true).clicked() {
                     let mut v = sel.clone();
                     v.reverse();
                     self.menu_action = Some(MenuAction::Run(Op::CherryPick(v)));
@@ -1817,7 +1817,7 @@ fn paint_drop_hint(p: &Painter, r: Rect, z: DragZone) {
 
 fn paint_drag_ghost(ctx: &egui::Context, pos: Pos2, n: usize, ok: bool) {
     let t = Theme::current();
-    let text = if n == 1 { "커밋 1개 이동".to_string() } else { format!("커밋 {n}개 이동") };
+    let text = if n == 1 { kiln_common::i18n::tr("커밋 1개 이동").to_string() } else { kiln_common::trf!("커밋 {n}개 이동") };
     let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, Id::new("hist-drag-ghost")));
     let g = p.layout_no_wrap(text, fonts::medium(12.0), if ok { t.accent_fg } else { t.text });
     let r = Rect::from_min_size(pos + vec2(14.0, 10.0), g.size() + vec2(20.0, 10.0));
@@ -2301,7 +2301,7 @@ fn file_row(ui: &mut Ui, f: &history::ChangedFile) -> egui::Response {
     };
     let stats = match (f.added, f.removed) {
         (Some(a), Some(d)) => format!("+{a} −{d}"),
-        _ => "바이너리".to_string(),
+        _ => kiln_common::i18n::tr("바이너리").to_string(),
     };
     let sg = p.layout_no_wrap(stats, fonts::mono(11.0), t.text_faint);
     let avail = r.width() - 28.0 - sg.size().x - 10.0;

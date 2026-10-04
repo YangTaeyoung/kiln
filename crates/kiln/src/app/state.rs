@@ -213,13 +213,13 @@ fn load_path(path: &std::path::Path) -> LoadReport {
                     Ok(())
                 })();
                 match result {
-                    Ok(()) => { report.warning = Some(format!("작업 상태 파일을 읽지 못했습니다. 원본을 {}에 보관했습니다. {error}", backup.display())); report.quarantined = Some(backup); }
-                    Err(e) => report.warning = Some(format!("작업 상태를 읽지 못했고 원본 보관에도 실패했습니다. 기존 파일을 덮어쓰지 않습니다. {error}; {e}")),
+                    Ok(()) => { report.warning = Some(kiln_common::trf!("작업 상태 파일을 읽지 못했습니다. 원본을 {}에 보관했습니다. {error}", backup.display())); report.quarantined = Some(backup); }
+                    Err(e) => report.warning = Some(kiln_common::trf!("작업 상태를 읽지 못했고 원본 보관에도 실패했습니다. 기존 파일을 덮어쓰지 않습니다. {error}; {e}")),
                 }
             }
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
-        Err(error) => report.warning = Some(format!("작업 상태를 읽지 못했습니다. 기존 파일은 유지됩니다. {error}")),
+        Err(error) => report.warning = Some(kiln_common::trf!("작업 상태를 읽지 못했습니다. 기존 파일은 유지됩니다. {error}")),
     }
     if report.state.workspaces.is_empty() { report.state.sidebar_open = true; }
     report
@@ -230,11 +230,11 @@ pub fn save(p: &Persist) -> Result<(), String> { save_path(&path(), p) }
 
 fn save_path(path: &std::path::Path, p: &Persist) -> Result<(), String> {
     match std::fs::read(path) {
-        Ok(bytes) => { serde_json::from_slice::<Persist>(&bytes).map_err(|e| format!("손상된 기존 상태 파일을 덮어쓰지 않았습니다: {e}"))?; }
+        Ok(bytes) => { serde_json::from_slice::<Persist>(&bytes).map_err(|e| kiln_common::trf!("손상된 기존 상태 파일을 덮어쓰지 않았습니다: {e}"))?; }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-        Err(e) => return Err(format!("기존 상태 파일을 확인하지 못했습니다: {e}")),
+        Err(e) => return Err(kiln_common::trf!("기존 상태 파일을 확인하지 못했습니다: {e}")),
     }
-    let parent = path.parent().ok_or("상태 파일 경로가 올바르지 않습니다")?;
+    let parent = path.parent().ok_or(kiln_common::i18n::tr("상태 파일 경로가 올바르지 않습니다"))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     let temp = path.with_extension(format!("{}-{stamp}.tmp", std::process::id()));

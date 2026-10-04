@@ -157,13 +157,13 @@ impl ActionsPanel {
             match r {
                 Ok(()) => {
                     let title = match kind {
-                        ActionKind::Rerun => format!("실행 #{id} 다시 시작됨"),
-                        ActionKind::Cancel => format!("실행 #{id} 취소됨"),
+                        ActionKind::Rerun => kiln_common::trf!("실행 #{id} 다시 시작됨"),
+                        ActionKind::Cancel => kiln_common::trf!("실행 #{id} 취소됨"),
                     };
                     self.action_msg = Some((BannerKind::Success, title, None));
                     self.refresh();
                 }
-                Err(e) => self.action_msg = Some((BannerKind::Error, match kind { ActionKind::Rerun => "워크플로 다시 실행 실패", ActionKind::Cancel => "워크플로 실행 취소 실패" }.into(), Some(e.to_string()))),
+                Err(e) => self.action_msg = Some((BannerKind::Error, match kind { ActionKind::Rerun => kiln_common::i18n::tr("워크플로 다시 실행 실패"), ActionKind::Cancel => kiln_common::i18n::tr("워크플로 실행 취소 실패") }.into(), Some(e.to_string()))),
             }
         }
         // 진행 중인 실행이 있으면 15초마다 새로 고친다.
@@ -206,7 +206,7 @@ impl ActionsPanel {
             if self.embedded {
                 if self.started && self.load.is_none() && self.error.is_none() {
                     let active = self.active_count();
-                    let s = if active > 0 { format!("실행 {}개 · 진행 중 {active}", self.items.len()) } else { format!("실행 {}개", self.items.len()) };
+                    let s = if active > 0 { kiln_common::trf!("실행 {}개 · 진행 중 {active}", self.items.len()) } else { kiln_common::trf!("실행 {}개", self.items.len()) };
                     ui.label(faint(s));
                 }
             } else {
@@ -215,7 +215,7 @@ impl ActionsPanel {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if self.load.is_some() {
                     spinner(ui, 12.0);
-                } else if icon_button(ui, Icon::Refresh, "새로 고침").clicked() {
+                } else if icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("새로 고침")).clicked() {
                     self.refresh();
                 }
             });
@@ -223,25 +223,25 @@ impl ActionsPanel {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let bv = self.filter.branch.clone().unwrap_or_else(|| "전체".into());
-            let br = filter_button(ui, "브랜치", &bv, self.filter.branch.is_some());
+            let bv = self.filter.branch.clone().unwrap_or_else(|| kiln_common::i18n::tr("전체").into());
+            let br = filter_button(ui, kiln_common::i18n::tr("브랜치"), &bv, self.filter.branch.is_some());
             let bid = Id::new("actions_branch_filter");
             if br.clicked() {
                 egui::Popup::toggle_id(ui.ctx(), bid);
             }
-            let wv = self.filter.workflow.clone().unwrap_or_else(|| "전체".into());
-            let wr = filter_button(ui, "워크플로", &wv, self.filter.workflow.is_some());
+            let wv = self.filter.workflow.clone().unwrap_or_else(|| kiln_common::i18n::tr("전체").into());
+            let wr = filter_button(ui, kiln_common::i18n::tr("워크플로"), &wv, self.filter.workflow.is_some());
             let wid = Id::new("actions_workflow_filter");
             if wr.clicked() {
                 egui::Popup::toggle_id(ui.ctx(), wid);
             }
-            let mut opts: Vec<(Option<String>, String)> = vec![(None, "모든 브랜치".into())];
+            let mut opts: Vec<(Option<String>, String)> = vec![(None, kiln_common::i18n::tr("모든 브랜치").into())];
             opts.extend(self.branches.iter().map(|b| (Some(b.clone()), b.clone())));
             if let Some(v) = single_pick_popup(ui, bid, br.rect, &opts, &self.filter.branch) {
                 let f = RunFilter { branch: v, ..self.filter.clone() };
                 self.set_filter(f);
             }
-            let mut opts: Vec<(Option<String>, String)> = vec![(None, "모든 워크플로".into())];
+            let mut opts: Vec<(Option<String>, String)> = vec![(None, kiln_common::i18n::tr("모든 워크플로").into())];
             opts.extend(self.workflows.iter().map(|w| (Some(w.clone()), w.clone())));
             if let Some(v) = single_pick_popup(ui, wid, wr.rect, &opts, &self.filter.workflow) {
                 let f = RunFilter { workflow: v, ..self.filter.clone() };
@@ -258,7 +258,7 @@ impl ActionsPanel {
 
     fn ui_list(&mut self, ui: &mut Ui, events: &mut Vec<GitEvent>) {
         if let Some(e) = self.error.clone() {
-            if gh_error_state(ui, &e, "워크플로 실행", events) == ErrorAction::Retry {
+            if gh_error_state(ui, &e, kiln_common::i18n::tr("워크플로 실행"), events) == ErrorAction::Retry {
                 self.refresh();
             }
             return;
@@ -268,13 +268,13 @@ impl ActionsPanel {
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
                 spinner(ui, 14.0);
-                ui.label(dim("워크플로 실행 불러오는 중…"));
+                ui.label(dim(kiln_common::i18n::tr("워크플로 실행 불러오는 중…")));
             });
             return;
         }
         if self.items.is_empty() {
             let filtered = self.filter != RunFilter::default();
-            empty_state_icon(ui, Icon::Actions, "워크플로 실행이 없습니다", if filtered { "다른 브랜치나 워크플로를 선택해 보세요." } else { "" });
+            empty_state_icon(ui, Icon::Actions, kiln_common::i18n::tr("워크플로 실행이 없습니다"), if filtered { kiln_common::i18n::tr("다른 브랜치나 워크플로를 선택해 보세요.") } else { "" });
             return;
         }
         let now = self.now_override.unwrap_or_else(now_unix);
@@ -312,27 +312,27 @@ impl ActionsPanel {
         let id = run.database_id;
         let repo = self.repo.clone();
         if status.is_active() {
-            if tool_button(ui, Some(Icon::Play), "실행 지켜보기").on_hover_text("터미널에서 gh run watch").clicked() {
+            if tool_button(ui, Some(Icon::Play), kiln_common::i18n::tr("실행 지켜보기")).on_hover_text(kiln_common::i18n::tr("터미널에서 gh run watch")).clicked() {
                 events.push(GitEvent::RunInTerminal(gh_command(&format!("run watch {id}"), repo.as_ref())));
             }
-        } else if tool_button(ui, Some(Icon::Open), "로그 보기").on_hover_text("터미널에서 gh run view --log").clicked() {
+        } else if tool_button(ui, Some(Icon::Open), kiln_common::i18n::tr("로그 보기")).on_hover_text(kiln_common::i18n::tr("터미널에서 gh run view --log")).clicked() {
             events.push(GitEvent::RunInTerminal(gh_command(&format!("run view {id} --log"), repo.as_ref())));
         }
         ui.add_enabled_ui(!busy, |ui| {
             if status.is_active() {
-                if tool_button(ui, Some(Icon::Stop), "실행 취소").clicked() {
+                if tool_button(ui, Some(Icon::Stop), kiln_common::i18n::tr("실행 취소")).clicked() {
                     self.run(ui.ctx(), ActionKind::Cancel, id, move |b, r| b.cancel_run(r, id));
                 }
             } else {
-                if tool_button(ui, Some(Icon::Refresh), "다시 실행").clicked() {
+                if tool_button(ui, Some(Icon::Refresh), kiln_common::i18n::tr("다시 실행")).clicked() {
                     self.run(ui.ctx(), ActionKind::Rerun, id, move |b, r| b.rerun(r, id, false));
                 }
-                if status == RunStatus::Failure && tool_button(ui, Some(Icon::Refresh), "실패한 작업만 다시 실행").clicked() {
+                if status == RunStatus::Failure && tool_button(ui, Some(Icon::Refresh), kiln_common::i18n::tr("실패한 작업만 다시 실행")).clicked() {
                     self.run(ui.ctx(), ActionKind::Rerun, id, move |b, r| b.rerun(r, id, true));
                 }
             }
         });
-        if tool_button(ui, Some(Icon::External), "브라우저에서 열기").clicked() && !run.url.is_empty() {
+        if tool_button(ui, Some(Icon::External), kiln_common::i18n::tr("브라우저에서 열기")).clicked() && !run.url.is_empty() {
             events.push(GitEvent::OpenUrl(run.url.clone()));
         }
         if busy && self.action.as_ref().is_some_and(|(_, aid, _)| *aid == id) {
@@ -382,7 +382,7 @@ fn paint_run_row(ui: &Ui, rect: Rect, run: &RunItem, status: RunStatus, now: i64
         meta.push_str(&format!(" #{}", run.number));
     }
     if run.attempt > 1 {
-        meta.push_str(&format!(" (시도 {})", run.attempt));
+        meta.push_str(&kiln_common::trf!(" (시도 {})", run.attempt));
     }
     let g = p.layout_job(one_line_job(&[(&meta, 11.0, t.text_dim)], (rect.width() * 0.45).max(60.0)));
     let mut x = x0 + g.size().x + 8.0;

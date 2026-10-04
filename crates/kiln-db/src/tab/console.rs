@@ -127,8 +127,8 @@ impl ConsoleView {
         if let Some(path)=&doc.path {
             match std::fs::read_to_string(path) {
                 Ok(text) if doc.saved_text.as_deref()==Some(&text)=>{},
-                Ok(_)=>{self.saved_text=None;self.document_error=Some("저장 파일이 외부에서 변경되었습니다. 다른 이름으로 저장하거나 파일을 다시 여세요.".into());}
-                Err(e)=>{self.saved_text=None;self.document_error=Some(format!("저장 파일을 읽지 못했습니다. 복원된 텍스트는 보존됩니다: {e}"));}
+                Ok(_)=>{self.saved_text=None;self.document_error=Some(kiln_common::i18n::tr("저장 파일이 외부에서 변경되었습니다. 다른 이름으로 저장하거나 파일을 다시 여세요.").into());}
+                Err(e)=>{self.saved_text=None;self.document_error=Some(kiln_common::trf!("저장 파일을 읽지 못했습니다. 복원된 텍스트는 보존됩니다: {e}"));}
             }
         }
     }
@@ -138,7 +138,7 @@ impl ConsoleView {
             match std::fs::read_to_string(&path) {
                 Ok(text) if self.saved_text.as_ref()==Some(&text)=>{},
                 Err(e) if e.kind()==std::io::ErrorKind::NotFound=>{},
-                _=>return Err("파일이 외부에서 변경되어 덮어쓰기를 중단했습니다. 다른 이름으로 저장하거나 다시 여세요.".into()),
+                _=>return Err(kiln_common::i18n::tr("파일이 외부에서 변경되어 덮어쓰기를 중단했습니다. 다른 이름으로 저장하거나 다시 여세요.").into()),
             }
         }
         kiln_common::safe_file::write(&path,self.sql.as_bytes()).map_err(|e|e.to_string())?;
@@ -163,18 +163,18 @@ impl ConsoleView {
         ui.set_min_width(ui.available_width());
         ui.spacing_mut().item_spacing=egui::vec2(8.0,6.0);
         ui.horizontal_wrapped(|ui|{
-            ui.strong(self.document_name().unwrap_or_else(||"이름 없는 쿼리".into()));
-            ui.label(RichText::new(if self.has_draft(){"저장하지 않은 변경"}else if self.document_path.is_some(){"저장됨"}else{"임시 쿼리"}).size(12.0).color(theme.text_dim));
-            if ui.button("열기…").clicked(){if self.has_draft(){self.confirm_open=true;}else{self.choose_open();}}
-            if ui.button("저장").clicked(){self.choose_save(false);}
-            if ui.button("다른 이름으로 저장…").clicked(){self.choose_save(true);}
+            ui.strong(self.document_name().unwrap_or_else(||kiln_common::i18n::tr("이름 없는 쿼리").into()));
+            ui.label(RichText::new(if self.has_draft(){kiln_common::i18n::tr("저장하지 않은 변경")}else if self.document_path.is_some(){kiln_common::i18n::tr("저장됨")}else{kiln_common::i18n::tr("임시 쿼리")}).size(12.0).color(theme.text_dim));
+            if ui.button(kiln_common::i18n::tr("열기…")).clicked(){if self.has_draft(){self.confirm_open=true;}else{self.choose_open();}}
+            if ui.button(kiln_common::i18n::tr("저장")).clicked(){self.choose_save(false);}
+            if ui.button(kiln_common::i18n::tr("다른 이름으로 저장…")).clicked(){self.choose_save(true);}
         });
         if let Some(error)=&self.document_error{ui.colored_label(Theme::current().red,error);}
         if self.pending_history.is_some(){
-            ui.horizontal_wrapped(|ui|{ui.label("수정 중인 쿼리를 기록의 SQL로 바꿀까요?");if ui.button("기록 불러오기 취소").clicked(){self.pending_history=None;}if ui.button("변경 버리고 기록 불러오기").clicked(){if let Some(sql)=self.pending_history.take(){self.set_text(&sql);}}});
+            ui.horizontal_wrapped(|ui|{ui.label(kiln_common::i18n::tr("수정 중인 쿼리를 기록의 SQL로 바꿀까요?"));if ui.button(kiln_common::i18n::tr("기록 불러오기 취소")).clicked(){self.pending_history=None;}if ui.button(kiln_common::i18n::tr("변경 버리고 기록 불러오기")).clicked(){if let Some(sql)=self.pending_history.take(){self.set_text(&sql);}}});
         }
         if self.confirm_open {
-            ui.horizontal_wrapped(|ui|{ui.label("현재 수정 내용을 버리고 파일을 열까요?");if ui.button("취소").clicked(){self.confirm_open=false;}if ui.button("변경 버리고 열기").clicked(){self.confirm_open=false;self.choose_open();}});
+            ui.horizontal_wrapped(|ui|{ui.label(kiln_common::i18n::tr("현재 수정 내용을 버리고 파일을 열까요?"));if ui.button(kiln_common::i18n::tr("취소")).clicked(){self.confirm_open=false;}if ui.button(kiln_common::i18n::tr("변경 버리고 열기")).clicked(){self.confirm_open=false;self.choose_open();}});
         }
         });
     }
@@ -336,7 +336,7 @@ impl ConsoleView {
         if let Some(s) = self.session.lock().clone() {
             let _ = m.spawn(async move { s.cancel().await });
         }
-        self.messages.push(("취소를 요청했습니다".into(), false));
+        self.messages.push((kiln_common::i18n::tr("취소를 요청했습니다").into(), false));
     }
 
     fn poll(&mut self, m: &DbManager) {
@@ -345,8 +345,8 @@ impl ConsoleView {
         {
             self.export_job = None;
             self.messages.push(match r {
-                Ok(n) => (format!("{}행을 내보냈습니다", thousands(n as i64)), false),
-                Err(e) => (format!("내보내기 실패: {e}"), true),
+                Ok(n) => (kiln_common::trf!("{}행을 내보냈습니다", thousands(n as i64)), false),
+                Err(e) => (kiln_common::trf!("내보내기 실패: {e}"), true),
             });
         }
         let Some(r) = &mut self.running else {
@@ -367,16 +367,16 @@ impl ConsoleView {
             );
             let msg = match &run.outcome {
                 Ok(o) if o.has_rows => (
-                    format!(
+                    kiln_common::trf!(
                         "{}행 조회 · {} ms{}",
                         thousands(o.result.len() as i64),
                         run.elapsed_ms,
-                        if o.truncated { " · 조회 한도에 도달해 일부 결과만 표시합니다" } else { "" }
+                        if o.truncated { kiln_common::i18n::tr(" · 조회 한도에 도달해 일부 결과만 표시합니다") } else { "" }
                     ),
                     false,
                 ),
                 Ok(o) => (
-                    format!("{}행 영향 · {} ms", o.affected, run.elapsed_ms),
+                    kiln_common::trf!("{}행 영향 · {} ms", o.affected, run.elapsed_ms),
                     false,
                 ),
                 Err(e) => (format!("{e}"), true),
@@ -407,7 +407,7 @@ impl ConsoleView {
         if stop_waiting && !finished {
             r.job.abort();
             self.messages
-                .push(("쿼리 대기를 중단했습니다".into(), true));
+                .push((kiln_common::i18n::tr("쿼리 대기를 중단했습니다").into(), true));
             *self.session.lock() = None;
         }
         if finished || stop_waiting {
@@ -417,7 +417,7 @@ impl ConsoleView {
             self.running = None;
             if total > 1 {
                 self.messages.push((
-                    format!("문 {total}개 중 {n}개 실행 · {ms} ms"),
+                    kiln_common::trf!("문 {total}개 중 {n}개 실행 · {ms} ms"),
                     false,
                 ));
             }
@@ -480,25 +480,25 @@ impl ConsoleView {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let running = self.running.is_some();
-                    if tool_button_icon(ui, Some(Icon::Play), "실행", !running, true)
-                        .on_hover_text("커서 위치 또는 선택 영역의 문 실행 (⌘↩)")
+                    if tool_button_icon(ui, Some(Icon::Play), kiln_common::i18n::tr("실행"), !running, true)
+                        .on_hover_text(kiln_common::i18n::tr("커서 위치 또는 선택 영역의 문 실행 (⌘↩)"))
                         .clicked()
                     {
                         let s = self.current_statements();
                         self.run(m, s, false);
                     }
-                    if ui::secondary_button(ui, None, "모두 실행", !running)
-                        .on_hover_text("모든 문 실행 (⌘⌥↩)")
+                    if ui::secondary_button(ui, None, kiln_common::i18n::tr("모두 실행"), !running)
+                        .on_hover_text(kiln_common::i18n::tr("모든 문 실행 (⌘⌥↩)"))
                         .clicked()
                     {
                         let s = self.all_statements();
                         self.run(m, s, false);
                     }
-                    if tool_button_icon(ui, Some(Icon::Stop), "취소", running, false).clicked() {
+                    if tool_button_icon(ui, Some(Icon::Stop), kiln_common::i18n::tr("취소"), running, false).clicked() {
                         self.cancel(m);
                     }
-                    if tool_button_icon(ui, Some(Icon::Sparkle), "실행 계획", !running, false)
-                        .on_hover_text("현재 문의 쿼리 실행 계획 표시")
+                    if tool_button_icon(ui, Some(Icon::Sparkle), kiln_common::i18n::tr("실행 계획"), !running, false)
+                        .on_hover_text(kiln_common::i18n::tr("현재 문의 쿼리 실행 계획 표시"))
                         .clicked()
                     {
                         let s = self.current_statements();
@@ -507,9 +507,9 @@ impl ConsoleView {
                     let (r, _) = ui.allocate_exact_size(egui::vec2(13.0, 18.0), egui::Sense::hover());
                     ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, theme.border_strong));
                     widgets::toggle(ui, &mut self.auto_limit)
-                        .on_hover_text("LIMIT이 없는 SELECT 문에 LIMIT 추가");
+                        .on_hover_text(kiln_common::i18n::tr("LIMIT이 없는 SELECT 문에 LIMIT 추가"));
                     ui.add_space(2.0);
-                    ui.label(RichText::new("행 제한").size(12.5).color(theme.text_dim));
+                    ui.label(RichText::new(kiln_common::i18n::tr("행 제한")).size(12.5).color(theme.text_dim));
                     ui.add_enabled(
                         self.auto_limit,
                         egui::DragValue::new(&mut self.limit)
@@ -527,10 +527,10 @@ impl ConsoleView {
                         )));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if toggle_button_icon(ui, Some(Icon::History), "기록", self.show_history).clicked() {
+                        if toggle_button_icon(ui, Some(Icon::History), kiln_common::i18n::tr("기록"), self.show_history).clicked() {
                             self.show_history = !self.show_history;
                         }
-                        if toggle_button_icon(ui, Some(Icon::Eye), "값", self.show_viewer).clicked() {
+                        if toggle_button_icon(ui, Some(Icon::Eye), kiln_common::i18n::tr("값"), self.show_viewer).clicked() {
                             self.show_viewer = !self.show_viewer;
                         }
                         ui.add_space(6.0);
@@ -580,7 +580,7 @@ impl ConsoleView {
                     .desired_width(f32::INFINITY)
                     .desired_rows(8)
                     .lock_focus(true)
-                    .hint_text(RichText::new("-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⌥↩는 전체를 실행합니다.").monospace().color(theme.text_faint))
+                    .hint_text(RichText::new(kiln_common::i18n::tr("-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⌥↩는 전체를 실행합니다.")).monospace().color(theme.text_faint))
                     .layouter(&mut layouter)
                     .show(ui);
                 if std::mem::take(&mut self.focus_pending) { out.response.request_focus(); }
@@ -613,9 +613,9 @@ impl ConsoleView {
                     for i in 0..n {
                         let t = &self.results[i];
                         let (label, color) = match &t.run.outcome {
-                            Ok(o) if o.has_rows => (format!("결과 {} · {}", i + 1, thousands(o.result.len() as i64)), theme.text),
-                            Ok(o) => (format!("#{} · {}행 영향", i + 1, o.affected), theme.text_dim),
-                            Err(_) => (format!("#{} · 오류", i + 1), theme.red),
+                            Ok(o) if o.has_rows => (kiln_common::trf!("결과 {} · {}", i + 1, thousands(o.result.len() as i64)), theme.text),
+                            Ok(o) => (kiln_common::trf!("#{} · {}행 영향", i + 1, o.affected), theme.text_dim),
+                            Err(_) => (kiln_common::trf!("#{} · 오류", i + 1), theme.red),
                         };
                         let sel = self.active == i;
                         let r = ui::tab_chip(ui, &label, sel, color);
@@ -625,7 +625,7 @@ impl ConsoleView {
                         r.on_hover_text(crate::value::one_line(&t.run.sql, 300));
                     }
                     let out_sel = self.active == usize::MAX;
-                    if ui::tab_chip(ui, "출력", out_sel, theme.text).clicked() {
+                    if ui::tab_chip(ui, kiln_common::i18n::tr("출력"), out_sel, theme.text).clicked() {
                         self.active = usize::MAX;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -635,9 +635,9 @@ impl ConsoleView {
                             .get(self.active)
                             .is_some_and(|t| matches!(&t.run.outcome, Ok(o) if o.has_rows));
                         ui.add_enabled_ui(exportable && self.export_job.is_none(), |ui| {
-                            ui::menu_button(ui, Some(Icon::Download), "내보내기", |ui| {
+                            ui::menu_button(ui, Some(Icon::Download), kiln_common::i18n::tr("내보내기"), |ui| {
                                 for f in [ExportFormat::Csv, ExportFormat::Json] {
-                                    if ui.button(format!("모든 행을 {}로…", f.extension().to_uppercase())).clicked() {
+                                    if ui.button(kiln_common::trf!("모든 행을 {}로…", f.extension().to_uppercase())).clicked() {
                                         ui.close();
                                         self.export(m, f);
                                     }
@@ -649,8 +649,8 @@ impl ConsoleView {
                         {
                             ui.label(faint(format!("{} ms", t.run.elapsed_ms)));
                             if o.truncated {
-                                widgets::pill(ui, "제한됨", theme.yellow)
-                                    .on_hover_text("행이 더 있습니다. 가져오려면 제한을 늘리거나 끄세요");
+                                widgets::pill(ui, kiln_common::i18n::tr("제한됨"), theme.yellow)
+                                    .on_hover_text(kiln_common::i18n::tr("행이 더 있습니다. 가져오려면 제한을 늘리거나 끄세요"));
                             }
                         }
                     });
@@ -684,7 +684,7 @@ impl ConsoleView {
                             .unwrap_or(0)
                             + 1;
                         ui.add_space(8.0);
-                        widgets::pill(ui, &format!("{line}줄, {col}열"), theme.red);
+                        widgets::pill(ui, &kiln_common::trf!("{line}줄, {col}열"), theme.red);
                     }
                     ui.add_space(10.0);
                     code_block(ui, &crate::value::one_line(&sql, 500));
@@ -695,7 +695,7 @@ impl ConsoleView {
                 egui::Frame::new().inner_margin(16).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui::glyph_label(ui, Icon::Check, theme.green, 16.0);
-                        ui.label(RichText::new(format!("{aff}행 영향받음")).font(fonts::semibold(14.0)).color(theme.text));
+                        ui.label(RichText::new(kiln_common::trf!("{aff}행 영향받음")).font(fonts::semibold(14.0)).color(theme.text));
                         ui.label(faint(format!("{ms} ms")));
                     });
                     ui.add_space(10.0);
@@ -769,7 +769,7 @@ impl ConsoleView {
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(14).show(ui, |ui| {
                     if self.messages.is_empty() {
-                        widgets::empty_state(ui, Icon::Terminal, "아직 출력이 없습니다", None);
+                        widgets::empty_state(ui, Icon::Terminal, kiln_common::i18n::tr("아직 출력이 없습니다"), None);
                     }
                     ui.spacing_mut().item_spacing.y = 4.0;
                     for (msg, err) in &self.messages {
@@ -789,12 +789,12 @@ impl ConsoleView {
 
     fn history_ui(&mut self, ui: &mut Ui, m: &DbManager) {
         let theme = Theme::current();
-        ui.label(RichText::new("기록").font(fonts::semibold(13.0)).color(theme.text));
+        ui.label(RichText::new(kiln_common::i18n::tr("기록")).font(fonts::semibold(13.0)).color(theme.text));
         ui.add_space(6.0);
         let w = ui.available_width();
         ui::text_field(
             ui,
-            egui::TextEdit::singleline(&mut self.history_filter).hint_text(RichText::new("검색").color(theme.text_faint)),
+            egui::TextEdit::singleline(&mut self.history_filter).hint_text(RichText::new(kiln_common::i18n::tr("검색")).color(theme.text_faint)),
             self.editor_id.with("history-filter"),
             w,
         );

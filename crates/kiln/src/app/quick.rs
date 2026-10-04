@@ -23,7 +23,7 @@ impl QuickTerminal {
             }));
             Ok(manager)
         })();
-        match result { Ok(manager)=>self.manager=Some(manager), Err(e)=>self.error=Some(format!("빠른 터미널 전역 단축키 Ctrl+` 등록 실패: {e}")) }
+        match result { Ok(manager)=>self.manager=Some(manager), Err(e)=>self.error=Some(kiln_common::trf!("빠른 터미널 전역 단축키 Ctrl+` 등록 실패: {e}")) }
     }
     pub fn poll(&mut self) { if self.pressed.swap(false,Ordering::SeqCst){self.open=!self.open;self.focus_pending=self.open;} }
 }

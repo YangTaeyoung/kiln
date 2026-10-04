@@ -59,10 +59,10 @@ pub fn paint_severity(p: &Painter, center: Pos2, s: Severity, size: f32) {
 
 fn severity_label(s: Severity) -> &'static str {
     match s {
-        Severity::Error => "오류",
-        Severity::Warning => "경고",
-        Severity::Information => "정보",
-        Severity::Hint => "힌트",
+        Severity::Error => kiln_common::i18n::tr("오류"),
+        Severity::Warning => kiln_common::i18n::tr("경고"),
+        Severity::Information => kiln_common::i18n::tr("정보"),
+        Severity::Hint => kiln_common::i18n::tr("힌트"),
     }
 }
 
@@ -124,7 +124,7 @@ pub fn diagnostics_ui(ui: &mut Ui, lsp: &LspManager) -> Vec<EditorEvent> {
                 p.galley(pos2(chip.left() + 23.0, cy - g.size().y / 2.0), g, t.text);
                 x = chip.right() + 6.0;
             }
-            let files_text = format!("파일 {}개", files.len());
+            let files_text = kiln_common::trf!("파일 {}개", files.len());
             p.text(pos2(header.right() - 14.0, cy), Align2::RIGHT_CENTER, files_text, kiln_common::fonts::medium(12.0), t.text_faint);
         }
     }

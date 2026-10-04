@@ -48,8 +48,8 @@ impl Encoding {
             Encoding::Utf8Bom => "UTF-8 with BOM",
             Encoding::Utf16Le => "UTF-16 LE",
             Encoding::Utf16Be => "UTF-16 BE",
-            Encoding::Utf8Lossy => "UTF-8 (손실)",
-            Encoding::Binary => "바이너리",
+            Encoding::Utf8Lossy => kiln_common::i18n::tr("UTF-8 (손실)"),
+            Encoding::Binary => kiln_common::i18n::tr("바이너리"),
         }
     }
 }
@@ -241,9 +241,9 @@ impl Editor {
     /// 파일을 연다. 이진 파일은 읽기 전용 자리표시로 연다.
     pub fn open(path: impl Into<PathBuf>) -> anyhow::Result<Editor> {
         let path: PathBuf = path.into();
-        let meta = std::fs::metadata(&path).with_context(|| format!("{}을(를) 열 수 없습니다", path.display()))?;
-        anyhow::ensure!(!meta.is_dir(), "{}은(는) 디렉터리입니다", path.display());
-        let bytes = std::fs::read(&path).with_context(|| format!("{}을(를) 읽을 수 없습니다", path.display()))?;
+        let meta = std::fs::metadata(&path).with_context(|| kiln_common::trf!("{}을(를) 열 수 없습니다", path.display()))?;
+        anyhow::ensure!(!meta.is_dir(), "{}", kiln_common::trf!("{}은(는) 디렉터리입니다", path.display()));
+        let bytes = std::fs::read(&path).with_context(|| kiln_common::trf!("{}을(를) 읽을 수 없습니다", path.display()))?;
         let decoded = decode(&bytes);
         let large = bytes.len() as u64 > LARGE_FILE_BYTES;
         let mut ed = Self::from_decoded(path.clone(), decoded, large);
@@ -462,15 +462,15 @@ impl Editor {
 
     /// Save a rescue copy without changing the original document or its dirty state.
     pub fn save_copy(&self,path:&Path)->anyhow::Result<()> {
-        anyhow::ensure!(self.encoding!=Encoding::Binary,"바이너리 파일은 저장할 수 없습니다");
-        anyhow::ensure!(path!=self.path,"복사본은 다른 경로에 저장하세요");
-        if let (Ok(source),Ok(target))=(std::fs::canonicalize(&self.path),std::fs::canonicalize(path)){anyhow::ensure!(source!=target,"복사본은 원본과 다른 파일에 저장하세요");}
+        anyhow::ensure!(self.encoding!=Encoding::Binary, "{}", kiln_common::trf!("바이너리 파일은 저장할 수 없습니다"));
+        anyhow::ensure!(path!=self.path, "{}", kiln_common::trf!("복사본은 다른 경로에 저장하세요"));
+        if let (Ok(source),Ok(target))=(std::fs::canonicalize(&self.path),std::fs::canonicalize(path)){anyhow::ensure!(source!=target, "{}", kiln_common::trf!("복사본은 원본과 다른 파일에 저장하세요"));}
         kiln_common::safe_file::write(path,&encode(&self.buf.to_text(),self.encoding))?;Ok(())
     }
     fn choose_save_copy(&mut self) {
         let name=self.path.file_name().unwrap_or_default().to_string_lossy();
         if let Some(path)=rfd::FileDialog::new().set_file_name(format!("copy-{name}")).save_file() {
-            match self.save_copy(&path){Ok(())=>{self.save_error=None;self.save_copy_notice=Some(format!("복사본 저장됨: {} · 원본의 미저장 변경은 유지됩니다",path.display()));},Err(e)=>self.save_error=Some(format!("복사본 저장 실패: {e}"))}
+            match self.save_copy(&path){Ok(())=>{self.save_error=None;self.save_copy_notice=Some(kiln_common::trf!("복사본 저장됨: {} · 원본의 미저장 변경은 유지됩니다",path.display()));},Err(e)=>self.save_error=Some(kiln_common::trf!("복사본 저장 실패: {e}"))}
         }
     }
 
@@ -478,13 +478,13 @@ impl Editor {
     pub fn save(&mut self) -> anyhow::Result<()> {
         if DiskStamp::of(&self.path) != self.disk { self.conflict = true; }
         if self.conflict {
-            self.save_error = Some("디스크 파일이 변경되었습니다. 복원된 내용과 디스크를 검토한 뒤 ‘내 편집 유지’를 선택하세요.".into());
-            anyhow::bail!("외부 변경 충돌을 먼저 해결하세요");
+            self.save_error = Some(kiln_common::i18n::tr("디스크 파일이 변경되었습니다. 복원된 내용과 디스크를 검토한 뒤 ‘내 편집 유지’를 선택하세요.").into());
+            anyhow::bail!(kiln_common::trf!("외부 변경 충돌을 먼저 해결하세요"));
         }
-        anyhow::ensure!(self.encoding != Encoding::Binary, "바이너리 파일은 저장할 수 없습니다");
-        anyhow::ensure!(!self.read_only, "읽기 전용 파일입니다");
+        anyhow::ensure!(self.encoding != Encoding::Binary, "{}", kiln_common::trf!("바이너리 파일은 저장할 수 없습니다"));
+        anyhow::ensure!(!self.read_only, "{}", kiln_common::trf!("읽기 전용 파일입니다"));
         let bytes = encode(&self.buf.to_text(), self.encoding);
-        let res = kiln_common::safe_file::write(&self.path, &bytes).with_context(|| format!("{}에 쓸 수 없습니다", self.path.display()));
+        let res = kiln_common::safe_file::write(&self.path, &bytes).with_context(|| kiln_common::trf!("{}에 쓸 수 없습니다", self.path.display()));
         match res {
             Ok(()) => {
                 self.buf.mark_saved();

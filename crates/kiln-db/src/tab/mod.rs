@@ -86,9 +86,9 @@ impl DbTab {
             }
             Kind::Console(c) => {
                 if c.is_running() {
-                    format!("{name} 콘솔 …")
+                    kiln_common::trf!("{name} 콘솔 …")
                 } else {
-                    format!("{}{}", c.document_name().unwrap_or_else(||format!("{name} 콘솔")), if c.has_draft() { " •" } else { "" })
+                    format!("{}{}", c.document_name().unwrap_or_else(||kiln_common::trf!("{name} 콘솔")), if c.has_draft() { " •" } else { "" })
                 }
             }
         }

@@ -11,17 +11,17 @@ impl Keymap {
         match std::fs::read(path) {
             Ok(bytes)=>match serde_json::from_slice::<BTreeMap<String,String>>(&bytes).map_err(|e| e.to_string()).and_then(|bindings| {validate(&bindings)?; Ok(bindings)}) {
                 Ok(bindings)=>Self{draft:bindings.clone(),bindings,source:Some(bytes),..Default::default()},
-                Err(e)=>Self{error:Some(format!("단축키 파일을 적용하지 않았습니다. 다시 읽거나 원본 백업 후 기본값으로 복구하세요: {} · {e}",path.display())),source:Some(bytes),load_failed:true,..Default::default()}
+                Err(e)=>Self{error:Some(kiln_common::trf!("단축키 파일을 적용하지 않았습니다. 다시 읽거나 원본 백업 후 기본값으로 복구하세요: {} · {e}",path.display())),source:Some(bytes),load_failed:true,..Default::default()}
             },
             Err(e) if e.kind()==std::io::ErrorKind::NotFound=>Self::default(),
-            Err(e)=>Self{error:Some(format!("단축키 파일을 읽지 못했습니다. 기존 파일을 덮어쓰지 않습니다: {e}")),load_failed:true,..Default::default()}
+            Err(e)=>Self{error:Some(kiln_common::trf!("단축키 파일을 읽지 못했습니다. 기존 파일을 덮어쓰지 않습니다: {e}")),load_failed:true,..Default::default()}
         }
     }
     fn save_path(&mut self,path:&std::path::Path)->Result<(),String> {
-        if self.load_failed { return Err("기존 단축키 파일을 읽거나 검증하지 못해 저장을 중단했습니다. 다시 읽거나 원본 백업 후 기본값으로 복구하세요.".into()); }
+        if self.load_failed { return Err(kiln_common::i18n::tr("기존 단축키 파일을 읽거나 검증하지 못해 저장을 중단했습니다. 다시 읽거나 원본 백업 후 기본값으로 복구하세요.").into()); }
         validate(&self.draft)?;
         let current=match std::fs::read(path){Ok(bytes)=>Some(bytes),Err(e) if e.kind()==std::io::ErrorKind::NotFound=>None,Err(e)=>return Err(e.to_string())};
-        if current!=self.source{return Err("단축키 파일이 외부에서 변경되었습니다. 덮어쓰지 않았습니다. 다시 읽기로 최신 설정을 불러오세요.".into());}
+        if current!=self.source{return Err(kiln_common::i18n::tr("단축키 파일이 외부에서 변경되었습니다. 덮어쓰지 않았습니다. 다시 읽기로 최신 설정을 불러오세요.").into());}
         kiln_common::store::save_json(path,&self.draft).map_err(|e|e.to_string())?;
         self.source=Some(serde_json::to_vec_pretty(&self.draft).map_err(|e|e.to_string())?);
         self.bindings=self.draft.clone();
@@ -38,27 +38,27 @@ impl Keymap {
     }
     fn recover_defaults(&mut self, path: &std::path::Path)->Result<(),String> {
         use std::io::Write;
-        let bytes=std::fs::read(path).map_err(|e|format!("원본 백업을 위해 파일을 읽지 못했습니다: {e}"))?;
-        if self.source.as_ref()!=Some(&bytes) {return Err("파일이 변경되었습니다. 다시 읽은 뒤 복구하세요.".into());}
+        let bytes=std::fs::read(path).map_err(|e|kiln_common::trf!("원본 백업을 위해 파일을 읽지 못했습니다: {e}"))?;
+        if self.source.as_ref()!=Some(&bytes) {return Err(kiln_common::i18n::tr("파일이 변경되었습니다. 다시 읽은 뒤 복구하세요.").into());}
         let mut backup=None;
         for n in 1..=1000 {
             let candidate=path.with_extension(format!("json.backup-{n}"));
             match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
                 Ok(mut file)=>{
-                    file.write_all(&bytes).and_then(|_|file.sync_all()).map_err(|e|format!("백업을 저장하지 못했습니다. 원본은 유지됩니다: {e}"))?;
+                    file.write_all(&bytes).and_then(|_|file.sync_all()).map_err(|e|kiln_common::trf!("백업을 저장하지 못했습니다. 원본은 유지됩니다: {e}"))?;
                     backup=Some(candidate);break;
                 }
                 Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>continue,
-                Err(e)=>return Err(format!("백업을 만들지 못했습니다. 원본은 유지됩니다: {e}")),
+                Err(e)=>return Err(kiln_common::trf!("백업을 만들지 못했습니다. 원본은 유지됩니다: {e}")),
             }
         }
-        let backup=backup.ok_or("백업 이름을 만들지 못했습니다. 원본은 유지됩니다.")?;
+        let backup=backup.ok_or(kiln_common::i18n::tr("백업 이름을 만들지 못했습니다. 원본은 유지됩니다."))?;
         // Recheck after writing the backup, before replacing the source.
-        if std::fs::read(path).map_err(|e|e.to_string())?!=bytes {return Err("백업 중 원본이 변경되었습니다. 다시 읽어 주세요.".into());}
+        if std::fs::read(path).map_err(|e|e.to_string())?!=bytes {return Err(kiln_common::i18n::tr("백업 중 원본이 변경되었습니다. 다시 읽어 주세요.").into());}
         let defaults=BTreeMap::<String,String>::new();
-        kiln_common::store::save_json(path,&defaults).map_err(|e|format!("기본값 저장 실패 (백업: {}): {e}",backup.display()))?;
+        kiln_common::store::save_json(path,&defaults).map_err(|e|kiln_common::trf!("기본값 저장 실패 (백업: {}): {e}",backup.display()))?;
         *self=Self::load_path(path);
-        if self.load_failed{return Err("복구한 파일을 다시 읽지 못했습니다.".into());}
+        if self.load_failed{return Err(kiln_common::i18n::tr("복구한 파일을 다시 읽지 못했습니다.").into());}
         self.saved=true;self.backup=Some(backup);Ok(())
     }
     pub fn has_unsaved_edits(&self)->bool {
@@ -67,15 +67,15 @@ impl Keymap {
     pub fn label(&self,id:&str,default:&str)->String{self.bindings.get(id).cloned().unwrap_or_else(||default.into())}
     pub fn resolve(&self, id:&str, default:KeyboardShortcut)->KeyboardShortcut { self.bindings.get(id).and_then(|s|parse(s).ok()).unwrap_or(default) }
     pub fn fields_ui(&mut self, ui:&mut egui::Ui) {
-        ui.label(if cfg!(target_os="macos") { "예: Cmd+Shift+J" } else { "예: Ctrl+Shift+J" })
-            .on_hover_text("앱 탐색용 단축키입니다. 복사·붙여넣기·저장과 터미널 제어 입력은 예약됩니다. F1~F12도 보조 키(Cmd·Ctrl·Alt·Shift)와 함께 사용할 수 있습니다.");
+        ui.label(if cfg!(target_os="macos") { kiln_common::i18n::tr("예: Cmd+Shift+J") } else { kiln_common::i18n::tr("예: Ctrl+Shift+J") })
+            .on_hover_text(kiln_common::i18n::tr("앱 탐색용 단축키입니다. 복사·붙여넣기·저장과 터미널 제어 입력은 예약됩니다. F1~F12도 보조 키(Cmd·Ctrl·Alt·Shift)와 함께 사용할 수 있습니다."));
         ui.add_space(4.0);
         let compact=ui.available_width()<260.0;
         let label_width=(ui.available_width()*0.38).clamp(100.0,150.0);
         let edit_width=if compact {ui.available_width().min(240.0)}else{(ui.available_width()-label_width-20.0).clamp(110.0,240.0)};
         egui::Grid::new("keybinding-fields").num_columns(if compact {1}else{2}).spacing(egui::vec2(10.0,6.0)).show(ui,|ui| {
             for (id,label,default) in ENTRIES {
-                let label_response=ui.add_sized([if compact {edit_width}else{label_width},24.0],egui::Label::new(*label).truncate()).on_hover_text(*label);
+                let label_response=ui.add_sized([if compact {edit_width}else{label_width},24.0],egui::Label::new(kiln_common::i18n::tr(label)).truncate()).on_hover_text(kiln_common::i18n::tr(label));
                 if compact {ui.end_row();}
                 let draft=self.draft.entry((*id).into()).or_insert_with(||(*default).into());
                 if ui.add(egui::TextEdit::singleline(draft).id_salt(id).desired_width(edit_width)).labelled_by(label_response.id).changed(){self.saved=false;}
@@ -85,24 +85,24 @@ impl Keymap {
     }
     pub fn footer_height(&self) -> f32 { (if self.load_failed {64.0}else{32.0}) + if self.reload_confirm { 52.0 } else { 0.0 } + if self.error.is_some() { 48.0 } else if self.saved { 22.0 } else { 0.0 } }
     pub fn footer_ui(&mut self, ui:&mut egui::Ui) {
-        if self.saved {ui.label("단축키가 저장되었습니다.").on_hover_text(self.backup.as_ref().map(|p|format!("원본 백업: {}",p.display())).unwrap_or_default());}
+        if self.saved {ui.label(kiln_common::i18n::tr("단축키가 저장되었습니다.")).on_hover_text(self.backup.as_ref().map(|p|kiln_common::trf!("원본 백업: {}",p.display())).unwrap_or_default());}
         if let Some(e)=&self.error { egui::ScrollArea::vertical().id_salt("keybinding-error").max_height(40.0).show(ui,|ui| { ui.colored_label(kiln_common::Theme::current().red,e); }); }
         let mut reload=false;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x=8.0;
-            if !self.load_failed && ui.button("단축키 저장").clicked() {
+            if !self.load_failed && ui.button(kiln_common::i18n::tr("단축키 저장")).clicked() {
                 let result=self.save_path(&kiln_common::paths::config_file("keybindings.json"));
                 self.saved=result.is_ok(); self.error=result.err();
             }
             if !self.load_failed {
-                ui.menu_button("관리",|ui| {
-                    if ui.button("기본값 복원").clicked(){self.saved=false;self.draft=ENTRIES.iter().map(|(id,_,value)|((*id).into(),(*value).into())).collect();ui.close();}
-                    if ui.button("다시 읽기").clicked(){reload=true;ui.close();}
+                ui.menu_button(kiln_common::i18n::tr("관리"),|ui| {
+                    if ui.button(kiln_common::i18n::tr("기본값 복원")).clicked(){self.saved=false;self.draft=ENTRIES.iter().map(|(id,_,value)|((*id).into(),(*value).into())).collect();ui.close();}
+                    if ui.button(kiln_common::i18n::tr("다시 읽기")).clicked(){reload=true;ui.close();}
                 });
             }
-            if self.error.is_some() && ui.button("다시 읽기").clicked(){reload=true;}
+            if self.error.is_some() && ui.button(kiln_common::i18n::tr("다시 읽기")).clicked(){reload=true;}
         });
-        if self.load_failed && ui.button("원본 백업 후 기본값 복구").clicked() {
+        if self.load_failed && ui.button(kiln_common::i18n::tr("원본 백업 후 기본값 복구")).clicked() {
             self.error=self.recover_defaults(&kiln_common::paths::config_file("keybindings.json")).err();
         }
         if reload {
@@ -110,11 +110,11 @@ impl Keymap {
             else {self.reload_path(&kiln_common::paths::config_file("keybindings.json"));}
         }
         if self.reload_confirm {
-            ui.label("편집 중인 단축키를 버리고 다시 읽을까요?");
+            ui.label(kiln_common::i18n::tr("편집 중인 단축키를 버리고 다시 읽을까요?"));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x=8.0;
-                if ui.button("편집 유지").clicked(){self.reload_confirm=false;}
-                if ui.button("버리고 다시 읽기").clicked(){self.reload_path(&kiln_common::paths::config_file("keybindings.json"));}
+                if ui.button(kiln_common::i18n::tr("편집 유지")).clicked(){self.reload_confirm=false;}
+                if ui.button(kiln_common::i18n::tr("버리고 다시 읽기")).clicked(){self.reload_path(&kiln_common::paths::config_file("keybindings.json"));}
             });
         }
     }
@@ -144,11 +144,11 @@ pub fn parse(s:&str)->Result<KeyboardShortcut,String>{
             "ctrl"|"control"=>modifiers|=Modifiers::CTRL,
             "shift"=>modifiers|=Modifiers::SHIFT,
             "alt"|"option"=>modifiers|=Modifiers::ALT,
-            _=>{if key.is_some(){return Err("키는 하나만 지정하세요.".into());} key=Key::from_name(part); if key.is_none(){return Err(format!("인식할 수 없는 키: {part}"));}}
+            _=>{if key.is_some(){return Err(kiln_common::i18n::tr("키는 하나만 지정하세요.").into());} key=Key::from_name(part); if key.is_none(){return Err(kiln_common::trf!("인식할 수 없는 키: {part}"));}}
         }
     }
-    let key=key.ok_or("키를 입력하세요.")?;
-    if !modifiers.command && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd{return Err("Cmd / Ctrl / Alt 등의 수식키를 포함하세요.".into());}
+    let key=key.ok_or(kiln_common::i18n::tr("키를 입력하세요."))?;
+    if !modifiers.command && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd{return Err(kiln_common::i18n::tr("Cmd / Ctrl / Alt 등의 수식키를 포함하세요.").into());}
     Ok(KeyboardShortcut::new(modifiers,key))
 }
 fn canonical(mut key:KeyboardShortcut)->KeyboardShortcut {
@@ -173,14 +173,15 @@ fn reserved(key:KeyboardShortcut)->bool {
     false
 }
 fn validate(bindings:&BTreeMap<String,String>)->Result<(),String> {
-    if let Some(id)=bindings.keys().find(|id|!ENTRIES.iter().any(|(known,_,_)| known==id)) {return Err(format!("알 수 없는 동작: {id}"));}
+    if let Some(id)=bindings.keys().find(|id|!ENTRIES.iter().any(|(known,_,_)| known==id)) {return Err(kiln_common::trf!("알 수 없는 동작: {id}"));}
     let mut seen=Vec::new();
     for (id,label,default) in ENTRIES {
         let parsed=canonical(parse(bindings.get(*id).map(String::as_str).unwrap_or(default))?);
         let own_default=canonical(parse(default)?);
         let other_default=ENTRIES.iter().any(|(other,_,value)| other!=id && parse(value).is_ok_and(|key|canonical(key)==parsed));
-        if (reserved(parsed) && parsed!=own_default) || other_default {return Err(format!("{label}: 편집·터미널 입력 또는 기본 작업 단축키와 겹칩니다."));}
-        if seen.contains(&parsed){return Err(format!("{label}: 다른 동작과 단축키가 겹칩니다."));}
+        let label = kiln_common::i18n::tr(label);
+        if (reserved(parsed) && parsed!=own_default) || other_default {return Err(kiln_common::trf!("{label}: 편집·터미널 입력 또는 기본 작업 단축키와 겹칩니다."));}
+        if seen.contains(&parsed){return Err(kiln_common::trf!("{label}: 다른 동작과 단축키가 겹칩니다."));}
         seen.push(parsed);
     }
     Ok(())
@@ -264,5 +265,22 @@ fn validate(bindings:&BTreeMap<String,String>)->Result<(),String> {
         let mut map=Keymap::load_path(&path);map.draft.insert("recent".into(),"Cmd+Shift+Y".into());map.save_path(&path).unwrap();
         let mut loaded=Keymap::load_path(&path);assert_eq!(loaded.bindings["recent"],"Cmd+Shift+Y");
         std::fs::write(&path,b"external").unwrap();assert!(loaded.save_path(&path).is_err());assert_eq!(std::fs::read(&path).unwrap(),b"external");
+    }
+}
+
+#[cfg(test)]
+mod language_error_tests {
+    use super::*;
+
+    #[test]
+    fn language_conflict_error_names_the_translated_action() {
+        let bindings = BTreeMap::from([("recent".into(), ENTRIES[0].2.into())]);
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                let error = validate(&bindings).unwrap_err();
+                assert!(error.starts_with(kiln_common::i18n::tr("최근 작업")));
+                if language != kiln_common::i18n::Language::Korean { assert!(!error.contains("최근 작업"), "untranslated action in {language:?}: {error}"); }
+            });
+        }
     }
 }

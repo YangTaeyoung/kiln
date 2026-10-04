@@ -286,7 +286,7 @@ impl DiffView {
             self.ui_toolbar(ui);
             if let Some(e) = self.action_error.clone() {
                 egui::Frame::new().inner_margin(Margin::symmetric(10, 4)).show(ui, |ui| {
-                    if banner(ui, BannerKind::Error, "선택한 변경 구간을 적용하지 못했습니다", Some(&e), true) {
+                    if banner(ui, BannerKind::Error, kiln_common::i18n::tr("선택한 변경 구간을 적용하지 못했습니다"), Some(&e), true) {
                         self.action_error = None;
                     }
                 });
@@ -294,7 +294,7 @@ impl DiffView {
             if let Some(e) = &self.error {
                 let e = e.clone();
                 egui::Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
-                    banner(ui, BannerKind::Error, "변경 비교를 불러올 수 없습니다", Some(&e), false);
+                    banner(ui, BannerKind::Error, kiln_common::i18n::tr("변경 비교를 불러올 수 없습니다"), Some(&e), false);
                 });
                 return;
             }
@@ -303,7 +303,7 @@ impl DiffView {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     spinner(ui, 14.0);
-                    ui.label(dim("diff 불러오는 중…"));
+                    ui.label(dim(kiln_common::i18n::tr("diff 불러오는 중…")));
                 });
                 return;
             }
@@ -318,7 +318,7 @@ impl DiffView {
             }
             egui::CentralPanel::no_frame().show(ui, |ui| {
                 if self.files.is_empty() {
-                    empty_state(ui, "변경 사항 없음", "표시할 변경 내용이 없습니다.");
+                    empty_state(ui, kiln_common::i18n::tr("변경 사항 없음"), kiln_common::i18n::tr("표시할 변경 내용이 없습니다."));
                     return;
                 }
                 self.ui_rows(ui);
@@ -360,7 +360,7 @@ impl DiffView {
                             if !dir.is_empty() {
                                 ui.label(RichText::new(dir).size(12.5).color(t.text_faint));
                             }
-                            let (lbl, c) = if *staged { ("스테이징됨", t.green) } else { ("작업 트리", t.yellow) };
+                            let (lbl, c) = if *staged { (kiln_common::i18n::tr("스테이징됨"), t.green) } else { (kiln_common::i18n::tr("작업 트리"), t.yellow) };
                             outline_badge(ui, lbl, c);
                         }
                         Source::Commit(_) => {}
@@ -373,7 +373,7 @@ impl DiffView {
                             ui.label(RichText::new("→").color(t.text_faint));
                             match to {
                                 Some(to) => ui.label(RichText::new(short(to)).font(kiln_common::fonts::mono(13.0)).color(t.text)),
-                                None => outline_badge(ui, "작업 트리", t.yellow),
+                                None => outline_badge(ui, kiln_common::i18n::tr("작업 트리"), t.yellow),
                             };
                         }
                     }
@@ -383,12 +383,12 @@ impl DiffView {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let mut mode = self.mode;
-                        if segmented(ui, &mut mode, &[(DiffMode::SideBySide, "나란히"), (DiffMode::Unified, "통합")]) {
+                        if segmented(ui, &mut mode, &[(DiffMode::SideBySide, kiln_common::i18n::tr("나란히")), (DiffMode::Unified, kiln_common::i18n::tr("통합"))]) {
                             self.set_mode(mode);
                         }
                         if self.load.is_some() || self.action.is_some() {
                             spinner(ui, 12.0);
-                        } else if icon_button(ui, Icon::Refresh, "다시 불러오기").clicked() {
+                        } else if icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("다시 불러오기")).clicked() {
                             self.reload();
                         }
                     });
@@ -403,7 +403,7 @@ impl DiffView {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.add_space(14.0);
-            ui.label(RichText::new(format!("파일 {}개", self.files.len())).font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
+            ui.label(RichText::new(kiln_common::trf!("파일 {}개", self.files.len())).font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
         });
         ui.add_space(4.0);
         egui::ScrollArea::vertical().id_salt("diff_file_list").auto_shrink([false, false]).show(ui, |ui| {
@@ -519,14 +519,14 @@ impl DiffView {
                                 enabled && resp.clicked()
                             };
                             if staged {
-                                if hbtn(ui, "헝크 스테이징 취소", false) {
+                                if hbtn(ui, kiln_common::i18n::tr("헝크 스테이징 취소"), false) {
                                     hunk_action = Some((fi, hi, HunkAction::Unstage));
                                 }
                             } else {
-                                if hbtn(ui, "헝크 스테이징", false) {
+                                if hbtn(ui, kiln_common::i18n::tr("헝크 스테이징"), false) {
                                     hunk_action = Some((fi, hi, HunkAction::Stage));
                                 }
-                                if hbtn(ui, "되돌리기", true) {
+                                if hbtn(ui, kiln_common::i18n::tr("되돌리기"), true) {
                                     hunk_action = Some((fi, hi, HunkAction::Revert));
                                 }
                             }
@@ -548,13 +548,13 @@ impl DiffView {
                     Row::Note(fi) => {
                         let f = &self.files[fi];
                         let msg = if f.binary {
-                            "바이너리 파일은 표시하지 않습니다"
+                            kiln_common::i18n::tr("바이너리 파일은 표시하지 않습니다")
                         } else if f.change == FileChange::Renamed {
-                            "내용 변경 없이 이름만 바뀌었습니다"
+                            kiln_common::i18n::tr("내용 변경 없이 이름만 바뀌었습니다")
                         } else if f.old_mode != f.new_mode {
-                            "파일 모드가 바뀌었습니다"
+                            kiln_common::i18n::tr("파일 모드가 바뀌었습니다")
                         } else {
-                            "내용 변경 없음"
+                            kiln_common::i18n::tr("내용 변경 없음")
                         };
                         ui.painter().text(
                             vis.left_center() + vec2(16.0, 0.0),
@@ -589,7 +589,7 @@ impl DiffView {
         if f.change == FileChange::Renamed
             && let Some(o) = &f.old_path
         {
-            from = format!("  {o}에서");
+            from = kiln_common::trf!("  {o}에서");
             parts.push((&from, 11.5, t.text_faint));
         }
         let g = p.layout_job(one_line_job(&parts, r.width() - 160.0));
@@ -826,25 +826,25 @@ fn commit_header(
         ui.painter().circle_filled(r.center(), 10.0, alpha(ac, if t.dark { 0.28 } else { 0.2 }));
         ui.painter().text(r.center(), Align2::CENTER_CENTER, initial, kiln_common::fonts::semibold(11.0), t.text);
         ui.label(RichText::new(&c.author).font(kiln_common::fonts::medium(13.0)).color(t.text));
-        ui.label(dim(format!("{} 커밋함", relative_time(c.date, now))));
+        ui.label(dim(kiln_common::trf!("{} 커밋함", relative_time(c.date, now))));
         if c.committer != c.author && !c.committer.is_empty() {
-            ui.label(faint(format!("(커미터 {})", c.committer)));
+            ui.label(faint(kiln_common::trf!("(커미터 {})", c.committer)));
         }
         ui.add_space(8.0);
         let short = &c.sha[..c.sha.len().min(10)];
-        if sha_chip(ui, short).on_hover_text("전체 SHA 복사").clicked() {
+        if sha_chip(ui, short).on_hover_text(kiln_common::i18n::tr("전체 SHA 복사")).clicked() {
             ui.ctx().copy_text(c.sha.clone());
         }
         if !c.parents.is_empty() {
             let ps: Vec<&str> = c.parents.iter().map(|p| &p[..p.len().min(7)]).collect();
-            ui.label(faint(format!("부모 {}", ps.join(" + "))));
+            ui.label(faint(kiln_common::trf!("부모 {}", ps.join(" + "))));
         }
         for r in &c.refs {
             let r = r.strip_prefix("HEAD -> ").unwrap_or(r);
             outline_badge(ui, r, t.purple);
         }
         let (a, d) = stats.fold((0, 0), |(a, d), (x, y)| (a + x, d + y));
-        ui.label(faint(format!("파일 {nfiles}개 변경됨")));
+        ui.label(faint(kiln_common::trf!("파일 {nfiles}개 변경됨")));
         diff_stat(ui, a, d);
     });
 }

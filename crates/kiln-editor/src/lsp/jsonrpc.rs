@@ -28,7 +28,7 @@ pub fn read_message(r: &mut impl BufRead) -> io::Result<Option<Value>> {
         let n = r.read_line(&mut line)?;
         if n == 0 {
             if saw_header {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "헤더 도중 스트림 끝"));
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, kiln_common::i18n::tr("헤더 도중 스트림 끝")));
             }
             return Ok(None);
         }
@@ -47,11 +47,11 @@ pub fn read_message(r: &mut impl BufRead) -> io::Result<Option<Value>> {
                 value
                     .trim()
                     .parse()
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "잘못된 Content-Length"))?,
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, kiln_common::i18n::tr("잘못된 Content-Length")))?,
             );
         }
     }
-    let len = len.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Content-Length 없음"))?;
+    let len = len.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, kiln_common::i18n::tr("Content-Length 없음")))?;
     let mut body = vec![0u8; len];
     r.read_exact(&mut body)?;
     serde_json::from_slice(&body).map(Some).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
@@ -78,7 +78,7 @@ pub fn classify(msg: Value) -> Incoming {
         (None, Some(id)) => {
             let result = match m.remove("error") {
                 Some(e) if !e.is_null() => {
-                    let msg = e.get("message").and_then(Value::as_str).unwrap_or("알 수 없는 오류");
+                    let msg = e.get("message").and_then(Value::as_str).unwrap_or(kiln_common::i18n::tr("알 수 없는 오류"));
                     Err(msg.to_owned())
                 }
                 _ => Ok(m.remove("result").unwrap_or(Value::Null)),

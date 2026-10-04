@@ -24,12 +24,12 @@ pub enum GitError {
 impl std::fmt::Display for GitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GitError::GitMissing => write!(f, "git이 설치되어 있지 않거나 PATH에 없습니다"),
-            GitError::GhMissing => write!(f, "GitHub CLI(gh)를 찾을 수 없습니다. 설치 경로와 PATH를 확인하세요 — https://cli.github.com"),
-            GitError::GhAuth(m) => write!(f, "GitHub CLI 인증이 필요합니다. `gh auth login`을 실행하세요. {m}"),
-            GitError::NotARepo => write!(f, "Git 저장소가 아닙니다"),
+            GitError::GitMissing => write!(f, "{}", kiln_common::trf!("git이 설치되어 있지 않거나 PATH에 없습니다")),
+            GitError::GhMissing => write!(f, "{}", kiln_common::trf!("GitHub CLI(gh)를 찾을 수 없습니다. 설치 경로와 PATH를 확인하세요 — https://cli.github.com")),
+            GitError::GhAuth(m) => write!(f, "{}", kiln_common::trf!("GitHub CLI 인증이 필요합니다. `gh auth login`을 실행하세요. {m}")),
+            GitError::NotARepo => write!(f, "{}", kiln_common::trf!("Git 저장소가 아닙니다")),
             GitError::Failed(m) => write!(f, "{m}"),
-            GitError::Parse(m) => write!(f, "출력을 해석할 수 없습니다: {m}"),
+            GitError::Parse(m) => write!(f, "{}", kiln_common::trf!("출력을 해석할 수 없습니다: {m}")),
         }
     }
 }

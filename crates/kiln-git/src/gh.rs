@@ -35,9 +35,9 @@ impl ReviewDecision {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Approved => "승인됨",
-            Self::ChangesRequested => "변경 요청됨",
-            Self::ReviewRequired => "리뷰 필요",
+            Self::Approved => kiln_common::i18n::tr("승인됨"),
+            Self::ChangesRequested => kiln_common::i18n::tr("변경 요청됨"),
+            Self::ReviewRequired => kiln_common::i18n::tr("리뷰 필요"),
         }
     }
 }
@@ -149,26 +149,26 @@ impl CheckItem {
             (Some(s), _) => s.as_str(),
             (None, Some("COMPLETED")) => self.conclusion.as_deref().unwrap_or("COMPLETED"),
             (None, Some(s)) => s,
-            (None, None) => return "알 수 없음".into(),
+            (None, None) => return kiln_common::i18n::tr("알 수 없음").into(),
         };
         let label = match raw.to_ascii_uppercase().as_str() {
-            "SUCCESS" => "성공",
-            "FAILURE" => "실패",
-            "ERROR" => "오류",
-            "NEUTRAL" => "중립",
-            "SKIPPED" => "건너뜀",
-            "CANCELLED" => "취소됨",
-            "TIMED_OUT" => "시간 초과",
-            "ACTION_REQUIRED" => "조치 필요",
-            "STARTUP_FAILURE" => "시작 실패",
-            "STALE" => "오래됨",
-            "COMPLETED" => "완료",
-            "IN_PROGRESS" => "진행 중",
-            "QUEUED" => "대기 중",
-            "PENDING" => "대기 중",
-            "WAITING" => "대기 중",
-            "REQUESTED" => "요청됨",
-            "EXPECTED" => "예정됨",
+            "SUCCESS" => kiln_common::i18n::tr("성공"),
+            "FAILURE" => kiln_common::i18n::tr("실패"),
+            "ERROR" => kiln_common::i18n::tr("오류"),
+            "NEUTRAL" => kiln_common::i18n::tr("중립"),
+            "SKIPPED" => kiln_common::i18n::tr("건너뜀"),
+            "CANCELLED" => kiln_common::i18n::tr("취소됨"),
+            "TIMED_OUT" => kiln_common::i18n::tr("시간 초과"),
+            "ACTION_REQUIRED" => kiln_common::i18n::tr("조치 필요"),
+            "STARTUP_FAILURE" => kiln_common::i18n::tr("시작 실패"),
+            "STALE" => kiln_common::i18n::tr("오래됨"),
+            "COMPLETED" => kiln_common::i18n::tr("완료"),
+            "IN_PROGRESS" => kiln_common::i18n::tr("진행 중"),
+            "QUEUED" => kiln_common::i18n::tr("대기 중"),
+            "PENDING" => kiln_common::i18n::tr("대기 중"),
+            "WAITING" => kiln_common::i18n::tr("대기 중"),
+            "REQUESTED" => kiln_common::i18n::tr("요청됨"),
+            "EXPECTED" => kiln_common::i18n::tr("예정됨"),
             _ => return raw.to_lowercase().replace('_', " "),
         };
         label.into()
@@ -400,10 +400,10 @@ impl PrFilter {
 
     pub fn label(self) -> &'static str {
         match self {
-            PrFilter::Open => "열림",
-            PrFilter::Mine => "내 PR",
-            PrFilter::ReviewRequested => "리뷰 요청됨",
-            PrFilter::All => "전체",
+            PrFilter::Open => kiln_common::i18n::tr("열림"),
+            PrFilter::Mine => kiln_common::i18n::tr("내 PR"),
+            PrFilter::ReviewRequested => kiln_common::i18n::tr("리뷰 요청됨"),
+            PrFilter::All => kiln_common::i18n::tr("전체"),
         }
     }
 
@@ -436,9 +436,9 @@ pub enum MergeMethod {
 impl MergeMethod {
     pub fn label(self) -> &'static str {
         match self {
-            MergeMethod::Squash => "스쿼시 후 병합",
-            MergeMethod::Merge => "병합 커밋 만들기",
-            MergeMethod::Rebase => "리베이스 후 병합",
+            MergeMethod::Squash => kiln_common::i18n::tr("스쿼시 후 병합"),
+            MergeMethod::Merge => kiln_common::i18n::tr("병합 커밋 만들기"),
+            MergeMethod::Rebase => kiln_common::i18n::tr("리베이스 후 병합"),
         }
     }
     fn flag(self) -> &'static str {
@@ -537,7 +537,7 @@ impl PrBackend for GhBackend {
     fn create_defaults(&self) -> GitResult<PrCreateDefaults> {
         let root = &self.root;
         let st = crate::repo::status(root)?;
-        let head = st.branch.head.clone().ok_or_else(|| GitError::Failed("분리된 HEAD입니다 — 먼저 브랜치로 전환하세요".into()))?;
+        let head = st.branch.head.clone().ok_or_else(|| GitError::Failed(kiln_common::i18n::tr("분리된 HEAD입니다 — 먼저 브랜치로 전환하세요").into()))?;
         let repo_name = self.repo.as_ref().map(RepoRef::full_name);
         let mut view_args = vec!["repo", "view"];
         if let Some(n) = &repo_name {

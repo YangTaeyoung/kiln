@@ -5,7 +5,7 @@ impl KilnApp {
         if self.confirm.is_some(){return;}
         if let Some(projects::ProjectAction::Open{path,name,command})=self.projects.ui(ctx) {
             let path=normalize_path(path.canonicalize().unwrap_or(path));
-            if !path.is_dir() { self.toast("폴더를 열 수 없습니다",path.display().to_string(),ToastKind::Error,None); return; }
+            if !path.is_dir() { self.toast(kiln_common::i18n::tr("폴더를 열 수 없습니다"),path.display().to_string(),ToastKind::Error,None); return; }
             self.add_workspace(path.clone(),ctx);
             self.workspaces[self.active].name=name.clone();
             if let Some(command)=command { self.actions.push(Action::RunSavedCommand(launchers::SelectedCommand{name,command,cwd:Some(path)})); }
@@ -15,8 +15,8 @@ impl KilnApp {
         if self.save_error.is_some() {
             egui::Area::new(egui::Id::new("save-failure-banner")).anchor(egui::Align2::CENTER_BOTTOM,[0.0,-8.0]).show(ctx,|ui|{
                 egui::Frame::popup(ui.style()).show(ui,|ui|{ui.horizontal(|ui|{
-                    ui.colored_label(self.theme.red,"작업 상태가 저장되지 않았습니다");
-                    if ui.button("작업 복구 센터").clicked(){self.recovery_open=true;}
+                    ui.colored_label(self.theme.red,kiln_common::i18n::tr("작업 상태가 저장되지 않았습니다"));
+                    if ui.button(kiln_common::i18n::tr("작업 복구 센터")).clicked(){self.recovery_open=true;}
                 });});
             });
         }
@@ -28,14 +28,14 @@ impl KilnApp {
             let frame=egui::Frame::new().fill(theme.bg_elevated).stroke(egui::Stroke::new(1.0,theme.border_strong)).corner_radius(12).shadow(theme.shadow()).inner_margin(egui::Margin::same(16));
             let response=egui::Modal::new(egui::Id::new("recovery-center")).frame(frame).show(ctx,|ui|{
                 ui.set_width((ctx.content_rect().width()-64.0).clamp(240.0,620.0));
-                ui.label(egui::RichText::new("작업 복구 센터").font(fonts::semibold(20.0)));
+                ui.label(egui::RichText::new(kiln_common::i18n::tr("작업 복구 센터")).font(fonts::semibold(20.0)));
                 ui.add_space(8.0);
-                ui.label("복원한 초안은 자동으로 저장하거나 전송하지 않습니다. 내용을 확인한 뒤 저장·적용하세요.");
+                ui.label(kiln_common::i18n::tr("복원한 초안은 자동으로 저장하거나 전송하지 않습니다. 내용을 확인한 뒤 저장·적용하세요."));
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-210.0).max(80.0)).show(ui,|ui|{
                     if !self.recovery_messages.is_empty() {
-                        egui::CollapsingHeader::new("이전 복구 안내").default_open(true).show(ui, |ui| {
+                        egui::CollapsingHeader::new(kiln_common::i18n::tr("이전 복구 안내")).default_open(true).show(ui, |ui| {
                             for message in &self.recovery_messages { ui.add(egui::Label::new(message).wrap()); }
-                            dismiss_history=ui.button("안내 확인 완료").on_hover_text("이 안내만 닫습니다. 백업 파일과 편집 초안은 유지됩니다.").clicked();
+                            dismiss_history=ui.button(kiln_common::i18n::tr("안내 확인 완료")).on_hover_text(kiln_common::i18n::tr("이 안내만 닫습니다. 백업 파일과 편집 초안은 유지됩니다.")).clicked();
                         });
                     }
                     if let Some(error)=&self.save_error{ui.colored_label(self.theme.red,error);}
@@ -45,18 +45,18 @@ impl KilnApp {
                             count+=1;
                             ui.push_id(("terminal-launch",pane),|ui| {
                                 ui.separator();
-                                ui.label(format!("{} · 터미널 시작",ws.name));
+                                ui.label(kiln_common::trf!("{} · 터미널 시작",ws.name));
                                 ui.add(egui::Label::new(&draft.reason).wrap());
                                 if let Some(cwd)=self.panes.get(&pane).and_then(|pane|pane.cwd.as_deref()) { ui.add(egui::Label::new(egui::RichText::new(cwd).small().color(theme.text_dim)).wrap()); }
                                 if let Some(command)=&draft.command {
-                                    egui::CollapsingHeader::new("보관한 명령").show(ui,|ui| {
+                                    egui::CollapsingHeader::new(kiln_common::i18n::tr("보관한 명령")).show(ui,|ui| {
                                         ui.add(egui::Label::new(command).wrap().selectable(true));
-                                        if ui.button("명령 복사").clicked(){ui.ctx().copy_text(command.clone());}
+                                        if ui.button(kiln_common::i18n::tr("명령 복사")).clicked(){ui.ctx().copy_text(command.clone());}
                                     });
                                 }
                                 ui.horizontal_wrapped(|ui| {
-                                    if ui.add_enabled(self.conn.is_connected(),egui::Button::new("다시 시작")).clicked(){self.actions.push(Action::RetryTerminalLaunch(pane));close=true;}
-                                    if ui.button(if draft.command.is_some(){"명령 버리고 셸 열기"}else{"셸 설정"}).clicked(){
+                                    if ui.add_enabled(self.conn.is_connected(),egui::Button::new(kiln_common::i18n::tr("다시 시작"))).clicked(){self.actions.push(Action::RetryTerminalLaunch(pane));close=true;}
+                                    if ui.button(if draft.command.is_some(){kiln_common::i18n::tr("명령 버리고 셸 열기")}else{kiln_common::i18n::tr("셸 설정")}).clicked(){
                                         if draft.command.is_some(){self.actions.push(Action::DiscardTerminalLaunch(pane));}else{self.actions.push(Action::OpenTerminalSettings);}
                                         close=true;
                                     }
@@ -68,38 +68,38 @@ impl KilnApp {
                         if let Some(tool)=self.panes.get(&id).and_then(Pane::tool) {
                             if let Some(notice)=tool.recovery_notice(){
                                 count+=1;ui.separator();ui.label(format!("{} · {}",ws.name,tool.title()));ui.label(notice);
-                                if ui.button("복원한 내용 열기").clicked(){self.actions.push(Action::RevealPane(id));close=true;}
+                                if ui.button(kiln_common::i18n::tr("복원한 내용 열기")).clicked(){self.actions.push(Action::RevealPane(id));close=true;}
                             }
                         }
                     }}
                     for (index,ws) in self.workspaces.iter().enumerate() {
                         let drafts=ws.tools.drafts();
                         if !drafts.agent_prompt.is_empty() {
-                            count+=1;ui.separator();ui.label(format!("{} · 작성 중인 에이전트 요청",ws.name));
-                            if ui.button("에이전트 요청 이어 쓰기").clicked(){draft_target=Some((index,Action::NewAgentTask));close=true;}
+                            count+=1;ui.separator();ui.label(kiln_common::trf!("{} · 작성 중인 에이전트 요청",ws.name));
+                            if ui.button(kiln_common::i18n::tr("에이전트 요청 이어 쓰기")).clicked(){draft_target=Some((index,Action::NewAgentTask));close=true;}
                         }
                         if !drafts.repositories.is_empty() {
-                            count+=1;ui.separator();ui.label(format!("{} · 작업 공간 초안",ws.name));
+                            count+=1;ui.separator();ui.label(kiln_common::trf!("{} · 작업 공간 초안",ws.name));
                             for text in ws.tools.unsaved_drafts(){ui.add(egui::Label::new(text).wrap());}
-                            if ui.button("작업 공간에서 이어 쓰기").clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
+                            if ui.button(kiln_common::i18n::tr("작업 공간에서 이어 쓰기")).clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
                         }
                         if !drafts.commit_message.is_empty() {
-                            count+=1; ui.separator(); ui.label(format!("{} · 작성 중인 커밋 메시지",ws.name));
-                            if ui.button("소스 제어에서 이어 쓰기").clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
+                            count+=1; ui.separator(); ui.label(kiln_common::trf!("{} · 작성 중인 커밋 메시지",ws.name));
+                            if ui.button(kiln_common::i18n::tr("소스 제어에서 이어 쓰기")).clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
                         }
                         if !drafts.github.repositories.is_empty() {
-                            count+=1; ui.separator(); ui.label(format!("{} · GitHub 작성 초안",ws.name));
+                            count+=1; ui.separator(); ui.label(kiln_common::trf!("{} · GitHub 작성 초안",ws.name));
                             for item in ws.tools.unsaved_drafts().into_iter().filter(|item|item.starts_with("GitHub")) {ui.add(egui::Label::new(item).wrap());}
-                            if ui.button("GitHub에서 이어 쓰기").clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::PullRequests)));close=true;}
+                            if ui.button(kiln_common::i18n::tr("GitHub에서 이어 쓰기")).clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::PullRequests)));close=true;}
                         }
                     }
-                    if count==0 && self.save_error.is_none(){ui.label("확인이 필요한 편집 초안이 없습니다.");}
-                    ui.separator();ui.label("작업 배치와 초안은 변경 후 주기적으로 저장합니다. 강제 종료 직전의 변경은 저장되지 않을 수 있습니다.");
+                    if count==0 && self.save_error.is_none(){ui.label(kiln_common::i18n::tr("확인이 필요한 편집 초안이 없습니다."));}
+                    ui.separator();ui.label(kiln_common::i18n::tr("작업 배치와 초안은 변경 후 주기적으로 저장합니다. 강제 종료 직전의 변경은 저장되지 않을 수 있습니다."));
                 });
                 ui.add_space(12.0);widgets::divider(ui);ui.add_space(8.0);
                 ui.horizontal(|ui|{
-                    if self.save_error.is_some() && widgets::button(ui,"작업 상태 저장 다시 시도",widgets::ButtonKind::Secondary).clicked(){self.save_if_changed(true);}
-                    if widgets::button(ui,"닫기",widgets::ButtonKind::Primary).clicked(){close=true;}
+                    if self.save_error.is_some() && widgets::button(ui,kiln_common::i18n::tr("작업 상태 저장 다시 시도"),widgets::ButtonKind::Secondary).clicked(){self.save_if_changed(true);}
+                    if widgets::button(ui,kiln_common::i18n::tr("닫기"),widgets::ButtonKind::Primary).clicked(){close=true;}
                 });
             });
             if let Some((index,action))=draft_target { self.active=index; self.actions.push(action); }
@@ -118,7 +118,7 @@ impl KilnApp {
         if self.quick.open {
             if self.quick.pane.is_none_or(|p|!self.panes.contains_key(&p)) {
                 let pane=self.new_term_pane(Some(self.workspaces[self.active].root.to_string_lossy().into_owned()));
-                let id=self.id();let mut page=Page::new(id,pane);page.title=Some("빠른 터미널".into());self.ws().pages.push(page);
+                let id=self.id();let mut page=Page::new(id,pane);page.title=Some(kiln_common::i18n::tr("빠른 터미널").into());self.ws().pages.push(page);
                 self.spawn_for_pane(pane);self.quick.pane=Some(pane);
             }
             let pane=self.quick.pane.unwrap();
@@ -126,7 +126,7 @@ impl KilnApp {
             if let Some(sid)=session {if self.quick.view.is_none(){self.quick.view=Some(TermView::new(sid));}}
             let settings=terminal::TermSettings{font_size:self.settings.font_size,option_as_meta:self.settings.option_as_meta,line_height:self.settings.line_height,copy_on_select:self.settings.copy_on_select,cursor_blink:self.settings.cursor_blink,close_shortcut:None};
             let mut close=false;let mut attach=false;
-            ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("quick-terminal"),egui::ViewportBuilder::default().with_title("Kiln · 빠른 터미널").with_inner_size([900.0,420.0]).with_min_inner_size([400.0,240.0]).with_always_on_top(),|ctx,_|{
+            ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("quick-terminal"),egui::ViewportBuilder::default().with_title(kiln_common::i18n::tr("Kiln · 빠른 터미널")).with_inner_size([900.0,420.0]).with_min_inner_size([400.0,240.0]).with_always_on_top(),|ctx,_|{
                 if self.quick.focus_pending { ctx.ctx().send_viewport_cmd(egui::ViewportCommand::Focus); }
                 if ctx.input(|i|i.viewport().close_requested()){close=true;}
                 egui::CentralPanel::default().show(ctx,|ui|{
@@ -134,7 +134,7 @@ impl KilnApp {
                     if actions.2 { if let Some(view) = &mut self.quick.view { view.open_history(); } }
                     attach=actions.0; close|=actions.1;
                     widgets::divider(ui);
-                    if let Some(view)=&mut self.quick.view{let out=view.ui(ui,&mut self.conn,&settings,self.quick.focus_pending,None);self.quick.focus_pending=false;if let Some(link)=out.open{self.actions.push(Action::OpenLink(link));}if let Some((command,cwd))=out.command_to_run{self.actions.push(Action::RunSavedCommand(launchers::SelectedCommand{name:"명령 다시 실행".into(),command,cwd:cwd.map(PathBuf::from)}));}}else{ui.spinner();ui.label("터미널 시작 중…");ui.ctx().request_repaint_after(Duration::from_millis(100));}
+                    if let Some(view)=&mut self.quick.view{let out=view.ui(ui,&mut self.conn,&settings,self.quick.focus_pending,None);self.quick.focus_pending=false;if let Some(link)=out.open{self.actions.push(Action::OpenLink(link));}if let Some((command,cwd))=out.command_to_run{self.actions.push(Action::RunSavedCommand(launchers::SelectedCommand{name:kiln_common::i18n::tr("명령 다시 실행").into(),command,cwd:cwd.map(PathBuf::from)}));}}else{ui.spinner();ui.label(kiln_common::i18n::tr("터미널 시작 중…"));ui.ctx().request_repaint_after(Duration::from_millis(100));}
                 });
             });
             if attach{self.actions.push(Action::RevealPane(pane));ctx.send_viewport_cmd(egui::ViewportCommand::Focus);close=true;}
@@ -146,11 +146,11 @@ impl KilnApp {
 fn quick_terminal_header(ui:&mut egui::Ui, history_open: bool)->(bool,bool,bool) {
     let mut attach=false; let mut close=false; let mut history=false;
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("빠른 터미널").font(fonts::medium(13.0)).color(Theme::current().text)).on_hover_text("Ctrl+` · 숨겨도 세션은 유지됩니다");
+        ui.label(egui::RichText::new(kiln_common::i18n::tr("빠른 터미널")).font(fonts::medium(13.0)).color(Theme::current().text)).on_hover_text(kiln_common::i18n::tr("Ctrl+` · 숨겨도 세션은 유지됩니다"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            close=widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, "숨기기").clicked();
-            attach=widgets::icon_button(ui, kiln_common::icons::Icon::Maximize, 28.0, false, "프로젝트에서 보기").clicked();
-            history=widgets::icon_button(ui, kiln_common::icons::Icon::History, 28.0, history_open, "명령 기록").clicked();
+            close=widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, kiln_common::i18n::tr("숨기기")).clicked();
+            attach=widgets::icon_button(ui, kiln_common::icons::Icon::Maximize, 28.0, false, kiln_common::i18n::tr("프로젝트에서 보기")).clicked();
+            history=widgets::icon_button(ui, kiln_common::icons::Icon::History, 28.0, history_open, kiln_common::i18n::tr("명령 기록")).clicked();
         });
     });
     (attach,close,history)
@@ -176,20 +176,20 @@ mod narrow_quick_header_tests {
 
 fn rename_task_form(ui:&mut egui::Ui,buffer:&mut String)->(bool,bool) {
     let mut save=false; let mut cancel=false;
-    ui.set_width(320.0);ui.heading("작업 이름");
-    ui.label("예: 결제 오류 조사, PR #42 검토");
+    ui.set_width(320.0);ui.heading(kiln_common::i18n::tr("작업 이름"));
+    ui.label(kiln_common::i18n::tr("예: 결제 오류 조사, PR #42 검토"));
     let input=ui.text_edit_singleline(buffer);
     let focus_id=egui::Id::new("rename-task-first-focus");
     if !ui.data(|d|d.get_temp::<bool>(focus_id).unwrap_or(false)){input.request_focus();ui.data_mut(|d|d.insert_temp(focus_id,true));}
     ui.horizontal(|ui|{
         let enter=ui.input_mut(|i|i.consume_key(Modifiers::NONE,Key::Enter));
         let valid=!buffer.trim().is_empty();
-        let clicked=ui.add_enabled(valid,egui::Button::new("저장")).clicked();
+        let clicked=ui.add_enabled(valid,egui::Button::new(kiln_common::i18n::tr("저장"))).clicked();
         save=valid && (clicked || enter);
 
-        cancel=ui.button("취소").clicked();
+        cancel=ui.button(kiln_common::i18n::tr("취소")).clicked();
     });
-    if buffer.trim().is_empty(){ui.colored_label(Theme::current().red,"작업 이름을 입력하세요");}
+    if buffer.trim().is_empty(){ui.colored_label(Theme::current().red,kiln_common::i18n::tr("작업 이름을 입력하세요"));}
     (save,cancel)
 }
 

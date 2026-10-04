@@ -10,8 +10,8 @@ pub(super) enum TaskPhase { Failed, Waiting, Attention, Running, Done, Unknown }
 
 impl TaskPhase {
     fn label(self) -> &'static str { match self {
-        Self::Failed=>"실패", Self::Waiting=>"입력 대기", Self::Attention=>"확인 필요",
-        Self::Running=>"작업 중", Self::Done=>"완료", Self::Unknown=>"세션 열림",
+        Self::Failed=>kiln_common::i18n::tr("실패"), Self::Waiting=>kiln_common::i18n::tr("입력 대기"), Self::Attention=>kiln_common::i18n::tr("확인 필요"),
+        Self::Running=>kiln_common::i18n::tr("작업 중"), Self::Done=>kiln_common::i18n::tr("완료"), Self::Unknown=>kiln_common::i18n::tr("세션 열림"),
     }}
     fn priority(self) -> u8 { match self {
         Self::Waiting=>0, Self::Running=>1, Self::Attention=>2, Self::Failed=>3, Self::Done=>4, Self::Unknown=>5,
@@ -63,9 +63,9 @@ impl KilnApp {
                 let mut title=if panes.len()==1 {page.title.clone()} else {None}
                     .or_else(||info.name.clone().filter(|name|!name.trim().is_empty()))
                     .unwrap_or_else(|| self.card_info(pane).name);
-                if title.is_empty() || super::shells().contains(&title.as_str()) || title=="셸" {
+                if title.is_empty() || super::shells().contains(&title.as_str()) || title==kiln_common::i18n::tr("셸") {
                     title=telemetry.and_then(|t|t.commands.last()).map(|c|c.command.lines().next().unwrap_or("").chars().take(120).collect())
-                        .filter(|s:&String|!s.is_empty()).unwrap_or_else(||"터미널".into());
+                        .filter(|s:&String|!s.is_empty()).unwrap_or_else(||kiln_common::i18n::tr("터미널").into());
                 }
                 let recorded=Some(command_time.max(notice_time)).filter(|time|*time>0);
                 tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),duplicate_index:0,phase:phase(info,telemetry),updated:info.created_unix.max(command_time).max(notice_time),recorded});
@@ -112,13 +112,13 @@ fn relative_time(updated:u64)->String {
     if updated==0 {return String::new()}
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     match now.saturating_sub(updated) {
-        0..=59=>"방금".into(), n@60..=3599=>format!("{}분 전",n/60),
-        n@3600..=86399=>format!("{}시간 전",n/3600), n=>format!("{}일 전",n/86400),
+        0..=59=>kiln_common::i18n::tr("방금").into(), n@60..=3599=>kiln_common::trf!("{}분 전",n/60),
+        n@3600..=86399=>kiln_common::trf!("{}시간 전",n/3600), n=>kiln_common::trf!("{}일 전",n/86400),
     }
 }
 
 pub(super) fn summary(tasks:&[WorkspaceTask])->String {
-    [(TaskPhase::Failed,"실패"),(TaskPhase::Waiting,"대기"),(TaskPhase::Attention,"확인"),(TaskPhase::Running,"진행"),(TaskPhase::Done,"완료"),(TaskPhase::Unknown,"열림")]
+    [(TaskPhase::Failed,kiln_common::i18n::tr("실패")),(TaskPhase::Waiting,kiln_common::i18n::tr("대기")),(TaskPhase::Attention,kiln_common::i18n::tr("확인")),(TaskPhase::Running,kiln_common::i18n::tr("진행")),(TaskPhase::Done,kiln_common::i18n::tr("완료")),(TaskPhase::Unknown,kiln_common::i18n::tr("열림"))]
         .into_iter().filter_map(|(phase,label)| {let n=tasks.iter().filter(|t|t.phase==phase).count();(n>0).then(||format!("{label} {n}"))}).collect::<Vec<_>>().join(" · ")
 }
 
@@ -178,10 +178,10 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
         if rect.right()-x > age_width+70.0 {ui.painter().text(pos2(rect.right()-8.0,rect.top()+26.0),Align2::RIGHT_CENTER,&age,fonts::regular(11.0),theme.text_dim);}
         widgets::focus_ring(ui,&response,4);
         if response.clicked() {reveal=Some(task.pane);}
-        response.on_hover_text(format!("{}\n{}{}\n클릭하여 작업으로 이동",task.title,task.phase.label(),if age.is_empty(){String::new()}else{format!("\n최근 명령·알림 기록: {age}")}));
+        response.on_hover_text(kiln_common::trf!("{}\n{}{}\n클릭하여 작업으로 이동",task.title,task.phase.label(),if age.is_empty(){String::new()}else{kiln_common::trf!("\n최근 명령·알림 기록: {age}")}));
     }
     if tasks.len()>3 {
-        let text=if expanded {"간단히 보기".into()} else {format!("작업 {}개 모두 보기",tasks.len())};
+        let text=if expanded {kiln_common::i18n::tr("간단히 보기").into()} else {kiln_common::trf!("작업 {}개 모두 보기",tasks.len())};
         if ui.add_sized([ui.available_width(),24.0],egui::Button::new(egui::RichText::new(text).font(fonts::regular(11.5)).color(theme.text_dim)).frame(false)).clicked() {
             ui.data_mut(|d|d.insert_temp(key,!expanded));
         }

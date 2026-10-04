@@ -352,11 +352,11 @@ impl AccountManager {
     pub fn save_current(&self, tool: Tool, label: &str) -> Result<Profile> {
         let _op = self.inner.op.lock();
         let (secret, acct) = self.read_live(tool)?.ok_or_else(|| match tool {
-            Tool::Claude => anyhow!("로그인된 Claude Code 계정이 없습니다. 먼저 `claude auth login` 으로 로그인하세요"),
-            Tool::Codex => anyhow!("로그인된 Codex 계정이 없습니다(auth.json 없음). 먼저 `codex login` 으로 로그인하세요"),
+            Tool::Claude => anyhow!(kiln_common::trf!("로그인된 Claude Code 계정이 없습니다. 먼저 `claude auth login` 으로 로그인하세요")),
+            Tool::Codex => anyhow!(kiln_common::trf!("로그인된 Codex 계정이 없습니다(auth.json 없음). 먼저 `codex login` 으로 로그인하세요")),
         })?;
         if tool == Tool::Codex && !codex::has_chatgpt_tokens(&secret) {
-            bail!("Codex 가 ChatGPT 계정으로 로그인되어 있지 않습니다(API 키 로그인은 저장하지 않습니다)");
+            bail!(kiln_common::trf!("Codex 가 ChatGPT 계정으로 로그인되어 있지 않습니다(API 키 로그인은 저장하지 않습니다)"));
         }
         let (email, oauth) = self.live_identity(tool, Some(&secret));
         let service = profile_service(tool);
@@ -395,7 +395,7 @@ impl AccountManager {
                 } else if let Some(e) = &email {
                     e.split('@').next().unwrap_or(e).to_string()
                 } else {
-                    format!("계정 {n}")
+                    kiln_common::trf!("계정 {n}")
                 };
                 let p = Profile { id: id.clone(), tool, label, email: email.clone(), added_unix: now as u64 };
                 ts.profiles.push(StoredProfile { profile: p.clone(), oauth_account: oauth.clone(), last_usage: None });
@@ -452,7 +452,7 @@ impl AccountManager {
         let Some((email, oauth)) = self.with_state(|s| {
             s.settings.tool(tool).profiles.iter().find(|p| p.profile.id == id).map(|p| (p.profile.email.clone(), p.oauth_account.clone()))
         }) else {
-            bail!("프로필을 찾을 수 없습니다: {id}");
+            bail!(kiln_common::trf!("프로필을 찾을 수 없습니다: {id}"));
         };
         if let Err(e) = self.sync_back_locked(tool) {
             log::warn!("accounts: sync-back failed: {e:#}");
@@ -465,7 +465,7 @@ impl AccountManager {
             .env
             .store
             .get(&profile_service(tool), id)?
-            .with_context(|| format!("프로필 {id} 의 저장된 자격증명이 없습니다"))?;
+            .with_context(|| kiln_common::trf!("프로필 {id} 의 저장된 자격증명이 없습니다"))?;
         self.write_live(tool, &secret)?;
         if tool == Tool::Claude
             && let Some(oa) = &oauth
@@ -487,10 +487,10 @@ impl AccountManager {
     pub fn remove(&self, tool: Tool, id: &str) -> Result<()> {
         let _op = self.inner.op.lock();
         if self.active(tool).as_deref() == Some(id) {
-            bail!("사용 중인 계정은 삭제할 수 없습니다. 다른 계정으로 전환한 뒤 삭제하세요");
+            bail!(kiln_common::trf!("사용 중인 계정은 삭제할 수 없습니다. 다른 계정으로 전환한 뒤 삭제하세요"));
         }
         if !self.profiles(tool).iter().any(|p| p.id == id) {
-            bail!("프로필을 찾을 수 없습니다: {id}");
+            bail!(kiln_common::trf!("프로필을 찾을 수 없습니다: {id}"));
         }
         self.inner.env.store.delete(&profile_service(tool), id)?;
         self.with_state(|s| {
@@ -504,13 +504,13 @@ impl AccountManager {
     pub fn rename(&self, tool: Tool, id: &str, label: &str) -> Result<()> {
         let label = label.trim();
         if label.is_empty() {
-            bail!("이름은 비울 수 없습니다");
+            bail!(kiln_common::trf!("이름은 비울 수 없습니다"));
         }
         let found = self.with_state(|s| {
             s.settings.tool_mut(tool).profiles.iter_mut().find(|p| p.profile.id == id).map(|p| p.profile.label = label.to_string()).is_some()
         });
         if !found {
-            bail!("프로필을 찾을 수 없습니다: {id}");
+            bail!(kiln_common::trf!("프로필을 찾을 수 없습니다: {id}"));
         }
         self.persist()
     }
@@ -634,7 +634,7 @@ impl AccountManager {
             Some(o) if o.at_unix >= since => self.set_usage(Tool::Codex, &active, o.usage),
             _ => {
                 if self.usage(Tool::Codex, &active).is_none() {
-                    self.set_usage(Tool::Codex, &active, Usage::unavailable("최근 세션 기록 없음"));
+                    self.set_usage(Tool::Codex, &active, Usage::unavailable(kiln_common::i18n::tr("최근 세션 기록 없음")));
                 }
             }
         }

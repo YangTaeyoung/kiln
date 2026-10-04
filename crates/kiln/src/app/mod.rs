@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 use terminal::{LinkTarget, TermView};
 
 pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
+    kiln_common::i18n::set_language(kiln_common::i18n::load_language());
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Kiln")
         .with_inner_size([1400.0, 880.0])
@@ -59,7 +60,7 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
         updater::install();
         let mut app = KilnApp::new(&cc.egui_ctx, path);
         app.quick.register(&cc.egui_ctx);
-        if let Some(error)=app.quick.error.clone(){app.toast("빠른 터미널",error,ToastKind::Error,None);}
+        if let Some(error)=app.quick.error.clone(){app.toast(kiln_common::i18n::tr("빠른 터미널"),error,ToastKind::Error,None);}
         Ok(Box::new(app))
     }))
         .map_err(|e| anyhow::anyhow!("{e}"))
@@ -189,6 +190,7 @@ pub enum Action {
     AttachSession(SessionId),
     KillSession(SessionId),
     OpenSettings,
+    SetLanguage(kiln_common::i18n::Language),
     OpenTerminalSettings,
     ShowAgentRequest(usize),
     CopyAgentRequest(usize),
@@ -313,6 +315,7 @@ mod inspector_state_tests {
 
 impl KilnApp {
     pub fn new(ctx: &egui::Context, open_path: Option<PathBuf>) -> Self {
+        kiln_common::i18n::set_language(kiln_common::i18n::load_language());
         kiln_common::fonts::install(ctx);
         let load_report = state::load_with_report();
         let persisted = load_report.state;
@@ -374,8 +377,8 @@ impl KilnApp {
             let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
             let backup=kiln_common::paths::config_file(&format!("state.recovery-{stamp}.json"));
             match std::fs::copy(state::path(),&backup) {
-                Ok(_)=>app.recovery_messages.push(format!("복원 전 상태 보관: {}",backup.display())),
-                Err(error)=>app.recovery_messages.push(format!("복원 전 상태 백업 실패: {error}")),
+                Ok(_)=>app.recovery_messages.push(kiln_common::trf!("복원 전 상태 보관: {}",backup.display())),
+                Err(error)=>app.recovery_messages.push(kiln_common::trf!("복원 전 상태 백업 실패: {error}")),
             }
         }
         if let Some(p) = open_path {
@@ -440,7 +443,7 @@ impl KilnApp {
                         Some(t) => match ws.tools.restore_tool(t, ctx) {
                             Some(tab) => PaneKind::Tool(tab),
                             None => {
-                                self.recovery_messages.push(format!("{} · 패널 {}를 복원하지 못했습니다. 파일 또는 DB 연결을 확인하세요.", wp.name, pp.id));
+                                self.recovery_messages.push(kiln_common::trf!("{} · 패널 {}를 복원하지 못했습니다. 파일 또는 DB 연결을 확인하세요.", wp.name, pp.id));
                                 self.recovery_open=true;
                                 // 복원할 수 없는 도구 카드(지워진 파일 등)는 빼고, 페이지가 비면 페이지를 버린다.
                                 if !root.remove(pp.id) {
@@ -517,7 +520,7 @@ impl KilnApp {
             .collect();
         let mut launch_drafts: std::collections::BTreeMap<_, _> = self.terminal_launch_drafts.iter().map(|(id,draft)| (*id,draft.clone())).collect();
         for (pane, command) in &self.pending_input {
-            launch_drafts.insert(*pane, state::TerminalLaunchDraft { pane:*pane, command:Some(command.trim_end_matches('\r').to_owned()), reason:"실행 확인 전 종료된 요청입니다. 실행 여부를 확인하고 다시 시작하세요.".into() });
+            launch_drafts.insert(*pane, state::TerminalLaunchDraft { pane:*pane, command:Some(command.trim_end_matches('\r').to_owned()), reason:kiln_common::i18n::tr("실행 확인 전 종료된 요청입니다. 실행 여부를 확인하고 다시 시작하세요.").into() });
         }
         Persist { workspaces, active: self.active, settings: self.settings.clone(), sidebar_open: self.sidebar_open, notifications: self.notifications.items.clone(), recent_panes: self.recent_panes.clone(), terminal_launch_drafts:launch_drafts.into_values().collect() }
     }
@@ -532,7 +535,7 @@ impl KilnApp {
             match state::save(&p) {
                 Ok(()) => { self.last_saved = Some(p); self.save_error = None; }
                 Err(error) => {
-                    if self.save_error.as_ref() != Some(&error) { self.toast("작업 상태 저장 실패", &error, ToastKind::Error, None); }
+                    if self.save_error.as_ref() != Some(&error) { self.toast(kiln_common::i18n::tr("작업 상태 저장 실패"), &error, ToastKind::Error, None); }
                     self.save_error = Some(error);
                 }
             }
@@ -583,7 +586,7 @@ impl KilnApp {
             return;
         }
         if !root.is_dir() {
-            self.toast("폴더를 열 수 없습니다", root.display().to_string(), ToastKind::Error, None);
+            self.toast(kiln_common::i18n::tr("폴더를 열 수 없습니다"), root.display().to_string(), ToastKind::Error, None);
             return;
         }
         let name = root.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| root.to_string_lossy().into_owned());
@@ -610,7 +613,7 @@ impl KilnApp {
     }
 
     fn focused_pane(&self) -> Option<PaneId> {
-        self.workspaces.get(self.active).map(|w| w.page().focused)
+        self.workspaces.get(self.active).and_then(|w| w.pages.get(w.active_page)).map(|page| page.focused)
     }
 
     fn focused_session(&self) -> Option<SessionId> {
@@ -646,7 +649,7 @@ impl KilnApp {
 
     fn block_disconnected_close(&mut self, panes: &[PaneId]) -> bool {
         if !self.conn.is_connected() && panes.iter().any(|id| self.panes.get(id).and_then(Pane::session).is_some()) {
-            self.toast("연결 후 종료할 수 있습니다", "세션을 종료하지 못해 패널을 유지했습니다. 연결이 복구되면 다시 닫으세요.", ToastKind::Error, None);
+            self.toast(kiln_common::i18n::tr("연결 후 종료할 수 있습니다"), kiln_common::i18n::tr("세션을 종료하지 못해 패널을 유지했습니다. 연결이 복구되면 다시 닫으세요."), ToastKind::Error, None);
             return true;
         }
         false
@@ -694,7 +697,7 @@ impl KilnApp {
             }
             Action::OpenFolder => {
                 let root = self.workspaces[self.active].root.clone();
-                if let Some(path) = rfd::FileDialog::new().set_title("작업 폴더 열기").set_directory(root).pick_folder() {
+                if let Some(path) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() {
                     self.add_workspace(path,ctx);
                 }
             }
@@ -718,9 +721,9 @@ impl KilnApp {
                     let busy:Vec<String>=if self.settings.confirm_close_running{ws.all_panes().iter().filter_map(|p|self.pane_is_busy(*p)).collect()}else{vec![]};
                     if !dirty.is_empty() || !busy.is_empty() {
                         self.confirm = Some(Confirm {
-                            title: format!("{} 작업 공간을 닫을까요?", ws.name),
-                            body: format!("이 작업 공간의 터미널 세션이 종료됩니다.\n실행 중: {}\n저장하지 않은 변경:\n{}", if busy.is_empty(){"없음".into()}else{busy.join(", ")},if dirty.is_empty(){"없음".into()}else{dirty.join("\n")}),
-                            ok: if dirty.is_empty() { "실행 종료 후 작업 공간 닫기" } else { "변경 버리고 작업 공간 닫기" }.into(),
+                            title: kiln_common::trf!("{} 작업 공간을 닫을까요?", ws.name),
+                            body: kiln_common::trf!("이 작업 공간의 터미널 세션이 종료됩니다.\n실행 중: {}\n저장하지 않은 변경:\n{}", if busy.is_empty(){kiln_common::i18n::tr("없음").into()}else{busy.join(", ")},if dirty.is_empty(){kiln_common::i18n::tr("없음").into()}else{dirty.join("\n")}),
+                            ok: if dirty.is_empty() { kiln_common::i18n::tr("실행 종료 후 작업 공간 닫기") } else { kiln_common::i18n::tr("변경 버리고 작업 공간 닫기") }.into(),
                             action: Action::CloseWorkspaceConfirmed(i),
                         });
                     } else {
@@ -813,16 +816,16 @@ impl KilnApp {
                 if !force {
                     let busy: Vec<String> = if self.settings.confirm_close_running { panes.iter().filter_map(|p| self.pane_is_busy(*p)).collect() } else { vec![] };
                     let mut dirty: Vec<String> = panes.iter().filter_map(|p| self.panes.get(p).and_then(|x| x.tool())).filter(|t| t.is_dirty()).map(|t| t.title()).collect();
-                    if panes.iter().any(|p| self.terminal_launch_drafts.get(p).is_some_and(|d|d.command.is_some())) { dirty.push("보관한 터미널 실행 요청".into()); }
+                    if panes.iter().any(|p| self.terminal_launch_drafts.get(p).is_some_and(|d|d.command.is_some())) { dirty.push(kiln_common::i18n::tr("보관한 터미널 실행 요청").into()); }
                     if !busy.is_empty() || !dirty.is_empty() {
                         let mut parts = Vec::new();
                         if !busy.is_empty() {
-                            parts.push(format!("종료할 프로세스: {}", busy.join(", ")));
+                            parts.push(kiln_common::trf!("종료할 프로세스: {}", busy.join(", ")));
                         }
                         if !dirty.is_empty() {
-                            parts.push(format!("버릴 변경: {}", dirty.join(", ")));
+                            parts.push(kiln_common::trf!("버릴 변경: {}", dirty.join(", ")));
                         }
-                        self.confirm = Some(Confirm { title: "작업 탭을 닫을까요?".into(), body: format!("{}\n이 탭의 패널과 터미널 세션이 모두 닫힙니다.",parts.join("\n")), ok: if dirty.is_empty(){"실행 종료 후 탭 닫기"}else{"변경 버리고 탭 닫기"}.into(), action: Action::ClosePage(i, true) });
+                        self.confirm = Some(Confirm { title: kiln_common::i18n::tr("작업 탭을 닫을까요?").into(), body: kiln_common::trf!("{}\n이 탭의 패널과 터미널 세션이 모두 닫힙니다.",parts.join("\n")), ok: if dirty.is_empty(){kiln_common::i18n::tr("실행 종료 후 탭 닫기")}else{kiln_common::i18n::tr("변경 버리고 탭 닫기")}.into(), action: Action::ClosePage(i, true) });
                         return;
                     }
                 }
@@ -865,23 +868,23 @@ impl KilnApp {
                 if self.block_disconnected_close(&[p]) { return; }
                 if !force {
                     if self.terminal_launch_drafts.get(&p).is_some_and(|draft|draft.command.is_some()) {
-                        self.confirm=Some(Confirm { title:"보관한 실행 요청을 버릴까요?".into(), body:"이 패널의 실행 요청이 삭제됩니다.".into(), ok:"요청 버리고 닫기".into(), action:Action::ClosePane(p,true) });
+                        self.confirm=Some(Confirm { title:kiln_common::i18n::tr("보관한 실행 요청을 버릴까요?").into(), body:kiln_common::i18n::tr("이 패널의 실행 요청이 삭제됩니다.").into(), ok:kiln_common::i18n::tr("요청 버리고 닫기").into(), action:Action::ClosePane(p,true) });
                         return;
                     }
                     if let Some(proc_name) = self.pane_is_busy(p).filter(|_| self.settings.confirm_close_running) {
                         self.confirm = Some(Confirm {
-                            title: "실행 중인 프로세스를 종료할까요?".into(),
-                            body: format!("프로세스: {proc_name}\n이 패널을 닫으면 위 프로세스도 함께 종료됩니다."),
-                            ok: "종료하고 닫기".into(),
+                            title: kiln_common::i18n::tr("실행 중인 프로세스를 종료할까요?").into(),
+                            body: kiln_common::trf!("프로세스: {proc_name}\n이 패널을 닫으면 위 프로세스도 함께 종료됩니다."),
+                            ok: kiln_common::i18n::tr("종료하고 닫기").into(),
                             action: Action::ClosePane(p, true),
                         });
                         return;
                     }
                     if let Some(t) = self.panes.get(&p).and_then(|x| x.tool()).filter(|t| t.is_dirty()) {
                         self.confirm = Some(Confirm {
-                            title: "저장하지 않은 변경".into(),
-                            body: format!("대상: {}\n저장하지 않은 변경을 버리고 패널을 닫습니다.", t.title()),
-                            ok: "버리고 닫기".into(),
+                            title: kiln_common::i18n::tr("저장하지 않은 변경").into(),
+                            body: kiln_common::trf!("대상: {}\n저장하지 않은 변경을 버리고 패널을 닫습니다.", t.title()),
+                            ok: kiln_common::i18n::tr("버리고 닫기").into(),
                             action: Action::ClosePane(p, true),
                         });
                         return;
@@ -981,7 +984,7 @@ impl KilnApp {
             }
             Action::RetryTerminalLaunch(p) => {
                 if !self.conn.is_connected() {
-                    self.toast("연결을 기다리는 중입니다", "연결이 복구되면 다시 실행하세요. 요청은 보관되어 있습니다.", ToastKind::Info, None);
+                    self.toast(kiln_common::i18n::tr("연결을 기다리는 중입니다"), kiln_common::i18n::tr("연결이 복구되면 다시 실행하세요. 요청은 보관되어 있습니다."), ToastKind::Info, None);
                     return;
                 }
                 if let Some(draft) = self.terminal_launch_drafts.remove(&p) {
@@ -1034,7 +1037,7 @@ impl KilnApp {
             Action::RunSavedCommand(command) => {
                 let cwd = command.cwd.unwrap_or_else(|| self.workspaces[self.active].root.clone());
                 if !cwd.is_dir() {
-                    self.toast("명령을 실행할 수 없습니다", "실행 폴더를 찾을 수 없습니다. 실행할 폴더를 다시 선택하세요.", ToastKind::Error, None);
+                    self.toast(kiln_common::i18n::tr("명령을 실행할 수 없습니다"), kiln_common::i18n::tr("실행 폴더를 찾을 수 없습니다. 실행할 폴더를 다시 선택하세요."), ToastKind::Error, None);
                 } else {
                     let pane = self.new_term_pane(Some(cwd.to_string_lossy().into_owned()));
                     let page_id = self.id();
@@ -1078,9 +1081,26 @@ impl KilnApp {
                 self.reveal_work_surface(ctx);
             }
             Action::KillSession(sid) => {
-                if !self.conn.kill(sid) { self.toast("연결 후 종료할 수 있습니다", "세션이 유지됩니다. 연결이 복구되면 다시 종료하세요.", ToastKind::Error, Some(sid)); }
+                if !self.conn.kill(sid) { self.toast(kiln_common::i18n::tr("연결 후 종료할 수 있습니다"), kiln_common::i18n::tr("세션이 유지됩니다. 연결이 복구되면 다시 종료하세요."), ToastKind::Error, Some(sid)); }
             }
             Action::OpenSettings => self.settings_ui.open = true,
+            Action::SetLanguage(language) => {
+                match kiln_common::i18n::save_language(language) {
+                    Ok(()) => {
+                        kiln_common::fonts::install(ctx);
+                        for pane in self.panes.values_mut() {
+                            if let PaneKind::Term { view: Some(view), .. } = &mut pane.kind {
+                                view.invalidate_fonts();
+                            }
+                        }
+                        if let Some(view) = &mut self.quick.view { view.invalidate_fonts(); }
+                        #[cfg(target_os="macos")]
+                        { macos::refresh_settings_menu(); updater::refresh_menu(); }
+                        ctx.request_repaint();
+                    }
+                    Err(error) => self.toast(kiln_common::i18n::tr("설정"), kiln_common::trf!("언어 설정을 저장하지 못했습니다: {error}"), ToastKind::Error, None),
+                }
+            }
             Action::ShowAgentRequest(index) => self.show_agent_request(index),
             Action::CopyAgentRequest(index) => self.copy_agent_request(index,ctx),
             Action::OpenTerminalSettings => { self.settings_ui.section=1; self.settings_ui.open=true; },
@@ -1116,7 +1136,7 @@ impl KilnApp {
                     Ok(tab) => {
                         self.place_card(PaneKind::Tool(tab));
                     }
-                    Err(e) => self.toast("열 수 없습니다", e, ToastKind::Error, None),
+                    Err(e) => self.toast(kiln_common::i18n::tr("열 수 없습니다"), e, ToastKind::Error, None),
                 }
             }
             Action::CloseTabByKey(key) => {
@@ -1150,12 +1170,12 @@ impl KilnApp {
             }
             Action::LaunchAgent {cwd, program, context, request} => {
                 if !cwd.is_dir() {
-                    self.toast("작업을 시작할 수 없습니다", "작업 공간 폴더를 찾을 수 없습니다.", ToastKind::Error, None);
+                    self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), kiln_common::i18n::tr("작업 공간 폴더를 찾을 수 없습니다."), ToastKind::Error, None);
                     return;
                 }
                 let prepared=match agent_launch::prepare(&program,&context,&request) {
                     Ok(prepared)=>prepared,
-                    Err(error)=>{self.toast("작업을 시작할 수 없습니다",error,ToastKind::Error,None);return;}
+                    Err(error)=>{self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"),error,ToastKind::Error,None);return;}
                 };
                 let pane=self.new_term_pane(Some(cwd.to_string_lossy().into_owned()));
                 let page_id=self.id();let mut page=Page::new(page_id,pane);page.title=Some(prepared.title);page.agent_request=Some(prepared.request_path);page.agent_request_offset=prepared.request_offset;
@@ -1181,19 +1201,19 @@ impl KilnApp {
             Action::RunLogin(tool) => self.apply(Action::RunInTerminal(kiln_accounts::login_command(tool).to_string()), ctx),
             Action::RotateAccount(session, tool) => self.rotator.start(session, tool),
             Action::OpenHistory => {
-                if self.ws().tools.has_multiple_repositories(){self.apply(Action::OpenSheet(tools::ToolKind::Git),ctx);self.toast("저장소별 로그", "각 저장소의 로그 버튼으로 변경 이력을 확인하세요.", ToastKind::Info,None);return;}
+                if self.ws().tools.has_multiple_repositories(){self.apply(Action::OpenSheet(tools::ToolKind::Git),ctx);self.toast(kiln_common::i18n::tr("저장소별 로그"), kiln_common::i18n::tr("각 저장소의 로그 버튼으로 변경 이력을 확인하세요."), ToastKind::Info,None);return;}
                 let root = self.ws().root.clone();
                 self.apply(Action::OpenTab(tools::history_factory(root)), ctx);
             }
             Action::CloneRepo(name) => {
-                let Some(parent) = rfd::FileDialog::new().set_title(format!("저장소 복제 위치 선택: {name}")).pick_folder() else { return };
+                let Some(parent) = rfd::FileDialog::new().set_title(kiln_common::trf!("저장소 복제 위치 선택: {name}")).pick_folder() else { return };
                 let dir = name.rsplit('/').next().unwrap_or(&name).to_string();
                 let target = parent.join(&dir);
                 if target.exists() {
-                    self.toast("이미 있는 폴더입니다", target.display().to_string(), ToastKind::Error, None);
+                    self.toast(kiln_common::i18n::tr("이미 있는 폴더입니다"), target.display().to_string(), ToastKind::Error, None);
                     return;
                 }
-                self.toast(format!("{name} 복제 중"), target.display().to_string(), ToastKind::Info, None);
+                self.toast(kiln_common::trf!("{name} 복제 중"), target.display().to_string(), ToastKind::Info, None);
                 let tx = self.clones.0.clone();
                 let ctx = ctx.clone();
                 std::thread::spawn(move || {
@@ -1277,7 +1297,7 @@ impl KilnApp {
 
     fn session_workspace_name(&self, session:SessionId)->String {
         self.workspaces.iter().find(|w|w.all_panes().iter().any(|pid|self.panes.get(pid).and_then(Pane::session)==Some(session)))
-            .map(|w|w.name.clone()).unwrap_or_else(||"연결되지 않은 세션".into())
+            .map(|w|w.name.clone()).unwrap_or_else(||kiln_common::i18n::tr("연결되지 않은 세션").into())
     }
 
     fn toast(&mut self, title: impl Into<String>, body: impl Into<String>, kind: ToastKind, session: Option<SessionId>) {
@@ -1301,25 +1321,25 @@ impl KilnApp {
             match e {
                 E::LimitReached { session, tool, reset_hint } => {
                     let body = match reset_hint {
-                        Some(h) => format!("{} 사용량 한도에 도달했습니다 · {h}", tool.display_name()),
-                        None => format!("{} 사용량 한도에 도달했습니다", tool.display_name()),
+                        Some(h) => kiln_common::trf!("{} 사용량 한도에 도달했습니다 · {h}", tool.display_name()),
+                        None => kiln_common::trf!("{} 사용량 한도에 도달했습니다", tool.display_name()),
                     };
-                    self.notifications.push("사용량 한도", &body, ToastKind::Notify, Some(session), self.session_workspace_name(session));
+                    self.notifications.push(kiln_common::i18n::tr("사용량 한도"), &body, ToastKind::Notify, Some(session), self.session_workspace_name(session));
                     if let Some(item) = self.notifications.items.last_mut() { item.rotate_tool = Some(tool); }
                     if self.settings.notification_toasts && !self.settings.do_not_disturb { self.toasts.push(Toast {
-                        title: "사용량 한도".into(),
+                        title: kiln_common::i18n::tr("사용량 한도").into(),
                         body,
                         at: Instant::now(),
                         kind: ToastKind::Notify,
                         session: Some(session),
-                        button: Some(("다음 계정으로 전환".into(), Action::RotateAccount(session, tool))),
+                        button: Some((kiln_common::i18n::tr("다음 계정으로 전환").into(), Action::RotateAccount(session, tool))),
                     }); }
                 }
                 E::Switched { session, tool, label } => {
-                    self.toast(format!("계정 전환: {label}"), format!("{} 대화를 이어서 실행합니다", tool.display_name()), ToastKind::Info, Some(session));
+                    self.toast(kiln_common::trf!("계정 전환: {label}"), kiln_common::trf!("{} 대화를 이어서 실행합니다", tool.display_name()), ToastKind::Info, Some(session));
                 }
-                E::NoAccount { tool } => self.toast("전환할 계정이 없습니다", format!("설정 → 계정에서 {} 계정을 더 등록하세요", tool.display_name()), ToastKind::Error, None),
-                E::Failed { tool, error } => self.toast(format!("{} 계정 전환 실패", tool.display_name()), error, ToastKind::Error, None),
+                E::NoAccount { tool } => self.toast(kiln_common::i18n::tr("전환할 계정이 없습니다"), kiln_common::trf!("설정 → 계정에서 {} 계정을 더 등록하세요", tool.display_name()), ToastKind::Error, None),
+                E::Failed { tool, error } => self.toast(kiln_common::trf!("{} 계정 전환 실패", tool.display_name()), error, ToastKind::Error, None),
             }
         }
     }
@@ -1331,13 +1351,13 @@ impl KilnApp {
             match e {
                 ConnEvent::Activity {session,activity} => {
                     if matches!(activity,kiln_proto::AgentActivity::Running|kiln_proto::AgentActivity::Unknown){continue;}
-                    let workspace=self.workspaces.iter().find(|w|w.all_panes().iter().any(|p|self.panes.get(p).and_then(Pane::session)==Some(session))).map(|w|w.name.clone()).unwrap_or_else(||"연결되지 않은 세션".into());
-                    let body=match activity {kiln_proto::AgentActivity::Waiting=>"입력을 기다리고 있습니다.",kiln_proto::AgentActivity::Failed=>"작업이 실패했습니다. 출력을 확인하세요.",_=>"작업이 완료되었습니다. 결과를 확인하세요."};
+                    let workspace=self.workspaces.iter().find(|w|w.all_panes().iter().any(|p|self.panes.get(p).and_then(Pane::session)==Some(session))).map(|w|w.name.clone()).unwrap_or_else(||kiln_common::i18n::tr("연결되지 않은 세션").into());
+                    let body=match activity {kiln_proto::AgentActivity::Waiting=>kiln_common::i18n::tr("입력을 기다리고 있습니다."),kiln_proto::AgentActivity::Failed=>kiln_common::i18n::tr("작업이 실패했습니다. 출력을 확인하세요."),_=>kiln_common::i18n::tr("작업이 완료되었습니다. 결과를 확인하세요.")};
                     self.notifications.push_activity(activity,session,workspace.clone(),body);
                     if self.session_is_observed(session,ctx) {
                         self.notifications.mark_session_read(session);self.conn.send(kiln_proto::ClientMsg::ClearAttention{session});
                     } else if !self.settings.do_not_disturb {
-                        let title=format!("{} · {}",workspace,activity.label());
+                        let title=format!("{} · {}",workspace,kiln_common::i18n::tr(activity.label()));
                         if self.settings.notification_toasts {self.toasts.push(Toast{title:title.clone(),body:body.into(),at:Instant::now(),kind:ToastKind::Notify,session:Some(session),button:None});}
                         if !self.window_focused {
                             ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
@@ -1370,7 +1390,7 @@ impl KilnApp {
                 ConnEvent::Notification { session, title, body } => {
                     let focused_here = self.session_is_observed(session,ctx);
                     if !focused_here {
-                        let who = self.conn.infos.get(&session).and_then(|i| i.fg_process.clone()).unwrap_or_else(|| "터미널".into());
+                        let who = self.conn.infos.get(&session).and_then(|i| i.fg_process.clone()).unwrap_or_else(|| kiln_common::i18n::tr("터미널").into());
                         let t = if title.is_empty() { who } else { title.clone() };
                         self.toast(t.clone(), body.clone(), ToastKind::Notify, Some(session));
                         if !self.window_focused && !self.settings.do_not_disturb {
@@ -1380,15 +1400,15 @@ impl KilnApp {
                             }
                         }
                     } else {
-                        self.notifications.push(if title.is_empty() { "터미널 알림" } else { &title }, &body, ToastKind::Notify, Some(session), self.workspaces[self.active].name.clone());
+                        self.notifications.push(if title.is_empty() { kiln_common::i18n::tr("터미널 알림") } else { &title }, &body, ToastKind::Notify, Some(session), self.workspaces[self.active].name.clone());
                         self.notifications.mark_session_read(session);
                         self.conn.send(kiln_proto::ClientMsg::ClearAttention { session });
                     }
                 }
                 ConnEvent::Exited { session, code } => {
                     let error = code.is_some_and(|code| code != 0);
-                    self.toast(if error { "터미널이 오류로 종료되었습니다" } else { "터미널 세션이 종료되었습니다" },
-                        code.map(|c| format!("종료 코드 {c} · 해당 패널에서 새 셸을 시작할 수 있습니다.")).unwrap_or_else(|| "해당 패널에서 새 셸을 시작할 수 있습니다.".into()),
+                    self.toast(if error { kiln_common::i18n::tr("터미널이 오류로 종료되었습니다") } else { kiln_common::i18n::tr("터미널 세션이 종료되었습니다") },
+                        code.map(|c| kiln_common::trf!("종료 코드 {c} · 해당 패널에서 새 셸을 시작할 수 있습니다.")).unwrap_or_else(|| kiln_common::i18n::tr("해당 패널에서 새 셸을 시작할 수 있습니다.").into()),
                         if error { ToastKind::Error } else { ToastKind::Info }, Some(session));
                 }
                 ConnEvent::Error { req, message } => {
@@ -1396,14 +1416,14 @@ impl KilnApp {
                     if let Some(pane) = self.pending_creates.remove(&req) {
                         if let Some(Pane { kind:PaneKind::Term { pending, .. }, .. }) = self.panes.get_mut(&pane) { *pending=None; }
                         self.retain_terminal_launch(pane,message);
-                    } else { self.toast("오류", message, ToastKind::Error, None); }
+                    } else { self.toast(kiln_common::i18n::tr("오류"), message, ToastKind::Error, None); }
                 }
                 ConnEvent::Connected => {
                     if self.restored {
-                        self.transient_info("데몬에 다시 연결됨", "");
+                        self.transient_info(kiln_common::i18n::tr("데몬에 다시 연결됨"), "");
                     }
                 }
-                ConnEvent::Upgrading => self.transient_info("데몬을 새 버전으로 교체하는 중", "실행 중인 세션은 그대로 유지됩니다"),
+                ConnEvent::Upgrading => self.transient_info(kiln_common::i18n::tr("데몬을 새 버전으로 교체하는 중"), kiln_common::i18n::tr("실행 중인 세션은 그대로 유지됩니다")),
                 ConnEvent::SessionText { session, text } => {
                     let mut out = Vec::new();
                     self.rotator.on_text(&self.conn, session, &text, &mut out);
@@ -1444,7 +1464,7 @@ impl KilnApp {
                 if let Some(Pane { kind: PaneKind::Term { pending, .. }, .. }) = self.panes.get_mut(&p) {
                     *pending = None;
                 }
-                self.retain_terminal_launch(p,"시작 중 연결이 끊겼습니다. 실행 여부를 확인한 뒤 다시 시작하세요.".into());
+                self.retain_terminal_launch(p,kiln_common::i18n::tr("시작 중 연결이 끊겼습니다. 실행 여부를 확인한 뒤 다시 시작하세요.").into());
             }
         }
         // Request IDs belong to one connection; a new client may reuse them.
@@ -1534,13 +1554,13 @@ impl KilnApp {
         for ws in self.workspaces.iter().enumerate().filter(|(i,_)| workspace.is_none_or(|wanted| *i==wanted)).map(|(_,ws)|ws) {
             for pane in ws.all_panes() {
                 if self.terminal_launch_drafts.get(&pane).is_some_and(|draft|draft.command.is_some()) || self.pending_input.contains_key(&pane) {
-                    items.push(format!("• {} — 실행 확인이 필요한 터미널 요청",ws.name));
+                    items.push(kiln_common::trf!("• {} — 실행 확인이 필요한 터미널 요청",ws.name));
                 }
             }
         }
-        if workspace.is_none() && self.projects.has_unsaved_edits() { items.push("• 프로젝트 — 편집 중인 작업 정보".into()); }
-        if workspace.is_none() && self.keymap.has_unsaved_edits() { items.push("• 설정 — 저장하지 않은 단축키".into()); }
-        if workspace.is_none() && self.launchers.has_unsaved_edits() { items.push("• 저장 명령 — 작성 중인 명령".into()); }
+        if workspace.is_none() && self.projects.has_unsaved_edits() { items.push(kiln_common::i18n::tr("• 프로젝트 — 편집 중인 작업 정보").into()); }
+        if workspace.is_none() && self.keymap.has_unsaved_edits() { items.push(kiln_common::i18n::tr("• 설정 — 저장하지 않은 단축키").into()); }
+        if workspace.is_none() && self.launchers.has_unsaved_edits() { items.push(kiln_common::i18n::tr("• 저장 명령 — 작성 중인 명령").into()); }
         items
     }
 
@@ -1554,7 +1574,7 @@ impl KilnApp {
         if self.projects.is_busy() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             #[cfg(target_os="macos")] macos::reply_to_termination(false);
-            self.toast("Worktree 생성 중", "진행 중인 Git 작업이 끝난 후 종료하세요.", ToastKind::Info, None);
+            self.toast(kiln_common::i18n::tr("Worktree 생성 중"), kiln_common::i18n::tr("진행 중인 Git 작업이 끝난 후 종료하세요."), ToastKind::Info, None);
             return;
         }
         let dirty = self.unsaved_items(None);
@@ -1581,12 +1601,12 @@ impl KilnApp {
             ctx.data_mut(|data| data.insert_temp(egui::Id::new("quit-return-focus"), previous));
         }
         self.confirm = Some(Confirm {
-            title: "저장하지 않은 변경이 있습니다".into(),
-            body: format!("{}\n실행 중인 터미널 작업은 계속됩니다.\n\n작성 중인 내용:\n{}",
+            title: kiln_common::i18n::tr("저장하지 않은 변경이 있습니다").into(),
+            body: kiln_common::trf!("{}\n실행 중인 터미널 작업은 계속됩니다.\n\n작성 중인 내용:\n{}",
                 if !self.launchers.has_unsaved_edits() && !self.projects.has_unsaved_edits() && !self.keymap.has_unsaved_edits() {
-                    "다음에 Kiln을 열면 작성 중인 내용을 이어서 편집할 수 있습니다. 파일과 데이터베이스에는 적용하지 않습니다."
-                } else { "계속 편집하려면 취소하세요. 변경 내용을 버리고 종료하면 아래 항목은 복구할 수 없습니다." }, dirty.join("\n")),
-            ok: "변경 버리고 종료".into(),
+                    kiln_common::i18n::tr("다음에 Kiln을 열면 작성 중인 내용을 이어서 편집할 수 있습니다. 파일과 데이터베이스에는 적용하지 않습니다.")
+                } else { kiln_common::i18n::tr("계속 편집하려면 취소하세요. 변경 내용을 버리고 종료하면 아래 항목은 복구할 수 없습니다.") }, dirty.join("\n")),
+            ok: kiln_common::i18n::tr("변경 버리고 종료").into(),
             action: Action::QuitConfirmed,
         });
     }
@@ -1779,6 +1799,18 @@ pub(crate) fn short_path(p: &Path) -> String {
 
 impl eframe::App for KilnApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os="macos")]
+        {
+            let menu_request = macos::take_settings_request();
+            let helper_request = crate::native_actions::take_settings_request();
+            if menu_request || helper_request {
+                self.settings_ui.open = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
         self.guard_window_close(ctx);
         // Window controls stay available while a settings or project modal is open.
         let fullscreen_shortcut=if cfg!(target_os="macos") {
@@ -1804,7 +1836,7 @@ impl eframe::App for KilnApp {
         while let Ok(r) = self.clones.1.try_recv() {
             match r {
                 Ok(p) => self.add_workspace(p, ctx),
-                Err(e) => self.toast("저장소 복제 실패", e, ToastKind::Error, None),
+                Err(e) => self.toast(kiln_common::i18n::tr("저장소 복제 실패"), e, ToastKind::Error, None),
             }
         }
         self.rotator.poll(&mut self.conn);

@@ -28,11 +28,11 @@ pub enum Group {
 impl Group {
     fn label(&self) -> &'static str {
         match self {
-            Group::Sessions => "열린 작업 · 최근 사용순",
-            Group::Commands => "명령",
-            Group::Tools => "도구",
-            Group::Spaces => "작업 공간",
-            Group::Settings => "설정",
+            Group::Sessions => kiln_common::i18n::tr("열린 작업 · 최근 사용순"),
+            Group::Commands => kiln_common::i18n::tr("명령"),
+            Group::Tools => kiln_common::i18n::tr("도구"),
+            Group::Spaces => kiln_common::i18n::tr("작업 공간"),
+            Group::Settings => kiln_common::i18n::tr("설정"),
         }
     }
 }
@@ -125,7 +125,7 @@ impl Palette {
                     let (ir, _) = ui.allocate_exact_size(vec2(22.0, 38.0), Sense::hover());
                     icons::paint(ui.painter(), egui::Rect::from_center_size(ir.center(), vec2(17.0, 17.0)), Icon::Search, t.accent);
                     let te = ui.add(egui::TextEdit::singleline(&mut self.query)
-                        .hint_text(if self.recent_only { "열린 작업 검색 · 파일, 터미널, Git, DB…" } else { "작업, 명령, 도구 검색…" }).font(fonts::regular(16.0))
+                        .hint_text(if self.recent_only { kiln_common::i18n::tr("열린 작업 검색 · 파일, 터미널, Git, DB…") } else { kiln_common::i18n::tr("작업, 명령, 도구 검색…") }).font(fonts::regular(16.0))
                         .frame(egui::Frame::NONE).desired_width(width - 50.0));
                     if opened { te.request_focus(); self.just_opened = false; }
                     changed = te.changed();
@@ -133,10 +133,10 @@ impl Palette {
                 });
                 if self.recent_only {
                     ui.horizontal(|ui|{
-                        ui.label("작업 공간");
+                        ui.label(kiln_common::i18n::tr("작업 공간"));
                         let menu_width=(ui.available_width()-16.0).min(420.0);
-                        egui::ComboBox::from_id_salt("recent-project-filter").width(menu_width).truncate().selected_text(if self.project_filter.is_empty(){"전체"}else{&self.project_filter}).show_ui(ui,|ui|{
-                            if ui.selectable_value(&mut self.project_filter,String::new(),"전체").changed(){changed=true;}
+                        egui::ComboBox::from_id_salt("recent-project-filter").width(menu_width).truncate().selected_text(if self.project_filter.is_empty(){kiln_common::i18n::tr("전체")}else{&self.project_filter}).show_ui(ui,|ui|{
+                            if ui.selectable_value(&mut self.project_filter,String::new(),kiln_common::i18n::tr("전체")).changed(){changed=true;}
                             ui.set_min_width(menu_width); ui.set_max_width(menu_width);
                             for project in &projects {
                                 let response=ui.add_sized([menu_width,28.0],egui::Button::selectable(self.project_filter==*project,project).truncate()).on_hover_text(project);
@@ -200,9 +200,9 @@ impl Palette {
                     if n == 0 {
                         ui.add_space(28.0);
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new("검색 결과가 없습니다").font(fonts::semibold(14.0)));
-                            ui.label(RichText::new(if self.recent_only {"다른 검색어를 입력하거나 작업 공간 필터를 전체로 바꾸세요."} else {"다른 검색어를 입력하거나 검색어를 지워 전체 명령을 확인하세요."}).color(t.text_dim));
-                            if (!self.query.is_empty() || !self.project_filter.is_empty()) && ui.button("검색 초기화").clicked(){self.query.clear();self.project_filter.clear();self.selected=0;}
+                            ui.label(RichText::new(kiln_common::i18n::tr("검색 결과가 없습니다")).font(fonts::semibold(14.0)));
+                            ui.label(RichText::new(if self.recent_only {kiln_common::i18n::tr("다른 검색어를 입력하거나 작업 공간 필터를 전체로 바꾸세요.")} else {kiln_common::i18n::tr("다른 검색어를 입력하거나 검색어를 지워 전체 명령을 확인하세요.")}).color(t.text_dim));
+                            if (!self.query.is_empty() || !self.project_filter.is_empty()) && ui.button(kiln_common::i18n::tr("검색 초기화")).clicked(){self.query.clear();self.project_filter.clear();self.selected=0;}
                         });
                         ui.add_space(28.0);
                     }
@@ -211,9 +211,9 @@ impl Palette {
                 widgets::divider(ui);
                 ui.horizontal(|ui| {
                     ui.set_height(28.0);
-                    ui.label(RichText::new(if self.recent_only {"↑ ↓ 선택     ↩ 이동     Esc 닫기"}else{"↑ ↓ 선택     ↩ 실행     Esc 닫기"}).size(11.5).color(t.text_dim));
+                    ui.label(RichText::new(if self.recent_only {kiln_common::i18n::tr("↑ ↓ 선택     ↩ 이동     Esc 닫기")}else{kiln_common::i18n::tr("↑ ↓ 선택     ↩ 실행     Esc 닫기")}).size(11.5).color(t.text_dim));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{}개 결과", scored.len())).size(11.5).color(t.text_dim));
+                        ui.label(RichText::new(kiln_common::trf!("{}개 결과", scored.len())).size(11.5).color(t.text_dim));
                     });
                 });
             });

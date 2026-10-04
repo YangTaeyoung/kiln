@@ -828,7 +828,7 @@ fn finish(root: &Path, old_head: String, ok: bool, output: String) -> GitResult<
 
 fn ensure_idle(root: &Path) -> GitResult<()> {
     match in_progress_op(root) {
-        Some(op) => Err(GitError::Failed(format!("{} 작업이 진행 중입니다. 먼저 계속하거나 중단하세요.", op.label()))),
+        Some(op) => Err(GitError::Failed(kiln_common::trf!("{} 작업이 진행 중입니다. 먼저 계속하거나 중단하세요.", op.label()))),
         None => Ok(()),
     }
 }
@@ -865,12 +865,12 @@ impl RebaseAction {
     /// 화면 표시 이름.
     pub fn label(self) -> &'static str {
         match self {
-            RebaseAction::Pick => "유지",
-            RebaseAction::Reword => "메시지 수정",
-            RebaseAction::Squash => "스쿼시",
-            RebaseAction::Fixup => "픽스업",
-            RebaseAction::Drop => "삭제",
-            RebaseAction::Edit => "멈추고 편집",
+            RebaseAction::Pick => kiln_common::i18n::tr("유지"),
+            RebaseAction::Reword => kiln_common::i18n::tr("메시지 수정"),
+            RebaseAction::Squash => kiln_common::i18n::tr("스쿼시"),
+            RebaseAction::Fixup => kiln_common::i18n::tr("픽스업"),
+            RebaseAction::Drop => kiln_common::i18n::tr("삭제"),
+            RebaseAction::Edit => kiln_common::i18n::tr("멈추고 편집"),
         }
     }
 
@@ -905,7 +905,7 @@ impl RebasePlan {
         self.steps
             .iter()
             .position(|s| s.sha == sha || s.sha.starts_with(sha))
-            .ok_or_else(|| GitError::Failed(format!("{}은(는) 현재 브랜치의 재작성 구간에 없습니다", short(sha))))
+            .ok_or_else(|| GitError::Failed(kiln_common::trf!("{}은(는) 현재 브랜치의 재작성 구간에 없습니다", short(sha))))
     }
 
     /// 결과 이력 미리보기: (대표 커밋 인덱스, 합쳐지는 커밋 인덱스들, 최종 제목). 오래된 순.
@@ -935,11 +935,11 @@ impl RebasePlan {
     pub fn validate(&self) -> Result<(), String> {
         let first_kept = self.steps.iter().find(|s| s.action != RebaseAction::Drop);
         if first_kept.is_some_and(|s| s.action.melds()) {
-            return Err("첫 커밋은 스쿼시·픽스업할 수 없습니다. 합칠 앞 커밋이 없습니다.".into());
+            return Err(kiln_common::i18n::tr("첫 커밋은 스쿼시·픽스업할 수 없습니다. 합칠 앞 커밋이 없습니다.").into());
         }
         for s in &self.steps {
             if matches!(s.action, RebaseAction::Reword | RebaseAction::Squash) && s.message.trim().is_empty() {
-                return Err(format!("{}의 커밋 메시지가 비어 있습니다", short(&s.sha)));
+                return Err(kiln_common::trf!("{}의 커밋 메시지가 비어 있습니다", short(&s.sha)));
             }
         }
         Ok(())
@@ -959,12 +959,12 @@ fn short(sha: &str) -> &str {
 pub fn rebase_plan(root: &Path, oldest: &str) -> GitResult<RebasePlan> {
     let oldest = resolve(root, oldest)?;
     if git(root, Mode::Read, &["merge-base", "--is-ancestor", &oldest, "HEAD"]).is_err() {
-        return Err(GitError::Failed(format!("{}은(는) 현재 브랜치에 없는 커밋입니다", short(&oldest))));
+        return Err(GitError::Failed(kiln_common::trf!("{}은(는) 현재 브랜치에 없는 커밋입니다", short(&oldest))));
     }
     let parents: Vec<String> =
         git(root, Mode::Read, &["rev-list", "--parents", "-n1", &oldest])?.split_whitespace().skip(1).map(str::to_string).collect();
     if parents.len() > 1 {
-        return Err(GitError::Failed("병합 커밋은 다시 쓸 수 없습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("병합 커밋은 다시 쓸 수 없습니다").into()));
     }
     let base = parents.into_iter().next();
     let range = match &base {
@@ -980,7 +980,7 @@ pub fn rebase_plan(root: &Path, oldest: &str) -> GitResult<RebasePlan> {
             continue;
         }
         if c[1].split_whitespace().count() > 1 {
-            return Err(GitError::Failed(format!(
+            return Err(GitError::Failed(kiln_common::trf!(
                 "{}부터 HEAD 사이에 병합 커밋({})이 있어 이력을 다시 쓸 수 없습니다",
                 short(&oldest),
                 short(&sha)
@@ -997,7 +997,7 @@ pub fn rebase_plan(root: &Path, oldest: &str) -> GitResult<RebasePlan> {
         });
     }
     if steps.first().is_none_or(|s| s.sha != oldest) {
-        return Err(GitError::Failed(format!("{}부터의 구간을 계산하지 못했습니다", short(&oldest))));
+        return Err(GitError::Failed(kiln_common::trf!("{}부터의 구간을 계산하지 못했습니다", short(&oldest))));
     }
     Ok(RebasePlan { base, steps })
 }
@@ -1110,10 +1110,10 @@ pub fn squash_commits(root: &Path, shas: &[String], message: &str, autostash: bo
     idx.sort_unstable();
     idx.dedup();
     if idx.len() < 2 {
-        return Err(GitError::Failed("합칠 커밋을 두 개 이상 선택하세요".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("합칠 커밋을 두 개 이상 선택하세요").into()));
     }
     if idx.windows(2).any(|w| w[1] != w[0] + 1) {
-        return Err(GitError::Failed("연속된 커밋만 하나로 합칠 수 있습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("연속된 커밋만 하나로 합칠 수 있습니다").into()));
     }
     plan.steps[idx[0]].action = RebaseAction::Reword;
     plan.steps[idx[0]].message = message.to_string();
@@ -1136,7 +1136,7 @@ pub fn drop_commits(root: &Path, shas: &[String], autostash: bool) -> GitResult<
 /// 커밋 메시지를 바꾼다. HEAD 면 `commit --amend --only`, 아니면 리베이스.
 pub fn reword_commit(root: &Path, sha: &str, message: &str, autostash: bool) -> GitResult<Rewrite> {
     if message.trim().is_empty() {
-        return Err(GitError::Failed("커밋 메시지가 비어 있습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("커밋 메시지가 비어 있습니다").into()));
     }
     ensure_idle(root)?;
     let full = resolve(root, sha)?;
@@ -1168,7 +1168,7 @@ pub enum DropPlace {
 
 fn plan_for(root: &Path, shas: &[String]) -> GitResult<RebasePlan> {
     if shas.is_empty() {
-        return Err(GitError::Failed("선택한 커밋이 없습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("선택한 커밋이 없습니다").into()));
     }
     ensure_idle(root)?;
     // 가장 오래된 커밋은 HEAD 에서 가장 먼 커밋이다.
@@ -1191,7 +1191,7 @@ fn reorder(plan: &mut RebasePlan, moving: &[String], target: &str, place: DropPl
     idx.dedup();
     let target_sha = plan.steps[plan.position(target)?].sha.clone();
     if idx.iter().any(|&i| plan.steps[i].sha == target_sha) {
-        return Err(GitError::Failed("선택한 커밋 위로는 옮길 수 없습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("선택한 커밋 위로는 옮길 수 없습니다").into()));
     }
     let mut moved: Vec<RebaseStep> = Vec::new();
     for &i in idx.iter().rev() {
@@ -1221,7 +1221,7 @@ pub fn move_commits(root: &Path, moving: &[String], target: &str, place: DropPla
     let before: Vec<String> = plan.steps.iter().map(|s| s.sha.clone()).collect();
     reorder(&mut plan, moving, target, place, false)?;
     if plan.steps.iter().map(|s| &s.sha).eq(before.iter()) {
-        return Err(GitError::Failed("순서가 바뀌지 않습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("순서가 바뀌지 않습니다").into()));
     }
     run_rebase(root, &plan, autostash)
 }
@@ -1331,10 +1331,10 @@ pub fn checkout(root: &Path, rev: &str) -> GitResult<String> {
 pub fn create_branch_at(root: &Path, name: &str, sha: &str, switch: bool) -> GitResult<String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(GitError::Failed("브랜치 이름이 비어 있습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("브랜치 이름이 비어 있습니다").into()));
     }
     git(root, Mode::Read, &["check-ref-format", "--branch", name])
-        .map_err(|_| GitError::Failed(format!("'{name}'은(는) 올바른 브랜치 이름이 아닙니다")))?;
+        .map_err(|_| GitError::Failed(kiln_common::trf!("'{name}'은(는) 올바른 브랜치 이름이 아닙니다")))?;
     if switch {
         git_combined(root, &["switch", "-c", name, sha])
     } else {
@@ -1346,10 +1346,10 @@ pub fn create_branch_at(root: &Path, name: &str, sha: &str, switch: bool) -> Git
 pub fn create_tag(root: &Path, name: &str, sha: &str, message: &str) -> GitResult<String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(GitError::Failed("태그 이름이 비어 있습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("태그 이름이 비어 있습니다").into()));
     }
     git(root, Mode::Read, &["check-ref-format", &format!("refs/tags/{name}")])
-        .map_err(|_| GitError::Failed(format!("'{name}'은(는) 올바른 태그 이름이 아닙니다")))?;
+        .map_err(|_| GitError::Failed(kiln_common::trf!("'{name}'은(는) 올바른 태그 이름이 아닙니다")))?;
     if message.trim().is_empty() {
         git_combined(root, &["tag", name, sha])
     } else {
@@ -1360,12 +1360,12 @@ pub fn create_tag(root: &Path, name: &str, sha: &str, message: &str) -> GitResul
 /// 진행 중인 작업을 계속한다(메시지 편집기 없이).
 pub fn continue_op(root: &Path) -> GitResult<Rewrite> {
     let Some(op) = in_progress_op(root) else {
-        return Err(GitError::Failed("진행 중인 작업이 없습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("진행 중인 작업이 없습니다").into()));
     };
     let old_head = head_sha(root).unwrap_or_default();
     let conflicts = conflicted_files(root)?;
     if !conflicts.is_empty() {
-        return Err(GitError::Failed(format!("충돌이 해결되지 않은 파일이 {}개 있습니다: {}", conflicts.len(), conflicts.join(", "))));
+        return Err(GitError::Failed(kiln_common::trf!("충돌이 해결되지 않은 파일이 {}개 있습니다: {}", conflicts.len(), conflicts.join(", "))));
     }
     let args: &[&str] = match op {
         RepoOp::Rebase => &["rebase", "--continue"],
@@ -1380,14 +1380,14 @@ pub fn continue_op(root: &Path) -> GitResult<Rewrite> {
 /// 현재 커밋을 건너뛰고 계속한다.
 pub fn skip_op(root: &Path) -> GitResult<Rewrite> {
     let Some(op) = in_progress_op(root) else {
-        return Err(GitError::Failed("진행 중인 작업이 없습니다".into()));
+        return Err(GitError::Failed(kiln_common::i18n::tr("진행 중인 작업이 없습니다").into()));
     };
     let old_head = head_sha(root).unwrap_or_default();
     let args: &[&str] = match op {
         RepoOp::Rebase => &["rebase", "--skip"],
         RepoOp::CherryPick => &["cherry-pick", "--skip"],
         RepoOp::Revert => &["revert", "--skip"],
-        RepoOp::Merge => return Err(GitError::Failed("병합은 건너뛸 수 없습니다".into())),
+        RepoOp::Merge => return Err(GitError::Failed(kiln_common::i18n::tr("병합은 건너뛸 수 없습니다").into())),
     };
     let (ok, out) = run_noninteractive(root, args, &[])?;
     finish(root, old_head, ok, out)

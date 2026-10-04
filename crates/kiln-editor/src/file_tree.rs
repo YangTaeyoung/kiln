@@ -387,7 +387,7 @@ impl FileTree {
             }
             Err(e) => {
                 self.dirs.insert(dir.to_path_buf(), Vec::new());
-                self.set_error(format!("읽을 수 없습니다: {} · {e}", dir.display()));
+                self.set_error(kiln_common::trf!("읽을 수 없습니다: {} · {e}", dir.display()));
             }
         }
         self.rows_dirty = true;
@@ -664,12 +664,12 @@ impl FileTree {
         let mut actions = Vec::new();
         let mut events = Vec::new();
         let target = self.selected_dir();
-        menu_item(ui, "새 파일…", || actions.push(Action::NewEntry(target.clone(), false)));
-        menu_item(ui, "새 폴더…", || actions.push(Action::NewEntry(target.clone(), true)));
+        menu_item(ui, kiln_common::i18n::tr("새 파일…"), || actions.push(Action::NewEntry(target.clone(), false)));
+        menu_item(ui, kiln_common::i18n::tr("새 폴더…"), || actions.push(Action::NewEntry(target.clone(), true)));
         ui.separator();
-        menu_item(ui, "새로 고침", || actions.push(Action::Refresh));
-        menu_item(ui, "폴더 모두 접기", || actions.push(Action::CollapseAll));
-        let ignored_label = if self.show_ignored { "무시된 파일 숨기기" } else { "무시된 파일 표시" };
+        menu_item(ui, kiln_common::i18n::tr("새로 고침"), || actions.push(Action::Refresh));
+        menu_item(ui, kiln_common::i18n::tr("폴더 모두 접기"), || actions.push(Action::CollapseAll));
+        let ignored_label = if self.show_ignored { kiln_common::i18n::tr("무시된 파일 숨기기") } else { kiln_common::i18n::tr("무시된 파일 표시") };
         menu_item(ui, ignored_label, || actions.push(Action::ToggleIgnored));
         self.apply_actions(ui, actions, &mut events);
         events
@@ -695,11 +695,11 @@ impl FileTree {
         }
         let root = self.root.clone();
         bg.context_menu(|ui| {
-            menu_item(ui, "새 파일…", || actions.push(Action::NewEntry(root.clone(), false)));
-            menu_item(ui, "새 폴더…", || actions.push(Action::NewEntry(root.clone(), true)));
+            menu_item(ui, kiln_common::i18n::tr("새 파일…"), || actions.push(Action::NewEntry(root.clone(), false)));
+            menu_item(ui, kiln_common::i18n::tr("새 폴더…"), || actions.push(Action::NewEntry(root.clone(), true)));
             ui.separator();
-            menu_item(ui, "새로 고침", || actions.push(Action::Refresh));
-            menu_item(ui, "터미널에서 열기", || actions.push(Action::Terminal(root.clone())));
+            menu_item(ui, kiln_common::i18n::tr("새로 고침"), || actions.push(Action::Refresh));
+            menu_item(ui, kiln_common::i18n::tr("터미널에서 열기"), || actions.push(Action::Terminal(root.clone())));
         });
 
         if show_header { self.header_ui(ui, header, &mut actions); }
@@ -785,19 +785,19 @@ impl FileTree {
                 ui.set_invisible();
             }
             let target = self.selected_dir();
-            if ui_kit::icon_button(ui, Icon::NewFile, "새 파일…").clicked() {
+            if ui_kit::icon_button(ui, Icon::NewFile, kiln_common::i18n::tr("새 파일…")).clicked() {
                 actions.push(Action::NewEntry(target.clone(), false));
             }
-            if ui_kit::icon_button(ui, Icon::NewFolder, "새 폴더…").clicked() {
+            if ui_kit::icon_button(ui, Icon::NewFolder, kiln_common::i18n::tr("새 폴더…")).clicked() {
                 actions.push(Action::NewEntry(target, true));
             }
-            if ui_kit::icon_button(ui, Icon::Refresh, "탐색기 새로 고침").clicked() {
+            if ui_kit::icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("탐색기 새로 고침")).clicked() {
                 actions.push(Action::Refresh);
             }
-            if ui_kit::icon_button(ui, Icon::CollapseAll, "폴더 모두 접기").clicked() {
+            if ui_kit::icon_button(ui, Icon::CollapseAll, kiln_common::i18n::tr("폴더 모두 접기")).clicked() {
                 actions.push(Action::CollapseAll);
             }
-            let (icon, tip) = if self.show_ignored { (Icon::Eye, "무시된 파일 숨기기") } else { (Icon::EyeOff, "무시된 파일 표시") };
+            let (icon, tip) = if self.show_ignored { (Icon::Eye, kiln_common::i18n::tr("무시된 파일 숨기기")) } else { (Icon::EyeOff, kiln_common::i18n::tr("무시된 파일 표시")) };
             if ui_kit::icon_toggle(ui, icon, tip, self.show_ignored, true).clicked() {
                 actions.push(Action::ToggleIgnored);
             }
@@ -899,19 +899,19 @@ impl FileTree {
         resp.context_menu(|ui| {
             ui.set_min_width(190.0);
             if !e.is_dir {
-                menu_item(ui, "열기", || actions.push(Action::Click(e.path.clone(), false)));
+                menu_item(ui, kiln_common::i18n::tr("열기"), || actions.push(Action::Click(e.path.clone(), false)));
                 ui.separator();
             }
-            menu_item(ui, "새 파일…", || actions.push(Action::NewEntry(target_dir.clone(), false)));
-            menu_item(ui, "새 폴더…", || actions.push(Action::NewEntry(target_dir.clone(), true)));
+            menu_item(ui, kiln_common::i18n::tr("새 파일…"), || actions.push(Action::NewEntry(target_dir.clone(), false)));
+            menu_item(ui, kiln_common::i18n::tr("새 폴더…"), || actions.push(Action::NewEntry(target_dir.clone(), true)));
             ui.separator();
-            menu_item(ui, "경로 복사", || actions.push(Action::CopyPath(e.path.clone())));
-            menu_item(ui, "상대 경로 복사", || actions.push(Action::CopyRelative(e.path.clone())));
+            menu_item(ui, kiln_common::i18n::tr("경로 복사"), || actions.push(Action::CopyPath(e.path.clone())));
+            menu_item(ui, kiln_common::i18n::tr("상대 경로 복사"), || actions.push(Action::CopyRelative(e.path.clone())));
             ui.separator();
-            menu_item(ui, "터미널에서 열기", || actions.push(Action::Terminal(target_dir.clone())));
+            menu_item(ui, kiln_common::i18n::tr("터미널에서 열기"), || actions.push(Action::Terminal(target_dir.clone())));
             ui.separator();
-            menu_item(ui, "이름 바꾸기…", || actions.push(Action::Rename(e.path.clone())));
-            menu_item(ui, "삭제", || actions.push(Action::Delete(e.path.clone())));
+            menu_item(ui, kiln_common::i18n::tr("이름 바꾸기…"), || actions.push(Action::Rename(e.path.clone())));
+            menu_item(ui, kiln_common::i18n::tr("삭제"), || actions.push(Action::Delete(e.path.clone())));
         });
     }
 
@@ -1015,7 +1015,7 @@ impl FileTree {
                 }
                 ui.ctx().request_repaint();
             }
-            Err(e) => self.set_error(format!("만들 수 없습니다: {name} · {e}")),
+            Err(e) => self.set_error(kiln_common::trf!("만들 수 없습니다: {name} · {e}")),
         }
     }
 
@@ -1033,7 +1033,7 @@ impl FileTree {
         }
         let to = r.path.with_file_name(name);
         if to.exists() && !name.eq_ignore_ascii_case(&old_name) {
-            self.set_error(format!("같은 이름이 이미 있습니다: {name}"));
+            self.set_error(kiln_common::trf!("같은 이름이 이미 있습니다: {name}"));
             return;
         }
         match std::fs::rename(&r.path, &to) {
@@ -1047,7 +1047,7 @@ impl FileTree {
                 self.pending_rename = Some((r.path.clone(), to));
                 ui.ctx().request_repaint();
             }
-            Err(e) => self.set_error(format!("이름 바꾸기 실패: {e}")),
+            Err(e) => self.set_error(kiln_common::trf!("이름 바꾸기 실패: {e}")),
         }
     }
 
@@ -1063,23 +1063,23 @@ impl FileTree {
             .frame(ui_kit::modal_frame())
             .show(ui.ctx(), |ui| {
                 ui.set_width((ui.ctx().content_rect().width() - 72.0).clamp(200.0, 360.0));
-                let what = if is_dir { "폴더를" } else { "파일을" };
-                let verb = if self.use_trash { "휴지통으로 이동할까요" } else { "영구 삭제할까요" };
-                ui.add(egui::Label::new(egui::RichText::new(format!("다음 {what} {verb}?\n{name}")).font(kiln_common::fonts::semibold(15.0)).color(t.text)).wrap());
+                let what = if is_dir { kiln_common::i18n::tr("폴더를") } else { kiln_common::i18n::tr("파일을") };
+                let verb = if self.use_trash { kiln_common::i18n::tr("휴지통으로 이동할까요") } else { kiln_common::i18n::tr("영구 삭제할까요") };
+                ui.add(egui::Label::new(egui::RichText::new(kiln_common::trf!("다음 {what} {verb}?\n{name}")).font(kiln_common::fonts::semibold(15.0)).color(t.text)).wrap());
                 ui.add_space(6.0);
                 let sub = if self.use_trash {
-                    if is_dir { "폴더와 그 안의 내용은 휴지통에서 복원할 수 있습니다." } else { "휴지통에서 복원할 수 있습니다." }
+                    if is_dir { kiln_common::i18n::tr("폴더와 그 안의 내용은 휴지통에서 복원할 수 있습니다.") } else { kiln_common::i18n::tr("휴지통에서 복원할 수 있습니다.") }
                 } else {
-                    "이 작업은 되돌릴 수 없습니다."
+                    kiln_common::i18n::tr("이 작업은 되돌릴 수 없습니다.")
                 };
                 ui.label(egui::RichText::new(sub).size(13.0).color(t.text_dim));
                 ui.add_space(18.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if self.use_trash { "휴지통으로 이동" } else { "삭제" };
+                    let label = if self.use_trash { kiln_common::i18n::tr("휴지통으로 이동") } else { kiln_common::i18n::tr("삭제") };
                     if ui_kit::danger_button(ui, label).clicked() {
                         confirm = true;
                     }
-                    if ui_kit::flat_button(ui, "취소", false).clicked() {
+                    if ui_kit::flat_button(ui, kiln_common::i18n::tr("취소"), false).clicked() {
                         cancel = true;
                     }
                 });
@@ -1110,7 +1110,7 @@ impl FileTree {
                     }
                     events.push(EditorEvent::FileDeleted(path));
                 }
-                Err(e) => self.set_error(format!("삭제 실패: {e}")),
+                Err(e) => self.set_error(kiln_common::trf!("삭제 실패: {e}")),
             }
             ui.memory_mut(|m| m.request_focus(self.id));
         } else if cancel {
@@ -1287,13 +1287,13 @@ fn menu_item(ui: &mut Ui, label: &str, f: impl FnOnce()) {
 
 fn validate_name(name: &str) -> Result<(), String> {
     if name == "." || name == ".." {
-        return Err("잘못된 이름".into());
+        return Err(kiln_common::i18n::tr("잘못된 이름").into());
     }
     if name.contains('\\') || name.contains('\0') || (cfg!(windows) && name.contains(['<', '>', ':', '"', '|', '?', '*'])) {
-        return Err(format!("“{name}”에 사용할 수 없는 문자가 있습니다"));
+        return Err(kiln_common::trf!("“{name}”에 사용할 수 없는 문자가 있습니다"));
     }
     if name.starts_with('/') {
-        return Err("이름은 /로 시작할 수 없습니다".into());
+        return Err(kiln_common::i18n::tr("이름은 /로 시작할 수 없습니다").into());
     }
     Ok(())
 }

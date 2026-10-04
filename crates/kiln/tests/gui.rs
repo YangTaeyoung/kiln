@@ -909,6 +909,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
         .build_eframe(|cc| {
             let mut app = KilnApp::new(&cc.egui_ctx, Some(proj.clone()));
             app.debug_set_sidebar_width(320.);
+            app.debug_set_shell("/bin/sh".into());
             app
         });
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
@@ -926,6 +927,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
     assert!(pump_until(&mut h, 8, |h| h.query_by_label("API contract review · 입력 대기").is_some()));
     h.key_press_modifiers(primary(), egui::Key::D);
     assert!(pump_until(&mut h, 10, |h| h.state().debug_pane_count() == 2 && h.state().debug_focused_session().is_some_and(|session| session != first)));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
     let second = h.state().debug_focused_session().unwrap();
     report(second, "Frontend authentication", "running");
     assert!(pump_until(&mut h, 8, |h| h.query_by_label("Frontend authentication · 작업 중").is_some()));
@@ -933,6 +935,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
     h.run_steps(3);
     h.state_mut().debug_queue_action(Action::NewWorkspace(Some(other.clone())));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_active_workspace_root().canonicalize().ok() == other.canonicalize().ok() && h.state().debug_focused_session().is_some_and(|session| session != first && session != second)));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
     let third = h.state().debug_focused_session().unwrap();
     report(third, "API tests complete", "done");
     assert!(pump_until(&mut h, 8, |h| h.query_by_label("API tests complete · 완료").is_some()));
@@ -963,4 +966,144 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
     assert_eq!(sessions().len(), 4, "task navigation must reuse the selected PTY");
     h.run_steps(4);
     save_shot(&mut h, "app_workspace_task_sidebar_320");
+}
+
+#[test]
+fn closing_last_pane_keeps_workspace_and_replaces_terminal() {
+    check_closing_last_work_surface(false);
+}
+
+#[test]
+fn closing_last_page_keeps_workspace_and_replaces_terminal() {
+    check_closing_last_work_surface(true);
+}
+
+fn check_closing_last_work_surface(close_page: bool) {
+    use kiln::app::Action;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup(if close_page { "close-last-page" } else { "close-last-pane" });
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) { shutdown(&self.0); }
+    }
+    let _cleanup = Cleanup(base.clone());
+    let other = base.join("other-project");
+    std::fs::create_dir_all(&other).unwrap();
+    let mut h = Harness::builder().with_size([1280.0, 800.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    let original = h.state().debug_focused_session().unwrap();
+    h.state_mut().debug_queue_action(Action::NewWorkspace(Some(other.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some_and(|session| session != original)));
+    let retained = h.state().debug_focused_session().unwrap();
+    h.state_mut().debug_queue_action(Action::SelectWorkspace(0));
+    assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_session() == Some(original)));
+    let original_pane = h.state().debug_focused_pane_id().unwrap();
+    assert_eq!(h.state().debug_task_count(), 1);
+    assert_eq!(h.state().debug_pane_count(), 1);
+
+    // Removing the last page leaves a transient empty pages vector while NewPage
+    // determines its cwd. This action previously panicked before creating a PTY.
+    h.state_mut().debug_queue_action(if close_page { Action::ClosePage(0, true) } else { Action::ClosePane(original_pane, true) });
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some_and(|session| session != original && session != retained)));
+    let replacement = h.state().debug_focused_session().unwrap();
+    assert_eq!(h.state().debug_workspace_count(), 2);
+    assert_eq!(h.state().debug_active_workspace_root().canonicalize().unwrap(), proj.canonicalize().unwrap());
+    assert_eq!(h.state().debug_task_count(), 1);
+    assert_eq!(h.state().debug_pane_count(), 1);
+    assert_ne!(h.state().debug_focused_pane_id(), Some(original_pane));
+    let client = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None).unwrap();
+    let sessions = match client.request(|req| kiln_proto::ClientMsg::ListSessions { req }, Duration::from_secs(2)).unwrap() {
+        kiln_proto::ServerMsg::Sessions { sessions, .. } => sessions,
+        response => panic!("unexpected response: {response:?}"),
+    };
+    assert!(sessions.iter().any(|session| session.id == replacement && session.exited.is_none()));
+    assert!(sessions.iter().any(|session| session.id == retained && session.exited.is_none()));
+    assert!(sessions.iter().find(|session| session.id == original).is_none_or(|session| session.exited.is_some()));
+
+    h.state_mut().debug_queue_action(Action::SelectWorkspace(1));
+    assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_session() == Some(retained)));
+    client.send(kiln_proto::ClientMsg::Input { session: retained, data: b"printf 'other-workspace-%s\\n' alive\r".to_vec() });
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| text.contains("other-workspace-alive"))));
+    assert_eq!(h.state().debug_active_workspace_root().canonicalize().unwrap(), other.canonicalize().unwrap());
+}
+
+#[test]
+fn language_switch_updates_settings_and_preserves_terminal_content() {
+    use kiln_common::i18n::{self, Language};
+    use egui_kittest::kittest::{By, NodeT};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("languages");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) { shutdown(&self.0); i18n::set_language(Language::Korean); }
+    }
+    let _cleanup = Cleanup(base.clone());
+    let mut h = Harness::builder().with_size([1280.0, 800.0]).wgpu()
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
+    let session = h.state().debug_focused_session();
+    let marker = "사용자 원문 / 日本語 / 中文";
+    h.event(egui::Event::Text(format!("printf '%s\\n' '{marker}'")));
+    h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| text.contains(marker))), "terminal: {:?}", h.state().debug_focused_text());
+    for language in [Language::English, Language::Japanese, Language::ChineseSimplified, Language::Korean] {
+        h.state_mut().debug_open_settings(0);
+        h.run_steps(3);
+        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, i18n::tr("언어")).click();
+        h.run_steps(2);
+        h.get_by_label(language.native_name()).click();
+        h.run_steps(3);
+        assert_eq!(i18n::language(), language);
+        assert_eq!(i18n::load_language(), language, "language must survive relaunch");
+        for section in 0..6 {
+            h.state_mut().debug_open_settings(section);
+            h.run_steps(3);
+            assert!(h.query_by_label(i18n::tr("닫기 (Esc)")).is_some(), "settings close is accessible: {language:?}, {section}");
+            if language != Language::Korean {
+                let untranslated: Vec<_> = h.query_all(By::new().predicate(|node| {
+                    node.label().is_some_and(|label| {
+                        label.chars().any(|c| ('가'..='힣').contains(&c)) && !label.contains(marker) && label != "한국어"
+                    })
+                })).map(|node| node.accesskit_node().label().unwrap_or_default().to_owned()).collect();
+                assert!(untranslated.is_empty(), "untranslated app UI in {language:?}/{section}: {untranslated:?}");
+            }
+            if section == 0 {
+                let directory = PathBuf::from("/tmp/kiln-localization-review");
+                std::fs::create_dir_all(&directory).unwrap();
+                h.render().unwrap().save(directory.join(format!("settings-{}.png",language.code()))).unwrap();
+            }
+        }
+        h.key_press(egui::Key::Escape); h.run_steps(2);
+        assert_eq!(h.state().debug_focused_session(), session);
+        assert!(h.state().debug_focused_text().is_some_and(|text| text.contains(marker)), "user text must not be translated");
+        // Text content alone misses stale font-atlas UVs: compare every rendered
+        // galley against a fresh layout using the current font definitions.
+        for clipped in &h.output().shapes {
+            if let egui::Shape::Text(text) = &clipped.shape {
+                let fresh = h.ctx.fonts_mut(|fonts| fonts.layout_job((*text.galley.job).clone()));
+                let uv = |galley: &egui::Galley| galley.rows.iter()
+                    .flat_map(|row| row.visuals.mesh.vertices.iter().map(|vertex| vertex.uv)).collect::<Vec<_>>();
+                assert_eq!(uv(&text.galley), uv(&fresh), "stale font atlas after {language:?}: {:?}", text.galley.job.text);
+            }
+        }
+    }
+}
+
+#[cfg(target_os="macos")]
+#[test]
+fn menu_bar_settings_request_reveals_existing_gui() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("menu-settings");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);}}
+    let _cleanup = Cleanup(base);
+    let mut h = Harness::builder().with_size([1280.0,800.0])
+        .build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    h.run_steps(3);
+    kiln::native_actions::request_settings().unwrap();
+    h.run_steps(2);
+    assert!(h.query_by_label("닫기 (Esc)").is_some());
+    assert!(h.query_by_label("언어").is_some());
+    assert!(!kiln::native_actions::take_settings_request());
 }

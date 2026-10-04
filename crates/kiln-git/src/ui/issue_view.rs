@@ -100,7 +100,7 @@ impl IssueView {
     pub fn title(&self) -> String {
         match &self.detail {
             Some(d) => format!("#{} {}", d.number, d.title),
-            None => format!("이슈 #{}", self.number),
+            None => kiln_common::trf!("이슈 #{}", self.number),
         }
     }
 
@@ -158,10 +158,10 @@ impl IssueView {
             match r {
                 Ok(()) => {
                     let title = match kind {
-                        ActionKind::Comment => "댓글을 남겼습니다",
-                        ActionKind::Close => "이슈를 닫았습니다",
-                        ActionKind::Reopen => "이슈를 다시 열었습니다",
-                        ActionKind::Edit => "이슈를 수정했습니다",
+                        ActionKind::Comment => kiln_common::i18n::tr("댓글을 남겼습니다"),
+                        ActionKind::Close => kiln_common::i18n::tr("이슈를 닫았습니다"),
+                        ActionKind::Reopen => kiln_common::i18n::tr("이슈를 다시 열었습니다"),
+                        ActionKind::Edit => kiln_common::i18n::tr("이슈를 수정했습니다"),
                     };
                     if kind == ActionKind::Comment && self.submitted_body.take().as_deref() == Some(self.comment.as_str()) {
                         self.comment.clear();
@@ -169,7 +169,7 @@ impl IssueView {
                     self.action_msg = Some((BannerKind::Success, title.into(), None));
                     self.started = false;
                 }
-                Err(e) => self.action_msg = Some((BannerKind::Error, match kind { ActionKind::Comment => "댓글 전송 실패", ActionKind::Close => "이슈 닫기 실패", ActionKind::Reopen => "이슈 다시 열기 실패", ActionKind::Edit => "이슈 수정 실패" }.into(), Some(e.to_string()))),
+                Err(e) => self.action_msg = Some((BannerKind::Error, match kind { ActionKind::Comment => kiln_common::i18n::tr("댓글 전송 실패"), ActionKind::Close => kiln_common::i18n::tr("이슈 닫기 실패"), ActionKind::Reopen => kiln_common::i18n::tr("이슈 다시 열기 실패"), ActionKind::Edit => kiln_common::i18n::tr("이슈 수정 실패") }.into(), Some(e.to_string()))),
             }
         }
     }
@@ -191,7 +191,7 @@ impl IssueView {
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
             if let Some(e) = self.error.clone() {
                 egui::Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
-                    if gh_error_state(ui, &e, &format!("이슈 #{}", self.number), &mut events) == ErrorAction::Retry {
+                    if gh_error_state(ui, &e, &kiln_common::trf!("이슈 #{}", self.number), &mut events) == ErrorAction::Retry {
                         self.refresh();
                     }
                 });
@@ -202,7 +202,7 @@ impl IssueView {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     spinner(ui, 14.0);
-                    ui.label(dim(format!("이슈 #{} 불러오는 중…", self.number)));
+                    ui.label(dim(kiln_common::trf!("이슈 #{} 불러오는 중…", self.number)));
                 });
                 return;
             }
@@ -256,7 +256,7 @@ impl IssueView {
                 ui.add_space(4.0);
                 ui.label(RichText::new(&d.author.login).font(kiln_common::fonts::medium(13.0)).color(t.text));
                 let when = parse_iso8601(&d.created_at).map(|ts| relative_time(ts, now)).unwrap_or_default();
-                ui.label(dim(format!("님이 {when}에 열었습니다 · 댓글 {}개", d.comments.len())));
+                ui.label(dim(kiln_common::trf!("님이 {when}에 열었습니다 · 댓글 {}개", d.comments.len())));
                 if let Some(r) = &self.repo {
                     ui.label(faint(format!("· {}", r.full_name())));
                 }
@@ -264,10 +264,10 @@ impl IssueView {
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                if tool_button(ui, Some(Icon::External), "브라우저에서 열기").clicked() && !d.url.is_empty() {
+                if tool_button(ui, Some(Icon::External), kiln_common::i18n::tr("브라우저에서 열기")).clicked() && !d.url.is_empty() {
                     events.push(GitEvent::OpenUrl(d.url.clone()));
                 }
-                if icon_button(ui, Icon::Refresh, "새로 고침").clicked() {
+                if icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("새로 고침")).clicked() {
                     self.refresh();
                 }
                 if busy {
@@ -276,13 +276,13 @@ impl IssueView {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_enabled_ui(!busy, |ui| {
                         if state.is_open() {
-                            if tool_button(ui, Some(Icon::IssueClosed), "이슈 닫기").on_hover_text("완료로 닫기").clicked() {
+                            if tool_button(ui, Some(Icon::IssueClosed), kiln_common::i18n::tr("이슈 닫기")).on_hover_text(kiln_common::i18n::tr("완료로 닫기")).clicked() {
                                 self.run(ui.ctx(), ActionKind::Close, move |b, repo| b.close_issue(repo, d.number, CloseReason::Completed));
                             }
-                            if tool_button(ui, Some(Icon::Skip), "계획 없음으로 닫기").clicked() {
+                            if tool_button(ui, Some(Icon::Skip), kiln_common::i18n::tr("계획 없음으로 닫기")).clicked() {
                                 self.run(ui.ctx(), ActionKind::Close, move |b, repo| b.close_issue(repo, d.number, CloseReason::NotPlanned));
                             }
-                        } else if tool_button(ui, Some(Icon::Issue), "다시 열기").clicked() {
+                        } else if tool_button(ui, Some(Icon::Issue), kiln_common::i18n::tr("다시 열기")).clicked() {
                             self.run(ui.ctx(), ActionKind::Reopen, move |b, repo| b.reopen_issue(repo, d.number));
                         }
                     });
@@ -301,18 +301,18 @@ impl IssueView {
         let t = theme();
         let Some(d) = self.detail.clone() else { return };
         let now = self.now();
-        comment_card(ui, &d.author.login, parse_iso8601(&d.created_at).unwrap_or(0), now, "님이 이 이슈를 열었습니다", t.accent, |ui| {
+        comment_card(ui, &d.author.login, parse_iso8601(&d.created_at).unwrap_or(0), now, kiln_common::i18n::tr("님이 이 이슈를 열었습니다"), t.accent, |ui| {
             if self.body.is_empty() {
-                ui.label(faint("설명이 없습니다."));
+                ui.label(faint(kiln_common::i18n::tr("설명이 없습니다.")));
             } else {
                 self.body.show(ui);
             }
         });
         for (c, md) in d.comments.iter().zip(&self.comments) {
             ui.add_space(10.0);
-            comment_card(ui, &c.author.login, parse_iso8601(&c.created_at).unwrap_or(0), now, "님이 댓글을 남겼습니다", t.border, |ui| {
+            comment_card(ui, &c.author.login, parse_iso8601(&c.created_at).unwrap_or(0), now, kiln_common::i18n::tr("님이 댓글을 남겼습니다"), t.border, |ui| {
                 if md.is_empty() {
-                    ui.label(faint("내용이 없습니다."));
+                    ui.label(faint(kiln_common::i18n::tr("내용이 없습니다.")));
                 } else {
                     md.show(ui);
                 }
@@ -324,7 +324,7 @@ impl IssueView {
                 let (icon, c) = issue_state_style(d.issue_state());
                 icon_label(ui, icon, c, 14.0);
                 let when = parse_iso8601(&d.closed_at).map(|ts| relative_time(ts, now)).unwrap_or_default();
-                ui.label(dim(format!("{when}에 {}(으)로 닫혔습니다", d.issue_state().label())));
+                ui.label(dim(kiln_common::trf!("{when}에 {}(으)로 닫혔습니다", d.issue_state().label())));
             });
         }
         // 댓글 입력
@@ -338,7 +338,7 @@ impl IssueView {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     icon_label(ui, Icon::Comment, t.text_dim, 14.0);
-                    ui.label(RichText::new("댓글 작성").font(kiln_common::fonts::semibold(13.5)).color(t.text));
+                    ui.label(RichText::new(kiln_common::i18n::tr("댓글 작성")).font(kiln_common::fonts::semibold(13.5)).color(t.text));
                 });
                 ui.add_space(8.0);
                 let cid = Id::new(("kiln_issue_comment", self.number));
@@ -346,7 +346,7 @@ impl IssueView {
                 ui.add(
                     egui::TextEdit::multiline(&mut self.comment)
                         .id(cid)
-                        .hint_text("댓글 남기기 (Markdown 지원)")
+                        .hint_text(kiln_common::i18n::tr("댓글 남기기 (Markdown 지원)"))
                         .desired_rows(4)
                         .desired_width(f32::INFINITY)
                         .frame(kiln_common::widgets::input_frame(focused, false)),
@@ -357,7 +357,7 @@ impl IssueView {
                 let cmd_enter = focused && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let n = d.number;
-                    let r = ui.add_enabled_ui(!busy && has_body, |ui| primary_button(ui, "댓글", Some(80.0))).inner;
+                    let r = ui.add_enabled_ui(!busy && has_body, |ui| primary_button(ui, kiln_common::i18n::tr("댓글"), Some(80.0))).inner;
                     if (r.clicked() || (cmd_enter && has_body && !busy)) && has_body {
                         let body = self.comment.clone();
                         self.run(ui.ctx(), ActionKind::Comment, move |b, repo| b.comment_issue(repo, n, &body));
@@ -372,7 +372,7 @@ impl IssueView {
         let Some(d) = self.detail.clone() else { return };
         let busy = self.action.is_some();
         // 담당자
-        let r = ui.add_enabled_ui(!busy, |ui| sidebar_heading(ui, "담당자", true)).inner;
+        let r = ui.add_enabled_ui(!busy, |ui| sidebar_heading(ui, kiln_common::i18n::tr("담당자"), true)).inner;
         if let Some(r) = r {
             let pid = Id::new(("issue_assignees_pick", self.number));
             if r.clicked() {
@@ -389,7 +389,7 @@ impl IssueView {
                     pid,
                     r.rect.with_min_x(r.rect.right() - 280.0),
                     &mut dr.pick,
-                    "담당자 검색…",
+                    kiln_common::i18n::tr("담당자 검색…"),
                     &user_options(&self.meta.users),
                     &mut dr.after,
                     self.meta.users_loading(),
@@ -403,14 +403,14 @@ impl IssueView {
             None => d.assignees.iter().map(|u| u.login.clone()).collect(),
         };
         if shown.is_empty() {
-            ui.label(faint("아무도 없음"));
+            ui.label(faint(kiln_common::i18n::tr("아무도 없음")));
         }
         for a in &shown {
             person_row(ui, a);
         }
         sidebar_divider(ui);
         // 라벨
-        let r = ui.add_enabled_ui(!busy, |ui| sidebar_heading(ui, "라벨", true)).inner;
+        let r = ui.add_enabled_ui(!busy, |ui| sidebar_heading(ui, kiln_common::i18n::tr("라벨"), true)).inner;
         if let Some(r) = r {
             let pid = Id::new(("issue_labels_pick", self.number));
             if r.clicked() {
@@ -426,7 +426,7 @@ impl IssueView {
                     pid,
                     r.rect.with_min_x(r.rect.right() - 280.0),
                     &mut dr.pick,
-                    "라벨 검색…",
+                    kiln_common::i18n::tr("라벨 검색…"),
                     &label_options(&self.meta.labels),
                     &mut dr.after,
                     self.meta.labels_loading(),
@@ -440,7 +440,7 @@ impl IssueView {
             None => d.labels.iter().map(|l| (l.name.clone(), hex_color(&l.color))).collect(),
         };
         if shown.is_empty() {
-            ui.label(faint("없음"));
+            ui.label(faint(kiln_common::i18n::tr("없음")));
         } else {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(5.0, 5.0);
@@ -450,7 +450,7 @@ impl IssueView {
             });
         }
         sidebar_divider(ui);
-        ui.label(RichText::new("참여자").font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
+        ui.label(RichText::new(kiln_common::i18n::tr("참여자")).font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
         ui.add_space(4.0);
         let mut people: Vec<&str> = vec![d.author.login.as_str()];
         for c in &d.comments {

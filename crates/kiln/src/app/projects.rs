@@ -33,10 +33,10 @@ pub enum TaskStatus {
 impl TaskStatus {
     fn label(self) -> &'static str {
         match self {
-            Self::Planned => "예정",
-            Self::Active => "진행 중",
-            Self::Review => "검토 중",
-            Self::Done => "완료",
+            Self::Planned => kiln_common::i18n::tr("예정"),
+            Self::Active => kiln_common::i18n::tr("진행 중"),
+            Self::Review => kiln_common::i18n::tr("검토 중"),
+            Self::Done => kiln_common::i18n::tr("완료"),
         }
     }
 }
@@ -105,7 +105,7 @@ impl Draft {
         let path = path.canonicalize().unwrap_or(path);
         let name = self.name.trim();
         if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
-            return Err("프로젝트 이름을 1~100자로 입력하세요.".into());
+            return Err(kiln_common::i18n::tr("프로젝트 이름을 1~100자로 입력하세요.").into());
         }
         // Worktree creation only creates a folder/branch. Start mode is chosen
         // in the following open step, so hidden command fields cannot block it.
@@ -116,16 +116,16 @@ impl Draft {
                     || self.command.len() > 16384
                     || self.command.chars().any(char::is_control)
                 {
-                    return Err("에이전트 실행 명령을 한 줄로 입력하세요.".into());
+                    return Err(kiln_common::i18n::tr("에이전트 실행 명령을 한 줄로 입력하세요.").into());
                 }
                 Some(self.command.clone())
             }
         }};
         if !self.worktree && !path.is_dir() {
-            return Err("기존 프로젝트 폴더를 선택하세요.".into());
+            return Err(kiln_common::i18n::tr("기존 프로젝트 폴더를 선택하세요.").into());
         }
         if self.worktree && (self.branch.trim().is_empty() || self.base.trim().is_empty()) {
-            return Err("작업 브랜치와 시작 지점을 입력하세요.".into());
+            return Err(kiln_common::i18n::tr("작업 브랜치와 시작 지점을 입력하세요.").into());
         }
         Ok((path, name.into(), command))
     }
@@ -221,7 +221,7 @@ impl Projects {
             Err(e) => {
                 self.load_failed = true;
                 self.failed_source = std::fs::metadata(&self.path).ok().filter(|m|m.len()<=4*1024*1024).and_then(|_|std::fs::read(&self.path).ok());
-                self.error = Some(format!(
+                self.error = Some(kiln_common::trf!(
                     "프로젝트 기록을 읽지 못했습니다. 원본 파일은 유지됩니다. {e}"
                 ));
             }
@@ -229,23 +229,23 @@ impl Projects {
     }
     fn recover_records(&mut self) -> Result<PathBuf,String> {
         use std::io::Write;
-        if !self.load_failed{return Err("프로젝트 기록을 정상적으로 읽었습니다. 복구할 필요가 없습니다.".into());}
-        let original=self.failed_source.as_ref().ok_or("원본을 안전하게 읽지 못해 복구하지 않았습니다. 기록 저장 없이 폴더를 열 수 있습니다.")?;
-        if std::fs::read(&self.path).map_err(|e|e.to_string())? != *original {return Err("파일이 변경되었습니다. 새로 고침 후 복구하세요.".into());}
+        if !self.load_failed{return Err(kiln_common::i18n::tr("프로젝트 기록을 정상적으로 읽었습니다. 복구할 필요가 없습니다.").into());}
+        let original=self.failed_source.as_ref().ok_or(kiln_common::i18n::tr("원본을 안전하게 읽지 못해 복구하지 않았습니다. 기록 저장 없이 폴더를 열 수 있습니다."))?;
+        if std::fs::read(&self.path).map_err(|e|e.to_string())? != *original {return Err(kiln_common::i18n::tr("파일이 변경되었습니다. 새로 고침 후 복구하세요.").into());}
         let mut backup=None;
         for n in 1..=1000 {
             let path=self.path.with_extension(format!("json.backup-{n}"));
             match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(mut file)=>{file.write_all(original).and_then(|_|file.sync_all()).map_err(|e|format!("백업 실패: {e}"))?;backup=Some(path);break;}
+                Ok(mut file)=>{file.write_all(original).and_then(|_|file.sync_all()).map_err(|e|kiln_common::trf!("백업 실패: {e}"))?;backup=Some(path);break;}
                 Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>continue,
-                Err(e)=>return Err(format!("백업 실패: {e}")),
+                Err(e)=>return Err(kiln_common::trf!("백업 실패: {e}")),
             }
         }
-        let backup=backup.ok_or("백업 파일 이름을 확보하지 못했습니다.")?;
-        if std::fs::read(&self.path).map_err(|e|e.to_string())? != *original {return Err("백업 중 파일이 변경되었습니다. 원본을 유지했습니다.".into());}
-        kiln_common::store::save_json(&self.path,&Vec::<Task>::new()).map_err(|e|format!("복구 실패. 백업: {} · {e}",backup.display()))?;
+        let backup=backup.ok_or(kiln_common::i18n::tr("백업 파일 이름을 확보하지 못했습니다."))?;
+        if std::fs::read(&self.path).map_err(|e|e.to_string())? != *original {return Err(kiln_common::i18n::tr("백업 중 파일이 변경되었습니다. 원본을 유지했습니다.").into());}
+        kiln_common::store::save_json(&self.path,&Vec::<Task>::new()).map_err(|e|kiln_common::trf!("복구 실패. 백업: {} · {e}",backup.display()))?;
         self.reload();
-        if self.load_failed{return Err("복구한 기록을 다시 읽지 못했습니다.".into());}
+        if self.load_failed{return Err(kiln_common::i18n::tr("복구한 기록을 다시 읽지 못했습니다.").into());}
         Ok(backup)
     }
     pub fn open(&mut self, root: &Path) {
@@ -310,7 +310,7 @@ impl Projects {
         let result = self.pending.as_ref().and_then(|rx| match rx.try_recv() {
             Ok(r) => Some(r),
             Err(mpsc::TryRecvError::Disconnected) => Some(JobResult::Loaded(Err(
-                "작업 프로세스가 종료됐습니다. 다시 시도하세요.".into(),
+                kiln_common::i18n::tr("작업 프로세스가 종료됐습니다. 다시 시도하세요.").into(),
             ))),
             Err(_) => None,
         });
@@ -330,12 +330,12 @@ impl Projects {
                 JobResult::Created(Err(e)) => self.error = Some(e),
                 JobResult::Created(Ok((tree, task))) => {
                     if let Err(e) = self.save_task(task.clone()) {
-                        self.error = Some(format!(
+                        self.error = Some(kiln_common::trf!(
                             "Worktree는 생성됐지만 프로젝트 메모를 저장하지 못했습니다. {} — {e}",
                             tree.path.display()
                         ));
                     } else {
-                        self.notice = Some("Worktree를 만들었습니다. 프로젝트를 열어 터미널이나 에이전트를 시작하세요.".into());
+                        self.notice = Some(kiln_common::i18n::tr("Worktree를 만들었습니다. 프로젝트를 열어 터미널이나 에이전트를 시작하세요.").into());
                     }
                     self.screen = Screen::Detail {
                         task: task.clone(),
@@ -351,12 +351,12 @@ impl Projects {
     }
     fn save_task(&mut self, task: Task) -> Result<(), String> {
         if self.load_failed {
-            return Err("기록 파일을 다시 불러온 뒤 저장하세요.".into());
+            return Err(kiln_common::i18n::tr("기록 파일을 다시 불러온 뒤 저장하세요.").into());
         }
         let (_, bytes) = read_tasks(&self.path)?;
         if bytes != self.disk {
             return Err(
-                "다른 창에서 프로젝트 기록을 변경했습니다. 메모를 복사한 뒤 편집을 취소하고 새로 고침하세요.".into(),
+                kiln_common::i18n::tr("다른 창에서 프로젝트 기록을 변경했습니다. 메모를 복사한 뒤 편집을 취소하고 새로 고침하세요.").into(),
             );
         }
         validate_task(&task)?;
@@ -367,11 +367,11 @@ impl Projects {
             tasks.push(task);
         }
         if tasks.len() > 1000 {
-            return Err("프로젝트 기록은 최대 1,000개까지 저장할 수 있습니다.".into());
+            return Err(kiln_common::i18n::tr("프로젝트 기록은 최대 1,000개까지 저장할 수 있습니다.").into());
         }
         let bytes = serde_json::to_vec_pretty(&tasks).map_err(|e| e.to_string())?;
         if bytes.len() > 4 * 1024 * 1024 {
-            return Err("프로젝트 기록이 4MB 제한을 초과했습니다.".into());
+            return Err(kiln_common::i18n::tr("프로젝트 기록이 4MB 제한을 초과했습니다.").into());
         }
         kiln_common::store::save_json(&self.path, &tasks).map_err(|e| e.to_string())?;
         self.disk = Some(bytes);
@@ -423,17 +423,17 @@ impl Projects {
         let modal = egui::Modal::new(egui::Id::new("projects-manager")).frame(frame).backdrop_color(Color32::from_black_alpha(100)).show(ctx, |ui| {
             ui.set_width(width); ui.spacing_mut().scroll.floating = false;
             ui.horizontal(|ui| {
-                ui.label(RichText::new(match screen { Screen::List => "프로젝트 관리", Screen::Compose { .. } => "새 프로젝트", Screen::Detail { .. } => "프로젝트 관리", Screen::Discard(..) => "편집 취소" }).font(fonts::semibold(20.0)));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { if widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, "프로젝트 창 닫기").clicked() { intent = Intent::Close; } });
+                ui.label(RichText::new(match screen { Screen::List => kiln_common::i18n::tr("프로젝트 관리"), Screen::Compose { .. } => kiln_common::i18n::tr("새 프로젝트"), Screen::Detail { .. } => kiln_common::i18n::tr("프로젝트 관리"), Screen::Discard(..) => kiln_common::i18n::tr("편집 취소") }).font(fonts::semibold(20.0)));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { if widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, kiln_common::i18n::tr("프로젝트 창 닫기")).clicked() { intent = Intent::Close; } });
             });
             ui.add_space(10.0);
             egui::ScrollArea::vertical().id_salt("project-body").max_height(height).auto_shrink([false, true]).show(ui, |ui| {
                 ui.set_min_width(width - 12.0);
                 ui.add_enabled_ui(!self.creating, |ui| match &mut screen {
                     Screen::List => {
-                        ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("프로젝트 이름, 폴더, 메모 검색").desired_width(f32::INFINITY));
-                        ui.horizontal(|ui| { ui.selectable_value(&mut self.archived, false, "프로젝트"); ui.selectable_value(&mut self.archived, true, "보관함"); });
-                        if self.pending.is_some() { ui.horizontal(|ui| { ui.spinner(); ui.label("저장소 확인 중…"); }); }
+                        ui.add(egui::TextEdit::singleline(&mut self.query).hint_text(kiln_common::i18n::tr("프로젝트 이름, 폴더, 메모 검색")).desired_width(f32::INFINITY));
+                        ui.horizontal(|ui| { ui.selectable_value(&mut self.archived, false, kiln_common::i18n::tr("프로젝트")); ui.selectable_value(&mut self.archived, true, kiln_common::i18n::tr("보관함")); });
+                        if self.pending.is_some() { ui.horizontal(|ui| { ui.spinner(); ui.label(kiln_common::i18n::tr("저장소 확인 중…")); }); }
                         if let Some(notice) = &self.notice { ui.label(RichText::new(notice).color(t.text_dim)); }
                         let query = self.query.to_lowercase(); let mut count = 0;
                         for task in tasks.iter().filter(|task| task.archived == self.archived && format!("{} {} {}", task.name, task.path.display(), task.note).to_lowercase().contains(&query)) {
@@ -441,89 +441,89 @@ impl Projects {
                             let label = format!("{}  ·  {}\n{}", task.name, task.status.label(), task.path.display());
                             ui.horizontal(|ui| {
                                 if ui.add_sized([(ui.available_width() - 36.0).max(80.0), 56.0], egui::Button::new(label).wrap())
-                                    .on_hover_text(if task.archived { "프로젝트 관리" } else { "프로젝트 열기" }).clicked() {
+                                    .on_hover_text(if task.archived { kiln_common::i18n::tr("프로젝트 관리") } else { kiln_common::i18n::tr("프로젝트 열기") }).clicked() {
                                     intent = if task.archived { Intent::Detail(task.clone()) } else { Intent::OpenSaved(task.clone()) };
                                 }
-                                if widgets::icon_button(ui, kiln_common::icons::Icon::Pencil, 28.0, false, "프로젝트 편집").clicked() {
+                                if widgets::icon_button(ui, kiln_common::icons::Icon::Pencil, 28.0, false, kiln_common::i18n::tr("프로젝트 편집")).clicked() {
                                     intent = Intent::Detail(task.clone());
                                 }
                             });
                         }
-                        if count == 0 { ui.add_space(18.0); ui.label(if self.archived { "보관한 프로젝트가 없습니다." } else if !query.is_empty() { "검색과 일치하는 프로젝트가 없습니다." } else { "첫 프로젝트의 폴더를 선택하세요. 터미널과 AI 에이전트 중 시작 방식을 선택할 수 있습니다." }); ui.add_space(18.0); }
+                        if count == 0 { ui.add_space(18.0); ui.label(if self.archived { kiln_common::i18n::tr("보관한 프로젝트가 없습니다.") } else if !query.is_empty() { kiln_common::i18n::tr("검색과 일치하는 프로젝트가 없습니다.") } else { kiln_common::i18n::tr("첫 프로젝트의 폴더를 선택하세요. 터미널과 AI 에이전트 중 시작 방식을 선택할 수 있습니다.") }); ui.add_space(18.0); }
                     }
                     Screen::Compose { draft, .. } => {
-                        let label = ui.label("프로젝트 이름"); let name = ui.add(egui::TextEdit::singleline(&mut draft.name).hint_text("예: 결제 서비스").desired_width(f32::INFINITY)).labelled_by(label.id);
+                        let label = ui.label(kiln_common::i18n::tr("프로젝트 이름")); let name = ui.add(egui::TextEdit::singleline(&mut draft.name).hint_text(kiln_common::i18n::tr("예: 결제 서비스")).desired_width(f32::INFINITY)).labelled_by(label.id);
                         if self.focus_name { name.request_focus(); self.focus_name = false; }
                         ui.add_space(8.0);
-                        ui.horizontal_wrapped(|ui| { ui.selectable_value(&mut draft.worktree, false, "기존 폴더"); ui.add_enabled_ui(self.snapshot.is_some(), |ui| { if ui.selectable_value(&mut draft.worktree, true, "새 worktree").clicked() && draft.folder == self.root.to_string_lossy() { draft.folder = self.root.parent().unwrap_or(&self.root).join("new-task").to_string_lossy().into_owned(); } }); });
-                        field(ui, if draft.worktree { "새 worktree 폴더" } else { "프로젝트 폴더" }, &mut draft.folder);
-                        if !draft.worktree && widgets::button(ui, "폴더 선택…", ButtonKind::Secondary).clicked() { if let Some(path) = rfd::FileDialog::new().set_directory(&self.root).pick_folder() { draft.folder = path.to_string_lossy().into_owned(); } }
+                        ui.horizontal_wrapped(|ui| { ui.selectable_value(&mut draft.worktree, false, kiln_common::i18n::tr("기존 폴더")); ui.add_enabled_ui(self.snapshot.is_some(), |ui| { if ui.selectable_value(&mut draft.worktree, true, kiln_common::i18n::tr("새 worktree")).clicked() && draft.folder == self.root.to_string_lossy() { draft.folder = self.root.parent().unwrap_or(&self.root).join("new-task").to_string_lossy().into_owned(); } }); });
+                        field(ui, if draft.worktree { kiln_common::i18n::tr("새 worktree 폴더") } else { kiln_common::i18n::tr("프로젝트 폴더") }, &mut draft.folder);
+                        if !draft.worktree && widgets::button(ui, kiln_common::i18n::tr("폴더 선택…"), ButtonKind::Secondary).clicked() { if let Some(path) = rfd::FileDialog::new().set_directory(&self.root).pick_folder() { draft.folder = path.to_string_lossy().into_owned(); } }
                         if self.snapshot.is_none() && self.pending.is_none() {
-                            ui.label(RichText::new("Git 저장소가 아닌 폴더도 프로젝트로 열 수 있습니다.").small().color(t.text_dim));
-                            ui.collapsing("Worktree 사용 안내",|ui| {ui.label("Worktree는 Git 저장소에서 작업을 분리할 때 사용합니다. Git 프로젝트를 연 뒤 다시 시도하세요.");if let Some(error)=&self.repo_error {ui.label(error);}});
+                            ui.label(RichText::new(kiln_common::i18n::tr("Git 저장소가 아닌 폴더도 프로젝트로 열 수 있습니다.")).small().color(t.text_dim));
+                            ui.collapsing(kiln_common::i18n::tr("Worktree 사용 안내"),|ui| {ui.label(kiln_common::i18n::tr("Worktree는 Git 저장소에서 작업을 분리할 때 사용합니다. Git 프로젝트를 연 뒤 다시 시도하세요."));if let Some(error)=&self.repo_error {ui.label(error);}});
                         }
                         if draft.worktree {
-                            ui.label(RichText::new(format!("저장소: {}", self.root.display())).small().color(t.text_dim));
-                            ui.checkbox(&mut draft.existing, "기존 로컬 브랜치 사용");
-                            field(ui, "작업 브랜치", &mut draft.branch);
+                            ui.label(RichText::new(kiln_common::trf!("저장소: {}", self.root.display())).small().color(t.text_dim));
+                            ui.checkbox(&mut draft.existing, kiln_common::i18n::tr("기존 로컬 브랜치 사용"));
+                            field(ui, kiln_common::i18n::tr("작업 브랜치"), &mut draft.branch);
                             if !draft.existing {
-                                field(ui, "시작 브랜치 / 커밋", &mut draft.base);
-                                if let Some(snapshot) = &self.snapshot { egui::ComboBox::from_id_salt("task-base").selected_text("브랜치에서 선택…").show_ui(ui, |ui| { for r in &snapshot.refs { ui.selectable_value(&mut draft.base, r.clone(), r); } }); }
-                            } else if let Some(snapshot) = &self.snapshot { egui::ComboBox::from_id_salt("task-branch").selected_text("로컬 브랜치 선택…").show_ui(ui, |ui| { for r in &snapshot.local_refs { ui.selectable_value(&mut draft.branch, r.clone(), r); } }); }
-                            ui.label(RichText::new("기존 파일과 브랜치는 덮어쓰지 않습니다. 의존성 설치는 새 폴더에서 진행하세요.").small().color(t.text_dim));
+                                field(ui, kiln_common::i18n::tr("시작 브랜치 / 커밋"), &mut draft.base);
+                                if let Some(snapshot) = &self.snapshot { egui::ComboBox::from_id_salt("task-base").selected_text(kiln_common::i18n::tr("브랜치에서 선택…")).show_ui(ui, |ui| { for r in &snapshot.refs { ui.selectable_value(&mut draft.base, r.clone(), r); } }); }
+                            } else if let Some(snapshot) = &self.snapshot { egui::ComboBox::from_id_salt("task-branch").selected_text(kiln_common::i18n::tr("로컬 브랜치 선택…")).show_ui(ui, |ui| { for r in &snapshot.local_refs { ui.selectable_value(&mut draft.branch, r.clone(), r); } }); }
+                            ui.label(RichText::new(kiln_common::i18n::tr("기존 파일과 브랜치는 덮어쓰지 않습니다. 의존성 설치는 새 폴더에서 진행하세요.")).small().color(t.text_dim));
                         }
                         if !draft.worktree {
-                        ui.add_space(10.0); ui.label("시작 방식");
-                        ui.horizontal_wrapped(|ui| { ui.selectable_value(&mut draft.mode, StartMode::Terminal, "터미널"); ui.selectable_value(&mut draft.mode, StartMode::Agent, "AI 에이전트"); });
+                        ui.add_space(10.0); ui.label(kiln_common::i18n::tr("시작 방식"));
+                        ui.horizontal_wrapped(|ui| { ui.selectable_value(&mut draft.mode, StartMode::Terminal, kiln_common::i18n::tr("터미널")); ui.selectable_value(&mut draft.mode, StartMode::Agent, kiln_common::i18n::tr("AI 에이전트")); });
                         if draft.mode == StartMode::Agent {
                             ui.horizontal_wrapped(|ui| { for command in ["codex", "claude", "gemini"] { ui.selectable_value(&mut draft.command, command.into(), command); } });
-                            field(ui, "에이전트 실행 명령", &mut draft.command);
+                            field(ui, kiln_common::i18n::tr("에이전트 실행 명령"), &mut draft.command);
                             let binary=draft.command.split_whitespace().next().unwrap_or("");
                             if let Some((_,path))=self.agent_bins.iter().find(|(name,_)| name==binary) {
                                 if let Some(path)=path {
-                                    ui.label(RichText::new(format!("실행 파일 확인: {}",path.display())).small().color(t.text_dim));
-                                    if cfg!(unix) && ui.small_button("확인한 실행 경로 사용").clicked() {
+                                    ui.label(RichText::new(kiln_common::trf!("실행 파일 확인: {}",path.display())).small().color(t.text_dim));
+                                    if cfg!(unix) && ui.small_button(kiln_common::i18n::tr("확인한 실행 경로 사용")).clicked() {
                                         let args=draft.command.trim_start()[binary.len()..].to_string();
                                         draft.command=format!("'{}'{}",path.to_string_lossy().replace('\'',"'\\''"),args);
                                     }
-                                } else {ui.label(RichText::new("앱에서 실행 파일을 찾지 못했습니다. 셸 별칭이나 사용자 경로는 직접 확인하세요.").small().color(t.orange));}
+                                } else {ui.label(RichText::new(kiln_common::i18n::tr("앱에서 실행 파일을 찾지 못했습니다. 셸 별칭이나 사용자 경로는 직접 확인하세요.")).small().color(t.orange));}
                             }
-                            ui.label(RichText::new("실행 파일 확인은 로그인·실행 성공을 보장하지 않습니다.").small().color(t.text_dim));
-                            ui.collapsing("설치와 상태 연결 안내",|ui| {
-                                ui.horizontal_wrapped(|ui| {ui.hyperlink_to("Codex 설치","https://developers.openai.com/codex/cli/");ui.hyperlink_to("Claude Code 설치","https://code.claude.com/docs/en/setup");ui.hyperlink_to("Gemini CLI 설치","https://geminicli.com/docs/get-started/installation/");});
-                                ui.label("시작 후 터미널에서 로그인을 진행하세요. Kiln은 에이전트 훅을 자동 설정하지 않습니다.");
-                                ui.label("완료·입력 요청 상태를 연결하려면 터미널의 ‘연동’ 안내에서 테스트하세요. 신호를 연결하지 않은 에이전트는 상태 확인 안 됨으로 표시됩니다.");
+                            ui.label(RichText::new(kiln_common::i18n::tr("실행 파일 확인은 로그인·실행 성공을 보장하지 않습니다.")).small().color(t.text_dim));
+                            ui.collapsing(kiln_common::i18n::tr("설치와 상태 연결 안내"),|ui| {
+                                ui.horizontal_wrapped(|ui| {ui.hyperlink_to(kiln_common::i18n::tr("Codex 설치"),"https://developers.openai.com/codex/cli/");ui.hyperlink_to(kiln_common::i18n::tr("Claude Code 설치"),"https://code.claude.com/docs/en/setup");ui.hyperlink_to(kiln_common::i18n::tr("Gemini CLI 설치"),"https://geminicli.com/docs/get-started/installation/");});
+                                ui.label(kiln_common::i18n::tr("시작 후 터미널에서 로그인을 진행하세요. Kiln은 에이전트 훅을 자동 설정하지 않습니다."));
+                                ui.label(kiln_common::i18n::tr("완료·입력 요청 상태를 연결하려면 터미널의 ‘연동’ 안내에서 테스트하세요. 신호를 연결하지 않은 에이전트는 상태 확인 안 됨으로 표시됩니다."));
                             });
                         }
                         }
-                        ui.label(RichText::new(if draft.worktree { "먼저 worktree를 만듭니다. 완료 후 프로젝트 열기에서 실행 방식을 선택할 수 있습니다." } else { "선택한 폴더를 열고 터미널 또는 에이전트를 시작합니다." }).small().color(t.text_dim));
+                        ui.label(RichText::new(if draft.worktree { kiln_common::i18n::tr("먼저 worktree를 만듭니다. 완료 후 프로젝트 열기에서 실행 방식을 선택할 수 있습니다.") } else { kiln_common::i18n::tr("선택한 폴더를 열고 터미널 또는 에이전트를 시작합니다.") }).small().color(t.text_dim));
                     }
                     Screen::Detail { task, .. } => {
-                        field(ui, "프로젝트 이름", &mut task.name);
-                        ui.label(RichText::new("아래 상태와 메모는 이 프로젝트 폴더 전체에 적용됩니다.").small().color(t.text_dim));
+                        field(ui, kiln_common::i18n::tr("프로젝트 이름"), &mut task.name);
+                        ui.label(RichText::new(kiln_common::i18n::tr("아래 상태와 메모는 이 프로젝트 폴더 전체에 적용됩니다.")).small().color(t.text_dim));
                         ui.label(RichText::new(task.path.display().to_string()).small().color(t.text_dim));
-                        if !task.base.is_empty() { ui.label(RichText::new(format!("시작 지점: {}", task.base)).small().color(t.text_dim)); }
+                        if !task.base.is_empty() { ui.label(RichText::new(kiln_common::trf!("시작 지점: {}", task.base)).small().color(t.text_dim)); }
                         ui.horizontal_wrapped(|ui| { for status in [TaskStatus::Planned, TaskStatus::Active, TaskStatus::Review, TaskStatus::Done] { ui.selectable_value(&mut task.status, status, status.label()); } });
-                        let label = ui.label("프로젝트 메모"); ui.add(egui::TextEdit::multiline(&mut task.note).hint_text("다음 할 일, 재현 방법, 검토할 내용을 남기세요.").desired_rows(4).desired_width(f32::INFINITY)).labelled_by(label.id);
-                        ui.label(RichText::new("보관은 목록만 정리합니다. 파일, 브랜치와 실행 중인 세션은 유지됩니다.").small().color(t.text_dim));
+                        let label = ui.label(kiln_common::i18n::tr("프로젝트 메모")); ui.add(egui::TextEdit::multiline(&mut task.note).hint_text(kiln_common::i18n::tr("다음 할 일, 재현 방법, 검토할 내용을 남기세요.")).desired_rows(4).desired_width(f32::INFINITY)).labelled_by(label.id);
+                        ui.label(RichText::new(kiln_common::i18n::tr("보관은 목록만 정리합니다. 파일, 브랜치와 실행 중인 세션은 유지됩니다.")).small().color(t.text_dim));
                     }
-                    Screen::Discard(..) => { ui.label("저장하지 않은 프로젝트 이름과 메모를 버릴까요?"); ui.label("이미 생성된 폴더와 worktree는 유지됩니다."); }
+                    Screen::Discard(..) => { ui.label(kiln_common::i18n::tr("저장하지 않은 프로젝트 이름과 메모를 버릴까요?")); ui.label(kiln_common::i18n::tr("이미 생성된 폴더와 worktree는 유지됩니다.")); }
                 });
             });
-            if self.load_failed {ui.label(RichText::new("프로젝트 기록 저장을 중단했습니다. 원본은 유지되며 일반 폴더는 기록 없이 열 수 있습니다.").small().color(t.orange));}
+            if self.load_failed {ui.label(RichText::new(kiln_common::i18n::tr("프로젝트 기록 저장을 중단했습니다. 원본은 유지되며 일반 폴더는 기록 없이 열 수 있습니다.")).small().color(t.orange));}
             if let Some(error) = &self.error { ui.add_space(6.0); egui::ScrollArea::vertical().id_salt("project-error").max_height(44.0).show(ui, |ui| { ui.label(RichText::new(error).color(t.red)); }); }
             ui.add_space(10.0); ui.separator(); ui.add_space(8.0);
-            if self.creating { ui.horizontal(|ui| { ui.spinner(); ui.label("Worktree 생성 중… 잠시 기다려 주세요."); }); }
+            if self.creating { ui.horizontal(|ui| { ui.spinner(); ui.label(kiln_common::i18n::tr("Worktree 생성 중… 잠시 기다려 주세요.")); }); }
             else { ui.horizontal_wrapped(|ui| match &screen {
-                Screen::List => { if widgets::button(ui, "새 프로젝트", ButtonKind::Primary).clicked() { intent = Intent::Compose; } if widgets::button(ui, "새로 고침", ButtonKind::Secondary).clicked() { intent = Intent::Refresh; } if self.load_failed && widgets::button(ui,"원본 백업 후 빈 목록 복구",ButtonKind::Secondary).clicked(){intent=Intent::RecoverRecords;} }
-                Screen::Compose { draft, .. } => { if self.load_failed && !draft.worktree { if widgets::button(ui,"기록 저장 없이 열기",ButtonKind::Primary).clicked(){intent=Intent::OpenWithoutRecord;} } else if widgets::button(ui, if draft.worktree { "Worktree 만들기" } else { "프로젝트 열기" }, ButtonKind::Primary).clicked() { intent = Intent::Start; } if !self.load_failed && self.error.is_some() && !draft.worktree && widgets::button(ui,"기록 저장 없이 열기",ButtonKind::Secondary).clicked(){intent=Intent::OpenWithoutRecord;} if widgets::button(ui, "목록", ButtonKind::Secondary).clicked() { intent = Intent::List; } }
+                Screen::List => { if widgets::button(ui, kiln_common::i18n::tr("새 프로젝트"), ButtonKind::Primary).clicked() { intent = Intent::Compose; } if widgets::button(ui, kiln_common::i18n::tr("새로 고침"), ButtonKind::Secondary).clicked() { intent = Intent::Refresh; } if self.load_failed && widgets::button(ui,kiln_common::i18n::tr("원본 백업 후 빈 목록 복구"),ButtonKind::Secondary).clicked(){intent=Intent::RecoverRecords;} }
+                Screen::Compose { draft, .. } => { if self.load_failed && !draft.worktree { if widgets::button(ui,kiln_common::i18n::tr("기록 저장 없이 열기"),ButtonKind::Primary).clicked(){intent=Intent::OpenWithoutRecord;} } else if widgets::button(ui, if draft.worktree { kiln_common::i18n::tr("Worktree 만들기") } else { kiln_common::i18n::tr("프로젝트 열기") }, ButtonKind::Primary).clicked() { intent = Intent::Start; } if !self.load_failed && self.error.is_some() && !draft.worktree && widgets::button(ui,kiln_common::i18n::tr("기록 저장 없이 열기"),ButtonKind::Secondary).clicked(){intent=Intent::OpenWithoutRecord;} if widgets::button(ui, kiln_common::i18n::tr("목록"), ButtonKind::Secondary).clicked() { intent = Intent::List; } }
                 Screen::Detail { task, .. } => {
-                    if widgets::button(ui, "열기…", ButtonKind::Primary).clicked() { intent = Intent::Start; }
-                    if widgets::button(ui, "메모 저장", ButtonKind::Secondary).clicked() { intent = Intent::Save; }
-                    if widgets::button(ui, if task.archived { "복원" } else { "보관" }, ButtonKind::Secondary).clicked() { intent = if task.archived { Intent::Restore } else { Intent::Archive }; }
-                    if widgets::button(ui, "목록", ButtonKind::Ghost).clicked() { intent = Intent::List; }
+                    if widgets::button(ui, kiln_common::i18n::tr("열기…"), ButtonKind::Primary).clicked() { intent = Intent::Start; }
+                    if widgets::button(ui, kiln_common::i18n::tr("메모 저장"), ButtonKind::Secondary).clicked() { intent = Intent::Save; }
+                    if widgets::button(ui, if task.archived { kiln_common::i18n::tr("복원") } else { kiln_common::i18n::tr("보관") }, ButtonKind::Secondary).clicked() { intent = if task.archived { Intent::Restore } else { Intent::Archive }; }
+                    if widgets::button(ui, kiln_common::i18n::tr("목록"), ButtonKind::Ghost).clicked() { intent = Intent::List; }
                 }
-                Screen::Discard(..) => { if widgets::button(ui, "편집 계속", ButtonKind::Primary).clicked() { intent = Intent::Resume; } if widgets::button(ui, "변경 버리기", ButtonKind::Danger).clicked() { intent = Intent::Discard; } }
+                Screen::Discard(..) => { if widgets::button(ui, kiln_common::i18n::tr("편집 계속"), ButtonKind::Primary).clicked() { intent = Intent::Resume; } if widgets::button(ui, kiln_common::i18n::tr("변경 버리기"), ButtonKind::Danger).clicked() { intent = Intent::Discard; } }
             }); }
         });
         self.screen = screen;
@@ -543,12 +543,12 @@ impl Projects {
         match intent {
             Intent::None => (),
             Intent::RecoverRecords => match self.recover_records() {
-                Ok(backup)=>self.notice=Some(format!("빈 프로젝트 목록으로 복구했습니다. 원본 백업: {}",backup.display())),
+                Ok(backup)=>self.notice=Some(kiln_common::trf!("빈 프로젝트 목록으로 복구했습니다. 원본 백업: {}",backup.display())),
                 Err(error)=>self.error=Some(error),
             },
             Intent::OpenWithoutRecord => {
                 if let Screen::Compose{draft,..}=&self.screen {
-                    if draft.worktree {self.error=Some("기록 없이 열기는 기존 폴더에서만 사용할 수 있습니다.".into());return None;}
+                    if draft.worktree {self.error=Some(kiln_common::i18n::tr("기록 없이 열기는 기존 폴더에서만 사용할 수 있습니다.").into());return None;}
                     match draft.validate() {
                         Ok((path,name,command))=>{self.open=false;self.screen=Screen::List;return Some(ProjectAction::Open{path,name,command});}
                         Err(error)=>self.error=Some(error),
@@ -683,7 +683,7 @@ impl Projects {
                         };
                         if draft.worktree {
                             if self.pending.is_some() {
-                                self.error = Some("저장소 확인을 마친 뒤 다시 시도하세요.".into());
+                                self.error = Some(kiln_common::i18n::tr("저장소 확인을 마친 뒤 다시 시도하세요.").into());
                                 return None;
                             }
                             let root = self.root.clone();
@@ -738,16 +738,16 @@ fn field(ui: &mut egui::Ui, title: &str, text: &mut String) {
 fn expand_path(raw: &str) -> Result<PathBuf, String> {
     let raw = raw.trim();
     if raw.is_empty() || raw.len() > 4096 || raw.chars().any(char::is_control) {
-        return Err("폴더의 전체 경로를 입력하세요.".into());
+        return Err(kiln_common::i18n::tr("폴더의 전체 경로를 입력하세요.").into());
     }
     let path = if raw == "~" || raw.starts_with("~/") {
-        PathBuf::from(std::env::var_os("HOME").ok_or("홈 폴더를 찾지 못했습니다.")?)
+        PathBuf::from(std::env::var_os("HOME").ok_or(kiln_common::i18n::tr("홈 폴더를 찾지 못했습니다."))?)
             .join(raw.strip_prefix("~/").unwrap_or(""))
     } else {
         raw.into()
     };
     if !path.is_absolute() {
-        return Err("전체 경로 또는 ~/로 시작하는 경로를 입력하세요.".into());
+        return Err(kiln_common::i18n::tr("전체 경로 또는 ~/로 시작하는 경로를 입력하세요.").into());
     }
     Ok(path)
 }
@@ -762,24 +762,24 @@ fn validate_task(task: &Task) -> Result<(), String> {
             s.trim().is_empty() || s.len() > 16384 || s.chars().any(char::is_control)
         })
     {
-        return Err("프로젝트 이름은 100자, 메모는 64KB 이내로 입력하세요.".into());
+        return Err(kiln_common::i18n::tr("프로젝트 이름은 100자, 메모는 64KB 이내로 입력하세요.").into());
     }
     Ok(())
 }
 fn read_tasks(path: &Path) -> Result<(Vec<Task>, Option<Vec<u8>>), String> {
     match std::fs::metadata(path) {
-        Ok(m) if m.len() > 4 * 1024 * 1024 => return Err("프로젝트 기록이 4MB보다 큽니다.".into()),
+        Ok(m) if m.len() > 4 * 1024 * 1024 => return Err(kiln_common::i18n::tr("프로젝트 기록이 4MB보다 큽니다.").into()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((vec![], None)),
         Err(e) => return Err(e.to_string()),
         _ => (),
     }
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     if bytes.len() > 4 * 1024 * 1024 {
-        return Err("프로젝트 기록이 4MB보다 큽니다.".into());
+        return Err(kiln_common::i18n::tr("프로젝트 기록이 4MB보다 큽니다.").into());
     }
     let tasks: Vec<Task> = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if tasks.len() > 1000 {
-        return Err("프로젝트 기록 수 제한을 초과했습니다.".into());
+        return Err(kiln_common::i18n::tr("프로젝트 기록 수 제한을 초과했습니다.").into());
     }
     for task in &tasks {
         validate_task(task)?;

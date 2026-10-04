@@ -79,8 +79,8 @@ fn brand_mark(ui: &mut Ui, tool: Tool) {
 
 fn subtitle(tool: Tool) -> &'static str {
     match tool {
-        Tool::Claude => "Anthropic 구독 계정",
-        Tool::Codex => "ChatGPT 구독 계정",
+        Tool::Claude => kiln_common::i18n::tr("Anthropic 구독 계정"),
+        Tool::Codex => kiln_common::i18n::tr("ChatGPT 구독 계정"),
     }
 }
 
@@ -102,7 +102,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.label(RichText::new(tool.display_name()).font(fonts::semibold(15.0)).color(t.text));
-                let count = if profiles.is_empty() { String::new() } else { format!(" · {}개", profiles.len()) };
+                let count = if profiles.is_empty() { String::new() } else { kiln_common::trf!(" · {}개", profiles.len()) };
                 ui.label(RichText::new(format!("{}{count}", subtitle(tool))).font(fonts::regular(12.0)).color(t.text_faint));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -110,8 +110,8 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                     ui.add(egui::Spinner::new().size(14.0).color(t.text_dim));
                 } else {
                     let tip = match tool {
-                        Tool::Claude => "저장한 계정의 사용량 확인",
-                        Tool::Codex => "사용량 새로 고침 (최근 Codex 세션 기록)",
+                        Tool::Claude => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
+                        Tool::Codex => kiln_common::i18n::tr("사용량 새로 고침 (최근 Codex 세션 기록)"),
                     };
                     if widgets::icon_button(ui, Icon::Refresh, 26.0, false, tip).clicked() {
                         mgr.refresh_usage(tool);
@@ -125,7 +125,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
         if let Some(Some(email)) = &live
             && !profiles.iter().any(|p| p.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(email)))
         {
-            info_banner(ui, &format!("현재 로그인 계정: {email} · 아직 Kiln에 저장하지 않았습니다"));
+            info_banner(ui, &kiln_common::trf!("현재 로그인 계정: {email} · 아직 Kiln에 저장하지 않았습니다"));
         }
 
         if profiles.is_empty() {
@@ -145,17 +145,17 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             ui.add_enabled_ui(busy.is_none(), |ui| {
-                if widgets::button_with(ui, Some(Icon::Save), "현재 로그인한 계정 저장", ButtonKind::Secondary, true).clicked() {
-                    mgr.run_async(tool, "저장 중…", move |m| {
+                if widgets::button_with(ui, Some(Icon::Save), kiln_common::i18n::tr("현재 로그인한 계정 저장"), ButtonKind::Secondary, true).clicked() {
+                    mgr.run_async(tool, kiln_common::i18n::tr("저장 중…"), move |m| {
                         let p = m.save_current(tool, "")?;
-                        Ok(format!("‘{}’ 계정을 저장했습니다", p.label))
+                        Ok(kiln_common::trf!("‘{}’ 계정을 저장했습니다", p.label))
                     });
                 }
-                if widgets::button_with(ui, Some(Icon::Plus), "새 계정 추가", ButtonKind::Primary, true).clicked() {
-                    mgr.run_async(tool, "준비 중…", move |m| {
+                if widgets::button_with(ui, Some(Icon::Plus), kiln_common::i18n::tr("새 계정 추가"), ButtonKind::Primary, true).clicked() {
+                    mgr.run_async(tool, kiln_common::i18n::tr("준비 중…"), move |m| {
                         m.sync_back(tool)?;
                         m.with_state(|s| s.events.push(AccountsEvent::RunLogin(tool)));
-                        Ok("터미널에서 로그인을 마친 뒤 ‘현재 로그인한 계정 저장’을 누르세요".to_string())
+                        Ok(kiln_common::i18n::tr("터미널에서 로그인을 마친 뒤 ‘현재 로그인한 계정 저장’을 누르세요").to_string())
                     });
                 }
             });
@@ -174,7 +174,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
         widgets::divider(ui);
 
         let mut on = mgr.auto_rotate(tool);
-        widgets::setting_row(ui, "자동 전환", "사용량이 소진되면 다음 계정으로 전환하고 세션을 이어갑니다", |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("자동 전환"), kiln_common::i18n::tr("사용량이 소진되면 다음 계정으로 전환하고 세션을 이어갑니다"), |ui| {
             if widgets::toggle(ui, &mut on).changed() {
                 mgr.set_auto_rotate(tool, on);
             }
@@ -207,10 +207,10 @@ fn empty_rows(ui: &mut Ui, tool: Tool) {
         ui.painter().rect_filled(r, CornerRadius::same(10), t.bg_hover);
         icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(18.0, 18.0)), Icon::Person, t.text_faint);
         ui.add_space(6.0);
-        ui.label(RichText::new("저장된 계정이 없습니다").font(fonts::medium(13.0)).color(t.text_dim));
+        ui.label(RichText::new(kiln_common::i18n::tr("저장된 계정이 없습니다")).font(fonts::medium(13.0)).color(t.text_dim));
         let hint = match tool {
-            Tool::Claude => "Claude Code 에 로그인한 뒤 현재 계정을 저장하세요",
-            Tool::Codex => "codex login 으로 로그인한 뒤 현재 계정을 저장하세요",
+            Tool::Claude => kiln_common::i18n::tr("Claude Code 에 로그인한 뒤 현재 계정을 저장하세요"),
+            Tool::Codex => kiln_common::i18n::tr("codex login 으로 로그인한 뒤 현재 계정을 저장하세요"),
         };
         ui.label(RichText::new(hint).font(fonts::regular(12.0)).color(t.text_faint));
         ui.add_space(10.0);
@@ -221,15 +221,15 @@ fn empty_rows(ui: &mut Ui, tool: Tool) {
 pub(crate) fn fmt_reset(reset: i64, now: i64) -> String {
     let d = reset - now;
     if d <= 0 {
-        return "갱신 시각 지남".into();
+        return kiln_common::i18n::tr("갱신 시각 지남").into();
     }
     let (days, hours, mins) = (d / 86400, (d % 86400) / 3600, (d % 3600) / 60);
     if days > 0 {
-        if hours > 0 { format!("{days}일 {hours}시간 후") } else { format!("{days}일 후") }
+        if hours > 0 { kiln_common::trf!("{days}일 {hours}시간 후") } else { kiln_common::trf!("{days}일 후") }
     } else if hours > 0 {
-        if mins > 0 { format!("{hours}시간 {mins}분 후") } else { format!("{hours}시간 후") }
+        if mins > 0 { kiln_common::trf!("{hours}시간 {mins}분 후") } else { kiln_common::trf!("{hours}시간 후") }
     } else {
-        format!("{}분 후", mins.max(1))
+        kiln_common::trf!("{}분 후", mins.max(1))
     }
 }
 
@@ -290,18 +290,18 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64) {
         };
         match usage {
             Some(u) if u.five_hour.is_some() || u.seven_day.is_some() => {
-                usage_line(ui, "5시간", u.five_hour, now);
-                usage_line(ui, "7일", u.seven_day, now);
+                usage_line(ui, kiln_common::i18n::tr("5시간"), u.five_hour, now);
+                usage_line(ui, kiln_common::i18n::tr("7일"), u.seven_day, now);
                 if u.is_unavailable() {
-                    ui.label(RichText::new("갱신 실패 · 마지막으로 확인한 사용량").font(fonts::regular(10.5)).color(t.text_faint)).on_hover_text(&u.status);
+                    ui.label(RichText::new(kiln_common::i18n::tr("갱신 실패 · 마지막으로 확인한 사용량")).font(fonts::regular(10.5)).color(t.text_faint)).on_hover_text(&u.status);
                 }
             }
             Some(u) if u.is_unavailable() => {
                 let reason = u.status.trim_start_matches("unavailable:").trim().to_string();
-                note(ui, Icon::Warning, "사용량 확인 불가", t.text_faint).on_hover_text(reason);
+                note(ui, Icon::Warning, kiln_common::i18n::tr("사용량 확인 불가"), t.text_faint).on_hover_text(reason);
             }
             _ => {
-                note(ui, Icon::Info, "사용량 정보 없음", t.text_faint);
+                note(ui, Icon::Info, kiln_common::i18n::tr("사용량 정보 없음"), t.text_faint);
             }
         }
     });
@@ -352,44 +352,44 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     ui.spacing_mut().item_spacing.x = 6.0;
                     ui.label(RichText::new(&p.label).font(fonts::semibold(13.5)).color(t.text));
                     if is_active {
-                        widgets::pill(ui, "사용 중", t.green);
+                        widgets::pill(ui, kiln_common::i18n::tr("사용 중"), t.green);
                     }
                     if exhausted {
-                        widgets::pill(ui, "소진", t.red);
+                        widgets::pill(ui, kiln_common::i18n::tr("소진"), t.red);
                     }
                 });
             }
-            let email = p.email.as_deref().unwrap_or("이메일 알 수 없음");
+            let email = p.email.as_deref().unwrap_or(kiln_common::i18n::tr("이메일 알 수 없음"));
             ui.label(RichText::new(email).font(fonts::regular(12.0)).color(t.text_faint));
         });
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             if confirming {
-                if widgets::button_with(ui, None, "삭제", ButtonKind::Danger, true).clicked() {
+                if widgets::button_with(ui, None, kiln_common::i18n::tr("삭제"), ButtonKind::Danger, true).clicked() {
                     mgr.ui_state().confirm_delete = None;
                     let id = p.id.clone();
                     let label = p.label.clone();
-                    mgr.run_async(tool, "삭제 중…", move |m| {
+                    mgr.run_async(tool, kiln_common::i18n::tr("삭제 중…"), move |m| {
                         m.remove(tool, &id)?;
-                        Ok(format!("‘{label}’ 계정을 삭제했습니다"))
+                        Ok(kiln_common::trf!("‘{label}’ 계정을 삭제했습니다"))
                     });
                 }
-                if widgets::button_with(ui, None, "취소", ButtonKind::Ghost, true).clicked() {
+                if widgets::button_with(ui, None, kiln_common::i18n::tr("취소"), ButtonKind::Ghost, true).clicked() {
                     mgr.ui_state().confirm_delete = None;
                 }
-                ui.label(RichText::new("삭제할까요?").font(fonts::medium(12.5)).color(t.text_dim));
+                ui.label(RichText::new(kiln_common::i18n::tr("삭제할까요?")).font(fonts::medium(12.5)).color(t.text_dim));
                 return;
             }
-            let more = widgets::icon_button(ui, Icon::Menu, 26.0, false, "계정 메뉴");
+            let more = widgets::icon_button(ui, Icon::Menu, 26.0, false, kiln_common::i18n::tr("계정 메뉴"));
             egui::Popup::menu(&more).gap(4.0).show(|ui| {
                 ui.set_min_width(150.0);
-                if menu_item(ui, Icon::Pencil, "이름 변경", t.text) {
+                if menu_item(ui, Icon::Pencil, kiln_common::i18n::tr("이름 변경"), t.text) {
                     mgr.ui_state().renaming = Some((tool, p.id.clone(), p.label.clone()));
                     ui.close();
                 }
                 let can_delete = !is_active;
-                let resp = ui.add_enabled_ui(can_delete, |ui| menu_item(ui, Icon::Trash, "삭제", t.red)).inner;
+                let resp = ui.add_enabled_ui(can_delete, |ui| menu_item(ui, Icon::Trash, kiln_common::i18n::tr("삭제"), t.red)).inner;
                 if resp {
                     mgr.ui_state().confirm_delete = Some((tool, p.id.clone()));
                     ui.close();
@@ -400,12 +400,12 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 ui.set_min_size(vec2(58.0, 30.0));
                 if !is_active {
                     ui.add_enabled_ui(!busy, |ui| {
-                        if widgets::button_with(ui, None, "전환", ButtonKind::Secondary, true).clicked() {
+                        if widgets::button_with(ui, None, kiln_common::i18n::tr("전환"), ButtonKind::Secondary, true).clicked() {
                             let id = p.id.clone();
                             let name = p.label.clone();
-                            mgr.run_async(tool, "전환 중…", move |m| {
+                            mgr.run_async(tool, kiln_common::i18n::tr("전환 중…"), move |m| {
                                 m.switch_to(tool, &id)?;
-                                Ok(format!("‘{name}’ 계정으로 전환했습니다. 새로 여는 세션부터 적용됩니다"))
+                                Ok(kiln_common::trf!("‘{name}’ 계정으로 전환했습니다. 새로 여는 세션부터 적용됩니다"))
                             });
                         }
                     });

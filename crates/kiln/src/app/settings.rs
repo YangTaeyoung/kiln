@@ -25,7 +25,7 @@ const SECTIONS: [(&str, Icon); 6] = [
     ("동작", Icon::Gear),
     ("계정", Icon::Person),
     ("단축키", Icon::Command),
-    ("정보", Icon::Bell),
+    ("앱 정보", Icon::Bell),
 ];
 
 impl SettingsUi {
@@ -35,7 +35,11 @@ impl SettingsUi {
         let screen = ctx.content_rect();
         let size = vec2(860.0f32.min(screen.width() - 60.0), 580.0f32.min(screen.height() - 80.0));
         let compact = size.y < 340.0 || size.x < 600.0;
-        let nav_width = if compact { 0.0 } else { 160.0 };
+        let nav_width = if compact { 0.0 } else {
+            ctx.fonts_mut(|fonts| SECTIONS.iter().map(|(label, _)| {
+                fonts.layout_no_wrap(kiln_common::i18n::tr(label).to_owned(), fonts::medium(13.5), t.text).size().x
+            }).fold(100.0_f32, f32::max)) + 60.0
+        };
         let mut close = false;
         let frame = Frame::new().fill(t.bg_panel).stroke(Stroke::new(1.0, t.border_strong)).corner_radius(CornerRadius::same(16)).shadow(t.shadow()).inner_margin(Margin::same(0));
         let modal = egui::Modal::new(egui::Id::new("settings")).frame(frame).backdrop_color(Color32::from_black_alpha(if t.dark { 130 } else { 60 })).show(ctx, |ui| {
@@ -48,12 +52,12 @@ impl SettingsUi {
                 if !compact {
                 ui.painter().rect_filled(nav, CornerRadius { nw: 16, sw: 16, ne: 0, se: 0 }, widgets::lerp_color(t.bg_panel, t.bg_elevated, 0.35));
                 ui.painter().line_segment([nav.right_top(), nav.right_bottom()], Stroke::new(1.0, t.border));
-                ui.painter().text(pos2(nav.left() + 22.0, nav.top() + 30.0), Align2::LEFT_CENTER, "설정", fonts::semibold(17.0), t.text);
+                ui.painter().text(pos2(nav.left() + 22.0, nav.top() + 30.0), Align2::LEFT_CENTER, kiln_common::i18n::tr("설정"), fonts::semibold(17.0), t.text);
                 for (i, (label, icon)) in SECTIONS.iter().enumerate() {
                     let r = egui::Rect::from_min_size(pos2(nav.left() + 12.0, nav.top() + 60.0 + i as f32 * 36.0), vec2(nav.width() - 24.0, 32.0));
                     let resp = ui.interact(r, ui.id().with(("nav", i)), Sense::click());
                     let sel = self.section == i;
-                    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), sel, label));
+                    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), sel, kiln_common::i18n::tr(label)));
                     widgets::focus_ring(ui, &resp, 8);
                     if sel {
                         ui.painter().rect_filled(r, CornerRadius::same(8), t.bg_selected);
@@ -61,7 +65,7 @@ impl SettingsUi {
                         ui.painter().rect_filled(r, CornerRadius::same(8), t.bg_hover);
                     }
                     icons::paint(ui.painter(), egui::Rect::from_center_size(pos2(r.left() + 18.0, r.center().y), vec2(15.0, 15.0)), *icon, if sel { t.accent } else { t.text_dim });
-                    ui.painter().text(pos2(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, *label, fonts::medium(13.5), if sel { t.text } else { t.text_dim });
+                    ui.painter().text(pos2(r.left() + 36.0, r.center().y), Align2::LEFT_CENTER, kiln_common::i18n::tr(label), fonts::medium(13.5), if sel { t.text } else { t.text_dim });
                     if resp.clicked() {
                         self.section = i;
                     }
@@ -75,20 +79,20 @@ impl SettingsUi {
                 cui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x=8.0;
                     if compact {
-                        ui.label(RichText::new("설정").font(fonts::semibold(17.0)));
-                        egui::ComboBox::from_id_salt("settings-sections").selected_text(SECTIONS[self.section].0).width(130.0).show_ui(ui, |ui| {
-                            for (index, (label, _)) in SECTIONS.iter().enumerate() { ui.selectable_value(&mut self.section, index, *label); }
+                        ui.label(RichText::new(kiln_common::i18n::tr("설정")).font(fonts::semibold(17.0)));
+                        egui::ComboBox::from_id_salt("settings-sections").selected_text(kiln_common::i18n::tr(SECTIONS[self.section].0)).width(130.0).show_ui(ui, |ui| {
+                            for (index, (label, _)) in SECTIONS.iter().enumerate() { ui.selectable_value(&mut self.section, index, kiln_common::i18n::tr(label)); }
                         });
                     } else {
-                        ui.label(RichText::new(SECTIONS[self.section].0).font(fonts::semibold(20.0)).color(t.text));
+                        ui.label(RichText::new(kiln_common::i18n::tr(SECTIONS[self.section].0)).font(fonts::semibold(20.0)).color(t.text));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::icon_button(ui, Icon::Close, 30.0, false, "닫기 (Esc)").clicked() {
+                        if widgets::icon_button(ui, Icon::Close, 30.0, false, kiln_common::i18n::tr("닫기 (Esc)")).clicked() {
                             close = true;
                         }
                     });
                 });
-                cui.label(RichText::new(if self.section==4 {"변경 후 ‘단축키 저장’을 눌러 적용하세요"}else{"변경 사항은 자동으로 저장됩니다"}).size(12.0).color(t.text_dim));
+                cui.label(RichText::new(if self.section==4 {kiln_common::i18n::tr("변경 후 ‘단축키 저장’을 눌러 적용하세요")}else{kiln_common::i18n::tr("변경 사항은 자동으로 저장됩니다")}).size(12.0).color(t.text_dim));
                 cui.add_space(if self.section==4 {8.0}else{16.0});
                 if self.section == 4 {
                     let area = cui.available_rect_before_wrap();
@@ -134,23 +138,38 @@ fn accounts_page(ui: &mut egui::Ui, mgr: &kiln_accounts::AccountManager, acts: &
             }
             AccountsEvent::Switched { tool, .. } => {
                 let name = mgr.active(tool).and_then(|id| mgr.profiles(tool).into_iter().find(|p| p.id == id)).map(|p| p.label).unwrap_or_default();
-                acts.push(Action::Toast(format!("{} 계정을 {name}(으)로 바꿨습니다. 새로 시작하는 세션부터 적용됩니다", tool.display_name())));
+                acts.push(Action::Toast(kiln_common::trf!("{} 계정을 {name}(으)로 바꿨습니다. 새로 시작하는 세션부터 적용됩니다", tool.display_name())));
             }
-            AccountsEvent::Saved { tool, .. } => acts.push(Action::Toast(format!("현재 {} 로그인을 계정 목록에 저장했습니다", tool.display_name()))),
+            AccountsEvent::Saved { tool, .. } => acts.push(Action::Toast(kiln_common::trf!("현재 {} 로그인을 계정 목록에 저장했습니다", tool.display_name()))),
         }
     }
 }
 
 fn appearance(ui: &mut egui::Ui, s: &mut Settings, acts: &mut Vec<Action>) {
     let t = Theme::current();
-    ui.label(RichText::new("테마").font(fonts::semibold(12.0)).color(t.text_faint));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let label = ui.label(kiln_common::i18n::tr("언어"));
+        let current = kiln_common::i18n::language();
+        let mut selected = current;
+        egui::ComboBox::from_id_salt("interface-language")
+            .selected_text(current.native_name())
+            .show_ui(ui, |ui| {
+                for language in kiln_common::i18n::Language::ALL {
+                    ui.selectable_value(&mut selected, language, language.native_name());
+                }
+            }).response.labelled_by(label.id);
+        if selected != current { acts.push(Action::SetLanguage(selected)); }
+    });
+    ui.add_space(20.0);
+    ui.label(RichText::new(kiln_common::i18n::tr("테마")).font(fonts::semibold(12.0)).color(t.text_faint));
     ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
         for th in Theme::ALL {
             let (r, resp) = ui.allocate_exact_size(vec2(120.0, 74.0), Sense::click());
             let sel = s.theme == th.name;
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), sel, th.label));
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), sel, kiln_common::i18n::tr(th.label)));
             widgets::focus_ring(ui, &resp, 10);
             // 미니 미리보기: 레일 + 카드 두 장.
             let preview = egui::Rect::from_min_size(r.min, vec2(r.width(), 46.0));
@@ -170,7 +189,7 @@ fn appearance(ui: &mut egui::Ui, s: &mut Settings, acts: &mut Vec<Action>) {
             }
             let stroke = if sel { Stroke::new(2.0, t.accent) } else if resp.hovered() { Stroke::new(1.0, t.border_strong) } else { Stroke::new(1.0, t.border) };
             ui.painter().rect_stroke(preview, CornerRadius::same(10), stroke, StrokeKind::Outside);
-            ui.painter().text(pos2(r.left() + 2.0, preview.bottom() + 15.0), Align2::LEFT_CENTER, th.label, fonts::medium(13.0), if sel { t.text } else { t.text_dim });
+            ui.painter().text(pos2(r.left() + 2.0, preview.bottom() + 15.0), Align2::LEFT_CENTER, kiln_common::i18n::tr(th.label), fonts::medium(13.0), if sel { t.text } else { t.text_dim });
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
@@ -180,13 +199,13 @@ fn appearance(ui: &mut egui::Ui, s: &mut Settings, acts: &mut Vec<Action>) {
         }
     });
     ui.add_space(18.0);
-    widgets::group(ui, "화면", |ui| {
-        widgets::setting_row(ui, "UI 크기", "창 전체의 글자와 여백 비율", |ui| {
+    widgets::group(ui, kiln_common::i18n::tr("화면"), |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("UI 크기"), kiln_common::i18n::tr("창 전체의 글자와 여백 비율"), |ui| {
             let mut v = (s.ui_scale * 100.0).round() as i32;
             let before = v;
-            let mut opts = [(90, "작게"), (100, "보통"), (115, "크게"), (130, "아주 크게")].to_vec();
+            let mut opts = [(90, kiln_common::i18n::tr("작게")), (100, kiln_common::i18n::tr("보통")), (115, kiln_common::i18n::tr("크게")), (130, kiln_common::i18n::tr("아주 크게"))].to_vec();
             if !opts.iter().any(|(x, _)| *x == v) {
-                opts.push((v, "사용자"));
+                opts.push((v, kiln_common::i18n::tr("사용자 지정")));
             }
             widgets::segmented(ui, &mut v, &opts);
             if v != before {
@@ -195,7 +214,7 @@ fn appearance(ui: &mut egui::Ui, s: &mut Settings, acts: &mut Vec<Action>) {
             }
         });
         widgets::divider(ui);
-        widgets::setting_row(ui, "패널 간격", "터미널·에디터 패널 사이 여백", |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("패널 간격"), kiln_common::i18n::tr("터미널·에디터 패널 사이 여백"), |ui| {
             ui.add(egui::Slider::new(&mut s.card_gap, 2.0..=16.0).step_by(1.0).suffix(" px").show_value(true));
         });
     });
@@ -211,8 +230,8 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
     ui.painter().rect_stroke(r, CornerRadius::same(12), Stroke::new(1.0, t.border), StrokeKind::Inside);
     let lines: [&[(&str, Color32)]; 4] = [
         &[("~/dev/kiln ", t.blue), ("main ", t.purple), ("❯ ", t.green), ("claude", t.text)],
-        &[("● ", t.orange), ("작업을 계획하는 중… ", t.text), ("(Esc로 중단)", t.text_faint)],
-        &[("fn ", t.purple), ("main", t.blue), ("() { println!(", t.text), ("\"안녕, Kiln\"", t.green), ("); }", t.text)],
+        &[("● ", t.orange), (kiln_common::i18n::tr("작업을 계획하는 중… "), t.text), (kiln_common::i18n::tr("(Esc로 중단)"), t.text_faint)],
+        &[("fn ", t.purple), ("main", t.blue), ("() { println!(", t.text), (kiln_common::i18n::tr("\"안녕, Kiln\""), t.green), ("); }", t.text)],
         &[("❯ ", t.green), ("cargo test ", t.text), ("-- --nocapture", t.text_dim)],
     ];
     let clip = ui.painter().with_clip_rect(r.shrink(2.0));
@@ -227,53 +246,53 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
         }
     }
     ui.add_space(16.0);
-    widgets::group(ui, "글꼴", |ui| {
-        widgets::setting_row(ui, "글꼴 크기", "⌘= / ⌘- 로도 바꿀 수 있습니다", |ui| {
+    widgets::group(ui, kiln_common::i18n::tr("글꼴"), |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("글꼴 크기"), kiln_common::i18n::tr("⌘= / ⌘- 로도 바꿀 수 있습니다"), |ui| {
             ui.add(egui::Slider::new(&mut s.font_size, 9.0..=24.0).step_by(0.5).suffix(" pt"));
         });
         widgets::divider(ui);
-        widgets::setting_row(ui, "줄 간격", "", |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("줄 간격"), "", |ui| {
             let mut v = (s.line_height * 100.0).round() as i32;
             let before = v;
-            widgets::segmented(ui, &mut v, &[(110, "좁게"), (120, "보통"), (140, "넓게")]);
+            widgets::segmented(ui, &mut v, &[(110, kiln_common::i18n::tr("좁게")), (120, kiln_common::i18n::tr("보통")), (140, kiln_common::i18n::tr("넓게"))]);
             if v != before {
                 s.line_height = v as f32 / 100.0;
             }
         });
     });
-    widgets::group(ui, "입력", |ui| {
-        widgets::setting_toggle(ui, "선택하면 복사", "터미널에서 선택한 텍스트를 클립보드에 복사합니다", &mut s.copy_on_select);
+    widgets::group(ui, kiln_common::i18n::tr("입력"), |ui| {
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("선택하면 복사"), kiln_common::i18n::tr("터미널에서 선택한 텍스트를 클립보드에 복사합니다"), &mut s.copy_on_select);
         widgets::divider(ui);
-        widgets::setting_toggle(ui, "커서 깜박임", "활성 터미널의 커서만 깜박입니다", &mut s.cursor_blink);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("커서 깜박임"), kiln_common::i18n::tr("활성 터미널의 커서만 깜박입니다"), &mut s.cursor_blink);
         widgets::divider(ui);
-        widgets::setting_toggle(ui, "Option 키를 Meta 로", "Option+B 같은 조합을 셸 단축키로 보냅니다", &mut s.option_as_meta);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("Option 키를 Meta 로"), kiln_common::i18n::tr("Option+B 같은 조합을 셸 단축키로 보냅니다"), &mut s.option_as_meta);
     });
-    widgets::group(ui, "셸", |ui| {
-        widgets::setting_row(ui, "기본 셸", "비워 두면 로그인 셸($SHELL)을 씁니다", |ui| {
+    widgets::group(ui, kiln_common::i18n::tr("셸"), |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("기본 셸"), kiln_common::i18n::tr("비워 두면 로그인 셸($SHELL)을 씁니다"), |ui| {
             ui.add(egui::TextEdit::singleline(&mut s.shell).hint_text("/bin/zsh").desired_width(200.0));
         });
     });
 }
 
 fn behavior(ui: &mut egui::Ui, s: &mut Settings) {
-    widgets::group(ui, "안전", |ui| {
-        widgets::setting_toggle(ui, "실행 중인 패널을 닫기 전 확인", "에이전트나 명령이 실행 중이면 종료 전에 확인합니다", &mut s.confirm_close_running);
+    widgets::group(ui, kiln_common::i18n::tr("안전"), |ui| {
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("실행 중인 패널을 닫기 전 확인"), kiln_common::i18n::tr("에이전트나 명령이 실행 중이면 종료 전에 확인합니다"), &mut s.confirm_close_running);
     });
-    widgets::group(ui, "알림", |ui| {
-        widgets::setting_toggle(ui, "방해 금지", "에이전트 팝업과 시스템 알림을 끕니다. 알림 센터에는 계속 보관됩니다.", &mut s.do_not_disturb);
+    widgets::group(ui, kiln_common::i18n::tr("알림"), |ui| {
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("방해 금지"), kiln_common::i18n::tr("에이전트 팝업과 시스템 알림을 끕니다. 알림 센터에는 계속 보관됩니다."), &mut s.do_not_disturb);
         widgets::divider(ui);
-        widgets::setting_toggle(ui, "앱 내 알림 팝업", "새 에이전트 알림을 화면 모서리에 표시합니다", &mut s.notification_toasts);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("앱 내 알림 팝업"), kiln_common::i18n::tr("새 에이전트 알림을 화면 모서리에 표시합니다"), &mut s.notification_toasts);
         widgets::divider(ui);
-        widgets::setting_toggle(ui, "시스템 알림", "창이 비활성일 때 에이전트 알림을 OS 알림으로도 보냅니다", &mut s.os_notifications);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("시스템 알림"), kiln_common::i18n::tr("창이 비활성일 때 에이전트 알림을 OS 알림으로도 보냅니다"), &mut s.os_notifications);
     });
 }
 
 fn shortcuts(ui: &mut egui::Ui) {
     let rows: [(&str, &[(&str, &str)]); 4] = [
-        ("패널과 탭", &[("패널 이동", "⌥⌘←"), ("탭 번호로 전환", "⌥⌘1")]),
-        ("탐색", &[("찾기", "⌘F"), ("프로젝트 전환", "⌘1")]),
-        ("도구", &[("파일", "⇧⌘E"), ("검색", "⇧⌘F"), ("Git", "⇧⌘G"), ("GitHub", "⇧⌘R"), ("데이터베이스", "⇧⌘B"), ("문제", "⇧⌘M"), ("Git 로그", "⇧⌘L")]),
-        ("화면", &[("글꼴 크게/작게", "⌘="), ("설정", "⌘,")]),
+        (kiln_common::i18n::tr("패널과 탭"), &[(kiln_common::i18n::tr("패널 이동"), "⌥⌘←"), (kiln_common::i18n::tr("탭 번호로 전환"), "⌥⌘1")]),
+        (kiln_common::i18n::tr("탐색"), &[(kiln_common::i18n::tr("찾기"), "⌘F"), (kiln_common::i18n::tr("프로젝트 전환"), "⌘1")]),
+        (kiln_common::i18n::tr("도구"), &[(kiln_common::i18n::tr("파일"), "⇧⌘E"), (kiln_common::i18n::tr("검색"), "⇧⌘F"), ("Git", "⇧⌘G"), ("GitHub", "⇧⌘R"), (kiln_common::i18n::tr("데이터베이스"), "⇧⌘B"), (kiln_common::i18n::tr("문제"), "⇧⌘M"), (kiln_common::i18n::tr("Git 로그"), "⇧⌘L")]),
+        (kiln_common::i18n::tr("화면"), &[(kiln_common::i18n::tr("글꼴 크게/작게"), "⌘="), (kiln_common::i18n::tr("설정"), "⌘,")]),
     ];
     for (title, items) in rows {
         widgets::group(ui, title, |ui| {
@@ -293,27 +312,27 @@ fn shortcuts(ui: &mut egui::Ui) {
 
 fn about_page(ui: &mut egui::Ui, about: &AboutInfo, acts: &mut Vec<Action>) {
     let t = Theme::current();
-    widgets::group(ui, "세션 데몬", |ui| {
-        widgets::setting_row(ui, "상태", if about.connected { "앱을 닫아도 터미널 세션은 계속 실행됩니다." } else { "연결되지 않음" }, |ui| {
-            let (c, label) = if about.connected { (t.green, format!("실행 중 · pid {}", about.daemon_pid)) } else { (t.red, "끊김".into()) };
+    widgets::group(ui, kiln_common::i18n::tr("세션 데몬"), |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("상태"), if about.connected { kiln_common::i18n::tr("앱을 닫아도 터미널 세션은 계속 실행됩니다.") } else { kiln_common::i18n::tr("연결되지 않음") }, |ui| {
+            let (c, label) = if about.connected { (t.green, kiln_common::trf!("실행 중 · pid {}", about.daemon_pid)) } else { (t.red, kiln_common::i18n::tr("끊김").into()) };
             ui.label(RichText::new(label).color(t.text_dim));
             let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
             ui.painter().circle_filled(r.center(), 4.0, c);
         });
         widgets::divider(ui);
-        widgets::setting_row(ui, "데몬 빌드", &about.daemon_build, |ui| {
-            if widgets::button(ui, "이 버전으로 교체", ButtonKind::Secondary).on_hover_text("실행 중인 세션을 유지한 채 데몬만 바꿉니다").clicked() {
+        widgets::setting_row(ui, kiln_common::i18n::tr("데몬 빌드"), &about.daemon_build, |ui| {
+            if widgets::button(ui, kiln_common::i18n::tr("이 버전으로 교체"), ButtonKind::Secondary).on_hover_text(kiln_common::i18n::tr("실행 중인 세션을 유지한 채 데몬만 바꿉니다")).clicked() {
                 acts.push(Action::UpgradeDaemon);
             }
         });
     });
-    widgets::group(ui, "앱", |ui| {
-        widgets::setting_row(ui, "버전", &format!("Kiln {} · build {}", env!("CARGO_PKG_VERSION"), kiln_daemon::build_id()), |_| {});
+    widgets::group(ui, kiln_common::i18n::tr("앱"), |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("버전"), &format!("Kiln {} · build {}", env!("CARGO_PKG_VERSION"), kiln_daemon::build_id()), |_| {});
         #[cfg(target_os = "macos")]
         { widgets::divider(ui); super::updater::settings(ui); }
         widgets::divider(ui);
-        widgets::setting_row(ui, "설정 폴더", &kiln_common::paths::config_dir().display().to_string(), |ui| {
-            if widgets::button(ui, "열기", ButtonKind::Secondary).clicked() {
+        widgets::setting_row(ui, kiln_common::i18n::tr("설정 폴더"), &kiln_common::paths::config_dir().display().to_string(), |ui| {
+            if widgets::button(ui, kiln_common::i18n::tr("열기"), ButtonKind::Secondary).clicked() {
                 let _ = open::that_detached(kiln_common::paths::config_dir());
             }
         });
@@ -385,5 +404,44 @@ mod typography_tests {
         }
         output.textures_delta.clear();
         assert!(checked,"last preview line must be painted");
+    }
+}
+
+#[cfg(test)]
+mod language_layout_tests {
+    use super::*;
+    use egui_kittest::{Harness, kittest::Queryable};
+
+    #[test]
+    fn language_sidebar_labels_fit_their_navigation_rows() {
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                for size in [[1100.0, 760.0], [720.0, 440.0]] {
+                    let dir = tempfile::tempdir().unwrap();
+                    let accounts = kiln_accounts::AccountManager::with_env(kiln_accounts::Env::sandbox(dir.path(), false).0);
+                    let mut initialized = false;
+                    let mut h = Harness::builder().with_size(size).build_ui_state(|ui, state: &mut (SettingsUi, Settings, super::super::keymap::Keymap)| {
+                        if !initialized {
+                            ui.ctx().set_fonts(fonts::definitions_for_language(false, language));
+                            Theme::current().apply(ui.ctx()); initialized = true; return;
+                        }
+                        state.0.ui(ui.ctx(), &mut state.1, &AboutInfo { daemon_pid: 0, daemon_build: String::new(), connected: false }, &accounts, &mut state.2);
+                    }, (SettingsUi { open: true, section: 0 }, Settings::default(), super::super::keymap::Keymap::default()));
+                    h.run_steps(3);
+                    for (source, _) in SECTIONS {
+                        let label = kiln_common::i18n::tr(source);
+                        let row = h.get_all_by_label(label).map(|node| node.rect()).min_by(|a, b| a.left().total_cmp(&b.left())).unwrap();
+                        let painted = h.output().shapes.iter().filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.job.text == label && text.pos.x < row.right() => Some(text.galley.rect.translate(text.pos.to_vec2())),
+                            _ => None,
+                        }).collect::<Vec<_>>();
+                        assert!(!painted.is_empty(), "missing {label} in {language:?}");
+                        for bounds in painted {
+                            assert!(row.contains_rect(bounds), "{language:?} / {label} overflows navigation row: {bounds:?} outside {row:?}");
+                        }
+                    }
+                }
+            });
+        }
     }
 }

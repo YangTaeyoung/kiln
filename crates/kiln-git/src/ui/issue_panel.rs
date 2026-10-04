@@ -308,27 +308,27 @@ impl IssuePanel {
             if self.embedded {
                 let n = self.visible_items().len();
                 if self.started && self.load.is_none() && self.error.is_none() {
-                    ui.label(faint(format!("이슈 {n}개")));
+                    ui.label(faint(kiln_common::trf!("이슈 {n}개")));
                 }
             } else {
-                ui.label(RichText::new("이슈").font(kiln_common::fonts::semibold(13.5)).color(t.text));
+                ui.label(RichText::new(kiln_common::i18n::tr("이슈")).font(kiln_common::fonts::semibold(13.5)).color(t.text));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if kiln_common::widgets::button_with(
                     ui,
                     Some(kiln_common::icons::Icon::Plus),
-                    if self.form.is_some() { "초안 이어 쓰기" } else { "새 이슈" },
+                    if self.form.is_some() { kiln_common::i18n::tr("초안 이어 쓰기") } else { kiln_common::i18n::tr("새 이슈") },
                     kiln_common::widgets::ButtonKind::Primary,
                     true,
                 )
-                .on_hover_text("이슈 새로 만들기")
+                .on_hover_text(kiln_common::i18n::tr("이슈 새로 만들기"))
                 .clicked()
                 {
                     self.open_create_form();
                 }
                 if self.load.is_some() {
                     spinner(ui, 12.0);
-                } else if icon_button(ui, Icon::Refresh, "새로 고침").clicked() {
+                } else if icon_button(ui, Icon::Refresh, kiln_common::i18n::tr("새로 고침")).clicked() {
                     self.refresh();
                 }
             });
@@ -345,7 +345,7 @@ impl IssuePanel {
         let r = ui.add(
             egui::TextEdit::singleline(&mut self.search)
                 .id(sid)
-                .hint_text("제목, 작성자, 라벨, #번호 · Enter로 GitHub 검색")
+                .hint_text(kiln_common::i18n::tr("제목, 작성자, 라벨, #번호 · Enter로 GitHub 검색"))
                 .desired_width(f32::INFINITY)
                 .frame(kiln_common::widgets::input_frame(focused, false)),
         );
@@ -379,7 +379,7 @@ impl IssuePanel {
         }
         if let Some(n) = self.created {
             ui.add_space(6.0);
-            if banner(ui, BannerKind::Success, &format!("이슈 #{n} 생성 완료"), None, true) {
+            if banner(ui, BannerKind::Success, &kiln_common::trf!("이슈 #{n} 생성 완료"), None, true) {
                 self.created = None;
             }
         }
@@ -388,7 +388,7 @@ impl IssuePanel {
     fn ui_list(&mut self, ui: &mut Ui, events: &mut Vec<GitEvent>) {
         let t = theme();
         if let Some(e) = self.error.clone() {
-            if gh_error_state(ui, &e, "이슈", events) == ErrorAction::Retry {
+            if gh_error_state(ui, &e, kiln_common::i18n::tr("이슈"), events) == ErrorAction::Retry {
                 self.refresh();
             }
             return;
@@ -398,20 +398,20 @@ impl IssuePanel {
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
                 spinner(ui, 14.0);
-                ui.label(dim("이슈 불러오는 중…"));
+                ui.label(dim(kiln_common::i18n::tr("이슈 불러오는 중…")));
             });
             return;
         }
         let items: Vec<IssueItem> = self.visible_items().into_iter().cloned().collect();
         if items.is_empty() {
             let msg = match self.filter {
-                IssueFilter::Mine => "열려 있는 내 이슈가 없습니다",
-                IssueFilter::Assigned => "나에게 할당된 이슈가 없습니다",
-                IssueFilter::Closed => "닫힌 이슈가 없습니다",
-                IssueFilter::Open => "열린 이슈가 없습니다",
+                IssueFilter::Mine => kiln_common::i18n::tr("열려 있는 내 이슈가 없습니다"),
+                IssueFilter::Assigned => kiln_common::i18n::tr("나에게 할당된 이슈가 없습니다"),
+                IssueFilter::Closed => kiln_common::i18n::tr("닫힌 이슈가 없습니다"),
+                IssueFilter::Open => kiln_common::i18n::tr("열린 이슈가 없습니다"),
             };
             let filtered = !self.search.trim().is_empty() || self.label_filter.is_some();
-            empty_state_icon(ui, Icon::Issue, msg, if filtered { "다른 검색어나 라벨을 사용해 보세요." } else { "" });
+            empty_state_icon(ui, Icon::Issue, msg, if filtered { kiln_common::i18n::tr("다른 검색어나 라벨을 사용해 보세요.") } else { "" });
             return;
         }
         let now = self.now_override.unwrap_or_else(now_unix);
@@ -468,11 +468,11 @@ impl IssuePanel {
     fn ui_form(&mut self, ui: &mut Ui) {
         let t = theme();
         if self.discard_confirm {
-            ui.label("작성한 초안을 버릴까요? GitHub에는 전송되지 않습니다.");
+            ui.label(kiln_common::i18n::tr("작성한 초안을 버릴까요? GitHub에는 전송되지 않습니다."));
             let mut discard = false;
             ui.horizontal(|ui| {
-                if tool_button(ui, None, "계속 작성").clicked() { self.discard_confirm = false; }
-                if tool_button(ui, None, "초안 버리기").clicked() { discard = true; }
+                if tool_button(ui, None, kiln_common::i18n::tr("계속 작성")).clicked() { self.discard_confirm = false; }
+                if tool_button(ui, None, kiln_common::i18n::tr("초안 버리기")).clicked() { discard = true; }
             });
             if discard { self.form = None; self.form_open = false; self.discard_confirm = false; }
             return;
@@ -481,7 +481,7 @@ impl IssuePanel {
         let mut close = false;
         ui.horizontal(|ui| {
             icon_label(ui, Icon::Issue, t.green, 16.0);
-            ui.label(RichText::new("새 이슈").font(kiln_common::fonts::semibold(14.0)).color(t.text));
+            ui.label(RichText::new(kiln_common::i18n::tr("새 이슈")).font(kiln_common::fonts::semibold(14.0)).color(t.text));
             if let Some(r) = &self.repo {
                 let width=(ui.available_width()-140.0).max(20.0);
                 let name=r.full_name();
@@ -490,10 +490,10 @@ impl IssuePanel {
                 else { ui.label(faint(&name)); }
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, Icon::Close, "초안 보관하고 닫기").clicked() {
+                if icon_button(ui, Icon::Close, kiln_common::i18n::tr("초안 보관하고 닫기")).clicked() {
                     close = true;
                 }
-                if form.submit.is_none() && tool_button(ui, None, "초안 버리기…").clicked() { self.discard_confirm = true; }
+                if form.submit.is_none() && tool_button(ui, None, kiln_common::i18n::tr("초안 버리기…")).clicked() { self.discard_confirm = true; }
             });
         });
         if close {
@@ -502,31 +502,31 @@ impl IssuePanel {
         }
         ui.add_space(8.0);
         if let Some(e) = form.error.clone() {
-            if banner(ui, BannerKind::Error, "이슈를 만들 수 없습니다", Some(&e), true) {
+            if banner(ui, BannerKind::Error, kiln_common::i18n::tr("이슈를 만들 수 없습니다"), Some(&e), true) {
                 form.error = None;
             }
             ui.add_space(6.0);
         }
         let submitting = form.submit.is_some();
         ui.add_enabled_ui(!submitting, |ui| {
-            field_label(ui, "제목");
+            field_label(ui, kiln_common::i18n::tr("제목"));
             let tid = Id::new("kiln_issue_create_title");
             let focused = ui.memory(|m| m.has_focus(tid));
             ui.add(
                 egui::TextEdit::singleline(&mut form.req.title)
                     .id(tid)
-                    .hint_text("이슈 제목")
+                    .hint_text(kiln_common::i18n::tr("이슈 제목"))
                     .desired_width(f32::INFINITY)
                     .frame(kiln_common::widgets::input_frame(focused, false)),
             );
             ui.add_space(10.0);
-            field_label(ui, "설명");
+            field_label(ui, kiln_common::i18n::tr("설명"));
             let bid = Id::new("kiln_issue_create_body");
             let focused = ui.memory(|m| m.has_focus(bid));
             ui.add(
                 egui::TextEdit::multiline(&mut form.req.body)
                     .id(bid)
-                    .hint_text("무엇이 문제인지, 어떻게 재현하는지 적어 주세요 (Markdown 지원)")
+                    .hint_text(kiln_common::i18n::tr("무엇이 문제인지, 어떻게 재현하는지 적어 주세요 (Markdown 지원)"))
                     .desired_rows(9)
                     .desired_width(f32::INFINITY)
                     .frame(kiln_common::widgets::input_frame(focused, false)),
@@ -536,8 +536,8 @@ impl IssuePanel {
             let meta = &self.meta;
             picker_field(
                 ui,
-                "라벨",
-                "라벨 선택",
+                kiln_common::i18n::tr("라벨"),
+                kiln_common::i18n::tr("라벨 선택"),
                 Id::new("issue_create_labels"),
                 &mut form.label_pick,
                 &label_options(&meta.labels),
@@ -551,8 +551,8 @@ impl IssuePanel {
             ui.add_space(10.0);
             picker_field(
                 ui,
-                "담당자",
-                "담당자 선택",
+                kiln_common::i18n::tr("담당자"),
+                kiln_common::i18n::tr("담당자 선택"),
                 Id::new("issue_create_assignees"),
                 &mut form.user_pick,
                 &user_options(&meta.users),
@@ -566,7 +566,7 @@ impl IssuePanel {
             ui.add_space(16.0);
             ui.horizontal(|ui| {
                 let can = !form.req.title.trim().is_empty() && !submitting;
-                let r = ui.add_enabled_ui(can, |ui| primary_button(ui, "생성", Some(96.0))).inner;
+                let r = ui.add_enabled_ui(can, |ui| primary_button(ui, kiln_common::i18n::tr("생성"), Some(96.0))).inner;
                 if r.clicked() {
                     let b = self.backend.clone();
                     let (req, repo) = (form.req.clone(), self.repo.clone());
@@ -575,9 +575,9 @@ impl IssuePanel {
                 }
                 if submitting {
                     spinner(ui, 12.0);
-                    ui.label(dim("만드는 중…"));
+                    ui.label(dim(kiln_common::i18n::tr("만드는 중…")));
                 } else if form.req.title.trim().is_empty() {
-                    ui.label(faint("제목을 입력하세요"));
+                    ui.label(faint(kiln_common::i18n::tr("제목을 입력하세요")));
                 }
             });
         });
@@ -608,7 +608,7 @@ pub(crate) fn picker_field(
     let anchor = ui
         .horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-            let r = tool_button(ui, Some(if title == "라벨" { Icon::Tag } else { Icon::Person }), button);
+            let r = tool_button(ui, Some(if title == kiln_common::i18n::tr("라벨") { Icon::Tag } else { Icon::Person }), button);
             if r.clicked() {
                 egui::Popup::toggle_id(ui.ctx(), popup_id);
                 st.filter.clear();
@@ -618,12 +618,12 @@ pub(crate) fn picker_field(
                 show_item(ui, s);
             }
             if selected.is_empty() {
-                ui.label(faint("없음"));
+                ui.label(faint(kiln_common::i18n::tr("없음")));
             }
             r.rect
         })
         .inner;
-    multi_pick_popup(ui, popup_id, anchor.with_max_x(anchor.left() + 300.0), st, &format!("{title} 검색…"), options, selected, loading, error);
+    multi_pick_popup(ui, popup_id, anchor.with_max_x(anchor.left() + 300.0), st, &kiln_common::trf!("{title} 검색…"), options, selected, loading, error);
 }
 
 /// 라벨 필터 칩(클릭 가능, 선택되면 강조).
@@ -632,7 +632,7 @@ fn label_filter_chip(ui: &mut Ui, name: &str, color: egui::Color32, count: usize
     let text = format!("{name}  {count}");
     let g = ui.painter().layout_no_wrap(text, kiln_common::fonts::medium(11.0), t.text_dim);
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 26.0, 22.0), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, format!("라벨 {name}")));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, kiln_common::trf!("라벨 {name}")));
     if ui.is_rect_visible(rect) {
         let fill = if sel { alpha(t.accent, 0.16) } else if resp.hovered() { t.bg_hover } else { t.bg_elevated };
         let stroke = if sel { alpha(t.accent, 0.6) } else { t.border };

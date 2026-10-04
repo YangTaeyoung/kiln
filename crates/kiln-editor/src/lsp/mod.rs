@@ -144,8 +144,8 @@ impl<T> Pending<T> {
         let out = match rx.try_recv() {
             Ok(r) => r,
             Err(TryRecvError::Empty) if Instant::now() < self.deadline => return None,
-            Err(TryRecvError::Empty) => Err("응답 시간 초과".to_owned()),
-            Err(TryRecvError::Disconnected) => Err("언어 서버 연결이 끊겼습니다".to_owned()),
+            Err(TryRecvError::Empty) => Err(kiln_common::i18n::tr("응답 시간 초과").to_owned()),
+            Err(TryRecvError::Disconnected) => Err(kiln_common::i18n::tr("언어 서버 연결이 끊겼습니다").to_owned()),
         };
         self.rx = None;
         Some(out)
@@ -157,7 +157,7 @@ impl<T> Pending<T> {
         match rx.recv_timeout(timeout) {
             Ok(r) => Some(r),
             Err(RecvTimeoutError::Timeout) => None,
-            Err(RecvTimeoutError::Disconnected) => Some(Err("언어 서버 연결이 끊겼습니다".to_owned())),
+            Err(RecvTimeoutError::Disconnected) => Some(Err(kiln_common::i18n::tr("언어 서버 연결이 끊겼습니다").to_owned())),
         }
     }
 
@@ -415,7 +415,7 @@ impl LspManager {
         params: Value,
         parse: impl FnOnce(Value) -> Result<T, String> + Send + 'static,
     ) -> Pending<T> {
-        let Some(server) = self.server_of(path) else { return Pending::failed("이 파일에 연결된 언어 서버가 없습니다") };
+        let Some(server) = self.server_of(path) else { return Pending::failed(kiln_common::i18n::tr("이 파일에 연결된 언어 서버가 없습니다")) };
         let (tx, pending) = Pending::channel();
         server.request(
             method,
@@ -462,7 +462,7 @@ impl LspManager {
         let mut params = Self::doc_pos(path, pos);
         params["newName"] = Value::String(new_name.to_owned());
         self.request(path, "textDocument/rename", params, |v| {
-            if v.is_null() { Err("이름을 바꿀 수 없는 위치입니다".to_owned()) } else { Ok(proto::parse_workspace_edit(&v)) }
+            if v.is_null() { Err(kiln_common::i18n::tr("이름을 바꿀 수 없는 위치입니다").to_owned()) } else { Ok(proto::parse_workspace_edit(&v)) }
         })
     }
 
@@ -500,11 +500,11 @@ impl LspManager {
         let starting=servers.values().any(|s|matches!(s.status(),Status::Starting | Status::Restarting));
         let has_servers=!servers.is_empty();
         drop(servers);
-        if unavailable { return ("진단 연결 확인 필요",format!("{}\n언어 서버 설정을 확인하세요. 전체 프로젝트를 검사한 결과가 아닙니다.",self.status_text().unwrap_or_else(||"언어 서버가 중지되었습니다".into())),false); }
-        if starting { return ("언어 서버 시작 중",self.status_text().unwrap_or_else(||"진단 결과를 기다리고 있습니다.".into()),false); }
-        if self.diagnostics_version()>0 { return ("수신한 진단 0건","수신한 진단에서 발견된 문제가 없습니다. 전체 프로젝트 검사 결과는 아닙니다.".into(),true); }
-        if has_servers { ("진단 대기 중","언어 서버에서 아직 진단 결과를 받지 못했습니다.".into(),false) }
-        else { ("아직 진단 결과 없음","코드 파일을 열면 언어 서버 연결을 시작합니다. 서버가 설치되어 있어야 진단을 받을 수 있습니다.".into(),false) }
+        if unavailable { return (kiln_common::i18n::tr("진단 연결 확인 필요"),kiln_common::trf!("{}\n언어 서버 설정을 확인하세요. 전체 프로젝트를 검사한 결과가 아닙니다.",self.status_text().unwrap_or_else(||kiln_common::i18n::tr("언어 서버가 중지되었습니다").into())),false); }
+        if starting { return (kiln_common::i18n::tr("언어 서버 시작 중"),self.status_text().unwrap_or_else(||kiln_common::i18n::tr("진단 결과를 기다리고 있습니다.").into()),false); }
+        if self.diagnostics_version()>0 { return (kiln_common::i18n::tr("수신한 진단 0건"),kiln_common::i18n::tr("수신한 진단에서 발견된 문제가 없습니다. 전체 프로젝트 검사 결과는 아닙니다.").into(),true); }
+        if has_servers { (kiln_common::i18n::tr("진단 대기 중"),kiln_common::i18n::tr("언어 서버에서 아직 진단 결과를 받지 못했습니다.").into(),false) }
+        else { (kiln_common::i18n::tr("아직 진단 결과 없음"),kiln_common::i18n::tr("코드 파일을 열면 언어 서버 연결을 시작합니다. 서버가 설치되어 있어야 진단을 받을 수 있습니다.").into(),false) }
     }
 
     /// 진단이 게시될 때마다 증가한다.
@@ -536,7 +536,7 @@ impl LspManager {
         let mut parts: Vec<String> = servers.iter().filter_map(|s| s.status_text()).collect();
         parts.dedup();
         for lang in self.inner.shared.missing.lock().iter() {
-            parts.push(format!("{lang}: 언어 서버 없음"));
+            parts.push(kiln_common::trf!("{lang}: 언어 서버 없음"));
         }
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
@@ -569,15 +569,15 @@ fn did_open_params(path: &Path, doc: &Doc) -> Value {
 pub(crate) fn progress_title(title: &str) -> String {
     let l = title.to_ascii_lowercase();
     let known = [
-        ("indexing", "인덱싱 중"),
-        ("fetching", "가져오는 중"),
-        ("loading", "불러오는 중"),
-        ("building", "빌드 중"),
-        ("roots scanned", "파일 검사 중"),
-        ("cargo check", "검사 중"),
-        ("checking", "검사 중"),
-        ("flycheck", "검사 중"),
-        ("background index", "인덱싱 중"),
+        ("indexing", kiln_common::i18n::tr("인덱싱 중")),
+        ("fetching", kiln_common::i18n::tr("가져오는 중")),
+        ("loading", kiln_common::i18n::tr("불러오는 중")),
+        ("building", kiln_common::i18n::tr("빌드 중")),
+        ("roots scanned", kiln_common::i18n::tr("파일 검사 중")),
+        ("cargo check", kiln_common::i18n::tr("검사 중")),
+        ("checking", kiln_common::i18n::tr("검사 중")),
+        ("flycheck", kiln_common::i18n::tr("검사 중")),
+        ("background index", kiln_common::i18n::tr("인덱싱 중")),
     ];
     known.iter().find(|(k, _)| l.starts_with(k)).map_or_else(|| title.to_owned(), |(_, v)| (*v).to_owned())
 }

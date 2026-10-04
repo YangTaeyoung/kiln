@@ -235,7 +235,7 @@ impl RepositoryWorkspace {
             }
         }
         Some(super::tools::RepoLine {
-            branch: format!("{}개 저장소", inventory.roots.len()),
+            branch: kiln_common::trf!("{}개 저장소", inventory.roots.len()),
             dirty,
             ahead,
             behind,
@@ -643,10 +643,10 @@ impl RepositoryWorkspace {
             .drafts()
             .into_iter()
             .filter(|(_, d)| !d.commit_message.is_empty() || !d.github.repositories.is_empty())
-            .map(|(p, _)| format!("{} — Git / GitHub 초안", self.label(&p)))
+            .map(|(p, _)| kiln_common::trf!("{} — Git / GitHub 초안", self.label(&p)))
             .collect();
         if !self.prompt.is_empty() {
-            items.push("작성 중인 에이전트 요청".into());
+            items.push(kiln_common::i18n::tr("작성 중인 에이전트 요청").into());
         }
         items
     }
@@ -771,7 +771,7 @@ impl RepositoryWorkspace {
             let ready = self.inventory.is_some();
             let context = self.context_cache.clone();
             if !ready {
-                ui.label("저장소 구성을 확인하는 중…");
+                ui.label(kiln_common::i18n::tr("저장소 구성을 확인하는 중…"));
             }
             egui::ScrollArea::vertical()
                 .id_salt("agent_request_input")
@@ -780,7 +780,7 @@ impl RepositoryWorkspace {
                     let request = ui.add(
                         egui::TextEdit::multiline(&mut self.prompt)
                             .desired_rows(5)
-                            .hint_text("무엇을 만들거나 바꿀까요?")
+                            .hint_text(kiln_common::i18n::tr("무엇을 만들거나 바꿀까요?"))
                             .desired_width(f32::INFINITY),
                     );
                     if std::mem::take(&mut self.focus_prompt) {
@@ -804,7 +804,7 @@ impl RepositoryWorkspace {
                 .add_enabled_ui(can_start, |ui| {
                     ui.add_sized(
                         egui::vec2(ui.available_width(), 32.0),
-                        egui::Button::new(RichText::new("작업 시작").color(if can_start {
+                        egui::Button::new(RichText::new(kiln_common::i18n::tr("작업 시작")).color(if can_start {
                             theme.accent_fg
                         } else {
                             theme.text
@@ -827,14 +827,14 @@ impl RepositoryWorkspace {
                 });
             }
             if self.prompt.chars().count() > super::agent_launch::MAX_REQUEST_CHARS {
-                ui.label("요청은 32,000자 이내로 입력해 주세요.");
+                ui.label(kiln_common::i18n::tr("요청은 32,000자 이내로 입력해 주세요."));
             }
             ui.add_space(6.0);
             egui::ScrollArea::vertical()
                 .id_salt("agent_context_body")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    egui::CollapsingHeader::new("함께 전달할 저장소 구성").show(ui, |ui| {
+                    egui::CollapsingHeader::new(kiln_common::i18n::tr("함께 전달할 저장소 구성")).show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let path = self.root.display().to_string();
                             let width = (ui.available_width() - 32.0).max(20.0);
@@ -854,7 +854,7 @@ impl RepositoryWorkspace {
                             );
                             if ui
                                 .add_enabled_ui(ready, |ui| {
-                                    icon_button(ui, Icon::Copy, 24.0, false, "저장소 구성 복사")
+                                    icon_button(ui, Icon::Copy, 24.0, false, kiln_common::i18n::tr("저장소 구성 복사"))
                                 })
                                 .inner
                                 .clicked()
@@ -896,7 +896,7 @@ impl RepositoryWorkspace {
                             }
                         }
                         ui.add_space(8.0);
-                        egui::CollapsingHeader::new("전달 원문").show(ui, |ui| {
+                        egui::CollapsingHeader::new(kiln_common::i18n::tr("전달 원문")).show(ui, |ui| {
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(&context).small().color(theme.text_dim),
@@ -917,26 +917,26 @@ impl RepositoryWorkspace {
             if self.detail.is_some()
                 && ui
                     .add_enabled_ui(!busy, |ui| {
-                        icon_button(ui, Icon::Undo, 28.0, false, "전체 저장소로 돌아가기")
+                        icon_button(ui, Icon::Undo, 28.0, false, kiln_common::i18n::tr("전체 저장소로 돌아가기"))
                     })
                     .inner
-                    .on_disabled_hover_text("Git 작업이 끝나면 돌아갈 수 있습니다.")
+                    .on_disabled_hover_text(kiln_common::i18n::tr("Git 작업이 끝나면 돌아갈 수 있습니다."))
                     .clicked()
             {
                 self.detail = None;
             }
             let count = self.inventory.as_ref().map_or(0, |i| i.roots.len());
             ui.label(
-                RichText::new(format!("저장소 {count}"))
+                RichText::new(kiln_common::trf!("저장소 {count}"))
                     .strong()
                     .color(theme.text),
             )
             .on_hover_text(self.root.display().to_string());
             if let Some(inventory) = self.inventory.as_ref().filter(|i| i.limited || i.unreadable > 0) {
-                let mut detail = String::from("하위 5단계, 최대 128개 저장소·20,000개 폴더까지 탐색합니다. 숨김·의존성·빌드 폴더와 심볼릭 링크는 제외합니다.");
-                if inventory.limited { detail.push_str("\n탐색 한도 때문에 확인하지 않은 경로가 있습니다."); }
-                if inventory.unreadable > 0 { detail.push_str(&format!("\n읽지 못한 폴더: {}개.", inventory.unreadable)); }
-                let info = icon_button(ui, if inventory.unreadable > 0 { Icon::Warning } else { Icon::Info }, 24.0, false, "저장소 탐색 정보")
+                let mut detail = String::from(kiln_common::i18n::tr("하위 5단계, 최대 128개 저장소·20,000개 폴더까지 탐색합니다. 숨김·의존성·빌드 폴더와 심볼릭 링크는 제외합니다."));
+                if inventory.limited { detail.push_str(kiln_common::i18n::tr("\n탐색 한도 때문에 확인하지 않은 경로가 있습니다.")); }
+                if inventory.unreadable > 0 { detail.push_str(&kiln_common::trf!("\n읽지 못한 폴더: {}개.", inventory.unreadable)); }
+                let info = icon_button(ui, if inventory.unreadable > 0 { Icon::Warning } else { Icon::Info }, 24.0, false, kiln_common::i18n::tr("저장소 탐색 정보"))
                     .on_hover_text(&detail);
                 egui::Popup::menu(&info).show(|ui| {
                     ui.set_max_width(280.0);
@@ -950,7 +950,7 @@ impl RepositoryWorkspace {
                     .all(|r| r.status_task.is_none() && r.pr_task.is_none());
             if ui
                 .add_enabled_ui(idle, |ui| {
-                    icon_button(ui, Icon::Refresh, 28.0, false, "저장소 새로고침")
+                    icon_button(ui, Icon::Refresh, 28.0, false, kiln_common::i18n::tr("저장소 새로고침"))
                 })
                 .inner
                 .clicked()
@@ -1003,9 +1003,9 @@ impl RepositoryWorkspace {
         ui.add(
             egui::TextEdit::singleline(&mut self.filter)
                 .hint_text(if kind == ToolKind::PullRequests {
-                    "저장소·PR 찾기"
+                    kiln_common::i18n::tr("저장소·PR 찾기")
                 } else {
-                    "저장소·변경 파일 찾기"
+                    kiln_common::i18n::tr("저장소·변경 파일 찾기")
                 })
                 .desired_width(f32::INFINITY),
         );
@@ -1034,14 +1034,14 @@ impl RepositoryWorkspace {
                 show_all,
                 false,
                 if kind == ToolKind::PullRequests {
-                    "PR 있음"
+                    kiln_common::i18n::tr("PR 있음")
                 } else {
-                    "변경만"
+                    kiln_common::i18n::tr("변경만")
                 },
             );
-            ui.selectable_value(show_all, true, "전체 저장소");
+            ui.selectable_value(show_all, true, kiln_common::i18n::tr("전체 저장소"));
             if pending > 0 {
-                let label = format!("{pending}개 저장소 확인 중");
+                let label = kiln_common::trf!("{pending}개 저장소 확인 중");
                 let response = ui.spinner().on_hover_text(&label);
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::ProgressIndicator, true, &label)
@@ -1054,7 +1054,7 @@ impl RepositoryWorkspace {
             .filter(|(p, _)| !self.inventory.as_ref().is_some_and(|i| i.roots.contains(p)))
             .collect();
         if !missing.is_empty() {
-            egui::CollapsingHeader::new("연결이 끊긴 저장소의 초안")
+            egui::CollapsingHeader::new(kiln_common::i18n::tr("연결이 끊긴 저장소의 초안"))
                 .default_open(true)
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical()
@@ -1064,8 +1064,8 @@ impl RepositoryWorkspace {
                             for (path, draft) in missing {
                                 ui.label(path.display().to_string());
                                 ui.horizontal_wrapped(|ui| {
-                                    if ui.button("초안 복사").clicked() {
-                                        let mut text = format!(
+                                    if ui.button(kiln_common::i18n::tr("초안 복사")).clicked() {
+                                        let mut text = kiln_common::trf!(
                                             "저장소: {}\n\n커밋 메시지:\n{}\n",
                                             path.display(),
                                             draft.commit_message
@@ -1078,7 +1078,7 @@ impl RepositoryWorkspace {
                                                 ));
                                             }
                                             if let Some(issue) = d.issue {
-                                                text.push_str(&format!(
+                                                text.push_str(&kiln_common::trf!(
                                                     "\n{name} 이슈: {}\n{}\n",
                                                     issue.title, issue.body
                                                 ));
@@ -1089,7 +1089,7 @@ impl RepositoryWorkspace {
                                     let busy =
                                         self.repos.get_mut(&path).is_some_and(Repository::busy);
                                     if ui
-                                        .add_enabled(!busy, egui::Button::new("초안 폐기…"))
+                                        .add_enabled(!busy, egui::Button::new(kiln_common::i18n::tr("초안 폐기…")))
                                         .clicked()
                                     {
                                         self.discard = Some(path.clone());
@@ -1101,14 +1101,14 @@ impl RepositoryWorkspace {
         }
         if let Some(path) = self.discard.clone() {
             egui::Modal::new(egui::Id::new("discard_missing_repo")).show(ui.ctx(), |ui| {
-                ui.heading("보관된 초안을 폐기할까요?");
+                ui.heading(kiln_common::i18n::tr("보관된 초안을 폐기할까요?"));
                 ui.label(path.display().to_string());
-                ui.label("이 저장소의 커밋 메시지와 GitHub 작성 초안을 제거합니다.");
+                ui.label(kiln_common::i18n::tr("이 저장소의 커밋 메시지와 GitHub 작성 초안을 제거합니다."));
                 ui.horizontal(|ui| {
-                    if ui.button("취소").clicked() {
+                    if ui.button(kiln_common::i18n::tr("취소")).clicked() {
                         self.discard = None;
                     }
-                    if ui.button("초안 폐기").clicked() {
+                    if ui.button(kiln_common::i18n::tr("초안 폐기")).clicked() {
                         self.repos.remove(&path);
                         self.discard = None;
                     }
@@ -1119,18 +1119,18 @@ impl RepositoryWorkspace {
             self.start_github_jobs(ui.ctx());
             let (auth, missing) = self.github_error_summary();
             if missing {
-                ui.label("GitHub CLI를 찾을 수 없습니다");
-                if ui.small_button("설치·경로 확인").clicked() {
+                ui.label(kiln_common::i18n::tr("GitHub CLI를 찾을 수 없습니다"));
+                if ui.small_button(kiln_common::i18n::tr("설치·경로 확인")).clicked() {
                     actions.push(Action::OpenLink(super::terminal::LinkTarget::Url(
                         "https://cli.github.com".into(),
                     )));
                 }
             }
             if auth > 0 {
-                ui.label(format!("{auth}개 저장소에 GitHub 로그인이 필요합니다"));
+                ui.label(kiln_common::trf!("{auth}개 저장소에 GitHub 로그인이 필요합니다"));
                 if ui
-                    .small_button("터미널에서 로그인")
-                    .on_hover_text("gh auth login · 대상 호스트는 로그인 과정에서 선택합니다")
+                    .small_button(kiln_common::i18n::tr("터미널에서 로그인"))
+                    .on_hover_text(kiln_common::i18n::tr("gh auth login · 대상 호스트는 로그인 과정에서 선택합니다"))
                     .clicked()
                 {
                     actions.push(Action::RunInTerminalAt {
@@ -1230,14 +1230,14 @@ impl RepositoryWorkspace {
                                 || kind == ToolKind::PullRequests && has_prs && !review_pr
                             {
                                 let content = if kind == ToolKind::Git {
-                                    "변경"
+                                    kiln_common::i18n::tr("변경")
                                 } else {
                                     "PR"
                                 };
                                 let tip = if repo.expanded {
-                                    format!("{name} {content} 접기")
+                                    kiln_common::trf!("{name} {content} 접기")
                                 } else {
-                                    format!("{name} {content} 펼치기")
+                                    kiln_common::trf!("{name} {content} 펼치기")
                                 };
                                 if icon_button(
                                     ui,
@@ -1322,9 +1322,9 @@ impl RepositoryWorkspace {
                             }
                             if let Some(error) = github_error {
                                 let label = match error {
-                                    GitError::GhAuth(_) => "로그인 필요",
-                                    GitError::GhMissing => "gh 경로 확인 필요",
-                                    _ => "GitHub 확인 실패",
+                                    GitError::GhAuth(_) => kiln_common::i18n::tr("로그인 필요"),
+                                    GitError::GhMissing => kiln_common::i18n::tr("gh 경로 확인 필요"),
+                                    _ => kiln_common::i18n::tr("GitHub 확인 실패"),
                                 };
                                 if icon_button(ui, Icon::Warning, 26.0, false, label)
                                     .on_hover_text(error.to_string())
@@ -1343,9 +1343,9 @@ impl RepositoryWorkspace {
                                 26.0,
                                 false,
                                 if kind == ToolKind::Git {
-                                    "Git 작업 열기"
+                                    kiln_common::i18n::tr("Git 작업 열기")
                                 } else {
-                                    "GitHub 열기"
+                                    kiln_common::i18n::tr("GitHub 열기")
                                 },
                             )
                             .clicked()
@@ -1353,7 +1353,7 @@ impl RepositoryWorkspace {
                                 detail = Some(path.clone());
                             }
                             if kind == ToolKind::Git
-                                && icon_button(ui, Icon::History, 26.0, false, "커밋 기록 열기")
+                                && icon_button(ui, Icon::History, 26.0, false, kiln_common::i18n::tr("커밋 기록 열기"))
                                     .clicked()
                             {
                                 actions.push(Action::OpenTab(history_factory(path.clone())));
@@ -1387,7 +1387,7 @@ impl RepositoryWorkspace {
                                     );
                                     if linked {
                                         ui.label(
-                                            RichText::new("워크트리").small().color(theme.text_dim),
+                                            RichText::new(kiln_common::i18n::tr("워크트리")).small().color(theme.text_dim),
                                         )
                                         .on_hover_text(
                                             repo.worktree
@@ -1401,7 +1401,7 @@ impl RepositoryWorkspace {
                                     let changes = status.changed_count();
                                     if changes > 0 {
                                         ui.label(
-                                            RichText::new(format!("{changes} 변경"))
+                                            RichText::new(kiln_common::trf!("{changes} 변경"))
                                                 .small()
                                                 .color(theme.text),
                                         );
@@ -1409,7 +1409,7 @@ impl RepositoryWorkspace {
                                     let conflicts = status.conflicted_count();
                                     if conflicts > 0 {
                                         ui.label(
-                                            RichText::new(format!("{conflicts} 충돌"))
+                                            RichText::new(kiln_common::trf!("{conflicts} 충돌"))
                                                 .small()
                                                 .color(theme.red),
                                         );
@@ -1435,7 +1435,7 @@ impl RepositoryWorkspace {
                                                 ui.label(
                                                     RichText::new("S").small().color(theme.green),
                                                 )
-                                                .on_hover_text("스테이징됨");
+                                                .on_hover_text(kiln_common::i18n::tr("스테이징됨"));
                                             }
                                             if ui
                                                 .add(
@@ -1464,7 +1464,7 @@ impl RepositoryWorkspace {
                                         .count();
                                     if matches > 8 {
                                         if ui
-                                            .small_button(format!("{}개 더 보기", matches - 8))
+                                            .small_button(kiln_common::trf!("{}개 더 보기", matches - 8))
                                             .clicked()
                                         {
                                             detail = Some(path.clone());
@@ -1496,9 +1496,9 @@ impl RepositoryWorkspace {
                                         .take(if review_pr { 3 } else { usize::MAX })
                                     {
                                         let checks = match pr.checks() {
-                                            Some(kiln_git::ChecksState::Pass) => "검사 통과",
-                                            Some(kiln_git::ChecksState::Fail) => "검사 실패",
-                                            Some(kiln_git::ChecksState::Pending) => "검사 진행 중",
+                                            Some(kiln_git::ChecksState::Pass) => kiln_common::i18n::tr("검사 통과"),
+                                            Some(kiln_git::ChecksState::Fail) => kiln_common::i18n::tr("검사 실패"),
+                                            Some(kiln_git::ChecksState::Pending) => kiln_common::i18n::tr("검사 진행 중"),
                                             None => "",
                                         };
                                         let title = if checks.is_empty() {
@@ -1537,7 +1537,7 @@ impl RepositoryWorkspace {
                                     if review_pr
                                         && prs.len() > 3
                                         && ui
-                                            .small_button(format!("PR {}개 더 보기", prs.len() - 3))
+                                            .small_button(kiln_common::trf!("PR {}개 더 보기", prs.len() - 3))
                                             .clicked()
                                     {
                                         detail = Some(path.clone());
@@ -1545,7 +1545,7 @@ impl RepositoryWorkspace {
                                 }
                                 Some(Err(_)) => {}
                                 None => {
-                                    ui.label("PR 확인 중…");
+                                    ui.label(kiln_common::i18n::tr("PR 확인 중…"));
                                 }
                             }
                         }
@@ -1558,7 +1558,7 @@ impl RepositoryWorkspace {
                     } else if query.is_empty() && pending > 0 {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label("확인 중…");
+                            ui.label(kiln_common::i18n::tr("확인 중…"));
                         });
                     } else if query.is_empty() {
                         let empty = self
@@ -1566,17 +1566,17 @@ impl RepositoryWorkspace {
                             .as_ref()
                             .is_none_or(|inventory| inventory.roots.is_empty());
                         ui.label(if empty {
-                            "Git 저장소가 없습니다."
+                            kiln_common::i18n::tr("Git 저장소가 없습니다.")
                         } else if kind == ToolKind::PullRequests {
-                            "열린 PR이 없습니다."
+                            kiln_common::i18n::tr("열린 PR이 없습니다.")
                         } else {
-                            "변경 사항이 없습니다."
+                            kiln_common::i18n::tr("변경 사항이 없습니다.")
                         });
                     } else {
                         ui.label(if kind == ToolKind::PullRequests {
-                            "일치하는 저장소·PR이 없습니다."
+                            kiln_common::i18n::tr("일치하는 저장소·PR이 없습니다.")
                         } else {
-                            "일치하는 저장소·변경 파일이 없습니다."
+                            kiln_common::i18n::tr("일치하는 저장소·변경 파일이 없습니다.")
                         });
                     }
                 }

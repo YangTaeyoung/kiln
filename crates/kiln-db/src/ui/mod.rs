@@ -312,7 +312,7 @@ impl TypedConfirm {
             ui.add_space(10.0);
             ui.add(egui::Label::new(RichText::new(&self.message).size(13.0).color(t.text_dim)).wrap());
             ui.add_space(12.0);
-            ui.label(faint(format!("확인하려면 \"{}\"을(를) 입력하세요", self.expected)));
+            ui.label(faint(kiln_common::trf!("확인하려면 \"{}\"을(를) 입력하세요", self.expected)));
             ui.add_space(4.0);
             let fid = id.with("typed");
             let hint = RichText::new(self.expected.as_str()).color(t.text_faint);
@@ -325,7 +325,7 @@ impl TypedConfirm {
                 if danger.clicked() || (ok && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                     result = Some(true);
                 }
-                if widgets::button(ui, "취소", ButtonKind::Secondary).clicked() {
+                if widgets::button(ui, kiln_common::i18n::tr("취소"), ButtonKind::Secondary).clicked() {
                     result = Some(false);
                 }
             });

@@ -26,19 +26,19 @@ impl From<&SelectedCommand> for Draft {
 impl Draft {
     fn validate(&self) -> Result<SelectedCommand, String> {
         let name = self.name.trim();
-        if name.is_empty() { return Err("명령 이름을 입력하세요.".into()); }
-        if name.chars().count() > 100 || name.chars().any(char::is_control) { return Err("이름은 줄바꿈 없이 100자 이내로 입력하세요.".into()); }
-        if self.command.trim().is_empty() { return Err("실행할 명령을 입력하세요.".into()); }
-        if self.command.len() > 16_384 { return Err("명령은 16KB 이내로 입력하세요.".into()); }
-        if self.command.chars().any(|c| c.is_control() && c != '\n' && c != '\t') { return Err("명령에 지원하지 않는 제어 문자가 있습니다.".into()); }
+        if name.is_empty() { return Err(kiln_common::i18n::tr("명령 이름을 입력하세요.").into()); }
+        if name.chars().count() > 100 || name.chars().any(char::is_control) { return Err(kiln_common::i18n::tr("이름은 줄바꿈 없이 100자 이내로 입력하세요.").into()); }
+        if self.command.trim().is_empty() { return Err(kiln_common::i18n::tr("실행할 명령을 입력하세요.").into()); }
+        if self.command.len() > 16_384 { return Err(kiln_common::i18n::tr("명령은 16KB 이내로 입력하세요.").into()); }
+        if self.command.chars().any(|c| c.is_control() && c != '\n' && c != '\t') { return Err(kiln_common::i18n::tr("명령에 지원하지 않는 제어 문자가 있습니다.").into()); }
         let raw = self.cwd.trim();
         let cwd = if raw.is_empty() { None } else {
-            if raw.len() > 4096 || raw.chars().any(char::is_control) { return Err("작업 폴더 경로를 확인하세요.".into()); }
+            if raw.len() > 4096 || raw.chars().any(char::is_control) { return Err(kiln_common::i18n::tr("작업 폴더 경로를 확인하세요.").into()); }
             let path = if raw == "~" || raw.starts_with("~/") {
-                let home = std::env::var_os("HOME").ok_or("홈 폴더를 찾을 수 없습니다. 전체 경로를 입력하세요.")?;
+                let home = std::env::var_os("HOME").ok_or(kiln_common::i18n::tr("홈 폴더를 찾을 수 없습니다. 전체 경로를 입력하세요."))?;
                 PathBuf::from(home).join(raw.strip_prefix("~/").unwrap_or(""))
             } else { PathBuf::from(raw) };
-            if !path.is_absolute() { return Err("작업 폴더는 전체 경로 또는 ~/로 입력하세요.".into()); }
+            if !path.is_absolute() { return Err(kiln_common::i18n::tr("작업 폴더는 전체 경로 또는 ~/로 입력하세요.").into()); }
             Some(path)
         };
         // Preserve command whitespace: trimming would change shell heredoc content.
@@ -83,31 +83,31 @@ impl Launcher {
     fn reload(&mut self) {
         match read_commands(&self.path) {
             Ok((entries, disk)) => { self.entries = entries; self.disk = disk; self.load_failed = false; self.error = None; }
-            Err(error) => { self.load_failed = true; self.disk = std::fs::metadata(&self.path).ok().filter(|m| m.len() <= MAX_FILE_BYTES).and_then(|_| std::fs::read(&self.path).ok()); self.error = Some(format!("저장된 명령을 읽지 못했습니다. 원본은 유지됩니다. 다시 불러오거나 원본을 백업한 뒤 빈 목록으로 복구하세요. 파일: {} · {error}", self.path.display())); }
+            Err(error) => { self.load_failed = true; self.disk = std::fs::metadata(&self.path).ok().filter(|m| m.len() <= MAX_FILE_BYTES).and_then(|_| std::fs::read(&self.path).ok()); self.error = Some(kiln_common::trf!("저장된 명령을 읽지 못했습니다. 원본은 유지됩니다. 다시 불러오거나 원본을 백업한 뒤 빈 목록으로 복구하세요. 파일: {} · {error}", self.path.display())); }
         }
     }
     fn recover_empty(&mut self) -> Result<PathBuf, String> {
         use std::io::Write;
-        if !self.load_failed { return Err("명령 목록을 정상적으로 읽었습니다. 복구할 필요가 없습니다.".into()); }
-        let expected = self.disk.as_ref().ok_or("원본을 읽지 못해 복구를 중단했습니다. 파일 크기와 읽기 권한을 확인한 뒤 다시 불러오세요.")?;
-        let bytes = std::fs::read(&self.path).map_err(|e| format!("원본을 읽지 못했습니다. 파일 권한을 확인하세요: {e}"))?;
-        if &bytes != expected { return Err("명령 파일이 변경되었습니다. 다시 불러온 뒤 복구하세요.".into()); }
+        if !self.load_failed { return Err(kiln_common::i18n::tr("명령 목록을 정상적으로 읽었습니다. 복구할 필요가 없습니다.").into()); }
+        let expected = self.disk.as_ref().ok_or(kiln_common::i18n::tr("원본을 읽지 못해 복구를 중단했습니다. 파일 크기와 읽기 권한을 확인한 뒤 다시 불러오세요."))?;
+        let bytes = std::fs::read(&self.path).map_err(|e| kiln_common::trf!("원본을 읽지 못했습니다. 파일 권한을 확인하세요: {e}"))?;
+        if &bytes != expected { return Err(kiln_common::i18n::tr("명령 파일이 변경되었습니다. 다시 불러온 뒤 복구하세요.").into()); }
         let mut backup = None;
         for n in 1..=1000 {
             let candidate = self.path.with_extension(format!("json.backup-{n}"));
             let mut options = std::fs::OpenOptions::new(); options.write(true).create_new(true);
             #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
             match options.open(&candidate) {
-                Ok(mut file) => { file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|e| format!("백업 저장 실패. 원본은 유지됩니다: {e}"))?; backup = Some(candidate); break; }
+                Ok(mut file) => { file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|e| kiln_common::trf!("백업 저장 실패. 원본은 유지됩니다: {e}"))?; backup = Some(candidate); break; }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(format!("백업 생성 실패. 원본은 유지됩니다: {e}")),
+                Err(e) => return Err(kiln_common::trf!("백업 생성 실패. 원본은 유지됩니다: {e}")),
             }
         }
-        let backup = backup.ok_or("백업 파일 이름을 만들지 못했습니다. 원본은 유지됩니다.")?;
-        if std::fs::read(&self.path).map_err(|e| e.to_string())? != bytes { return Err("백업 중 원본이 변경되었습니다. 다시 불러온 뒤 복구하세요.".into()); }
-        kiln_common::store::save_json(&self.path, &Vec::<SelectedCommand>::new()).map_err(|e| format!("빈 목록 저장 실패. 백업: {} · {e}", backup.display()))?;
+        let backup = backup.ok_or(kiln_common::i18n::tr("백업 파일 이름을 만들지 못했습니다. 원본은 유지됩니다."))?;
+        if std::fs::read(&self.path).map_err(|e| e.to_string())? != bytes { return Err(kiln_common::i18n::tr("백업 중 원본이 변경되었습니다. 다시 불러온 뒤 복구하세요.").into()); }
+        kiln_common::store::save_json(&self.path, &Vec::<SelectedCommand>::new()).map_err(|e| kiln_common::trf!("빈 목록 저장 실패. 백업: {} · {e}", backup.display()))?;
         self.reload();
-        if self.load_failed { return Err("복구한 명령 목록을 다시 읽지 못했습니다. 다시 불러오기를 눌러주세요.".into()); }
+        if self.load_failed { return Err(kiln_common::i18n::tr("복구한 명령 목록을 다시 읽지 못했습니다. 다시 불러오기를 눌러주세요.").into()); }
         self.screen = Screen::List; self.query.clear(); self.selected = 0;
         Ok(backup)
     }
@@ -127,14 +127,14 @@ impl Launcher {
         dirty(&self.screen)
     }
     fn persist(&mut self, entries: Vec<SelectedCommand>) -> Result<(), String> {
-        if self.load_failed { return Err("명령 파일을 먼저 다시 불러오세요.".into()); }
+        if self.load_failed { return Err(kiln_common::i18n::tr("명령 파일을 먼저 다시 불러오세요.").into()); }
         let (_, current) = read_commands(&self.path)?;
-        if current != self.disk { return Err("다른 창에서 명령 파일을 변경했습니다. 목록으로 돌아가 다시 불러온 뒤 편집하세요.".into()); }
-        if entries.len() > MAX_COMMANDS { return Err("저장할 수 있는 명령은 최대 200개입니다.".into()); }
+        if current != self.disk { return Err(kiln_common::i18n::tr("다른 창에서 명령 파일을 변경했습니다. 목록으로 돌아가 다시 불러온 뒤 편집하세요.").into()); }
+        if entries.len() > MAX_COMMANDS { return Err(kiln_common::i18n::tr("저장할 수 있는 명령은 최대 200개입니다.").into()); }
         for entry in &entries { Draft::from(entry).validate()?; }
         let bytes = serde_json::to_vec_pretty(&entries).map_err(|e| e.to_string())?;
-        if bytes.len() as u64 > MAX_FILE_BYTES { return Err("명령 파일이 4MB 제한을 초과했습니다. 명령 수나 내용을 줄여주세요.".into()); }
-        kiln_common::store::save_json(&self.path, &entries).map_err(|e| format!("저장하지 못했습니다. 입력한 내용은 유지됩니다. {e}"))?;
+        if bytes.len() as u64 > MAX_FILE_BYTES { return Err(kiln_common::i18n::tr("명령 파일이 4MB 제한을 초과했습니다. 명령 수나 내용을 줄여주세요.").into()); }
+        kiln_common::store::save_json(&self.path, &entries).map_err(|e| kiln_common::trf!("저장하지 못했습니다. 입력한 내용은 유지됩니다. {e}"))?;
         self.disk = Some(bytes); self.entries = entries; Ok(())
     }
     pub fn ui(&mut self, ctx: &egui::Context, default_cwd: &Path) -> Option<SelectedCommand> {
@@ -152,17 +152,17 @@ impl Launcher {
             ui.spacing_mut().scroll.floating = false;
             ui.spacing_mut().scroll.dormant_handle_opacity = 0.65;
             ui.horizontal(|ui| {
-                let title = match screen { Screen::List => "저장 명령", Screen::Preview(_) => "명령 실행", Screen::Edit { index: Some(_), .. } => "명령 편집", Screen::Edit { .. } => "새 명령", Screen::Delete(_) => "명령 삭제", Screen::Discard { .. } => "편집 취소" };
+                let title = match screen { Screen::List => kiln_common::i18n::tr("저장 명령"), Screen::Preview(_) => kiln_common::i18n::tr("명령 실행"), Screen::Edit { index: Some(_), .. } => kiln_common::i18n::tr("명령 편집"), Screen::Edit { .. } => kiln_common::i18n::tr("새 명령"), Screen::Delete(_) => kiln_common::i18n::tr("명령 삭제"), Screen::Discard { .. } => kiln_common::i18n::tr("편집 취소") };
                 ui.label(RichText::new(title).font(fonts::semibold(20.0)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, "명령 창 닫기").clicked() { intent = Intent::Close; }
+                    if widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, kiln_common::i18n::tr("명령 창 닫기")).clicked() { intent = Intent::Close; }
                 });
             });
             ui.add_space(10.0);
             egui::ScrollArea::vertical().id_salt("saved-command-content").max_height(body_height).auto_shrink([false, true]).show(ui, |ui| {
                 match &mut screen {
                     Screen::List => {
-                        let search = ui.add(egui::TextEdit::singleline(&mut self.query).hint_text("이름 또는 명령 검색").desired_width(f32::INFINITY));
+                        let search = ui.add(egui::TextEdit::singleline(&mut self.query).hint_text(kiln_common::i18n::tr("이름 또는 명령 검색")).desired_width(f32::INFINITY));
                         if self.focus_search { search.request_focus(); self.focus_search = false; }
                         if search.changed() { self.selected = 0; }
                         ui.add_space(8.0);
@@ -178,7 +178,7 @@ impl Launcher {
                         }
                         if visible.is_empty() {
                             ui.add_space(12.0);
-                            ui.label(RichText::new(if self.entries.is_empty() { "반복하는 작업을 한 번 저장해두세요." } else { "일치하는 명령이 없습니다. 검색어를 바꿔보세요." }).color(t.text_dim));
+                            ui.label(RichText::new(if self.entries.is_empty() { kiln_common::i18n::tr("반복하는 작업을 한 번 저장해두세요.") } else { kiln_common::i18n::tr("일치하는 명령이 없습니다. 검색어를 바꿔보세요.") }).color(t.text_dim));
                             ui.add_space(12.0);
                         }
                         for (position, (index, item)) in visible.iter().enumerate() {
@@ -189,30 +189,30 @@ impl Launcher {
                         }
                     }
                     Screen::Edit { draft, .. } => {
-                        let label = ui.label("이름");
-                        let name = ui.add(egui::TextEdit::singleline(&mut draft.name).hint_text("예: 개발 서버").desired_width(f32::INFINITY)).labelled_by(label.id);
+                        let label = ui.label(kiln_common::i18n::tr("이름"));
+                        let name = ui.add(egui::TextEdit::singleline(&mut draft.name).hint_text(kiln_common::i18n::tr("예: 개발 서버")).desired_width(f32::INFINITY)).labelled_by(label.id);
                         if self.focus_name { name.request_focus(); self.focus_name = false; }
-                        let label = ui.label("명령");
-                        ui.add(egui::TextEdit::multiline(&mut draft.command).code_editor().desired_rows(4).hint_text("예: npm run dev").desired_width(f32::INFINITY)).labelled_by(label.id);
-                        let label = ui.label("작업 폴더 · 선택 사항");
-                        ui.add(egui::TextEdit::singleline(&mut draft.cwd).hint_text("비우면 실행 시 현재 프로젝트 폴더").desired_width(f32::INFINITY)).labelled_by(label.id);
-                        ui.add(egui::Label::new(RichText::new("명령은 이 컴퓨터에 저장됩니다. 저장만으로 실행되지 않습니다.").size(12.0).color(t.text_dim)).wrap());
+                        let label = ui.label(kiln_common::i18n::tr("명령"));
+                        ui.add(egui::TextEdit::multiline(&mut draft.command).code_editor().desired_rows(4).hint_text(kiln_common::i18n::tr("예: npm run dev")).desired_width(f32::INFINITY)).labelled_by(label.id);
+                        let label = ui.label(kiln_common::i18n::tr("작업 폴더 · 선택 사항"));
+                        ui.add(egui::TextEdit::singleline(&mut draft.cwd).hint_text(kiln_common::i18n::tr("비우면 실행 시 현재 프로젝트 폴더")).desired_width(f32::INFINITY)).labelled_by(label.id);
+                        ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("명령은 이 컴퓨터에 저장됩니다. 저장만으로 실행되지 않습니다.")).size(12.0).color(t.text_dim)).wrap());
                     }
                     Screen::Preview(index) => if let Some(item) = self.entries.get(*index) {
                         ui.label(RichText::new(&item.name).font(fonts::semibold(16.0)));
-                        ui.label(RichText::new("실행할 명령").color(t.text_dim));
+                        ui.label(RichText::new(kiln_common::i18n::tr("실행할 명령")).color(t.text_dim));
                         ui.add(egui::Label::new(RichText::new(&item.command).font(fonts::mono(13.0))).wrap().selectable(true));
                         ui.add_space(10.0);
-                        ui.label(RichText::new("작업 폴더").color(t.text_dim));
+                        ui.label(RichText::new(kiln_common::i18n::tr("작업 폴더")).color(t.text_dim));
                         ui.add(egui::Label::new(item.cwd.as_deref().unwrap_or(default_cwd).display().to_string()).wrap().selectable(true));
                         ui.add_space(8.0);
-                        ui.label(RichText::new("새 터미널에서 실행합니다.").size(12.0).color(t.text_dim));
+                        ui.label(RichText::new(kiln_common::i18n::tr("새 터미널에서 실행합니다.")).size(12.0).color(t.text_dim));
                     },
                     Screen::Delete(index) => if let Some(item) = self.entries.get(*index) {
-                        ui.add(egui::Label::new(format!("다음 저장 명령을 삭제할까요?\n{}", item.name)).wrap());
-                        ui.label(RichText::new("실행 중인 터미널에는 영향을 주지 않습니다.").color(t.text_dim));
+                        ui.add(egui::Label::new(kiln_common::trf!("다음 저장 명령을 삭제할까요?\n{}", item.name)).wrap());
+                        ui.label(RichText::new(kiln_common::i18n::tr("실행 중인 터미널에는 영향을 주지 않습니다.")).color(t.text_dim));
                     },
-                    Screen::Discard { .. } => { ui.label("저장하지 않은 편집 내용을 버릴까요?"); },
+                    Screen::Discard { .. } => { ui.label(kiln_common::i18n::tr("저장하지 않은 편집 내용을 버릴까요?")); },
                 }
             });
             if let Some(error) = self.error.as_ref().or(self.notice.as_ref()) {
@@ -226,35 +226,35 @@ impl Launcher {
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| match &screen {
                 Screen::List => {
-                    ui.add_enabled_ui(!self.load_failed && self.entries.len() < MAX_COMMANDS, |ui| { if widgets::button(ui, "새 명령", ButtonKind::Primary).clicked() { intent = Intent::Edit(None); } });
-                    if widgets::button(ui, "다시 불러오기", ButtonKind::Ghost).clicked() { intent = Intent::Reload; }
-                    if self.load_failed && widgets::button(ui, "원본 백업 후 빈 목록으로 복구", ButtonKind::Secondary).clicked() { intent = Intent::Recover; }
-                    ui.label(RichText::new("↑↓ 선택 · Enter 미리보기").size(11.5).color(t.text_dim));
+                    ui.add_enabled_ui(!self.load_failed && self.entries.len() < MAX_COMMANDS, |ui| { if widgets::button(ui, kiln_common::i18n::tr("새 명령"), ButtonKind::Primary).clicked() { intent = Intent::Edit(None); } });
+                    if widgets::button(ui, kiln_common::i18n::tr("다시 불러오기"), ButtonKind::Ghost).clicked() { intent = Intent::Reload; }
+                    if self.load_failed && widgets::button(ui, kiln_common::i18n::tr("원본 백업 후 빈 목록으로 복구"), ButtonKind::Secondary).clicked() { intent = Intent::Recover; }
+                    ui.label(RichText::new(kiln_common::i18n::tr("↑↓ 선택 · Enter 미리보기")).size(11.5).color(t.text_dim));
                 }
                 Screen::Edit { draft, .. } => {
-                    if self.error.is_some() && widgets::button(ui, "초안 내보내기…", ButtonKind::Secondary).clicked() {
+                    if self.error.is_some() && widgets::button(ui, kiln_common::i18n::tr("초안 내보내기…"), ButtonKind::Secondary).clicked() {
                         if let Some(path) = rfd::FileDialog::new().set_file_name("kiln-command-draft.json").save_file() {
-                            match kiln_common::store::save_json(&path, draft) { Ok(()) => self.notice = Some(format!("초안을 내보냈습니다: {}", path.display())), Err(error) => self.error = Some(format!("초안 내보내기 실패. 입력은 유지됩니다: {error}")) }
+                            match kiln_common::store::save_json(&path, draft) { Ok(()) => self.notice = Some(kiln_common::trf!("초안을 내보냈습니다: {}", path.display())), Err(error) => self.error = Some(kiln_common::trf!("초안 내보내기 실패. 입력은 유지됩니다: {error}")) }
                         }
                     }
-                    if widgets::button(ui, "명령 저장", ButtonKind::Primary).clicked() { intent = Intent::Save; }
-                    if widgets::button(ui, "편집 취소", ButtonKind::Secondary).clicked() { intent = Intent::List; }
+                    if widgets::button(ui, kiln_common::i18n::tr("명령 저장"), ButtonKind::Primary).clicked() { intent = Intent::Save; }
+                    if widgets::button(ui, kiln_common::i18n::tr("편집 취소"), ButtonKind::Secondary).clicked() { intent = Intent::List; }
                 }
                 Screen::Preview(index) => {
-                    let run = widgets::button(ui, "새 터미널에서 실행", ButtonKind::Primary);
+                    let run = widgets::button(ui, kiln_common::i18n::tr("새 터미널에서 실행"), ButtonKind::Primary);
                     if self.focus_primary { run.request_focus(); self.focus_primary = false; }
                     if run.clicked() { intent = Intent::Run(*index); }
-                    if widgets::button(ui, "편집", ButtonKind::Secondary).clicked() { intent = Intent::Edit(Some(*index)); }
-                    if widgets::button(ui, "삭제", ButtonKind::Ghost).clicked() { intent = Intent::Delete(*index); }
-                    if widgets::button(ui, "목록", ButtonKind::Ghost).clicked() { intent = Intent::List; }
+                    if widgets::button(ui, kiln_common::i18n::tr("편집"), ButtonKind::Secondary).clicked() { intent = Intent::Edit(Some(*index)); }
+                    if widgets::button(ui, kiln_common::i18n::tr("삭제"), ButtonKind::Ghost).clicked() { intent = Intent::Delete(*index); }
+                    if widgets::button(ui, kiln_common::i18n::tr("목록"), ButtonKind::Ghost).clicked() { intent = Intent::List; }
                 }
                 Screen::Delete(index) => {
-                    if widgets::button(ui, "명령 삭제", ButtonKind::Danger).clicked() { intent = Intent::ConfirmDelete(*index); }
-                    if widgets::button(ui, "유지", ButtonKind::Secondary).clicked() { intent = Intent::Preview(*index); }
+                    if widgets::button(ui, kiln_common::i18n::tr("명령 삭제"), ButtonKind::Danger).clicked() { intent = Intent::ConfirmDelete(*index); }
+                    if widgets::button(ui, kiln_common::i18n::tr("유지"), ButtonKind::Secondary).clicked() { intent = Intent::Preview(*index); }
                 }
                 Screen::Discard { close, .. } => {
-                    if widgets::button(ui, "편집 버리기", ButtonKind::Danger).clicked() { intent = Intent::DiscardEdit(*close); }
-                    if widgets::button(ui, "계속 편집", ButtonKind::Secondary).clicked() { intent = Intent::ResumeEdit; }
+                    if widgets::button(ui, kiln_common::i18n::tr("편집 버리기"), ButtonKind::Danger).clicked() { intent = Intent::DiscardEdit(*close); }
+                    if widgets::button(ui, kiln_common::i18n::tr("계속 편집"), ButtonKind::Secondary).clicked() { intent = Intent::ResumeEdit; }
                 }
             });
         });
@@ -283,7 +283,7 @@ impl Launcher {
                     let mut entries = self.entries.clone();
                     if let Some(index) = index { entries[index] = entry; }
                     else if entries.len() < MAX_COMMANDS { entries.push(entry); }
-                    else { return Err("저장할 수 있는 명령은 최대 200개입니다.".into()); }
+                    else { return Err(kiln_common::i18n::tr("저장할 수 있는 명령은 최대 200개입니다.").into()); }
                     self.persist(entries)
                 });
                 match result { Ok(()) => { self.screen = Screen::List; self.query.clear(); self.error = None; self.focus_search = true; }, Err(error) => self.error = Some(error) }
@@ -296,13 +296,13 @@ impl Launcher {
             }
             Intent::Run(index) => if let Some(item) = self.entries.get(index) {
                 let cwd = item.cwd.as_deref().unwrap_or(default_cwd);
-                if !cwd.is_dir() { self.error = Some("작업 폴더를 찾을 수 없습니다. 명령을 편집해 경로를 수정하세요.".into()); }
+                if !cwd.is_dir() { self.error = Some(kiln_common::i18n::tr("작업 폴더를 찾을 수 없습니다. 명령을 편집해 경로를 수정하세요.").into()); }
                 else { self.open = false; return Some(item.clone()); }
             },
             Intent::DiscardEdit(close) => { self.screen = Screen::List; self.error = None; self.open = !close; },
             Intent::ResumeEdit => if let Screen::Discard { edit, .. } = &self.screen { self.screen = *edit.clone(); },
             Intent::Reload => { self.reload(); self.selected = 0; }
-            Intent::Recover => { match self.recover_empty() { Ok(path) => self.notice = Some(format!("빈 명령 목록으로 복구했습니다. 원본 백업: {}", path.display())), Err(error) => self.error = Some(error) } }
+            Intent::Recover => { match self.recover_empty() { Ok(path) => self.notice = Some(kiln_common::trf!("빈 명령 목록으로 복구했습니다. 원본 백업: {}", path.display())), Err(error) => self.error = Some(error) } }
         }
         None
     }
@@ -314,10 +314,10 @@ fn read_commands(path: &Path) -> Result<(Vec<SelectedCommand>, Option<Vec<u8>>),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((vec![], None)),
         Err(error) => return Err(error.to_string()),
     };
-    if metadata.len() > MAX_FILE_BYTES { return Err("명령 파일이 4MB 제한을 초과했습니다.".into()); }
+    if metadata.len() > MAX_FILE_BYTES { return Err(kiln_common::i18n::tr("명령 파일이 4MB 제한을 초과했습니다.").into()); }
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let entries: Vec<SelectedCommand> = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    if entries.len() > MAX_COMMANDS { return Err("명령 파일에는 최대 200개만 저장할 수 있습니다.".into()); }
+    if entries.len() > MAX_COMMANDS { return Err(kiln_common::i18n::tr("명령 파일에는 최대 200개만 저장할 수 있습니다.").into()); }
     let entries = entries.iter().map(|entry| Draft::from(entry).validate()).collect::<Result<Vec<_>, _>>()?;
     Ok((entries, Some(bytes)))
 }

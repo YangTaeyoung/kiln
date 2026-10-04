@@ -267,7 +267,7 @@ impl QuickOpen {
             let out = egui::TextEdit::singleline(&mut self.query)
                 .id(id)
                 .frame(egui::Frame::NONE)
-                .hint_text(egui::RichText::new("파일 이름 또는 경로 검색").color(t.text_faint))
+                .hint_text(egui::RichText::new(kiln_common::i18n::tr("파일 이름 또는 경로 검색")).color(t.text_faint))
                 .font(FontId::proportional(16.0))
                 .text_color(t.text)
                 .desired_width(inner.width())
@@ -287,11 +287,11 @@ impl QuickOpen {
         if n == 0 {
             let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
             let msg = if self.index.as_ref().is_some_and(|i| !i.is_done()) && self.file_count() == 0 {
-                "파일 색인 중…"
+                kiln_common::i18n::tr("파일 색인 중…")
             } else if self.query.trim().is_empty() {
-                "파일 없음"
+                kiln_common::i18n::tr("파일 없음")
             } else {
-                "일치하는 파일 없음"
+                kiln_common::i18n::tr("일치하는 파일 없음")
             };
             ui.painter().text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(13.0), t.text_dim);
             return None;
@@ -355,7 +355,7 @@ impl QuickOpen {
                     hl(&mut job, dir, 0, t.text_dim, 12.0, &m.indices);
                 }
                 if m.index == u32::MAX && self.query.trim().is_empty() {
-                    job.append("   최근에 연 파일", 0.0, TextFormat { font_id: FontId::proportional(11.5), color: t.text_faint, ..Default::default() });
+                    job.append(kiln_common::i18n::tr("   최근에 연 파일"), 0.0, TextFormat { font_id: FontId::proportional(11.5), color: t.text_faint, ..Default::default() });
                 }
                 job.wrap.max_width = rect.width() - 52.0;
                 job.wrap.max_rows = 1;
@@ -384,14 +384,14 @@ impl QuickOpen {
         p.line_segment([band.left_top(), band.right_top()], Stroke::new(1.0, t.border));
         let count = self.file_count();
         let left = if self.query.trim().is_empty() {
-            format!("파일 {}개", fmt_count(count))
+            kiln_common::trf!("파일 {}개", fmt_count(count))
         } else {
-            format!("파일 {}개 중 {}개", fmt_count(count), fmt_count(self.total))
+            kiln_common::trf!("파일 {}개 중 {}개", fmt_count(count), fmt_count(self.total))
         };
-        let left = if self.is_indexing() { format!("{left} · 색인 중…") } else { left };
+        let left = if self.is_indexing() { kiln_common::trf!("{left} · 색인 중…") } else { left };
         p.text(pos2(rect.left() + 6.0, rect.center().y), Align2::LEFT_CENTER, left, kiln_common::fonts::medium(12.0), t.text_faint);
         let mut x = rect.right() - 4.0;
-        for (keys, label) in [(&["Esc"][..], "닫기"), (&["Enter"][..], "열기"), (&["↓", "↑"][..], "이동")] {
+        for (keys, label) in [(&["Esc"][..], kiln_common::i18n::tr("닫기")), (&["Enter"][..], kiln_common::i18n::tr("열기")), (&["↓", "↑"][..], kiln_common::i18n::tr("이동"))] {
             let g = p.layout_no_wrap(label.to_owned(), kiln_common::fonts::medium(12.0), t.text_dim);
             x -= g.size().x;
             p.galley(pos2(x, rect.center().y - g.size().y / 2.0), g, t.text_dim);
