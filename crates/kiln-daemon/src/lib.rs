@@ -9,6 +9,7 @@ pub mod procinfo;
 pub mod pty;
 pub mod ptyhost;
 pub mod server;
+pub mod shell;
 pub mod transport;
 
 use std::sync::OnceLock;

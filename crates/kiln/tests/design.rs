@@ -33,7 +33,7 @@ fn setup() -> (PathBuf, PathBuf) {
     commit("Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.2.0\"\n", "버전 0.2.0");
     git(&["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "feature/login", "-m", "Merge branch 'feature/login'"]);
     git(&["tag", "v0.2.0"]);
-    commit("src/main.rs", "fn main() {}\n", "main 정리");
+    commit("src/main.rs", "use std::time::Duration;\n\n// Keep agent sessions alive while the workspace is closed.\nfn restore_workspace(project: &str, sessions: &[String]) -> Result<(), String> {\n    let timeout = Duration::from_secs(30);\n    for session in sessions {\n        println!(\"Restoring {project}: {session} (timeout: {timeout:?})\");\n    }\n    Ok(())\n}\n\nfn main() {\n    restore_workspace(\"kiln-demo\", &[\"code-review\".to_owned()]).unwrap();\n}\n", "main 정리");
     std::fs::write(proj.join("src/lib.rs"), "pub fn add(a: i32, b: i32) -> i32 { a + b }\n").unwrap();
     let acc = base.join("accounts/config");
     std::fs::create_dir_all(&acc).unwrap();
@@ -59,8 +59,15 @@ fn setup() -> (PathBuf, PathBuf) {
         .to_string(),
     )
     .unwrap();
+    // Keep visual evidence deterministic and never load the user's shell startup files.
+    let shell_home = base.join("shell-home");
+    std::fs::create_dir_all(&shell_home).unwrap();
+    std::fs::write(shell_home.join(".zshrc"), "PROMPT='%F{blue}%1~%f %F{green}❯%f '\n").unwrap();
     // SAFETY: 테스트 시작 시 설정한다.
     unsafe {
+        std::env::set_var("HOME", &shell_home);
+        std::env::set_var("ZDOTDIR", &shell_home);
+        std::env::set_var("SHELL", "/bin/zsh");
         std::env::set_var("KILN_SOCKET", base.join("d.sock"));
         std::env::set_var("KILN_CONFIG_DIR", base.join("cfg"));
         std::env::set_var("KILN_EXE", env!("CARGO_BIN_EXE_kiln"));
@@ -133,6 +140,27 @@ fn design_review_screens() {
     h.key_press_modifiers(cmd_shift(), egui::Key::G);
     pump(&mut h, 3.0, |_| false);
     shot(&mut h, "03_editor_card_git_sheet");
+    for (width, height, scale) in [(720.0, 440.0, 1.0), (1024.0, 768.0, 1.0), (1440.0, 900.0, 2.0), (1920.0, 1080.0, 1.0), (2560.0, 1440.0, 1.0)] {
+        h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(scale);
+        h.ctx.set_zoom_factor(1.0);
+        h.run_steps(3);
+        h.set_size(egui::vec2(width, height));
+        h.run_steps(4);
+        assert_eq!(h.ctx.content_rect().size(), egui::vec2(width, height));
+        let image = h.render().expect("resolution render");
+        assert_eq!(image.dimensions(), ((width * scale) as u32, (height * scale) as u32));
+        shot(&mut h, &format!("resolution_{}x{}_{}x", width as u32, height as u32, scale as u32));
+    }
+    h.state_mut().debug_queue_action(kiln::app::Action::ArrangeGrid);h.run_steps(4);
+    shot(&mut h,"balanced_grid_2560");
+    h.set_size(egui::vec2(1920.0,1080.0));h.run_steps(4);
+    shot(&mut h,"balanced_grid_1920");
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(1.0);
+    h.ctx.set_zoom_factor(1.0);
+    h.run_steps(3);
+    h.set_size(egui::vec2(1440.0, 900.0));
+    h.run_steps(4);
+
     h.key_press_modifiers(cmd_shift(), egui::Key::G);
     h.run_steps(3);
     h.key_press_modifiers(cmd_shift(), egui::Key::R);
@@ -172,6 +200,56 @@ fn design_review_screens() {
     pump(&mut h, 0.5, |_| false);
     shot(&mut h, "08_ember");
     h.state_mut().debug_set_theme(&ctx, "kiln-dark");
+
+    // Stress navigation with long names and more pages than fit in one titlebar.
+    use kiln::app::Action;
+    for name in ["customer-platform-production-workspace-with-a-long-name", "국제화-프로젝트-이름이-아주-긴-에이전트-작업-공간"] {
+        let path = base.join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        h.state_mut().debug_queue_action(Action::NewWorkspace(Some(path)));
+        h.run_steps(3);
+    }
+    for _ in 0..8 { h.state_mut().debug_queue_action(Action::NewPage); h.run_steps(3); }
+    for width in [720.0, 1024.0, 1920.0] {
+        h.set_size(egui::vec2(width, 768.0)); h.run_steps(4);
+        shot(&mut h, &format!("navigation_stress_{}", width as u32));
+    }
+
+    h.ctx.set_zoom_factor(1.3);
+    h.run_steps(3);
+    h.set_size(egui::vec2(720.0 / 1.3, 440.0 / 1.3));
+    h.state_mut().debug_open_settings(0);
+    h.run_steps(4);
+    let scaled = h.render().unwrap();
+    assert!(scaled.width().abs_diff(720) <= 1 && scaled.height().abs_diff(440) <= 1);
+    assert!(h.ctx.content_rect().contains_rect(h.get_by_label("닫기 (Esc)").rect()));
+    shot(&mut h, "minimum_settings_130pct");
+    h.key_press(egui::Key::Escape); h.run_steps(3);
+    h.get_by_label("알림 센터").click(); h.run_steps(4);
+    for label in ["알림 닫기 (Esc)", "방해 금지 꺼짐", "읽은 알림 지우기"] {
+        assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()), "{label} clipped at 130% zoom");
+    }
+    shot(&mut h, "minimum_inbox_130pct");
+    h.key_press(egui::Key::Escape); h.run_steps(4);
+    assert!(h.ctx.content_rect().contains_rect(h.get_by_label("세션 연결됨").rect()));
+    shot(&mut h, "minimum_sidebar_130pct");
+    h.state_mut().debug_queue_action(Action::OpenRecent); h.run_steps(4);
+    h.get_by_value("전체").click(); h.run_steps(3);
+    shot(&mut h, "recent_project_filter_130pct");
+    h.key_press(egui::Key::Escape); h.run_steps(3);
+    h.key_press(egui::Key::Escape); h.run_steps(3);
+    h.state_mut().debug_open_settings(4); h.run_steps(4);
+    assert!(h.ctx.content_rect().contains_rect(h.get_by_label("닫기 (Esc)").rect()));
+    shot(&mut h, "keybindings_130pct");
+    h.key_press(egui::Key::Escape); h.run_steps(3);
+    h.ctx.set_zoom_factor(1.0); h.run_steps(3); h.set_size(egui::vec2(1024.0,768.0)); h.run_steps(3);
+    h.state_mut().debug_open_settings(4); h.run_steps(4);
+    shot(&mut h, "keybindings_1024");
+    h.key_press(egui::Key::Escape); h.run_steps(3);
+    h.state_mut().debug_queue_action(Action::OpenRecovery); h.run_steps(4);
+    shot(&mut h, "recovery_center_empty");
+    h.get_by_label("닫기").click(); h.run_steps(3);
+
 
     if let Ok(c) = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None) {
         c.send(kiln_proto::ClientMsg::Shutdown);

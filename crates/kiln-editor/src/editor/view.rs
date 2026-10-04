@@ -42,6 +42,7 @@ pub(crate) struct ViewState {
     pub row_h: f32,
     pub char_w: f32,
     pub font: Option<FontId>,
+    pixels_per_point: f32,
     pub last_interaction: f64,
     pub preedit: Option<String>,
     pub overlays: Vec<Rect>,
@@ -59,6 +60,7 @@ pub(crate) struct ViewState {
     pub gutter_rect: Option<Rect>,
     /// 다음 글자 입력을 버린다.
     pub swallow_text: bool,
+    pub reload_confirm: bool,
 }
 
 /// 화면에 그릴 시각 줄 하나.
@@ -85,11 +87,12 @@ fn text_format(font: &FontId, color: Color32, italics: bool, underline: bool) ->
 impl ViewState {
     fn update_metrics(&mut self, ui: &Ui) -> FontId {
         let font = TextStyle::Monospace.resolve(ui.style());
-        if self.font.as_ref() != Some(&font) {
+        if self.font.as_ref() != Some(&font) || self.pixels_per_point != ui.ctx().pixels_per_point() {
             let (w, h) = ui.ctx().fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
             self.char_w = w;
             self.row_h = (h * 1.5).round().max(h + 4.0);
             self.font = Some(font.clone());
+            self.pixels_per_point = ui.ctx().pixels_per_point();
         }
         font
     }
@@ -207,6 +210,7 @@ impl Editor {
             Lossy,
             Large,
             SaveError,
+            SaveCopy,
         }
         let mut list = Vec::new();
         if self.conflict {
@@ -221,6 +225,7 @@ impl Editor {
         if self.large_banner {
             list.push(B::Large);
         }
+        if self.save_copy_notice.is_some(){list.push(B::SaveCopy);}
         if self.save_error.is_some() {
             list.push(B::SaveError);
         }
@@ -235,6 +240,7 @@ impl Editor {
                     t.blue,
                     format!("큰 파일({}) — 구문 강조를 끕니다.", ui_kit::size_label(self.file_len)),
                 ),
+                B::SaveCopy => (t.green,self.save_copy_notice.clone().unwrap_or_default()),
                 B::SaveError => (t.red, format!("저장 실패: {}", self.save_error.clone().unwrap_or_default())),
             };
             let p = ui.painter();
@@ -249,13 +255,11 @@ impl Editor {
                 ui.label(egui::RichText::new(msg).font(kiln_common::fonts::medium(12.5)).color(t.text));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| match b {
                     B::Conflict => {
-                        if ui_kit::flat_button(ui, "내 변경 유지", false).clicked() {
+                        if ui_kit::flat_button(ui, "내 편집 유지", false).on_hover_text("다음 저장 시 디스크 파일을 내 편집 내용으로 덮어씁니다").clicked() {
                             self.keep_local_changes();
                         }
-                        if ui_kit::flat_button(ui, "다시 불러오기", true).clicked()
-                            && let Err(e) = self.reload_from_disk()
-                        {
-                            self.save_error = Some(format!("{e:#}"));
+                        if ui_kit::flat_button(ui, "디스크 파일 불러오기…", true).on_hover_text("현재 편집 내용을 바꾸기 전에 확인합니다").clicked() {
+                            self.view.reload_confirm = true;
                         }
                     }
                     B::Lossy => {
@@ -268,7 +272,9 @@ impl Editor {
                             self.large_banner = false;
                         }
                     }
+                    B::SaveCopy => {if ui_kit::flat_button(ui,"닫기",false).clicked(){self.save_copy_notice=None;}},
                     B::SaveError => {
+                        if ui_kit::flat_button(ui, "복사본 저장…", false).clicked(){self.choose_save_copy();}
                         if ui_kit::icon_button(ui, Icon::Close, "닫기").clicked() {
                             self.save_error = None;
                         }
@@ -276,6 +282,24 @@ impl Editor {
                     B::Deleted => {}
                 });
             });
+        }
+        if self.view.reload_confirm {
+            let mut replace = false;
+            let mut cancel = false;
+            let modal = egui::Modal::new(ui.id().with("reload-disk-confirm")).show(ui.ctx(), |ui| {
+                ui.set_max_width((ui.ctx().content_rect().width() - 48.0).clamp(220.0, 440.0));
+                ui.heading("내 편집을 디스크 내용으로 바꿀까요?");
+                ui.label("현재 편집 내용이 디스크 파일 내용으로 바뀝니다. 파일 자체를 덮어쓰지는 않습니다. 먼저 편집 내용을 복사본으로 저장할 수 있습니다.");
+                ui.horizontal_wrapped(|ui| {
+                    cancel = kiln_common::widgets::button(ui, "계속 편집", kiln_common::widgets::ButtonKind::Primary).clicked();
+                    if kiln_common::widgets::button(ui, "복사본 저장…", kiln_common::widgets::ButtonKind::Secondary).clicked() { self.choose_save_copy(); }
+                    replace = kiln_common::widgets::button(ui, "내 편집 버리고 불러오기", kiln_common::widgets::ButtonKind::Danger).clicked();
+                });
+            });
+            if replace {
+                self.view.reload_confirm = false;
+                if let Err(error) = self.reload_from_disk() { self.save_error = Some(format!("{error:#}")); }
+            } else if cancel || modal.should_close() { self.view.reload_confirm = false; }
         }
         Rect::from_min_max(pos2(full.left(), top), full.max)
     }
@@ -364,6 +388,44 @@ impl Editor {
     /// 줄 바꿈으로 이어진 시각 줄의 들여쓰기(px).
     fn row_indent_px(&self, line: usize, sub: usize) -> f32 {
         self.display.row_indent(self.buf.line(line), sub) as f32 * self.view.char_w
+    }
+
+    /// Build the same AccessKit text-run and selection model used by egui TextEdit.
+    /// The full text galley is created only while an accessibility client is active.
+    fn accessible_text(&mut self, ui: &mut Ui, font: &FontId, origin: Pos2) {
+        if ui.ctx().accesskit_node_builder(self.id(), |node| {
+            node.set_label(self.path.display().to_string());
+            node.add_action(egui::accesskit::Action::SetTextSelection);
+            if self.read_only { node.set_read_only(); }
+        }).is_none() { return; }
+        let text = self.buf.lines().join("\n");
+        let mut job = LayoutJob::simple(text, font.clone(), Color32::WHITE, f32::INFINITY);
+        for section in &mut job.sections { section.format.line_height = Some(self.view.row_h); }
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        let char_index = |pos: Pos| self.buf.lines().iter().take(pos.line).map(|l| l.chars().count()+1).sum::<usize>() + self.buf.line(pos.line)[..pos.col].chars().count();
+        let mut selection = egui::text::CCursorRange::two(CCursor::new(char_index(self.sel.anchor)), CCursor::new(char_index(self.sel.head)));
+        let mut changed = false;
+        let os = ui.ctx().os();
+        for event in ui.input(|i| i.events.clone()) {
+            if matches!(event, Event::AccessKitActionRequest(_)) {
+                changed |= selection.on_event(os, &event, &galley, self.id());
+            }
+        }
+        if changed {
+            let to_pos = |mut index: usize| {
+                for (line, text) in self.buf.lines().iter().enumerate() {
+                    let count = text.chars().count();
+                    if index <= count { return Pos::new(line, text.char_indices().nth(index).map_or(text.len(), |(byte,_)| byte)); }
+                    index -= count+1;
+                }
+                let line=self.buf.line_count()-1; Pos::new(line,self.buf.line(line).len())
+            };
+            self.set_selection(Selection::new(to_pos(selection.secondary.index.0), to_pos(selection.primary.index.0)));
+        }
+        egui::text_selection::accesskit_text::update_accesskit_for_text_widget(
+            ui.ctx(), self.id(), Some(selection), egui::accesskit::Role::MultilineTextInput,
+            egui::emath::TSTransform::from_translation(origin.to_vec2()), &galley,
+        );
     }
 
     fn max_cols(&mut self) -> usize {
@@ -496,6 +558,8 @@ impl Editor {
 
         let screen_vp = vp.translate(origin.to_vec2());
         let resp = ui.interact(screen_vp, self.id(), Sense::click_and_drag());
+        resp.widget_info(|| egui::WidgetInfo::text_edit(ui.is_enabled(), self.text(), self.text(), self.path.display().to_string()));
+        self.accessible_text(ui, font, origin + vec2(PAD_LEFT, 0.0));
         self.handle_mouse(ui, &resp, origin, font);
         self.context_menu(ui, &resp);
 
@@ -1243,4 +1307,23 @@ fn caret_in_row(r: &RowInfo, col: usize, row_end: bool) -> bool {
         return false;
     }
     r.start <= col && (col < r.end || (col == r.end && r.last))
+}
+
+#[cfg(test)]
+mod metric_tests {
+    use super::*;
+    #[test]
+    fn cached_editor_metrics_match_fresh_layout_after_display_scale_change() {
+        let ctx=egui::Context::default();kiln_common::fonts::install(&ctx);
+        let mut state=ViewState::default();
+        for scale in [1.0,1.3,2.0,1.0] {
+            ctx.set_pixels_per_point(scale);
+            let mut output=ctx.run_ui(egui::RawInput::default(),|ui| {
+                state.update_metrics(ui);
+                let mut fresh=ViewState::default();fresh.update_metrics(ui);
+                assert_eq!((state.char_w,state.row_h),(fresh.char_w,fresh.row_h));
+                assert_eq!(state.pixels_per_point,ui.ctx().pixels_per_point());
+            });output.textures_delta.clear();
+        }
+    }
 }

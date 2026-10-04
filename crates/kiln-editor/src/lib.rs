@@ -15,7 +15,7 @@ mod ui_kit;
 use std::path::PathBuf;
 
 pub use buffer::{FindOptions, Indent, LineEnding, Pos, Selection};
-pub use editor::{Editor, EditorStatus, Encoding, FoldRange};
+pub use editor::{EditorDraft, Editor, EditorStatus, Encoding, FoldRange};
 pub use file_tree::{Decoration, FileTree};
 pub use lsp::{LspManager, diagnostics_ui};
 pub use quick_open::QuickOpen;

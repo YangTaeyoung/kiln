@@ -19,9 +19,26 @@ pub enum Node {
     Split { dir: Dir, ratio: f32, a: Box<Node>, b: Box<Node> },
 }
 
-pub const SPLITTER: f32 = 8.0;
+pub const SPLITTER: f32 = 4.0;
 
 impl Node {
+    /// Balanced two-column workspace without discarding or recreating sessions.
+    pub fn grid(panes: &[PaneId]) -> Option<Self> {
+        if panes.len()<3 {return Self::arranged(panes,Dir::Horizontal);}
+        let mid=panes.len().div_ceil(2);
+        Some(Self::Split{dir:Dir::Horizontal,ratio:0.5,
+            a:Box::new(Self::arranged(&panes[..mid],Dir::Vertical)?),
+            b:Box::new(Self::arranged(&panes[mid..],Dir::Vertical)?)})
+    }
+    /// Equal-area strips, preserving every pane and its order.
+    pub fn arranged(panes: &[PaneId], dir: Dir) -> Option<Self> {
+        let (&first, rest) = panes.split_first()?;
+        Some(if rest.is_empty() { Self::Leaf(first) } else {
+            Self::Split { dir, ratio: 1.0 / panes.len() as f32,
+                a: Box::new(Self::Leaf(first)), b: Box::new(Self::arranged(rest, dir)?) }
+        })
+    }
+
     pub fn panes(&self) -> Vec<PaneId> {
         let mut v = Vec::new();
         self.collect(&mut v);
@@ -70,27 +87,35 @@ impl Node {
 
     /// 각 창의 영역을 계산한다.
     pub fn layout(&self, rect: Rect, out: &mut Vec<(PaneId, Rect)>) {
+        self.layout_with_gap(rect, SPLITTER, out);
+    }
+
+    pub fn layout_with_gap(&self, rect: Rect, gap: f32, out: &mut Vec<(PaneId, Rect)>) {
         match self {
             Node::Leaf(p) => out.push((*p, rect)),
             Node::Split { dir, ratio, a, b } => {
-                let (ra, rb) = split_rect(rect, *dir, *ratio);
-                a.layout(ra, out);
-                b.layout(rb, out);
+                let (ra, rb) = split_rect_with_gap(rect, *dir, *ratio, gap);
+                a.layout_with_gap(ra, gap, out);
+                b.layout_with_gap(rb, gap, out);
             }
         }
     }
 
     /// 분할선 영역들(경로 id, 방향, 분할선 rect, 부모 rect).
     pub fn splitters(&self, rect: Rect, path: u64, out: &mut Vec<(u64, Dir, Rect, Rect)>) {
+        self.splitters_with_gap(rect, path, SPLITTER, out);
+    }
+
+    pub fn splitters_with_gap(&self, rect: Rect, path: u64, gap: f32, out: &mut Vec<(u64, Dir, Rect, Rect)>) {
         if let Node::Split { dir, ratio, a, b } = self {
-            let (ra, rb) = split_rect(rect, *dir, *ratio);
+            let (ra, rb) = split_rect_with_gap(rect, *dir, *ratio, gap);
             let sep = match dir {
                 Dir::Horizontal => Rect::from_min_max(pos2(ra.right(), rect.top()), pos2(rb.left(), rect.bottom())),
                 Dir::Vertical => Rect::from_min_max(pos2(rect.left(), ra.bottom()), pos2(rect.right(), rb.top())),
             };
             out.push((path, *dir, sep, rect));
-            a.splitters(ra, path * 2 + 1, out);
-            b.splitters(rb, path * 2 + 2, out);
+            a.splitters_with_gap(ra, path * 2 + 1, gap, out);
+            b.splitters_with_gap(rb, path * 2 + 2, gap, out);
         }
     }
 
@@ -119,15 +144,21 @@ impl Node {
     }
 }
 
+#[allow(dead_code)]
 pub fn split_rect(rect: Rect, dir: Dir, ratio: f32) -> (Rect, Rect) {
+    split_rect_with_gap(rect, dir, ratio, SPLITTER)
+}
+
+pub fn split_rect_with_gap(rect: Rect, dir: Dir, ratio: f32, gap: f32) -> (Rect, Rect) {
+    let gap = gap.clamp(2.0, 16.0).min(rect.width().min(rect.height()).max(0.0));
     match dir {
         Dir::Horizontal => {
-            let x = rect.left() + (rect.width() - SPLITTER) * ratio;
-            (Rect::from_min_max(rect.min, pos2(x, rect.bottom())), Rect::from_min_max(pos2(x + SPLITTER, rect.top()), rect.max))
+            let x = rect.left() + (rect.width() - gap) * ratio;
+            (Rect::from_min_max(rect.min, pos2(x, rect.bottom())), Rect::from_min_max(pos2(x + gap, rect.top()), rect.max))
         }
         Dir::Vertical => {
-            let y = rect.top() + (rect.height() - SPLITTER) * ratio;
-            (Rect::from_min_max(rect.min, pos2(rect.right(), y)), Rect::from_min_max(pos2(rect.left(), y + SPLITTER), rect.max))
+            let y = rect.top() + (rect.height() - gap) * ratio;
+            (Rect::from_min_max(rect.min, pos2(rect.right(), y)), Rect::from_min_max(pos2(rect.left(), y + gap), rect.max))
         }
     }
 }
@@ -196,5 +227,18 @@ mod tests {
             Node::Split { ratio, .. } => assert!((ratio - 0.92).abs() < 1e-6),
             _ => panic!(),
         }
+    }
+}
+
+#[cfg(test)] mod gap_regression {
+    use super::*;
+    #[test] fn gap_setting_changes_geometry_and_drag_target_together() {
+        let mut n=Node::Leaf(1); n.split(1,Dir::Horizontal,2);
+        let area=Rect::from_min_size(pos2(0.,0.),egui::vec2(800.,400.));
+        let mut panes=vec![]; n.layout_with_gap(area,12.,&mut panes);
+        assert_eq!(panes[1].1.left()-panes[0].1.right(),12.);
+        let mut splitters=vec![];n.splitters_with_gap(area,0,12.,&mut splitters);
+        assert_eq!(splitters[0].2.width(),12.);
+        assert_eq!(splitters[0].2.left(),panes[0].1.right());
     }
 }

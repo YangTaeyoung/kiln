@@ -178,6 +178,7 @@ pub struct FileTree {
     rows: Vec<Row>,
     rows_dirty: bool,
     selected: Option<PathBuf>,
+    focus_pending: bool,
     show_ignored: bool,
     decorations: HashMap<PathBuf, Decoration>,
     dir_decor: HashMap<PathBuf, Color32>,
@@ -215,6 +216,7 @@ impl FileTree {
             rows: Vec::new(),
             rows_dirty: true,
             selected: None,
+            focus_pending: false,
             show_ignored: false,
             decorations: HashMap::new(),
             dir_decor: HashMap::new(),
@@ -245,6 +247,11 @@ impl FileTree {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Focus the visible tree once when its host explicitly opens the file view.
+    pub fn request_focus(&mut self) {
+        self.focus_pending = true;
     }
 
     /// 루트를 바꾸고 모든 상태를 초기화한다.
@@ -380,7 +387,7 @@ impl FileTree {
             }
             Err(e) => {
                 self.dirs.insert(dir.to_path_buf(), Vec::new());
-                self.set_error(format!("{}을(를) 읽을 수 없음: {e}", dir.display()));
+                self.set_error(format!("읽을 수 없습니다: {} · {e}", dir.display()));
             }
         }
         self.rows_dirty = true;
@@ -644,6 +651,31 @@ impl FileTree {
 
     /// 트리를 그리고 사건 목록을 돌려준다.
     pub fn ui(&mut self, ui: &mut Ui) -> Vec<EditorEvent> {
+        self.ui_with_header(ui, true)
+    }
+
+    /// Embedded inspectors already own the workspace title and file actions.
+    pub fn ui_embedded(&mut self, ui: &mut Ui) -> Vec<EditorEvent> {
+        self.ui_with_header(ui, false)
+    }
+
+    /// Root/selection actions for a host inspector's file menu.
+    pub fn menu_ui(&mut self, ui: &mut Ui) -> Vec<EditorEvent> {
+        let mut actions = Vec::new();
+        let mut events = Vec::new();
+        let target = self.selected_dir();
+        menu_item(ui, "새 파일…", || actions.push(Action::NewEntry(target.clone(), false)));
+        menu_item(ui, "새 폴더…", || actions.push(Action::NewEntry(target.clone(), true)));
+        ui.separator();
+        menu_item(ui, "새로 고침", || actions.push(Action::Refresh));
+        menu_item(ui, "폴더 모두 접기", || actions.push(Action::CollapseAll));
+        let ignored_label = if self.show_ignored { "무시된 파일 숨기기" } else { "무시된 파일 표시" };
+        menu_item(ui, ignored_label, || actions.push(Action::ToggleIgnored));
+        self.apply_actions(ui, actions, &mut events);
+        events
+    }
+
+    fn ui_with_header(&mut self, ui: &mut Ui, show_header: bool) -> Vec<EditorEvent> {
         let t = Theme::current();
         let mut events = Vec::new();
         let mut actions: Vec<Action> = Vec::new();
@@ -653,7 +685,7 @@ impl FileTree {
 
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, t.bg_panel);
-        let header = Rect::from_min_size(full.min, vec2(full.width(), HEADER_H));
+        let header = Rect::from_min_size(full.min, vec2(full.width(), if show_header { HEADER_H } else { 0.0 }));
         let list_rect = Rect::from_min_max(pos2(full.left(), header.bottom()), full.max);
 
         // 목록 배경: 포커스 보관과 빈 곳 클릭/우클릭.
@@ -670,8 +702,18 @@ impl FileTree {
             menu_item(ui, "터미널에서 열기", || actions.push(Action::Terminal(root.clone())));
         });
 
-        self.header_ui(ui, header, &mut actions);
+        if show_header { self.header_ui(ui, header, &mut actions); }
 
+        if self.focus_pending && !egui::Popup::is_any_open(ui.ctx()) {
+            self.focus_pending = false;
+            if let Some(create) = &mut self.create {
+                create.focus = true;
+            } else if let Some(rename) = &mut self.rename {
+                rename.focus = true;
+            } else {
+                ui.memory_mut(|m| m.request_focus(self.id));
+            }
+        }
         let focused = ui.memory(|m| m.has_focus(self.id));
         if focused {
             ui.memory_mut(|m| {
@@ -973,7 +1015,7 @@ impl FileTree {
                 }
                 ui.ctx().request_repaint();
             }
-            Err(e) => self.set_error(format!("{name}을(를) 만들 수 없음: {e}")),
+            Err(e) => self.set_error(format!("만들 수 없습니다: {name} · {e}")),
         }
     }
 
@@ -991,7 +1033,7 @@ impl FileTree {
         }
         let to = r.path.with_file_name(name);
         if to.exists() && !name.eq_ignore_ascii_case(&old_name) {
-            self.set_error(format!("“{name}”이(가) 이미 있습니다"));
+            self.set_error(format!("같은 이름이 이미 있습니다: {name}"));
             return;
         }
         match std::fs::rename(&r.path, &to) {
@@ -1021,9 +1063,9 @@ impl FileTree {
             .frame(ui_kit::modal_frame())
             .show(ui.ctx(), |ui| {
                 ui.set_width((ui.ctx().content_rect().width() - 72.0).clamp(200.0, 360.0));
-                let what = if is_dir { "폴더" } else { "파일" };
+                let what = if is_dir { "폴더를" } else { "파일을" };
                 let verb = if self.use_trash { "휴지통으로 이동할까요" } else { "영구 삭제할까요" };
-                ui.add(egui::Label::new(egui::RichText::new(format!("{what} “{name}”을(를) {verb}?")).font(kiln_common::fonts::semibold(15.0)).color(t.text)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(format!("다음 {what} {verb}?\n{name}")).font(kiln_common::fonts::semibold(15.0)).color(t.text)).wrap());
                 ui.add_space(6.0);
                 let sub = if self.use_trash {
                     if is_dir { "폴더와 그 안의 내용은 휴지통에서 복원할 수 있습니다." } else { "휴지통에서 복원할 수 있습니다." }

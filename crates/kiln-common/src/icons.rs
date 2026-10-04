@@ -5,10 +5,14 @@ use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Icon {
     Menu,
+    More,
     Folder,
     Search,
     Branch,
     PullRequest,
+    GitHub,
+    Codex,
+    Claude,
     Database,
     Gear,
     Command,
@@ -20,6 +24,7 @@ pub enum Icon {
     Bell,
     Warning,
     Sidebar,
+    Inspector,
     Maximize,
     Restore,
     File,
@@ -73,6 +78,12 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let st = Stroke::new(1.5 * s.max(0.8), color);
     let at = |x: f32, y: f32| -> Pos2 { pos2(c.x + x * s, c.y + y * s) };
     match icon {
+        Icon::GitHub => paint_github(p, rect, color),
+        Icon::Codex => paint_agent_mark(p, rect, color, "codex", include_str!("../assets/mark-codex.svg")),
+        Icon::Claude => paint_agent_mark(p, rect, color, "claude", include_str!("../assets/mark-claude.svg")),
+        Icon::More => {
+            for x in [-5.0, 0.0, 5.0] { p.circle_filled(at(x, 0.0), 1.2 * s, color); }
+        }
         Icon::Menu => {
             for y in [-5.0, 0.0, 5.0] {
                 p.line_segment([at(-6.5, y), at(6.5, y)], st);
@@ -159,6 +170,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             let r = Rect::from_center_size(c, vec2(16.0 * s, 13.0 * s));
             p.rect_stroke(r, 2.5 * s, st, egui::StrokeKind::Middle);
             p.line_segment([pos2(r.left() + 5.5 * s, r.top()), pos2(r.left() + 5.5 * s, r.bottom())], st);
+        }
+        Icon::Inspector => {
+            let r = Rect::from_center_size(c, vec2(16.0 * s, 13.0 * s));
+            p.rect_stroke(r, 2.5 * s, st, egui::StrokeKind::Middle);
+            p.line_segment([pos2(r.right() - 5.5 * s, r.top()), pos2(r.right() - 5.5 * s, r.bottom())], st);
         }
         Icon::Maximize => {
             p.add(Shape::line(vec![at(1.5, -7.0), at(7.0, -7.0), at(7.0, -1.5)], st));
@@ -394,4 +410,37 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, size: egui::Vec2, color: Color32, h
     let icon_rect = Rect::from_center_size(rect.center(), egui::Vec2::splat(size.y.min(size.x) * 0.62));
     paint(ui.painter(), icon_rect, icon, color);
     if tip.is_empty() { resp } else { resp.on_hover_text(tip) }
+}
+
+// GitHub's official Octicons mark (MIT); see assets/OCTICONS-LICENSE.
+fn paint_github(p: &Painter, rect: Rect, color: Color32) {
+    let px = (rect.width().min(rect.height()) * p.ctx().pixels_per_point()).ceil().clamp(8.0, 256.0) as u32;
+    let id = egui::Id::new(("github-mark", px));
+    let texture = p.ctx().data_mut(|d| d.get_temp::<egui::TextureHandle>(id));
+    let texture = texture.unwrap_or_else(|| {
+        let svg = include_str!("../assets/mark-github-16.svg").replace("<svg ", "<svg fill=\"white\" ");
+        let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).expect("bundled GitHub mark");
+        let mut pixels = resvg::tiny_skia::Pixmap::new(px, px).expect("bounded icon size");
+        resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(px as f32 / 16.0, px as f32 / 16.0), &mut pixels.as_mut());
+        let image = egui::ColorImage::from_rgba_premultiplied([px as usize, px as usize], pixels.data());
+        let texture = p.ctx().load_texture("github-mark", image, egui::TextureOptions::LINEAR);
+        p.ctx().data_mut(|d| d.insert_temp(id, texture.clone()));
+        texture
+    });
+    p.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), color);
+}
+
+fn paint_agent_mark(p: &Painter, rect: Rect, color: Color32, name: &'static str, svg: &str) {
+    let px = (rect.width().min(rect.height()) * p.ctx().pixels_per_point()).ceil().clamp(8.0, 256.0) as u32;
+    let id = egui::Id::new(("agent-mark", name, px));
+    let texture = p.ctx().data_mut(|data| data.get_temp::<egui::TextureHandle>(id)).unwrap_or_else(|| {
+        let tree = resvg::usvg::Tree::from_str(&svg.replace("currentColor", "white"), &resvg::usvg::Options::default()).expect("bundled agent mark");
+        let mut pixels = resvg::tiny_skia::Pixmap::new(px, px).expect("bounded icon size");
+        resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(px as f32 / tree.size().width(), px as f32 / tree.size().height()), &mut pixels.as_mut());
+        let image = egui::ColorImage::from_rgba_premultiplied([px as usize, px as usize], pixels.data());
+        let texture = p.ctx().load_texture(name, image, egui::TextureOptions::LINEAR);
+        p.ctx().data_mut(|data| data.insert_temp(id, texture.clone()));
+        texture
+    });
+    p.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), color);
 }

@@ -6,6 +6,7 @@ use egui::{Color32, FontId, Modifiers, Pos2, Rect, Sense, Shape, Stroke, Vec2, p
 use kiln_proto::{Cell, Color, CursorShape, Line, ScrollTo, SessionId, flags, mode};
 use std::collections::HashMap;
 use std::sync::Arc;
+use unicode_width::UnicodeWidthChar;
 
 pub struct Palette {
     pub fg: Color32,
@@ -49,6 +50,17 @@ impl Palette {
             }
         }
     }
+
+    fn cell_colors(&self, c: &Cell) -> (Color32, Color32) {
+        let mut fg = match c.fg {
+            Color::Idx(i) if i < 8 && c.flags & flags::BOLD != 0 => self.ansi[i as usize + 8],
+            other => self.resolve(other, true),
+        };
+        let mut bg = self.resolve(c.bg, false);
+        if c.flags & flags::INVERSE != 0 { std::mem::swap(&mut fg, &mut bg); }
+        if c.flags & flags::DIM != 0 { fg = lerp(bg, fg, 0.6); }
+        (fg, bg)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -56,11 +68,14 @@ pub struct TermSettings {
     pub font_size: f32,
     pub option_as_meta: bool,
     pub line_height: f32,
+    pub copy_on_select: bool,
+    pub cursor_blink: bool,
+    pub close_shortcut: Option<egui::KeyboardShortcut>,
 }
 
 impl Default for TermSettings {
     fn default() -> Self {
-        TermSettings { font_size: 13.5, option_as_meta: true, line_height: 1.2 }
+        TermSettings { font_size: 13.5, option_as_meta: true, line_height: 1.2, copy_on_select: false, cursor_blink: false, close_shortcut: None }
     }
 }
 
@@ -110,6 +125,8 @@ pub struct TermOutput {
     pub open: Option<LinkTarget>,
     /// 종료된 세션에서 Enter 를 눌러 재시작을 요청했다.
     pub restart: bool,
+    /// Explicitly reviewed command to launch in a fresh terminal; never silently injected.
+    pub command_to_run: Option<(String, Option<String>)>,
 }
 
 struct SearchBar {
@@ -122,18 +139,60 @@ pub struct TermView {
     pub session: SessionId,
     rows: Vec<RowCache>,
     fit_cache: HashMap<char, bool>,
-    metrics: Option<(f32, Vec2)>,
+    metrics: Option<((f32, f32, f32), Vec2)>,
     selection: Option<Selection>,
     selecting: bool,
     preedit: String,
     scroll_accum: f32,
     last_mouse_cell: Option<(u16, u16)>,
+    mouse_capture: MouseCapture,
     search: Option<SearchBar>,
+    inspector: bool,
+    integration_help: bool,
+    inspected_command: Option<u64>,
+    inspector_record_expired: bool,
+    command_draft: String,
+    accessible_input: String,
     pub palette: Arc<Palette>,
     pending_size: Option<((u16, u16), std::time::Instant)>,
     theme_name: &'static str,
     /// false 면 바탕을 칠하지 않는다(카드가 둥근 바탕을 그린다).
     pub fill_background: bool,
+}
+
+// Text events follow their key event, but InputState.modifiers contains the
+// final state of the whole frame. Do not re-send text already encoded as Meta
+// or Ctrl when the modifier was released later in that same frame.
+fn terminal_input_events(events: Vec<egui::Event>, frame_mods: egui::Modifiers, option_as_meta: bool, is_mac: bool) -> Vec<egui::Event> {
+    let mut text_mods = frame_mods;
+    events.into_iter().filter(|event| match event {
+        egui::Event::Key { pressed:true, modifiers, .. } => {text_mods=*modifiers;true}
+        egui::Event::Text(_) => {
+            let include=!(is_mac && option_as_meta && text_mods.alt || !is_mac && text_mods.ctrl);
+            text_mods=frame_mods;
+            include
+        }
+        _=>true,
+    }).collect()
+}
+
+/// Each split owns only presses delivered to its terminal, including an outside release.
+#[derive(Default)]
+struct MouseCapture(u8);
+impl MouseCapture {
+    fn button(&mut self, button: u8, pressed: bool, shift: bool, owns_pointer: bool) -> bool {
+        let mask = 1 << button;
+        if pressed {
+            if shift || !owns_pointer { return false; }
+            self.0 |= mask;
+            true
+        } else {
+            let captured = self.0 & mask != 0;
+            self.0 &= !mask;
+            captured
+        }
+    }
+    fn dragged_button(&self) -> Option<u8> { (0..3).find(|button| self.0 & (1 << button) != 0) }
 }
 
 impl TermView {
@@ -148,7 +207,14 @@ impl TermView {
             preedit: String::new(),
             scroll_accum: 0.0,
             last_mouse_cell: None,
+            mouse_capture: MouseCapture::default(),
             search: None,
+            inspector: false,
+            integration_help: false,
+            inspected_command: None,
+            inspector_record_expired: false,
+            command_draft: String::new(),
+            accessible_input: String::new(),
             palette: Arc::new(Palette::default()),
             pending_size: None,
             theme_name: kiln_common::Theme::current().name,
@@ -164,6 +230,22 @@ impl TermView {
         }
     }
 
+    /// Open command history and selectable output from the terminal header.
+    pub fn open_history(&mut self) {
+        self.inspector = true;
+        self.integration_help = false;
+    }
+
+    /// Setup is secondary to terminal work and lives in the terminal menu.
+    pub fn open_integration_help(&mut self) {
+        self.inspector = true;
+        self.integration_help = true;
+    }
+
+    pub fn inspector_open(&self) -> bool {
+        self.inspector
+    }
+
     pub fn set_search_result(&mut self, found: bool) {
         if let Some(s) = &mut self.search {
             s.last_found = Some(found);
@@ -171,14 +253,15 @@ impl TermView {
     }
 
     fn cell_size(&mut self, ctx: &egui::Context, s: &TermSettings) -> Vec2 {
-        if let Some((fs, v)) = self.metrics
-            && fs == s.font_size * s.line_height {
+        let key = (s.font_size, s.line_height, ctx.pixels_per_point());
+        if let Some((cached_key, v)) = self.metrics
+            && cached_key == key {
                 return v;
             }
         let font = FontId::monospace(s.font_size);
         let (w, h) = ctx.fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
         let v = vec2(w, (h * s.line_height).round());
-        self.metrics = Some((s.font_size * s.line_height, v));
+        self.metrics = Some((key, v));
         self.rows.clear();
         self.fit_cache.clear();
         v
@@ -197,6 +280,7 @@ impl TermView {
             }
             let l = &screen.lines[row as usize];
             let cols = l.cells.len() as u16;
+            if cols == 0 { continue; }
             let (c0, c1) = match sel.mode {
                 SelMode::Line => (0, cols.saturating_sub(1)),
                 _ => (if line == a.line { a.col } else { 0 }, if line == b.line { b.col } else { cols.saturating_sub(1) }),
@@ -208,6 +292,7 @@ impl TermView {
                     continue;
                 }
                 s.push(cell.c);
+                for (_, combining) in l.combining.iter().filter(|(col, _)| *col == c) { s.push_str(combining); }
             }
             let wrapped = l.cells.last().is_some_and(|c| c.flags & flags::WRAP != 0);
             if line != b.line && wrapped && c1 + 1 >= cols {
@@ -249,11 +334,17 @@ impl TermView {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, conn: &mut Conn, settings: &TermSettings, focus_request: bool, cwd: Option<&str>) -> TermOutput {
         let mut out = TermOutput::default();
+        if self.inspector {
+            out.clicked = ui.rect_contains_pointer(ui.max_rect()) && ui.input(|i|i.pointer.any_pressed());
+            self.inspector_ui(ui, conn, cwd, &mut out);
+            return out;
+        }
         let rect = ui.available_rect_before_wrap();
         let id = ui.id().with(("term", self.session));
         let resp = ui.interact(rect, id, Sense::click_and_drag());
         ui.advance_cursor_after_rect(rect);
-        if focus_request || resp.clicked() || resp.drag_started() {
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "터미널 화면"));
+        if !self.inspector && (focus_request || resp.clicked() || resp.drag_started()) {
             resp.request_focus();
         }
         let focused = resp.has_focus();
@@ -271,7 +362,7 @@ impl TermView {
         let inner = rect.shrink2(pad);
         let cols = ((inner.width() / cell.x).floor() as u16).max(2);
         let rows = ((inner.height() / cell.y).floor() as u16).max(1);
-        self.request_size(conn, cols, rows);
+        self.request_size(ui.ctx(), conn, cols, rows);
 
         let theme = kiln_common::Theme::current();
         if theme.name != self.theme_name {
@@ -292,11 +383,41 @@ impl TermView {
 
         // 입력 처리 (화면 캐시를 빌리기 전에).
         let term_mode = conn.screens.get(&self.session).map(|s| s.mode).unwrap_or(0);
+        // Preserve application mouse reporting. Shift-right-click always opens Kiln's menu.
+        let app_handles_mouse = term_mode & (mode::MOUSE_CLICK | mode::MOUSE_DRAG | mode::MOUSE_MOTION) != 0;
+        if !app_handles_mouse || ui.input(|i| i.modifiers.shift) || resp.context_menu_opened() {
+            resp.context_menu(|ui| {
+                if ui.add_enabled(self.has_selection(), egui::Button::new("복사")).clicked() {
+                    self.copy_selection(ui.ctx(), conn);
+                    ui.close();
+                }
+                if ui.button("출력 검색").clicked() {
+                    self.open_search();
+                    ui.close();
+                }
+                if ui.button("명령 기록").clicked() {
+                    self.open_history();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("셸·에이전트 연동").clicked() {
+                    self.open_integration_help();
+                    ui.close();
+                }
+            });
+        }
+        if self.inspector {
+            out.clicked = true;
+            return out;
+        }
         let exited = conn.infos.get(&self.session).and_then(|i| i.exited);
-        if focused && self.search.as_ref().is_none_or(|s| !s.focus) {
+        if focused && !resp.context_menu_opened() && !self.inspector && self.search.as_ref().is_none_or(|s| !s.focus) {
             self.handle_keyboard(ui, conn, term_mode, settings, exited, &mut out);
         }
         self.handle_mouse(ui, &resp, conn, inner.min, cell, term_mode, &mut out, cwd);
+        if settings.copy_on_select && !self.inspector && self.has_selection() && (resp.drag_stopped() || resp.double_clicked() || resp.triple_clicked()) {
+            self.copy_selection(ui.ctx(),conn);
+        }
 
         let screen = conn.screens.get(&self.session).unwrap();
         // 행 캐시 갱신 후 그리기.
@@ -360,6 +481,7 @@ impl TermView {
             }
         }
 
+        if settings.cursor_blink && focused { ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)); }
         // 커서와 IME 조합 문자열.
         if let Some(c) = screen.cursor {
             let pos = pos2(inner.min.x + c.col as f32 * cell.x, inner.min.y + c.row as f32 * cell.y);
@@ -372,21 +494,28 @@ impl TermView {
                 });
             }
             if !self.preedit.is_empty() {
-                let g = painter.layout_no_wrap(self.preedit.clone(), font.clone(), self.palette.fg);
-                let r = Rect::from_min_size(pos, vec2(g.size().x.max(cell.x), cell.y));
-                painter.rect_filled(r, 0.0, self.palette.bg);
-                painter.galley(pos2(pos.x, pos.y + (cell.y - g.size().y) / 2.0), g, self.palette.fg);
-                painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, self.palette.fg));
-            } else if screen.display_offset == 0 {
+                let (fg, bg) = screen.lines.get(c.row as usize).and_then(|l| l.cells.get(c.col as usize))
+                    .map(|c| self.palette.cell_colors(c)).unwrap_or((self.palette.fg, self.palette.bg));
+                let line = preedit_line(&self.preedit, fg);
+                let r = Rect::from_min_size(pos, vec2((line.cells.len() as f32 * cell.x).max(cell.x), cell.y));
+                painter.rect_filled(r, 0.0, bg);
+                for mut shape in build_row(ui.ctx(), &line, cell, &font, &self.palette, &mut self.fit_cache) {
+                    shape.translate(pos.to_vec2());
+                    painter.add(shape);
+                }
+                painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, fg));
+            } else if screen.display_offset == 0 && (!settings.cursor_blink || !focused || ui.input(|i| (i.time * 2.0) as u64 % 2 == 0)) {
                 let color = self.palette.cursor;
                 match (c.shape, focused) {
                     (CursorShape::Block, true) => {
                         painter.rect_filled(crect, 1.0, color);
-                        if let Some(ch) = screen.lines.get(c.row as usize).and_then(|l| l.cells.get(c.col as usize))
-                            && ch.c != ' ' {
-                                let g = painter.layout_no_wrap(ch.c.to_string(), font.clone(), self.palette.bg);
-                                painter.galley(pos2(pos.x + (w - g.size().x) / 2.0, pos.y + (cell.y - g.size().y) / 2.0), g, self.palette.bg);
+                        if let Some(line) = screen.lines.get(c.row as usize) {
+                            let line = cursor_line(line, c.col, self.palette.bg);
+                            for mut shape in build_row(ui.ctx(), &line, cell, &font, &self.palette, &mut self.fit_cache) {
+                                shape.translate(pos.to_vec2());
+                                painter.add(shape);
                             }
+                        }
                     }
                     (CursorShape::Beam, _) => {
                         painter.rect_filled(Rect::from_min_size(pos, vec2(2.0, cell.y)), 0.0, color);
@@ -421,7 +550,8 @@ impl TermView {
             let t = kiln_common::Theme::current();
             let msg = format!("프로세스가 종료됐습니다 (코드 {code})");
             let g = painter.layout_no_wrap(msg, kiln_common::fonts::medium(13.0), t.text);
-            let hint = painter.layout_no_wrap("↩ 새 셸   ·   ⌘W 닫기".to_string(), kiln_common::fonts::regular(12.0), t.text_dim);
+            let hint_text = settings.close_shortcut.as_ref().map(|shortcut| format!("↩ 새 셸   ·   {} 닫기", ui.ctx().format_shortcut(shortcut))).unwrap_or_else(|| "↩ 새 셸 시작".into());
+            let hint = painter.layout_no_wrap(hint_text, kiln_common::fonts::regular(12.0), t.text_dim);
             let w = g.size().x.max(hint.size().x) + 36.0;
             let r = Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 46.0), vec2(w, 56.0));
             painter.rect_filled(r, 12.0, t.bg_elevated);
@@ -430,11 +560,16 @@ impl TermView {
             painter.galley(pos2(r.center().x - hint.size().x / 2.0, r.top() + 31.0), hint, t.text_dim);
         }
 
+        let searching = self.search.is_some();
         self.search_ui(ui, conn, rect);
+        if searching && self.search.is_none() { resp.request_focus(); }
+        if resp.has_focus() && ui.input(|i| i.focused) && ui.memory(|m| m.allows_interaction(ui.layer_id())) && !resp.context_menu_opened() {
+            conn.note_terminal_focus(self.session, ui.ctx(), id);
+        }
         out
     }
 
-    fn request_size(&mut self, conn: &mut Conn, cols: u16, rows: u16) {
+    fn request_size(&mut self, ctx: &egui::Context, conn: &mut Conn, cols: u16, rows: u16) {
         let now = std::time::Instant::now();
         match self.pending_size {
             Some((sz, _)) if sz == (cols, rows) => {}
@@ -446,25 +581,19 @@ impl TermView {
         if !attached_before || since.elapsed().as_millis() >= 40 {
             conn.attach(self.session, c, r);
         } else {
-            conn_repaint(conn);
+            ctx.request_repaint_after(std::time::Duration::from_millis(40).saturating_sub(since.elapsed()));
         }
     }
 
     fn handle_keyboard(&mut self, ui: &mut egui::Ui, conn: &mut Conn, term_mode: u32, s: &TermSettings, exited: Option<i32>, out: &mut TermOutput) {
-        let events = ui.input(|i| i.events.clone());
         let mods = ui.input(|i| i.modifiers);
+        let events = terminal_input_events(ui.input(|i| i.events.clone()), mods, s.option_as_meta, cfg!(target_os = "macos"));
         let sid = self.session;
         let mut bytes: Vec<u8> = Vec::new();
         let is_mac = cfg!(target_os = "macos");
         for ev in events {
             match ev {
                 egui::Event::Text(t) => {
-                    if mods.alt && s.option_as_meta && is_mac {
-                        continue;
-                    }
-                    if mods.ctrl && !is_mac {
-                        continue;
-                    }
                     bytes.extend_from_slice(t.as_bytes());
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
@@ -506,9 +635,6 @@ impl TermView {
                 egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
                     self.preedit.clear();
                     bytes.extend_from_slice(text.as_bytes());
-                }
-                egui::Event::WindowFocused(f) if term_mode & mode::FOCUS_EVENTS != 0 => {
-                    bytes.extend_from_slice(if f { b"\x1b[I" } else { b"\x1b[O" });
                 }
                 _ => {}
             }
@@ -573,37 +699,40 @@ impl TermView {
             }
         }
 
-        if mouse_mode {
+        let app_handles_mouse = term_mode & (mode::MOUSE_CLICK | mode::MOUSE_DRAG | mode::MOUSE_MOTION) != 0;
+        if app_handles_mouse {
             for ev in ui.input(|i| i.events.clone()) {
                 match ev {
-                    egui::Event::PointerButton { pos, button, pressed, modifiers } if resp.rect.contains(pos) || !pressed => {
+                    egui::Event::PointerButton { pos, button, pressed, modifiers } => {
                         let b = match button {
                             egui::PointerButton::Primary => 0,
                             egui::PointerButton::Middle => 1,
                             egui::PointerButton::Secondary => 2,
                             _ => continue,
                         };
-                        if !resp.rect.contains(pos) && pressed {
-                            continue;
+                        let owns_pointer = resp.rect.contains(pos) && resp.contains_pointer() && !resp.context_menu_opened();
+                        if self.mouse_capture.button(b, pressed, modifiers.shift, owns_pointer) {
+                            let (c, r) = to_cell(pos);
+                            conn.input(sid, keys::mouse_report(b, c, r, pressed, modifiers, term_mode));
                         }
-                        let (c, r) = to_cell(pos);
-                        conn.input(sid, keys::mouse_report(b, c, r, pressed, modifiers, term_mode));
                     }
-                    egui::Event::PointerMoved(pos) if resp.rect.contains(pos) => {
+                    egui::Event::PointerMoved(pos) if mouse_mode && !resp.context_menu_opened()
+                        && (resp.contains_pointer() || self.mouse_capture.dragged_button().is_some()) => {
                         let (c, r) = to_cell(pos);
                         if self.last_mouse_cell != Some((c, r)) {
                             self.last_mouse_cell = Some((c, r));
-                            let down = ui.input(|i| i.pointer.primary_down());
-                            if (down && term_mode & (mode::MOUSE_DRAG | mode::MOUSE_MOTION) != 0) || term_mode & mode::MOUSE_MOTION != 0 {
-                                let btn = if down { 32 } else { 35 };
-                                conn.input(sid, keys::mouse_report(btn, c, r, true, mods, term_mode));
+                            let dragged = self.mouse_capture.dragged_button();
+                            if (dragged.is_some() && term_mode & (mode::MOUSE_DRAG | mode::MOUSE_MOTION) != 0) || term_mode & mode::MOUSE_MOTION != 0 {
+                                conn.input(sid, keys::mouse_report(32 + dragged.unwrap_or(3), c, r, true, mods, term_mode));
                             }
                         }
                     }
                     _ => {}
                 }
             }
-            return;
+            if mouse_mode { return; }
+        } else {
+            self.mouse_capture = MouseCapture::default();
         }
 
         // 선택.
@@ -661,6 +790,123 @@ impl TermView {
             }
     }
 
+    /// A selectable text alternative to the GPU terminal canvas, plus explicit command review.
+    fn inspector_ui(&mut self, host: &mut egui::Ui, conn: &mut Conn, cwd: Option<&str>, out: &mut TermOutput) {
+        if !self.inspector { return; }
+        let ctx = host.ctx().clone();
+        let t = kiln_common::Theme::current();
+        let telemetry = conn.telemetry.get(&self.session).cloned().unwrap_or_default();
+        if self.inspected_command.is_some_and(|id| !telemetry.commands.iter().any(|record|record.id==id)) {
+            self.inspected_command = None;
+            self.inspector_record_expired = true;
+        }
+        let screen_text = conn.screens.get(&self.session).map(|s| s.lines.iter().map(|l| l.text()).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+        let mut close = false;
+        let available_height = host.available_height();
+        let frame = egui::Frame::new().fill(t.bg_panel).inner_margin(8);
+        frame.show(host, |ui| {
+            ui.set_width((ui.available_width()-16.0).max(100.0));
+            ui.spacing_mut().scroll.floating = false;
+            ui.spacing_mut().scroll.dormant_handle_opacity = 0.65;
+            ui.horizontal_wrapped(|ui| {
+                close = ui.button("← 터미널").clicked();
+                ui.label(egui::RichText::new("명령 기록").color(t.text).strong()).on_hover_text("최근 40개 명령 · 출력은 명령당 앞부분 128KiB. 데몬 재시작·업그레이드 시 기록이 사라집니다.");
+                if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Plug, 28.0, self.integration_help, "셸·에이전트 연동").clicked() {
+                    self.integration_help = !self.integration_help;
+                }
+            });
+            let body_height=(available_height-116.0).max(32.0);
+            egui::ScrollArea::vertical().id_salt(("command-inspector",self.session)).max_height(body_height).auto_shrink([false,false]).show(ui, |ui| {
+                if self.integration_help {
+                    ui.label(if telemetry.shell_integration {"셸: 연결됨"} else {"셸: 명령 경계를 받지 못했습니다"});
+                    ui.label(format!("에이전트: {}",telemetry.activity.label()));
+                    ui.label("설정 → 터미널에서 기본 셸을 /bin/zsh로 지정하고, Kiln의 + 버튼으로 새 작업을 여세요. 새 터미널은 자동 연결됩니다. 기존 zsh에는 그다음 아래 명령을 직접 실행하세요. 셸 안에서 zsh만 실행하면 연결 파일이 생성되지 않습니다.");
+                    if ui.button("zsh 연결 명령 복사").clicked(){ctx.copy_text("source ~/.local/share/kiln/shell-integration-v1/integration.zsh".into());}
+                    ui.label("에이전트 상태는 훅에서 kiln activity running / waiting / done / failed로 알립니다. 명령을 실행할 수 있는 셸 프롬프트에서 테스트하세요.");
+                    if ui.button("연결 테스트 명령 복사").clicked(){ctx.copy_text(r"printf '\033]777;kiln-agent;waiting\007'".into());}
+                    ui.label("테스트 후 에이전트 상태가 ‘입력 필요’로 바뀌고 알림에 표시됩니다. kiln activity unknown으로 초기화할 수 있습니다.");
+                    return;
+                } else if !telemetry.shell_integration {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("셸을 연결하면 명령 기록이 표시됩니다.");
+                        if ui.link("연결 방법").clicked() { self.integration_help = true; }
+                    });
+                }
+                if self.inspector_record_expired {
+                    ui.label("선택한 명령 기록이 만료되어 현재 출력을 표시합니다.");
+                    if !self.command_draft.is_empty() {
+                        ui.label("편집하던 명령은 아래에 남겨두었습니다. 복사한 뒤 다른 기록을 선택하세요.");
+                        ui.add(egui::TextEdit::multiline(&mut self.command_draft).desired_rows(2).desired_width(f32::INFINITY));
+                        if ui.button("명령 초안 복사").clicked(){ctx.copy_text(self.command_draft.clone());}
+                    }
+                }
+                let old = self.inspected_command;
+                egui::ComboBox::from_id_salt(("command-picker",self.session)).width(ui.available_width()-16.0)
+                    .selected_text(self.inspected_command.and_then(|id| telemetry.commands.iter().find(|c|c.id==id)).map(|c| command_label(c)).unwrap_or_else(|| "현재 보이는 출력".into()))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.inspected_command,None,"현재 보이는 출력");
+                        for c in telemetry.commands.iter().rev() { ui.selectable_value(&mut self.inspected_command,Some(c.id),command_label(c)); }
+                    });
+                ui.horizontal_wrapped(|ui| {
+                    let index=self.inspected_command.and_then(|id|telemetry.commands.iter().position(|c|c.id==id));
+                    let previous=index.map(|i|i.checked_sub(1)).unwrap_or_else(||telemetry.commands.len().checked_sub(1));
+                    ui.add_enabled_ui(previous.is_some(), |ui| {
+                        if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::ArrowUp, 28.0, false, "이전 명령").clicked() { self.inspected_command=previous.map(|i|telemetry.commands[i].id); }
+                    });
+                    let next=index.and_then(|i|telemetry.commands.get(i+1)).map(|c|c.id);
+                    ui.add_enabled_ui(next.is_some(), |ui| {
+                        if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::ArrowDown, 28.0, false, "다음 명령").clicked() { self.inspected_command=next; }
+                    });
+                    if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Terminal, 28.0, self.inspected_command.is_none(), "현재 출력").clicked() { self.inspected_command=None; }
+                    if let Some(record) = self.inspected_command.and_then(|id| telemetry.commands.iter().find(|c| c.id == id)) {
+                        ui.add_enabled_ui(record.output_available, |ui| {
+                            if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Refresh, 28.0, false, "명령 출력 다시 읽기").clicked() { conn.read_command_output(self.session, record.id); }
+                        });
+                    }
+                });
+                if old != self.inspected_command {
+                    self.inspector_record_expired = false;
+                    self.command_draft = self.inspected_command.and_then(|id|telemetry.commands.iter().find(|c|c.id==id)).map(|c|c.command.clone()).unwrap_or_default();
+                    if let Some(id)=self.inspected_command.filter(|id|telemetry.commands.iter().any(|c|c.id==*id && c.output_available)) { conn.read_command_output(self.session,id); }
+                }
+                let command = self.inspected_command.and_then(|id|telemetry.commands.iter().find(|c|c.id==id));
+                let output = self.inspected_command.and_then(|id|conn.command_outputs.get(&(self.session,id)));
+                let display = if self.inspected_command.is_none() { screen_text.as_str() }
+                    else if let Some((text, _)) = output { text.as_str() }
+                    else if command.is_some_and(|c| c.finished_unix.is_none()) { "실행 중인 명령입니다. ‘현재 출력’에서 진행 상황을 확인하세요." }
+                    else if command.is_some_and(|c| !c.output_available) { "보관된 출력이 없습니다. 명령 내용은 아래에서 확인할 수 있습니다." }
+                    else { "출력을 불러오는 중… 응답이 없으면 ‘명령 출력 다시 읽기’를 누르세요." };
+                if output.is_some_and(|x|x.1) { ui.label(egui::RichText::new("출력이 기록 제한(128KiB)을 초과해 앞부분만 보관했습니다.").color(t.orange)); }
+                let label = ui.label(if self.inspected_command.is_none() { "보이는 터미널 출력 · 읽기 전용" } else { "선택한 명령 출력 · 읽기 전용" });
+                let mut readonly: &str = display;
+                ui.add(egui::TextEdit::multiline(&mut readonly).font(egui::TextStyle::Monospace).desired_rows(8).desired_width(f32::INFINITY)).labelled_by(label.id);
+                if let Some(command)=command {
+                    ui.label(format!("작업 폴더: {}",command.cwd.as_deref().or(cwd).unwrap_or("확인 안 됨")));
+                    let label=ui.label("명령 편집 · 아래 실행 버튼을 눌러야 실행됩니다");
+                    ui.add(egui::TextEdit::multiline(&mut self.command_draft).desired_rows(2).desired_width(f32::INFINITY).code_editor()).labelled_by(label.id);
+                } else {
+                    let label=ui.label("터미널 입력 · 전송 후 터미널에서 Enter로 실행");
+                    ui.add(egui::TextEdit::singleline(&mut self.accessible_input).desired_width(f32::INFINITY)).labelled_by(label.id);
+                    if ui.button("입력만 보내기").clicked() {
+                        let text=self.accessible_input.replace(['\r','\n']," ");
+                        conn.input(self.session,text.into_bytes()); self.accessible_input.clear();
+                    }
+                    if ui.button("터미널에 Enter 보내기").clicked() { conn.input(self.session,vec![b'\r']); }
+                }
+            });
+            if !self.integration_help { ui.horizontal_wrapped(|ui| {
+                let output = if self.inspected_command.is_none(){Some(screen_text.as_str())}else{self.inspected_command.and_then(|id|conn.command_outputs.get(&(self.session,id))).map(|o|o.0.as_str())};
+                if ui.add_enabled(output.is_some(),egui::Button::new("출력 복사")).clicked(){ctx.copy_text(output.unwrap_or_default().to_owned());}
+            if let Some(command)=self.inspected_command.and_then(|id|telemetry.commands.iter().find(|c|c.id==id)) {
+                if ui.add_enabled(!self.command_draft.trim().is_empty(),egui::Button::new("새 터미널에서 실행")).clicked() {
+                    out.command_to_run=Some((self.command_draft.clone(),command.cwd.clone())); close=true;
+                }
+            }
+            }); }
+        });
+        if close { self.inspector=false; }
+    }
+
     fn search_ui(&mut self, ui: &mut egui::Ui, conn: &mut Conn, rect: Rect) {
         use kiln_common::icons::Icon;
         use kiln_common::widgets;
@@ -708,7 +954,7 @@ impl TermView {
                             ui.label(egui::RichText::new("없음").size(12.0).color(t.red));
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if widgets::icon_button(ui, Icon::Close, 24.0, false, "닫기 (Esc)").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            if widgets::icon_button(ui, Icon::Close, 24.0, false, "닫기 (Esc)").clicked() || ((te.has_focus() || te.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
                                 close = true;
                             }
                             if widgets::icon_button(ui, Icon::ArrowDown, 24.0, false, "다음 (⇧↩)").clicked() {
@@ -727,10 +973,6 @@ impl TermView {
             conn.send(kiln_proto::ClientMsg::Scroll { session: self.session, scroll: ScrollTo::Bottom });
         }
     }
-}
-
-fn conn_repaint(conn: &Conn) {
-    let _ = conn;
 }
 
 fn word_bounds(line: &Line, col: u16) -> (u16, u16) {
@@ -752,6 +994,12 @@ fn word_bounds(line: &Line, col: u16) -> (u16, u16) {
         b += 1;
     }
     (a as u16, b as u16)
+}
+
+fn command_label(command: &kiln_proto::CommandRecord) -> String {
+    let status=match (command.finished_unix,command.exit_code) { (None,_)=>"실행 중".into(),(_,Some(0))=>"성공".into(),(_,Some(code))=>format!("종료 {code}"),_=>"종료 코드 확인 안 됨".into() };
+    let text=if command.command.is_empty(){"명령 텍스트 확인 안 됨"}else{&command.command};
+    format!("{} · {} · {}",command.id,status,text.chars().take(80).collect::<String>())
 }
 
 /// OSC 8 URI 를 열 대상으로 바꾼다(`file://` 는 로컬 파일).
@@ -806,23 +1054,42 @@ pub fn find_link(text: &str, col: usize, cwd: Option<&str>) -> Option<(usize, us
     None
 }
 
+/// Use the emulator's Unicode column widths so composition has the same glyph
+/// sizing, fallback fonts, and alignment as the text after it is committed.
+fn preedit_line(text: &str, fg: Color32) -> Line {
+    let mut line = Line::default();
+    let mut base: Option<u16> = None;
+    for c in text.chars() {
+        match c.width() {
+            Some(0) => {
+                if let Some(col) = base { line.combining.push((col, c.to_string())); }
+            }
+            Some(width) => {
+                base = Some(line.cells.len() as u16);
+                line.cells.push(Cell { c, fg: Color::Rgb(fg.r(), fg.g(), fg.b()), flags: if width == 2 { flags::WIDE } else { 0 }, ..Default::default() });
+                if width == 2 { line.cells.push(Cell { flags: flags::SPACER, ..Default::default() }); }
+            }
+            None => {}
+        }
+    }
+    line
+}
+
+/// Repaint only the glyph on a block cursor, without its original background or
+/// style colors. Hidden text must never be revealed by moving the cursor over it.
+fn cursor_line(line: &Line, col: u16, fg: Color32) -> Line {
+    let Some(c) = line.cells.get(col as usize).filter(|c| c.flags & (flags::HIDDEN | flags::SPACER) == 0) else { return Line::default() };
+    Line {
+        cells: vec![Cell { c: c.c, fg: Color::Rgb(fg.r(), fg.g(), fg.b()), flags: c.flags & flags::WIDE, ..Default::default() }],
+        combining: line.combining.iter().filter(|(i, _)| *i == col).map(|(_, text)| (0, text.clone())).collect(),
+        links: vec![],
+    }
+}
+
 /// 한 줄을 셰이프로 만든다. 좌표는 줄 원점 기준.
 fn build_row(ctx: &egui::Context, line: &Line, cell: Vec2, font: &FontId, pal: &Palette, fit: &mut HashMap<char, bool>) -> Vec<Shape> {
     let mut shapes = Vec::new();
-    let resolve = |c: &Cell| -> (Color32, Color32) {
-        let mut fg = match c.fg {
-            Color::Idx(i) if i < 8 && c.flags & flags::BOLD != 0 => pal.ansi[i as usize + 8],
-            other => pal.resolve(other, true),
-        };
-        let mut bg = pal.resolve(c.bg, false);
-        if c.flags & flags::INVERSE != 0 {
-            std::mem::swap(&mut fg, &mut bg);
-        }
-        if c.flags & flags::DIM != 0 {
-            fg = lerp(bg, fg, 0.6);
-        }
-        (fg, bg)
-    };
+    let resolve = |c: &Cell| pal.cell_colors(c);
 
     // 배경.
     let mut run: Option<(usize, Color32)> = None;
@@ -953,6 +1220,290 @@ pub fn modifiers_none() -> Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ime_typography_matches_committed_terminal_cells() {
+        use egui_kittest::Harness;
+        let mut emu = kiln_daemon::emu::Emu::new(80, 3);
+        emu.advance("\x1b[48;2;47;49;55m\x1b[2J한으a한b e\u{301}".as_bytes());
+        let mut conn = Conn::offline(egui::Context::default());
+        conn.screens.insert(1, Screen {
+            cols: 80, rows: 3, lines: (0..3).map(|r| emu.visible_line(r)).collect(), row_versions: vec![1; 3],
+            cursor: Some(kiln_proto::Cursor { col: 0, row: 1, shape: CursorShape::Block }), ..Default::default()
+        });
+        let mut installed = false;
+        let mut h = Harness::builder().with_size([760.0, 200.0]).build_ui_state(|ui, s: &mut (TermView, Conn, TermSettings)| {
+            if !installed { kiln_common::fonts::install(ui.ctx()); installed = true; return; }
+            s.0.ui(ui, &mut s.1, &s.2, true, None);
+        }, (TermView::new(1), conn, TermSettings::default()));
+        h.run_steps(3);
+        for (size, scale) in [(13.5, 1.0), (18.0, 2.0), (24.0, 1.3)] {
+            h.state_mut().2.font_size = size;
+            h.set_pixels_per_point(scale);
+            h.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: "한으a한b e\u{301}".into(), active_range_chars: None }));
+            h.run_steps(3);
+            let texts: Vec<_> = h.output().shapes.iter().filter_map(|s| match &s.shape { Shape::Text(t) => Some(t), _ => None }).collect();
+            let cell = h.state().0.metrics.unwrap().1;
+            // Compare actual terminal rendering with the overlay, including fallback font,
+            // CJK enlargement, combining marks, and each glyph's grid-relative position.
+            let split = texts.iter().position(|t| t.pos.y >= 6.0 + cell.y).unwrap();
+            let (committed, composing) = texts.split_at(split);
+            assert_eq!(committed.len(), composing.len(), "composition must use terminal cell layout");
+            for (a, b) in committed.iter().zip(composing) {
+                assert_eq!(a.galley.job.text, b.galley.job.text);
+                assert_eq!(a.galley.job.sections[0].format.font_id, b.galley.job.sections[0].format.font_id);
+                assert_eq!(a.galley.size(), b.galley.size());
+                assert!((a.pos.x - b.pos.x).abs() < 0.01);
+                assert!((b.pos.y - a.pos.y - cell.y).abs() < 0.01);
+            }
+            if size == 18.0 {
+                h.render().unwrap().save("/tmp/kiln-ime-composition-2x.png").unwrap();
+            }
+            h.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: String::new(), active_range_chars: None }));
+            h.run_steps(2);
+            assert!(h.state().0.preedit.is_empty());
+            h.state_mut().1.screens.get_mut(&1).unwrap().cursor.as_mut().unwrap().row = 0;
+            h.run_steps(2);
+            let texts: Vec<_> = h.output().shapes.iter().filter_map(|s| match &s.shape { Shape::Text(t) => Some(t), _ => None }).collect();
+            let (a, b) = (texts[0], *texts.last().unwrap());
+            assert_eq!(a.galley.job.text, b.galley.job.text);
+            assert_eq!(a.galley.job.sections[0].format.font_id, b.galley.job.sections[0].format.font_id);
+            assert_eq!(a.galley.size(), b.galley.size());
+            assert_eq!(a.pos, b.pos, "block cursor must not move or resize its underlying glyph");
+            if size == 24.0 {
+                h.render().unwrap().save("/tmp/kiln-ime-cursor-130.png").unwrap();
+            }
+            h.state_mut().1.screens.get_mut(&1).unwrap().cursor.as_mut().unwrap().row = 1;
+        }
+        h.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: "으".into(), active_range_chars: None }));
+        h.run_steps(2);
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("으".into())));
+        h.run_steps(2);
+        assert!(h.state().0.preedit.is_empty(), "commit removes the composition overlay");
+    }
+
+    #[test]
+    fn ime_columns_and_cursor_styles_preserve_terminal_semantics() {
+        for text in ["으", "ㄱ", "a한b", "e\u{301}", "한\u{301}字", "かな", "中🙂"] {
+            let mut emu = kiln_daemon::emu::Emu::new(80, 1);
+            emu.advance(text.as_bytes());
+            let rendered = emu.visible_line(0);
+            let composing = preedit_line(text, Color32::WHITE);
+            for (a, b) in rendered.cells.iter().zip(&composing.cells) {
+                assert_eq!(a.c, b.c, "{text}");
+                assert_eq!(a.flags & (flags::WIDE | flags::SPACER), b.flags, "{text}");
+            }
+            assert_eq!(rendered.combining, composing.combining, "{text}");
+        }
+        let mut line = Line { cells: vec![Cell { c: '한', flags: flags::WIDE | flags::INVERSE | flags::BOLD, bg: Color::Idx(1), ..Default::default() }], combining: vec![(0, "\u{301}".into())], links: vec![] };
+        let cursor = cursor_line(&line, 0, Color32::BLACK);
+        assert_eq!(cursor.cells[0].flags, flags::WIDE);
+        assert_eq!(cursor.cells[0].bg, Color::DefaultBg);
+        assert_eq!(cursor.combining, line.combining);
+        line.cells[0].flags |= flags::HIDDEN;
+        assert!(cursor_line(&line, 0, Color32::BLACK).cells.is_empty());
+        assert!(cursor_line(&line, 0, Color32::BLACK).combining.is_empty());
+    }
+
+    #[test]
+    fn tui_mouse_capture_keeps_releases_in_their_split_and_excludes_shift_selection() {
+        let mut left = MouseCapture::default();
+        let mut right = MouseCapture::default();
+        assert!(left.button(0, true, false, true));
+        assert!(!right.button(0, true, false, false));
+        // Drag into the other split and release with Shift newly pressed.
+        assert!(left.button(0, false, true, false));
+        assert!(!right.button(0, false, true, true));
+        assert_eq!(left.dragged_button(), None);
+        // A popup-covered press or Shift selection never enters TUI mouse reporting.
+        assert!(!left.button(2, true, false, false));
+        assert!(!left.button(2, false, false, true));
+        assert!(!left.button(0, true, true, true));
+        assert!(!left.button(0, false, false, true));
+        assert!(left.button(1, true, false, true));
+        assert_eq!(left.dragged_button(), Some(1));
+    }
+
+    #[test]
+    fn copied_selection_preserves_combining_unicode_and_soft_wrapped_lines() {
+        let mut first = Line { cells: "cafe".chars().map(|c| Cell { c, ..Default::default() }).collect(), combining: vec![(3, "\u{301}".into())], links: vec![] };
+        first.cells[3].flags |= flags::WRAP;
+        let second = Line { cells: " noir".chars().map(|c| Cell { c, ..Default::default() }).collect(), combining: vec![], links: vec![] };
+        let screen = Screen { cols: 5, rows: 2, lines: vec![first, second], ..Default::default() };
+        let mut view = TermView::new(1);
+        view.selection = Some(Selection { anchor: Point { line: 0, col: 0 }, head: Point { line: 1, col: 4 }, mode: SelMode::Cell });
+        assert_eq!(view.selection_text(&screen).as_deref(), Some("cafe\u{301} noir"));
+    }
+
+    #[test]
+    fn closing_terminal_search_returns_keyboard_focus_to_terminal() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let mut view = TermView::new(1);
+        view.open_search();
+        let mut conn = Conn::offline(egui::Context::default());
+        conn.screens.insert(1, Screen { cols: 2, rows: 1, lines: vec![Line { cells: vec![Cell::default(); 2], combining: vec![], links: vec![] }], row_versions: vec![1], ..Default::default() });
+        let mut initialized = false;
+        let mut h = Harness::builder().with_size([720.0, 440.0]).build_ui_state(|ui, s: &mut (TermView, Conn)| {
+            if !initialized { kiln_common::fonts::install(ui.ctx()); initialized = true; return; }
+            s.0.ui(ui, &mut s.1, &TermSettings::default(), false, None);
+        }, (view, conn));
+        h.run_steps(3);
+        h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);
+        assert!(h.state().0.search.is_none());
+        assert!(h.get_by_label("터미널 화면").is_focused());
+    }
+
+    #[test]
+    fn modifier_release_in_one_frame_does_not_duplicate_meta_text() {
+        use egui::{Event,Key,Modifiers};
+        let key=|key,modifiers|Event::Key{key,physical_key:None,pressed:true,repeat:false,modifiers};
+        let events=vec![key(Key::B,Modifiers::ALT),Event::Text("b".into()),key(Key::C,Modifiers::ALT),Event::Text("c".into())];
+        let filtered=terminal_input_events(events.clone(),Modifiers::NONE,true,true);
+        let mut bytes=vec![];
+        for event in filtered {match event {Event::Key{key,modifiers,..}=>bytes.extend(keys::encode_key(key,modifiers,0,true).unwrap_or_default()),Event::Text(text)=>bytes.extend(text.bytes()),_=>{}}}
+        assert_eq!(bytes,b"\x1bb\x1bc");
+        assert_eq!(terminal_input_events(events,Modifiers::NONE,false,true).iter().filter(|e|matches!(e,Event::Text(_))).count(),2,"Option-as-Meta off preserves composed text");
+        let mixed=vec![key(Key::B,Modifiers::NONE),Event::Text("b".into()),key(Key::C,Modifiers::ALT),Event::Text("c".into())];
+        assert_eq!(terminal_input_events(mixed,Modifiers::ALT,true,true).iter().filter(|e|matches!(e,Event::Text(_))).count(),1,"plain text before Option press must not be lost");
+    }
+
+    #[test]
+    fn inspector_expired_record_returns_to_live_output_and_preserves_edited_command() {
+        use egui_kittest::{Harness,kittest::Queryable};
+        let conn=Conn::offline(egui::Context::default());
+        let mut view=TermView::new(1); view.inspector=true; view.inspected_command=Some(7); view.command_draft="echo edited".into();
+        let mut installed=false;
+        let mut h=Harness::builder().with_size([720.0,600.0]).build_ui_state(|ui,state:&mut(TermView,Conn,TermOutput)|{
+            if !installed{kiln_common::fonts::install(ui.ctx());kiln_common::Theme::current().apply(ui.ctx());installed=true;return;}
+            state.0.inspector_ui(ui,&mut state.1,None,&mut state.2);
+        },(view,conn,TermOutput::default()));
+        h.run_steps(3);
+        assert_eq!(h.state().0.inspected_command,None);
+        assert_eq!(h.state().0.command_draft,"echo edited");
+        assert!(h.query_by_label("명령 초안 복사").is_some());
+        assert!(h.query_by_label("명령 출력 다시 읽기").is_none());
+        assert!(h.query_by_label("보이는 터미널 출력 · 읽기 전용").is_some());
+        assert!(h.state().2.command_to_run.is_none());
+    }
+
+    #[test]
+    fn cell_metrics_track_font_spacing_and_display_scale_independently() {
+        let ctx=egui::Context::default(); kiln_common::fonts::install(&ctx);
+        let mut view=TermView::new(1);
+        let mut sizes=Vec::new();
+        let first=TermSettings{font_size:12.0,line_height:1.5,..Default::default()};
+        let second=TermSettings{font_size:15.0,line_height:1.2,..Default::default()};
+        assert_eq!(first.font_size*first.line_height,second.font_size*second.line_height);
+        let mut output=ctx.run_ui(egui::RawInput::default(),|ui| {
+            sizes.push(view.cell_size(ui.ctx(),&first));
+            sizes.push(view.cell_size(ui.ctx(),&second));
+        });output.textures_delta.clear();
+        assert!(sizes[1].x>sizes[0].x,"font size must update column width even with equal font × line spacing");
+        ctx.set_pixels_per_point(1.3);
+        let mut output=ctx.run_ui(egui::RawInput::default(),|ui| {
+            let measured=view.cell_size(ui.ctx(),&second);
+            let expected=ui.fonts_mut(|fonts|fonts.glyph_width(&FontId::monospace(15.0),'M'));
+            assert_eq!(measured.x,expected);
+            assert_eq!(view.metrics.unwrap().0.2,ui.ctx().pixels_per_point());
+        });output.textures_delta.clear();
+    }
+
+
+    #[test]
+    fn command_inspector_small_window_is_bounded_and_execution_is_explicit() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let ctx=egui::Context::default();
+        let mut conn=Conn::offline(ctx);
+        conn.telemetry.insert(1,kiln_proto::SessionTelemetry { shell_integration:true, commands:vec![kiln_proto::CommandRecord {id:7,command:"echo original".into(),cwd:Some("/tmp".into()),exit_code:Some(0),finished_unix:Some(1),output_available:true,..Default::default()}],..Default::default() });
+        conn.command_outputs.insert((1,7),("original".into(),false));
+        let mut view=TermView::new(1); view.inspector=true;view.inspected_command=Some(7);view.command_draft="echo edited".into();
+        let mut installed=false;
+        let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).build_ui_state(|ui,state:&mut (TermView,Conn,TermOutput)| {
+            if !installed { kiln_common::fonts::install(ui.ctx()); kiln_common::Theme::current().apply(ui.ctx()); installed=true;return; }
+            state.0.inspector_ui(ui,&mut state.1,None,&mut state.2);
+        },(view,conn,TermOutput::default()));
+        h.run_steps(3);
+        assert!(h.state().2.command_to_run.is_none());
+        assert!(h.ctx.content_rect().contains_rect(h.get_by_label("← 터미널").rect()));
+        h.render().unwrap().save("/tmp/kiln-command-inspector-small.png").unwrap();
+        assert!(h.ctx.content_rect().contains_rect(h.get_by_label("새 터미널에서 실행").rect()));
+        // The execution action remains visible outside the scrollable editor.
+        h.get_by_label("새 터미널에서 실행").click();
+        h.run_steps(2);
+        assert_eq!(h.state().2.command_to_run,Some(("echo edited".into(),Some("/tmp".into()))));
+    }
+
+    #[test]
+    fn inline_history_keeps_other_panels_interactive_and_selection_does_not_execute() {
+        use egui_kittest::{Harness,kittest::Queryable};
+        let mut conn=Conn::offline(egui::Context::default());
+        conn.telemetry.insert(1,kiln_proto::SessionTelemetry {shell_integration:true,commands:(1..=2).map(|id|kiln_proto::CommandRecord{id,command:format!("echo {id}"),exit_code:Some(0),finished_unix:Some(1),output_available:true,..Default::default()}).collect(),..Default::default()});
+        let mut view=TermView::new(1);view.inspector=true;view.inspected_command=Some(2);view.command_draft="echo 2".into();
+        let mut initialized=false;
+        let mut h=Harness::builder().with_size([1000.0,600.0]).build_ui_state(|ui,s:&mut (TermView,Conn,TermOutput,bool)| {
+            if !initialized {kiln_common::fonts::install(ui.ctx());initialized=true;return;}
+            ui.columns(2,|cols|{s.0.inspector_ui(&mut cols[0],&mut s.1,None,&mut s.2);if cols[1].button("다른 패널 작업").clicked(){s.3=true;}});
+        },(view,conn,TermOutput::default(),false));
+        h.run_steps(3);h.get_by_label("이전 명령").click();h.run_steps(2);
+        assert_eq!(h.state().0.command_draft,"echo 1");assert!(h.state().2.command_to_run.is_none());
+        h.get_by_label("다른 패널 작업").click();h.run_steps(2);assert!(h.state().3);
+        h.get_by_label("← 터미널").click();h.run_steps(2);assert!(!h.state().0.inspector);
+    }
+
+    #[test]
+    fn header_history_action_leaves_setup_and_keeps_command_draft() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let mut view = TermView::new(1);
+        view.open_integration_help();
+        view.inspected_command = Some(7);
+        view.command_draft = "echo edited".into();
+        let mut conn = Conn::offline(egui::Context::default());
+        conn.telemetry.insert(1, kiln_proto::SessionTelemetry {
+            shell_integration: true,
+            commands: vec![kiln_proto::CommandRecord {
+                id: 7, command: "echo original".into(), exit_code: Some(0),
+                finished_unix: Some(1), output_available: true, ..Default::default()
+            }], ..Default::default()
+        });
+        let mut initialized = false;
+        let mut h = Harness::builder().with_size([720.0, 600.0]).build_ui_state(|ui, s: &mut (TermView, Conn, TermOutput)| {
+            if !initialized {
+                kiln_common::fonts::install(ui.ctx());
+                kiln_common::Theme::current().apply(ui.ctx());
+                initialized = true;
+                return;
+            }
+            if kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::History, 28.0, s.0.inspector_open(), "명령 기록 열기").clicked() {
+                s.0.open_history();
+            }
+            s.0.inspector_ui(ui, &mut s.1, None, &mut s.2);
+        }, (view, conn, TermOutput::default()));
+        h.run_steps(3);
+        assert!(h.query_by_label("zsh 연결 명령 복사").is_some());
+        h.get_by_label("명령 기록 열기").click();
+        h.run_steps(2);
+        assert!(h.state().0.inspector_open());
+        assert!(h.query_by_label("zsh 연결 명령 복사").is_none());
+        assert_eq!(h.state().0.command_draft, "echo edited");
+        assert_eq!(h.state().0.inspected_command, Some(7));
+        assert!(h.state().2.command_to_run.is_none());
+    }
+
+    #[test]
+    fn integration_help_exposes_status_and_copy_only_setup() {
+        use egui_kittest::{Harness,kittest::Queryable};
+        let mut view=TermView::new(1);view.inspector=true;view.integration_help=true;
+        let mut initialized=false;
+        let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).build_ui_state(|ui,s:&mut (TermView,Conn,TermOutput)|{
+            if !initialized {kiln_common::fonts::install(ui.ctx());kiln_common::Theme::current().apply(ui.ctx());initialized=true;return;}
+            s.0.inspector_ui(ui,&mut s.1,None,&mut s.2);
+        },(view,Conn::offline(egui::Context::default()),TermOutput::default()));
+        h.run_steps(3);
+        assert!(h.ctx.content_rect().contains_rect(h.get_by_label("← 터미널").rect()));
+        h.get_by_label("zsh 연결 명령 복사").click();h.run_steps(2);
+        assert!(h.state().2.command_to_run.is_none());
+        h.render().unwrap().save("/tmp/kiln-terminal-integration-help-small.png").unwrap();
+    }
 
     #[test]
     fn finds_url_under_column() {

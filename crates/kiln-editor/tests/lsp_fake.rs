@@ -181,8 +181,8 @@ fn crash_restarts_server_and_reopens_documents() {
     let marker = dir.path().join("crash-once");
     std::fs::write(&marker, "").unwrap();
     let marker_s = marker.to_string_lossy().into_owned();
-    // initialize, initialized, didOpen, 진행률 토큰 응답 다음 다섯 번째 메시지(hover)에서 한 번 죽는다.
-    let (m, p) = open(dir.path(), "a.rs", "fn a() {}\n", &["--crash-after", "5", "--crash-marker", &marker_s]);
+    // Progress-token replies and hover are asynchronous: crash on the method, not an assumed message count.
+    let (m, p) = open(dir.path(), "a.rs", "fn a() {}\n", &["--crash-on", "textDocument/hover", "--crash-marker", &marker_s]);
     let first = m.hover(&p, pos(0, 4)).wait(WAIT).unwrap();
     assert!(first.is_err(), "{first:?}");
     // 재시작 중에 바뀐 내용도 다시 열 때 반영되어야 한다.

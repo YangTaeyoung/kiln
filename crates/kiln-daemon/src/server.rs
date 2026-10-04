@@ -29,6 +29,7 @@ pub struct Session {
     info: Mutex<SessionInfo>,
     generation: AtomicU64,
     images: Mutex<SessionImages>,
+    telemetry: Mutex<crate::shell::Tracker>,
 }
 
 /// 세션이 표시 중인 이미지. 오래된 것부터 버린다.
@@ -241,7 +242,7 @@ impl Daemon {
         let (tx, rx) = unbounded::<Vec<u8>>();
         let mut writer = pty.writer()?;
         let reader = pty.reader()?;
-        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), images: Mutex::new(SessionImages::default()) });
+        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()) });
         self.sessions.write().insert(id, sess.clone());
         std::thread::Builder::new().name(format!("pty-w-{id}")).spawn(move || {
             while let Ok(data) = rx.recv() {
@@ -273,6 +274,10 @@ impl Daemon {
             match reader.read_timeout(&mut buf, 100) {
                 Ok(ReadResult::Data(n)) => {
                     let data = &buf[..n];
+                    let cwd = sess.info.lock().cwd.clone();
+                    let (cols, rows) = sess.emu.lock().size();
+                    let changed = { let mut tracker = sess.telemetry.lock(); tracker.resize(cols, rows); tracker.feed(data, cwd.as_deref()) };
+                    if changed { self.broadcast(ServerMsg::SessionTelemetry { session: sess.id, telemetry: sess.telemetry.lock().state.clone() }); }
                     osc.feed(data, &mut osc_events);
                     let mut events = Vec::new();
                     for seg in img_scan.feed(data) {
@@ -313,6 +318,8 @@ impl Daemon {
         };
         sess.generation.fetch_add(1, Ordering::SeqCst);
         self.broadcast(ServerMsg::SessionUpdated(info));
+        sess.telemetry.lock().exited();
+        self.broadcast(ServerMsg::SessionTelemetry { session: sess.id, telemetry: sess.telemetry.lock().state.clone() });
         self.broadcast(ServerMsg::SessionExited { session: sess.id, code: Some(code) });
         self.wake_attached(sess.id);
         self.save_registry();
@@ -457,6 +464,12 @@ impl Daemon {
                     updated = true;
                     self.broadcast(ServerMsg::Notification { session: sess.id, title, body });
                 }
+                OscEvent::Activity(activity) => {
+                    let mut info = sess.info.lock();
+                    info.attention = matches!(activity, AgentActivity::Waiting | AgentActivity::Done | AgentActivity::Failed);
+                    updated = true;
+                }
+                OscEvent::CommandText(_) | OscEvent::CommandStart | OscEvent::CommandEnd(_) | OscEvent::Prompt => {},
                 OscEvent::Cwd(p) => {
                     let mut i = sess.info.lock();
                     if i.cwd.as_deref() != Some(&p) {
@@ -563,7 +576,16 @@ impl Daemon {
                 can_upgrade: true,
             }),
             ClientMsg::Ping { req } => reply(ServerMsg::Pong { req }),
-            ClientMsg::ListSessions { req } => reply(ServerMsg::Sessions { req, sessions: self.list() }),
+            ClientMsg::ListSessions { req } => {
+                reply(ServerMsg::Sessions { req, sessions: self.list() });
+                for sess in self.sessions.read().values() { reply(ServerMsg::SessionTelemetry { session: sess.id, telemetry: sess.telemetry.lock().state.clone() }); }
+            },
+            ClientMsg::ReadCommandOutput { req, session, command } => {
+                match self.session(session).and_then(|s| s.telemetry.lock().output(command)) {
+                    Some((text, truncated)) => reply(ServerMsg::CommandOutput { req, session, command, text, truncated }),
+                    None => reply(ServerMsg::Error { req, message: "명령 출력을 더 이상 사용할 수 없습니다. 데몬 재시작 또는 기록 제한을 확인하세요.".into() }),
+                }
+            },
             ClientMsg::Create { req, spec } => match self.create(spec) {
                 Ok(session) => reply(ServerMsg::Created { req, session }),
                 Err(e) => reply(ServerMsg::Error { req, message: format!("spawn failed: {e}") }),

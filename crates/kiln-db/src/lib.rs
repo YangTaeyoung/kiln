@@ -19,5 +19,5 @@ pub use edit::{ChangeSet, RowInsert, RowUpdate, TableRef};
 pub use manager::{ConnStatus, ConsoleSession, DbManager, HistoryEntry, Job};
 pub use meta::{ColumnDef, ForeignKeyInfo, IndexInfo, TableDetails, TableInfo, TableKind};
 pub use panel::{DbEvent, DbPanel};
-pub use tab::DbTab;
+pub use tab::{DbTab, TableDraft, ConsoleDocument};
 pub use value::{TypeClass, Value};

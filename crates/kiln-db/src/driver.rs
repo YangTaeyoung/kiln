@@ -14,7 +14,7 @@ use sqlx::{MySql, MySqlConnection, PgConnection, Postgres, Sqlite, SqliteConnect
 use std::time::Duration;
 
 /// 결과 컬럼 메타데이터.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ColumnInfo {
     pub name: String,
     pub type_name: String,
@@ -427,6 +427,18 @@ macro_rules! driver_ops {
                 Ok(out)
             }
 
+            pub async fn query_bound(conn:&mut $Conn,sql:&str,values:&[Value])->DbResult<ResultSet>{
+                let mut args=<$DB as sqlx::Database>::Arguments::default();
+                for value in values {<$DB as DbKind>::add_arg(&mut args,value).map_err(|e|DbError::msg(e.to_string()))?;}
+                let rows=sqlx::query_with(sqlx::AssertSqlSafe(sql.to_owned()),args).persistent(false).fetch_all(&mut *conn).await?;
+                let cols=if let Some(row)=rows.first(){columns_of(row)}else{
+                    use sqlx::{Executor as _,Statement as _};
+                    let description=(&mut *conn).prepare(sqlx::SqlSafeStr::into_sql_str(sqlx::AssertSqlSafe(sql.to_owned()))).await?;
+                    description.columns().iter().map(|c|ColumnInfo::new(c.name(),c.type_info().name())).collect()
+                };
+                let values=rows.iter().map(|row|decode_row(row,&cols)).collect();Ok(ResultSet::new(cols,values))
+            }
+
             /// 결과를 행 단위로 콜백에 흘려 보낸다. 콜백 오류는 중단 사유가 된다.
             pub async fn stream_sql(
                 conn: &mut $Conn,
@@ -514,6 +526,11 @@ pub(crate) enum SessionConn {
 }
 
 impl DbPool {
+    pub(crate) async fn query_bound(&self,sql:&str,args:&[Value])->DbResult<ResultSet>{match self{
+        DbPool::Pg(p)=>pg::query_bound(&mut *p.acquire().await?,sql,args).await,
+        DbPool::My(p)=>my::query_bound(&mut *p.acquire().await?,sql,args).await,
+        DbPool::Lite(p)=>lite::query_bound(&mut *p.acquire().await?,sql,args).await,
+    }}
     pub(crate) async fn run_sql(
         &self,
         sql: &str,

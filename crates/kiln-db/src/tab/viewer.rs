@@ -108,9 +108,9 @@ impl ValueViewer {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 if ui
-                    .add_enabled_ui(self.dirty, |ui| widgets::button_with(ui, None, "적용", ButtonKind::Primary, true))
+                    .add_enabled_ui(self.dirty, |ui| widgets::button_with(ui, None, "셀에 반영", ButtonKind::Primary, true))
                     .inner
-                    .on_hover_text("이 텍스트를 셀에 씁니다 (제출 전까지 보류)")
+                    .on_hover_text("DB에 제출하기 전까지 임시 변경으로 유지됩니다")
                     .clicked()
                 {
                     let text = if cell.class == TypeClass::Json {

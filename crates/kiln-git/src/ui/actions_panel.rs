@@ -157,13 +157,13 @@ impl ActionsPanel {
             match r {
                 Ok(()) => {
                     let title = match kind {
-                        ActionKind::Rerun => format!("실행 {id}을(를) 다시 시작했습니다"),
-                        ActionKind::Cancel => format!("실행 {id}을(를) 취소했습니다"),
+                        ActionKind::Rerun => format!("실행 #{id} 다시 시작됨"),
+                        ActionKind::Cancel => format!("실행 #{id} 취소됨"),
                     };
                     self.action_msg = Some((BannerKind::Success, title, None));
                     self.refresh();
                 }
-                Err(e) => self.action_msg = Some((BannerKind::Error, "작업 실패".into(), Some(e.to_string()))),
+                Err(e) => self.action_msg = Some((BannerKind::Error, match kind { ActionKind::Rerun => "워크플로 다시 실행 실패", ActionKind::Cancel => "워크플로 실행 취소 실패" }.into(), Some(e.to_string()))),
             }
         }
         // 진행 중인 실행이 있으면 15초마다 새로 고친다.

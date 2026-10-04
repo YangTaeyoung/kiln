@@ -58,6 +58,7 @@ pub struct PrView {
     diff: Option<DiffView>,
     diff_error: Option<String>,
     review_body: String,
+    submitted_body: Option<String>,
     action: Option<(ActionKind, Task<GitResult<String>>)>,
     action_msg: Option<(BannerKind, String, Option<String>)>,
     merge: Option<MergeDialog>,
@@ -93,12 +94,17 @@ impl PrView {
             diff: None,
             diff_error: None,
             review_body: String::new(),
+            submitted_body: None,
             action: None,
             action_msg: None,
             merge: None,
             now_override: None,
         }
     }
+
+    pub fn review_draft(&self) -> &str { &self.review_body }
+
+    pub fn restore_review_draft(&mut self, body: &str) { self.review_body = body.to_owned(); }
 
     pub fn number(&self) -> u64 {
         self.number
@@ -192,7 +198,7 @@ impl PrView {
                         ActionKind::Merge => "풀 리퀘스트를 병합했습니다",
                         ActionKind::Ready => "리뷰 준비 완료로 표시했습니다",
                     };
-                    if kind == ActionKind::Review {
+                    if kind == ActionKind::Review && self.submitted_body.take().as_deref() == Some(self.review_body.as_str()) {
                         self.review_body.clear();
                     }
                     let detail = out.trim();
@@ -202,13 +208,14 @@ impl PrView {
                         self.started = false;
                     }
                 }
-                Err(e) => self.action_msg = Some((BannerKind::Error, "작업 실패".into(), Some(e.to_string()))),
+                Err(e) => self.action_msg = Some((BannerKind::Error, match kind { ActionKind::Checkout => "브랜치 체크아웃 실패", ActionKind::Review => "리뷰 제출 실패", ActionKind::Merge => "풀 리퀘스트 병합 실패", ActionKind::Ready => "리뷰 준비 상태 변경 실패" }.into(), Some(e.to_string()))),
             }
         }
     }
 
     fn run(&mut self, ctx: &egui::Context, kind: ActionKind, f: impl FnOnce(&dyn PrBackend) -> GitResult<String> + Send + 'static) {
         let b = self.backend.clone();
+        self.submitted_body = (kind == ActionKind::Review).then(|| self.review_body.clone());
         self.action_msg = None;
         self.action = Some((kind, Task::spawn(ctx, move || f(b.as_ref()))));
     }
@@ -223,7 +230,7 @@ impl PrView {
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
             if let Some(e) = self.error.clone() {
                 egui::Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
-                    banner(ui, BannerKind::Error, &format!("풀 리퀘스트 #{}을(를) 불러올 수 없습니다", self.number), Some(&e), false);
+                    banner(ui, BannerKind::Error, &format!("풀 리퀘스트 #{} 불러오기 실패", self.number), Some(&e), false);
                     ui.add_space(6.0);
                     if tool_button(ui, Some(Icon::Refresh), "다시 시도").clicked() {
                         self.refresh();
@@ -260,7 +267,7 @@ impl PrView {
                 PrTab::Files => {
                     if let Some(e) = self.diff_error.clone() {
                         egui::Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
-                            banner(ui, BannerKind::Error, "diff를 불러올 수 없습니다", Some(&e), false);
+                            banner(ui, BannerKind::Error, "변경 비교를 불러올 수 없습니다", Some(&e), false);
                         });
                     } else if let Some(d) = &mut self.diff {
                         d.ui(ui);
@@ -569,7 +576,7 @@ impl PrView {
         let mut method = m.method;
         let mut delete = m.delete_branch;
         let head = d.head_ref_name.clone();
-        let msg = format!("#{} \"{}\"을(를) {}(으)로 병합합니다.", d.number, d.title, d.base_ref_name);
+        let msg = format!("풀 리퀘스트 #{} · {}\n대상 브랜치: {}", d.number, d.title, d.base_ref_name);
         let r = confirm_modal(ctx, Id::new(("pr_merge", self.number)), "풀 리퀘스트 병합", &msg, "병합 확인", false, |ui| {
             ui.add_space(10.0);
             for mm in [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase] {
@@ -685,4 +692,24 @@ pub(crate) fn comment_card(ui: &mut Ui, author: &str, when: i64, now: i64, verb:
                 body(ui);
             });
         });
+}
+
+#[cfg(test)]
+mod pending_draft_tests {
+    use super::*;
+    #[test]
+    fn successful_delayed_submission_preserves_newer_text() {
+        for edit_while_sending in [false,true] {
+            let ctx=egui::Context::default(); let mut view=PrView::new(PathBuf::from("."), 1);
+            view.started=true;view.review_body="submitted body".into();
+            let (tx,rx)=std::sync::mpsc::channel();
+            view.run(&ctx,ActionKind::Review,move |_|{rx.recv().unwrap();Ok(String::new())});
+            if edit_while_sending {view.review_body="submitted body plus next draft".into();}
+            tx.send(()).unwrap();
+            let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+            while view.action.is_some() && std::time::Instant::now()<deadline {view.pump(&ctx);std::thread::sleep(std::time::Duration::from_millis(1));}
+            assert!(view.action.is_none());
+            assert_eq!(view.review_body,if edit_while_sending {"submitted body plus next draft"}else{""});
+        }
+    }
 }

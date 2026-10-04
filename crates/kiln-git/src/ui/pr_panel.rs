@@ -13,6 +13,14 @@ use crate::cmd::{GitError, GitResult};
 use crate::gh::{GhBackend, PrBackend, PrCreate, PrCreateDefaults, PrFilter, PrItem};
 use crate::util::{now_unix, parse_iso8601, short_relative_time};
 
+/// Local-only creation draft. Restoring never submits a request.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PrCreationDraft {
+    pub request: PrCreate,
+    pub head: String,
+    pub bases: Vec<String>,
+}
+
 const PR_ROW_H: f32 = 50.0;
 
 struct CreateForm {
@@ -34,6 +42,8 @@ pub struct PrPanel {
     items: Vec<PrItem>,
     error: Option<GitError>,
     form: Option<CreateForm>,
+    form_open: bool,
+    discard_confirm: bool,
     created: Option<String>,
     embedded: bool,
     can_create: bool,
@@ -56,6 +66,8 @@ impl PrPanel {
             items: Vec::new(),
             error: None,
             form: None,
+            form_open: false,
+            discard_confirm: false,
             created: None,
             embedded: false,
             can_create: true,
@@ -76,9 +88,21 @@ impl PrPanel {
     /// "새 PR" 버튼 표시 여부. 작업 폴더와 다른 저장소를 볼 때 끈다.
     pub fn set_can_create(&mut self, on: bool) {
         self.can_create = on;
-        if !on {
-            self.form = None;
-        }
+        if !on { self.form_open = false; }
+    }
+
+    pub fn is_submitting(&self) -> bool { self.form.as_ref().is_some_and(|f| f.submit.is_some()) }
+
+    pub fn creation_draft(&self) -> Option<PrCreationDraft> {
+        self.form.as_ref().filter(|f| f.req != PrCreate::default()).map(|f| PrCreationDraft {
+            request: f.req.clone(), head: f.head.clone(), bases: f.bases.clone(),
+        })
+    }
+
+    pub fn restore_creation_draft(&mut self, draft: &PrCreationDraft) {
+        self.form = Some(CreateForm { defaults: None, head: draft.head.clone(), bases: draft.bases.clone(),
+            req: draft.request.clone(), submit: None, error: None });
+        self.form_open = true;
     }
 
     pub fn refresh(&mut self) {
@@ -110,6 +134,9 @@ impl PrPanel {
 
     /// PR 생성 폼을 연다.
     pub fn open_create_form(&mut self) {
+        self.form_open = true;
+        self.discard_confirm = false;
+        if self.form.is_some() { return; }
         self.form = Some(CreateForm {
             defaults: None,
             head: String::new(),
@@ -160,9 +187,9 @@ impl PrPanel {
                     Ok(d) => {
                         form.head = d.head;
                         form.bases = d.bases;
-                        form.req.base = d.base;
-                        form.req.title = d.title;
-                        form.req.body = d.body;
+                        if form.req.base.is_empty() { form.req.base = d.base; }
+                        if form.req.title.is_empty() { form.req.title = d.title; }
+                        if form.req.body.is_empty() { form.req.body = d.body; }
                     }
                     Err(e) => form.error = Some(e.to_string()),
                 }
@@ -175,6 +202,7 @@ impl PrPanel {
                     Ok(url) => {
                         self.created = Some(url);
                         self.form = None;
+                        self.form_open = false;
                         self.refresh();
                     }
                     Err(e) => form.error = Some(e.to_string()),
@@ -201,12 +229,12 @@ impl PrPanel {
                         ui.label(RichText::new("풀 리퀘스트").font(kiln_common::fonts::semibold(13.5)).color(t.text));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if self.form.is_none()
+                        if !self.form_open
                             && self.can_create
                             && kiln_common::widgets::button_with(
                                 ui,
                                 Some(kiln_common::icons::Icon::Plus),
-                                "새 PR",
+                                if self.form.is_some() { "초안 이어 쓰기" } else { "새 PR" },
                                 kiln_common::widgets::ButtonKind::Primary,
                                 true,
                             )
@@ -249,7 +277,7 @@ impl PrPanel {
             ui.painter().rect_filled(line.shrink2(vec2(12.0, 0.0)), 0.0, t.border);
             ui.add_space(4.0);
 
-            if self.form.is_some() {
+            if self.form.is_some() && self.form_open {
                 egui::ScrollArea::vertical().id_salt("pr_form").auto_shrink([false, false]).show(ui, |ui| {
                     egui::Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| self.ui_form(ui));
                 });
@@ -368,18 +396,29 @@ impl PrPanel {
 
     fn ui_form(&mut self, ui: &mut Ui) {
         let t = theme();
+        if self.discard_confirm {
+            ui.label("작성한 초안을 버릴까요? GitHub에는 전송되지 않습니다.");
+            let mut discard = false;
+            ui.horizontal(|ui| {
+                if tool_button(ui, None, "계속 작성").clicked() { self.discard_confirm = false; }
+                if tool_button(ui, None, "초안 버리기").clicked() { discard = true; }
+            });
+            if discard { self.form = None; self.form_open = false; self.discard_confirm = false; }
+            return;
+        }
         let Some(form) = &mut self.form else { return };
         let mut close = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("새 풀 리퀘스트").font(kiln_common::fonts::semibold(14.0)).color(t.text));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, Icon::Close, "취소").clicked() {
+                if icon_button(ui, Icon::Close, "초안 보관하고 닫기").clicked() {
                     close = true;
                 }
+                if form.submit.is_none() && tool_button(ui, None, "초안 버리기…").clicked() { self.discard_confirm = true; }
             });
         });
         if close {
-            self.form = None;
+            self.form_open = false;
             return;
         }
         ui.add_space(4.0);
@@ -398,22 +437,39 @@ impl PrPanel {
         }
         let submitting = form.submit.is_some();
         ui.add_enabled_ui(!submitting, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(dim("원본"));
-                outline_badge(ui, if form.head.is_empty() { "?" } else { &form.head }, t.accent);
+            let head_width=ui.painter().layout_no_wrap(form.head.clone(),kiln_common::fonts::medium(11.0),t.accent).size().x;
+            let stacked=head_width+240.0>ui.available_width();
+            let render_base=|ui:&mut Ui, form:&mut CreateForm, width:f32| {
                 ui.label(dim("→ 대상"));
                 egui::ComboBox::from_id_salt(Id::new("pr_create_base"))
-                    .selected_text(RichText::new(&form.req.base).size(12.5))
-                    .width(140.0)
+                    .selected_text(RichText::new(&form.req.base).size(12.5)).truncate()
+                    .width(width)
                     .icon(|ui, rect, visuals, _open| {
                         paint_icon(ui.painter(), rect.expand(2.0), Icon::ChevronDown, visuals.fg_stroke.color);
                     })
                     .show_ui(ui, |ui| {
+                        ui.set_width(width);
                         for b in &form.bases {
-                            ui.selectable_value(&mut form.req.base, b.clone(), b);
+                            if ui.add_sized([width,24.0],egui::Button::selectable(form.req.base==*b,b).truncate()).on_hover_text(b).clicked() {
+                                form.req.base=b.clone();ui.close();
+                            }
                         }
-                    });
-            });
+                    }).response.on_hover_text(&form.req.base);
+            };
+            if stacked {
+                ui.horizontal(|ui| {
+                    ui.label(dim("원본"));
+                    ui.add(egui::Label::new(RichText::new(&form.head).font(kiln_common::fonts::medium(11.0)).color(t.accent)).truncate()).on_hover_text(&form.head);
+                });
+                let width=(ui.available_width()-55.0).max(80.0);
+                ui.horizontal(|ui|render_base(ui,form,width));
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(dim("원본"));
+                    outline_badge(ui, if form.head.is_empty() { "?" } else { &form.head }, t.accent);
+                    render_base(ui,form,140.0);
+                });
+            }
             ui.add_space(10.0);
             ui.label(RichText::new("제목").font(kiln_common::fonts::semibold(12.0)).color(t.text_dim));
             ui.add(
@@ -439,7 +495,8 @@ impl PrPanel {
                 let label = if form.req.draft { "초안 PR 만들기" } else { "풀 리퀘스트 만들기" };
                 if ui.add_enabled_ui(can, |ui| primary_button(ui, label, None)).inner.clicked() {
                     let b = self.backend.clone();
-                    let req = form.req.clone();
+                    let mut req = form.req.clone();
+                    req.head = form.head.clone();
                     form.error = None;
                     form.submit = Some(Task::spawn(ui.ctx(), move || b.create(&req)));
                 }

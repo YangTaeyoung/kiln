@@ -9,6 +9,7 @@
 //! - formatting: 줄 끝 공백 제거
 //! - initialized 뒤 `$/progress` begin·report(50%), 첫 didSave 에서 end
 //!
+//! `--crash-on METHOD` fails precisely on the requested method, independent of progress reply ordering.
 //! 인수: `--full-sync` 전체 동기화, `--crash-after N` N번째 메시지에서 비정상 종료,
 //! `--crash-marker 파일` 그 파일이 있을 때만(지우고) 비정상 종료.
 
@@ -328,6 +329,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let crash_after: Option<usize> = arg("--crash-after").and_then(|s| s.parse().ok());
+    let crash_on = arg("--crash-on");
     let crash_marker = arg("--crash-marker").map(PathBuf::from);
     let crash_enabled = match &crash_marker {
         Some(m) => std::fs::remove_file(m).is_ok(),
@@ -344,10 +346,10 @@ fn main() {
     let mut count = 0usize;
     while let Some(msg) = read_message(&mut r) {
         count += 1;
-        if crash_enabled && crash_after.is_some_and(|n| count >= n) {
+        let method = msg.get("method").and_then(Value::as_str).map(str::to_owned);
+        if crash_enabled && (crash_after.is_some_and(|n| count >= n) || crash_on.as_ref().is_some_and(|wanted| method.as_ref()==Some(wanted))) {
             std::process::exit(3);
         }
-        let method = msg.get("method").and_then(Value::as_str).map(str::to_owned);
         let params = msg.get("params").cloned().unwrap_or(Value::Null);
         match (method, msg.get("id")) {
             (Some(m), Some(id)) => {

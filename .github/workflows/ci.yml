@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Check
+        run: cargo check --locked -p kiln
+      - name: Application unit tests
+        run: cargo test --locked -p kiln --lib
+      - name: Git integration tests
+        run: cargo test --locked -p kiln-git
+      - name: GUI and session integration
+        run: cargo test --locked -p kiln --test gui
+      - name: Validate release scripts
+        run: |
+          bash -n scripts/bundle-macos.sh scripts/release-macos.sh
+          python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py

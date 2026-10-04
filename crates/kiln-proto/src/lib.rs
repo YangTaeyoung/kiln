@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-pub const PROTO_VERSION: u32 = 2;
+pub const PROTO_VERSION: u32 = 3;
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
 
 pub type SessionId = u64;
@@ -50,6 +50,7 @@ pub enum ClientMsg {
     ReadRange { req: u32, session: SessionId, start: (i32, u16), end: (i32, u16) },
     /// 클라이언트 셀 픽셀 크기(이미지 배치 계산용).
     CellSize { width: u16, height: u16 },
+    ReadCommandOutput { req: u32, session: SessionId, command: u64 },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -78,6 +79,31 @@ pub enum ServerMsg {
     SearchResult { req: u32, found: bool },
     /// 이미지 픽셀(RGBA8). 프레임의 `images` 가 참조하기 전에 한 번 보낸다.
     Image { session: SessionId, id: u32, width: u32, height: u32, rgba: Vec<u8> },
+    SessionTelemetry { session: SessionId, telemetry: SessionTelemetry },
+    CommandOutput { req: u32, session: SessionId, command: u64, text: String, truncated: bool },
+}
+
+/// Explicit integration signals only. A live foreground process does not imply progress.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AgentActivity { #[default] Unknown, Running, Waiting, Done, Failed }
+impl AgentActivity {
+    pub fn label(self) -> &'static str { match self { Self::Unknown => "상태 확인 안 됨", Self::Running => "작업 중", Self::Waiting => "입력 필요", Self::Done => "완료", Self::Failed => "실패" } }
+}
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandRecord {
+    pub id: u64,
+    pub command: String,
+    pub cwd: Option<String>,
+    pub started_unix: u64,
+    pub finished_unix: Option<u64>,
+    pub exit_code: Option<i32>,
+    pub output_available: bool,
+}
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionTelemetry {
+    pub shell_integration: bool,
+    pub activity: AgentActivity,
+    pub commands: Vec<CommandRecord>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]

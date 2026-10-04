@@ -2,6 +2,7 @@
 name = "kiln-db"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 resvg = { version = "0.48", default-features = false }

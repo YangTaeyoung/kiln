@@ -410,7 +410,7 @@ fn hub_switches_tabs_and_repositories() {
     h.run_steps(1);
     settle(&mut h, |s| s.hub.is_loading());
     assert!(backend.has_call("list_repos cli"));
-    h.get_by_label("cli/go-gh 새 스페이스로 복제").click();
+    h.get_by_label("cli/go-gh 새 프로젝트로 복제").click();
     h.run_steps(2);
     assert!(h.state().events.contains(&GitEvent::CloneRepo { name_with_owner: "cli/go-gh".into() }));
 
@@ -496,4 +496,64 @@ fn hub_without_github_remote_offers_repo_picker() {
     settle(&mut h, |s| s.hub.is_loading());
     assert_eq!(h.state().hub.repo(), Some(RepoRef::new("octocat", "dotfiles")));
     assert!(h.state().hub.error().is_none());
+}
+
+#[test]
+fn issue_draft_survives_close_reopen_and_requires_explicit_discard() {
+    let backend = Arc::new(FakeGh::default());
+    let mut h = issue_panel_harness(backend.clone(), vec2(460.0, 720.0));
+    let draft = kiln_git::IssueCreate { title: "Local draft".into(), body: "Not submitted".into(), labels: vec!["bug".into()], assignees: vec!["alice".into()] };
+    h.state_mut().panel.restore_creation_draft(&draft);
+    settle(&mut h, |s| s.panel.is_loading());
+    h.get_by_label("초안 보관하고 닫기").click(); h.run_steps(2);
+    assert!(!h.state().panel.is_form_open());
+    assert_eq!(h.state().panel.creation_draft(), Some(draft.clone()));
+    h.get_by_label("초안 이어 쓰기").click(); h.run_steps(2);
+    assert!(h.state().panel.is_form_open());
+    h.get_by_label("초안 버리기…").click(); h.run_steps(2);
+    h.get_by_label("계속 작성").click(); h.run_steps(2);
+    assert_eq!(h.state().panel.creation_draft(), Some(draft));
+    h.get_by_label("초안 버리기…").click(); h.run_steps(2);
+    h.get_by_label("초안 버리기").click(); h.run_steps(2);
+    assert!(h.state().panel.creation_draft().is_none());
+    assert!(!backend.calls().iter().any(|c| c.starts_with("create_issue")));
+}
+
+#[test]
+fn github_drafts_restore_each_repository_and_offer_direct_resume_without_sending() {
+    let backend = Arc::new(FakeGh::default());
+    let mut h = hub_harness(backend.clone(), vec2(600.0, 840.0));
+    let mut drafts = kiln_git::GithubDrafts::default();
+    for name in ["cli/cli", "octocat/kiln"] {
+        drafts.repositories.insert(name.into(), kiln_git::RepositoryDrafts {
+            issue: Some(kiln_git::IssueCreate { title: format!("draft {name}"), ..Default::default() }),
+            ..Default::default()
+        });
+    }
+    h.state_mut().hub.restore_drafts(&drafts);
+    settle(&mut h, |s| s.hub.is_loading());
+    h.get_by_label("보관된 작성 초안 · 저장소 2개").click(); h.run_steps(2);
+    h.get_by_label("octocat/kiln · 이슈 이어 쓰기").click(); h.run_steps(2);
+    settle(&mut h, |s| s.hub.is_loading());
+    assert_eq!(h.state().hub.repo(), Some(RepoRef::new("octocat", "kiln")));
+    assert_eq!(h.state_mut().hub.issue_panel().unwrap().creation_draft().unwrap().title, "draft octocat/kiln");
+    h.get_by_label("cli/cli · 이슈 이어 쓰기").click(); h.run_steps(2);
+    settle(&mut h, |s| s.hub.is_loading());
+    assert_eq!(h.state_mut().hub.issue_panel().unwrap().creation_draft().unwrap().title, "draft cli/cli");
+    assert_eq!(h.state().hub.recovery_drafts().repositories, drafts.repositories);
+    assert!(!backend.calls().iter().any(|c| c.starts_with("create_issue") || c.starts_with("create ")));
+}
+
+#[test]
+fn issue_creation_long_repository_fits_360_points() {
+    let backend=Arc::new(FakeGh::default());
+    let mut panel=IssuePanel::with_backend(backend,Some(RepoRef::new("organization-long-한글".repeat(4),"repository-long".repeat(4))));
+    panel.restore_creation_draft(&kiln_git::IssueCreate {title:"긴 이슈 제목long-title".repeat(12),..Default::default()});
+    let mut h=Harness::builder().with_size(vec2(360.0,720.0)).wgpu().build_ui_state(|ui,p:&mut IssuePanel|{if theme(ui){p.ui(ui);}},panel);
+    settle(&mut h,|p|p.is_loading());
+    h.render().unwrap().save("/tmp/kiln-issue-create-360.png").unwrap();
+    for label in ["초안 버리기…","초안 보관하고 닫기","생성"] {
+        assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}: {:?}",h.get_by_label(label).rect());
+    }
+    for input in h.query_all_by_role(Role::TextInput) {assert!(h.ctx.content_rect().contains_rect(input.rect()),"input overflow {:?}",input.rect());}
 }

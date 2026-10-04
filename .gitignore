@@ -4,3 +4,15 @@
 .DS_Store
 **/tests/snapshots/*.diff.png
 **/tests/snapshots/*.new.png
+/docs/reviews/
+/assets/brand-review/
+/.impeccable/
+.env
+.env.*
+!.env.example
+*.p12
+*.p8
+*.mobileprovision
+*.key
+*.pem
+__pycache__/

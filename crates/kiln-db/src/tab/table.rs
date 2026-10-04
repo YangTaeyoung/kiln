@@ -338,6 +338,28 @@ impl GridSource for TableData {
     }
 }
 
+/// A local-only snapshot. Restoration never submits database writes.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TableDraft {
+    columns: Vec<ColumnInfo>,
+    rows: Vec<Vec<Value>>,
+    edits: Vec<(usize, usize, Value)>,
+    deleted: Vec<usize>,
+    inserted: Vec<Vec<Option<Value>>>,
+    page: usize,
+    page_size: usize,
+    filter: String,
+    order: String,
+    #[serde(default)]
+    pending_cell: Option<(usize, usize, String)>,
+}
+
+struct RecoveryConflict {
+    row: usize,
+    current: Option<Vec<Value>>,
+    description: String,
+}
+
 /// 테이블 탭 상태.
 pub(crate) struct TableView {
     conn: ConnId,
@@ -370,6 +392,9 @@ pub(crate) struct TableView {
     status: Option<(String, bool)>,
     load_error: Option<String>,
     is_view: bool,
+    recovery_review: bool,
+    recovery_conflicts: Vec<RecoveryConflict>,
+    recovery_check: Option<Job<DbResult<ResultSet>>>,
 }
 
 impl TableView {
@@ -408,6 +433,9 @@ impl TableView {
             status: None,
             load_error: None,
             is_view: false,
+            recovery_review: false,
+            recovery_conflicts: Vec::new(),
+            recovery_check: None,
         };
         v.load_details(m);
         v.reload(m, true);
@@ -419,7 +447,85 @@ impl TableView {
     }
 
     pub fn pending_changes(&self) -> usize {
-        self.data.as_ref().map(|d| d.pending()).unwrap_or(0)
+        self.data.as_ref().map(|d| d.pending()).unwrap_or(0) + usize::from(self.pending_cell().is_some())
+    }
+
+    fn pending_cell(&self) -> Option<(usize,usize,String)> {
+        let edit=self.grid.editing.as_ref()?;
+        let data=self.data.as_ref()?;
+        (edit.row < data.n_rows() && edit.col < data.rs.columns.len() && edit.text != data.edit_text(edit.row,edit.col)).then(|| (edit.row,edit.col,edit.text.clone()))
+    }
+
+    pub fn recovery_draft(&self) -> Option<TableDraft> {
+        if self.pending_changes() == 0 { return None; }
+        let data = self.data.as_ref()?;
+        let mut edits: Vec<_> = data.edits.iter().map(|(&(r,c),(v,_))| (r,c,v.clone())).collect();
+        edits.sort_by_key(|(r,c,_)| (*r,*c));
+        Some(TableDraft { columns: data.rs.columns.clone(), rows: data.rs.rows.clone(), edits,
+            deleted: data.deleted.iter().copied().collect(), inserted: data.inserted.iter().map(|r| r.iter().map(|v| v.as_ref().map(|(v,_)| v.clone())).collect()).collect(),
+            page: self.page, page_size: self.page_size, filter: self.applied_filter.clone(), order: self.applied_order.clone(), pending_cell: self.pending_cell() })
+    }
+
+    pub fn restore_draft(&mut self, draft: &TableDraft) {
+        self.load_job = None;
+        self.count_job = None;
+        self.page = draft.page;
+        self.page_size = draft.page_size.clamp(1, 50_000);
+        self.applied_filter = draft.filter.clone(); self.filter = draft.filter.clone();
+        self.applied_order = draft.order.clone(); self.order = draft.order.clone();
+        let mut data = TableData::new(ResultSet::new(draft.columns.clone(), draft.rows.clone()));
+        for (r,c,v) in &draft.edits {
+            if *r < data.rs.rows.len() && *c < data.rs.columns.len() { data.edits.insert((*r,*c), (v.clone(), v.display(DISPLAY_MAX_CHARS).into_boxed_str())); }
+        }
+        data.deleted = draft.deleted.iter().copied().filter(|r| *r < data.rs.rows.len()).collect();
+        data.inserted = draft.inserted.iter().filter(|r| r.len() == data.rs.columns.len()).map(|r| r.iter().map(|v| v.as_ref().map(|v| (v.clone(), v.display(DISPLAY_MAX_CHARS).into_boxed_str()))).collect()).collect();
+        if let Some((row,col,text))=&draft.pending_cell && *row < data.n_rows() && *col < data.rs.columns.len() {
+            self.grid.editing=Some(crate::ui::grid::EditCell {row:*row,col:*col,text:text.clone(),focus_requested:false});
+        }
+        self.data = Some(data);
+        self.recovery_review = true;
+        self.refresh_details_on_data();
+    }
+
+    fn check_recovered_draft(&mut self, m: &DbManager) {
+        if self.recovery_check.is_some() { return; }
+        let Some(data)=&self.data else{return};
+        if data.pk.is_empty() {self.status=Some(("기본 키 정보를 읽은 뒤 비교할 수 있습니다.".into(),true));return;}
+        let rows=affected_rows(data,self.pending_cell().as_ref().map(|(r,_,_)|*r));
+        let Some(details)=&self.details else{return};
+        let columns=details.columns.clone();
+        let mapping:Option<Vec<usize>>=data.rs.columns.iter().map(|col|columns.iter().position(|c|c.name==col.name)).collect();
+        let Some(mapping)=mapping else{self.status=Some(("테이블 구조가 변경되었습니다. 초안을 내보내세요.".into(),true));return};
+        let keys:Vec<Vec<(usize,Value)>>=rows.iter().map(|&row|data.pk.iter().map(|&col|(mapping[col],data.rs.rows[row][col].clone())).collect()).collect();
+        let (id,t)=(self.conn,self.t.clone());let m2=m.clone();self.recovery_conflicts.clear();
+        self.recovery_check=Some(m.spawn(async move { m2.fetch_original_rows(id,&t,&columns,&keys).await }));
+    }
+
+    fn export_recovery(&mut self) {
+        let Some(draft)=self.recovery_draft() else{return};
+        let Some(path)=rfd::FileDialog::new().set_file_name(format!("{}-draft.json",self.t.table)).add_filter("Kiln DB 초안",&["json"]).save_file() else{return};
+        let result=self.write_recovery(&path,&draft);
+        self.status=Some(match result{Ok(())=>(format!("초안 내보냄: {} · DB에 적용되지 않았습니다",path.display()),false),Err(e)=>(format!("초안 내보내기 실패: {e}"),true)});
+    }
+
+    fn write_recovery(&self,path:&std::path::Path,draft:&TableDraft)->Result<(),String>{
+        let bytes=serde_json::to_vec_pretty(&serde_json::json!({"version":1,"schema":self.t.schema,"table":self.t.table,"draft":draft})).map_err(|e|e.to_string())?;
+        kiln_common::safe_file::write(path,&bytes).map_err(|e|e.to_string())
+    }
+
+    fn resolve_recovery_row(&mut self,index:usize,keep_edits:bool) {
+        if index>=self.recovery_conflicts.len(){return;}
+        let conflict=self.recovery_conflicts.remove(index);
+        let Some(data)=&mut self.data else{return};
+        if !keep_edits || conflict.current.is_none() {
+            data.edits.retain(|(row,_),_|*row!=conflict.row);data.deleted.remove(&conflict.row);
+            if self.grid.editing.as_ref().is_some_and(|e|e.row==conflict.row){self.grid.editing=None;}
+        }
+        if let Some(current)=conflict.current {
+            data.rs.display[conflict.row]=current.iter().map(|v|v.display(DISPLAY_MAX_CHARS).into_boxed_str()).collect();
+            data.rs.rows[conflict.row]=current;
+        }
+        self.status=Some(("선택한 행을 정리했습니다. 최신 DB와 다시 비교한 뒤 제출하세요.".into(),false));
     }
 
     fn load_details(&mut self, m: &DbManager) {
@@ -558,7 +664,7 @@ impl TableView {
             Err(e) => {
                 self.status = Some((
                     format!(
-                        "트랜잭션 롤백됨 — 문 #{} 실패: {}",
+                        "{}번째 SQL 실행 실패. 이 트랜잭션의 변경은 되돌렸습니다: {}",
                         e.index + 1,
                         e.error
                     ),
@@ -569,6 +675,14 @@ impl TableView {
     }
 
     fn submit(&mut self, m: &DbManager) {
+        if let Some(edit) = self.grid.editing.take() {
+            self.commit_edit(edit.row, edit.col, &edit.text);
+            if self.grid.editing.is_some() { return; }
+        }
+        if self.recovery_review {
+            self.status = Some(("복원된 초안은 먼저 최신 DB와 비교해야 제출할 수 있습니다.".into(), true));
+            return;
+        }
         let (Some(data), Some(det)) = (&self.data, &self.details) else {
             return;
         };
@@ -627,13 +741,47 @@ impl TableView {
         };
         let m2 = m.clone();
         let (id, t, cols) = (self.conn, self.t.clone(), det.columns.clone());
-        self.status = Some(("제출 중…".into(), false));
+        self.status = Some(("DB에 변경 적용 중…".into(), false));
         self.submit_job = Some(m.spawn(async move { m2.submit_changes(id, &t, &cols, &cs).await }));
     }
 
     pub fn ui(&mut self, ui: &mut Ui, m: &DbManager) {
         self.poll();
         self.poll_submit(m);
+        if let Some(job) = &mut self.recovery_check && let Some(result) = job.poll() {
+            self.recovery_check = None;
+            match result {
+                Ok(fresh) => {
+                    let pending=self.pending_cell().as_ref().map(|(r,_,_)|*r);
+                    match self.data.as_ref().map(|data|find_recovery_conflicts(data,&fresh,pending)) {
+                        Some(Ok(conflicts)) if conflicts.is_empty()=>{self.recovery_review=false;self.status=Some(("변경할 원본 행이 최신 DB와 일치합니다. 검토 후 직접 제출하세요.".into(),false));}
+                        Some(Ok(conflicts))=>{self.status=Some((format!("DB의 원본 {}개 행이 변경되었습니다. 행별로 해결하거나 초안을 내보내세요.",conflicts.len()),true));self.recovery_conflicts=conflicts;}
+                        Some(Err(e))=>self.status=Some((e,true)),None=>{},
+                    }
+                }
+                Err(e) => self.status = Some((format!("초안 비교 실패: {e}"), true)),
+            }
+        }
+        if self.recovery_check.is_some() { ui.ctx().request_repaint_after(std::time::Duration::from_millis(60)); }
+        if self.recovery_review && self.pending_changes() > 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("복원된 DB 초안 · 아직 DB에 적용되지 않았습니다.");
+                if ui.add_enabled(self.recovery_check.is_none(), egui::Button::new("최신 DB와 비교")).clicked() { self.check_recovered_draft(m); }
+                if ui.button("초안 내보내기…").clicked(){self.export_recovery();}
+            });
+        } else if self.pending_changes() == 0 { self.recovery_review = false; }
+        if !self.recovery_conflicts.is_empty() {
+            let mut resolve=None;
+            egui::ScrollArea::vertical().id_salt(self.grid.id.with("recovery-conflicts")).max_height(150.0).show(ui,|ui|{
+                for (index,conflict) in self.recovery_conflicts.iter().enumerate(){
+                    ui.group(|ui|{ui.label(&conflict.description);ui.horizontal_wrapped(|ui|{
+                        if ui.button("이 행의 초안 버리기").clicked(){resolve=Some((index,false));}
+                        if conflict.current.is_some() && ui.button("내 편집을 최신 행에 재적용").clicked(){resolve=Some((index,true));}
+                    });});
+                }
+            });
+            if let Some((index,keep))=resolve{self.resolve_recovery_row(index,keep);}
+        }
         let theme = Theme::current();
         if self.load_job.is_some()
             || self.submit_job.is_some()
@@ -645,9 +793,6 @@ impl TableView {
         }
         // 전역 단축키.
         if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter)) {
-            if let Some(ed) = self.grid.editing.take() {
-                self.commit_edit(ed.row, ed.col, &ed.text);
-            }
             self.submit(m);
         }
         egui::Frame::new().fill(theme.bg).show(ui, |ui| {
@@ -696,8 +841,8 @@ impl TableView {
                     if self.sub == SubTab::Data {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
-                            if ui::toggle_button_icon(ui, Some(Icon::Eye), "값", self.show_viewer)
-                                .on_hover_text("값 뷰어 전환")
+                            if ui::toggle_button_icon(ui, Some(Icon::Eye), "셀 내용", self.show_viewer)
+                                .on_hover_text("선택한 셀의 전체 내용 보기")
                                 .clicked()
                             {
                                 self.show_viewer = !self.show_viewer;
@@ -843,6 +988,7 @@ impl TableView {
         {
             let name = data.rs.columns[c].name.clone();
             self.status = Some((format!("{name}: {e}"), true));
+            self.grid.editing = Some(crate::ui::grid::EditCell { row:r, col:c, text:text.to_owned(), focus_requested:false });
         }
     }
 
@@ -1005,6 +1151,7 @@ impl TableView {
                         && let Some(d) = &mut self.data
                     {
                         d.revert_all();
+                        self.grid.editing = None;
                         self.status = None;
                     }
                     if self.submit_job.is_some() {
@@ -1097,9 +1244,11 @@ impl TableView {
         egui::Frame::new()
             .inner_margin(egui::Margin { left: 10, right: 10, top: 2, bottom: 8 })
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                let narrow=ui.available_width()<600.0;
+                let mut render=|ui:&mut Ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    let w = ((ui.available_width() - 190.0) / 2.0).max(120.0);
+                    let available=ui.available_width();
+                    let w=if narrow {available}else{((available-90.0)/2.0).max(120.0)};
                     let mut apply = false;
                     for (label, text, hint, id) in [
                         (
@@ -1115,6 +1264,7 @@ impl TableView {
                         let r = widgets::input_frame(focused, false)
                             .inner_margin(egui::Margin { left: 8, right: 6, top: 2, bottom: 2 })
                             .show(ui, |ui| {
+                                ui.set_width((w-16.0).max(100.0));
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 8.0;
                                     ui.label(RichText::new(label).font(fonts::mono(11.0)).color(theme.purple));
@@ -1124,7 +1274,7 @@ impl TableView {
                                             .font(egui::TextStyle::Monospace)
                                             .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(0, 4)))
                                             .hint_text(RichText::new(hint).size(12.0).color(theme.text_faint))
-                                            .desired_width(ui.available_width().min(w - 16.0 - if label == "WHERE" { 52.0 } else { 70.0 })),
+                                            .desired_width(ui.available_width().max(50.0)),
                                     )
                                 })
                                 .inner
@@ -1154,7 +1304,8 @@ impl TableView {
                             self.apply_filters(m);
                         }
                     }
-                });
+                };
+                if narrow {ui.vertical(&mut render);}else{ui.horizontal(&mut render);}
             });
         ui.painter().hline(
             ui.max_rect().x_range(),
@@ -1530,4 +1681,111 @@ pub(crate) fn copy_result_selection(
         .map(|&r| cols.iter().map(|&c| &rs.rows[r][c]).collect())
         .collect();
     format_rows(fmt, driver, None, &col_refs, &vals, header)
+}
+
+fn affected_rows(data:&TableData,pending:Option<usize>)->BTreeSet<usize>{
+    data.edits.keys().map(|(row,_)|*row).chain(data.deleted.iter().copied()).chain(pending).filter(|row|*row<data.rs.rows.len()).collect()
+}
+fn find_recovery_conflicts(data:&TableData,fresh:&ResultSet,pending:Option<usize>)->Result<Vec<RecoveryConflict>,String>{
+    if data.pk.is_empty(){return Err("기본 키가 없어 행을 안전하게 비교할 수 없습니다. 초안을 내보내세요.".into());}
+    let map:Vec<usize>=data.rs.columns.iter().map(|col|fresh.columns.iter().position(|c|c.name==col.name).ok_or_else(||format!("컬럼 {}이 없어졌습니다. 초안을 내보내세요.",col.name))).collect::<Result<_,_>>()?;
+    let mut conflicts=Vec::new();
+    for row in affected_rows(data,pending){
+        let original=&data.rs.rows[row];
+        let matches:Vec<_>=fresh.rows.iter().filter(|values|data.pk.iter().all(|&col|values.get(map[col])==original.get(col))).collect();
+        let key=data.pk.iter().map(|&col|format!("{}={}",data.rs.columns[col].name,original[col].display(80))).collect::<Vec<_>>().join(", ");
+        if matches.len()>1{return Err(format!("기본 키가 중복된 행: {key}. 안전한 비교를 중단했습니다."));}
+        let current=matches.first().map(|values|map.iter().map(|&col|values.get(col).cloned().unwrap_or(Value::Null)).collect::<Vec<_>>());
+        if let Some(current)=&current {
+            let differences=data.rs.columns.iter().enumerate().filter(|(col,_)|original[*col]!=current[*col]).map(|(col,c)|format!("{}: {} → {}",c.name,original[col].display(80),current[col].display(80))).collect::<Vec<_>>();
+            if differences.is_empty(){continue;}
+            conflicts.push(RecoveryConflict{row,current:Some(current.clone()),description:format!("{key} · {}",differences.join("; "))});
+        }else{conflicts.push(RecoveryConflict{row,current:None,description:format!("{key} · DB에서 삭제된 행")});}
+    }
+    Ok(conflicts)
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn recovery_compares_only_changed_primary_keys_independent_of_row_order(){
+        let columns=vec![ColumnInfo::new("id","INTEGER"),ColumnInfo::new("name","TEXT")];
+        let mut data=TableData::new(ResultSet::new(columns.clone(),vec![vec![Value::Int(1),Value::Text("a".into())],vec![Value::Int(2),Value::Text("b".into())]]));
+        data.pk=vec![0];data.edits.insert((0,1),(Value::Text("mine".into()),"mine".into()));
+        let fresh=ResultSet::new(columns.clone(),vec![vec![Value::Int(2),Value::Text("unrelated changed".into())],vec![Value::Int(1),Value::Text("a".into())]]);
+        assert!(find_recovery_conflicts(&data,&fresh,None).unwrap().is_empty());
+        let fresh=ResultSet::new(columns,vec![vec![Value::Int(1),Value::Text("theirs".into())]]);
+        let conflicts=find_recovery_conflicts(&data,&fresh,None).unwrap();assert_eq!(conflicts.len(),1);assert!(conflicts[0].description.contains("name: a → theirs"));
+        let manager=DbManager::in_memory();let mut view=TableView::new(&manager,ConnId(999),None,"fixture".into());view.load_job=None;view.data=Some(data);view.recovery_review=true;view.recovery_conflicts=conflicts;
+        view.resolve_recovery_row(0,true);assert!(view.recovery_review);assert!(view.submit_job.is_none());
+        assert!(find_recovery_conflicts(view.data.as_ref().unwrap(),&fresh,None).unwrap().is_empty());
+        assert_eq!(view.data.as_ref().unwrap().edits[&(0,1)].0,Value::Text("mine".into()));
+    }
+    #[test]
+    fn restored_table_edits_never_submit_before_review() {
+        let manager=DbManager::in_memory();
+        let mut tab=TableView::new(&manager,ConnId(999),None,"fixture".into());
+        let draft=TableDraft { columns:vec![ColumnInfo::new("id","INTEGER")], rows:vec![vec![Value::Int(1)]], edits:vec![(0,0,Value::Int(2))],deleted:vec![],inserted:vec![],page:0,page_size:500,filter:String::new(),order:String::new(),pending_cell:None };
+        let draft:TableDraft=serde_json::from_str(&serde_json::to_string(&draft).unwrap()).unwrap();
+        tab.restore_draft(&draft); assert_eq!(tab.pending_changes(),1); assert!(tab.load_job.is_none());
+        tab.submit(&manager); assert!(tab.submit_job.is_none()); assert!(tab.recovery_review);
+        assert_eq!(tab.recovery_draft().unwrap(),draft);
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("draft.json");tab.write_recovery(&path,&draft).unwrap();
+        let exported:serde_json::Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(exported["table"],"fixture");let exported_draft:TableDraft=serde_json::from_value(exported["draft"].clone()).unwrap();assert_eq!(draft,exported_draft);
+        assert!(tab.submit_job.is_none());
+        let source=ResultSet::new(draft.columns.clone(),draft.rows.clone());
+        tab.data.as_mut().unwrap().pk=vec![0];
+        assert!(find_recovery_conflicts(tab.data.as_ref().unwrap(),&source,None).unwrap().is_empty());
+        assert_eq!(find_recovery_conflicts(tab.data.as_ref().unwrap(),&ResultSet::new(draft.columns,vec![vec![Value::Int(3)]]),None).unwrap().len(),1);
+    }
+    #[test]
+    fn in_progress_invalid_cell_text_is_recoverable_without_submitting() {
+        let manager=DbManager::in_memory();
+        let mut tab=TableView::new(&manager,ConnId(999),None,"fixture".into());
+        tab.load_job=None;
+        tab.data=Some(TableData::new(ResultSet::new(vec![ColumnInfo::new("id","INTEGER")],vec![vec![Value::Int(1)]])));
+        tab.grid.editing=Some(crate::ui::grid::EditCell {row:0,col:0,text:"unfinished invalid integer".into(),focus_requested:true});
+        assert_eq!(tab.pending_changes(),1);
+        let draft=tab.recovery_draft().unwrap();
+        let mut restored=TableView::new(&manager,ConnId(999),None,"fixture".into());
+        restored.restore_draft(&draft);
+        assert_eq!(restored.pending_cell(),Some((0,0,"unfinished invalid integer".into())));
+        assert!(restored.submit_job.is_none());
+        restored.recovery_review=false;
+        restored.submit(&manager);
+        assert!(restored.submit_job.is_none());
+        assert_eq!(restored.pending_cell(),Some((0,0,"unfinished invalid integer".into())));
+    }
+
+    #[test]
+    fn recovery_float_encoding_preserves_nonfinite_values() {
+        for value in [f64::INFINITY,f64::NEG_INFINITY,f64::NAN,-0.0] {
+            let encoded=serde_json::to_string(&Value::Float(value)).unwrap();
+            let Value::Float(decoded)=serde_json::from_str::<Value>(&encoded).unwrap() else { panic!() };
+            assert_eq!(value.to_bits(),decoded.to_bits());
+        }
+    }
+}
+
+#[cfg(test)]
+mod narrow_filter_tests {
+    use super::*;
+    use egui_kittest::{Harness,kittest::Queryable};
+    #[test]
+    fn narrow_filter_fields_and_apply_remain_inside_panel() {
+        let manager=DbManager::in_memory();
+        let mut view=TableView::new(&manager,ConnId(999),None,"fixture".into());
+        view.load_job=None;view.filter="id > 2".into();view.order="created_at DESC".into();
+        let mut initialized=false;
+        let mut h=Harness::builder().with_size([320.0,300.0]).wgpu().build_ui_state(|ui,view:&mut TableView| {
+            if !initialized {fonts::install(ui.ctx());Theme::current().apply(ui.ctx());initialized=true;return;}
+            view.filter_bar(ui,&manager);
+        },view);
+        h.run_steps(4);
+        for label in ["WHERE","ORDER BY","적용"]{assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}");}
+        assert!(h.get_by_label("ORDER BY").rect().top()>h.get_by_label("WHERE").rect().bottom());
+        h.render().unwrap().save("/tmp/kiln-db-filter-320.png").unwrap();
+    }
 }

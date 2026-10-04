@@ -4,6 +4,7 @@ pub mod fonts;
 pub mod icons;
 pub mod paths;
 pub mod store;
+pub mod safe_file;
 pub mod task;
 pub mod theme;
 pub mod widgets;

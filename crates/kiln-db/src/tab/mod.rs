@@ -8,7 +8,9 @@ use crate::{ConnId, DbManager, ResultSet};
 use egui::Ui;
 
 pub(crate) use console::ConsoleView;
+pub use console::ConsoleDocument;
 pub(crate) use table::TableView;
+pub use table::TableDraft;
 
 enum Kind {
     Table(Box<TableView>),
@@ -86,9 +88,17 @@ impl DbTab {
                 if c.is_running() {
                     format!("{name} 콘솔 …")
                 } else {
-                    format!("{name} 콘솔")
+                    format!("{}{}", c.document_name().unwrap_or_else(||format!("{name} 콘솔")), if c.has_draft() { " •" } else { "" })
                 }
             }
+        }
+    }
+
+    /// Closing requires confirmation for pending table edits and SQL drafts.
+    pub fn has_unsaved_changes(&self) -> bool {
+        match &self.kind {
+            Kind::Table(t) => t.pending_changes() > 0,
+            Kind::Console(c) => c.has_draft(),
         }
     }
 
@@ -107,11 +117,44 @@ impl DbTab {
         }
     }
 
+    pub fn table_draft(&self) -> Option<TableDraft> {
+        match &self.kind { Kind::Table(t) => t.recovery_draft(), _ => None }
+    }
+    pub fn restore_table_draft(&mut self, draft: &TableDraft) {
+        if let Kind::Table(t) = &mut self.kind { t.restore_draft(draft); }
+    }
+    pub fn console_document(&self)->Option<ConsoleDocument>{match &self.kind{Kind::Console(c)=>Some(c.document()),_=>None}}
+    pub fn restore_console_document(&mut self,document:&ConsoleDocument){if let Kind::Console(c)=&mut self.kind{c.restore_document(document);}}
+    pub fn console_text(&self) -> Option<&str> {
+        match &self.kind { Kind::Console(c) => Some(c.text()), _ => None }
+    }
+    pub fn request_focus(&mut self) {
+        if let Kind::Console(c) = &mut self.kind { c.request_focus(); }
+    }
     pub fn ui(&mut self, ui: &mut Ui) {
         self.manager.set_ctx(ui.ctx());
         match &mut self.kind {
             Kind::Table(t) => t.ui(ui, &self.manager),
             Kind::Console(c) => c.ui(ui, &self.manager),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod close_guard_tests {
+    use super::*;
+
+    #[test]
+    fn console_draft_requires_discard_even_without_pending_table_edits() {
+        let mut tab = DbTab::console(DbManager::in_memory(), ConnId(1));
+        assert!(!tab.has_unsaved_changes());
+        tab.set_console_text("select * from important_work;");
+        assert!(tab.has_unsaved_changes());
+        assert_eq!(tab.pending_changes(), 0);
+        assert!(tab.title().ends_with(" •"));
+        tab.set_console_text("  \n");
+        assert!(!tab.has_unsaved_changes());
+        assert!(!tab.title().ends_with(" •"));
     }
 }

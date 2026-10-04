@@ -306,3 +306,51 @@ fn launcher_session_markers_do_not_leak_into_shells() {
     assert!(t.contains("marker=[]"), "{t}");
     assert!(!t.contains("kiln=[]"), "{t}");
 }
+
+
+#[test]
+fn activity_cli_emits_only_valid_explicit_states() {
+    for state in ["running", "waiting", "done", "failed", "unknown"] {
+        let output=std::process::Command::new(exe()).args(["activity",state]).output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout,format!("\x1b]777;kiln-agent;{state}\x07").into_bytes());
+        assert!(output.stderr.is_empty());
+    }
+    let invalid=std::process::Command::new(exe()).args(["activity","probably-done"]).output().unwrap();
+    assert!(!invalid.status.success());assert!(invalid.stdout.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn shell_telemetry_and_command_output_protocol_roundtrip() {
+    let d=Daemon::start("shell-integration");
+    let dotdir=d.dir.join("zsh");std::fs::create_dir_all(&dotdir).unwrap();
+    std::fs::write(dotdir.join(".zshrc"),"PS1='protocol> '\n").unwrap();
+    let c=d.client();
+    let spec=SpawnSpec {program:Some("/bin/zsh".into()),cwd:Some(d.dir.to_string_lossy().into()),env:vec![("ZDOTDIR".into(),dotdir.to_string_lossy().into())],cols:80,rows:24,..Default::default()};
+    let session=match c.request(|req|ClientMsg::Create{req,spec},Duration::from_secs(5)).unwrap(){ServerMsg::Created{session,..}=>session,m=>panic!("{m:?}")};
+    fn telemetry(c:&Client,session:SessionId,ready:impl Fn(&kiln_proto::SessionTelemetry)->bool)->kiln_proto::SessionTelemetry {
+        c.send(ClientMsg::ListSessions{req:c.next_req()});
+        let deadline=Instant::now()+Duration::from_secs(10);
+        loop {
+            let msg=c.rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("telemetry timeout");
+            if let ServerMsg::SessionTelemetry{session:id,telemetry}=msg {if id==session && ready(&telemetry){return telemetry;}}
+        }
+    }
+    telemetry(&c,session,|t|t.shell_integration);
+    let command="printf 'exact-command-output\\n'; false";
+    type_line(&c,session,command);
+    let state=telemetry(&c,session,|t|t.commands.iter().any(|r|r.finished_unix.is_some()));
+    let record=state.commands.last().unwrap();
+    assert_eq!(record.command,command);assert_eq!(record.exit_code,Some(1));assert!(record.output_available);
+    match c.request(|req|ClientMsg::ReadCommandOutput{req,session,command:record.id},Duration::from_secs(5)).unwrap(){
+        ServerMsg::CommandOutput{session:id,command:id2,text,truncated,..}=>{assert_eq!(id,session);assert_eq!(id2,record.id);assert_eq!(text,"exact-command-output");assert!(!truncated);},
+        msg=>panic!("unexpected command output {msg:?}"),
+    }
+    let executable=exe().to_string_lossy().replace('\'',"'\\''");
+    type_line(&c,session,&format!("'{executable}' activity waiting"));
+    let state=telemetry(&c,session,|t|t.activity==kiln_proto::AgentActivity::Waiting);
+    assert_eq!(state.activity,kiln_proto::AgentActivity::Waiting);
+    let ServerMsg::Sessions{sessions,..}=c.request(|req|ClientMsg::ListSessions{req},Duration::from_secs(5)).unwrap() else {panic!("sessions expected")};
+    assert!(sessions.iter().find(|s|s.id==session).unwrap().attention);
+}

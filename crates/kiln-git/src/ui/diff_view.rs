@@ -286,7 +286,7 @@ impl DiffView {
             self.ui_toolbar(ui);
             if let Some(e) = self.action_error.clone() {
                 egui::Frame::new().inner_margin(Margin::symmetric(10, 4)).show(ui, |ui| {
-                    if banner(ui, BannerKind::Error, "헝크를 적용할 수 없습니다", Some(&e), true) {
+                    if banner(ui, BannerKind::Error, "선택한 변경 구간을 적용하지 못했습니다", Some(&e), true) {
                         self.action_error = None;
                     }
                 });
@@ -294,7 +294,7 @@ impl DiffView {
             if let Some(e) = &self.error {
                 let e = e.clone();
                 egui::Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
-                    banner(ui, BannerKind::Error, "diff를 불러올 수 없습니다", Some(&e), false);
+                    banner(ui, BannerKind::Error, "변경 비교를 불러올 수 없습니다", Some(&e), false);
                 });
                 return;
             }
@@ -318,7 +318,7 @@ impl DiffView {
             }
             egui::CentralPanel::no_frame().show(ui, |ui| {
                 if self.files.is_empty() {
-                    empty_state(ui, "변경 사항 없음", "이 diff에 표시할 내용이 없습니다.");
+                    empty_state(ui, "변경 사항 없음", "표시할 변경 내용이 없습니다.");
                     return;
                 }
                 self.ui_rows(ui);

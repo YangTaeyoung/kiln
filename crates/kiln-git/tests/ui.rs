@@ -102,6 +102,87 @@ fn panel_harness(root: PathBuf, size: egui::Vec2) -> Harness<'static, PanelState
 }
 
 #[test]
+fn commit_history_expand_is_available_even_when_history_is_collapsed() {
+    let r = Repo::new();
+    r.write("README.md", "# Test\n");
+    r.commit_all("Initial commit");
+    let original_head=r.git(&["rev-parse", "HEAD"]);
+    let mut h=panel_harness(r.path.clone(),vec2(280.0,560.0));
+    settle(&mut h, |s|s.panel.is_busy());
+    h.get_by_label("커밋 기록").click();h.run_steps(2);
+    let button=h.get_by_label("커밋 기록 크게 보기");
+    assert!(h.ctx.content_rect().contains_rect(button.rect()));
+    button.click();h.run_steps(2);
+    assert!(h.state().events.contains(&GitEvent::OpenHistory));
+    assert_eq!(r.git(&["rev-parse", "HEAD"]),original_head);
+    h.render().unwrap().save("/tmp/kiln-git-history-entry-280.png").unwrap();
+}
+
+fn inline_repo()->Repo {
+    let r=Repo::new();
+    for n in 0..4 {r.write(&format!("file{n}.txt"),&format!("{n}\n"));r.commit_all(&format!("Commit {n}"));}
+    r.git(&["switch","-q","-c","feature"]);
+    r.write("feature.txt","Feature\n");r.commit_all("Feature change");
+    r.git(&["switch","-q","main"]);r
+}
+fn inline_panel(root:PathBuf)->Harness<'static,PanelState> {
+    Harness::builder().with_size(vec2(1000.0,900.0)).wgpu().build_ui_state(|ui,s:&mut PanelState|{
+        if !theme(ui){return;}ui.set_max_width(320.0);s.events.extend(s.panel.ui(ui));
+    },PanelState{panel:GitPanel::new(root),events:vec![]})
+}
+#[test]
+fn inline_history_context_actions_and_drag_need_no_edit_mode() {
+    let r=inline_repo();let head=r.git(&["rev-parse","HEAD"]);
+    let mut h=inline_panel(r.path.clone());settle(&mut h,|s|s.panel.is_busy());
+    assert!(h.query_by_label("기록 편집").is_none());
+    h.get_by_label("Commit 3").click_secondary();h.run_steps(3);
+    for label in ["메시지 수정…","커밋 삭제","체리픽"] {h.get_by_label(label);}
+    h.render().unwrap().save("/tmp/kiln-inline-history-menu.png").unwrap();
+    h.get_by_label("메시지 수정…").click();settle(&mut h,|s|s.panel.is_busy());
+    h.get_by_label("커밋 메시지 수정");
+    h.get_by_label("취소").click();h.run_steps(3);
+    let from=h.get_by_label("Commit 3").rect();let to=h.get_by_label("Commit 1").rect();
+    h.hover_at(from.center());h.run_steps(1);h.drag_at(from.center());h.run_steps(1);
+    h.hover_at(to.center());h.run_steps(2);h.drop_at(to.center());h.run_steps(2);
+    h.get_by_label("Commit 2").click_secondary();h.run_steps(3);
+    h.get_by_label("하나로 스쿼시…").click();settle(&mut h,|s|s.panel.is_busy());
+    h.get_by_label("커밋 스쿼시 검토");h.get_by_label("취소").click();h.run_steps(2);
+    assert_eq!(r.git(&["rev-parse","HEAD"]),head);
+}
+#[test]
+fn inline_history_rewords_commit_and_preserves_commit_box_draft() {
+    let r=inline_repo();let mut h=inline_panel(r.path.clone());settle(&mut h,|s|s.panel.is_busy());
+    *h.state_mut().panel.commit_message_mut()="Unrelated next commit draft".into();
+    h.get_by_label("Commit 3").click_secondary();h.run_steps(2);
+    h.get_by_label("메시지 수정…").click();settle(&mut h,|s|s.panel.is_busy());
+    h.get_all_by_role(egui::accesskit::Role::MultilineTextInput).last().unwrap().focus();h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::A);
+    h.get_all_by_role(egui::accesskit::Role::MultilineTextInput).last().unwrap().type_text("Renamed commit");h.run_steps(2);
+    h.get_by_label("메시지 수정").click();settle(&mut h,|s|s.panel.is_busy());
+    assert_eq!(r.git(&["log","-1","--format=%s"]).trim(),"Renamed commit");
+    assert_eq!(h.state().panel.commit_draft(),"Unrelated next commit draft");
+    h.get_by_label("Renamed commit");
+}
+#[test]
+fn inline_history_cherry_picks_other_branch_then_drops_with_review() {
+    let r=inline_repo();let mut h=inline_panel(r.path.clone());settle(&mut h,|s|s.panel.is_busy());
+    h.get_by_label("Feature change").click_secondary();h.run_steps(2);
+    h.get_by_label("체리픽").click();settle(&mut h,|s|s.panel.is_busy());
+    h.get_by_label("현재 브랜치에 체리픽").click();settle(&mut h,|s|s.panel.is_busy());
+    assert!(r.path.join("feature.txt").exists());
+    assert_eq!(r.git(&["branch","--show-current"]).trim(),"main");
+    // Filter to the destination branch to avoid the original source commit.
+    h.get_by_label("브랜치 필터").click();h.run_steps(2);h.get_by_label("현재 브랜치").click();settle(&mut h,|s|s.panel.is_busy());
+    h.get_by_label("Feature change").click_secondary();h.run_steps(2);
+    h.get_by_label("커밋 삭제").click();settle(&mut h,|s|s.panel.is_busy());
+    h.get_by_label("커밋 삭제 검토");
+    h.get_by_label("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다").click();h.run_steps(2);
+    h.get_by_label("커밋 삭제").click();settle(&mut h,|s|s.panel.is_busy());
+    assert!(!r.path.join("feature.txt").exists());
+    assert_eq!(r.git(&["log","-1","--format=%s"]).trim(),"Commit 3");
+}
+
+#[test]
 fn git_panel_renders_sections_and_emits_events() {
     let r = panel_repo();
     let mut h = panel_harness(r.path.clone(), vec2(380.0, 900.0));
@@ -126,11 +207,13 @@ fn git_panel_renders_sections_and_emits_events() {
     h.run_steps(2);
     assert!(h.state().events.contains(&GitEvent::OpenDiff { path: r.path.join("src/main.rs"), staged: false }));
 
-    // 커밋 행 클릭 → OpenCommit
-    h.get_by_label("Tweak main loop").click();
+    // A normal click selects; opening the diff is an explicit row action.
+    h.get_by_label("Tweak main loop").click_secondary();
+    h.run_steps(2);
+    h.get_by_label("커밋 diff 열기").click();
     h.run_steps(2);
     let head = r.git(&["rev-parse", "HEAD"]).trim().to_string();
-    assert!(h.state().events.contains(&GitEvent::OpenCommit(head)));
+    assert!(h.state().events.contains(&GitEvent::History(kiln_git::history::HistoryEvent::OpenCommit(head))));
 }
 
 #[test]
@@ -327,6 +410,7 @@ fn diff_view_virtualizes_large_diffs() {
 /// 픽스처를 돌려주고 호출을 기록하는 가짜 백엔드.
 #[derive(Default)]
 struct FakeBackend {
+    fail_create: std::sync::atomic::AtomicBool,
     calls: Mutex<Vec<String>>,
 }
 
@@ -387,6 +471,7 @@ impl PrBackend for FakeBackend {
     }
     fn create(&self, req: &PrCreate) -> GitResult<String> {
         self.log(format!("create {} -> {} draft={}", req.title, req.base, req.draft));
+        if self.fail_create.load(std::sync::atomic::Ordering::SeqCst) { return Err(kiln_git::GitError::Failed("offline".into())); }
         Ok("https://github.com/example/kiln/pull/7".into())
     }
     fn review(&self, number: u64, kind: ReviewKind, body: &str) -> GitResult<()> {
@@ -537,4 +622,57 @@ fn pr_view_review_and_merge_actions_call_backend() {
     h.run_steps(1);
     settle(&mut h, |v| v.is_loading());
     assert!(backend.calls().contains(&"checkout 14507".to_string()));
+}
+
+#[test]
+fn pr_draft_reopens_without_overwriting_restored_fields_or_submitting() {
+    let backend = Arc::new(FakeBackend::default());
+    let draft = kiln_git::PrCreationDraft {
+        request: PrCreate { title: "Saved title".into(), body: "Saved body".into(), base: "release".into(), draft: true, ..Default::default() },
+        head: "feature/saved".into(), bases: vec!["main".into(), "release".into()],
+    };
+    let mut panel = PrPanel::with_backend(backend.clone()); panel.restore_creation_draft(&draft);
+    let mut h = Harness::builder().with_size(vec2(460.0, 720.0)).build_ui_state(
+        |ui, p: &mut PrPanel| { if theme(ui) { p.ui(ui); } }, panel);
+    settle(&mut h, |p| p.is_loading());
+    assert_eq!(h.state().creation_draft(), Some(draft.clone()));
+    h.get_by_label("초안 보관하고 닫기").click(); h.run_steps(2);
+    h.get_by_label("초안 이어 쓰기").click(); h.run_steps(2);
+    assert_eq!(h.state().creation_draft(), Some(draft));
+    assert!(!backend.calls().iter().any(|c| c.starts_with("create ")));
+    h.get_by_label("초안 PR 만들기").click(); h.run_steps(1);
+    settle(&mut h, |p| p.is_loading());
+    assert!(h.state().creation_draft().is_none(), "only confirmed success clears the draft");
+    assert!(h.query_by_label("새 PR").is_some(), "the form can be opened after successful submission");
+}
+
+#[test]
+fn failed_pr_submission_keeps_the_complete_draft() {
+    let backend = Arc::new(FakeBackend::default());
+    backend.fail_create.store(true, std::sync::atomic::Ordering::SeqCst);
+    let draft = kiln_git::PrCreationDraft { request: PrCreate { title: "Keep me".into(), body: "Body".into(), base: "main".into(), ..Default::default() }, head: "feature".into(), bases: vec!["main".into()] };
+    let mut panel = PrPanel::with_backend(backend.clone()); panel.restore_creation_draft(&draft);
+    let mut h = Harness::builder().with_size(vec2(460.0, 720.0)).build_ui_state(|ui, p: &mut PrPanel| { if theme(ui) { p.ui(ui); } }, panel);
+    settle(&mut h, |p| p.is_loading());
+    h.get_by_label("풀 리퀘스트 만들기").click(); h.run_steps(1); settle(&mut h, |p| p.is_loading());
+    assert_eq!(h.state().creation_draft(), Some(draft));
+    assert!(h.query_by_label("풀 리퀘스트를 만들 수 없습니다").is_some());
+    assert_eq!(backend.calls().iter().filter(|c| c.starts_with("create ")).count(), 1);
+}
+
+#[test]
+fn pr_creation_long_branches_fit_360_points() {
+    let backend=Arc::new(FakeBackend::default());
+    let long="feature/결제오류-recovery-long-branch/".repeat(5);
+    let draft=kiln_git::PrCreationDraft { request:PrCreate {title:long.clone(),base:long.clone(),..Default::default()},head:long.clone(),bases:vec![long] };
+    let mut panel=PrPanel::with_backend(backend);panel.restore_creation_draft(&draft);
+    let mut h=Harness::builder().with_size(vec2(360.0,720.0)).wgpu().build_ui_state(|ui,p:&mut PrPanel| {if theme(ui){p.ui(ui);}},panel);
+    settle(&mut h,|p|p.is_loading());
+    h.render().unwrap().save("/tmp/kiln-pr-create-360.png").unwrap();
+    for label in ["초안 버리기…","초안 보관하고 닫기","풀 리퀘스트 만들기"] {
+        assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}: {:?}",h.get_by_label(label).rect());
+    }
+    for input in h.query_all_by_role(egui::accesskit::Role::TextInput) {
+        assert!(h.ctx.content_rect().contains_rect(input.rect()),"input overflow {:?}",input.rect());
+    }
 }

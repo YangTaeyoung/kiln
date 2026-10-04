@@ -156,6 +156,7 @@ mod imp {
             for (k, v) in &spec.env {
                 cmd.env(k, v);
             }
+            if let Err(error) = crate::shell::configure_zsh(&mut cmd, &program, spec) { log::warn!("shell integration unavailable: {error}"); }
             cmd.stdin(Stdio::from(slave.try_clone()?));
             cmd.stdout(Stdio::from(slave.try_clone()?));
             cmd.stderr(Stdio::from(slave));

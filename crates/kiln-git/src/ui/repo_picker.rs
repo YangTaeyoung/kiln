@@ -26,7 +26,7 @@ pub enum RepoPickerAction {
     Select(RepoRef),
     /// 작업 폴더의 저장소로 돌아간다.
     UseWorkspace,
-    /// 새 스페이스로 복제한다(`owner/name`).
+    /// 새 프로젝트로 복제한다(`owner/name`).
     Clone(String),
 }
 
@@ -252,7 +252,7 @@ impl RepoPicker {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
-                            ui.label(faint(if q.is_empty() { "저장소가 없습니다" } else { "일치하는 저장소가 없습니다 · Enter로 GitHub에서 검색" }));
+                            ui.label(faint(if q.is_empty() { "표시할 저장소가 없습니다 · 이름으로 검색하세요" } else { "일치하는 저장소가 없습니다 · Enter로 GitHub에서 검색" }));
                         });
                         ui.add_space(8.0);
                     }
@@ -332,7 +332,7 @@ fn repo_row(ui: &mut Ui, it: &RepoListItem, is_current: bool, now: i64) -> RowAc
     let (rect, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, is_current, &it.name_with_owner));
     let clone_rect = Rect::from_center_size(pos2(rect.right() - 18.0, rect.center().y), vec2(24.0, 24.0));
-    let clone = icon_button_at(ui, clone_rect, resp.id.with("clone"), Icon::Download, &format!("{} 새 스페이스로 복제", it.name_with_owner));
+    let clone = icon_button_at(ui, clone_rect, resp.id.with("clone"), Icon::Download, &format!("{} 새 프로젝트로 복제", it.name_with_owner));
     if ui.is_rect_visible(rect) {
         kiln_common::widgets::paint_row(ui.painter(), rect, is_current, resp.hovered() || clone.hovered());
         let p = ui.painter();

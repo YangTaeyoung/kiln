@@ -249,3 +249,48 @@ fn snapshot_file_tree_show_ignored() {
     h.run();
     h.snapshot("file_tree_ignored");
 }
+
+#[test]
+fn embedded_tree_moves_header_actions_into_the_host_menu() {
+    let fixture = fixture();
+    let root = fixture.path().to_path_buf();
+    let mut tree = FileTree::new(root.clone());
+    tree.request_focus();
+    let mut h = Harness::builder().with_size(egui::vec2(360.0, 500.0)).build_ui_state(
+        |ui, state: &mut State| {
+            if !common::fonts_ready(ui.ctx()) { return; }
+            let menu = ui.button("파일 작업");
+            egui::Popup::menu(&menu).show(|ui| state.events.extend(state.tree.menu_ui(ui)));
+            state.events.extend(state.tree.ui_embedded(ui));
+        },
+        State { tree, events: vec![] },
+    );
+    common::apply_theme(&h.ctx);
+    h.run_steps(3);
+    assert!(h.get_by_label("assets").rect().top() < 50.0, "embedded tree reserves no redundant root header");
+    assert!(h.query_by_label("새 파일…").is_none());
+    h.get_by_label("docs").click(); h.run_steps(2);
+    h.get_by_label("파일 작업").click(); h.run_steps(2);
+    for label in ["새 파일…", "새 폴더…", "새로 고침", "폴더 모두 접기", "무시된 파일 표시"] { h.get_by_label(label); }
+    h.get_by_label("새 파일…").click(); h.run_steps(2);
+    h.event(Event::Text("created.txt".into())); h.run_steps(2);
+    h.key_press(Key::Enter); h.run_steps(2);
+    assert!(root.join("docs/created.txt").is_file());
+    assert!(h.state().events.contains(&EditorEvent::OpenFile(root.join("docs/created.txt"))));
+    h.get_by_label("파일 작업").click(); h.run_steps(2);
+    h.get_by_label("새 폴더…").click(); h.run_steps(2);
+    h.event(Event::Text("nested".into())); h.run_steps(2);
+    h.key_press(Key::Enter); h.run_steps(2);
+    assert!(root.join("docs/nested").is_dir());
+    h.get_by_label("파일 작업").click(); h.run_steps(2);
+    h.get_by_label("폴더 모두 접기").click(); h.run_steps(2);
+    assert!(!h.state().tree.is_expanded(&root.join("docs")));
+    h.get_by_label("파일 작업").click(); h.run_steps(2);
+    h.get_by_label("무시된 파일 표시").click(); h.run_steps(2);
+    assert!(h.state().tree.show_ignored());
+    h.get_by_label("target");
+    std::fs::write(root.join("added-externally.txt"), "new").unwrap();
+    h.get_by_label("파일 작업").click(); h.run_steps(2);
+    h.get_by_label("새로 고침").click(); h.run_steps(2);
+    h.get_by_label("added-externally.txt");
+}

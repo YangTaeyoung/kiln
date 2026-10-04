@@ -161,10 +161,17 @@ impl ConnConfig {
                 .map(|f| f.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "sqlite".into()),
             _ => {
-                if self.database.is_empty() {
-                    format!("{}@{}", self.user, self.host)
+                let database=self.database.trim();
+                let user=self.user.trim();
+                let host=self.host.trim();
+                if !database.is_empty() {
+                    if host.is_empty(){database.into()}else{format!("{database}@{host}")}
+                } else if !user.is_empty() && !host.is_empty() {
+                    format!("{user}@{host}")
+                } else if !host.is_empty() {
+                    host.into()
                 } else {
-                    format!("{}@{}", self.database, self.host)
+                    self.driver.label().into()
                 }
             }
         }
@@ -336,4 +343,20 @@ impl Secrets {
 pub(crate) struct StorePaths {
     pub connections: PathBuf,
     pub history: PathBuf,
+}
+
+#[cfg(test)]
+mod display_name_tests {
+    use super::*;
+    #[test]
+    fn unnamed_connection_never_displays_an_empty_at_sign_component() {
+        let mut cfg=ConnConfig::default();
+        cfg.name.clear();cfg.user.clear();cfg.database.clear();cfg.host="localhost".into();
+        assert_eq!(cfg.display_name(),"localhost");
+        cfg.user="alice".into();assert_eq!(cfg.display_name(),"alice@localhost");
+        cfg.database="app".into();assert_eq!(cfg.display_name(),"app@localhost");
+        cfg.host="  ".into();assert_eq!(cfg.display_name(),"app");
+        cfg.database.clear();assert_eq!(cfg.display_name(),cfg.driver.label());
+        cfg.name="개발 DB".into();assert_eq!(cfg.display_name(),"개발 DB");
+    }
 }

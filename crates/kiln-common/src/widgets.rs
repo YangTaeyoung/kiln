@@ -5,20 +5,31 @@ use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, StrokeK
 use crate::Theme;
 use crate::fonts;
 
+/// Visible focus treatment for every custom control, including keyboard navigation.
+pub fn focus_ring(ui: &Ui, response: &Response, radius: u8) {
+    if response.has_focus() && ui.is_enabled() {
+        ui.painter().rect_stroke(response.rect.expand(2.0), CornerRadius::same(radius), Stroke::new(2.0, Theme::current().accent), StrokeKind::Outside);
+    }
+}
+
 /// iOS 스타일 토글 스위치.
 pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
     let t = Theme::current();
-    let size = vec2(34.0, 20.0);
+    let size = vec2(36.0, 24.0);
     let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
+    let label = ui.data(|d| d.get_temp::<String>(ui.id().with("setting-label"))).unwrap_or_else(|| "전환".into());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, &label));
+    focus_ring(ui, &resp, 10);
+    let rect = rect.shrink2(vec2(1.0, 2.0));
     let k = ui.ctx().animate_bool_with_time(resp.id, *on, 0.12);
     let track = lerp_color(t.border_strong, t.accent, k);
     ui.painter().rect_filled(rect, CornerRadius::same(10), track);
     let x = egui::lerp(rect.left() + 10.0..=rect.right() - 10.0, k);
-    ui.painter().circle_filled(pos2(x, rect.center().y), 7.5, Color32::WHITE);
+    ui.painter().circle_filled(pos2(x, rect.center().y), 7.5, lerp_color(Color32::WHITE, t.accent_fg, k));
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -40,6 +51,8 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
         let r = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(w, rect.height() - 4.0));
         let resp = ui.interact(r, ui.id().with(("seg", label)), Sense::click());
         let sel = *value == *v;
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), sel, label));
+        focus_ring(ui, &resp, 5);
         if sel {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.bg_selected);
             ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, t.border_strong), StrokeKind::Inside);
@@ -130,7 +143,7 @@ pub fn button_with(ui: &mut Ui, icon: Option<Icon>, label: &str, kind: ButtonKin
     let g = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
     let icon_w = if icon.is_some() { if label.is_empty() { 14.0 } else { 20.0 } } else { 0.0 };
     let pad = if compact { 20.0 } else { 26.0 };
-    let size = vec2(g.size().x + icon_w + pad, if compact { 26.0 } else { 30.0 });
+    let size = vec2(g.size().x + icon_w + pad, if compact { 28.0 } else { 32.0 });
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     if !ui.is_rect_visible(rect) {
@@ -140,18 +153,11 @@ pub fn button_with(ui: &mut Ui, icon: Option<Icon>, label: &str, kind: ButtonKin
     let pressed = resp.is_pointer_button_down_on() && enabled;
     let (fill, stroke, fg) = match kind {
         ButtonKind::Primary => (if hovered { lerp_color(t.accent, Color32::WHITE, 0.08) } else { t.accent }, t.accent, t.accent_fg),
-        ButtonKind::Danger => (if hovered { lerp_color(t.red, Color32::WHITE, 0.08) } else { t.red }, t.red, Color32::WHITE),
+        ButtonKind::Danger => (if hovered { lerp_color(t.red, if t.dark { Color32::WHITE } else { Color32::BLACK }, 0.08) } else { t.red }, t.red, if t.dark { t.accent_fg } else { Color32::WHITE }),
         ButtonKind::Secondary => (if pressed { t.bg_selected } else if hovered { t.bg_hover } else { t.bg_elevated }, t.border_strong, t.text),
         ButtonKind::Ghost => (if pressed { t.bg_selected } else if hovered { t.bg_hover } else { Color32::TRANSPARENT }, Color32::TRANSPARENT, if hovered { t.text } else { t.text_dim }),
     };
-    let (fill, fg) = if enabled {
-        (fill, fg)
-    } else {
-        match kind {
-            ButtonKind::Primary | ButtonKind::Danger => (fill.gamma_multiply(0.4), fg.gamma_multiply(0.7)),
-            _ => (fill, t.text_faint),
-        }
-    };
+    // Disabled Ui already attenuates its painter once; do not fade colors again.
     ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
     if kind == ButtonKind::Secondary {
         ui.painter().rect_stroke(rect, CornerRadius::same(7), Stroke::new(1.0, stroke), StrokeKind::Inside);
@@ -163,7 +169,8 @@ pub fn button_with(ui: &mut Ui, icon: Option<Icon>, label: &str, kind: ButtonKin
         icons::paint(ui.painter(), ir, i, fg);
         x += icon_w;
     }
-    ui.painter().galley(pos2(x, rect.center().y - g.size().y / 2.0), g, fg);
+    ui.painter().galley_with_override_text_color(pos2(x, rect.center().y - g.size().y / 2.0), g, fg);
+    focus_ring(ui, &resp, 7);
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -178,7 +185,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: &str) 
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, active, tip));
     if ui.is_rect_visible(rect) {
         let (bg, fg) = if !enabled {
-            (Color32::TRANSPARENT, t.text_faint)
+            (Color32::TRANSPARENT, t.text_dim)
         } else if active {
             (t.accent_soft(if t.dark { 46 } else { 32 }), t.accent)
         } else if resp.hovered() {
@@ -189,6 +196,8 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: &str) 
         ui.painter().rect_filled(rect, CornerRadius::same(7), bg);
         icons::paint(ui.painter(), Rect::from_center_size(rect.center(), Vec2::splat(size * 0.56)), icon, fg);
     }
+    focus_ring(ui, &resp, 7);
+    if resp.hovered() && enabled { ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand); }
     if tip.is_empty() { resp } else { resp.on_hover_text(tip) }
 }
 
@@ -219,6 +228,7 @@ pub fn pill(ui: &mut Ui, text: &str, fg: Color32) -> Response {
     let t = Theme::current();
     let g = ui.painter().layout_no_wrap(text.to_string(), fonts::medium(11.0), fg);
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 14.0, 18.0), Sense::hover());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     if ui.is_rect_visible(rect) {
         ui.painter().rect_filled(rect, CornerRadius::same(9), tint(fg, if t.dark { 0.16 } else { 0.12 }));
         ui.painter().galley(rect.center() - g.size() / 2.0, g, fg);
@@ -280,22 +290,50 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 
 /// 카드·시트 바탕(창 바탕보다 조금 어둡거나 밝은 캔버스 색).
 pub fn canvas_color(t: &Theme) -> Color32 {
-    if t.dark { lerp_color(t.bg, Color32::BLACK, 0.45) } else { t.bg_panel }
+    if t.dark { lerp_color(t.bg_panel, t.bg, 0.5) } else { t.bg_panel }
 }
 
 /// 설정 화면의 한 줄: 제목·설명 왼쪽, 컨트롤 오른쪽.
 pub fn setting_row(ui: &mut Ui, title: &str, desc: &str, control: impl FnOnce(&mut Ui)) {
+    setting_row_with_control_width(ui,title,desc,230.0,control);
+}
+
+/// A switch needs only its own width; keep it aligned with its setting at narrow sizes.
+pub fn setting_toggle(ui: &mut Ui, title: &str, desc: &str, value: &mut bool) {
+    setting_row_with_control_width(ui,title,desc,52.0,|ui|{toggle(ui,value);});
+}
+
+fn setting_row_with_control_width(ui: &mut Ui, title: &str, desc: &str, control_width: f32, control: impl FnOnce(&mut Ui)) {
     let t = Theme::current();
-    ui.horizontal(|ui| {
-        ui.set_min_height(if desc.is_empty() { 36.0 } else { 46.0 });
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(egui::RichText::new(title).font(fonts::medium(13.5)).color(t.text));
+    let width = ui.available_width();
+    // Stack descriptive settings at narrow widths so controls never cover the explanation.
+    ui.push_id(title, |ui| {
+        let copy = |ui: &mut Ui| {
+            ui.spacing_mut().item_spacing.y = 3.0;
+            ui.add(egui::Label::new(egui::RichText::new(title).font(fonts::medium(13.5)).color(t.text)).wrap());
             if !desc.is_empty() {
-                ui.label(egui::RichText::new(desc).size(12.0).color(t.text_faint));
+                ui.add(egui::Label::new(egui::RichText::new(desc).size(12.0).color(t.text_dim)).wrap());
             }
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
+        };
+        if width < control_width + 250.0 && !desc.is_empty() {
+            ui.add_space(8.0);
+            copy(ui);
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.data_mut(|d| d.insert_temp(ui.id().with("setting-label"), title.to_owned()));
+                control(ui);
+            });
+            ui.add_space(8.0);
+        } else {
+            ui.horizontal(|ui| {
+                ui.set_min_height(if desc.is_empty() { 38.0 } else { 54.0 });
+                ui.allocate_ui_with_layout(vec2((width - control_width).max(100.0), if desc.is_empty() { 24.0 } else { 42.0 }), egui::Layout::top_down(egui::Align::Min), copy);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.data_mut(|d| d.insert_temp(ui.id().with("setting-label"), title.to_owned()));
+                    control(ui);
+                });
+            });
+        }
     });
 }
 

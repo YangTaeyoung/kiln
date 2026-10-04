@@ -26,6 +26,22 @@ pub enum HubTab {
     Actions,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GithubDrafts {
+    pub repositories: std::collections::BTreeMap<String, RepositoryDrafts>,
+    pub selected: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RepositoryDrafts {
+    pub pull_request: Option<super::pr_panel::PrCreationDraft>,
+    pub issue: Option<crate::github::IssueCreate>,
+}
+
+impl RepositoryDrafts {
+    fn is_empty(&self) -> bool { self.pull_request.is_none() && self.issue.is_none() }
+}
+
 /// 선택된 저장소의 패널 묶음.
 struct Panels {
     repo: RepoRef,
@@ -50,11 +66,34 @@ pub struct GithubHub {
     info_task: Option<(RepoRef, Task<GitResult<RepoInfo>>)>,
     pending_info: Option<RepoRef>,
     panels: Option<Panels>,
+    drafts: GithubDrafts,
     picker: RepoPicker,
     now_override: Option<i64>,
 }
 
 impl GithubHub {
+    pub fn is_submitting(&self) -> bool { self.panels.as_ref().is_some_and(|p| p.pr.is_submitting() || p.issues.is_submitting()) }
+
+    pub fn recovery_drafts(&self) -> GithubDrafts {
+        let mut drafts = self.drafts.clone();
+        drafts.selected = self.selected.as_ref().map(RepoRef::full_name);
+        if let Some(p) = &self.panels {
+            let current = RepositoryDrafts { pull_request: p.pr.creation_draft(), issue: p.issues.creation_draft() };
+            if current.is_empty() { drafts.repositories.remove(&p.repo.full_name()); }
+            else { drafts.repositories.insert(p.repo.full_name(), current); }
+        }
+        drafts
+    }
+
+    pub fn restore_drafts(&mut self, drafts: &GithubDrafts) {
+        self.drafts = drafts.clone();
+        if let Some(panels) = &mut self.panels && let Some(draft) = drafts.repositories.get(&panels.repo.full_name()) {
+            if let Some(pr) = &draft.pull_request { panels.pr.restore_creation_draft(pr); }
+            if let Some(issue) = &draft.issue { panels.issues.restore_creation_draft(issue); }
+        }
+        if let Some(repo) = drafts.selected.as_deref().and_then(RepoRef::parse) { self.select_repo(repo); }
+    }
+
     pub fn new(root: PathBuf) -> Self {
         let backend: Arc<dyn GithubBackend> = Arc::new(GhBackend::new(root.clone()));
         Self::with_backend(root, backend)
@@ -76,6 +115,7 @@ impl GithubHub {
             info_task: None,
             pending_info: None,
             panels: None,
+            drafts: GithubDrafts::default(),
             now_override: None,
         }
     }
@@ -127,6 +167,7 @@ impl GithubHub {
 
     /// 작업 폴더와 다른 저장소를 대상으로 삼는다. 작업 폴더 저장소와 같으면 선택을 푼다.
     pub fn select_repo(&mut self, repo: RepoRef) {
+        if self.is_submitting() { return; }
         if self.workspace.as_ref().is_some_and(|w| w.repo == repo) {
             self.use_workspace_repo();
             return;
@@ -141,6 +182,7 @@ impl GithubHub {
 
     /// 작업 폴더 저장소로 돌아간다.
     pub fn use_workspace_repo(&mut self) {
+        if self.is_submitting() { return; }
         self.selected = None;
         self.selected_info = None;
         self.info_task = None;
@@ -245,6 +287,9 @@ impl GithubHub {
         }
         // 패널은 대상 저장소가 바뀌면 새로 만든다.
         let target = self.repo();
+        if self.panels.as_ref().is_some_and(|p| target.as_ref() != Some(&p.repo)) {
+            self.drafts = self.recovery_drafts();
+        }
         match (&target, &self.panels) {
             (Some(r), Some(p)) if &p.repo == r => {}
             (Some(r), _) => {
@@ -261,6 +306,10 @@ impl GithubHub {
                     pr.set_now(ts);
                     issues.set_now(ts);
                     actions.set_now(ts);
+                }
+                if let Some(drafts) = self.drafts.repositories.get(&r.full_name()) {
+                    if let Some(draft) = &drafts.pull_request { pr.restore_creation_draft(draft); }
+                    if let Some(draft) = &drafts.issue { issues.restore_creation_draft(draft); }
                 }
                 self.panels = Some(Panels { repo: r.clone(), pr, issues, actions });
             }
@@ -288,6 +337,27 @@ impl GithubHub {
 
     fn ui_header(&mut self, ui: &mut Ui, events: &mut Vec<GitEvent>) {
         let t = theme();
+        let drafts = self.recovery_drafts();
+        if !drafts.repositories.is_empty() {
+            egui::CollapsingHeader::new(format!("보관된 작성 초안 · 저장소 {}개", drafts.repositories.len()))
+                .id_salt("github_saved_drafts").show(ui, |ui| {
+                    ui.label(faint("전송 전 GitHub에서 이미 등록되었는지 확인하세요."));
+                    for (name, draft) in &drafts.repositories {
+                        for (exists, tab, title) in [(draft.pull_request.is_some(), HubTab::PullRequests, "풀 리퀘스트"), (draft.issue.is_some(), HubTab::Issues, "이슈")] {
+                            if exists && ui.add_enabled(!self.is_submitting(), egui::Button::new(format!("{name} · {title} 이어 쓰기"))).clicked() {
+                                if let Some(repo) = RepoRef::parse(name) {
+                                    if self.workspace.as_ref().is_some_and(|w| w.repo == repo) { self.use_workspace_repo(); }
+                                    else { self.select_repo(repo); }
+                                    self.tab = tab;
+                                    if let Some(panels) = &mut self.panels && panels.repo.full_name() == *name {
+                                        match tab { HubTab::PullRequests => panels.pr.open_create_form(), HubTab::Issues => panels.issues.open_create_form(), _ => {} }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+        }
         let info = self.repo_info().cloned();
         let repo = self.repo();
         let chip = ui
@@ -320,7 +390,8 @@ impl GithubHub {
                 chip
             })
             .inner;
-        if chip.clicked() {
+        if self.is_submitting() { ui.label(faint("전송 중에는 저장소를 바꿀 수 없습니다")); }
+        if chip.clicked() && !self.is_submitting() {
             self.picker.toggle(ui.ctx());
         }
         let ws = self.workspace.as_ref().map(|w| w.repo.clone());
@@ -410,7 +481,7 @@ fn no_repo_detail(e: &GitError) -> String {
     match e {
         GitError::NotARepo => "이 폴더는 Git 저장소가 아닙니다. GitHub 저장소를 직접 선택할 수 있습니다.".into(),
         GitError::Failed(m) if m.contains("no git remotes") || m.contains("none of the git remotes") => {
-            "이 저장소에 GitHub 원격이 없습니다. GitHub 저장소를 직접 선택할 수 있습니다.".into()
+            "GitHub 원격 저장소가 연결되어 있지 않습니다. GitHub 저장소를 직접 선택할 수 있습니다.".into()
         }
         other => other.to_string(),
     }

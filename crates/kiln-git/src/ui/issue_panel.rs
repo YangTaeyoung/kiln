@@ -98,6 +98,8 @@ pub struct IssuePanel {
     items: Vec<IssueItem>,
     error: Option<GitError>,
     form: Option<CreateForm>,
+    form_open: bool,
+    discard_confirm: bool,
     meta: RepoMeta,
     created: Option<u64>,
     embedded: bool,
@@ -124,6 +126,8 @@ impl IssuePanel {
             items: Vec::new(),
             error: None,
             form: None,
+            form_open: false,
+            discard_confirm: false,
             meta: RepoMeta::default(),
             created: None,
             embedded: false,
@@ -196,6 +200,9 @@ impl IssuePanel {
 
     /// 이슈 생성 폼을 연다.
     pub fn open_create_form(&mut self) {
+        self.form_open = true;
+        self.discard_confirm = false;
+        if self.form.is_some() { return; }
         self.form = Some(CreateForm {
             req: IssueCreate::default(),
             submit: None,
@@ -206,8 +213,20 @@ impl IssuePanel {
         self.created = None;
     }
 
+    pub fn is_submitting(&self) -> bool { self.form.as_ref().is_some_and(|f| f.submit.is_some()) }
+
+    pub fn creation_draft(&self) -> Option<IssueCreate> {
+        self.form.as_ref().filter(|f| f.req != IssueCreate::default()).map(|f| f.req.clone())
+    }
+
+    pub fn restore_creation_draft(&mut self, request: &IssueCreate) {
+        self.form = None;
+        self.open_create_form();
+        self.form.as_mut().unwrap().req = request.clone();
+    }
+
     pub fn is_form_open(&self) -> bool {
-        self.form.is_some()
+        self.form.is_some() && self.form_open
     }
 
     #[doc(hidden)]
@@ -250,6 +269,7 @@ impl IssuePanel {
                     events.push(GitEvent::OpenIssue(n));
                     self.created = Some(n);
                     self.form = None;
+                    self.form_open = false;
                     self.refresh();
                 }
                 Err(e) => form.error = Some(e.to_string()),
@@ -265,7 +285,7 @@ impl IssuePanel {
         egui::Frame::new().fill(t.bg_panel).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-            if self.form.is_some() {
+            if self.form.is_some() && self.form_open {
                 egui::ScrollArea::vertical().id_salt("issue_form").auto_shrink([false, false]).show(ui, |ui| {
                     egui::Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| self.ui_form(ui));
                 });
@@ -297,7 +317,7 @@ impl IssuePanel {
                 if kiln_common::widgets::button_with(
                     ui,
                     Some(kiln_common::icons::Icon::Plus),
-                    "새 이슈",
+                    if self.form.is_some() { "초안 이어 쓰기" } else { "새 이슈" },
                     kiln_common::widgets::ButtonKind::Primary,
                     true,
                 )
@@ -359,7 +379,7 @@ impl IssuePanel {
         }
         if let Some(n) = self.created {
             ui.add_space(6.0);
-            if banner(ui, BannerKind::Success, &format!("이슈 #{n}을(를) 만들었습니다"), None, true) {
+            if banner(ui, BannerKind::Success, &format!("이슈 #{n} 생성 완료"), None, true) {
                 self.created = None;
             }
         }
@@ -447,22 +467,37 @@ impl IssuePanel {
 
     fn ui_form(&mut self, ui: &mut Ui) {
         let t = theme();
+        if self.discard_confirm {
+            ui.label("작성한 초안을 버릴까요? GitHub에는 전송되지 않습니다.");
+            let mut discard = false;
+            ui.horizontal(|ui| {
+                if tool_button(ui, None, "계속 작성").clicked() { self.discard_confirm = false; }
+                if tool_button(ui, None, "초안 버리기").clicked() { discard = true; }
+            });
+            if discard { self.form = None; self.form_open = false; self.discard_confirm = false; }
+            return;
+        }
         let Some(form) = &mut self.form else { return };
         let mut close = false;
         ui.horizontal(|ui| {
             icon_label(ui, Icon::Issue, t.green, 16.0);
             ui.label(RichText::new("새 이슈").font(kiln_common::fonts::semibold(14.0)).color(t.text));
             if let Some(r) = &self.repo {
-                ui.label(faint(r.full_name()));
+                let width=(ui.available_width()-140.0).max(20.0);
+                let name=r.full_name();
+                let natural_width=ui.painter().layout_no_wrap(name.clone(),kiln_common::fonts::regular(12.0),t.text_faint).size().x;
+                if natural_width>width { ui.add_sized([width,18.0],egui::Label::new(faint(&name)).truncate()).on_hover_text(&name); }
+                else { ui.label(faint(&name)); }
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icon_button(ui, Icon::Close, "취소").clicked() {
+                if icon_button(ui, Icon::Close, "초안 보관하고 닫기").clicked() {
                     close = true;
                 }
+                if form.submit.is_none() && tool_button(ui, None, "초안 버리기…").clicked() { self.discard_confirm = true; }
             });
         });
         if close {
-            self.form = None;
+            self.form_open = false;
             return;
         }
         ui.add_space(8.0);

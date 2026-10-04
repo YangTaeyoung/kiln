@@ -110,7 +110,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                     ui.add(egui::Spinner::new().size(14.0).color(t.text_dim));
                 } else {
                     let tip = match tool {
-                        Tool::Claude => "사용량 새로 고침 (계정마다 최소 요청 1회)",
+                        Tool::Claude => "저장한 계정의 사용량 확인",
                         Tool::Codex => "사용량 새로 고침 (최근 Codex 세션 기록)",
                     };
                     if widgets::icon_button(ui, Icon::Refresh, 26.0, false, tip).clicked() {
@@ -125,7 +125,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
         if let Some(Some(email)) = &live
             && !profiles.iter().any(|p| p.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(email)))
         {
-            info_banner(ui, &format!("현재 {email} 로 로그인되어 있지만 아직 저장하지 않았습니다"));
+            info_banner(ui, &format!("현재 로그인 계정: {email} · 아직 Kiln에 저장하지 않았습니다"));
         }
 
         if profiles.is_empty() {
@@ -221,7 +221,7 @@ fn empty_rows(ui: &mut Ui, tool: Tool) {
 pub(crate) fn fmt_reset(reset: i64, now: i64) -> String {
     let d = reset - now;
     if d <= 0 {
-        return "초기화됨".into();
+        return "갱신 시각 지남".into();
     }
     let (days, hours, mins) = (d / 86400, (d % 86400) / 3600, (d % 3600) / 60);
     if days > 0 {
@@ -293,7 +293,7 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64) {
                 usage_line(ui, "5시간", u.five_hour, now);
                 usage_line(ui, "7일", u.seven_day, now);
                 if u.is_unavailable() {
-                    ui.label(RichText::new("최근 조회 실패 · 이전 값").font(fonts::regular(10.5)).color(t.text_faint)).on_hover_text(&u.status);
+                    ui.label(RichText::new("갱신 실패 · 마지막으로 확인한 사용량").font(fonts::regular(10.5)).color(t.text_faint)).on_hover_text(&u.status);
                 }
             }
             Some(u) if u.is_unavailable() => {
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn reset_formatting() {
-        assert_eq!(fmt_reset(100, 200), "초기화됨");
+        assert_eq!(fmt_reset(100, 200), "갱신 시각 지남");
         assert_eq!(fmt_reset(30, 0), "1분 후");
         assert_eq!(fmt_reset(45 * 60, 0), "45분 후");
         assert_eq!(fmt_reset(2 * 3600 + 13 * 60, 0), "2시간 13분 후");

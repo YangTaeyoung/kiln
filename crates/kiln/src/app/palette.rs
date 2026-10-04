@@ -2,7 +2,7 @@
 
 use kiln_common::icons::{self, Icon};
 use kiln_common::widgets;
-use egui::{Align2, Color32, CornerRadius, Frame, Key, Margin, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Frame, Key, Margin, RichText, Sense, Stroke, pos2, vec2};
 use kiln_common::{Theme, fonts};
 
 #[derive(Default)]
@@ -11,6 +11,9 @@ pub struct Palette {
     query: String,
     selected: usize,
     just_opened: bool,
+    recent_only: bool,
+    project_filter: String,
+    frozen: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -25,20 +28,23 @@ pub enum Group {
 impl Group {
     fn label(&self) -> &'static str {
         match self {
-            Group::Sessions => "세션",
+            Group::Sessions => "열린 작업 · 최근 사용순",
             Group::Commands => "명령",
             Group::Tools => "도구",
-            Group::Spaces => "스페이스",
+            Group::Spaces => "작업 공간",
             Group::Settings => "설정",
         }
     }
 }
 
 pub struct Item<A> {
+    pub key: String,
+    pub project: String,
     pub group: Group,
     pub icon: Icon,
     pub label: String,
     pub hint: String,
+    pub detail: String,
     pub action: A,
 }
 
@@ -80,160 +86,145 @@ pub fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
 
 impl Palette {
     pub fn open(&mut self) {
+        self.recent_only = false;
         self.open = true;
         self.query.clear();
+        self.project_filter.clear();
+        self.frozen.clear();
         self.selected = 0;
         self.just_opened = true;
     }
+
+    pub fn open_recent(&mut self) { self.open(); self.recent_only = true; self.selected = 1; }
 
     pub fn is_open(&self) -> bool {
         self.open
     }
 
     pub fn ui<A>(&mut self, ctx: &egui::Context, items: Vec<Item<A>>) -> Option<A> {
-        if !self.open {
-            return None;
-        }
+        if !self.open { return None; }
+        let mut items: Vec<_> = items.into_iter().filter(|item| !self.recent_only || item.group == Group::Sessions).collect();
+        if self.just_opened { self.frozen=items.iter().map(|i|i.key.clone()).collect(); }
+        items.retain(|i|self.frozen.contains(&i.key));
+        items.sort_by_key(|i|self.frozen.iter().position(|k|k==&i.key).unwrap_or(usize::MAX));
+        let mut projects:Vec<_>=items.iter().filter(|i|!i.project.is_empty()).map(|i|i.project.clone()).collect(); projects.sort(); projects.dedup();
         let t = Theme::current();
-        let mut scored: Vec<(i32, Item<A>)> = items.into_iter().filter_map(|it| fuzzy_score(&self.query, &it.label).map(|s| (s, it))).collect();
-        if self.query.is_empty() {
-            scored.sort_by_key(|(_, it)| it.group);
-        } else {
-            scored.sort_by_key(|x| std::cmp::Reverse(x.0));
-        }
-        let n = scored.len();
-        if ctx.input(|i| i.key_pressed(Key::Escape)) {
-            self.open = false;
-            return None;
-        }
-        if ctx.input(|i| i.key_pressed(Key::ArrowDown)) && n > 0 {
-            self.selected = (self.selected + 1) % n;
-        }
-        if ctx.input(|i| i.key_pressed(Key::ArrowUp)) && n > 0 {
-            self.selected = (self.selected + n - 1) % n;
-        }
-        self.selected = self.selected.min(n.saturating_sub(1));
-        let enter = ctx.input(|i| i.key_pressed(Key::Enter));
-        let mut chosen: Option<usize> = if enter && n > 0 { Some(self.selected) } else { None };
-
         let screen = ctx.content_rect();
-        // 뒤를 어둡게.
-        let mut close_by_backdrop = false;
-        egui::Area::new(egui::Id::new("palette-dim")).fixed_pos(screen.min).order(egui::Order::Foreground).show(ctx, |ui| {
-            let r = ui.allocate_rect(screen, Sense::click());
-            ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(if t.dark { 120 } else { 50 }));
-            close_by_backdrop = r.clicked();
-        });
-        let width = 620.0f32.min(screen.width() - 40.0);
-        egui::Area::new(egui::Id::new("palette"))
-            .fixed_pos(pos2(screen.center().x - width / 2.0, screen.top() + screen.height() * 0.14))
-            .order(egui::Order::Tooltip)
+        let width = 640.0f32.min(screen.width() - 48.0);
+        let mut chosen = None;
+        let mut scored = Vec::new();
+        let frame = Frame::new().fill(t.bg_elevated).stroke(Stroke::new(1.0, t.border_strong))
+            .corner_radius(CornerRadius::same(12)).shadow(t.shadow()).inner_margin(Margin::same(12));
+        let modal = egui::Modal::new(egui::Id::new("palette")).frame(frame)
+            .backdrop_color(Color32::from_black_alpha(if t.dark { 130 } else { 60 }))
             .show(ctx, |ui| {
-                Frame::new()
-                    .fill(t.bg_elevated)
-                    .stroke(Stroke::new(1.0, t.border_strong))
-                    .corner_radius(CornerRadius::same(14))
-                    .shadow(t.shadow())
-                    .inner_margin(Margin::same(0))
-                    .show(ui, |ui| {
-                        ui.set_width(width);
-                        // 검색 입력.
-                        ui.horizontal(|ui| {
-                            ui.add_space(16.0);
-                            let (ir, _) = ui.allocate_exact_size(vec2(18.0, 52.0), Sense::hover());
-                            icons::paint(ui.painter(), egui::Rect::from_center_size(ir.center(), vec2(17.0, 17.0)), Icon::Search, t.text_faint);
-                            ui.add_space(6.0);
-                            let te = ui.add(
-                                egui::TextEdit::singleline(&mut self.query)
-                                    .hint_text(RichText::new("무엇을 할까요? 세션, 명령, 테마…").color(t.text_faint))
-                                    .font(fonts::regular(16.0))
-                                    .frame(egui::Frame::NONE)
-                                    .desired_width(width - 60.0),
-                            );
-                            if self.just_opened {
-                                te.request_focus();
-                                self.just_opened = false;
+                ui.set_width(width);
+                let opened = self.just_opened;
+                let mut changed = false;
+                ui.horizontal(|ui| {
+                    let (ir, _) = ui.allocate_exact_size(vec2(22.0, 38.0), Sense::hover());
+                    icons::paint(ui.painter(), egui::Rect::from_center_size(ir.center(), vec2(17.0, 17.0)), Icon::Search, t.accent);
+                    let te = ui.add(egui::TextEdit::singleline(&mut self.query)
+                        .hint_text(if self.recent_only { "열린 작업 검색 · 파일, 터미널, Git, DB…" } else { "작업, 명령, 도구 검색…" }).font(fonts::regular(16.0))
+                        .frame(egui::Frame::NONE).desired_width(width - 50.0));
+                    if opened { te.request_focus(); self.just_opened = false; }
+                    changed = te.changed();
+                    if changed { self.selected = 0; }
+                });
+                if self.recent_only {
+                    ui.horizontal(|ui|{
+                        ui.label("작업 공간");
+                        let menu_width=(ui.available_width()-16.0).min(420.0);
+                        egui::ComboBox::from_id_salt("recent-project-filter").width(menu_width).truncate().selected_text(if self.project_filter.is_empty(){"전체"}else{&self.project_filter}).show_ui(ui,|ui|{
+                            if ui.selectable_value(&mut self.project_filter,String::new(),"전체").changed(){changed=true;}
+                            ui.set_min_width(menu_width); ui.set_max_width(menu_width);
+                            for project in &projects {
+                                let response=ui.add_sized([menu_width,28.0],egui::Button::selectable(self.project_filter==*project,project).truncate()).on_hover_text(project);
+                                if response.clicked(){self.project_filter=project.clone();changed=true;ui.close();}
                             }
-                            if te.changed() {
-                                self.selected = 0;
-                            }
-                        });
-                        let (sep, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
-                        ui.painter().rect_filled(sep, 0.0, t.border);
-                        egui::ScrollArea::vertical().max_height(420.0).auto_shrink([false, true]).show(ui, |ui| {
-                            ui.add_space(6.0);
-                            let mut last_group = None;
-                            for (i, (_, it)) in scored.iter().enumerate() {
-                                if self.query.is_empty() && last_group != Some(it.group) {
-                                    last_group = Some(it.group);
-                                    ui.add_space(4.0);
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(18.0);
-                                        ui.label(RichText::new(it.group.label()).font(fonts::semibold(11.0)).color(t.text_faint));
-                                    });
-                                }
-                                let sel = i == self.selected;
-                                let (row, resp) = ui.allocate_exact_size(vec2(width, 38.0), Sense::click());
-                                let r = row.shrink2(vec2(8.0, 1.0));
-                                if sel {
-                                    ui.painter().rect_filled(r, CornerRadius::same(8), t.bg_selected);
-                                    resp.scroll_to_me(None);
-                                } else if resp.hovered() {
-                                    ui.painter().rect_filled(r, CornerRadius::same(8), t.bg_hover);
-                                }
-                                let ib = egui::Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 12.0), vec2(24.0, 24.0));
-                                ui.painter().rect_filled(ib, CornerRadius::same(6), if sel { t.accent_soft(40) } else { t.bg_hover });
-                                icons::paint(ui.painter(), ib.shrink(6.0), it.icon, if sel { t.accent } else { t.text_dim });
-                                ui.painter().with_clip_rect(r.shrink2(vec2(0.0, 0.0))).text(pos2(ib.right() + 12.0, r.center().y), Align2::LEFT_CENTER, &it.label, fonts::regular(13.5), t.text);
-                                if !it.hint.is_empty() {
-                                    let keys = widgets::split_keys(&it.hint);
-                                    let mut kui = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_max(pos2(r.right() - 160.0, r.center().y - 9.0), pos2(r.right() - 10.0, r.center().y + 9.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
-                                    let rev: Vec<&str> = keys.iter().rev().map(|s| s.as_str()).collect();
-                                    widgets::keycaps(&mut kui, &rev);
-                                }
-                                if resp.clicked() {
-                                    chosen = Some(i);
-                                }
-                                if resp.hovered() && ui.input(|i| i.pointer.delta().length() > 0.0) {
-                                    self.selected = i;
-                                }
-                            }
-                            if n == 0 {
-                                ui.add_space(20.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.label(RichText::new("일치하는 항목이 없습니다").color(t.text_faint));
-                                });
-                                ui.add_space(20.0);
-                            }
-                            ui.add_space(6.0);
-                        });
-                        let (sep, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
-                        ui.painter().rect_filled(sep, 0.0, t.border);
-                        ui.horizontal(|ui| {
-                            ui.set_height(32.0);
-                            ui.add_space(16.0);
-                            let hint = |ui: &mut egui::Ui, k: &[&str], s: &str| {
-                                widgets::keycaps(ui, k);
-                                ui.label(RichText::new(s).size(11.5).color(t.text_faint));
-                                ui.add_space(10.0);
-                            };
-                            hint(ui, &["↑", "↓"], "이동");
-                            hint(ui, &["↩"], "실행");
-                            hint(ui, &["esc"], "닫기");
                         });
                     });
+                }
+                widgets::divider(ui);
+                // Filter after editing, so typing and Enter in one frame use the visible query.
+                scored = items.into_iter().filter(|i|self.project_filter.is_empty() || i.project==self.project_filter).filter_map(|it| fuzzy_score(&self.query, &format!("{} {} {}", it.label, it.hint, it.detail)).map(|s| (s, it))).collect();
+                if self.query.trim().is_empty() { scored.sort_by_key(|(_, it)| it.group); }
+                else { scored.sort_by_key(|x| std::cmp::Reverse(x.0)); }
+                let n = scored.len();
+                let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown));
+                let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowUp));
+                self.selected = self.selected.min(n.saturating_sub(1));
+                if down && n > 0 { self.selected = (self.selected + 1) % n; }
+                if up && n > 0 { self.selected = (self.selected + n - 1) % n; }
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter)) && n > 0 { chosen = Some(self.selected); }
+                let follow_selection = opened || changed || down || up;
+                egui::ScrollArea::vertical().id_salt("palette-results")
+                    .max_height((screen.height() - 180.0).clamp(100.0, 420.0)).auto_shrink([false, true]).show(ui, |ui| {
+                    ui.add_space(8.0);
+                    let mut last_group = None;
+                    for (i, (_, it)) in scored.iter().enumerate() {
+                        if self.query.trim().is_empty() && last_group != Some(it.group) {
+                            last_group = Some(it.group);
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(it.group.label()).font(fonts::semibold(11.5)).color(t.text_dim));
+                            ui.add_space(4.0);
+                        }
+                        let sel = i == self.selected;
+                        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), if it.detail.is_empty(){38.0}else{54.0}), Sense::click());
+                        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, sel, format!("{}\n{}",it.label,it.detail)));
+                        if sel || response.hovered() { ui.painter().rect_filled(row, CornerRadius::same(6), if sel { t.bg_selected } else { t.bg_hover }); }
+                        if sel && follow_selection { response.scroll_to_me(None); }
+                        let icon = egui::Rect::from_center_size(pos2(row.left() + 20.0, row.center().y), vec2(15.0, 15.0));
+                        icons::paint(ui.painter(), icon, it.icon, if sel { t.accent } else { t.text_dim });
+                        let hint_width = if it.hint.is_empty() { 12.0 } else { 120.0 };
+                        let text_rect = egui::Rect::from_min_max(pos2(row.left() + 42.0, row.top()), pos2(row.right() - hint_width, row.bottom()));
+                        let mut job = egui::text::LayoutJob::simple(it.label.clone(), fonts::regular(13.5), t.text, text_rect.width());
+                        job.wrap.max_rows = 1;
+                        job.wrap.break_anywhere = true;
+                        let galley = ui.painter().layout_job(job);
+                        let title_y=if it.detail.is_empty(){row.center().y-galley.size().y*0.5}else{row.top()+7.0};
+                        ui.painter().galley(pos2(text_rect.left(), title_y), galley, t.text);
+                        if !it.detail.is_empty() {
+                            let mut detail=egui::text::LayoutJob::simple(it.detail.clone(),fonts::regular(11.5),t.text_dim,text_rect.width());
+                            detail.wrap.max_rows=1; detail.wrap.break_anywhere=true;
+                            let galley=ui.painter().layout_job(detail);
+                            ui.painter().galley(pos2(text_rect.left(),row.top()+29.0),galley,t.text_dim);
+                        }
+                        if !it.hint.is_empty() {
+                            ui.painter().text(pos2(row.right() - 12.0, row.center().y), Align2::RIGHT_CENTER, &it.hint, fonts::medium(11.5), t.text_dim);
+                        }
+                        let response = response.on_hover_text(format!("{}\n{}",it.label,it.detail));
+                        if response.clicked() { chosen = Some(i); }
+                        if response.hovered() && ui.input(|i| i.pointer.delta().length() > 0.0) { self.selected = i; }
+                    }
+                    if n == 0 {
+                        ui.add_space(28.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new("검색 결과가 없습니다").font(fonts::semibold(14.0)));
+                            ui.label(RichText::new(if self.recent_only {"다른 검색어를 입력하거나 작업 공간 필터를 전체로 바꾸세요."} else {"다른 검색어를 입력하거나 검색어를 지워 전체 명령을 확인하세요."}).color(t.text_dim));
+                            if (!self.query.is_empty() || !self.project_filter.is_empty()) && ui.button("검색 초기화").clicked(){self.query.clear();self.project_filter.clear();self.selected=0;}
+                        });
+                        ui.add_space(28.0);
+                    }
+                    ui.add_space(8.0);
+                });
+                widgets::divider(ui);
+                ui.horizontal(|ui| {
+                    ui.set_height(28.0);
+                    ui.label(RichText::new(if self.recent_only {"↑ ↓ 선택     ↩ 이동     Esc 닫기"}else{"↑ ↓ 선택     ↩ 실행     Esc 닫기"}).size(11.5).color(t.text_dim));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{}개 결과", scored.len())).size(11.5).color(t.text_dim));
+                    });
+                });
             });
-        let _ = StrokeKind::Inside;
-        if close_by_backdrop && chosen.is_none() {
-            self.open = false;
-            return None;
-        }
+        if modal.should_close() { self.open = false; return None; }
         if let Some(i) = chosen {
             self.open = false;
-            return scored.into_iter().nth(i).map(|(_, it)| it.action);
+            return scored.into_iter().nth(i).map(|(_, item)| item.action);
         }
         None
     }
+
 }
 
 #[cfg(test)]
@@ -245,5 +236,28 @@ mod tests {
         assert!(fuzzy_score("spl", "Split Right").unwrap() > fuzzy_score("spl", "Simple pull").unwrap());
         assert!(fuzzy_score("xyz", "Split").is_none());
         assert_eq!(fuzzy_score("", "anything"), Some(0));
+    }
+}
+
+#[cfg(test)]
+mod responsive_tests {
+    use super::*;
+    use egui_kittest::{Harness,kittest::Queryable};
+    #[test]
+    fn recent_project_menu_stays_inside_minimum_viewport_and_resets_empty_filter() {
+        let project="매우 긴 프로젝트 이름 · /workspace/".repeat(8);
+        let mut palette=Palette::default();palette.open_recent();
+        let mut initialized=false;
+        let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).build_ui_state(|ui,p:&mut Palette| {
+            if !initialized {fonts::install(ui.ctx());Theme::current().apply(ui.ctx());initialized=true;return;}
+            p.ui(ui.ctx(),vec![Item{key:"fixture".into(),project:project.clone(),group:Group::Sessions,icon:Icon::Terminal,label:"터미널 1.1".into(),hint:"터미널".into(),detail:"작업 1".into(),action:()}]);
+        },palette);
+        h.run_steps(4);h.get_by_value("전체").click();h.run_steps(3);
+        let row=h.get_by_label(&project).rect();assert!(h.ctx.content_rect().contains_rect(row),"{row:?}");
+        h.render().unwrap().save("/tmp/kiln-project-filter-minimum.png").unwrap();
+        h.get_by_label(&project).click();h.run_steps(2);
+        h.state_mut().query="does-not-match".into();h.run_steps(3);
+        h.get_by_label("검색 초기화").click();h.run_steps(3);
+        assert!(h.state().query.is_empty() && h.state().project_filter.is_empty());
     }
 }

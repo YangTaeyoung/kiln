@@ -5,12 +5,18 @@
 pub enum OscEvent {
     Notify { title: String, body: String },
     Cwd(String),
+    CommandText(String),
+    CommandStart,
+    CommandEnd(Option<i32>),
+    Prompt,
+    Activity(kiln_proto::AgentActivity),
 }
 
 #[derive(Default)]
 pub struct OscScanner {
     state: State,
     buf: Vec<u8>,
+    overflow: bool,
 }
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -37,6 +43,7 @@ impl OscScanner {
                     if b == b']' {
                         self.state = State::Osc;
                         self.buf.clear();
+                        self.overflow = false;
                     } else if b == 0x1b {
                         self.state = State::Esc;
                     } else {
@@ -52,7 +59,7 @@ impl OscScanner {
                     _ => {
                         if self.buf.len() < MAX_OSC {
                             self.buf.push(b);
-                        }
+                        } else { self.overflow = true; }
                     }
                 },
                 State::OscEsc => {
@@ -62,6 +69,7 @@ impl OscScanner {
                     } else if b == b']' {
                         self.state = State::Osc;
                         self.buf.clear();
+                        self.overflow = false;
                     } else {
                         self.state = State::Ground;
                     }
@@ -71,6 +79,7 @@ impl OscScanner {
     }
 
     fn finish(&mut self, out: &mut Vec<OscEvent>) {
+        if self.overflow { self.buf.clear(); self.overflow = false; return; }
         let s = String::from_utf8_lossy(&self.buf).into_owned();
         self.buf.clear();
         let (code, rest) = match s.split_once(';') {
@@ -78,6 +87,17 @@ impl OscScanner {
             None => return,
         };
         match code {
+            "133" | "633" => {
+                let (marker, payload) = rest.split_once(';').unwrap_or((rest, ""));
+                match marker {
+                    "A" => out.push(OscEvent::Prompt),
+                    "C" => out.push(OscEvent::CommandStart),
+                    "D" => out.push(OscEvent::CommandEnd(payload.split(';').next().and_then(|s| s.parse().ok()))),
+                    "E" if code == "633" => out.push(OscEvent::CommandText(payload.split(';').next().unwrap_or("").replace("\\x3b", ";").replace("\\x0a", "\n").replace("\\x5c", "\\"))),
+                    _ => {},
+                }
+            }
+
             "9" => {
                 // OSC 9;4;... 는 ConEmu 진행률 표시다.
                 if rest.starts_with("4;") || rest == "4" {
@@ -87,7 +107,19 @@ impl OscScanner {
             }
             "777" => {
                 let mut parts = rest.splitn(3, ';');
-                if parts.next() == Some("notify") {
+                let kind = parts.next();
+                if kind == Some("kiln-command") {
+                    if let Some(hex) = parts.next() {
+                        if hex.len() % 2 == 0 && hex.len() <= 8192 {
+                            let bytes: Option<Vec<u8>> = (0..hex.len()).step_by(2).map(|i| hex.get(i..i+2).and_then(|s| u8::from_str_radix(s, 16).ok())).collect();
+                            if let Some(bytes) = bytes { out.push(OscEvent::CommandText(String::from_utf8_lossy(&bytes).into_owned())); }
+                        }
+                    }
+                } else if kind == Some("kiln-agent") {
+                    use kiln_proto::AgentActivity::*;
+                    let state = match parts.next() { Some("running") => Running, Some("waiting") => Waiting, Some("done") => Done, Some("failed") => Failed, Some("unknown") => Unknown, _ => return };
+                    out.push(OscEvent::Activity(state));
+                } else if kind == Some("notify") {
                     let title = parts.next().unwrap_or("").to_string();
                     let body = parts.next().unwrap_or("").to_string();
                     out.push(OscEvent::Notify { title, body });

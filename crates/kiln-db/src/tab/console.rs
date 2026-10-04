@@ -41,10 +41,24 @@ struct Running {
     cancel_at: Option<Instant>,
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ConsoleDocument {
+    pub path: Option<std::path::PathBuf>,
+    pub text: String,
+    pub saved_text: Option<String>,
+}
+
 pub(crate) struct ConsoleView {
     conn: ConnId,
+    editor_id: egui::Id,
+    focus_pending: bool,
     driver: Driver,
     sql: String,
+    document_path: Option<std::path::PathBuf>,
+    saved_text: Option<String>,
+    document_error: Option<String>,
+    confirm_open: bool,
+    pending_history: Option<String>,
     hl: SqlHighlighter,
     session: Arc<Mutex<Option<ConsoleSession>>>,
     running: Option<Running>,
@@ -65,10 +79,18 @@ pub(crate) struct ConsoleView {
 
 impl ConsoleView {
     pub fn new(m: &DbManager, conn: ConnId) -> ConsoleView {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         ConsoleView {
+            editor_id: egui::Id::new(("db-console", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))),
+            focus_pending: true,
             conn,
             driver: m.driver(conn).unwrap_or(Driver::Postgres),
             sql: String::new(),
+            document_path: None,
+            saved_text: None,
+            document_error: None,
+            confirm_open: false,
+            pending_history: None,
             hl: SqlHighlighter::default(),
             session: Arc::new(Mutex::new(None)),
             running: None,
@@ -93,6 +115,70 @@ impl ConsoleView {
         self.set_cursor = Some(sql.chars().count());
     }
 
+    pub fn text(&self) -> &str { &self.sql }
+    pub fn request_focus(&mut self) { self.focus_pending = true; }
+
+    pub fn has_draft(&self) -> bool {
+        self.saved_text.as_ref().map_or_else(|| self.document_path.is_some() || !self.sql.trim().is_empty(), |saved| saved != &self.sql)
+    }
+    pub fn document(&self) -> ConsoleDocument { ConsoleDocument {path:self.document_path.clone(),text:self.sql.clone(),saved_text:self.saved_text.clone()} }
+    pub fn restore_document(&mut self, doc:&ConsoleDocument) {
+        self.set_text(&doc.text);self.document_path=doc.path.clone();self.saved_text=doc.saved_text.clone();
+        if let Some(path)=&doc.path {
+            match std::fs::read_to_string(path) {
+                Ok(text) if doc.saved_text.as_deref()==Some(&text)=>{},
+                Ok(_)=>{self.saved_text=None;self.document_error=Some("저장 파일이 외부에서 변경되었습니다. 다른 이름으로 저장하거나 파일을 다시 여세요.".into());}
+                Err(e)=>{self.saved_text=None;self.document_error=Some(format!("저장 파일을 읽지 못했습니다. 복원된 텍스트는 보존됩니다: {e}"));}
+            }
+        }
+    }
+    pub fn document_name(&self)->Option<String>{self.document_path.as_ref().and_then(|p|p.file_name()).map(|s|s.to_string_lossy().into_owned())}
+    fn save_document(&mut self,path:std::path::PathBuf)->Result<(),String>{
+        if self.document_path.as_ref()==Some(&path) {
+            match std::fs::read_to_string(&path) {
+                Ok(text) if self.saved_text.as_ref()==Some(&text)=>{},
+                Err(e) if e.kind()==std::io::ErrorKind::NotFound=>{},
+                _=>return Err("파일이 외부에서 변경되어 덮어쓰기를 중단했습니다. 다른 이름으로 저장하거나 다시 여세요.".into()),
+            }
+        }
+        kiln_common::safe_file::write(&path,self.sql.as_bytes()).map_err(|e|e.to_string())?;
+        self.document_path=Some(path);self.saved_text=Some(self.sql.clone());self.document_error=None;Ok(())
+    }
+    fn open_document(&mut self,path:std::path::PathBuf)->Result<(),String>{
+        let text=std::fs::read_to_string(&path).map_err(|e|e.to_string())?;
+        self.set_text(&text);self.saved_text=Some(text);self.document_path=Some(path);self.document_error=None;Ok(())
+    }
+    fn choose_open(&mut self){
+        if let Some(path)=rfd::FileDialog::new().add_filter("SQL",&["sql"]).pick_file() {
+            if let Err(e)=self.open_document(path){self.document_error=Some(e);}
+        }
+    }
+    fn choose_save(&mut self,save_as:bool){
+        let path=if !save_as {self.document_path.clone()} else {None}.or_else(||rfd::FileDialog::new().set_file_name(self.document_name().unwrap_or_else(||"query.sql".into())).add_filter("SQL",&["sql"]).save_file());
+        if let Some(path)=path && let Err(e)=self.save_document(path){self.document_error=Some(e);}
+    }
+    fn document_ui(&mut self,ui:&mut Ui){
+        let theme=Theme::current();
+        egui::Frame::new().fill(theme.bg_panel).inner_margin(egui::Margin::symmetric(12,8)).show(ui,|ui|{
+        ui.set_min_width(ui.available_width());
+        ui.spacing_mut().item_spacing=egui::vec2(8.0,6.0);
+        ui.horizontal_wrapped(|ui|{
+            ui.strong(self.document_name().unwrap_or_else(||"이름 없는 쿼리".into()));
+            ui.label(RichText::new(if self.has_draft(){"저장하지 않은 변경"}else if self.document_path.is_some(){"저장됨"}else{"임시 쿼리"}).size(12.0).color(theme.text_dim));
+            if ui.button("열기…").clicked(){if self.has_draft(){self.confirm_open=true;}else{self.choose_open();}}
+            if ui.button("저장").clicked(){self.choose_save(false);}
+            if ui.button("다른 이름으로 저장…").clicked(){self.choose_save(true);}
+        });
+        if let Some(error)=&self.document_error{ui.colored_label(Theme::current().red,error);}
+        if self.pending_history.is_some(){
+            ui.horizontal_wrapped(|ui|{ui.label("수정 중인 쿼리를 기록의 SQL로 바꿀까요?");if ui.button("기록 불러오기 취소").clicked(){self.pending_history=None;}if ui.button("변경 버리고 기록 불러오기").clicked(){if let Some(sql)=self.pending_history.take(){self.set_text(&sql);}}});
+        }
+        if self.confirm_open {
+            ui.horizontal_wrapped(|ui|{ui.label("현재 수정 내용을 버리고 파일을 열까요?");if ui.button("취소").clicked(){self.confirm_open=false;}if ui.button("변경 버리고 열기").clicked(){self.confirm_open=false;self.choose_open();}});
+        }
+        });
+    }
+
     pub fn is_running(&self) -> bool {
         self.running.is_some()
     }
@@ -113,7 +199,7 @@ impl ConsoleView {
                 }),
                 elapsed_ms: 0,
             },
-            grid: GridState::new(egui::Id::new(("db-console-grid", self.conn, self.run_seq))),
+            grid: GridState::new(self.editor_id.with(("result-grid", self.run_seq))),
         });
         self.active = self.results.len() - 1;
     }
@@ -285,7 +371,7 @@ impl ConsoleView {
                         "{}행 조회 · {} ms{}",
                         thousands(o.result.len() as i64),
                         run.elapsed_ms,
-                        if o.truncated { " (제한됨)" } else { "" }
+                        if o.truncated { " · 조회 한도에 도달해 일부 결과만 표시합니다" } else { "" }
                     ),
                     false,
                 ),
@@ -305,7 +391,7 @@ impl ConsoleView {
             self.run_seq += 1;
             self.results.push(ResultTab {
                 run,
-                grid: GridState::new(egui::Id::new(("db-console-grid", self.conn, self.run_seq))),
+                grid: GridState::new(self.editor_id.with(("result-grid", self.run_seq))),
             });
             // 오류 탭, 또는 결과 집합이 있는 첫 탭을 보여준다.
             let idx = self.results.len() - 1;
@@ -340,13 +426,16 @@ impl ConsoleView {
 
     pub fn ui(&mut self, ui: &mut Ui, m: &DbManager) {
         self.poll(m);
+        let focused=ui.memory(|memory|memory.has_focus(self.editor_id));
+        if focused && ui.input_mut(|i|i.consume_key(Modifiers::COMMAND|Modifiers::SHIFT,Key::S)){self.choose_save(true);}
+        else if focused && ui.input_mut(|i|i.consume_key(Modifiers::COMMAND,Key::S)){self.choose_save(false);}
         let theme = Theme::current();
         if self.running.is_some() || self.export_job.is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(50));
         }
         let (run_all, run_cur) = ui.input_mut(|i| {
-            let all = i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter);
-            let cur = i.consume_key(Modifiers::COMMAND, Key::Enter);
+            let all = focused && i.consume_key(Modifiers::COMMAND | Modifiers::ALT, Key::Enter);
+            let cur = focused && i.consume_key(Modifiers::COMMAND, Key::Enter);
             (all, cur)
         });
         if run_all {
@@ -358,9 +447,10 @@ impl ConsoleView {
         }
         egui::Frame::new().fill(theme.bg).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
+            self.document_ui(ui);
             self.toolbar(ui, m);
             if self.show_history {
-                egui::Panel::right(egui::Id::new(("db-console-history", self.conn)))
+                egui::Panel::right(self.editor_id.with("history"))
                     .resizable(true)
                     .default_size(280.0)
                     .frame(
@@ -372,7 +462,7 @@ impl ConsoleView {
                     .show(ui, |ui| self.history_ui(ui, m));
             }
             let editor_h = (ui.available_height() * 0.42).clamp(90.0, 600.0);
-            egui::Panel::top(egui::Id::new(("db-console-editor", self.conn)))
+            egui::Panel::top(self.editor_id.with("editor"))
                 .resizable(true)
                 .default_size(editor_h)
                 .min_size(60.0)
@@ -387,7 +477,7 @@ impl ConsoleView {
         egui::Frame::new()
             .inner_margin(egui::Margin { left: 10, right: 10, top: 8, bottom: 8 })
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let running = self.running.is_some();
                     if tool_button_icon(ui, Some(Icon::Play), "실행", !running, true)
@@ -398,7 +488,7 @@ impl ConsoleView {
                         self.run(m, s, false);
                     }
                     if ui::secondary_button(ui, None, "모두 실행", !running)
-                        .on_hover_text("모든 문 실행 (⌘⇧↩)")
+                        .on_hover_text("모든 문 실행 (⌘⌥↩)")
                         .clicked()
                     {
                         let s = self.all_statements();
@@ -464,7 +554,7 @@ impl ConsoleView {
     fn editor_ui(&mut self, ui: &mut Ui) {
         let theme = Theme::current();
         let driver = self.driver;
-        let te_id = egui::Id::new(("db-console-editor-te", self.conn));
+        let te_id = self.editor_id;
         if let Some(ci) = self.set_cursor.take()
             && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), te_id)
         {
@@ -476,7 +566,7 @@ impl ConsoleView {
         }
         let hl = &mut self.hl;
         egui::ScrollArea::vertical()
-            .id_salt(("db-console-editor-scroll", self.conn))
+            .id_salt(self.editor_id.with("scroll"))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
@@ -490,9 +580,10 @@ impl ConsoleView {
                     .desired_width(f32::INFINITY)
                     .desired_rows(8)
                     .lock_focus(true)
-                    .hint_text(RichText::new("-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⇧↩는 전체를 실행합니다.").monospace().color(theme.text_faint))
+                    .hint_text(RichText::new("-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⌥↩는 전체를 실행합니다.").monospace().color(theme.text_faint))
                     .layouter(&mut layouter)
                     .show(ui);
+                if std::mem::take(&mut self.focus_pending) { out.response.request_focus(); }
                 if let Some(cr) = out.cursor_range {
                     let r = cr.as_sorted_char_range();
                     self.cursor = Some((r.start.0, r.end.0));
@@ -633,7 +724,7 @@ impl ConsoleView {
                 .sel
                 .cursor
                 .filter(|(r, c)| *r < rs.rows.len() && *c < rs.columns.len());
-            egui::Panel::right(egui::Id::new(("db-console-viewer", self.conn)))
+            egui::Panel::right(self.editor_id.with("viewer"))
                 .resizable(true)
                 .default_size(300.0)
                 .frame(
@@ -672,7 +763,7 @@ impl ConsoleView {
     fn output_ui(&mut self, ui: &mut Ui) {
         let theme = Theme::current();
         egui::ScrollArea::vertical()
-            .id_salt(("db-console-output", self.conn))
+            .id_salt(self.editor_id.with("output"))
             .auto_shrink([false, false])
             .stick_to_bottom(true)
             .show(ui, |ui| {
@@ -704,7 +795,7 @@ impl ConsoleView {
         ui::text_field(
             ui,
             egui::TextEdit::singleline(&mut self.history_filter).hint_text(RichText::new("검색").color(theme.text_faint)),
-            egui::Id::new(("db-console-history-filter", self.conn)),
+            self.editor_id.with("history-filter"),
             w,
         );
         ui.add_space(6.0);
@@ -712,7 +803,7 @@ impl ConsoleView {
         let entries = m.history(self.conn);
         let mut pick: Option<(String, bool)> = None;
         egui::ScrollArea::vertical()
-            .id_salt(("db-console-history-scroll", self.conn))
+            .id_salt(self.editor_id.with("history-scroll"))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for e in entries
@@ -753,9 +844,9 @@ impl ConsoleView {
                 }
             });
         if let Some((sql, run)) = pick {
-            self.set_text(&sql);
-            if run {
-                self.run(m, vec![(0, sql)], false);
+            if self.has_draft(){self.pending_history=Some(sql);}else{
+                self.set_text(&sql);
+                if run { self.run(m, vec![(0, sql)], false); }
             }
         }
     }
@@ -790,4 +881,47 @@ fn code_block(ui: &mut Ui, sql: &str) {
             ui.set_width(ui.available_width());
             ui.add(egui::Label::new(RichText::new(sql).font(fonts::mono(12.0)).color(theme.text_dim)).wrap());
         });
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn command_enter_only_runs_the_focused_console(){
+        let manager=DbManager::in_memory();let ctx=egui::Context::default();kiln_common::fonts::install(&ctx);
+        let mut first=ConsoleView::new(&manager,ConnId(999));let mut second=ConsoleView::new(&manager,ConnId(999));
+        first.set_text("select 1;");second.set_text("select 2;");first.focus_pending=false;second.focus_pending=false;
+        let input=egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(900.0,900.0))),..Default::default()};
+        let mut output=ctx.run_ui(input.clone(),|ui|{ui.columns(2,|cols|{first.ui(&mut cols[0],&manager);second.ui(&mut cols[1],&manager);});});output.textures_delta.clear();
+        ctx.memory_mut(|memory|memory.request_focus(second.editor_id));
+        let mut input=input;input.events.push(egui::Event::Key{key:Key::Enter,physical_key:None,pressed:true,repeat:false,modifiers:Modifiers::COMMAND});
+        let mut output=ctx.run_ui(input,|ui|{ui.columns(2,|cols|{first.ui(&mut cols[0],&manager);second.ui(&mut cols[1],&manager);});});output.textures_delta.clear();
+        assert!(!first.is_running());assert!(second.is_running());
+    }
+    #[test]
+    fn saved_query_has_a_clean_baseline_and_edits_survive_restart(){
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("query.sql");let manager=DbManager::in_memory();
+        let mut console=ConsoleView::new(&manager,ConnId(1));console.set_text("select 1;");assert!(console.has_draft());
+        console.save_document(path.clone()).unwrap();assert!(!console.has_draft());assert_eq!(std::fs::read_to_string(&path).unwrap(),"select 1;");
+        console.set_text("select 2;");assert!(console.has_draft());let doc=console.document();
+        let mut restored=ConsoleView::new(&manager,ConnId(1));restored.restore_document(&doc);assert!(restored.has_draft());assert_eq!(restored.text(),"select 2;");assert!(!restored.is_running());
+        restored.save_document(path.clone()).unwrap();assert!(!restored.has_draft());
+        let mut reopened=ConsoleView::new(&manager,ConnId(1));reopened.open_document(path).unwrap();assert!(!reopened.has_draft());assert_eq!(reopened.text(),"select 2;");
+    }
+    #[test]
+    fn saving_query_refuses_external_replacement_and_preserves_dirty_text(){
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("query.sql");let manager=DbManager::in_memory();
+        let mut console=ConsoleView::new(&manager,ConnId(1));console.set_text("select 1;");console.save_document(path.clone()).unwrap();console.set_text("select 2;");
+        std::fs::write(&path,"external").unwrap();assert!(console.save_document(path.clone()).is_err());assert!(console.has_draft());assert_eq!(std::fs::read_to_string(&path).unwrap(),"external");
+        let mut restored=ConsoleView::new(&manager,ConnId(1));restored.restore_document(&console.document());assert!(restored.has_draft());assert!(restored.document_error.is_some());
+    }
+    #[test]
+    fn consoles_on_same_connection_have_independent_edit_state() {
+        let manager=DbManager::in_memory();
+        let mut first=ConsoleView::new(&manager,ConnId(1)); let second=ConsoleView::new(&manager,ConnId(1));
+        assert_ne!(first.editor_id,second.editor_id);
+        first.set_text("delete from example; -- not executed");
+        assert!(first.has_draft()); assert!(!first.is_running()); assert!(first.results.is_empty());
+        assert_eq!(second.text(), "");
+    }
 }

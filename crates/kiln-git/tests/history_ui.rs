@@ -102,6 +102,7 @@ fn multi_select_context_menu_squash_then_undo() {
     assert!(msg.starts_with("Tweak graph colors\n\nFix date column\n\nPolish detail pane"), "{msg}");
     h.run_steps(2);
     h.snapshot("history_squash_dialog");
+    h.get_by_label("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다").click();
     *h.state_mut().view.dialog_message_mut().unwrap() = "Graph, date and detail polish".into();
     h.run_steps(1);
     h.get_by_label("스쿼시").click();
@@ -125,6 +126,7 @@ fn drag_shows_target_and_moves_commit() {
     let to = row(&h, "Tweak graph colors").rect();
     h.hover_at(from.center());
     h.run_steps(1);
+    h.event(egui::Event::ModifiersChanged(Modifiers::ALT));
     h.drag_at(from.center());
     h.run_steps(1);
     // 대상 행 아래쪽 절반으로.
@@ -145,6 +147,7 @@ fn drag_shows_target_and_moves_commit() {
     h.hover_at(target);
     h.run_steps(2);
     h.drop_at(target);
+    h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
     h.run_steps(3);
     h.snapshot("history_drop_menu");
     h.get_by_label("여기로 순서 이동").click();
@@ -161,6 +164,7 @@ fn drag_onto_commit_offers_fixup() {
     let to = row(&h, "Add log view").rect();
     h.hover_at(from.center());
     h.run_steps(1);
+    h.event(egui::Event::ModifiersChanged(Modifiers::ALT));
     h.drag_at(from.center());
     h.run_steps(1);
     for k in 1..=4 {
@@ -185,6 +189,7 @@ fn interactive_rebase_dialog_reorder_and_start() {
 
     row(&h, "Add log view").click_secondary();
     h.run_steps(3);
+    h.get_by_label_contains("고급 작업").click();h.run_steps(2);
     h.get_by_label("이 커밋부터 대화형 리베이스…").click();
     settle(&mut h);
     h.run_steps(2);
@@ -237,16 +242,15 @@ fn rewriting_pushed_commit_warns_and_offers_force_push() {
     row(&h, "Fix date column").click_secondary();
     h.run_steps(3);
     h.get_by_label("커밋 삭제").click();
-    h.run_steps(3);
-    assert!(h.query_all_by_label_contains("이미 푸시된 커밋").next().is_some());
     settle(&mut h);
+    assert!(h.query_by_label("성공 후 이 브랜치만 force-with-lease로 푸시").is_some());
     h.snapshot("history_drop_pushed_confirm");
-    h.get_by_label("삭제").click();
+    h.get_by_label("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다").click();h.run_steps(2);
+    h.get_by_label("커밋 삭제").click();
     settle(&mut h);
     assert!(!subjects(&r).contains(&"Fix date column".to_string()));
-    h.get_by_label("강제 푸시(--force-with-lease)").click();
-    settle(&mut h);
-    assert_eq!(r.git(&["rev-parse", "origin/main"]).trim(), r.git(&["rev-parse", "HEAD"]).trim());
+    let remote=r.git(&["ls-remote","origin","refs/heads/main"]);
+    assert_eq!(remote.split_whitespace().next().unwrap(),r.git(&["rev-parse","HEAD"]).trim());
 }
 
 #[test]
@@ -256,6 +260,7 @@ fn reset_dialog_and_conflict_banner() {
     settle(&mut h);
     row(&h, "Add log view").click_secondary();
     h.run_steps(3);
+    h.get_by_label_contains("고급 작업").click();h.run_steps(2);
     h.get_by_label("현재 브랜치를 여기로 리셋…").click();
     h.run_steps(2);
     h.get_by_label("Hard").click();
@@ -284,6 +289,7 @@ fn reset_dialog_and_conflict_banner() {
     h.run_steps(3);
     h.get_by_label("체리픽").click();
     settle(&mut h);
+    h.get_by_label("현재 브랜치에 체리픽").click();settle(&mut h);
     assert!(h.query_all_by_label_contains("충돌 1개").next().is_some());
     settle(&mut h);
     h.snapshot("history_conflict");
@@ -303,6 +309,7 @@ fn branch_and_tag_dialogs() {
     settle(&mut h);
     row(&h, "Add log view").click_secondary();
     h.run_steps(3);
+    h.get_by_label_contains("고급 작업").click();h.run_steps(2);
     h.get_by_label("여기서 브랜치 만들기…").click();
     h.run_steps(3);
     focused_input(&h).type_text("topic/log");
@@ -318,6 +325,7 @@ fn branch_and_tag_dialogs() {
 
     row(&h, "Fix date column").click_secondary();
     h.run_steps(3);
+    h.get_by_label_contains("고급 작업").click();h.run_steps(2);
     h.get_by_label("태그 만들기…").click();
     h.run_steps(3);
     focused_input(&h).type_text("v0.3.0");
@@ -329,4 +337,19 @@ fn branch_and_tag_dialogs() {
 
 fn focused_input<'a>(h: &'a Harness<'_, State>) -> egui_kittest::Node<'a> {
     h.get_all_by_role(egui::accesskit::Role::TextInput).find(|n| n.is_focused()).expect("focused text input")
+}
+
+#[test]
+fn primary_drag_selects_range_and_cancel_does_not_rewrite() {
+    let r=ui_repo();let original=r.git(&["rev-parse","HEAD"]);
+    let mut h=harness(r.path.clone(),vec2(1180.0,560.0));settle(&mut h);
+    let from=row(&h,"Polish detail pane").rect();let to=row(&h,"Tweak graph colors").rect();
+    h.hover_at(from.center());h.run_steps(1);h.drag_at(from.center());h.run_steps(1);
+    h.hover_at(to.center());h.run_steps(2);h.drop_at(to.center());h.run_steps(2);
+    assert_eq!(h.state().view.selection().len(),3);
+    assert!(h.state().view.drag_hint().is_none());
+    h.get_by_label("스쿼시…").click();settle(&mut h);
+    assert!(h.query_by_label("커밋 스쿼시 검토").is_some());
+    h.get_by_label("취소").click();h.run_steps(2);
+    assert_eq!(r.git(&["rev-parse","HEAD"]),original);
 }

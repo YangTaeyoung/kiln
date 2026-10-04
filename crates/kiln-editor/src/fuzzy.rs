@@ -246,6 +246,9 @@ impl Scorer {
             && query.starts_with(&self.last_query)
             && !query.contains(['!', '^', '$', '\'', ' ']);
         let candidates: Vec<u32> = if narrowing { std::mem::take(&mut self.last_matched) } else { (0..items.len() as u32).collect() };
+        // The old candidate buffer is consumed above. A cancelled calculation must
+        // not advertise that emptied buffer as a completed prefix-search cache.
+        self.last_complete = false;
 
         let chunk = candidates.len().div_ceil(self.matchers.len()).max(4096);
         let chunks: Vec<&[u32]> = candidates.chunks(chunk).collect();
@@ -395,6 +398,16 @@ mod tests {
 
     fn top(v: &[Box<str>], q: &str) -> Vec<String> {
         Scorer::default().run(1, v, q, 10, &|| false).unwrap().matches.into_iter().map(|m| m.path).collect()
+    }
+
+    #[test]
+    fn cancelled_narrowing_does_not_reuse_emptied_candidate_cache() {
+        let paths=items(&["src/main.rs","src/mod.rs","README.md"]);
+        let mut scorer=Scorer::default();
+        assert!(!scorer.run(1,&paths,"m",10,&||false).unwrap().matches.is_empty());
+        assert!(scorer.run(1,&paths,"ma",10,&||true).is_none());
+        let recovered=scorer.run(1,&paths,"main",10,&||false).unwrap();
+        assert_eq!(recovered.matches.iter().map(|m|m.path.as_str()).collect::<Vec<_>>(),vec!["src/main.rs"]);
     }
 
     #[test]

@@ -46,6 +46,7 @@ pub struct IssueView {
     comments: Vec<Markdown>,
     error: Option<GitError>,
     comment: String,
+    submitted_body: Option<String>,
     action: Option<(ActionKind, Task<GitResult<()>>)>,
     action_msg: Option<(BannerKind, String, Option<String>)>,
     meta: RepoMeta,
@@ -73,6 +74,7 @@ impl IssueView {
             comments: Vec::new(),
             error: None,
             comment: String::new(),
+            submitted_body: None,
             action: None,
             action_msg: None,
             meta: RepoMeta::default(),
@@ -105,6 +107,8 @@ impl IssueView {
     pub fn refresh(&mut self) {
         self.started = false;
     }
+
+    pub fn comment_draft(&self) -> &str { &self.comment }
 
     pub fn comment_mut(&mut self) -> &mut String {
         &mut self.comment
@@ -159,19 +163,20 @@ impl IssueView {
                         ActionKind::Reopen => "이슈를 다시 열었습니다",
                         ActionKind::Edit => "이슈를 수정했습니다",
                     };
-                    if kind == ActionKind::Comment {
+                    if kind == ActionKind::Comment && self.submitted_body.take().as_deref() == Some(self.comment.as_str()) {
                         self.comment.clear();
                     }
                     self.action_msg = Some((BannerKind::Success, title.into(), None));
                     self.started = false;
                 }
-                Err(e) => self.action_msg = Some((BannerKind::Error, "작업 실패".into(), Some(e.to_string()))),
+                Err(e) => self.action_msg = Some((BannerKind::Error, match kind { ActionKind::Comment => "댓글 전송 실패", ActionKind::Close => "이슈 닫기 실패", ActionKind::Reopen => "이슈 다시 열기 실패", ActionKind::Edit => "이슈 수정 실패" }.into(), Some(e.to_string()))),
             }
         }
     }
 
     fn run(&mut self, ctx: &egui::Context, kind: ActionKind, f: impl FnOnce(&dyn GithubBackend, Option<&RepoRef>) -> GitResult<()> + Send + 'static) {
         let (b, r) = (self.backend.clone(), self.repo.clone());
+        self.submitted_body = (kind == ActionKind::Comment).then(|| self.comment.clone());
         self.action_msg = None;
         self.action = Some((kind, Task::spawn(ctx, move || f(b.as_ref(), r.as_ref()))));
     }
@@ -505,4 +510,24 @@ fn sidebar_divider(ui: &mut Ui) {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(r, 0.0, theme().border);
     ui.add_space(12.0);
+}
+
+#[cfg(test)]
+mod pending_draft_tests {
+    use super::*;
+    #[test]
+    fn successful_delayed_submission_preserves_newer_text() {
+        for edit_while_sending in [false,true] {
+            let ctx=egui::Context::default(); let mut view=IssueView::new(PathBuf::from("."), None, 1);
+            view.started=true;view.comment="submitted body".into();
+            let (tx,rx)=std::sync::mpsc::channel();
+            view.run(&ctx,ActionKind::Comment,move |_, _|{rx.recv().unwrap();Ok(())});
+            if edit_while_sending {view.comment="submitted body plus next draft".into();}
+            tx.send(()).unwrap();
+            let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+            while view.action.is_some() && std::time::Instant::now()<deadline {view.pump(&ctx);std::thread::sleep(std::time::Duration::from_millis(1));}
+            assert!(view.action.is_none());
+            assert_eq!(view.comment,if edit_while_sending {"submitted body plus next draft"}else{""});
+        }
+    }
 }

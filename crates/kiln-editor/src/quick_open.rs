@@ -267,7 +267,7 @@ impl QuickOpen {
             let out = egui::TextEdit::singleline(&mut self.query)
                 .id(id)
                 .frame(egui::Frame::NONE)
-                .hint_text(egui::RichText::new("이름으로 파일 검색").color(t.text_faint))
+                .hint_text(egui::RichText::new("파일 이름 또는 경로 검색").color(t.text_faint))
                 .font(FontId::proportional(16.0))
                 .text_color(t.text)
                 .desired_width(inner.width())

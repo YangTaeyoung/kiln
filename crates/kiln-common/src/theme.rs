@@ -48,21 +48,21 @@ impl Theme {
         name: "kiln-dark",
         label: "Kiln 다크",
         dark: true,
-        bg: hex(0x111214),
-        bg_panel: hex(0x17181b),
-        bg_elevated: hex(0x1f2024),
-        bg_hover: hex(0x26272c),
-        bg_selected: hex(0x2c2e35),
-        bg_input: hex(0x1a1b1f),
-        border: hex(0x26272c),
-        border_strong: hex(0x34363d),
-        text: hex(0xe8e9ed),
-        text_dim: hex(0xa1a4ae),
-        text_faint: hex(0x6b6e79),
-        accent: hex(0x7c8cff),
-        accent_fg: hex(0xffffff),
+        bg: hex(0x14171c),
+        bg_panel: hex(0x1a1e25),
+        bg_elevated: hex(0x232832),
+        bg_hover: hex(0x2b323e),
+        bg_selected: hex(0x303c50),
+        bg_input: hex(0x161b22),
+        border: hex(0x2b323e),
+        border_strong: hex(0x3b4656),
+        text: hex(0xecf0f7),
+        text_dim: hex(0xb2bdcf),
+        text_faint: hex(0xa1a6b3),
+        accent: hex(0x91b4ff),
+        accent_fg: hex(0x101726),
         green: hex(0x5fd08c),
-        red: hex(0xff6b6b),
+        red: hex(0xff8383),
         yellow: hex(0xf2c46d),
         blue: hex(0x5eb1ff),
         purple: hex(0xc49bff),
@@ -87,9 +87,9 @@ impl Theme {
         border_strong: hex(0x2d3a4c),
         text: hex(0xe6edf3),
         text_dim: hex(0x9aa7b8),
-        text_faint: hex(0x647286),
+        text_faint: hex(0x929fb2),
         accent: hex(0x4f9dff),
-        accent_fg: hex(0xffffff),
+        accent_fg: hex(0x0c1524),
         green: hex(0x56d364),
         red: hex(0xf8716d),
         yellow: hex(0xe3b341),
@@ -116,11 +116,11 @@ impl Theme {
         border_strong: hex(0x3b332b),
         text: hex(0xf1ebe4),
         text_dim: hex(0xb3a898),
-        text_faint: hex(0x7c7266),
+        text_faint: hex(0xa99c8c),
         accent: hex(0xff8a3d),
         accent_fg: hex(0x1a1208),
         green: hex(0x9ccf74),
-        red: hex(0xf2685f),
+        red: hex(0xf86e65),
         yellow: hex(0xf0c05a),
         blue: hex(0x78b4e8),
         purple: hex(0xd09ade),
@@ -145,15 +145,15 @@ impl Theme {
         border_strong: hex(0xd2d4db),
         text: hex(0x1c1d21),
         text_dim: hex(0x5c606b),
-        text_faint: hex(0x8f93a0),
-        accent: hex(0x4f5bd5),
+        text_faint: hex(0x606572),
+        accent: hex(0x4c58d2),
         accent_fg: hex(0xffffff),
-        green: hex(0x1f8a4c),
-        red: hex(0xd23c3c),
-        yellow: hex(0xa66a00),
-        blue: hex(0x1f6fd1),
-        purple: hex(0x8a4fd1),
-        orange: hex(0xc9560f),
+        green: hex(0x0a7537),
+        red: hex(0xc02a2a),
+        yellow: hex(0x935700),
+        blue: hex(0x1363c5),
+        purple: hex(0x8045c7),
+        orange: hex(0xb23f00),
         ansi: [
             hex(0x3a3d45), hex(0xd23c3c), hex(0x1f8a4c), hex(0xa66a00), hex(0x1f6fd1), hex(0x8a4fd1), hex(0x0f8a8a), hex(0x8f93a0),
             hex(0x5c606b), hex(0xe85a5a), hex(0x2ea862), hex(0xc58300), hex(0x3a86e8), hex(0xa26be6), hex(0x1ba6a6), hex(0x1c1d21),
@@ -203,7 +203,7 @@ impl Theme {
         v.faint_bg_color = self.bg_elevated;
         v.code_bg_color = self.bg_elevated;
         v.selection.bg_fill = self.accent_soft(if self.dark { 90 } else { 60 });
-        v.selection.stroke = Stroke::new(1.0, self.accent);
+        v.selection.stroke = Stroke::new(1.0, self.text);
         v.hyperlink_color = self.accent;
         v.text_cursor.stroke = Stroke::new(2.0, self.accent);
         v.override_text_color = Some(self.text);
@@ -231,9 +231,11 @@ impl Theme {
         w.hovered.fg_stroke = Stroke::new(1.0, self.text);
         w.hovered.corner_radius = r;
         w.hovered.expansion = 0.0;
-        w.active.bg_fill = self.accent;
+        w.active.bg_fill = self.bg_selected;
         w.active.weak_bg_fill = self.bg_selected;
         w.active.bg_stroke = Stroke::new(1.0, self.accent);
+        // egui also uses active.text_color() for strong labels. Filled primary
+        // buttons already select accent_fg in our explicit button primitive.
         w.active.fg_stroke = Stroke::new(1.0, self.text);
         w.active.corner_radius = r;
         w.active.expansion = 0.0;
@@ -271,3 +273,44 @@ impl Theme {
 }
 
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+mod contrast_tests {
+    use super::*;
+    // WCAG 2.2 SC 1.4.3: normal-size text >= 4.5:1, without rounding.
+    // https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html
+    fn luminance(c:Color32)->f64 {
+        let linear=|v:u8|{let x=f64::from(v)/255.0;if x<=0.04045{x/12.92}else{((x+0.055)/1.055).powf(2.4)}};
+        0.2126*linear(c.r())+0.7152*linear(c.g())+0.0722*linear(c.b())
+    }
+    fn ratio(a:Color32,b:Color32)->f64 {
+        let (a,b)=(luminance(a),luminance(b));(a.max(b)+0.05)/(a.min(b)+0.05)
+    }
+    #[test]
+    fn strong_labels_and_pressed_widgets_remain_readable_in_every_theme() {
+        let ctx=egui::Context::default();
+        for t in Theme::ALL {
+            t.apply(&ctx);
+            let visuals=ctx.style_of(if t.dark {egui::Theme::Dark}else{egui::Theme::Light}).visuals.clone();
+            for background in [t.bg,t.bg_panel,t.bg_elevated,visuals.widgets.active.bg_fill] {
+                assert!(ratio(visuals.strong_text_color(),background)>=4.5,"{} strong text contrast",t.name);
+            }
+        }
+    }
+    #[test]
+    fn normal_text_and_action_labels_meet_aa_on_all_shared_surfaces() {
+        for t in Theme::ALL {
+            for (role,fg) in [("text",t.text),("dim",t.text_dim),("faint",t.text_faint),("green",t.green),("red",t.red),("yellow",t.yellow),("blue",t.blue),("purple",t.purple),("orange",t.orange),("accent",t.accent)] {
+                for bg in [t.bg,t.bg_panel,t.bg_elevated,t.bg_hover,t.bg_selected,t.bg_input] {
+                    assert!(ratio(fg,bg)>=4.5,"{} {role}: {}",t.name,ratio(fg,bg));
+                }
+            }
+            for (role,fg,bg) in [("primary",t.accent_fg,t.accent),("danger",if t.dark{t.accent_fg}else{Color32::WHITE},t.red)] {
+                let hover_target=if role=="danger" && !t.dark {Color32::BLACK}else{Color32::WHITE};
+                for bg in [bg,crate::widgets::lerp_color(bg,hover_target,0.08)] {
+                    assert!(ratio(fg,bg)>=4.5,"{} {role}: {}",t.name,ratio(fg,bg));
+                }
+            }
+        }
+    }
+}

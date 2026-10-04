@@ -30,7 +30,7 @@ pub const LARGE_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8192;
 
 /// 파일 인코딩.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Encoding {
     Utf8,
     Utf8Bom,
@@ -77,7 +77,7 @@ pub struct EditorStatus {
     pub cursors: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct DiskStamp {
     mtime: Option<SystemTime>,
     len: u64,
@@ -88,6 +88,16 @@ impl DiskStamp {
         let m = std::fs::metadata(path).ok()?;
         Some(Self { mtime: m.modified().ok(), len: m.len() })
     }
+}
+
+/// Separate recovery content. Restoring this never writes the original file.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EditorDraft {
+    pub text: String,
+    encoding: Encoding,
+    disk: Option<DiskStamp>,
+    #[serde(default)]
+    conflict: bool,
 }
 
 /// 디스크에서 읽어 해석한 파일 내용.
@@ -219,6 +229,7 @@ pub struct Editor {
     pub(crate) deleted_on_disk: bool,
     pub(crate) large_banner: bool,
     pub(crate) save_error: Option<String>,
+    pub(crate) save_copy_notice: Option<String>,
     pub(crate) find: FindState,
     pub(crate) goto: Option<String>,
     pub(crate) reveal: Option<Reveal>,
@@ -283,6 +294,7 @@ impl Editor {
             deleted_on_disk: false,
             large_banner: large,
             save_error: None,
+            save_copy_notice: None,
             find: FindState::default(),
             goto: None,
             reveal: None,
@@ -427,12 +439,52 @@ impl Editor {
         std::mem::take(&mut self.events)
     }
 
+    /// Capture unsaved content and the original disk identity for conflict detection.
+    pub fn recovery_draft(&self) -> Option<EditorDraft> {
+        self.is_dirty().then(|| EditorDraft { text: self.text(), encoding: self.encoding, disk: self.disk, conflict: self.conflict })
+    }
+
+    /// Apply a recovered draft as an undoable, dirty edit. Never silently overwrite
+    /// a file changed externally since the snapshot was recorded.
+    pub fn restore_draft(&mut self, draft: &EditorDraft) {
+        let conflict = draft.conflict || DiskStamp::of(&self.path) != draft.disk;
+        self.read_only = false;
+        self.select_all();
+        self.insert_text(&draft.text);
+        self.encoding = draft.encoding;
+        self.buf.line_ending = Buffer::from_text(&draft.text).line_ending;
+        self.read_only = matches!(self.encoding, Encoding::Binary | Encoding::Utf8Lossy);
+        self.conflict = conflict;
+        self.deleted_on_disk = !self.path.exists();
+    }
+
+    pub fn recovery_conflict(&self) -> bool { self.conflict }
+
+    /// Save a rescue copy without changing the original document or its dirty state.
+    pub fn save_copy(&self,path:&Path)->anyhow::Result<()> {
+        anyhow::ensure!(self.encoding!=Encoding::Binary,"바이너리 파일은 저장할 수 없습니다");
+        anyhow::ensure!(path!=self.path,"복사본은 다른 경로에 저장하세요");
+        if let (Ok(source),Ok(target))=(std::fs::canonicalize(&self.path),std::fs::canonicalize(path)){anyhow::ensure!(source!=target,"복사본은 원본과 다른 파일에 저장하세요");}
+        kiln_common::safe_file::write(path,&encode(&self.buf.to_text(),self.encoding))?;Ok(())
+    }
+    fn choose_save_copy(&mut self) {
+        let name=self.path.file_name().unwrap_or_default().to_string_lossy();
+        if let Some(path)=rfd::FileDialog::new().set_file_name(format!("copy-{name}")).save_file() {
+            match self.save_copy(&path){Ok(())=>{self.save_error=None;self.save_copy_notice=Some(format!("복사본 저장됨: {} · 원본의 미저장 변경은 유지됩니다",path.display()));},Err(e)=>self.save_error=Some(format!("복사본 저장 실패: {e}"))}
+        }
+    }
+
     /// 저장한다. 원래 인코딩, 줄 끝, 마지막 줄바꿈을 그대로 쓴다.
     pub fn save(&mut self) -> anyhow::Result<()> {
+        if DiskStamp::of(&self.path) != self.disk { self.conflict = true; }
+        if self.conflict {
+            self.save_error = Some("디스크 파일이 변경되었습니다. 복원된 내용과 디스크를 검토한 뒤 ‘내 편집 유지’를 선택하세요.".into());
+            anyhow::bail!("외부 변경 충돌을 먼저 해결하세요");
+        }
         anyhow::ensure!(self.encoding != Encoding::Binary, "바이너리 파일은 저장할 수 없습니다");
         anyhow::ensure!(!self.read_only, "읽기 전용 파일입니다");
         let bytes = encode(&self.buf.to_text(), self.encoding);
-        let res = std::fs::write(&self.path, &bytes).with_context(|| format!("{}에 쓸 수 없습니다", self.path.display()));
+        let res = kiln_common::safe_file::write(&self.path, &bytes).with_context(|| format!("{}에 쓸 수 없습니다", self.path.display()));
         match res {
             Ok(()) => {
                 self.buf.mark_saved();
@@ -441,6 +493,7 @@ impl Editor {
                 self.conflict = false;
                 self.deleted_on_disk = false;
                 self.save_error = None;
+                self.save_copy_notice = None;
                 self.lsp_did_save();
                 Ok(())
             }
@@ -528,8 +581,9 @@ impl Editor {
         Ok(())
     }
 
-    /// 충돌 배너에서 "내 변경 유지"를 고른 상태.
+    /// 충돌 배너에서 "내 편집 유지"를 고른 상태.
     pub fn keep_local_changes(&mut self) {
+        self.disk = DiskStamp::of(&self.path);
         self.conflict = false;
     }
 
@@ -1178,6 +1232,104 @@ mod tests {
 
     fn ed(text: &str) -> Editor {
         Editor::from_text("t.rs", text)
+    }
+
+    #[cfg(unix)] #[test]
+    fn hardlinked_document_preserves_links_and_can_export_a_rescue_copy(){
+        let dir=tempfile::tempdir().unwrap();let source=dir.path().join("source.txt");let alias=dir.path().join("alias.txt");let copy=dir.path().join("copy.txt");
+        std::fs::write(&source,"original").unwrap();std::fs::hard_link(&source,&alias).unwrap();
+        let mut editor=Editor::open(&source).unwrap();editor.select_all();editor.insert_text("edited");
+        assert!(editor.save().is_err());assert_eq!(std::fs::read_to_string(&source).unwrap(),"original");assert_eq!(std::fs::read_to_string(&alias).unwrap(),"original");
+        editor.save_copy(&copy).unwrap();assert_eq!(std::fs::read_to_string(copy).unwrap(),"edited");assert!(editor.is_dirty());
+    }
+
+    #[test]
+    fn disk_conflict_reload_requires_confirmation_and_cancel_preserves_edits() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let dir=tempfile::tempdir().unwrap(); let path=dir.path().join("draft.txt");
+        std::fs::write(&path,"original").unwrap(); let mut editor=Editor::open(&path).unwrap();
+        editor.select_all(); editor.insert_text("my unsaved edit");
+        std::fs::write(&path,"external version").unwrap(); assert!(editor.save().is_err()); editor.save_error=None;
+        let mut initialized=false;
+        let mut h=Harness::builder().with_size([1100.0,600.0]).build_ui_state(|ui,editor:&mut Editor| {if !initialized {kiln_common::fonts::install(ui.ctx()); kiln_common::Theme::current().apply(ui.ctx()); initialized=true; return;} editor.ui(ui);},editor);
+        h.run_steps(3);
+        h.get_by_label("디스크 파일 불러오기…").click(); h.run_steps(3);
+        assert_eq!(h.state().text(),"my unsaved edit");
+        h.get_by_label("계속 편집").click(); h.run_steps(3);
+        assert_eq!(h.state().text(),"my unsaved edit"); assert!(h.state().is_dirty());
+        h.get_by_label("디스크 파일 불러오기…").click(); h.run_steps(3);
+        h.get_by_label("내 편집 버리고 불러오기").click(); h.run_steps(3);
+        assert_eq!(h.state().text(),"external version"); assert!(!h.state().is_dirty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(),"external version");
+    }
+
+    #[test]
+    fn save_checks_disk_even_without_a_focus_change() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("draft.txt");
+        std::fs::write(&path,"old").unwrap();let mut editor=Editor::open(&path).unwrap();editor.insert_text("mine");
+        std::fs::write(&path,"external replacement").unwrap();
+        assert!(editor.save().is_err());assert_eq!(std::fs::read_to_string(&path).unwrap(),"external replacement");
+        editor.keep_local_changes();assert!(editor.save().is_ok());
+    }
+
+    #[test]
+    fn editor_exposes_multiline_text_runs_and_accessible_selection() {
+        let ctx=egui::Context::default(); ctx.enable_accesskit();
+        let mut editor=ed("hello 한글\nsecond line");
+        let input=egui::RawInput { screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(800.0,600.0))), ..Default::default() };
+        let mut output=ctx.run_ui(input.clone(),|ui| editor.ui(ui));
+        output.textures_delta.clear();
+        let tree=output.platform_output.accesskit_update.unwrap();
+        let (_,node)=tree.nodes.iter().find(|(id,_)| *id==editor.id().accesskit_id()).unwrap();
+        assert_eq!(node.role(),egui::accesskit::Role::MultilineTextInput);
+        assert_eq!(node.value(),Some("hello 한글\nsecond line"));
+        assert!(node.text_selection().is_some());
+        let (run,_)=tree.nodes.iter().find(|(_,n)| n.role()==egui::accesskit::Role::TextRun && n.value().unwrap_or("").starts_with("hello")).unwrap();
+        let mut input=input;
+        input.events.push(egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest { action:egui::accesskit::Action::SetTextSelection,target_tree:egui::accesskit::TreeId::ROOT,target_node:editor.id().accesskit_id(),data:Some(egui::accesskit::ActionData::SetTextSelection(egui::accesskit::TextSelection { anchor:egui::accesskit::TextPosition { node:*run,character_index:6 },focus:egui::accesskit::TextPosition { node:*run,character_index:8 } })) }));
+        let mut output=ctx.run_ui(input,|ui| editor.ui(ui));
+        output.textures_delta.clear();
+        assert_eq!(editor.selection(),Selection::new(Pos::new(0,6),Pos::new(0,12)));
+    }
+
+    #[test]
+    fn draft_roundtrip_preserves_unsaved_text_and_never_writes_on_restore() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("draft.txt");
+        std::fs::write(&path, "original").unwrap();
+        let mut e = Editor::open(&path).unwrap(); e.select_all(); e.insert_text("recovered 한글\n");
+        let draft: EditorDraft = serde_json::from_str(&serde_json::to_string(&e.recovery_draft().unwrap()).unwrap()).unwrap();
+        let mut restored = Editor::open(&path).unwrap(); restored.restore_draft(&draft);
+        assert_eq!(restored.text(), "recovered 한글\n"); assert!(restored.is_dirty()); assert!(!restored.recovery_conflict());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
+        restored.save().unwrap(); assert!(!restored.is_dirty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "recovered 한글\n");
+    }
+
+    #[test]
+    fn recovered_draft_cannot_silently_overwrite_external_change() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("draft.txt");
+        std::fs::write(&path, "original").unwrap();
+        let mut e = Editor::open(&path).unwrap(); e.select_all(); e.insert_text("my changes");
+        let draft = e.recovery_draft().unwrap(); std::fs::write(&path, "external changed text").unwrap();
+        let mut restored = Editor::open(&path).unwrap(); restored.restore_draft(&draft);
+        assert!(restored.recovery_conflict()); assert!(restored.save().is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "external changed text");
+        restored.keep_local_changes(); restored.save().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "my changes");
+    }
+
+    #[test]
+    fn empty_and_deleted_file_drafts_remain_dirty() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("draft.txt");
+        std::fs::write(&path, "original").unwrap();
+        let mut e = Editor::open(&path).unwrap(); e.select_all(); e.insert_text("");
+        let draft=e.recovery_draft().unwrap();
+        let mut restored=Editor::open(&path).unwrap(); restored.restore_draft(&draft);
+        assert!(restored.is_dirty()); assert_eq!(restored.text(), "");
+        e.insert_text("survives deletion"); let draft=e.recovery_draft().unwrap(); std::fs::remove_file(&path).unwrap();
+        let mut restored=Editor::from_text(&path, ""); restored.restore_draft(&draft);
+        assert!(restored.is_dirty()); assert!(restored.recovery_conflict());
+        assert_eq!(restored.text(), "survives deletion"); assert!(!path.exists());
     }
 
     #[test]

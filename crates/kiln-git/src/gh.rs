@@ -451,8 +451,10 @@ impl MergeMethod {
 }
 
 /// PR 생성 요청.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PrCreate {
+    #[serde(default)]
+    pub head: String,
     pub title: String,
     pub body: String,
     pub base: String,
@@ -564,6 +566,7 @@ impl PrBackend for GhBackend {
 
     fn create(&self, req: &PrCreate) -> GitResult<String> {
         let mut args = vec!["pr", "create", "--title", &req.title, "--base", &req.base, "--body-file", "-"];
+        if !req.head.is_empty() { args.extend(["--head", &req.head]); }
         if req.draft {
             args.push("--draft");
         }

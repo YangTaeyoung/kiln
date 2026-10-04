@@ -3,13 +3,13 @@
 use std::fmt::Write as _;
 
 /// 셀 하나의 값. 날짜/시간 계열은 DB 가 내놓은 정규 텍스트를 그대로 담는다.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Value {
     Null,
     Bool(bool),
     Int(i64),
     UInt(u64),
-    Float(f64),
+    Float(#[serde(with = "float_bits")] f64),
     Decimal(String),
     Text(String),
     Bytes(Vec<u8>),
@@ -24,7 +24,7 @@ pub enum Value {
 }
 
 /// 컬럼 타입 이름을 분류한 결과. 디코딩·표시·편집 파싱 규칙을 결정한다.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TypeClass {
     Bool,
     Int,
@@ -417,4 +417,11 @@ pub fn hex_dump(b: &[u8], max_bytes: usize) -> String {
         let _ = write!(out, "… {} more bytes", b.len() - max_bytes);
     }
     out
+}
+
+// Preserve NaN/infinity and signed zero in recovery JSON without lossy JSON numbers.
+mod float_bits {
+    use serde::{Deserialize, Serializer, Deserializer};
+    pub fn serialize<S: Serializer>(value: &f64, s: S) -> Result<S::Ok, S::Error> { s.serialize_u64(value.to_bits()) }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> { u64::deserialize(d).map(f64::from_bits) }
 }

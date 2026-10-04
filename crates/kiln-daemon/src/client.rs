@@ -108,6 +108,7 @@ impl Client {
                 ServerMsg::Sessions { req, .. }
                 | ServerMsg::Created { req, .. }
                 | ServerMsg::Text { req, .. }
+                | ServerMsg::CommandOutput { req, .. }
                 | ServerMsg::Error { req, .. }
                 | ServerMsg::Pong { req }
                 | ServerMsg::SearchResult { req, .. } => Some(*req),

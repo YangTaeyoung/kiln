@@ -160,6 +160,13 @@ fn key_where(driver: Driver, cols: &[ColumnDef], key: &[(usize, Value)], p: &mut
         .join(" AND ")
 }
 
+/// Read the original row using bound primary-key values, independent of page order.
+pub(crate) fn select_key(driver:Driver,t:&TableRef,cols:&[ColumnDef],key:&[(usize,Value)])->ChangeStmt{
+    let mut params=Params{driver,n:0,args:Vec::new()};
+    let predicate=key_where(driver,cols,key,&mut params);
+    ChangeStmt{sql:format!("SELECT * FROM {} WHERE {} LIMIT 2",t.sql_name(driver),if predicate.is_empty(){"1=0"}else{&predicate}),args:params.args,expect_one:false}
+}
+
 /// 변경 묶음을 파라미터 바인딩 문장 목록으로 만든다(DELETE → UPDATE → INSERT 순).
 pub fn build_changes(
     driver: Driver,

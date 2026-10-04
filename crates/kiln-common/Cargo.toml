@@ -2,6 +2,7 @@
 name = "kiln-common"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 egui.workspace = true
@@ -9,3 +10,4 @@ serde.workspace = true
 serde_json.workspace = true
 directories.workspace = true
 anyhow.workspace = true
+resvg = { version = "0.48", default-features = false }

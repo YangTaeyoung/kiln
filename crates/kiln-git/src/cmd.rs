@@ -25,7 +25,7 @@ impl std::fmt::Display for GitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             GitError::GitMissing => write!(f, "git이 설치되어 있지 않거나 PATH에 없습니다"),
-            GitError::GhMissing => write!(f, "GitHub CLI(gh)가 설치되어 있지 않습니다 — https://cli.github.com"),
+            GitError::GhMissing => write!(f, "GitHub CLI(gh)를 찾을 수 없습니다. 설치 경로와 PATH를 확인하세요 — https://cli.github.com"),
             GitError::GhAuth(m) => write!(f, "GitHub CLI 인증이 필요합니다. `gh auth login`을 실행하세요. {m}"),
             GitError::NotARepo => write!(f, "Git 저장소가 아닙니다"),
             GitError::Failed(m) => write!(f, "{m}"),
@@ -173,19 +173,83 @@ pub(crate) fn gh(root: &Path, args: &[&str]) -> GitResult<String> {
 }
 
 pub(crate) fn gh_stdin(root: &Path, args: &[&str], input: Option<&[u8]>) -> GitResult<String> {
+    gh_stdin_with_path(root, args, input, std::env::var_os("PATH").as_deref())
+}
+
+/// Finder-launched apps do not inherit shell startup files. Keep explicit PATH
+/// entries first, then add standard macOS installations for gh and its children.
+/// https://docs.brew.sh/FAQ#my-macos-apps-dont-find-homebrew-utilities
+fn gh_search_path(inherited: Option<&std::ffi::OsStr>) -> Option<std::ffi::OsString> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut paths: Vec<_> = inherited
+            .map(std::env::split_paths)
+            .into_iter()
+            .flatten()
+            .collect();
+        for directory in [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ] {
+            let path = std::path::PathBuf::from(directory);
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        Some(
+            std::env::join_paths(paths)
+                .expect("existing PATH entries and standard macOS paths are valid"),
+        )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        inherited.map(std::ffi::OsStr::to_os_string)
+    }
+}
+
+fn gh_stdin_with_path(
+    root: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+    path: Option<&std::ffi::OsStr>,
+) -> GitResult<String> {
+    if !root.is_dir() {
+        return Err(GitError::NotARepo);
+    }
     let mut c = Command::new("gh");
+    if let Some(path) = gh_search_path(path) {
+        c.env("PATH", path);
+    } else {
+        c.env_remove("PATH");
+    }
     c.current_dir(root)
         .args(args)
         .env("GH_PROMPT_DISABLED", "1")
         .env("GH_NO_UPDATE_NOTIFIER", "1")
         .env("NO_COLOR", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     hide_console(&mut c);
     let mut child = c.spawn().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound { GitError::GhMissing } else { GitError::Failed(e.to_string()) }
+        if e.kind() == std::io::ErrorKind::NotFound {
+            if root.is_dir() {
+                GitError::GhMissing
+            } else {
+                GitError::NotARepo
+            }
+        } else {
+            GitError::Failed(e.to_string())
+        }
     })?;
     if let Some(data) = input
         && let Some(mut w) = child.stdin.take()
@@ -195,17 +259,144 @@ pub(crate) fn gh_stdin(root: &Path, args: &[&str], input: Option<&[u8]>) -> GitR
             let _ = w.write_all(&data);
         });
     }
-    let out = child.wait_with_output().map_err(|e| GitError::Failed(e.to_string()))?;
+    let out = child
+        .wait_with_output()
+        .map_err(|e| GitError::Failed(e.to_string()))?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() {
         return Ok(stdout);
     }
     let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    if stderr.contains("gh auth login") || stderr.contains("not logged in") || stderr.contains("authentication") {
+    // Authentication is a CLI status, not a word in an arbitrary repository,
+    // branch name, SSO policy or network error. Preserve those errors verbatim.
+    // https://cli.github.com/manual/gh_help_exit-codes
+    if out.status.code() == Some(4) {
         return Err(GitError::GhAuth(String::new()));
     }
     if stderr.contains("not a git repository") {
         return Err(GitError::NotARepo);
     }
-    Err(GitError::Failed(if stderr.is_empty() { stdout.trim().to_string() } else { stderr }))
+    Err(GitError::Failed(if stderr.is_empty() {
+        stdout.trim().to_string()
+    } else {
+        stderr
+    }))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn fake_gh(directory: &Path, script: &str) {
+        let executable = directory.join("gh");
+        std::fs::write(&executable, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn gh_preserves_explicit_path_priority_and_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        fake_gh(dir.path(), "printf 'custom gh: '; /bin/cat");
+        let result = gh_stdin_with_path(
+            dir.path(),
+            &["api"],
+            Some(b"request body"),
+            Some(dir.path().as_os_str()),
+        )
+        .unwrap();
+        assert_eq!(result, "custom gh: request body");
+    }
+
+    #[test]
+    fn gh_missing_working_directory_is_not_missing_cli() {
+        let dir = tempfile::tempdir().unwrap();
+        fake_gh(dir.path(), "printf success");
+        assert_eq!(
+            gh_stdin_with_path(
+                &dir.path().join("removed-repository"),
+                &["--version"],
+                None,
+                Some(dir.path().as_os_str())
+            ),
+            Err(GitError::NotARepo)
+        );
+        let file = dir.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(
+            gh_stdin_with_path(&file, &["--version"], None, None),
+            Err(GitError::NotARepo)
+        );
+    }
+
+    #[test]
+    fn gh_auth_error_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        fake_gh(dir.path(), "printf 'Run gh auth login' >&2; exit 4");
+        assert_eq!(
+            gh_stdin_with_path(dir.path(), &["api"], None, Some(dir.path().as_os_str())),
+            Err(GitError::GhAuth(String::new()))
+        );
+    }
+
+    #[test]
+    fn gh_repository_and_permission_errors_are_not_login_requests() {
+        let dir = tempfile::tempdir().unwrap();
+        for message in [
+            "GraphQL: Could not resolve to a Repository with the name owner/authentication-service. (repository)",
+            "GraphQL: Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization using SSO authentication.",
+            "HTTP 403: Resource not accessible by integration",
+            "error connecting to authentication.example.com",
+        ] {
+            fake_gh(dir.path(), &format!("printf '%s' '{message}' >&2; exit 1"));
+            assert_eq!(
+                gh_stdin_with_path(dir.path(), &["repo", "view"], None, Some(dir.path().as_os_str())),
+                Err(GitError::Failed(message.into()))
+            );
+        }
+        // The documented status remains authoritative even without English text.
+        fake_gh(dir.path(), "exit 4");
+        assert_eq!(
+            gh_stdin_with_path(dir.path(), &["repo", "view"], None, Some(dir.path().as_os_str())),
+            Err(GitError::GhAuth(String::new()))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_fallback_path_reaches_gh_children_without_changing_process_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let original_path = std::env::var_os("PATH");
+        fake_gh(dir.path(), "printf '%s\\n' \"$PATH\"; command -v git");
+        let output = gh_stdin_with_path(
+            dir.path(),
+            &["--version"],
+            None,
+            Some(dir.path().as_os_str()),
+        )
+        .unwrap();
+        let mut lines = output.lines();
+        let paths: Vec<_> = std::env::split_paths(lines.next().unwrap()).collect();
+        assert_eq!(paths[0], dir.path());
+        assert!(paths.contains(&Path::new("/opt/homebrew/bin").to_path_buf()));
+        assert!(paths.contains(&Path::new("/usr/local/bin").to_path_buf()));
+        assert!(lines.next().unwrap().ends_with("/git"));
+        assert_eq!(std::env::var_os("PATH"), original_path);
+        let missing_path = gh_search_path(None).unwrap();
+        assert!(std::env::split_paths(&missing_path).any(|p| p == Path::new("/opt/homebrew/bin")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires gh installed at a standard Homebrew prefix; no network or authentication"]
+    fn installed_homebrew_gh_works_with_finder_path_and_absent_path() {
+        let dir = tempfile::tempdir().unwrap();
+        for path in [
+            Some(std::ffi::OsStr::new("/usr/bin:/bin:/usr/sbin:/sbin")),
+            None,
+        ] {
+            let output = gh_stdin_with_path(dir.path(), &["--version"], None, path).unwrap();
+            assert!(output.starts_with("gh version "), "{output}");
+        }
+    }
 }

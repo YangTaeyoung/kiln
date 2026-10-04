@@ -1,0 +1,9 @@
+{
+  "repository": "YangTaeyoung/kiln",
+  "bundle_id": "dev.kiln.app",
+  "sparkle_version": "2.10.0",
+  "sparkle_sha256": "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c",
+  "sparkle_key_account": "dev.kiln.app",
+  "sparkle_public_key": "qG627DSRI0JsjpBijJuwgSCSiKV8WN11rIqs8uvn7vg=",
+  "feed_url": "https://github.com/YangTaeyoung/kiln/releases/latest/download/appcast.xml"
+}

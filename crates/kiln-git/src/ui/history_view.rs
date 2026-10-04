@@ -1,5 +1,5 @@
 //! 커밋 이력(Log) 화면: 가상화된 커밋 표와 그래프 레인, 필터 도구 막대, 상세 패널,
-//! 다중 선택과 컨텍스트 메뉴, 끌어다 놓기로 순서 이동·픽스업, 대화형 리베이스.
+//! 드래그 범위 선택과 검토 후 스쿼시·삭제·체리픽, Option/Alt 드래그로 순서 이동·픽스업.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -51,8 +51,6 @@ pub(crate) enum Op {
     Revert(String),
     Reset(String, ResetMode),
     Reword { sha: String, message: String },
-    Drop(Vec<String>),
-    Squash { shas: Vec<String>, message: String },
     Move { moving: Vec<String>, target: String, place: DropPlace },
     Fixup { moving: Vec<String>, target: String },
     Rebase(RebasePlan),
@@ -60,7 +58,8 @@ pub(crate) enum Op {
     Skip,
     Abort,
     Undo(String),
-    ForcePush,
+    UndoReviewed {old:String,head:String,branch:String},
+    Reviewed { review: Box<crate::history_guard::HistoryReview>, message: String, auto_push: bool, ack_risk: bool },
 }
 
 impl Op {
@@ -73,22 +72,20 @@ impl Op {
             Op::Revert(_) => "커밋 되돌리기(revert)",
             Op::Reset(..) => "리셋",
             Op::Reword { .. } => "메시지 수정",
-            Op::Drop(_) => "커밋 삭제",
-            Op::Squash { .. } => "스쿼시",
             Op::Move { .. } => "순서 이동",
             Op::Fixup { .. } => "픽스업",
             Op::Rebase(_) => "대화형 리베이스",
             Op::Continue => "계속",
             Op::Skip => "건너뛰기",
             Op::Abort => "중단",
-            Op::Undo(_) => "되돌리기",
-            Op::ForcePush => "강제 푸시",
+            Op::Undo(_) | Op::UndoReviewed{..} => "되돌리기",
+            Op::Reviewed {review,..} => match review.action {crate::history_guard::ReviewAction::Squash=>"스쿼시",crate::history_guard::ReviewAction::Drop=>"커밋 삭제",crate::history_guard::ReviewAction::CherryPick=>"체리픽"},
         }
     }
 
     /// 실행 전 HEAD 를 기록해 되돌리기를 제안할 작업인지.
     fn offers_undo(&self) -> bool {
-        !matches!(self, Op::Checkout(_) | Op::Branch { .. } | Op::Tag { .. } | Op::Abort | Op::Undo(_) | Op::ForcePush)
+        !matches!(self, Op::Checkout(_) | Op::Branch { .. } | Op::Tag { .. } | Op::Abort | Op::Undo(_) | Op::UndoReviewed{..})
     }
 
     fn run(self, root: &Path, autostash: bool) -> GitResult<OpResult> {
@@ -102,8 +99,6 @@ impl Op {
             Op::Revert(sha) => rw(history::revert(root, &sha)),
             Op::Reset(sha, mode) => rw(history::reset(root, &sha, mode)),
             Op::Reword { sha, message } => rw(history::reword_commit(root, &sha, &message, autostash)),
-            Op::Drop(shas) => rw(history::drop_commits(root, &shas, autostash)),
-            Op::Squash { shas, message } => rw(history::squash_commits(root, &shas, &message, autostash)),
             Op::Move { moving, target, place } => rw(history::move_commits(root, &moving, &target, place, autostash)),
             Op::Fixup { moving, target } => rw(history::fixup_into(root, &moving, &target, autostash)),
             Op::Rebase(plan) => rw(history::run_rebase(root, &plan, autostash)),
@@ -111,12 +106,20 @@ impl Op {
             Op::Skip => rw(history::skip_op(root)),
             Op::Abort => tx(history::abort_op(root)),
             Op::Undo(old) => tx(history::undo(root, &old)),
-            Op::ForcePush => tx(history::force_push(root)),
+            Op::UndoReviewed{old,head,branch} => {
+                let state=history::repo_state(root)?;
+                if state.head.as_deref()!=Some(&head)||state.branch.as_deref()!=Some(&branch)||crate::repo::in_progress_op(root).is_some() {
+                    return Err(crate::GitError::Failed("작업 이후 브랜치·HEAD가 변경되었거나 새 Git 작업이 진행 중이어서 되돌리지 않았습니다. 백업 참조와 현재 이력을 확인하세요.".into()));
+                }
+                tx(history::undo(root,&old))
+            },
+            Op::Reviewed {review,message,auto_push,ack_risk} => crate::history_guard::execute(root,&review,&message,auto_push,ack_risk).map(OpResult::Guarded),
         }
     }
 }
 
 pub(crate) enum OpResult {
+    Guarded(crate::history_guard::HistoryResult),
     Text(String),
     Rewrite(Rewrite),
 }
@@ -251,6 +254,7 @@ struct Notice {
     /// 작업이 멈춰 사용자 조치가 필요한 알림.
     warn: bool,
     undo: Option<String>,
+    undo_guard: Option<(String,String)>,
     force_push: bool,
 }
 
@@ -295,9 +299,11 @@ pub struct HistoryView {
     detail_info: Option<CommitInfo>,
     detail_error: Option<String>,
     runner: Option<Runner>,
+    external_busy: bool,
     notice: Option<Notice>,
     dialog: Option<Dialog>,
     drag: Option<DragState>,
+    range_drag: Option<usize>,
     drop_menu: Option<DropMenu>,
     scroll_to: Option<usize>,
     detail_w: f32,
@@ -334,9 +340,11 @@ impl HistoryView {
             detail_info: None,
             detail_error: None,
             runner: None,
+            external_busy: false,
             notice: None,
             dialog: None,
             drag: None,
+            range_drag: None,
             drop_menu: None,
             scroll_to: None,
             detail_w: 360.0,
@@ -426,6 +434,7 @@ impl HistoryView {
     pub fn dialog_message_mut(&mut self) -> Option<&mut String> {
         match self.dialog.as_mut()? {
             Dialog::Message(m) => Some(&mut m.text),
+            Dialog::HistoryReview(m) => Some(&mut m.message),
             _ => None,
         }
     }
@@ -447,7 +456,7 @@ impl HistoryView {
 
     // ------------------------------------------------------------ 로드
 
-    fn pump(&mut self, ctx: &egui::Context) {
+    pub(crate) fn pump(&mut self, ctx: &egui::Context) {
         if self.runner.is_none() {
             self.runner = Some(Runner::new(ctx, self.root.clone()));
         }
@@ -598,6 +607,14 @@ impl HistoryView {
             self.detail_stale = true;
             let label = d.op.label();
             match d.result {
+                Ok(OpResult::Guarded(result)) => {
+                    let stopped = matches!(result.rewrite.outcome,history::Outcome::Stopped(_));
+                    let push_failed=matches!(&d.op,Op::Reviewed{review,auto_push:true,..} if review.pushed)&&!result.pushed&&!stopped;
+                    let text = if stopped {format!("{label} 일시 중단 — 충돌을 해결하거나 중단하세요")} else if push_failed {format!("로컬 {label} 완료 · 원격 반영 실패")}else{format!("{label} 완료")};
+                    self.events.push(HistoryEvent::Toast(text.clone()));
+                    let undo_guard=match &d.op {Op::Reviewed{review,..}=>Some((review.branch.clone(),result.rewrite.new_head.clone())),_=>None};
+                    self.notice = Some(Notice {undo_guard,text,detail:Some(result.notice),error:false,warn:stopped||push_failed,undo:if !stopped && !result.pushed {Some(result.rewrite.old_head)} else {None},force_push:false});
+                }
                 Ok(OpResult::Rewrite(rw)) => match &rw.outcome {
                     history::Outcome::Done => {
                         let undo = (d.op.offers_undo() && rw.old_head != rw.new_head && !rw.old_head.is_empty())
@@ -609,12 +626,13 @@ impl HistoryView {
                             detail: Some(format!("HEAD {} → {}", short(&rw.old_head), short(&rw.new_head))),
                             error: false, warn: false,
                             undo,
+                            undo_guard:None,
                             force_push: d.pushed,
                         });
                     }
                     history::Outcome::Stopped(st) => {
                         let what = if st.conflicts.is_empty() {
-                            format!("{}이(가) 편집을 위해 멈췄습니다", st.op.label())
+                            format!("편집 대기 중 · {}", st.op.label())
                         } else {
                             format!("{} 중 충돌 {}개", st.op.label(), st.conflicts.len())
                         };
@@ -623,6 +641,7 @@ impl HistoryView {
                             detail: None,
                             error: false, warn: true,
                             undo: (!rw.old_head.is_empty() && d.op.offers_undo()).then(|| rw.old_head.clone()),
+                            undo_guard:None,
                             force_push: false,
                         });
                     }
@@ -632,20 +651,21 @@ impl HistoryView {
                     self.events.push(HistoryEvent::Toast(text.clone()));
                     let force_push = d.pushed && matches!(d.op, Op::Continue);
                     let last = out.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_string);
-                    self.notice = Some(Notice { text, detail: last, error: false, warn: false, undo: None, force_push });
+                    self.notice = Some(Notice { text, detail: last, error: false, warn: false, undo: None, undo_guard:None, force_push });
                     if let Op::Branch { name, switch: false, .. } = &d.op {
                         self.notice.as_mut().expect("notice").detail = Some(format!("'{name}' 브랜치를 만들었습니다"));
                     }
                 }
                 Err(e) => {
                     self.notice =
-                        Some(Notice { text: format!("{label} 실패"), detail: Some(e.to_string()), error: true, warn: false, undo: None, force_push: false });
+                        Some(Notice { text: format!("{label} 실패"), detail: Some(e.to_string()), error: true, warn: false, undo: None, undo_guard:None, force_push: false });
                 }
             }
         }
     }
 
     fn submit(&mut self, op: Op, autostash: bool, pushed: bool) {
+        if self.external_busy || self.is_mutating() {return;}
         self.notice = None;
         if let Some(r) = &mut self.runner {
             r.pending += 1;
@@ -767,7 +787,7 @@ impl HistoryView {
         ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
 
         self.ui_toolbar(&mut ui);
-        self.ui_op_banner(&mut ui);
+        self.ui_op_banner(&mut ui, false);
 
         let body = ui.available_rect_before_wrap();
         let detail_w = self.detail_w.clamp(260.0, (body.width() * 0.55).max(260.0));
@@ -777,7 +797,7 @@ impl HistoryView {
         {
             let mut tui = ui.new_child(UiBuilder::new().max_rect(table_rect).layout(Layout::top_down(Align::Min)));
             tui.set_clip_rect(table_rect.intersect(ui.clip_rect()));
-            self.ui_table(&mut tui);
+            self.ui_table(&mut tui, false);
         }
         if show_detail {
             let split = Rect::from_min_max(pos2(table_rect.right(), body.top()), pos2(table_rect.right() + 1.0, body.bottom()));
@@ -806,6 +826,40 @@ impl HistoryView {
         std::mem::take(&mut self.events)
     }
 
+    /// The same history interactions in a narrow repository panel, without an edit mode.
+    pub(crate) fn ui_embedded(&mut self, ui: &mut Ui) {
+        self.pump(ui.ctx());
+        ui.horizontal(|ui| {
+            self.branch_menu(ui);
+            ui.with_layout(Layout::right_to_left(Align::Center),|ui| {
+                if self.selected.len()>1 {ui.label(RichText::new(format!("{}개 선택",self.selected.len())).font(fonts::regular(11.0)).color(Theme::current().text_dim));}
+            });
+        });
+        let height=(ui.ctx().content_rect().height()*0.5).clamp(200.0,440.0);
+        let (rect,_)=ui.allocate_exact_size(vec2(ui.available_width(),height),Sense::hover());
+        self.table_rect=rect;
+        let mut table=ui.new_child(UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Min)));
+        table.set_clip_rect(rect.intersect(ui.clip_rect()));
+        self.ui_table(&mut table,true);
+        self.ui_notice(ui,rect);
+    }
+
+    pub(crate) fn finish_embedded(&mut self, ctx:&egui::Context, external_busy:bool)->Vec<HistoryEvent> {
+        self.external_busy=external_busy;
+        self.ui_drop_menu(ctx);
+        if let Some(action)=self.menu_action.take(){self.apply_menu(ctx,action);}
+        self.ui_dialog(ctx);
+        std::mem::take(&mut self.events)
+    }
+
+    pub(crate) fn blocks_external_mutation(&self)->bool {
+        self.is_mutating() || self.dialog.is_some() || self.drop_menu.is_some()
+    }
+
+    pub(crate) fn is_mutating(&self)->bool {
+        self.runner.as_ref().is_some_and(|runner|runner.pending>0)
+    }
+
     fn handle_keys(&mut self, ctx: &egui::Context) {
         if self.dialog.is_some() || ctx.memory(|m| m.focused().is_some()) || self.drop_menu.is_some() {
             return;
@@ -831,6 +885,7 @@ impl HistoryView {
         }
         if esc {
             self.drag = None;
+            self.range_drag = None;
         }
         if copy && !self.selected.is_empty() {
             ctx.copy_text(self.selection_sorted().join("\n"));
@@ -887,7 +942,7 @@ impl HistoryView {
             BranchFilter::Named(n) => n.clone(),
         };
         let active = self.query.branch != BranchFilter::All;
-        let resp = dropdown_button(ui, Icon::Branch, &label, active, "브랜치 필터");
+        let resp = dropdown_button(ui, Icon::Branch, &label, active, "브랜치 필터").on_hover_text("조회할 브랜치를 선택합니다. 체리픽할 커밋을 찾을 때 사용하며 현재 작업 브랜치는 바뀌지 않습니다.");
         let mut pick: Option<BranchFilter> = None;
         egui::Popup::menu(&resp).width(240.0).show(|ui| {
             ui.set_min_width(240.0);
@@ -971,7 +1026,7 @@ impl HistoryView {
         }
     }
 
-    fn ui_op_banner(&mut self, ui: &mut Ui) {
+    pub(crate) fn ui_op_banner(&mut self, ui: &mut Ui, compact:bool) {
         let Some(st) = self.state.clone() else {
             if let Some(e) = &self.state_error {
                 let e = e.clone();
@@ -985,6 +1040,17 @@ impl HistoryView {
         let t = Theme::current();
         let c = if st.conflicts.is_empty() { t.blue } else { t.orange };
         let busy = self.runner.as_ref().is_some_and(|r| r.pending > 0);
+        if compact {
+            egui::Frame::new().fill(tint(c,0.10)).inner_margin(Margin::same(8)).show(ui,|ui| {
+                ui.label(RichText::new(format!("{} 진행 중 · 충돌 {}개",op.label(),st.conflicts.len())).font(fonts::medium(12.0)).color(c));
+                ui.add_enabled_ui(!busy&&!self.external_busy,|ui|ui.horizontal_wrapped(|ui| {
+                    if button_with(ui,Some(Icon::Play),"계속",ButtonKind::Primary,true).clicked(){self.submit(Op::Continue,false,false);}
+                    if op!=RepoOp::Merge && button_with(ui,None,"건너뛰기",ButtonKind::Secondary,true).clicked(){self.submit(Op::Skip,false,false);}
+                    if button_with(ui,None,"중단",ButtonKind::Secondary,true).clicked(){self.submit(Op::Abort,false,false);}
+                }));
+            });
+            return;
+        }
         egui::Frame::new()
             .fill(tint(c, if t.dark { 0.10 } else { 0.07 }))
             .inner_margin(Margin::symmetric(14, 8))
@@ -1037,12 +1103,15 @@ impl HistoryView {
 
     // ------------------------------------------------------------ 표
 
-    fn ui_table(&mut self, ui: &mut Ui) {
+    fn ui_table(&mut self, ui: &mut Ui, compact: bool) {
+        let row_h=if compact {40.0}else{ROW_H};
         let t = Theme::current();
         let rect = ui.max_rect();
         let w = rect.width();
         let mut cols = Columns::new(rect.left(), rect.right(), w);
+        if compact {cols.subject.max=rect.right()-10.0;cols.show_author=false;cols.show_date=false;}
         // 머리글
+        if !compact {
         let (hr, _) = ui.allocate_exact_size(vec2(w, HEADER_H), Sense::hover());
         let p = ui.painter();
         p.hline(hr.x_range(), hr.bottom() - 0.5, Stroke::new(1.0, t.border));
@@ -1056,6 +1125,7 @@ impl HistoryView {
         }
         p.text(pos2(cols.hash.min, hr.center().y), Align2::LEFT_CENTER, "해시", hf, t.text_faint);
 
+        }
         if self.log.commits.is_empty() {
             let loading = self.next.is_some() || self.reload_log;
             ui.add_space(40.0);
@@ -1082,9 +1152,9 @@ impl HistoryView {
         let mut sa = egui::ScrollArea::vertical().id_salt("hist-table").auto_shrink([false, false]);
         if let Some(i) = self.scroll_to.take() {
             let view_h = ui.available_height();
-            let y = i as f32 * ROW_H;
+            let y = i as f32 * row_h;
             let cur = ui.ctx().data(|d| d.get_temp::<f32>(Id::new(("hist-scroll", &self.root)))).unwrap_or(0.0);
-            if y < cur || y + ROW_H > cur + view_h {
+            if y < cur || y + row_h > cur + view_h {
                 sa = sa.vertical_scroll_offset((y - view_h / 2.0).max(0.0));
             }
         } else if let Some(d) = self.auto_scroll.take() {
@@ -1103,7 +1173,7 @@ impl HistoryView {
         let mut menu: Option<MenuAction> = None;
         let drag_hint = self.drag.as_ref().and_then(|d| d.target.clone());
         let dragging: HashSet<String> = self.drag.as_ref().map(|d| d.moving.iter().cloned().collect()).unwrap_or_default();
-        let out = sa.show_rows(ui, ROW_H, total, |ui, range| {
+        let out = sa.show_rows(ui, row_h, total, |ui, range| {
             ui.spacing_mut().item_spacing.y = 0.0;
             self.want_more = range.end + 120 >= n;
             cols.graph_lanes = range
@@ -1113,11 +1183,12 @@ impl HistoryView {
                 .max()
                 .unwrap_or(1)
                 .max(1);
+            if compact {cols.graph_lanes=cols.graph_lanes.min(4);}
             if filtered {
                 cols.graph_lanes = 1;
             }
             for i in range {
-                let (r, _) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
+                let (r, _) = ui.allocate_exact_size(vec2(w, row_h), Sense::hover());
                 if i >= n {
                     ui.painter().text(
                         pos2(r.left() + GRAPH_PAD, r.center().y),
@@ -1132,12 +1203,13 @@ impl HistoryView {
                 let id = Id::new(("hist-row", &c.sha));
                 let resp = ui.interact(r, id, Sense::click_and_drag());
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected.contains(&c.sha), &c.subject));
+                let resp=resp.on_hover_text("드래그: 커밋 범위 선택 · Shift 클릭: 범위 선택 · Option/Alt 드래그: 순서 이동");
                 row_rects.push((i, r));
                 let is_sel = selected.contains(&c.sha);
                 let hovered = resp.hovered() && self.drag.is_none();
                 paint_row_bg(ui.painter(), r, is_sel, hovered, dragging.contains(&c.sha));
                 let lanes = if filtered { None } else { self.log.lanes.get(i) };
-                paint_commit_row(ui.painter(), r, &cols, c, lanes, head.as_deref() == Some(c.sha.as_str()), is_sel, now);
+                paint_commit_row(ui.painter(), r, &cols, c, lanes, head.as_deref() == Some(c.sha.as_str()), is_sel, now, compact);
                 if let Some((ts, z)) = &drag_hint
                     && ts == &c.sha
                 {
@@ -1180,7 +1252,12 @@ impl HistoryView {
         if let Some(i) = double {
             self.events.push(HistoryEvent::OpenCommit(self.log.commits[i].sha.clone()));
         }
-        if let Some(i) = drag_start {
+        if let Some(i) = drag_start.filter(|_|!ui.input(|i|i.modifiers.alt)) {
+            self.range_drag = Some(i);
+            self.anchor = Some(self.log.commits[i].sha.clone());
+            self.selected = vec![self.log.commits[i].sha.clone()];
+        }
+        if let Some(i) = drag_start.filter(|_|ui.input(|i|i.modifiers.alt)) {
             let sha = self.log.commits[i].sha.clone();
             if !self.selected.contains(&sha) {
                 self.selected = vec![sha.clone()];
@@ -1190,7 +1267,23 @@ impl HistoryView {
             let valid = moving.iter().all(|s| self.rewritable(s));
             self.drag = Some(DragState { moving, target: None, valid });
         }
+        self.update_range_drag(ui, &row_rects, out.inner_rect);
         self.update_drag(ui, &row_rects, out.inner_rect);
+    }
+
+    fn update_range_drag(&mut self, ui: &Ui, rows: &[(usize, Rect)], viewport: Rect) {
+        let Some(start)=self.range_drag else{return;};
+        let (pos,down)=ui.input(|i|(i.pointer.hover_pos(),i.pointer.primary_down()));
+        if let Some(pos)=pos {
+            if let Some((end,_))=rows.iter().find(|(_,r)|pos.y>=r.top()&&pos.y<r.bottom()) {
+                let lo=start.min(*end);let hi=start.max(*end).min(self.log.commits.len().saturating_sub(1));
+                self.selected=self.log.commits[lo..=hi].iter().map(|c|c.sha.clone()).collect();
+            }
+            if down && viewport.x_range().contains(pos.x) {
+                self.auto_scroll=if pos.y<viewport.top()+28.0{Some(-8.0)}else if pos.y>viewport.bottom()-28.0{Some(8.0)}else{None};
+            }
+        }
+        if !down {self.range_drag=None;self.auto_scroll=None;} else {ui.ctx().request_repaint();}
     }
 
     fn update_drag(&mut self, ui: &Ui, rows: &[(usize, Rect)], viewport: Rect) {
@@ -1291,47 +1384,15 @@ impl HistoryView {
             let is_head = head.as_deref() == Some(sha.as_str());
             let why = "현재 브랜치의 첫 부모 줄(병합 이후)에 있는 커밋만 다시 쓸 수 있습니다";
             menu_caption(ui, &format!("{} · {}", c.short(), elide_str(&c.subject, 34)));
-            let branches: Vec<&RefLabel> = c.refs.iter().filter(|r| r.kind == RefKind::LocalBranch && !r.current).collect();
-            for b in branches.iter().take(3) {
-                if ctx_item(ui, &format!("'{}' 체크아웃", b.name), None, true).clicked() {
-                    act = Some(MenuAction::Run(Op::Checkout(b.name.clone())));
-                }
-            }
-            if ctx_item(ui, "체크아웃", Some("분리된 HEAD"), !is_head).clicked() {
-                act = Some(MenuAction::CheckoutDetached(sha.clone()));
-            }
-            if ctx_item(ui, "여기서 브랜치 만들기…", None, true).clicked() {
-                act = Some(MenuAction::NewBranch(sha.clone()));
-            }
-            if ctx_item(ui, "태그 만들기…", None, true).clicked() {
-                act = Some(MenuAction::NewTag(sha.clone()));
-            }
-            menu_sep(ui);
-            if ctx_item(ui, "체리픽", None, !self.linear.contains_key(&sha)).clicked() {
-                act = Some(MenuAction::Run(Op::CherryPick(vec![sha.clone()])));
-            }
-            if ctx_item(ui, "되돌리기(revert)", None, true).clicked() {
-                act = Some(MenuAction::Run(Op::Revert(sha.clone())));
-            }
-            if ctx_item(ui, "현재 브랜치를 여기로 리셋…", None, !is_head).clicked() {
-                act = Some(MenuAction::Reset(sha.clone()));
-            }
-            menu_sep(ui);
             let r = ctx_item(ui, "메시지 수정…", Some(if is_head { "amend" } else { "rebase" }), rewritable);
-            if r.clicked() {
-                act = Some(MenuAction::Reword(sha.clone()));
-            }
-            if !rewritable {
-                r.on_disabled_hover_text(why);
-            }
-            let r = menu_item_danger(ui, "커밋 삭제", rewritable);
-            if r.clicked() {
-                act = Some(MenuAction::DropCommits(vec![sha.clone()]));
-            }
-            let r = ctx_item(ui, "이 커밋부터 대화형 리베이스…", None, rewritable);
-            if r.clicked() {
-                act = Some(MenuAction::InteractiveFrom(sha.clone()));
-            }
+            if r.clicked() {act=Some(MenuAction::Reword(sha.clone()));}
+            if !rewritable {r.on_disabled_hover_text(why);}
+            let cherry=ctx_item(ui, "체리픽", None, !self.linear.contains_key(&sha));
+            if cherry.clicked() {act=Some(MenuAction::Run(Op::CherryPick(vec![sha.clone()])));}
+            cherry.on_disabled_hover_text("현재 브랜치에 이미 포함된 커밋입니다. 다른 브랜치의 커밋을 선택하세요.");
+            let drop=menu_item_danger(ui, "커밋 삭제", rewritable);
+            if drop.clicked() {act=Some(MenuAction::DropCommits(vec![sha.clone()]));}
+            drop.on_disabled_hover_text(why);
             menu_sep(ui);
             if ctx_item(ui, "커밋 diff 열기", Some("↵"), true).clicked() {
                 act = Some(MenuAction::OpenCommit(sha.clone()));
@@ -1342,6 +1403,20 @@ impl HistoryView {
             if ctx_item(ui, "해시 복사", Some(copy_shortcut(ui.ctx())), true).clicked() {
                 act = Some(MenuAction::CopyHashes(vec![sha.clone()]));
             }
+            menu_sep(ui);
+            ui.menu_button("고급 작업",|ui| {
+                let branches:Vec<_>=c.refs.iter().filter(|r|r.kind==RefKind::LocalBranch&&!r.current).collect();
+                for b in branches.iter().take(3) {
+                    if ctx_item(ui,&format!("'{}' 체크아웃",b.name),None,true).clicked(){act=Some(MenuAction::Run(Op::Checkout(b.name.clone())));}
+                }
+                if ctx_item(ui,"체크아웃",Some("분리된 HEAD"),!is_head).clicked(){act=Some(MenuAction::CheckoutDetached(sha.clone()));}
+                if ctx_item(ui,"여기서 브랜치 만들기…",None,true).clicked(){act=Some(MenuAction::NewBranch(sha.clone()));}
+                if ctx_item(ui,"태그 만들기…",None,true).clicked(){act=Some(MenuAction::NewTag(sha.clone()));}
+                menu_sep(ui);
+                if ctx_item(ui,"되돌리기(revert)",None,true).clicked(){act=Some(MenuAction::Run(Op::Revert(sha.clone())));}
+                if ctx_item(ui,"현재 브랜치를 여기로 리셋…",None,!is_head).clicked(){act=Some(MenuAction::Reset(sha.clone()));}
+                if ctx_item(ui,"이 커밋부터 대화형 리베이스…",None,rewritable).clicked(){act=Some(MenuAction::InteractiveFrom(sha.clone()));}
+            });
         } else {
             let contiguous = self.contiguous_linear(&sel);
             let all_rewritable = sel.iter().all(|s| self.rewritable(s));
@@ -1371,11 +1446,17 @@ impl HistoryView {
         act
     }
 
+    fn open_history_review(&mut self,ctx:&egui::Context,action:crate::history_guard::ReviewAction,shas:Vec<String>) {
+        let root=self.root.clone();
+        let task=Task::spawn(ctx,move||crate::history_guard::prepare(&root,action,&shas));
+        self.dialog=Some(Dialog::HistoryReview(dialogs::HistoryReviewDialog::new(action,task)));
+    }
+
     fn apply_menu(&mut self, ctx: &egui::Context, a: MenuAction) {
         match a {
+            MenuAction::Run(Op::CherryPick(shas)) => self.open_history_review(ctx, crate::history_guard::ReviewAction::CherryPick, shas),
             MenuAction::Run(op) => {
-                let pushed = false;
-                self.submit(op, false, pushed);
+                self.submit(op, false, false);
             }
             MenuAction::CheckoutDetached(sha) => {
                 let c = self.commit(&sha).cloned();
@@ -1384,7 +1465,7 @@ impl HistoryView {
                     Op::Checkout(sha.clone()),
                     "커밋을 체크아웃할까요?",
                     format!(
-                        "{} \"{}\"을(를) 분리된 HEAD 상태로 체크아웃합니다. 이 상태에서 만든 커밋은 브랜치를 만들지 않으면 잃을 수 있습니다.",
+                        "분리된 HEAD 상태로 체크아웃합니다: {} · {}. 이 상태에서 만든 커밋은 브랜치를 만들지 않으면 잃을 수 있습니다.",
                         short(&sha),
                         subject
                     ),
@@ -1414,28 +1495,8 @@ impl HistoryView {
                 let task = Task::spawn(ctx, move || history::commit_message(&root, &s));
                 self.dialog = Some(Dialog::Message(MessageDialog::new(MessageKind::Reword(sha), task, pushed, self.dirty())));
             }
-            MenuAction::Squash(shas) => {
-                let pushed = self.rewrites_pushed(&shas);
-                let root = self.root.clone();
-                let mut oldest_first = shas.clone();
-                oldest_first.reverse();
-                let task = Task::spawn(ctx, move || history::combined_message(&root, &oldest_first));
-                self.dialog = Some(Dialog::Message(MessageDialog::new(MessageKind::Squash(shas), task, pushed, self.dirty())));
-            }
-            MenuAction::DropCommits(shas) => {
-                let pushed = self.rewrites_pushed(&shas);
-                let body = if shas.len() == 1 {
-                    let s = self.commit(&shas[0]).map(|c| c.subject.clone()).unwrap_or_default();
-                    format!("{} \"{}\"을(를) 이력에서 지우고 이후 커밋을 다시 적용합니다. 이 커밋의 변경 내용은 사라집니다.", short(&shas[0]), s)
-                } else {
-                    format!("선택한 커밋 {}개를 이력에서 지우고 이후 커밋을 다시 적용합니다. 이 커밋들의 변경 내용은 사라집니다.", shas.len())
-                };
-                let mut d = ConfirmDialog::plain(Op::Drop(shas), if pushed { "푸시된 커밋을 삭제할까요?" } else { "커밋을 삭제할까요?" }, body, "삭제");
-                d.pushed = pushed;
-                d.dirty = self.dirty();
-                d.autostash = d.dirty;
-                self.dialog = Some(Dialog::Confirm(d));
-            }
+            MenuAction::Squash(shas) => self.open_history_review(ctx,crate::history_guard::ReviewAction::Squash,shas),
+            MenuAction::DropCommits(shas) => self.open_history_review(ctx,crate::history_guard::ReviewAction::Drop,shas),
             MenuAction::InteractiveFrom(sha) => {
                 let pushed = self.rewrites_pushed(std::slice::from_ref(&sha));
                 let root = self.root.clone();
@@ -1459,6 +1520,7 @@ impl HistoryView {
             DialogOutcome::Open => {}
             DialogOutcome::Cancel => self.dialog = None,
             DialogOutcome::Run { op, autostash, pushed } => {
+                if self.external_busy || self.is_mutating() {return;}
                 self.dialog = None;
                 self.submit(op, autostash, pushed);
             }
@@ -1500,8 +1562,9 @@ impl HistoryView {
                                 ui.spacing_mut().item_spacing.y = 1.0;
                                 ui.label(RichText::new(&n.text).font(fonts::semibold(13.0)).color(t.text));
                                 if let Some(d) = &n.detail {
-                                    let d: String = d.lines().take(4).collect::<Vec<_>>().join("\n");
-                                    ui.add(egui::Label::new(RichText::new(d).font(fonts::regular(12.0)).color(t.text_dim)).wrap());
+                                    let full_detail=d;
+                                    let d: String = d.lines().take(4).map(|line|if line.starts_with("원본 보관: refs/kiln/backup/"){"원본 이력은 백업 참조에 보관했습니다. (마우스를 올려 참조 확인)"}else{line}).collect::<Vec<_>>().join("\n");
+                                    ui.add(egui::Label::new(RichText::new(d).font(fonts::regular(12.0)).color(t.text_dim)).wrap()).on_hover_text(full_detail);
                                 }
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1514,16 +1577,11 @@ impl HistoryView {
                                         .on_hover_text(format!("git reset --keep {}", short(old)))
                                         .clicked()
                                 {
-                                    self.submit(Op::Undo(old.clone()), false, false);
+                                    let op=if let Some((branch,head))=&n.undo_guard {Op::UndoReviewed{old:old.clone(),head:head.clone(),branch:branch.clone()}} else {Op::Undo(old.clone())};
+                                    self.submit(op, false, false);
                                     close = true;
                                 }
-                                if n.force_push
-                                    && button_with(ui, Some(Icon::Upload), "강제 푸시(--force-with-lease)", ButtonKind::Primary, true)
-                                        .clicked()
-                                {
-                                    self.submit(Op::ForcePush, false, false);
-                                    close = true;
-                                }
+                                if n.force_push { ui.label(RichText::new("원격 이력이 달라졌습니다. 푸시 전 원격 상태를 다시 확인하세요.").color(t.orange)); }
                             });
                         });
                     });
@@ -1771,11 +1829,11 @@ fn paint_drag_ghost(ctx: &egui::Context, pos: Pos2, n: usize, ok: bool) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn paint_commit_row(p: &Painter, r: Rect, cols: &Columns, c: &LogCommit, lanes: Option<&LaneRow>, is_head: bool, selected: bool, now: i64) {
+fn paint_commit_row(p: &Painter, r: Rect, cols: &Columns, c: &LogCommit, lanes: Option<&LaneRow>, is_head: bool, selected: bool, now: i64, compact: bool) {
     let t = Theme::current();
-    let lx = |lane: usize| r.left() + GRAPH_PAD + lane.min(MAX_LANES) as f32 * LANE_W + LANE_W / 2.0;
+    let lx = |lane: usize| r.left() + GRAPH_PAD + lane.min(if compact {3}else{MAX_LANES}) as f32 * LANE_W + LANE_W / 2.0;
     let top = r.top();
-    let mid = r.center().y;
+    let mid = if compact {r.top()+12.0}else{r.center().y};
     let bot = r.bottom();
     let clip = p.with_clip_rect(p.clip_rect().intersect(Rect::from_min_max(pos2(r.left(), top), pos2(cols.subject.max, bot))));
     let width = cols.graph_lanes;
@@ -1853,6 +1911,13 @@ fn paint_commit_row(p: &Painter, r: Rect, cols: &Columns, c: &LogCommit, lanes: 
     let g = elide(&sp, &c.subject, font, t.text, (max_x - x).max(10.0));
     sp.galley(pos2(x, mid - g.size().y / 2.0), g, t.text);
 
+    if compact {
+        let x=r.left()+GRAPH_PAD+width as f32*LANE_W+8.0;
+        let meta=format!("{} · {} · {}",c.author,relative_time(c.date,now),c.short());
+        let text=elide(p,&meta,fonts::regular(11.0),t.text_faint,(r.right()-x-10.0).max(1.0));
+        p.galley(pos2(x,r.top()+23.0),text,t.text_faint);
+        return;
+    }
     // 작성자
     if cols.show_author {
         let ar = Rect::from_center_size(pos2(cols.author.min + 8.0, mid), vec2(16.0, 16.0));
@@ -2062,7 +2127,7 @@ fn dropdown_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, a11y: &st
     ui.painter().rect(rect, CornerRadius::same(7), fill, Stroke::new(1.0, stroke), StrokeKind::Inside);
     let fg = if active { t.accent } else { t.text_dim };
     kicons::paint(ui.painter(), Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), vec2(13.0, 13.0)), icon, fg);
-    ui.painter().galley(pos2(rect.left() + 28.0, rect.center().y - g.size().y / 2.0), g, if active { t.accent } else { t.text });
+    ui.painter().galley_with_override_text_color(pos2(rect.left() + 28.0, rect.center().y - g.size().y / 2.0), g, if active { t.accent } else { t.text });
     kicons::paint(ui.painter(), Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(10.0, 10.0)), Icon::ChevronDown, t.text_faint);
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -2255,4 +2320,24 @@ fn file_row(ui: &mut Ui, f: &history::ChangedFile) -> egui::Response {
     p.galley(pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0), g, t.text);
     p.galley(pos2(r.right() - sg.size().x, r.center().y - sg.size().y / 2.0), sg, t.text_faint);
     resp
+}
+
+#[cfg(test)]
+mod reviewed_undo_tests {
+    use super::*;
+    #[test]
+    fn reviewed_undo_preserves_later_commits_branches_and_operations() {
+        let dir=tempfile::tempdir().unwrap();let root=dir.path();
+        let git=|args:&[&str]|{let out=std::process::Command::new("git").args(args).current_dir(root).output().unwrap();assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));String::from_utf8_lossy(&out.stdout).trim().to_string()};
+        git(&["init","-q","-b","main"]);git(&["config","user.name","Test"]);git(&["config","user.email","test@example.com"]);
+        git(&["-c","commit.gpgsign=false","commit","--allow-empty","-m","first"]);let old=git(&["rev-parse","HEAD"]);
+        git(&["-c","commit.gpgsign=false","commit","--allow-empty","-m","second"]);let head=git(&["rev-parse","HEAD"]);
+        let undo=||Op::UndoReviewed{old:old.clone(),head:head.clone(),branch:"main".into()};
+        std::fs::write(root.join(".git/CHERRY_PICK_HEAD"),&old).unwrap();
+        assert!(undo().run(root,false).is_err());assert!(root.join(".git/CHERRY_PICK_HEAD").exists());assert_eq!(git(&["rev-parse","HEAD"]),head);
+        std::fs::remove_file(root.join(".git/CHERRY_PICK_HEAD")).unwrap();
+        git(&["checkout","-b","other"]);assert!(undo().run(root,false).is_err());assert_eq!(git(&["rev-parse","HEAD"]),head);
+        git(&["checkout","main"]);git(&["-c","commit.gpgsign=false","commit","--allow-empty","-m","third"]);let later=git(&["rev-parse","HEAD"]);
+        assert!(undo().run(root,false).is_err());assert_eq!(git(&["rev-parse","HEAD"]),later);
+    }
 }

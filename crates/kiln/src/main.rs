@@ -1,12 +1,16 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use kiln_daemon::client::Client;
 use kiln_proto::{ClientMsg, ServerMsg, SpawnSpec};
 use std::time::Duration;
 
 use kiln::app;
 
+const CLI_VERSION: &str = if cfg!(feature = "updater-test") {
+    concat!(env!("CARGO_PKG_VERSION"), "-updater-test")
+} else { env!("CARGO_PKG_VERSION") };
+
 #[derive(Parser)]
-#[command(name = "kiln", version, about = "Kiln — terminal-first IDE with persistent sessions")]
+#[command(name = "kiln", version = CLI_VERSION, about = "Kiln — terminal-first IDE with persistent sessions")]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
@@ -14,8 +18,21 @@ struct Cli {
     path: Option<std::path::PathBuf>,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum ActivityState { Running, Waiting, Done, Failed, Unknown }
+impl ActivityState {
+    fn as_str(self) -> &'static str { match self { Self::Running=>"running",Self::Waiting=>"waiting",Self::Done=>"done",Self::Failed=>"failed",Self::Unknown=>"unknown" } }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
+    #[cfg(feature = "updater-test")]
+    #[command(hide = true)]
+    UpdaterTestRoot,
+    /// Internal menu-bar companion; never owns terminal sessions.
+    #[cfg(target_os = "macos")]
+    #[command(hide = true)]
+    StatusBar,
     /// 세션 데몬을 실행한다.
     Daemon {
         #[arg(long)]
@@ -69,6 +86,8 @@ enum Cmd {
     Kill { session: u64 },
     /// 현재 터미널에 알림 이스케이프를 쓴다(Kiln 사이드바 알림).
     Notify { title: String, body: Option<String> },
+    /// 현재 터미널에 명시적인 에이전트 상태를 전송한다.
+    Activity { #[arg(value_enum)] state: ActivityState },
     /// 실행 중인 데몬을 이 실행 파일로 교체한다(세션 유지).
     UpgradeDaemon,
     /// 데몬과 모든 세션을 종료한다.
@@ -86,14 +105,38 @@ fn connect() -> anyhow::Result<Client> {
 }
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(feature = "updater-test")]
+    isolate_updater_fixture()?;
+    #[cfg(target_os = "macos")]
+    if std::env::current_exe()?.file_name().is_some_and(|n|n=="kiln-status") { return kiln::status_bar::run(); }
     let cli = Cli::parse();
+    #[cfg(feature = "updater-test")]
+    match &cli.cmd {
+        Some(Cmd::Daemon { socket: Some(socket), .. }) => anyhow::ensure!(
+            socket == &kiln_proto::socket_name(), "fixture daemon socket must stay isolated"),
+        Some(Cmd::PtyHost { endpoint, session, .. }) => anyhow::ensure!(
+            endpoint == &kiln_daemon::ptyhost::endpoint_for(&kiln_proto::socket_name(), *session),
+            "fixture PTY endpoint must stay isolated"),
+        _ => {}
+    }
     match cli.cmd {
+        #[cfg(feature = "updater-test")]
+        Some(Cmd::UpdaterTestRoot) => {
+            println!("{}", std::path::Path::new(option_env!("KILN_UPDATER_TEST_ROOT").unwrap()).canonicalize()?.display());
+            Ok(())
+        }
+        #[cfg(target_os = "macos")]
+        Some(Cmd::StatusBar) => kiln::status_bar::run(),
         None => {
+            #[cfg(target_os = "macos")]
+            kiln::status_bar::ensure_running();
             env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
             app::run(cli.path)
         }
         Some(Cmd::Daemon { foreground: _, restore, socket, wait_pid }) => {
             let socket = socket.unwrap_or_else(kiln_proto::socket_name);
+            #[cfg(target_os = "macos")]
+            if socket == kiln_proto::socket_name() { kiln::status_bar::ensure_running(); }
             // 분리 실행(WMI 등)에서는 표준 에러가 없으므로 로그 파일에 직접 쓴다.
             let log_path = kiln_daemon::client::daemon_log_path(&socket);
             let mut logger = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
@@ -181,6 +224,13 @@ fn main() -> anyhow::Result<()> {
             out.flush()?;
             Ok(())
         }
+        Some(Cmd::Activity { state }) => {
+            use std::io::Write;
+            let mut out = std::io::stdout().lock();
+            write!(out, "\x1b]777;kiln-agent;{}\x07", state.as_str())?;
+            out.flush()?;
+            Ok(())
+        }
         Some(Cmd::UpgradeDaemon) => {
             let socket = kiln_proto::socket_name();
             let old = Client::connect(&socket, None).map(|c| c.server_pid).ok();
@@ -217,4 +267,25 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// Sparkle relaunches through Launch Services without our launch environment.
+/// Compile the fixture root into test builds so every child/relaunch stays isolated.
+#[cfg(feature = "updater-test")]
+fn isolate_updater_fixture() -> anyhow::Result<()> {
+    use std::path::Path;
+    let root = option_env!("KILN_UPDATER_TEST_ROOT")
+        .ok_or_else(|| anyhow::anyhow!("updater-test requires KILN_UPDATER_TEST_ROOT at build time"))?;
+    let root = Path::new(root).canonicalize()?;
+    anyhow::ensure!(root.starts_with("/private/tmp")
+        && root.file_name().is_some_and(|n| n.to_string_lossy().starts_with("kiln-updater-")),
+        "updater-test root must be a dedicated /tmp/kiln-updater-* directory");
+    std::fs::create_dir_all(root.join("config"))?;
+    // First action in main, before AppKit, logging, or any worker thread starts.
+    unsafe {
+        std::env::set_var("KILN_CONFIG_DIR", root.join("config"));
+        std::env::set_var("KILN_SOCKET", root.join("daemon.sock"));
+        std::env::set_var("SHELL", "/bin/sh");
+    }
+    Ok(())
 }

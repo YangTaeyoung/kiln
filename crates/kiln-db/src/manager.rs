@@ -512,6 +512,18 @@ impl DbManager {
         Ok(rs)
     }
 
+    pub(crate) async fn fetch_original_rows(&self,id:ConnId,t:&TableRef,columns:&[ColumnDef],keys:&[Vec<(usize,crate::Value)>])->DbResult<ResultSet>{
+        let driver=self.driver_or_err(id)?;let pool=self.pool(id).await?;
+        let mut all=ResultSet::default();
+        let empty=vec![Vec::new()];
+        for key in if keys.is_empty(){&empty[..]}else{keys}{
+            let statement=crate::edit::select_key(driver,t,columns,key);
+            let result=pool.query_bound(&statement.sql,&statement.args).await?;
+            all.columns=result.columns;all.rows.extend(result.rows);
+        }
+        Ok(ResultSet::new(all.columns,all.rows))
+    }
+
     /// 필터가 적용된 전체 행 수.
     pub async fn count_rows(&self, id: ConnId, t: &TableRef, filter: &str) -> DbResult<i64> {
         let d = self.driver_or_err(id)?;
@@ -679,5 +691,23 @@ impl ConsoleSession {
 
     pub fn driver(&self) -> Driver {
         self.driver
+    }
+}
+
+#[cfg(test)]
+mod recovery_query_tests {
+    use super::*;
+    #[test]
+    fn row_recovery_query_binds_keys_and_does_not_read_unrelated_rows() {
+        let dir=tempfile::tempdir().unwrap();let file=dir.path().join("fixture.db");std::fs::write(&file,[]).unwrap();
+        let manager=DbManager::in_memory();let id=manager.add(ConnConfig{driver:Driver::Sqlite,file:file.to_string_lossy().into_owned(),..Default::default()},None);
+        manager.block_on(manager.query(id,"CREATE TABLE items (id TEXT PRIMARY KEY, value TEXT); INSERT INTO items VALUES ('one','a'),('two','b');",None)).unwrap();
+        let table=TableRef::new(None,"items");let details=manager.block_on(manager.table_details(id,&table)).unwrap();
+        let keys=vec![vec![(0,crate::Value::Text("two".into()))]];
+        let result=manager.block_on(manager.fetch_original_rows(id,&table,&details.columns,&keys)).unwrap();
+        assert_eq!(result.rows.len(),1);assert_eq!(result.rows[0][0],crate::Value::Text("two".into()));
+        let malicious=vec![vec![(0,crate::Value::Text("' OR 1=1; DROP TABLE items; --".into()))]];
+        let result=manager.block_on(manager.fetch_original_rows(id,&table,&details.columns,&malicious)).unwrap();assert!(result.rows.is_empty());assert_eq!(result.columns.len(),2);
+        assert_eq!(manager.block_on(manager.count_rows(id,&table,"")).unwrap(),2);
     }
 }

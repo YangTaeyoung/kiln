@@ -47,10 +47,11 @@ impl Screen {
 
 #[derive(Debug, Clone)]
 pub enum ConnEvent {
+    Activity { session: SessionId, activity: AgentActivity },
     Notification { session: SessionId, title: String, body: String },
     Exited { session: SessionId, code: Option<i32> },
     Created { req: u32, session: SessionId },
-    Error(String),
+    Error { req: u32, message: String },
     Connected,
     Upgrading,
     SearchResult { found: bool },
@@ -68,8 +69,12 @@ pub struct Conn {
     pub state: State,
     pub screens: HashMap<SessionId, Screen>,
     pub infos: HashMap<SessionId, SessionInfo>,
+    pub telemetry: HashMap<SessionId, SessionTelemetry>,
+    pub command_outputs: HashMap<(SessionId, u64), (String, bool)>,
     /// 붙어 있는 세션과 요청한 크기.
     attached: HashMap<SessionId, (u16, u16)>,
+    /// Explicitly closed sessions stay hidden from late PTY exit/update events.
+    closing_sessions: std::collections::HashSet<SessionId>,
     pub events: Vec<ConnEvent>,
     ctx: egui::Context,
     socket: String,
@@ -85,6 +90,8 @@ pub struct Conn {
     pending_copy: std::collections::HashSet<u32>,
     pending_text: HashMap<u32, SessionId>,
     cell_px: (u16, u16),
+    terminal_focus_candidate: Option<(SessionId, egui::ViewportId, egui::Id)>,
+    reported_terminal_focus: Option<SessionId>,
 }
 
 impl Conn {
@@ -94,7 +101,10 @@ impl Conn {
             state: State::Disconnected { since: Instant::now(), last_error: String::new() },
             screens: HashMap::new(),
             infos: HashMap::new(),
+            telemetry: HashMap::new(),
+            command_outputs: HashMap::new(),
             attached: HashMap::new(),
+            closing_sessions: Default::default(),
             events: Vec::new(),
             ctx,
             socket: socket_name(),
@@ -108,6 +118,8 @@ impl Conn {
             pending_copy: Default::default(),
             pending_text: HashMap::new(),
             cell_px: (0, 0),
+            terminal_focus_candidate: None,
+            reported_terminal_focus: None,
         };
         c.try_connect();
         c
@@ -121,7 +133,10 @@ impl Conn {
             state: State::Disconnected { since: Instant::now(), last_error: String::new() },
             screens: HashMap::new(),
             infos: HashMap::new(),
+            telemetry: HashMap::new(),
+            command_outputs: HashMap::new(),
             attached: HashMap::new(),
+            closing_sessions: Default::default(),
             events: Vec::new(),
             ctx,
             socket: String::new(),
@@ -135,6 +150,8 @@ impl Conn {
             pending_copy: Default::default(),
             pending_text: HashMap::new(),
             cell_px: (0, 0),
+            terminal_focus_candidate: None,
+            reported_terminal_focus: None,
         }
     }
 
@@ -148,6 +165,7 @@ impl Conn {
         let notify: kiln_daemon::client::Notify = Arc::new(move || ctx.request_repaint());
         match Client::connect_or_spawn(&self.socket, &self.exe, Some(notify)) {
             Ok(c) => {
+                if self.daemon_pid != 0 && self.daemon_pid != c.server_pid { self.closing_sessions.clear(); }
                 self.daemon_pid = c.server_pid;
                 self.daemon_build = c.server_build.clone();
                 // 실행 파일이 데몬보다 새로우면 데몬을 교체한다(세션은 유지된다).
@@ -164,9 +182,12 @@ impl Conn {
                 }
                 // 재연결 후 이미지를 다시 받는다.
                 self.textures.clear();
+                // Command ids are local to the daemon lifetime, never reuse stale output after reconnect.
+                self.command_outputs.clear();
                 for (sid, (cols, rows)) in &self.attached {
                     c.send(ClientMsg::Attach { session: *sid, cols: *cols, rows: *rows });
                 }
+                for session in &self.closing_sessions { c.send(ClientMsg::Kill { session:*session }); }
                 self.client = Some(c);
                 self.state = State::Connected;
                 self.events.push(ConnEvent::Connected);
@@ -198,6 +219,7 @@ impl Conn {
         }
         if disconnected {
             self.client = None;
+            self.reported_terminal_focus = None;
             self.state = State::Disconnected { since: Instant::now(), last_error: "connection lost".into() };
         }
         if self.client.is_none() {
@@ -212,32 +234,38 @@ impl Conn {
     fn handle(&mut self, m: ServerMsg) {
         match m {
             ServerMsg::Frame(f) => {
+                if self.closing_sessions.contains(&f.session) { return; }
                 self.screens.entry(f.session).or_default().apply(f);
             }
             ServerMsg::Sessions { sessions, .. } => {
-                self.infos = sessions.into_iter().map(|s| (s.id, s)).collect();
+                self.infos = sessions.into_iter().filter(|s|!self.closing_sessions.contains(&s.id)).map(|s| (s.id, s)).collect();
                 self.sessions_listed = true;
             }
             ServerMsg::SessionUpdated(i) => {
+                if self.closing_sessions.contains(&i.id) { return; }
                 self.infos.insert(i.id, i);
             }
             ServerMsg::SessionExited { session, code } => {
+                if self.closing_sessions.contains(&session) { return; }
                 if let Some(i) = self.infos.get_mut(&session) {
                     i.exited = Some(code.unwrap_or(-1));
                 }
                 if code.is_none() {
+                    self.closing_sessions.insert(session);
                     self.infos.remove(&session);
                 }
                 self.events.push(ConnEvent::Exited { session, code });
             }
-            ServerMsg::Notification { session, title, body } => self.events.push(ConnEvent::Notification { session, title, body }),
+            ServerMsg::Notification { session, title, body } => {
+                if !self.closing_sessions.contains(&session) { self.events.push(ConnEvent::Notification { session, title, body }); }
+            }
             ServerMsg::Clipboard { text, .. } => {
                 if let Ok(mut cb) = arboard::Clipboard::new() {
                     let _ = cb.set_text(text);
                 }
             }
             ServerMsg::Created { req, session } => self.events.push(ConnEvent::Created { req, session }),
-            ServerMsg::Error { message, .. } => self.events.push(ConnEvent::Error(message)),
+            ServerMsg::Error { req, message } => self.events.push(ConnEvent::Error { req, message }),
             ServerMsg::Upgrading => self.events.push(ConnEvent::Upgrading),
             ServerMsg::SearchResult { found, .. } => self.events.push(ConnEvent::SearchResult { found }),
             ServerMsg::Text { req, text } => {
@@ -247,6 +275,17 @@ impl Conn {
                     self.events.push(ConnEvent::SessionText { session, text });
                 }
             }
+            ServerMsg::SessionTelemetry { session, telemetry } => {
+                if self.closing_sessions.contains(&session) { return; }
+                let old = self.telemetry.get(&session).map(|s|s.activity).unwrap_or_default();
+                if old != telemetry.activity { self.events.push(ConnEvent::Activity {session,activity:telemetry.activity}); }
+                self.command_outputs.retain(|(sid,id),_| *sid != session || telemetry.commands.iter().any(|c| c.id == *id && c.output_available));
+                self.telemetry.insert(session, telemetry);
+            },
+            ServerMsg::CommandOutput { session, command, text, truncated, .. } => {
+                if self.command_outputs.len() >= 40 { self.command_outputs.clear(); }
+                self.command_outputs.insert((session, command), (text, truncated));
+            },
             ServerMsg::Image { session, id, width, height, rgba } => {
                 if rgba.len() == (width * height * 4) as usize {
                     let img = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
@@ -295,11 +334,59 @@ impl Conn {
         }
     }
 
+    /// Only canvases actually owning keyboard focus may claim the frame.
+    pub fn begin_terminal_focus_frame(&mut self) { self.terminal_focus_candidate = None; }
+
+    pub fn note_terminal_focus(&mut self, session: SessionId, ctx: &egui::Context, widget: egui::Id) {
+        self.terminal_focus_candidate = Some((session, ctx.viewport_id(), widget));
+    }
+
+    /// Current keyboard owner, independent of a CLI opting into focus reports.
+    /// Missing child-window focus information is intentionally treated as unread.
+    pub fn observed_terminal(&self, ctx:&egui::Context) -> Option<(SessionId,egui::ViewportId)> {
+        let (session,viewport,widget)=self.terminal_focus_candidate?;
+        let focused=if viewport==ctx.viewport_id() {
+            ctx.input(|i|i.focused) && ctx.memory(|m|m.focused())==Some(widget) && !egui::Popup::is_any_open(ctx)
+        } else {
+            ctx.input(|i|i.raw.viewports.get(&viewport).and_then(|v|v.focused)==Some(true))
+        };
+        focused.then_some((session,viewport))
+    }
+
+    pub fn finish_terminal_focus_frame(&mut self, ctx: &egui::Context) {
+        if !self.is_connected() { self.reported_terminal_focus = None; return; }
+        let next = self.terminal_focus_candidate.filter(|(_, viewport, widget)| {
+            // Root overlays can take focus after the terminal was drawn. An immediate
+            // child viewport has already validated its own input and focus state.
+            *viewport != ctx.viewport_id() || (ctx.input(|i| i.focused)
+                && ctx.memory(|m| m.focused()) == Some(*widget) && !egui::Popup::is_any_open(ctx))
+        }).map(|(session, _, _)| session);
+        for (session, focused) in self.terminal_focus_changes(next) {
+            self.input(session, if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec());
+        }
+    }
+
+    fn terminal_focus_changes(&mut self, next: Option<SessionId>) -> Vec<(SessionId, bool)> {
+        let enabled = |session| self.screens.get(&session).is_some_and(|screen| screen.mode & mode::FOCUS_EVENTS != 0);
+        let next = next.filter(|session| enabled(*session));
+        if next == self.reported_terminal_focus { return Vec::new(); }
+        let mut events = Vec::with_capacity(2);
+        if let Some(previous) = self.reported_terminal_focus.filter(|session| enabled(*session)) { events.push((previous, false)); }
+        if let Some(session) = next { events.push((session, true)); }
+        self.reported_terminal_focus = next;
+        events
+    }
+
     /// 그리드 구간 텍스트를 요청하고, 응답이 오면 클립보드에 복사한다.
     pub fn copy_range(&mut self, session: SessionId, start: (i32, u16), end: (i32, u16)) {
         let req = self.next_req();
         self.pending_copy.insert(req);
         self.send(ClientMsg::ReadRange { req, session, start, end });
+    }
+
+    pub fn read_command_output(&mut self, session: SessionId, command: u64) {
+        let req = self.next_req();
+        self.send(ClientMsg::ReadCommandOutput { req, session, command });
     }
 
     /// 세션의 보이는 화면 텍스트를 요청한다. 응답은 `ConnEvent::SessionText` 로 온다.
@@ -320,12 +407,15 @@ impl Conn {
         }
     }
 
-    pub fn kill(&mut self, sid: SessionId) {
+    pub fn kill(&mut self, sid: SessionId) -> bool {
+        if !self.is_connected() { return false; }
+        self.closing_sessions.insert(sid);
         self.detach(sid);
         self.send(ClientMsg::Kill { session: sid });
         self.screens.remove(&sid);
         self.infos.remove(&sid);
         self.textures.retain(|(s, _), _| *s != sid);
+        true
     }
 
     pub fn is_alive(&self, sid: SessionId) -> bool {
@@ -344,4 +434,91 @@ impl Conn {
 /// 데몬을 실행할 파일. `KILN_EXE` 가 있으면 그 경로를 쓴다.
 pub fn daemon_exe() -> std::path::PathBuf {
     std::env::var_os("KILN_EXE").map(std::path::PathBuf::from).unwrap_or_else(|| std::env::current_exe().unwrap_or_default())
+}
+
+#[cfg(test)]
+mod terminal_focus_tests {
+    use super::*;
+    #[test]
+    fn observation_requires_current_focus_and_known_child_window_focus() {
+        let ctx=egui::Context::default();
+        let mut conn=Conn::offline(ctx.clone());
+        let widget=egui::Id::new("terminal");
+        let mut output=ctx.run_ui(egui::RawInput::default(),|ui| {
+            let ctx=ui.ctx();
+            ctx.memory_mut(|m|m.request_focus(widget));
+            conn.note_terminal_focus(7,ctx,widget);
+            // No screen or FOCUS_EVENTS mode is needed to observe a terminal.
+            assert_eq!(conn.observed_terminal(ctx),Some((7,egui::ViewportId::ROOT)));
+            ctx.memory_mut(|m|m.request_focus(egui::Id::new("search")));
+            assert_eq!(conn.observed_terminal(ctx),None);
+        });output.textures_delta.clear();
+        let child=egui::ViewportId::from_hash_of("quick-terminal");
+        conn.terminal_focus_candidate=Some((7,child,widget));
+        for focused in [None,Some(false),Some(true)] {
+            let mut input=egui::RawInput::default();
+            input.viewports.entry(child).or_default().focused=focused;
+            let mut output=ctx.run_ui(input,|ui| {
+                let ctx=ui.ctx();
+                assert_eq!(conn.observed_terminal(ctx),focused.filter(|v|*v).map(|_|(7,child)));
+            });output.textures_delta.clear();
+        }
+        conn.begin_terminal_focus_frame();
+        assert_eq!(conn.observed_terminal(&ctx),None);
+    }
+
+    #[test]
+    fn explicit_close_ignores_late_exit_updates_and_list_snapshots() {
+        let mut conn=Conn::offline(egui::Context::default());
+        conn.state=State::Connected;
+        let info=SessionInfo { id:42, ..Default::default() };
+        conn.infos.insert(42,info.clone());
+        assert!(conn.kill(42));
+        for message in [
+            ServerMsg::SessionExited { session:42,code:None },
+            ServerMsg::SessionUpdated(SessionInfo { exited:Some(1),..info.clone() }),
+            ServerMsg::SessionExited { session:42,code:Some(1) },
+            ServerMsg::Sessions { req:3,sessions:vec![info] },
+            ServerMsg::Notification { session:42,title:"late".into(),body:String::new() },
+        ] { conn.handle(message); }
+        assert!(!conn.exists(42));
+        assert!(conn.events.is_empty(),"intentional close must not report a failure or notification");
+    }
+
+    #[test]
+    fn disconnected_kill_preserves_local_session_and_error_preserves_request_id() {
+        let mut conn=Conn::offline(egui::Context::default());
+        conn.infos.insert(7,SessionInfo { id:7,..Default::default() });
+        assert!(!conn.kill(7));assert!(conn.exists(7));
+        conn.handle(ServerMsg::Error { req:19,message:"spawn failed".into() });
+        assert!(matches!(conn.events.last(),Some(ConnEvent::Error { req:19,message }) if message=="spawn failed"));
+    }
+
+    #[test]
+    fn external_kill_tombstones_the_session_before_late_watcher_updates() {
+        let mut conn=Conn::offline(egui::Context::default());
+        conn.infos.insert(9,SessionInfo { id:9,..Default::default() });
+        conn.handle(ServerMsg::SessionExited { session:9,code:None });
+        conn.handle(ServerMsg::SessionUpdated(SessionInfo { id:9,exited:Some(1),..Default::default() }));
+        conn.handle(ServerMsg::SessionExited { session:9,code:Some(1) });
+        assert!(!conn.exists(9));
+        assert_eq!(conn.events.len(),1);
+        assert!(matches!(conn.events[0],ConnEvent::Exited { session:9,code:None }));
+    }
+    #[test]
+    fn focus_reports_follow_split_tab_and_search_transitions_without_duplicates() {
+        let mut conn = Conn::offline(egui::Context::default());
+        for id in [1, 2] { conn.screens.insert(id, Screen { mode: mode::FOCUS_EVENTS, ..Default::default() }); }
+        assert_eq!(conn.terminal_focus_changes(Some(1)), vec![(1, true)]);
+        assert!(conn.terminal_focus_changes(Some(1)).is_empty());
+        assert_eq!(conn.terminal_focus_changes(Some(2)), vec![(1, false), (2, true)]);
+        // Search, editor, hidden tab, or an unfocused application has no canvas claimant.
+        assert_eq!(conn.terminal_focus_changes(None), vec![(2, false)]);
+        assert!(conn.terminal_focus_changes(None).is_empty());
+        conn.screens.get_mut(&1).unwrap().mode = 0;
+        assert!(conn.terminal_focus_changes(Some(1)).is_empty());
+        // An already-focused CLI can enable reporting later.
+        conn.screens.get_mut(&1).unwrap().mode = mode::FOCUS_EVENTS;
+        assert_eq!(conn.terminal_focus_changes(Some(1)), vec![(1, true)]);
+    }
 }

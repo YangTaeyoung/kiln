@@ -14,6 +14,7 @@ use crate::history::{RebaseAction, RebasePlan, ResetMode};
 /// 열린 대화상자.
 pub(crate) enum Dialog {
     Confirm(ConfirmDialog),
+    HistoryReview(HistoryReviewDialog),
     Reset(ResetDialog),
     Name(NameDialog),
     Message(MessageDialog),
@@ -30,6 +31,7 @@ pub(crate) enum DialogOutcome {
 impl Dialog {
     pub(crate) fn is_loading(&mut self) -> bool {
         match self {
+            Dialog::HistoryReview(d) => d.task.as_mut().is_some_and(|t|t.is_pending()),
             Dialog::Message(m) => m.task.as_mut().is_some_and(|t| t.is_pending()),
             Dialog::Rebase(r) => r.task.as_mut().is_some_and(|t| t.is_pending()),
             _ => false,
@@ -40,6 +42,7 @@ impl Dialog {
         let id = Id::new(("kiln-history-dialog", root));
         match self {
             Dialog::Confirm(d) => d.show(ctx, id),
+            Dialog::HistoryReview(d) => d.show(ctx,id),
             Dialog::Reset(d) => d.show(ctx, id),
             Dialog::Name(d) => d.show(ctx, id),
             Dialog::Message(d) => d.show(ctx, id),
@@ -247,8 +250,8 @@ impl ResetDialog {
     fn show(&mut self, ctx: &egui::Context, id: Id) -> DialogOutcome {
         let t = Theme::current();
         modal(ctx, id, 460.0, |ui| {
-            let who = self.branch.as_deref().map(|b| format!("'{b}'을(를)")).unwrap_or_else(|| "HEAD를".into());
-            title(ui, &format!("{who} 여기로 리셋"), Some(&format!("{} · {}", short(&self.sha), self.subject)));
+            let who = self.branch.as_deref().map(|b| format!("브랜치 {b}")).unwrap_or_else(|| "HEAD".into());
+            title(ui, &format!("{who} 리셋"), Some(&format!("{} · {}", short(&self.sha), self.subject)));
             let options = [
                 (ResetMode::Soft, "Soft", "커밋만 되돌립니다. 이후 커밋의 변경 내용은 스테이지된 상태로 남습니다."),
                 (ResetMode::Mixed, "Mixed", "커밋과 스테이지를 되돌립니다. 변경 내용은 작업 트리에 그대로 남습니다."),
@@ -416,8 +419,6 @@ impl NameDialog {
 
 pub(crate) enum MessageKind {
     Reword(String),
-    /// 표 순서(새 커밋 먼저).
-    Squash(Vec<String>),
 }
 
 pub(crate) struct MessageDialog {
@@ -449,11 +450,7 @@ impl MessageDialog {
         modal(ctx, id, 540.0, |ui| {
             let (head, sub, confirm) = match &self.kind {
                 MessageKind::Reword(sha) => ("커밋 메시지 수정", short(sha).to_string(), "메시지 수정"),
-                MessageKind::Squash(shas) => (
-                    "하나로 스쿼시",
-                    format!("커밋 {}개 · {} … {}", shas.len(), short(shas.last().map(String::as_str).unwrap_or("")), short(&shas[0])),
-                    "스쿼시",
-                ),
+
             };
             title(ui, head, Some(&sub));
             if self.task.is_some() {
@@ -496,7 +493,6 @@ impl MessageDialog {
             if ok || submit {
                 let op = match &self.kind {
                     MessageKind::Reword(sha) => Op::Reword { sha: sha.clone(), message: self.text.clone() },
-                    MessageKind::Squash(shas) => Op::Squash { shas: shas.clone(), message: self.text.clone() },
                 };
                 DialogOutcome::Run { op, autostash: self.autostash, pushed: self.pushed }
             } else if cancel {
@@ -975,5 +971,119 @@ impl RebaseDialog {
             }
         });
         ui.allocate_rect(r, Sense::hover());
+    }
+}
+
+fn review_remote_label_full(remote:&str)->String {
+    if let Some((scheme,rest))=remote.split_once("://") && let Some((_,host))=rest.rsplit_once('@') {return format!("{scheme}://{host}");}
+    remote.into()
+}
+
+fn review_remote_label(remote:&str)->String {
+    if let Some((scheme,rest))=remote.split_once("://") {
+        if let Some((_,host))=rest.rsplit_once('@') {return format!("{scheme}://{host}");}
+    }
+    if std::path::Path::new(remote).is_absolute() {return format!("로컬 원격 · {}",std::path::Path::new(remote).file_name().unwrap_or_default().to_string_lossy());}
+    remote.into()
+}
+
+/// Every destructive operation is reviewed against a fresh repository snapshot.
+pub(crate) struct HistoryReviewDialog {
+    action: crate::history_guard::ReviewAction,
+    task: Option<Task<GitResult<crate::history_guard::HistoryReview>>>,
+    review: Option<crate::history_guard::HistoryReview>,
+    error: Option<String>,
+    pub message: String,
+    auto_push: bool,
+    ack: bool,
+}
+impl HistoryReviewDialog {
+    pub(crate) fn new(action:crate::history_guard::ReviewAction,task:Task<GitResult<crate::history_guard::HistoryReview>>)->Self {
+        Self{action,task:Some(task),review:None,error:None,message:String::new(),auto_push:false,ack:false}
+    }
+    fn show(&mut self,ctx:&egui::Context,id:Id)->DialogOutcome {
+        use crate::history_guard::{ReviewAction,DefaultStatus};
+        if let Some(task)=&mut self.task && let Some(result)=task.take() {
+            self.task=None;
+            match result {Ok(review)=>{self.message=review.message.clone();self.auto_push=review.pushed&&review.remote.is_some();self.review=Some(review);},Err(error)=>self.error=Some(error.to_string())}
+        }
+        let t=Theme::current();
+        let title_text=match self.action {ReviewAction::Squash=>"커밋 스쿼시 검토",ReviewAction::Drop=>"커밋 삭제 검토",ReviewAction::CherryPick=>"체리픽 검토"};
+        modal(ctx,id,(ctx.content_rect().width()-64.0).clamp(240.0,660.0),|ui|{
+            title(ui,title_text,None);
+            if self.task.is_some(){ui.spinner();body_text(ui,"현재 브랜치와 원격 이력을 확인하고 있습니다. 아직 이력은 변경하지 않습니다.");return if footer(ui,"검토 중…",ButtonKind::Primary,false).1 {DialogOutcome::Cancel}else{DialogOutcome::Open};}
+            let Some(review)=&self.review else {
+                body_text(ui,self.error.as_deref().unwrap_or("검토 정보를 읽지 못했습니다."));
+                body_text(ui,"저장하지 않은 파일·진행 중인 Git 작업·현재 브랜치를 확인한 뒤 다시 선택하세요.");
+                return if footer(ui,"실행할 수 없음",ButtonKind::Primary,false).1 {DialogOutcome::Cancel}else{DialogOutcome::Open};
+            };
+            let rewrite=self.action!=ReviewAction::CherryPick;
+            let risk=matches!(review.default_status,DefaultStatus::Unknown(_)|DefaultStatus::Merged{..}|DefaultStatus::DefaultBranch{..});
+            ui.add(egui::Label::new(RichText::new(format!("{}개 선택 · {}",review.commits.len(),review.branch)).strong()).truncate()).on_hover_text(&review.branch);
+            if let (Some(first),Some(last))=(review.commits.first(),review.commits.last()) {ui.add(egui::Label::new(if review.commits.len()==1 {first.subject.clone()}else{format!("{} → {}",first.subject,last.subject)}).truncate()).on_hover_text(format!("{}\n{}",first.subject,last.subject));}
+            if self.action==ReviewAction::Squash {ui.add(egui::Label::new(format!("합친 메시지: {}",self.message.lines().next().unwrap_or("(입력 필요)"))).truncate());}
+            ui.spacing_mut().scroll.floating=false;
+            egui::ScrollArea::vertical().id_salt("review-body").max_height((ctx.content_rect().height()-300.0).max(38.0)).show(ui,|ui|{
+                ui.label(RichText::new(format!("변경할 현재 브랜치: {}",review.branch)).strong());
+                body_text(ui,if rewrite {"선택한 커밋과 이후 커밋의 해시가 바뀝니다. 공유한 이력과 협업자의 작업에 영향을 줍니다. 실행 전에 원본 HEAD를 별도 백업 참조로 보관합니다."}else{"아래 커밋의 변경을 현재 브랜치에 새 커밋으로 적용합니다. 원본 브랜치는 변경하지 않습니다. 충돌이 나면 계속 진행하거나 중단할 수 있습니다."});
+                if self.action==ReviewAction::Drop {ui.colored_label(t.red,"선택한 커밋의 변경 내용을 현재 브랜치에서 제거합니다.");}
+                if rewrite {match &review.default_status {
+                    DefaultStatus::DefaultBranch{branch}=>{ui.add(egui::Label::new(RichText::new(format!("주의: 기본 브랜치 {branch} 자체를 변경합니다.")).color(t.red)).wrap());},
+                    DefaultStatus::Merged{branch}=>{ui.add(egui::Label::new(RichText::new(format!("주의: 다시 쓸 이력이 기본 브랜치 {branch}에 포함되어 있습니다. 이미 공유한 이력을 바꿉니다.")).color(t.red)).wrap());},
+                    DefaultStatus::Unknown(reason)=>{ui.add(egui::Label::new(RichText::new(format!("기본 브랜치 포함 여부를 확인하지 못했습니다: {reason}")).color(t.orange)).wrap());},
+                    DefaultStatus::NotMerged=>{body_text(ui,"조회한 기본 브랜치 이력에는 포함되어 있지 않습니다.");},
+                }}
+                ui.separator();ui.label(format!("선택한 커밋 {}개",review.commits.len()));
+                for commit in &review.commits {ui.add(egui::Label::new(format!("{}  {}",short(&commit.sha),commit.subject)).wrap());}
+                if rewrite && review.affected_commits.len()>review.commits.len() {
+                    ui.collapsing(format!("이후 재작성되는 커밋 포함 {}개",review.affected_commits.len()),|ui|{for commit in &review.affected_commits{ui.add(egui::Label::new(format!("{}  {}",short(&commit.sha),commit.subject)).wrap());}});
+                }
+                if self.action==ReviewAction::Squash {
+                    ui.separator();let label=ui.label("합친 커밋 메시지");
+                    ui.add(egui::TextEdit::multiline(&mut self.message).desired_rows(5).desired_width(f32::INFINITY)).labelled_by(label.id);
+                }
+                if rewrite && review.pushed {
+                    ui.separator();
+                    if let Some(remote)=&review.remote {
+                        ui.add(egui::Label::new(format!("원격 대상: {} · {}",review_remote_label(&remote.remote),remote.branch)).wrap()).on_hover_text(review_remote_label_full(&remote.remote));
+                        body_text(ui,"검토 이후 원격 커밋이 달라졌으면 푸시를 거부합니다. 충돌로 중단되면 자동으로 푸시하지 않습니다.");
+                    } else {body_text(ui,"원격 대상과 기준 커밋을 확인하지 못해 자동 푸시하지 않습니다.");}
+                }
+            });
+            if rewrite && review.pushed && review.remote.is_some() {ui.checkbox(&mut self.auto_push,"성공 후 이 브랜치만 force-with-lease로 푸시");}
+            if rewrite && risk {ui.checkbox(&mut self.ack,"기본 브랜치·공유 이력에 미치는 영향을 확인했습니다");}
+            ui.add_space(10.0);
+            let valid=(!rewrite||!risk||self.ack)&&(self.action!=ReviewAction::Squash||!self.message.trim().is_empty());
+            let label=match self.action {ReviewAction::Squash=>"스쿼시",ReviewAction::Drop=>"커밋 삭제",ReviewAction::CherryPick=>"현재 브랜치에 체리픽"};
+            let (ok,cancel)=footer(ui,label,if rewrite{ButtonKind::Danger}else{ButtonKind::Primary},valid);
+            if ok {DialogOutcome::Run{op:Op::Reviewed{review:Box::new(review.clone()),message:self.message.clone(),auto_push:self.auto_push,ack_risk:self.ack},autostash:false,pushed:false}}
+            else if cancel {DialogOutcome::Cancel}else{DialogOutcome::Open}
+        })
+    }
+}
+
+#[cfg(test)]
+mod guarded_review_tests {
+    use super::*;
+    use crate::history_guard::*;
+    use egui_kittest::{Harness,kittest::Queryable};
+    #[test]
+    fn history_review_small_viewport_keeps_acknowledgement_and_actions_visible() {
+        let review=HistoryReview{action:ReviewAction::Squash,branch:"feature/a-very-long-branch-name-for-a-small-window".into(),old_head:"a".repeat(40),commits:vec![ReviewCommit{sha:"b".repeat(40),subject:"First selected commit".into()},ReviewCommit{sha:"c".repeat(40),subject:"Second selected commit".into()}],affected_commits:vec![],message:"Squashed change".into(),remote:Some(LeaseTarget{remote:"https://secret@example.com/owner/repo.git".into(),branch:"refs/heads/feature/example".into(),expected_oid:"a".repeat(40)}),default_status:DefaultStatus::Merged{branch:"main".into()},pushed:true};
+        let dialog=HistoryReviewDialog::new(ReviewAction::Squash,Task::ready(Ok(review)));
+        let mut installed=false;
+        let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).wgpu().build_ui_state(|ui,state:&mut(HistoryReviewDialog,bool)|{
+            if !installed {kiln_common::fonts::install(ui.ctx());Theme::current().apply(ui.ctx());installed=true;return;}
+            if matches!(state.0.show(ui.ctx(),Id::new("review-test")),DialogOutcome::Run{..}){state.1=true;}
+        },(dialog,false));
+        h.run_steps(3);
+        for label in ["기본 브랜치·공유 이력에 미치는 영향을 확인했습니다","취소","스쿼시"] {
+            assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}");
+        }
+        h.key_press(Key::Enter);h.run_steps(2);assert!(!h.state().1);
+        h.get_by_label("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다").click();h.run_steps(2);
+        h.render().unwrap().save("/tmp/kiln-history-review-small.png").unwrap();
+        h.get_by_label("스쿼시").click();h.run_steps(2);assert!(h.state().1);
+        assert_eq!(review_remote_label_full("https://secret@example.com/owner/repo.git"),"https://example.com/owner/repo.git");
     }
 }

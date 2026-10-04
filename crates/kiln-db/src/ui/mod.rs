@@ -163,7 +163,7 @@ pub(crate) fn toggle_button_icon(ui: &mut Ui, icon: Option<Icon>, label: &str, o
             icons::paint(ui.painter(), Rect::from_center_size(pos2(x + 7.0, rect.center().y), vec2(14.0, 14.0)), i, fg);
             x += icon_w;
         }
-        ui.painter().galley(pos2(x, rect.center().y - g.size().y / 2.0), g, fg);
+        ui.painter().galley_with_override_text_color(pos2(x, rect.center().y - g.size().y / 2.0), g, fg);
     }
     resp
 }

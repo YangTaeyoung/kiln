@@ -90,6 +90,8 @@ struct ConnDialog {
     url_error: Option<String>,
     test: Option<Job<DbResult<String>>>,
     test_result: Option<Result<String, String>>,
+    tested_settings: Option<(ConnConfig,String)>,
+    test_stale: bool,
 }
 
 enum PendingAction {
@@ -374,7 +376,7 @@ impl DbPanel {
             }
             ui.add_space(12.0);
             ui.vertical_centered(|ui| {
-                if widgets::button_with(ui, None, "URL 에서 가져오기…", widgets::ButtonKind::Ghost, true).clicked() {
+                if widgets::button_with(ui, None, "URL에서 가져오기…", widgets::ButtonKind::Ghost, true).clicked() {
                     let mut d = ConnDialog::new(ConnConfig::default(), String::new(), true);
                     d.url = "postgres://user:password@localhost:5432/db".into();
                     self.dialog = Some(d);
@@ -479,12 +481,12 @@ impl DbPanel {
                         TypedConfirm {
                             title: "연결 삭제".into(),
                             message: format!(
-                                "\"{}\" 연결과 저장된 비밀번호를 삭제할까요?",
+                                "\"{}\" 연결 설정과 저장된 비밀번호를 삭제할까요? 데이터베이스의 데이터는 유지됩니다.",
                                 cfg.display_name()
                             ),
                             expected: cfg.display_name(),
                             input: String::new(),
-                            action_label: "삭제".into(),
+                            action_label: "연결 삭제".into(),
                         },
                         ConfirmKind::DeleteConn(id),
                     ));
@@ -546,8 +548,11 @@ impl DbPanel {
         let mut save = false;
         let fid = |k: &str| egui::Id::new(("db-conn-field", k));
         let resp = egui::Modal::new(egui::Id::new("db-conn-dialog")).frame(ui::modal_frame()).show(ctx, |ui| {
-            ui.set_width(460.0);
+            let width=460.0f32.min(ctx.content_rect().width()-64.0).max(260.0);
+            ui.set_width(width);
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.spacing_mut().scroll.floating=false;
+            ui.spacing_mut().scroll.dormant_handle_opacity=0.65;
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), egui::Sense::hover());
                 crate::logo::paint(ui, r, d.cfg.driver);
@@ -562,6 +567,8 @@ impl DbPanel {
                 });
             });
             ui.add_space(4.0);
+            let status_budget=if d.test.is_some() || d.test_result.is_some() || d.test_stale {210.0}else{160.0};
+            egui::ScrollArea::vertical().id_salt("db-connection-fields").max_height((ctx.content_rect().height()-status_budget).max(60.0)).auto_shrink([false,true]).show(ui,|ui| {
             // URL 가져오기.
             ui.horizontal(|ui| {
                 ui.allocate_ui_with_layout(
@@ -577,7 +584,7 @@ impl DbPanel {
                     egui::TextEdit::singleline(&mut d.url)
                         .hint_text(RichText::new("postgres://user:pass@host:5432/db").color(theme.text_faint)),
                     fid("url"),
-                    290.0,
+                    (width-170.0).max(100.0),
                 );
                 if ui::secondary_button(ui, None, "가져오기", true).clicked()
                     || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
@@ -605,7 +612,7 @@ impl DbPanel {
             }
             let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), egui::Sense::hover());
             ui.painter().rect_filled(r, 0.0, theme.border);
-            let full = 372.0;
+            let full = (ui.available_width()-88.0).max(150.0);
             egui::Grid::new("db-conn-grid")
                 .num_columns(2)
                 .min_col_width(72.0)
@@ -618,7 +625,7 @@ impl DbPanel {
                             |ui| ui.label(dim(s)),
                         );
                     };
-                    label(ui, "이름");
+                    label(ui, "연결 이름");
                     let hint = d.cfg.display_name();
                     ui::text_field(
                         ui,
@@ -627,7 +634,7 @@ impl DbPanel {
                         full,
                     );
                     ui.end_row();
-                    label(ui, "드라이버");
+                    label(ui, "DB 종류");
                     if let Some(drv) = driver_chips(ui, d.cfg.driver, full) {
                         if d.cfg.port == d.cfg.driver.default_port() {
                             d.cfg.port = drv.default_port();
@@ -743,6 +750,10 @@ impl DbPanel {
                     });
                 }
             }
+            });
+            d.invalidate_changed_test();
+            egui::ScrollArea::vertical().id_salt("db-connection-result").max_height(48.0).show(ui,|ui| {
+            if d.test_stale {ui.label(dim("설정이 변경되었습니다. 다시 테스트하세요."));}
             match (&d.test, &d.test_result) {
                 (Some(_), _) => {
                     ui.horizontal(|ui| {
@@ -753,7 +764,7 @@ impl DbPanel {
                 (None, Some(Ok(v))) => {
                     ui.horizontal(|ui| {
                         ui::glyph_label(ui, Icon::Check, theme.green, 14.0);
-                        ui.label(RichText::new(format!("연결됨 · {}", first_line(v, 90))).color(theme.green).size(12.5));
+                        ui.label(RichText::new(format!("연결 테스트 성공 · {}", first_line(v, 90))).color(theme.green).size(12.5));
                     });
                 }
                 (None, Some(Err(e))) => {
@@ -761,6 +772,7 @@ impl DbPanel {
                 }
                 _ => {}
             }
+            });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui::secondary_button(ui, Some(Icon::Plug), "연결 테스트", d.test.is_none()).clicked() {
@@ -768,6 +780,8 @@ impl DbPanel {
                     let cfg = d.cfg.clone();
                     let pw = (!d.password.is_empty()).then(|| d.password.clone());
                     d.test_result = None;
+                    d.test_stale = false;
+                    d.tested_settings = Some((d.cfg.clone(),d.password.clone()));
                     d.test = Some(
                         self.manager
                             .spawn(async move { m.test_connection(cfg, pw).await }),
@@ -884,6 +898,12 @@ impl DbPanel {
 }
 
 impl ConnDialog {
+    fn invalidate_changed_test(&mut self) {
+        if self.tested_settings.as_ref().is_some_and(|(cfg,password)|cfg!=&self.cfg || password!=&self.password) {
+            self.test=None; self.test_result=None; self.tested_settings=None; self.test_stale=true;
+        }
+    }
+
     fn new(cfg: ConnConfig, password: String, is_new: bool) -> ConnDialog {
         ConnDialog {
             cfg,
@@ -894,6 +914,8 @@ impl ConnDialog {
             url_error: None,
             test: None,
             test_result: None,
+            tested_settings: None,
+            test_stale: false,
         }
     }
 }
@@ -1217,25 +1239,25 @@ fn table_ui(
         ui.separator();
         if t.info.kind == TableKind::Table
             && ui
-                .button(RichText::new("비우기…").color(theme.orange))
+                .button(RichText::new("모든 행 삭제…").color(theme.orange))
                 .clicked()
         {
             *confirm = Some((
                 TypedConfirm {
-                    title: "테이블 비우기".into(),
+                    title: "모든 행 삭제".into(),
                     message: format!(
                         "{}의 모든 행을 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
                         t.info.name
                     ),
                     expected: t.info.name.clone(),
                     input: String::new(),
-                    action_label: "비우기".into(),
+                    action_label: "모든 행 삭제".into(),
                 },
                 ConfirmKind::Truncate(id, tref.clone()),
             ));
             ui.close();
         }
-        if ui.button(RichText::new("삭제(DROP)…").color(theme.red)).clicked() {
+        if ui.button(RichText::new(if t.info.kind==TableKind::Table {"테이블 삭제…"}else{"뷰 삭제…"}).color(theme.red)).clicked() {
             *confirm = Some((
                 TypedConfirm {
                     title: format!(
@@ -1246,10 +1268,10 @@ fn table_ui(
                             "뷰"
                         }
                     ),
-                    message: format!("{}을(를) 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.", t.info.name),
+                    message: format!("다음 객체를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.\n{}", t.info.name),
                     expected: t.info.name.clone(),
                     input: String::new(),
-                    action_label: "삭제".into(),
+                    action_label: if t.info.kind==TableKind::Table {"테이블 삭제".into()}else{"뷰 삭제".into()},
                 },
                 ConfirmKind::Drop(id, tref.clone(), t.info.kind),
             ));
@@ -1430,4 +1452,42 @@ fn driver_chips(ui: &mut Ui, selected: Driver, width: f32) -> Option<Driver> {
         }
     });
     picked
+}
+
+#[cfg(test)]
+mod dialog_regressions {
+    use super::*;
+    use egui_kittest::{Harness,kittest::Queryable};
+    #[test]
+    fn changed_connection_settings_invalidate_previous_test() {
+        let mut d=ConnDialog::new(ConnConfig::default(),"old".into(),true);
+        d.tested_settings=Some((d.cfg.clone(),d.password.clone()));
+        d.test_result=Some(Ok("server A".into()));
+        d.invalidate_changed_test(); assert!(d.test_result.is_some());
+        d.cfg.host="server-b.invalid".into();d.invalidate_changed_test();
+        assert!(d.test_result.is_none() && d.test_stale);
+        d.tested_settings=Some((d.cfg.clone(),d.password.clone()));d.test_result=Some(Err("auth error".into()));
+        d.password="new".into();d.invalidate_changed_test();assert!(d.test_result.is_none());
+    }
+    #[test]
+    fn minimum_connection_dialog_keeps_actions_visible_with_long_error() {
+        for theme in ["kiln-dark","kiln-light"] {
+            Theme::set_current(theme);
+            let mut panel=DbPanel::new(DbManager::in_memory());
+            let mut d=ConnDialog::new(ConnConfig::default(),String::new(),true);
+            d.test_result=Some(Err("연결하지 못했습니다. 입력한 호스트와 인증 정보를 확인하세요. ".repeat(8)));
+            panel.dialog=Some(d);
+            let mut initialized=false;
+            let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).wgpu().build_ui_state(|ui,p:&mut DbPanel| {
+                if !initialized {fonts::install(ui.ctx());Theme::current().apply(ui.ctx());initialized=true;return;}
+                p.dialog_ui(ui.ctx());
+            },panel);
+            h.run_steps(5);
+            for label in ["연결 테스트","취소","저장"] {
+                assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{theme} {label}");
+            }
+            h.render().unwrap().save(format!("/tmp/kiln-db-connection-minimum-{theme}.png")).unwrap();
+        }
+        Theme::set_current("kiln-dark");
+    }
 }

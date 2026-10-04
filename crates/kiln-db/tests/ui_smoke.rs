@@ -204,12 +204,12 @@ fn table_view_edits_cell_and_submits_to_database() {
     // 값 뷰어, 구조, DDL 하위 탭.
     let p = cell_pos(&h, "notes", 0);
     click_at(&mut h, p, false);
-    h.get_by_label("값").click();
+    h.get_by_label("셀 내용").click();
     for _ in 0..3 {
         h.step();
     }
     save_png(&mut h, "table_value_viewer");
-    h.get_by_label("값").click();
+    h.get_by_label("셀 내용").click();
     h.get_by_label("구조").click();
     for _ in 0..3 {
         h.step();
@@ -341,7 +341,7 @@ fn console_runs_typed_sql_and_shows_rows() {
         "SELECT nope FROM customers;\nUPDATE customers SET vip = 1 WHERE id = 1;".into(),
     ));
     h.step();
-    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter);
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::Enter);
     step_until(&mut h, "error", |h| {
         h.query_by_label_contains("오류").is_some()
     });

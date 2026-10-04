@@ -372,7 +372,7 @@ impl IssueFilter {
 }
 
 /// 이슈 생성 요청.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct IssueCreate {
     pub title: String,
     pub body: String,

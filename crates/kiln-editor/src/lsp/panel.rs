@@ -92,23 +92,20 @@ pub fn diagnostics_ui(ui: &mut Ui, lsp: &LspManager) -> Vec<EditorEvent> {
         let count = |s: Severity| files.iter().flat_map(|(_, d)| d).filter(|d| d.severity == s).count();
         let total: usize = files.iter().map(|(_, d)| d.len()).sum();
         if total == 0 {
-            let g = p.layout_no_wrap("문제 없음".to_owned(), kiln_common::fonts::medium(12.0), t.green);
+            let (label,description,received)=lsp.empty_diagnostics_status();
+            let color=if received {t.green}else{t.text_dim};
+            let g = p.layout_no_wrap(label.to_owned(), kiln_common::fonts::medium(12.0), color);
             let chip = Rect::from_min_size(pos2(x, cy - 12.0), vec2(g.size().x + 32.0, 24.0));
-            p.rect_filled(chip, 12.0, kiln_common::widgets::tint(t.green, if t.dark { 0.14 } else { 0.10 }));
-            kiln_common::icons::paint(p, Rect::from_center_size(pos2(chip.left() + 13.0, cy), vec2(13.0, 13.0)), kiln_common::icons::Icon::Check, t.green);
+            p.rect_filled(chip, 12.0, kiln_common::widgets::tint(color, if t.dark { 0.14 } else { 0.10 }));
+            kiln_common::icons::paint(p, Rect::from_center_size(pos2(chip.left() + 13.0, cy), vec2(13.0, 13.0)), if received {kiln_common::icons::Icon::Check}else{kiln_common::icons::Icon::Info}, color);
             p.galley(pos2(chip.left() + 23.0, cy - g.size().y / 2.0), g, t.green);
             let body = Rect::from_min_max(pos2(full.left(), header.bottom()), full.max);
             let c = body.center() - vec2(0.0, 14.0);
             let tile = Rect::from_center_size(c - vec2(0.0, 20.0), vec2(40.0, 40.0));
             p.rect_filled(tile, 10.0, t.bg_hover);
-            kiln_common::icons::paint(p, tile.shrink(10.0), kiln_common::icons::Icon::Check, t.text_faint);
-            p.text(
-                c + vec2(0.0, 18.0),
-                Align2::CENTER_CENTER,
-                "작업 공간에서 발견된 문제가 없습니다",
-                kiln_common::fonts::medium(13.0),
-                t.text_dim,
-            );
+            kiln_common::icons::paint(p, tile.shrink(10.0), if received {kiln_common::icons::Icon::Check}else{kiln_common::icons::Icon::Info}, t.text_faint);
+            let galley=p.layout(description,kiln_common::fonts::medium(13.0),t.text_dim,(body.width()-40.0).max(40.0));
+            p.galley(pos2(c.x-galley.size().x*0.5,c.y+18.0),galley,t.text_dim);
         } else {
             for s in [Severity::Error, Severity::Warning, Severity::Information, Severity::Hint] {
                 let n = count(s);

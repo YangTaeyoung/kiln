@@ -80,7 +80,7 @@ fn fuzzy_query_and_enter_opens_best_match() {
     wait_indexed(&mut h);
     assert_eq!(h.state().qo.file_count(), 16, "gitignored target/ is excluded");
     type_text(&mut h, "main");
-    assert!(common::wait_until(&mut h, 15.0, |h| h.state().qo.result_paths().first().map(String::as_str) == Some("src/main.rs")));
+    assert!(common::wait_until(&mut h, 15.0, |h| h.state().qo.result_paths().first().map(String::as_str) == Some("src/main.rs")), "input={:?}, results={:?}",h.query_by_role(egui::accesskit::Role::TextInput),h.state().qo.result_paths());
     h.key_press(Key::Enter);
     h.run();
     assert_eq!(h.state().picked.as_deref(), Some(root.join("src/main.rs").as_path()));

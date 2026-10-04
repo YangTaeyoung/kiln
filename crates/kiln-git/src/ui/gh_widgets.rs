@@ -25,8 +25,8 @@ pub(crate) fn gh_error_state(ui: &mut Ui, err: &GitError, subject: &str, events:
             let clicked = empty_panel(
                 ui,
                 Icon::Warning,
-                "GitHub CLI가 필요합니다",
-                "GitHub CLI(gh)를 설치한 뒤 다시 시도하세요.",
+                "GitHub CLI를 찾을 수 없습니다",
+                "GitHub 연결에는 gh가 필요합니다. 설치되어 있다면 실행 경로를 확인한 뒤 다시 시도하세요.",
                 None,
                 &[(None, "설치 안내 열기", ButtonKind::Primary), (Some(CI::Refresh), "다시 시도", ButtonKind::Secondary)],
             );
@@ -41,7 +41,7 @@ pub(crate) fn gh_error_state(ui: &mut Ui, err: &GitError, subject: &str, events:
                 ui,
                 Icon::Lock,
                 "GitHub에 로그인하세요",
-                "GitHub CLI 로그인이 필요합니다. 터미널에서 아래 명령을 실행한 뒤 다시 시도하세요.",
+                "로그인하면 이슈, Pull Request와 Actions를 이곳에서 확인할 수 있습니다. 터미널에서 로그인한 뒤 다시 시도하세요.",
                 Some("gh auth login"),
                 &[(Some(CI::Terminal), "터미널에서 로그인", ButtonKind::Primary), (None, "다시 시도", ButtonKind::Secondary)],
             );
@@ -52,7 +52,7 @@ pub(crate) fn gh_error_state(ui: &mut Ui, err: &GitError, subject: &str, events:
             }
         }
         other => {
-            let title = format!("{subject}을(를) 불러올 수 없습니다");
+            let title = format!("{subject} 정보를 불러오지 못했습니다");
             if empty_panel(ui, Icon::Warning, &title, &other.to_string(), None, &[(Some(CI::Refresh), "다시 시도", ButtonKind::Secondary)]).is_some() {
                 action = ErrorAction::Retry;
             }

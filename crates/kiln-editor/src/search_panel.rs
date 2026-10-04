@@ -376,7 +376,7 @@ impl SearchPanel {
             if found > 0 { (format!("검색 중… 지금까지 결과 {}개", fmt_count(found)), t.text_dim) } else { ("검색 중…".to_owned(), t.text_dim) }
         } else if let Some(s) = &self.summary {
             if s.matches == 0 {
-                ("결과가 없습니다".to_owned(), t.text_dim)
+                ("일치하는 내용이 없습니다 · 검색어와 파일 필터를 확인하세요".to_owned(), t.text_dim)
             } else {
                 let mut msg = format!("파일 {}개에서 결과 {}개", fmt_count(s.files), fmt_count(s.matches));
                 if s.truncated {

@@ -31,6 +31,7 @@ fn history_light_theme_snapshots() {
     h.run_steps(2);
     row(&h, "Add log view").click_secondary();
     h.run_steps(3);
+    h.get_by_label_contains("고급 작업").click();h.run_steps(2);
     h.get_by_label("이 커밋부터 대화형 리베이스…").click();
     settle(&mut h);
     h.get_by_label("리베이스: Fix date column").click();

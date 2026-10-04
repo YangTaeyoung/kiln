@@ -493,6 +493,20 @@ impl LspManager {
         v
     }
 
+    /// Empty diagnostics are not proof that the workspace has been checked.
+    pub(crate) fn empty_diagnostics_status(&self) -> (&'static str,String,bool) {
+        let servers=self.inner.servers.lock();
+        let unavailable=!self.inner.shared.missing.lock().is_empty() || servers.values().any(|s|matches!(s.status(),Status::Failed(_) | Status::Stopped));
+        let starting=servers.values().any(|s|matches!(s.status(),Status::Starting | Status::Restarting));
+        let has_servers=!servers.is_empty();
+        drop(servers);
+        if unavailable { return ("진단 연결 확인 필요",format!("{}\n언어 서버 설정을 확인하세요. 전체 프로젝트를 검사한 결과가 아닙니다.",self.status_text().unwrap_or_else(||"언어 서버가 중지되었습니다".into())),false); }
+        if starting { return ("언어 서버 시작 중",self.status_text().unwrap_or_else(||"진단 결과를 기다리고 있습니다.".into()),false); }
+        if self.diagnostics_version()>0 { return ("수신한 진단 0건","수신한 진단에서 발견된 문제가 없습니다. 전체 프로젝트 검사 결과는 아닙니다.".into(),true); }
+        if has_servers { ("진단 대기 중","언어 서버에서 아직 진단 결과를 받지 못했습니다.".into(),false) }
+        else { ("아직 진단 결과 없음","코드 파일을 열면 언어 서버 연결을 시작합니다. 서버가 설치되어 있어야 진단을 받을 수 있습니다.".into(),false) }
+    }
+
     /// 진단이 게시될 때마다 증가한다.
     pub fn diagnostics_version(&self) -> u64 {
         self.inner.shared.diag_version.load(Ordering::Relaxed)
@@ -571,6 +585,18 @@ pub(crate) fn progress_title(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_diagnostics_distinguish_unchecked_missing_and_received() {
+        let m=LspManager::with_config(PathBuf::from("/tmp/kiln-diagnostics-fixture"),LspConfig::default());
+        assert_eq!(m.empty_diagnostics_status().0,"아직 진단 결과 없음");
+        assert!(!m.empty_diagnostics_status().2);
+        m.inject_diagnostics(PathBuf::from("/tmp/kiln-diagnostics-fixture/a.rs"),vec![]);
+        assert_eq!(m.empty_diagnostics_status().0,"수신한 진단 0건");
+        m.inner.shared.missing.lock().insert("rust".into());
+        assert_eq!(m.empty_diagnostics_status().0,"진단 연결 확인 필요");
+        assert!(!m.empty_diagnostics_status().2);
+    }
 
     #[test]
     fn pending_reports_once_and_fails_when_sender_dropped() {
