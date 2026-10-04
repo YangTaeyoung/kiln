@@ -48,8 +48,9 @@ Follow the [release runbook](releases.md); future publication still needs the ow
 - Final notarized app installed at `/Applications/Kiln.app` after normal GUI exit.
   Daemon replacement preserved all session IDs and shell PIDs in the before/after snapshot.
   The updater fixtures, duplicate build/extracted apps and previous installed backup
-  were removed. Only the latest production app bundle remains installed. The GUI
-  was left closed after the owner-assisted normal exit; opening Kiln starts it again.
+  were removed. Only the latest production app bundle remains installed. A final
+  process check confirmed the GUI and menu companion running from that bundle,
+  with the original session IDs and shell PIDs still intact.
 
 ## Public-source audit
 
