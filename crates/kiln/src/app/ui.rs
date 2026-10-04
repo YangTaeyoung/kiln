@@ -40,6 +40,27 @@ pub(super) fn paint_running(ui: &egui::Ui, center: egui::Pos2, color: Color32) {
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
 }
 
+pub(super) fn agent_icon(agent: Option<kiln_accounts::Tool>) -> Icon {
+    match agent { Some(kiln_accounts::Tool::Claude) => Icon::Claude, Some(kiln_accounts::Tool::Codex) => Icon::Codex, None => Icon::Terminal }
+}
+
+pub(super) fn agent_ink(icon: Icon, theme: &Theme) -> Color32 {
+    match icon { Icon::Claude => theme.orange, Icon::Codex => theme.blue, _ => theme.text_dim }
+}
+
+/// Keep the brand legible inside a separate fixed-size activity ring.
+pub(super) fn paint_agent_progress(ui: &egui::Ui, center: egui::Pos2, color: Color32) {
+    let rect = egui::Rect::from_center_size(center, vec2(24.0, 24.0));
+    if !ui.is_rect_visible(rect) { return; }
+    let phase = ui.input(|i| (i.time / 1.2).fract()) as f32 * std::f32::consts::TAU;
+    let points = (0..=32).map(|i| {
+        let angle = phase + i as f32 / 32.0 * std::f32::consts::TAU * 0.72;
+        center + vec2(angle.cos(), angle.sin()) * 11.5
+    }).collect();
+    ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, color)));
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+}
+
 pub(super) fn title_activity(title: &str, activity: kiln_proto::AgentActivity, exited: Option<i32>) -> kiln_proto::AgentActivity {
     if let Some(code) = exited {
         return if code == 0 { kiln_proto::AgentActivity::Done } else { kiln_proto::AgentActivity::Failed };
@@ -85,19 +106,31 @@ fn terminal_title_marker(title: &str) -> Option<(bool, &str)> {
     Some((running, rest.strip_prefix("| ").unwrap_or(rest).trim_start()))
 }
 
+fn is_kiro_bridge(process: &str) -> bool {
+    ["zsh (kiro-cli-term)", "bash (kiro-cli-term)", "sh (kiro-cli-term)", "fish (kiro-cli-term)"].contains(&process)
+}
+
 /// Prefer an identified foreground agent; wrappers often report only the shell,
 /// so recognize the same standalone OSC tokens used for activity as a fallback.
 pub(super) fn session_agent(info: &kiln_proto::SessionInfo) -> Option<kiln_accounts::Tool> {
-    info.fg_process.as_deref().and_then(super::rotation::tool_for).or_else(|| {
-        if action_required_title(&info.title).is_some() {
-            return Some(kiln_accounts::Tool::Codex);
-        }
-        terminal_title_marker(&info.title)?;
-        match info.title.trim().chars().next()? {
-            '◐' | '◑' | '✳' => Some(kiln_accounts::Tool::Claude),
-            _ => Some(kiln_accounts::Tool::Codex),
-        }
-    })
+    if info.exited.is_some() { return None; }
+    let process = info.fg_process.as_deref()?;
+    if let Some(agent) = super::rotation::tool_for(process) { return Some(agent); }
+    // Legacy/unresolved Kiro bridges may still use the exact OSC fallback.
+    // A confirmed shell/editor or a failed process lookup must clear old marks.
+    if !is_kiro_bridge(process) { return None; }
+    if action_required_title(&info.title).is_some() { return Some(kiln_accounts::Tool::Codex); }
+    terminal_title_marker(&info.title)?;
+    match info.title.trim().chars().next()? {
+        '◐' | '◑' | '✳' => Some(kiln_accounts::Tool::Claude),
+        _ => Some(kiln_accounts::Tool::Codex),
+    }
+}
+
+/// Confirmed non-agent jobs must not animate an agent's leftover OSC title.
+pub(super) fn session_activity(info: &kiln_proto::SessionInfo, activity: kiln_proto::AgentActivity) -> kiln_proto::AgentActivity {
+    let title = if info.fg_process.as_deref().is_some_and(|process| super::rotation::tool_for(process).is_some() || is_kiro_bridge(process)) { &info.title } else { "" };
+    title_activity(title, activity, info.exited)
 }
 
 pub(super) fn running_color(agent: Option<kiln_accounts::Tool>, theme: &Theme) -> Color32 {
@@ -198,13 +231,31 @@ mod tab_tests {
     }
 
     #[test]
+    fn non_agent_or_failed_lookup_clears_stale_title_activity_and_brand() {
+        use kiln_proto::{SessionInfo, AgentActivity};
+        for process in [None, Some("bash"), Some("vim"), Some("other (kiro-cli-term)")] {
+            for title in ["⠋ Old task", "✳ Old task", "[ ! ] Action Required | Old task"] {
+                let info = SessionInfo { fg_process: process.map(String::from), title: title.into(), ..Default::default() };
+                assert_eq!(super::session_agent(&info), None);
+                assert_eq!(super::session_activity(&info, AgentActivity::Unknown), AgentActivity::Unknown);
+                // Explicit integration signals remain authoritative.
+                assert_eq!(super::session_activity(&info, AgentActivity::Failed), AgentActivity::Failed);
+            }
+        }
+    }
+
+    #[test]
     fn agent_colors_follow_process_or_standalone_title_markers() {
         use kiln_accounts::Tool::{Claude,Codex};
         use kiln_proto::SessionInfo;
         for (title,process,expected) in [
             ("◐ Work", "zsh (kiro-cli-term)", Some(Claude)),
             ("◑ Work", "zsh (kiro-cli-term)", Some(Claude)),
-            ("✳ Work", "zsh", Some(Claude)),
+            ("✳ Work", "zsh (kiro-cli-term)", Some(Claude)),
+            ("✳ Work", "zsh", None),
+            ("⠼ stale", "sh", None),
+            ("✳ stale", "vim", None),
+            ("⠋ stale", "sleep", None),
             ("⠼ Work", "zsh (kiro-cli-term)", Some(Codex)),
             ("⠼ Work", "claude", Some(Claude)),
             ("Work", "codex", Some(Codex)),
@@ -336,7 +387,7 @@ impl KilnApp {
                     let base = raw_process.split_whitespace().next().unwrap_or(&raw_process);
                     let proc_name = if shells().contains(&base) {base.to_owned()} else {raw_process};
                     let is_shell = shells().contains(&proc_name.as_str()) || proc_name == kiln_common::i18n::tr("셸");
-                    let activity=title_activity(&i.title,session.and_then(|sid|self.conn.telemetry.get(&sid)).map(|x|x.activity).unwrap_or_default(),i.exited);
+                    let activity=session_activity(i,session.and_then(|sid|self.conn.telemetry.get(&sid)).map(|x|x.activity).unwrap_or_default());
                     let (dot,pulse,status)=match (i.exited,activity) {
                         (Some(0),_) => (t.text_dim,false,kiln_common::i18n::tr("종료됨")),
                         (Some(_),_) => (t.red,false,kiln_common::i18n::tr("오류 종료")),
@@ -352,7 +403,8 @@ impl KilnApp {
                     let detail = status.into();
                     let right = i.cwd.as_deref().map(|c| short_path(Path::new(c))).unwrap_or_default();
                     let running = activity == kiln_proto::AgentActivity::Running && i.exited.is_none() && !i.attention;
-                    CardInfo { name, detail, right, dot, pulse, running, icon: Icon::Terminal }
+                    let icon = agent_icon(session.and_then(|sid| self.conn.session_agent(sid)));
+                    CardInfo { name, detail, right, dot, pulse, running, icon }
                 }
                 None => CardInfo { name: if self.terminal_launch_error(pid).is_some(){kiln_common::i18n::tr("시작 요청 보관됨")}else{kiln_common::i18n::tr("시작하는 중…")}.into(), detail: String::new(), right: String::new(), dot: if self.terminal_launch_error(pid).is_some(){t.orange}else{t.text_faint}, pulse: false, running: false, icon: Icon::Terminal },
             },
@@ -409,12 +461,12 @@ impl KilnApp {
             let Some(session)=self.panes.get(&id).and_then(|pane|pane.session()) else {continue;};
             let info=self.conn.infos.get(&session);
             let activity=self.conn.telemetry.get(&session).map(|state|state.activity).unwrap_or_default();
-            let activity=info.map(|info|title_activity(&info.title,activity,info.exited)).unwrap_or(activity);
+            let activity=info.map(|info|session_activity(info,activity)).unwrap_or(activity);
             let state=match activity {
                 AgentActivity::Failed => Some((5,Icon::Warning,self.theme.red,kiln_common::i18n::tr("실패"))),
                 AgentActivity::Waiting => Some((4,Icon::Bell,self.theme.orange,kiln_common::i18n::tr("입력 필요"))),
                 _ if info.is_some_and(|info|info.attention) => Some((3,Icon::Bell,self.theme.orange,kiln_common::i18n::tr("확인 필요"))),
-                AgentActivity::Running => Some((2,Icon::Play,running_color(info.and_then(session_agent),&self.theme),kiln_common::i18n::tr("실행 중"))),
+                AgentActivity::Running => Some((2,Icon::Play,running_color(self.conn.session_agent(session),&self.theme),kiln_common::i18n::tr("실행 중"))),
                 AgentActivity::Done => Some((1,Icon::Check,self.theme.green,kiln_common::i18n::tr("완료"))),
                 _ => None,
             };
@@ -963,19 +1015,26 @@ impl KilnApp {
         ui.painter().rect_filled(rect, CornerRadius::ZERO, if focused { t.bg_panel } else { widgets::canvas_color(&t) });
         ui.painter().line_segment([pos2(rect.left() + 1.0, rect.bottom()), pos2(rect.right() - 1.0, rect.bottom())], Stroke::new(1.0, t.border));
 
-        let mut x = rect.left() + 14.0;
-        if info.running { paint_running(ui, pos2(x, cy), info.dot); }
-        else { widgets::status_dot(ui, pos2(x, cy), info.dot, info.pulse); }
-        x += 11.0;
-        let icon_rect = egui::Rect::from_center_size(pos2(x + 6.0, cy), vec2(12.0, 12.0));
+        let branded = matches!(info.icon, Icon::Claude | Icon::Codex);
+        let icon_rect = egui::Rect::from_center_size(pos2(rect.left() + 30.0, cy), vec2(18.0, 18.0));
+        if info.running && branded { paint_agent_progress(ui, icon_rect.center(), agent_ink(info.icon, &t)); }
+        else if info.running { paint_running(ui, pos2(rect.left() + 12.0, cy), info.dot); }
+        else { widgets::status_dot(ui, pos2(rect.left() + 12.0, cy), info.dot, info.pulse); }
         let custom = match self.panes.get(&pid).map(|p| &p.kind) {
             Some(PaneKind::Tool(tool)) => tool.paint_icon(ui, icon_rect),
             _ => false,
         };
         if !custom {
-            icons::paint(ui.painter(), icon_rect, info.icon, if focused { t.text_dim } else { t.text_faint });
+            icons::paint(ui.painter(), icon_rect, info.icon, if branded { agent_ink(info.icon, &t) } else if focused { t.text_dim } else { t.text_faint });
         }
-        x += 19.0;
+        if branded {
+            let brand = if info.icon == Icon::Claude { "Claude Code" } else { "Codex" };
+            let label = format!("{} · {brand}{}", info.name, if info.detail.is_empty() { String::new() } else { format!(" · {}", info.detail) });
+            let response = ui.interact(icon_rect.expand(3.0), ui.id().with(("agent-identity", pid)), Sense::hover());
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
+            response.on_hover_text(label);
+        }
+        let mut x = rect.left() + 47.0;
         let is_terminal = matches!(self.panes.get(&pid).map(|p|&p.kind),Some(PaneKind::Term {..}));
         let show_history = is_terminal && rect.width() >= 240.0;
         let buttons_w = if show_history { 82.0 } else { 56.0 };

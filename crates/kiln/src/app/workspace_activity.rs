@@ -37,7 +37,7 @@ pub(super) struct WorkspaceTask {
 }
 
 fn phase(info: &SessionInfo, telemetry: Option<&SessionTelemetry>) -> TaskPhase {
-    let activity = super::ui::title_activity(&info.title,telemetry.map(|t|t.activity).unwrap_or_default(),info.exited);
+    let activity = super::ui::session_activity(info,telemetry.map(|t|t.activity).unwrap_or_default());
     match activity {
         AgentActivity::Failed=>TaskPhase::Failed,
         AgentActivity::Waiting=>TaskPhase::Waiting,
@@ -158,16 +158,17 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
         let (icon,color)=task.phase.appearance(theme);
         let color=if task.phase==TaskPhase::Running {super::ui::running_color(task.agent,theme)}else{color};
         let center=pos2(rect.left()+17.0,rect.top()+13.0);
-        if task.phase==TaskPhase::Running {super::ui::paint_running(ui,center,color);}
-        else {
-            let (icon, size, ink) = match task.agent {
-                Some(kiln_accounts::Tool::Claude) => (Icon::Claude, 16.0, theme.orange),
-                Some(kiln_accounts::Tool::Codex) => (Icon::Codex, 16.0, theme.blue),
-                None => (icon, 13.0, color),
-            };
-            icons::paint(ui.painter(),egui::Rect::from_center_size(center,vec2(size,size)),icon,ink);
+        let branded = task.agent.is_some();
+        if task.phase == TaskPhase::Running {
+            if branded { super::ui::paint_agent_progress(ui, center, super::ui::running_color(task.agent, theme)); }
+            else { super::ui::paint_running(ui, center, color); }
         }
-        let x=rect.left()+30.0;
+        let mark = if branded { super::ui::agent_icon(task.agent) } else { icon };
+        if branded || task.phase != TaskPhase::Running {
+            icons::paint(ui.painter(), egui::Rect::from_center_size(center, vec2(18.0,18.0)), mark,
+                if branded { super::ui::agent_ink(mark, theme) } else { color });
+        }
+        let x=rect.left()+34.0;
         let text_color=if chosen || matches!(task.phase,TaskPhase::Running|TaskPhase::Waiting|TaskPhase::Failed|TaskPhase::Attention){theme.text}else{theme.text_dim};
         let width=rect.right()-x-8.0;
         let qualifier=visible_qualifier(ui,task,width*0.45,theme);
@@ -264,7 +265,10 @@ mod tests {
         t.activity=AgentActivity::Done; assert_eq!(phase(&info,Some(&t)),TaskPhase::Done);
         info.exited=Some(1); assert_eq!(phase(&info,Some(&t)),TaskPhase::Failed);
         info.exited=None;info.attention=false;t.activity=AgentActivity::Unknown;info.title="⠼ API 구현".into();
+        assert_eq!(phase(&info,Some(&t)),TaskPhase::Unknown,"missing process lookup must not revive a stale spinner");
+        info.fg_process=Some("codex".into());
         assert_eq!(phase(&info,Some(&t)),TaskPhase::Running);
+        info.fg_process=Some("claude".into());
         info.title="◑ Claude task".into(); assert_eq!(phase(&info,Some(&t)),TaskPhase::Running);
         info.title="✳ Claude task".into(); assert_eq!(phase(&info,Some(&t)),TaskPhase::Unknown);
     }

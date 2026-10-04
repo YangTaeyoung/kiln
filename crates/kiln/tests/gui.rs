@@ -1118,7 +1118,7 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
     let _cleanup=Cleanup(base.clone());
     let mut h=Harness::builder().with_size([1280.0,800.0]).build_eframe(|cc| {
         let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));
-        app.debug_set_shell("/bin/sh".into());app
+        app.debug_set_shell("/bin/bash".into());app
     });
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     let original=h.state().debug_focused_session().unwrap();
@@ -1126,16 +1126,28 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some_and(|s|s!=original)&&h.state().debug_focused_text().is_some_and(|text|!text.trim().is_empty())));
     let session=h.state().debug_focused_session().unwrap();
     let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    let wait_process = |process: &str| {
+        let deadline=Instant::now()+Duration::from_secs(5);
+        loop {
+            let kiln_proto::ServerMsg::Sessions{sessions,..}=client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(1)).unwrap() else {panic!("sessions")};
+            if sessions.iter().any(|s|s.id==session && s.fg_process.as_deref()==Some(process)) {break;}
+            assert!(Instant::now()<deadline,"foreground {process} missing");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
     // Replay the actual OSC title tokens emitted by Claude 2.1.289 through a PTY,
     // without hooks, process-name guesses or artificial telemetry.
     let theme=kiln_common::theme::Theme::current();
     for (frame,label,color) in [('◐',"작업 중",Some(theme.orange)),('◑',"작업 중",Some(theme.orange)),('✳',"세션 열림",None),('⠼',"작업 중",Some(theme.blue)),('◐',"작업 중",Some(theme.orange))] {
-        client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{frame} Claude lifecycle\\007'\r").into_bytes()});
+        client.send(kiln_proto::ClientMsg::Input{session,data:vec![3]});
+        wait_process("bash");
+        let process=if frame=='⠼'{"codex"}else{"claude"};
+        client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{frame} Claude lifecycle\\007'; (exec -a {process} /bin/sleep 120)\r").into_bytes()});
         let agent=if frame=='⠼'{"Codex"}else{"Claude Code"};
         let expected=format!("Claude lifecycle · {agent} · {label}");
         assert!(pump_until(&mut h,5,|h| {
             let arcs:Vec<_>=h.output().shapes.iter().filter_map(|shape|match &shape.shape {
-                egui::Shape::Path(path) if path.points.len()==33 && path.stroke.width==1.7 => Some(&path.stroke.color),
+                egui::Shape::Path(path) if path.points.len()==33 && [1.0,1.7].contains(&path.stroke.width) => Some(&path.stroke.color),
                 _=>None,
             }).collect();
             h.query_by_label(&expected).is_some() && match color {
@@ -1143,9 +1155,19 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
                 None=>arcs.is_empty(),
             }
         }),"missing {expected} with expected agent color");
+        wait_process(process);
         h.run_steps(2);
+        let name=if process=="claude" {"claude"} else {"codex"};
+        let pixels=(18.0*h.ctx.pixels_per_point()).ceil() as u32;
+        let texture=h.ctx.data(|d|d.get_temp::<egui::TextureHandle>(egui::Id::new(("agent-mark",name,pixels)))).expect("brand texture");
+        let marks:Vec<_>=h.output().shapes.iter().filter_map(|s|match &s.shape {
+            egui::Shape::Mesh(mesh) if mesh.texture_id==texture.id()=>Some(mesh.calc_bounds()), _=>None,
+        }).collect();
+        assert_eq!(marks.len(),2,"both sidebar and panel header must retain the brand, including while spinning");
+        assert!(marks.iter().all(|r|r.size()==egui::vec2(18.0,18.0)));
+        assert!(marks[0].center().distance(marks[1].center())>24.0);
         let arcs:Vec<_>=h.output().shapes.iter().filter_map(|shape|match &shape.shape {
-            egui::Shape::Path(path) if path.points.len()==33 && path.stroke.width==1.7 => Some(&path.stroke.color),
+            egui::Shape::Path(path) if path.points.len()==33 && [1.0,1.7].contains(&path.stroke.width) => Some(&path.stroke.color),
             _=>None,
         }).collect();
         if let Some(color)=color {
@@ -1162,11 +1184,16 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
     for (title,label) in [("⠋ Task | personal","작업 중"),("Task | personal","세션 열림"),
         ("[ ! ] Action Required | Task | personal","입력 대기"),("[ . ] Action Required | Task | personal","입력 대기"),
         ("Task | personal","세션 열림")] {
-        client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{title}\\007'\r").into_bytes()});
+        client.send(kiln_proto::ClientMsg::Input{session,data:vec![3]});
+        wait_process("bash");
+        client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{title}\\007'; (exec -a codex /bin/sleep 120)\r").into_bytes()});
+        wait_process("codex");
         let expected=format!("Task | personal · Codex · {label}");
-        assert!(pump_until(&mut h,5,|h|h.query_by_label(&expected).is_some()),"missing {expected}");
+        let ok=pump_until(&mut h,5,|h|h.query_by_label(&expected).is_some());
+        let snapshot=client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(1)).unwrap();
+        assert!(ok,"missing {expected}: {snapshot:?}");
         if label!="작업 중" {
-            assert!(!h.output().shapes.iter().any(|shape|matches!(&shape.shape,egui::Shape::Path(path) if path.points.len()==33 && path.stroke.width==1.7)),"idle/waiting must stop busy animations");
+            assert!(!h.output().shapes.iter().any(|shape|matches!(&shape.shape,egui::Shape::Path(path) if path.points.len()==33 && [1.0,1.7].contains(&path.stroke.width))),"idle/waiting must stop busy animations");
         }
     }
 

@@ -496,13 +496,13 @@ impl Daemon {
                 if s.info.lock().exited.is_some() {
                     continue;
                 }
-                let fg = s.pty.fg_pid();
+                let fg = s.pty.fg_pid().and_then(procinfo::foreground_pid);
                 let name = fg.and_then(procinfo::display_name);
                 let cwd = fg.and_then(procinfo::cwd).or_else(|| procinfo::cwd(s.pty.pid()));
                 let mut changed = false;
                 {
                     let mut i = s.info.lock();
-                    if name.is_some() && i.fg_process != name {
+                    if i.fg_process != name {
                         i.fg_process = name;
                         changed = true;
                     }

@@ -473,6 +473,28 @@ pub fn daemon_exe() -> std::path::PathBuf {
 mod terminal_focus_tests {
     use super::*;
     #[test]
+    fn foreground_identity_is_available_on_first_idle_snapshot_and_reconnect() {
+        use kiln_accounts::Tool;
+        for process in ["codex", "claude"] {
+            let mut info = SessionInfo { id: 9, pid: 13, fg_process: Some(process.into()), title: "Plain task title".into(), ..Default::default() };
+            for _ in 0..2 {
+                let mut conn = Conn::offline(egui::Context::default());
+                conn.handle(ServerMsg::Sessions { req: 1, sessions: vec![info.clone()] });
+                assert_eq!(conn.session_agent(9), Some(if process == "codex" { Tool::Codex } else { Tool::Claude }));
+                info.title = "Another idle task".into();
+                conn.handle(ServerMsg::SessionUpdated(info.clone()));
+                assert!(conn.session_agent(9).is_some());
+                info.fg_process = Some("bash".into());
+                info.title = "⠋ Stale agent title".into();
+                conn.handle(ServerMsg::SessionUpdated(info.clone()));
+                assert_eq!(conn.session_agent(9), None);
+                info.fg_process = Some(process.into());
+                info.title = "Plain task title".into();
+            }
+        }
+    }
+
+    #[test]
     fn wrapped_agent_identity_survives_idle_and_clears_on_real_changes() {
         use kiln_accounts::Tool;
         let mut conn=Conn::offline(egui::Context::default());
