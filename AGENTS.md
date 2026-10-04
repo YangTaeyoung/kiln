@@ -16,6 +16,7 @@ the user's shells, agents, builds, or servers.
   setup, never passwords or private keys.
 - [Native updater validation](docs/maintainers/updater-validation.md) — isolated
   old/new fixtures, cancellation, relaunch and session survival checks.
+- [0.1.1 local verification](docs/maintainers/0.1.1-status.md) — current build evidence and installation boundary.
 - [First-release handoff](docs/maintainers/first-release-status.md) — pending work
   and verified preparation; recheck its dated status before continuing.
 
