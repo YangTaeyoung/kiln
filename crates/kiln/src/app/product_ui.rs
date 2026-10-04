@@ -75,7 +75,7 @@ impl KilnApp {
                     for (index,ws) in self.workspaces.iter().enumerate() {
                         let drafts=ws.tools.drafts();
                         if !drafts.agent_prompt.is_empty() {
-                            count+=1;ui.separator();ui.label(format!("{} · 에이전트 요청 초안",ws.name));
+                            count+=1;ui.separator();ui.label(format!("{} · 작성 중인 에이전트 요청",ws.name));
                             if ui.button("에이전트 요청 이어 쓰기").clicked(){draft_target=Some((index,Action::NewAgentTask));close=true;}
                         }
                         if !drafts.repositories.is_empty() {
@@ -84,7 +84,7 @@ impl KilnApp {
                             if ui.button("작업 공간에서 이어 쓰기").clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
                         }
                         if !drafts.commit_message.is_empty() {
-                            count+=1; ui.separator(); ui.label(format!("{} · 커밋 메시지 초안",ws.name));
+                            count+=1; ui.separator(); ui.label(format!("{} · 작성 중인 커밋 메시지",ws.name));
                             if ui.button("소스 제어에서 이어 쓰기").clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
                         }
                         if !drafts.github.repositories.is_empty() {

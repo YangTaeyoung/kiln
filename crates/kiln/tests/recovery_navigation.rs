@@ -18,7 +18,7 @@ fn recovery_resumes_prompt_and_shell_settings_and_background_limit_keeps_owner()
  h.state_mut().debug_recovery_fixture("프론트와 백 API를 함께 변경");h.run_steps(3);
  h.get_by_label("에이전트 요청 이어 쓰기").click();h.run_steps(3);
  assert!(h.get_all_by_value("프론트와 백 API를 함께 변경").next().is_some());
- assert!(h.state().debug_unsaved_items().iter().any(|v|v.contains("에이전트 요청 초안")));
+ assert!(h.state().debug_unsaved_items().iter().any(|v|v.contains("작성 중인 에이전트 요청")));
  h.state_mut().debug_apply_action(&ctx,Action::OpenRecovery);h.run_steps(3);
  h.get_by_label("셸 설정").click();h.run_steps(3);
  h.get_by_label("기본 셸");

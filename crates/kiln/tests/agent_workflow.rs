@@ -30,7 +30,7 @@ fn long_parent_request_launches_a_separate_task_and_preserves_both_repositories(
  assert_eq!(std::fs::read_to_string(root.join("working-directory.txt")).unwrap().trim(),root.canonicalize().unwrap().to_str().unwrap());
  assert!(!root.join("PWNED").exists());assert_eq!(h.state().debug_task_count(),count+1);assert_ne!(h.state().debug_focused_session(),original);
  assert_eq!(h.state().debug_active_workspace_root(),root.canonicalize().unwrap());
- assert!(!h.state().debug_unsaved_items().iter().any(|s|s.contains("에이전트 요청 초안")));
+ assert!(!h.state().debug_unsaved_items().iter().any(|s|s.contains("작성 중인 에이전트 요청")));
  h.state_mut().debug_apply_action(&ctx,Action::ToggleInspector);h.run_steps(3);h.get_by_label("변경").click();
  pump(&mut h,|h|h.query_by_label("frontend 변경 펼치기").is_some()&&h.query_by_label("backend 변경 펼치기").is_some());
  h.get_by_label("frontend 변경 펼치기").click();h.run_steps(3);h.get_by_label("backend 변경 펼치기").click();h.run_steps(3);
@@ -46,7 +46,7 @@ fn long_parent_request_launches_a_separate_task_and_preserves_both_repositories(
  let failed=h.state().debug_launch_drafts()[0].0;
  h.state_mut().debug_set_shell(String::new());h.state_mut().debug_apply_action(&ctx,Action::DiscardTerminalLaunch(failed));
  pump(&mut h,|h|h.state().debug_focused_session().is_some());h.run_steps(3);
- assert!(h.state().debug_unsaved_items().iter().any(|s|s.contains("에이전트 요청 초안")));
+ assert!(h.state().debug_unsaved_items().iter().any(|s|s.contains("작성 중인 에이전트 요청")));
  h.state_mut().debug_apply_action(&ctx,Action::NewAgentTask);h.run_steps(3);
  assert!(h.get_all_by_value("보존할 요청").next().is_some());
 }

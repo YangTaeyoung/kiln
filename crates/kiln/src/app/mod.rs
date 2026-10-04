@@ -1540,7 +1540,7 @@ impl KilnApp {
         }
         if workspace.is_none() && self.projects.has_unsaved_edits() { items.push("• 프로젝트 — 편집 중인 작업 정보".into()); }
         if workspace.is_none() && self.keymap.has_unsaved_edits() { items.push("• 설정 — 저장하지 않은 단축키".into()); }
-        if workspace.is_none() && self.launchers.has_unsaved_edits() { items.push("• 저장 명령 — 편집 중인 초안".into()); }
+        if workspace.is_none() && self.launchers.has_unsaved_edits() { items.push("• 저장 명령 — 작성 중인 명령".into()); }
         items
     }
 
@@ -1582,10 +1582,10 @@ impl KilnApp {
         }
         self.confirm = Some(Confirm {
             title: "저장하지 않은 변경이 있습니다".into(),
-            body: format!("{}\n\n{}\n터미널 세션은 종료 후에도 유지됩니다.", dirty.join("\n"),
+            body: format!("{}\n실행 중인 터미널 작업은 계속됩니다.\n\n작성 중인 내용:\n{}",
                 if !self.launchers.has_unsaved_edits() && !self.projects.has_unsaved_edits() && !self.keymap.has_unsaved_edits() {
-                    "초안을 보관하면 다음 실행에서 이어서 편집할 수 있습니다. 원본 파일과 데이터베이스에는 적용하지 않습니다."
-                } else { "계속 편집하려면 취소하세요. 변경 내용을 버리고 종료하면 위 항목은 복구할 수 없습니다." }),
+                    "다음에 Kiln을 열면 작성 중인 내용을 이어서 편집할 수 있습니다. 파일과 데이터베이스에는 적용하지 않습니다."
+                } else { "계속 편집하려면 취소하세요. 변경 내용을 버리고 종료하면 아래 항목은 복구할 수 없습니다." }, dirty.join("\n")),
             ok: "변경 버리고 종료".into(),
             action: Action::QuitConfirmed,
         });

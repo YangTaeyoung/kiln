@@ -798,7 +798,7 @@ fn minimum_quit_confirmation_keeps_all_draft_actions_visible() {
     h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.clear();
     h.run_steps(3);
     save_shot(&mut h,"quit_confirmation_minimum_130pct");
-    for label in ["초안 보관 후 종료","변경 버리고 종료","취소"] {
+    for label in ["작성 내용 남기고 종료","변경 버리고 종료","취소"] {
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}: {:?}, viewport {:?}",h.get_by_label(label).rect(),h.ctx.content_rect());
     }
     h.get_by_label("취소").click();h.run_steps(2);

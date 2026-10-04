@@ -1124,7 +1124,7 @@ impl KilnApp {
                 });
                 ui.add_space(16.0);
                 if matches!(c.action, Action::QuitConfirmed) && !self.launchers.has_unsaved_edits() && !self.projects.has_unsaved_edits() && !self.keymap.has_unsaved_edits() {
-                    if widgets::button(ui,"초안 보관 후 종료",ButtonKind::Primary).clicked(){preserve_quit=true;}
+                    if widgets::button(ui,"작성 내용 남기고 종료",ButtonKind::Primary).clicked(){preserve_quit=true;}
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if widgets::button(ui, &c.ok, ButtonKind::Danger).clicked() {

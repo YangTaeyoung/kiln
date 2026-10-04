@@ -618,11 +618,11 @@ impl WorkspaceTools {
 
     pub fn unsaved_drafts(&self) -> Vec<String> {
         let mut items = self.repositories.unsaved();
-        if self.git.as_ref().is_some_and(|g| !g.commit_draft().is_empty()) { items.push("Git — 커밋 메시지 초안".into()); }
+        if self.git.as_ref().is_some_and(|g| !g.commit_draft().is_empty()) { items.push("Git — 작성 중인 커밋 메시지".into()); }
         if let Some(hub) = &self.hub {
             for (repo, drafts) in hub.recovery_drafts().repositories {
-                if drafts.pull_request.is_some() { items.push(format!("GitHub · {repo} — 새 풀 리퀘스트 초안")); }
-                if drafts.issue.is_some() { items.push(format!("GitHub · {repo} — 새 이슈 초안")); }
+                if drafts.pull_request.is_some() { items.push(format!("GitHub · {repo} — 작성 중인 풀 리퀘스트")); }
+                if drafts.issue.is_some() { items.push(format!("GitHub · {repo} — 작성 중인 이슈")); }
             }
         }
         items

@@ -646,7 +646,7 @@ impl RepositoryWorkspace {
             .map(|(p, _)| format!("{} — Git / GitHub 초안", self.label(&p)))
             .collect();
         if !self.prompt.is_empty() {
-            items.push("에이전트 요청 초안".into());
+            items.push("작성 중인 에이전트 요청".into());
         }
         items
     }
