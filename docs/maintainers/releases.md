@@ -96,7 +96,12 @@ not prove the app starts, updates or preserves running work.
 ## 4. Publish GitHub Release
 
 Only after the preceding checks pass, create/push the new tag from the reviewed
-commit. Create a draft release, upload the three distribution files, review it,
+commit. Await the release-upload process **until it actually exits successfully**;
+a tool's running session ID is not completion. Check the complete draft asset
+set (ZIP, appcast and checksums), lengths and SHA-256 digests against local files.
+If any check fails, stop before publication. Use `set -euo pipefail` for dependent
+shell commands or checked subprocess calls, and invoke publication as a separate
+step only after inspecting successful verification output. Create a draft release, upload the three distribution files, review it,
 then publish it as the latest stable release. Initial repository publication must
 likewise wait until the release prerequisites are complete.
 
