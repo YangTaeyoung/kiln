@@ -28,7 +28,6 @@ pub(super) struct WorkspaceTask {
     pub title: String,
     /// Compact visible distinction; reserve its width instead of truncating it.
     pub qualifier: String,
-    pub duplicate_index: usize,
     pub phase: TaskPhase,
     pub agent: Option<kiln_accounts::Tool>,
     pub updated: u64,
@@ -70,7 +69,7 @@ impl KilnApp {
                         .filter(|s:&String|!s.is_empty()).unwrap_or_else(||kiln_common::i18n::tr("터미널").into());
                 }
                 let recorded=Some(command_time.max(notice_time)).filter(|time|*time>0);
-                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),duplicate_index:0,phase:phase(info,telemetry),agent:self.conn.session_agent(session),updated:info.created_unix.max(command_time).max(notice_time),recorded});
+                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),phase:phase(info,telemetry),agent:self.conn.session_agent(session),updated:info.created_unix.max(command_time).max(notice_time),recorded});
                 locations.push(info.cwd.as_deref().map(|cwd| {
                     let cwd=Path::new(cwd);
                     cwd.strip_prefix(&self.workspaces[index].root).ok().filter(|p|!p.as_os_str().is_empty())
@@ -81,8 +80,8 @@ impl KilnApp {
         }
         // Stable ties preserve page/split order. Animated OSC title frames must
         // never make the list shuffle or imply a new task completion.
-        // Name in navigation order before activity sorting: internal pane IDs
-        // have no user meaning, and status changes must not swap display numbers.
+        // Distinguish duplicate names only with a meaningful folder, never
+        // synthetic ordinals or internal pane IDs.
         distinguish_titles(&mut tasks,&locations);
         tasks.sort_by_key(|t|(t.phase.priority(),std::cmp::Reverse(t.updated)));
         tasks
@@ -94,18 +93,9 @@ fn distinguish_titles(tasks:&mut [WorkspaceTask],locations:&[String]) {
     for (i,task) in tasks.iter_mut().enumerate() {
         let peers:Vec<_>=names.iter().enumerate().filter(|(_,name)|**name==names[i]).map(|(index,_)|index).collect();
         if peers.len()<2 {continue;}
-        task.duplicate_index=peers.iter().position(|&peer|peer==i).unwrap()+1;
         if !locations[i].is_empty() && peers.iter().any(|&j|locations[j]!=locations[i]) {
             task.qualifier=Path::new(&locations[i]).file_name().unwrap_or_default().to_string_lossy().into_owned();
             task.title=format!("{} · {}",names[i],task.qualifier);
-        }
-    }
-    let names:Vec<_>=tasks.iter().map(|t|t.title.clone()).collect();
-    for (i,task) in tasks.iter_mut().enumerate() {
-        if names.iter().filter(|name|**name==names[i]).count()>1 {
-            let number=names[..=i].iter().filter(|name|**name==names[i]).count();
-            task.title=format!("{} {number}",names[i]);
-            task.qualifier=if task.qualifier.is_empty(){number.to_string()}else{format!("{} {number}",task.qualifier)};
         }
     }
 }
@@ -134,14 +124,13 @@ fn elided(ui:&egui::Ui,text:&str,font:FontId,color:Color32,width:f32)->std::sync
 fn visible_qualifier(ui:&egui::Ui,task:&WorkspaceTask,width:f32,theme:&Theme)->String {
     let measure=|text:String|ui.painter().layout_no_wrap(text,fonts::regular(11.0),theme.text_dim).size().x;
     if measure(task.qualifier.clone())<=width {return task.qualifier.clone();}
-    let number=task.duplicate_index.to_string();
-    let mut prefix=task.qualifier.clone();
-    while !prefix.is_empty() {
-        prefix.pop();
-        let candidate=format!("{prefix}… {number}");
+    let mut suffix: Vec<char> = task.qualifier.chars().collect();
+    while !suffix.is_empty() {
+        suffix.remove(0);
+        let candidate=format!("…{}",suffix.iter().collect::<String>());
         if measure(candidate.clone())<=width {return candidate;}
     }
-    number
+    String::new()
 }
 
 pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<PaneId>,theme:&Theme)->Option<PaneId> {
@@ -210,7 +199,7 @@ mod tests {
         use kiln_accounts::Tool;
         for theme in [Theme::KILN_DARK,Theme::KILN_LIGHT] {
             for width in [180.0,300.0] {
-                let task=|pane,title:&str,agent,phase|WorkspaceTask {pane,title:title.into(),qualifier:String::new(),duplicate_index:0,phase,agent,updated:0,recorded:None};
+                let task=|pane,title:&str,agent,phase|WorkspaceTask {pane,title:title.into(),qualifier:String::new(),phase,agent,updated:0,recorded:None};
                 let tasks=vec![task(1,"용량 정리",Some(Tool::Claude),TaskPhase::Unknown),
                     task(2,"API 연결",Some(Tool::Codex),TaskPhase::Unknown),
                     task(3,"변경 승인",Some(Tool::Claude),TaskPhase::Waiting)];
@@ -231,23 +220,29 @@ mod tests {
     #[test]
     fn duplicate_names_keep_human_distinctions_when_activity_order_changes() {
         use egui_kittest::{Harness,kittest::Queryable};
-        let task=|pane,title:&str|WorkspaceTask{pane,title:title.into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None};
+        let task=|pane,title:&str|WorkspaceTask{pane,title:title.into(),qualifier:String::new(),phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None};
         let mut tasks=vec![task(1004,"터미널"),task(1001,"터미널"),
             task(1051,"동일한 긴 작업 제목으로 프론트와 백엔드 API 연결 상태 확인"),
             task(1062,"동일한 긴 작업 제목으로 프론트와 백엔드 API 연결 상태 확인")];
         distinguish_titles(&mut tasks,&["workspace".into(),"workspace".into(),"frontend-staging".into(),"frontend-production".into()]);
-        assert_eq!(tasks[0].title,"터미널 1");assert_eq!(tasks[1].title,"터미널 2");
+        assert_eq!(tasks[0].title,"터미널");assert_eq!(tasks[1].title,"터미널");
+        assert!(tasks[..2].iter().all(|task|task.qualifier.is_empty()));
         assert_eq!(tasks[2].qualifier,"frontend-staging");assert_eq!(tasks[3].qualifier,"frontend-production");
+        let mut named=vec![task(2000,"API v2"),task(2001,"API v2"),task(2002,"터미널 2")];
+        distinguish_titles(&mut named,&["release-2026".into(),"release-2027".into(),"workspace".into()]);
+        assert_eq!(named[0].title,"API v2 · release-2026");
+        assert_eq!(named[1].title,"API v2 · release-2027");
+        assert_eq!(named[2].title,"터미널 2");
         tasks[1].phase=TaskPhase::Waiting;
         tasks.sort_by_key(|t|t.phase.priority());
-        assert_eq!((tasks[0].pane,tasks[0].title.as_str()),(1001,"터미널 2"));
+        assert_eq!((tasks[0].pane,tasks[0].title.as_str()),(1001,"터미널"));
         assert!(tasks.iter().all(|t|!t.title.contains("패널")&&!t.title.contains(&t.pane.to_string())));
         let mut installed=false;
         let mut h=Harness::builder().with_size([180.0,240.0]).build_ui(move|ui|{
             if !installed{kiln_common::fonts::install(ui.ctx());Theme::current().apply(ui.ctx());installed=true;return;}
             let first=visible_qualifier(ui,&tasks[2],60.0,&Theme::current());
             let second=visible_qualifier(ui,&tasks[3],60.0,&Theme::current());
-            assert_ne!(first,second);assert!(first.ends_with('1'));assert!(second.ends_with('2'));
+            assert_ne!(first,second);assert!(first.ends_with("staging"));assert!(second.ends_with("tion"));
             task_rows(ui,&tasks,Some(1001),&Theme::current());
         });
         h.run_steps(3);h.get_by_label("작업 4개 모두 보기").click();h.run_steps(2);
@@ -297,10 +292,10 @@ mod tests {
     fn workspace_task_rows_are_bounded_and_open_the_selected_split() {
         use egui_kittest::{Harness,kittest::Queryable};
         let tasks=vec![
-            WorkspaceTask{pane:11,title:"결제 API 인증 방식 확인".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Waiting,agent:None,updated:0,recorded:None},
-            WorkspaceTask{pane:12,title:"프론트·백엔드 로그인 연결 구현".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Running,agent:None,updated:0,recorded:None},
-            WorkspaceTask{pane:13,title:"캐시 무효화 문제 수정".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Done,agent:None,updated:0,recorded:None},
-            WorkspaceTask{pane:14,title:"아주 긴 최근 작업 제목이 좁은 작업 공간 목록을 밀어내면 안 됩니다".into(),qualifier:String::new(),duplicate_index:0,phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:11,title:"결제 API 인증 방식 확인".into(),qualifier:String::new(),phase:TaskPhase::Waiting,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:12,title:"프론트·백엔드 로그인 연결 구현".into(),qualifier:String::new(),phase:TaskPhase::Running,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:13,title:"캐시 무효화 문제 수정".into(),qualifier:String::new(),phase:TaskPhase::Done,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:14,title:"아주 긴 최근 작업 제목이 좁은 작업 공간 목록을 밀어내면 안 됩니다".into(),qualifier:String::new(),phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None},
         ];
         for width in [180.0,280.0] {
             let tasks=tasks.clone(); let mut installed=false;

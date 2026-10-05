@@ -91,6 +91,7 @@ pub struct Conn {
     pending_copy: std::collections::HashSet<u32>,
     pending_text: HashMap<u32, SessionId>,
     cell_px: (u16, u16),
+    terminal_palette: TerminalPalette,
     terminal_focus_candidate: Option<(SessionId, egui::ViewportId, egui::Id)>,
     reported_terminal_focus: Option<SessionId>,
 }
@@ -120,6 +121,7 @@ impl Conn {
             pending_copy: Default::default(),
             pending_text: HashMap::new(),
             cell_px: (0, 0),
+            terminal_palette: palette_for_theme(&kiln_common::Theme::current()),
             terminal_focus_candidate: None,
             reported_terminal_focus: None,
         };
@@ -153,6 +155,7 @@ impl Conn {
             pending_copy: Default::default(),
             pending_text: HashMap::new(),
             cell_px: (0, 0),
+            terminal_palette: palette_for_theme(&kiln_common::Theme::current()),
             terminal_focus_candidate: None,
             reported_terminal_focus: None,
         }
@@ -179,6 +182,10 @@ impl Conn {
                     self.state = State::Disconnected { since: Instant::now(), last_error: "upgrading daemon".into() };
                     return;
                 }
+                // Same-socket ordering installs the palette before any Create can
+                // start a child that immediately asks for its default colors.
+                self.terminal_palette = palette_for_theme(&kiln_common::Theme::current());
+                c.send(ClientMsg::SetPalette { palette: self.terminal_palette.clone() });
                 c.send(ClientMsg::ListSessions { req: c.next_req() });
                 if self.cell_px != (0, 0) {
                     c.send(ClientMsg::CellSize { width: self.cell_px.0, height: self.cell_px.1 });
@@ -203,6 +210,7 @@ impl Conn {
 
     /// 매 프레임 호출: 서버 메시지를 처리하고 끊겼으면 재연결한다.
     pub fn pump(&mut self) {
+        self.sync_palette();
         let mut disconnected = false;
         let mut msgs = Vec::new();
         if let Some(c) = &self.client {
@@ -335,7 +343,17 @@ impl Conn {
         }
     }
 
+    /// Share the actual displayed terminal colors, including after reconnection.
+    pub fn sync_palette(&mut self) {
+        let palette = palette_for_theme(&kiln_common::Theme::current());
+        if palette != self.terminal_palette {
+            self.terminal_palette = palette.clone();
+            self.send(ClientMsg::SetPalette { palette });
+        }
+    }
+
     pub fn create(&mut self, spec: SpawnSpec) -> Option<u32> {
+        self.sync_palette();
         let c = self.client.as_ref()?;
         let req = c.next_req();
         c.send(ClientMsg::Create { req, spec });
@@ -611,4 +629,11 @@ mod terminal_focus_tests {
         conn.screens.get_mut(&1).unwrap().mode = mode::FOCUS_EVENTS;
         assert_eq!(conn.terminal_focus_changes(Some(1)), vec![(1, true)]);
     }
+}
+
+/// Keep OSC color replies identical to terminal::Palette, without an egui
+/// dependency in the protocol or daemon. Explicit application RGB stays intact.
+fn palette_for_theme(theme: &kiln_common::Theme) -> TerminalPalette {
+    let rgb = |color: egui::Color32| [color.r(), color.g(), color.b()];
+    TerminalPalette { fg: rgb(theme.text), bg: rgb(theme.bg), cursor: rgb(theme.accent), ansi: theme.ansi.map(rgb) }
 }

@@ -65,6 +65,12 @@ impl Emu {
         std::mem::take(&mut *self.proxy.0.lock())
     }
 
+    /// OSC overrides belong to the application and take precedence over GUI defaults.
+    pub fn color_override(&self, index: usize) -> Option<[u8; 3]> {
+        if index >= alacritty_terminal::term::color::COUNT { return None; }
+        self.term.colors()[index].map(|rgb| [rgb.r, rgb.g, rgb.b])
+    }
+
     pub fn size(&self) -> (u16, u16) {
         (self.term.columns() as u16, self.term.screen_lines() as u16)
     }

@@ -288,12 +288,12 @@ pub(crate) fn shells() -> &'static [&'static str] {
 }
 
 fn is_inspector(kind:tools::ToolKind)->bool {
-    matches!(kind,tools::ToolKind::Explorer|tools::ToolKind::Search|tools::ToolKind::Git|tools::ToolKind::PullRequests)
+    matches!(kind,tools::ToolKind::Explorer|tools::ToolKind::Search|tools::ToolKind::Git|tools::ToolKind::PullRequests|tools::ToolKind::Database)
 }
 
 fn restored_inspector(last:Option<&str>,sheet:Option<&str>)->tools::ToolKind {
     last.into_iter().chain(sheet).find_map(|value| match value {
-        "explorer"|"search"|"git"|"prs"=>Some(tools::ToolKind::from_str(value)),
+        "explorer"|"search"|"git"|"prs"|"db"=>Some(tools::ToolKind::from_str(value)),
         _=>None,
     }).unwrap_or(tools::ToolKind::Explorer)
 }
@@ -306,7 +306,8 @@ mod inspector_state_tests {
         use tools::ToolKind::*;
         assert_eq!(restored_inspector(Some("prs"),Some("db")),PullRequests);
         assert_eq!(restored_inspector(None,Some("git")),Git);
-        assert_eq!(restored_inspector(Some("db"),Some("search")),Search);
+        assert_eq!(restored_inspector(Some("db"),Some("search")),Database);
+        assert_eq!(restored_inspector(None,Some("db")),Database);
         assert_eq!(restored_inspector(Some("unknown"),Some("problems")),Explorer);
         assert_eq!(restored_inspector(None,None),Explorer);
         let old:state::WorkspaceP=serde_json::from_str(r#"{"name":"parent","root":"/workspace","sheet":"git"}"#).unwrap();
@@ -1230,6 +1231,7 @@ impl KilnApp {
                 self.theme = Theme::current();
                 self.theme.apply(ctx);
                 self.settings.theme = name;
+                self.conn.sync_palette();
             }
         }
     }

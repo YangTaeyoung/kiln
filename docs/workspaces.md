@@ -11,6 +11,11 @@ Use the repository selector inside Git/GitHub tools to target a specific reposit
 for Git operations. A workspace is a navigation and agent context boundary, not a
 replacement for each repository's Git history.
 
+The right-hand workspace inspector includes Files, Changes, GitHub and a database
+icon. Select the database icon to browse connections and tables or open a SQL
+console. At narrow widths, tabs use icons with tooltips; the inspector remembers
+the last selected tool when closed and reopened.
+
 ## Tasks and terminals
 
 - The sidebar previews up to three tasks per workspace, with an option to show all.

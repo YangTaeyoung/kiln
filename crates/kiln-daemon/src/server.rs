@@ -92,6 +92,7 @@ pub struct Daemon {
     socket: String,
     cell_w: AtomicU32,
     cell_h: AtomicU32,
+    palette: RwLock<TerminalPalette>,
 }
 
 /// 업그레이드 상태 파일 v1(접두 없음).
@@ -177,6 +178,7 @@ impl Daemon {
             socket,
             cell_w: AtomicU32::new(8),
             cell_h: AtomicU32::new(17),
+            palette: RwLock::new(TerminalPalette::default()),
         })
     }
 
@@ -443,11 +445,9 @@ impl Daemon {
                     let _ = sess.input.send(f(ws).into_bytes());
                 }
                 Event::ColorRequest(idx, f) => {
-                    let rgb = match idx {
-                        256 => alacritty_terminal::vte::ansi::Rgb { r: 0xdc, g: 0xde, b: 0xe6 },
-                        257 => alacritty_terminal::vte::ansi::Rgb { r: 0x16, g: 0x17, b: 0x1c },
-                        _ => alacritty_terminal::vte::ansi::Rgb { r: 0x80, g: 0x80, b: 0x80 },
-                    };
+                    let [r,g,b] = sess.emu.lock().color_override(idx)
+                        .or_else(|| self.palette.read().color(idx)).unwrap_or([0x80;3]);
+                    let rgb = alacritty_terminal::vte::ansi::Rgb { r, g, b };
                     let _ = sess.input.send(f(rgb).into_bytes());
                 }
                 _ => {}
@@ -681,6 +681,7 @@ impl Daemon {
                 Some(s) => reply(ServerMsg::Text { req, text: s.emu.lock().read_range(start, end) }),
                 None => reply(ServerMsg::Error { req, message: format!("no session {session}") }),
             },
+            ClientMsg::SetPalette { palette } => { *self.palette.write() = palette; }
             ClientMsg::CellSize { width, height } => {
                 self.cell_w.store(width.max(1) as u32, Ordering::Relaxed);
                 self.cell_h.store(height.max(1) as u32, Ordering::Relaxed);
@@ -1101,4 +1102,82 @@ fn restore(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<Listener> {
     // SAFETY: 이전 프로세스에서 상속한 리스닝 소켓 fd.
     let l = unsafe { std::os::unix::net::UnixListener::from_raw_fd(state.listener_fd) };
     Ok(Listener(l))
+}
+
+#[cfg(all(test, unix))]
+mod palette_tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn first_child_queries_use_palette_sent_before_create_and_updates_preserve_overrides() {
+        assert!(!crate::ptyhost::host_mode(), "run this isolated native PTY test without KILN_PTY_HOST=1");
+        let dir=tempfile::Builder::new().prefix("kiln-palette-").tempdir_in("/tmp").unwrap();
+        let socket=dir.path().join("d.sock").to_string_lossy().into_owned();
+        let daemon=Daemon::new(socket.clone());
+        struct Cleanup(Arc<Daemon>);
+        impl Drop for Cleanup {fn drop(&mut self){for s in self.0.sessions.read().values(){if s.info.lock().exited.is_none(){s.pty.kill();}}}}
+        let _cleanup=Cleanup(daemon.clone());
+        let listener=Listener::bind(&socket).unwrap();
+        let d=daemon.clone();
+        let server=std::thread::spawn(move||d.handle_client(listener.accept().unwrap()));
+        let mut stream=UnixStream::connect(&socket).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        write_msg(&mut stream,&ClientMsg::Hello{proto:PROTO_VERSION,build:"test".into(),client:"palette-test".into()}).unwrap();
+        assert!(matches!(read_msg::<_,ServerMsg>(&mut stream).unwrap(),Some(ServerMsg::Hello{proto:4,..})));
+        let light=TerminalPalette{fg:[28,29,33],bg:[255;3],cursor:[76,88,210],ansi:[[20,30,40];16]};
+        let script=dir.path().join("probe.py");
+        std::fs::write(&script,r#"import os,sys,tty,select,time,json
+os.chdir(sys.argv[1])
+tty.setraw(0)
+def query(sequence):
+    os.write(1, sequence)
+    data=b''
+    deadline=time.monotonic()+5
+    while not data.endswith(b'\x07'):
+        remaining=deadline-time.monotonic()
+        if remaining<=0 or not select.select([0],[],[],remaining)[0]:
+            raise RuntimeError('OSC reply timeout: '+repr(data))
+        data+=os.read(0,1)
+    return data.decode()
+def phase(name,queries):
+    values=[query(q) for q in queries]
+    with open(name,'w') as f: json.dump(values,f)
+queries=[b'\x1b]10;?\x07',b'\x1b]11;?\x07',b'\x1b]12;?\x07',b'\x1b]4;7;?\x07',b'\x1b]4;21;?\x07',b'\x1b]4;244;?\x07']
+phase('initial.json',queries)
+deadline=time.monotonic()+10
+while not os.path.exists('continue'):
+    if time.monotonic()>deadline: raise RuntimeError('test did not update palette')
+    time.sleep(.005)
+phase('updated.json',queries)
+os.write(1,b'\x1b]11;rgb:11/22/33\x07\x1b]4;7;rgb:00/aa/00\x07')
+phase('override.json',[queries[1],queries[3]])
+os.write(1,b'\x1b]111\x07\x1b]104;7\x07')
+phase('reset.json',[queries[1],queries[3]])
+"#).unwrap();
+        // The two messages share one FIFO stream. No sleep between palette and Create.
+        write_msg(&mut stream,&ClientMsg::SetPalette{palette:light}).unwrap();
+        write_msg(&mut stream,&ClientMsg::Create{req:7,spec:SpawnSpec{program:Some("/usr/bin/python3".into()),args:vec![script.to_string_lossy().into_owned(),dir.path().to_string_lossy().into_owned()],cwd:Some(dir.path().to_string_lossy().into_owned()),cols:80,rows:24,..Default::default()}}).unwrap();
+        let session=loop {match read_msg::<_,ServerMsg>(&mut stream).unwrap().unwrap(){ServerMsg::Created{req:7,session}=>break session,ServerMsg::Error{message,..}=>panic!("{message}"),_=>{}}};
+        let read_phase=|name:&str|{
+            let deadline=Instant::now()+Duration::from_secs(10);
+            loop {
+                if let Ok(bytes)=std::fs::read(dir.path().join(name)) {if let Ok(values)=serde_json::from_slice::<Vec<String>>(&bytes){break values;}}
+                assert!(Instant::now()<deadline,"missing {name}: {}",daemon.session(session).unwrap().emu.lock().text(0));
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let reply=|prefix:&str,[r,g,b]:[u8;3]|format!("\x1b]{prefix};rgb:{r:02x}{r:02x}/{g:02x}{g:02x}/{b:02x}{b:02x}\x07");
+        let expected=|palette:TerminalPalette|vec![reply("10",palette.fg),reply("11",palette.bg),reply("12",palette.cursor),reply("4;7",palette.ansi[7]),reply("4;21",[0,0,255]),reply("4;244",[128;3])];
+        assert_eq!(read_phase("initial.json"),expected(light));
+        let dark=TerminalPalette::default();
+        write_msg(&mut stream,&ClientMsg::SetPalette{palette:dark}).unwrap();
+        write_msg(&mut stream,&ClientMsg::Ping{req:8}).unwrap();
+        loop {if matches!(read_msg::<_,ServerMsg>(&mut stream).unwrap(),Some(ServerMsg::Pong{req:8})){break;}}
+        std::fs::write(dir.path().join("continue"),b"go").unwrap();
+        assert_eq!(read_phase("updated.json"),expected(dark));
+        assert_eq!(read_phase("override.json"),vec![reply("11",[0x11,0x22,0x33]),reply("4;7",[0,0xaa,0])]);
+        assert_eq!(read_phase("reset.json"),vec![reply("11",dark.bg),reply("4;7",dark.ansi[7])]);
+        stream.shutdown(std::net::Shutdown::Both).unwrap();drop(stream);server.join().unwrap();
+    }
 }

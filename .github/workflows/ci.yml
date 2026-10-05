@@ -24,8 +24,10 @@ jobs:
         run: cargo test --locked -p egui-winit --lib kiln_ime_tests
       - name: Native IME commit and trigger regression
         run: cargo test --locked -p kiln --test native_ime
-      - name: Foreground process identity regression
-        run: cargo test --locked -p kiln-daemon --lib procinfo
+      - name: Daemon protocol, palette and foreground identity regressions
+        run: |
+          cargo test --locked -p kiln-proto
+          cargo test --locked -p kiln-daemon --lib
       - name: Application unit tests
         run: |
           cargo test --locked -p kiln --lib

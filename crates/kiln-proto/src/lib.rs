@@ -8,10 +8,48 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-pub const PROTO_VERSION: u32 = 3;
+pub const PROTO_VERSION: u32 = 4;
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
 
 pub type SessionId = u64;
+
+/// Terminal defaults reported to applications through OSC color queries.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalPalette {
+    pub fg: [u8; 3],
+    pub bg: [u8; 3],
+    pub cursor: [u8; 3],
+    pub ansi: [[u8; 3]; 16],
+}
+
+impl Default for TerminalPalette {
+    fn default() -> Self {
+        Self {
+            fg: [0xec, 0xf0, 0xf7], bg: [0x14, 0x17, 0x1c], cursor: [0x91, 0xb4, 0xff],
+            ansi: [
+                [0x2b,0x2d,0x33],[0xff,0x6b,0x6b],[0x5f,0xd0,0x8c],[0xf2,0xc4,0x6d],
+                [0x5e,0xb1,0xff],[0xc4,0x9b,0xff],[0x5a,0xd4,0xd4],[0xc8,0xca,0xd2],
+                [0x5c,0x5f,0x6a],[0xff,0x8a,0x8a],[0x80,0xe0,0xa6],[0xff,0xd8,0x8c],
+                [0x85,0xc5,0xff],[0xd6,0xb8,0xff],[0x7e,0xe6,0xe6],[0xf4,0xf5,0xf8],
+            ],
+        }
+    }
+}
+
+impl TerminalPalette {
+    pub fn color(&self, index: usize) -> Option<[u8; 3]> {
+        match index {
+            0..=15 => Some(self.ansi[index]),
+            16..=231 => {
+                let n=index-16; let component=|v:usize| if v==0 {0} else {(55+v*40) as u8};
+                Some([component(n/36),component((n/6)%6),component(n%6)])
+            }
+            232..=255 => Some([8+(index as u8-232)*10;3]),
+            256 => Some(self.fg), 257 => Some(self.bg), 258 => Some(self.cursor),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct SpawnSpec {
@@ -51,6 +89,8 @@ pub enum ClientMsg {
     /// 클라이언트 셀 픽셀 크기(이미지 배치 계산용).
     CellSize { width: u16, height: u16 },
     ReadCommandOutput { req: u32, session: SessionId, command: u64 },
+    /// Send before Create on the same connection so the first child query is correct.
+    SetPalette { palette: TerminalPalette },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -307,6 +347,26 @@ fn unsafe_uid() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_wire_append_and_color_indices() {
+        let palette=TerminalPalette::default();
+        let bytes=encode(&ClientMsg::SetPalette{palette});
+        assert_eq!(bytes[4],19,"append only; old message indices must not move");
+        let Some(ClientMsg::SetPalette{palette:decoded})=read_msg(&mut &bytes[..]).unwrap() else {panic!("palette roundtrip")};
+        assert_eq!(decoded,palette);
+        assert_eq!(palette.color(16),Some([0;3]));
+        assert_eq!(palette.color(231),Some([255;3]));
+        assert_eq!(palette.color(232),Some([8;3]));
+        assert_eq!(palette.color(255),Some([238;3]));
+        assert_eq!(palette.color(258),Some(palette.cursor));
+        assert_eq!(palette.color(999),None);
+        // Literal v3 payload: field/variant layout is still decodable during upgrade.
+        let old_hello=[0,3,1,b'b',1,b'c'];
+        assert!(matches!(postcard::from_bytes::<ClientMsg>(&old_hello).unwrap(),ClientMsg::Hello{proto:3,..}));
+        let old_upgrade=[11,1,1,b'x'];
+        assert!(matches!(postcard::from_bytes::<ClientMsg>(&old_upgrade).unwrap(),ClientMsg::Upgrade{req:1,exe} if exe=="x"));
+    }
 
     #[test]
     fn frame_roundtrip() {

@@ -97,6 +97,89 @@ fn pump_until(h: &mut Harness<'_, KilnApp>, secs: u64, mut f: impl FnMut(&mut Ha
     false
 }
 
+/// A cold-start child reads OSC 10/11 just as a palette-aware TUI does. Its
+/// shaded composer must follow the persisted theme before the first query.
+#[test]
+fn terminal_color_probe_matches_saved_theme_changes_and_reconnect() {
+    use std::os::unix::fs::PermissionsExt;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("terminal-palette");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { shutdown(&self.0); } }
+    let _cleanup = Cleanup(base.clone());
+    let probe = base.join("probe.py");
+    let result = base.join("palette.json");
+    std::fs::write(&probe, r#"import json, os, re, select, sys, termios, time, tty
+tty.setraw(0)
+def query():
+    os.write(1, b'\x1b]10;?\x07\x1b]11;?\x07')
+    data = b''
+    end = time.monotonic() + 3
+    while len(re.findall(rb'rgb:([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)', data)) < 2:
+        if time.monotonic() >= end: raise RuntimeError('OSC response timeout')
+        if select.select([0], [], [], 0.1)[0]: data += os.read(0, 4096)
+    colors = [[int(v[:2], 16) for v in values] for values in re.findall(rb'rgb:([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)', data)]
+    fg, bg = colors
+    # Codex's documented composer fill: 4% black on light, 12% white on dark.
+    light = sum(bg) > 384
+    top, alpha = (0, .04) if light else (255, .12)
+    fill = [int(top * alpha + v * (1-alpha)) for v in bg]
+    os.write(1, b'\x1b[2J\x1b[H' + ('\x1b[48;2;%d;%d;%dm' % tuple(fill)).encode() + b'  Ask a question' + b' ' * 60 + b'\x1b[0m\r\n')
+    os.write(1, b'\x1b[48;2;13;123;67m explicit application RGB stays intact               \x1b[0m\r\n')
+    temp = sys.argv[1] + '.tmp'
+    with open(temp, 'w') as f: json.dump({'fg': fg, 'bg': bg, 'fill': fill}, f)
+    os.replace(temp, sys.argv[1])
+query()
+while os.read(0, 1): query()
+"#).unwrap();
+    let shell = base.join("probe-shell");
+    std::fs::write(&shell, format!("#!/bin/sh\nexec /usr/bin/python3 '{}' '{}'\n", probe.display(), result.display())).unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(base.join("cfg/state.json"), serde_json::json!({"settings": {"theme": "kiln-light", "shell": shell}}).to_string()).unwrap();
+    let mut h = Harness::builder().with_size([1100.0, 700.0]).wgpu()
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |_| result.exists()), "cold child did not finish its color probe");
+    let client = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None).unwrap();
+    let sid = h.state().debug_focused_session().unwrap();
+    let ctx = h.ctx.clone();
+    for (index, theme) in [kiln_common::Theme::KILN_LIGHT, kiln_common::Theme::KILN_DARK,
+        kiln_common::Theme::MIDNIGHT, kiln_common::Theme::EMBER].into_iter().enumerate() {
+        if index > 0 {
+            std::fs::remove_file(&result).unwrap();
+            h.state_mut().debug_set_theme(&ctx, theme.name);
+            // Flush ordering with a Ping on a separate connection is insufficient;
+            // allow the application's queued palette to reach the daemon first.
+            h.run_steps(5);
+            std::thread::sleep(Duration::from_millis(100));
+            client.send(kiln_proto::ClientMsg::Input { session: sid, data: b"q".to_vec() });
+            assert!(pump_until(&mut h, 5, |_| result.exists()));
+        }
+        let colors: serde_json::Value = serde_json::from_slice(&std::fs::read(&result).unwrap()).unwrap();
+        assert_eq!(colors["fg"], serde_json::json!([theme.text.r(), theme.text.g(), theme.text.b()]));
+        assert_eq!(colors["bg"], serde_json::json!([theme.bg.r(), theme.bg.g(), theme.bg.b()]));
+        assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_text().is_some_and(|text| text.contains("Ask a question"))));
+        let fill = colors["fill"].as_array().unwrap();
+        let fill = [fill[0].as_u64().unwrap() as u8, fill[1].as_u64().unwrap() as u8, fill[2].as_u64().unwrap() as u8];
+        let fill_color = egui::Color32::from_rgb(fill[0],fill[1],fill[2]);
+        assert!(pump_until(&mut h, 5, |h| h.output().shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == fill_color && rect.rect.area()>1000.0))), "new palette output frame was not rendered");
+        let image = h.render().unwrap();
+        assert!(image.pixels().filter(|p| p.0[..3] == fill).count() > 1000, "{name}: composer fill missing", name=theme.name);
+        assert!(image.pixels().filter(|p| p.0[..3] == [13,123,67]).count() > 1000, "explicit RGB was recolored");
+        image.save(format!("/tmp/kiln-osc-composer-{}.png", theme.name)).unwrap();
+    }
+    // A new GUI connection must publish the selected theme even when the daemon
+    // is already alive with another palette; reattaching must preserve the PTY.
+    h.state_mut().debug_set_theme(&ctx, "kiln-light");
+    h.run_steps(5);
+    let mut reconnect = kiln::app::conn::Conn::new(ctx);
+    std::fs::remove_file(&result).unwrap();
+    let probe_req = reconnect.create(kiln_proto::SpawnSpec { program: Some(shell.to_string_lossy().into_owned()), ..Default::default() }).unwrap();
+    assert!(pump_until(&mut h, 10, |_| { reconnect.pump(); result.exists() }));
+    assert!(probe_req > 0);
+    let colors: serde_json::Value = serde_json::from_slice(&std::fs::read(&result).unwrap()).unwrap();
+    assert_eq!(colors["bg"], serde_json::json!([255,255,255]));
+}
+
 #[test]
 fn terminal_roundtrip_split_and_snapshot() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -434,6 +517,55 @@ fn escape_reaches_terminal_while_wide_explorer_stays_open() {
     assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("RECEIVED-BYTE-27"))), "Escape did not reach the raw-mode terminal");
     assert!(h.query_by_label("도구 닫기").is_some(), "wide dock must remain open on terminal Escape");
     shutdown(&base);
+}
+
+#[test]
+fn database_inspector_tab_is_bounded_localized_and_restores_selection() {
+    use kiln::app::Action;
+    use kiln_common::i18n::{self, Language};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("database-inspector");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { shutdown(&self.0); } }
+    let _cleanup = Cleanup(base.clone());
+    let mut h = Harness::builder().with_size([1100.0, 700.0]).wgpu()
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    h.key_press_modifiers(cmd_shift(), egui::Key::E);
+    h.run_steps(4);
+    for theme in ["kiln-light", "kiln-dark"] {
+        let ctx=h.ctx.clone();h.state_mut().debug_set_theme(&ctx,theme);
+        for language in Language::ALL {
+            i18n::save_language(language).unwrap();
+            h.run_steps(3);
+            let panel_id=egui::Id::new("tools-dock");
+            let mut panel=egui::containers::PanelState::load(&h.ctx,panel_id).expect("inspector dock");
+            panel.outer_rect.min.x=panel.outer_rect.right()-300.0;
+            h.ctx.data_mut(|data| data.insert_persisted(panel_id,panel));h.run_steps(3);
+            let panel=egui::containers::PanelState::load(&h.ctx,panel_id).unwrap();
+            assert!((panel.size().x-300.0).abs()<1.0,"minimum dock width changed");
+            let inner=panel.outer_rect.shrink(10.0);
+            for label in [i18n::tr("파일"),i18n::tr("변경"),"GitHub",i18n::tr("데이터베이스"),i18n::tr("파일 작업"),i18n::tr("파일 내용 검색 (⇧⌘F)")] {
+                assert!(inner.contains_rect(h.get_by_label(label).rect()),"{language:?}: {label} is outside the dock");
+            }
+            h.get_by_label(i18n::tr("데이터베이스")).click();h.run_steps(3);
+            h.get_by_label(i18n::tr("데이터베이스에 연결하세요"));
+            h.render().unwrap().save(format!("/tmp/kiln-db-inspector-{theme}-{}.png",language.code())).unwrap();
+            h.state_mut().debug_queue_action(Action::ToggleInspector);h.run_steps(3);
+            assert!(!h.state().debug_sheet_open());
+            h.state_mut().debug_queue_action(Action::ToggleInspector);h.run_steps(3);
+            h.get_by_label(i18n::tr("데이터베이스에 연결하세요"));
+            let ctx=h.ctx.clone();h.state_mut().debug_checkpoint_restore(&ctx);h.run_steps(3);
+            h.get_by_label(i18n::tr("데이터베이스에 연결하세요"));
+            h.get_by_label(i18n::tr("파일")).click();h.run_steps(3);
+        }
+    }
+    h.set_size(egui::vec2(720.0,440.0));h.run_steps(3);
+    h.get_by_label(i18n::tr("데이터베이스")).click();h.run_steps(3);
+    h.get_by_label(i18n::tr("데이터베이스에 연결하세요"));
+    assert!(h.ctx.content_rect().contains_rect(h.get_by_label(i18n::tr("새 연결")).rect()));
+    h.get_by_label(i18n::tr("작업으로 돌아가기 (Esc)")).click();h.run_steps(3);
+    assert!(!h.state().debug_sheet_open());
 }
 
 #[test]

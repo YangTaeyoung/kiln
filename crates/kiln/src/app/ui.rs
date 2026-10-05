@@ -1144,7 +1144,7 @@ impl KilnApp {
         let Some(kind) = self.workspaces[ws_idx].sheet else { return };
         let mut acts = Vec::new();
         let agent_task = kind == tools::ToolKind::Git && self.workspaces[ws_idx].tools.is_agent_task_open();
-        let inspector = !agent_task && matches!(kind, tools::ToolKind::Explorer | tools::ToolKind::Search | tools::ToolKind::Git | tools::ToolKind::PullRequests);
+        let inspector = !agent_task && super::is_inspector(kind);
         let workspace_name = self.workspaces[ws_idx].name.clone();
         let workspace_path = self.workspaces[ws_idx].root.display().to_string();
         // Dock beside the editor instead of obscuring the file or terminal being worked on.
@@ -1189,9 +1189,14 @@ impl KilnApp {
                 if inspector {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        for (target, label) in [(tools::ToolKind::Explorer, kiln_common::i18n::tr("파일")), (tools::ToolKind::Git, kiln_common::i18n::tr("변경")), (tools::ToolKind::PullRequests, "GitHub")] {
+                        let compact_tabs = ui.available_width() < 320.0;
+                        for (target, label) in [(tools::ToolKind::Explorer, kiln_common::i18n::tr("파일")), (tools::ToolKind::Git, kiln_common::i18n::tr("변경")), (tools::ToolKind::PullRequests, "GitHub"), (tools::ToolKind::Database, kiln_common::i18n::tr("데이터베이스"))] {
                             let selected = kind == target || target == tools::ToolKind::Explorer && kind == tools::ToolKind::Search;
-                            let response = widgets::button_with(ui, if target == tools::ToolKind::PullRequests { Some(Icon::GitHub) } else { None }, label, ButtonKind::Ghost, true);
+                            let response = if compact_tabs || target == tools::ToolKind::Database {
+                                widgets::icon_button(ui, target.vicon(), 28.0, false, label)
+                            } else {
+                                widgets::button_with(ui, if target == tools::ToolKind::PullRequests { Some(Icon::GitHub) } else { None }, label, ButtonKind::Ghost, true)
+                            };
                             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, label));
                             if selected {
                                 ui.painter().line_segment([response.rect.left_bottom(), response.rect.right_bottom()], Stroke::new(2.0, t.accent));

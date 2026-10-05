@@ -16,6 +16,7 @@ the user's shells, agents, builds, or servers.
   setup, never passwords or private keys.
 - [Native updater validation](docs/maintainers/updater-validation.md) — isolated
   old/new fixtures, cancellation, relaunch and session survival checks.
+- [0.1.7 release verification](docs/maintainers/0.1.7-status.md) — terminal palette queries, ordinal-free task names and scoped Codex verification.
 - [0.1.6 release verification](docs/maintainers/0.1.6-status.md) — shared branding, saved appearance, portable icon rendering and published artifacts; installed-device update observation is pending.
 - [0.1.5 release verification](docs/maintainers/0.1.5-status.md) — published artifacts, installed version/session survival and pending menu-icon recovery observation.
 - [0.1.4 release verification](docs/maintainers/0.1.4-status.md) — foreground identity, branded session surfaces, signed artifacts and observed live update.
