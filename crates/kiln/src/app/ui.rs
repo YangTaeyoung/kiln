@@ -465,9 +465,9 @@ impl KilnApp {
     }
 
     /// Aggregate only reported activity; a running shell is not an agent in progress.
-    fn page_activity(&self, page: &Page) -> Option<(Icon, Color32, &'static str)> {
+    fn page_activity(&self, page: &Page) -> Option<(Icon, Color32, &'static str, Option<kiln_accounts::Tool>)> {
         use kiln_proto::AgentActivity;
-        let mut best: Option<(u8, Icon, Color32, &'static str)> = None;
+        let mut best: Option<(u8, Icon, Color32, &'static str, Option<kiln_accounts::Tool>)> = None;
         for id in page.root.panes() {
             let Some(session)=self.panes.get(&id).and_then(|pane|pane.session()) else {continue;};
             let info=self.conn.infos.get(&session);
@@ -481,9 +481,12 @@ impl KilnApp {
                 AgentActivity::Done => Some((1,Icon::Check,self.theme.green,kiln_common::i18n::tr("완료"))),
                 _ => None,
             };
-            if let Some(state)=state {if best.as_ref().is_none_or(|old|state.0>old.0 || (state.0==old.0 && id==page.focused)){best=Some(state);}}
+            if let Some(state)=state {if best.as_ref().is_none_or(|old|state.0>old.0 || (state.0==old.0 && id==page.focused)){best=Some((state.0,state.1,state.2,state.3,self.conn.session_agent(session)));}}
         }
-        best.map(|(_,icon,color,label)|(icon,color,label))
+        best.map(|(_,icon,color,label,agent)|(icon,color,label,agent)).or_else(|| {
+            let agent=self.panes.get(&page.focused).and_then(Pane::session).and_then(|session|self.conn.session_agent(session))?;
+            Some((Icon::Terminal,agent_ink(agent_icon(Some(agent)),&self.theme),kiln_common::i18n::tr("세션 열림"),Some(agent)))
+        })
     }
 
     // ------------------------------------------------------------------ 상단 바
@@ -570,11 +573,25 @@ impl KilnApp {
                         let close_width=if i==active {24.0}else{0.0};
                         let (response,galley,title_origin)=allocate_tab_title(ui,title,fg,tab_max,icon_width,close_width);
                         let rect=response.rect;
-                        response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::Button,true,i==active,title));
-                        ui.painter().rect_filled(rect,5,if i==active{t.bg_panel}else if response.hovered(){t.bg_hover}else{Color32::TRANSPARENT});
-                        if let Some((icon,color,_))=activity {
+                        let accessible_title=activity.map(|(_,_,status,agent)|match agent {
+                            Some(tool)=>format!("{title} · {} · {status}",tool.display_name()),
+                            None=>format!("{title} · {status}"),
+                        }).unwrap_or_else(||title.clone());
+                        response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::Button,true,i==active,&accessible_title));
+                        let tab_bg=if i==active{t.bg_panel}else if response.hovered(){t.bg_hover}else{canvas};
+                        ui.painter().rect_filled(rect,5,tab_bg);
+                        if let Some((icon,color,_,agent))=activity {
                             let center=pos2(rect.left()+17.0,rect.center().y);
-                            if icon==Icon::Play {paint_running(ui,center,color);}
+                            if let Some(agent)=agent {
+                                if icon==Icon::Play {paint_agent_progress(ui,center,color);}
+                                let mark=agent_icon(Some(agent));
+                                icons::paint(ui.painter(),egui::Rect::from_center_size(center,vec2(18.0,18.0)),mark,agent_ink(mark,&t));
+                                if icon!=Icon::Play && icon!=Icon::Terminal {
+                                    let badge=center+vec2(8.0,8.0);
+                                    ui.painter().circle_filled(badge,3.5,tab_bg);
+                                    ui.painter().circle_filled(badge,2.5,color);
+                                }
+                            } else if icon==Icon::Play {paint_running(ui,center,color);}
                             else {icons::paint(ui.painter(),egui::Rect::from_center_size(center,vec2(14.0,14.0)),icon,color);}
                         }
                         ui.painter().galley(title_origin,galley,fg);
@@ -589,7 +606,7 @@ impl KilnApp {
                             if widgets::icon_button(&mut close_ui,Icon::Close,22.0,false,kiln_common::i18n::tr("작업 탭 닫기")).clicked(){self.actions.push(Action::ClosePage(i,false));}
                         }
                         if response.double_clicked() { self.rename_page = Some((i, label.clone())); }
-                        response.on_hover_text(kiln_common::trf!("{label}{}\n작업 {} · 우클릭으로 작업 메뉴", activity.map(|(_,_,status)|format!("\n{status}")).unwrap_or_default(), i + 1)).context_menu(|ui| {
+                        response.on_hover_text(kiln_common::trf!("{label}{}\n작업 {} · 우클릭으로 작업 메뉴", activity.map(|(_,_,status,agent)|format!("\n{}{status}",agent.map(|tool|format!("{} · ",tool.display_name())).unwrap_or_default())).unwrap_or_default(), i + 1)).context_menu(|ui| {
                             if self.workspaces[self.active].pages[i].agent_request.is_some() {
                                 if ui.button(kiln_common::i18n::tr("요청 보기")).clicked(){self.actions.push(Action::ShowAgentRequest(i));ui.close();}
                                 if ui.button(kiln_common::i18n::tr("요청 복사")).clicked(){self.actions.push(Action::CopyAgentRequest(i));ui.close();}
@@ -863,17 +880,21 @@ impl KilnApp {
             if adaptive {
                 let switcher = egui::Rect::from_min_size(area.min, vec2(area.width(), 32.0));
                 let mut nav = ui.new_child(UiBuilder::new().max_rect(switcher).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                nav.set_clip_rect(switcher.intersect(ui.clip_rect()));
+                nav.spacing_mut().item_spacing.x = 4.0;
                 nav.add_space(8.0);
-                if area.width()>520.0 {nav.label(RichText::new(kiln_common::i18n::tr("집중 보기")).size(12.0).color(t.text_dim));}
-                if area.width()>620.0 && nav.button(kiln_common::i18n::tr("격자로 배치")).on_hover_text(kiln_common::i18n::tr("열린 패널을 두 열로 정리합니다")).clicked(){self.actions.push(Action::ArrangeGrid);}
-                if nav.button(kiln_common::i18n::tr("분할로 복원")).on_hover_text(kiln_common::i18n::tr("이 탭의 패널을 분할한 채 유지합니다. 작업 공간을 우클릭한 뒤 패널 배치에서 ‘좁아지면 선택한 패널만 표시’를 다시 켤 수 있습니다.")).clicked(){self.workspaces[ws_idx].page_mut().manual_split=true;}
-                egui::ComboBox::from_id_salt("adaptive-pane-switcher").selected_text(self.card_info(focused).name).width((area.width() - 155.0).clamp(80.0, 240.0)).show_ui(&mut nav, |ui| {
+                if area.width()>260.0 && widgets::icon_button(&mut nav, Icon::Grid, 26.0, false, kiln_common::i18n::tr("격자로 배치")).on_hover_text(kiln_common::i18n::tr("열린 패널을 두 열로 정리합니다")).clicked(){self.actions.push(Action::ArrangeGrid);}
+                if widgets::icon_button(&mut nav, Icon::SplitRight, 26.0, false, kiln_common::i18n::tr("분할로 복원")).on_hover_text(kiln_common::i18n::tr("이 탭의 패널을 분할한 채 유지합니다. 작업 공간을 우클릭한 뒤 패널 배치에서 ‘좁아지면 선택한 패널만 표시’를 다시 켤 수 있습니다.")).clicked(){self.workspaces[ws_idx].page_mut().manual_split=true;}
+                let selected_name = self.card_info(focused).name;
+                let selector_width = (nav.available_width() - 8.0).max(1.0);
+                let selector = egui::ComboBox::from_id_salt("adaptive-pane-switcher").selected_text(&selected_name).width(selector_width).truncate().show_ui(&mut nav, |ui| {
                     for (index, pid) in root_node.panes().iter().enumerate() {
                         if ui.selectable_label(*pid == focused, format!("{} · {}", index + 1, self.card_info(*pid).name)).clicked() {
                             self.actions.push(Action::FocusPane(*pid));
                         }
                     }
                 });
+                selector.response.on_hover_text(format!("{}\n{}", selected_name, kiln_common::i18n::tr("좁아지면 선택한 패널만 표시")));
                 area.min.y += 32.0;
                 rects.clear();
                 rects.push((focused, area));

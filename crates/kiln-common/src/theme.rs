@@ -190,6 +190,9 @@ impl Theme {
 
     /// egui 전역 스타일에 테마와 타이포그래피를 적용한다.
     pub fn apply(&self, ctx: &egui::Context) {
+        // Kiln's saved palette is an explicit choice. Do not let the OS switch
+        // egui to an untouched style after startup or an appearance change.
+        ctx.set_theme(if self.dark { egui::Theme::Dark } else { egui::Theme::Light });
         let mut v = if self.dark { egui::Visuals::dark() } else { egui::Visuals::light() };
         v.dark_mode = self.dark;
         v.panel_fill = self.bg_panel;
@@ -273,6 +276,34 @@ impl Theme {
 }
 
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    #[test]
+    fn chosen_theme_survives_opposite_system_appearance_at_startup_and_later() {
+        for chosen in Theme::ALL {
+            for initial in [egui::Theme::Light, egui::Theme::Dark] {
+                let ctx = egui::Context::default();
+                let mut warmup = ctx.run_ui(egui::RawInput { system_theme: Some(initial), ..Default::default() }, |_| {});
+                warmup.textures_delta.clear();
+                chosen.apply(&ctx);
+                for system in [initial, egui::Theme::Light, egui::Theme::Dark] {
+                    let mut output = ctx.run_ui(egui::RawInput { system_theme: Some(system), ..Default::default() }, |ui| {
+                        assert_eq!(ui.visuals().dark_mode, chosen.dark);
+                        assert_eq!(ui.visuals().panel_fill, chosen.bg_panel);
+                        assert_eq!(ui.visuals().widgets.inactive.bg_fill, chosen.bg_hover);
+                        assert_eq!(ui.spacing().button_padding, Vec2::new(10.0, 5.0));
+                        assert_eq!(ui.style().text_styles[&TextStyle::Button], FontId::new(13.0, FontFamily::Proportional));
+                        let _ = ui.button("Appearance regression");
+                    });
+                    output.textures_delta.clear();
+                }
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod contrast_tests {

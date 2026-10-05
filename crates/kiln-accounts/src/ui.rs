@@ -48,33 +48,15 @@ fn card(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     ui.add_space(14.0);
 }
 
-/// 도구 로고 자리의 둥근 사각형 마크.
+/// The same embedded brand mark used by task navigation and terminal headers.
 fn brand_mark(ui: &mut Ui, tool: Tool) {
     let t = Theme::current();
     let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-    let p = ui.painter();
-    match tool {
-        Tool::Claude => {
-            p.rect_filled(rect, CornerRadius::same(8), Color32::from_rgb(0xd9, 0x77, 0x57));
-            let c = rect.center();
-            let st = Stroke::new(2.2, Color32::from_rgb(0xfb, 0xf4, 0xee));
-            for k in 0..6 {
-                let a = std::f32::consts::PI * k as f32 / 6.0;
-                let d = vec2(a.cos(), a.sin()) * 8.5;
-                p.line_segment([c - d, c + d], st);
-            }
-            p.circle_filled(c, 2.4, Color32::from_rgb(0xd9, 0x77, 0x57));
-        }
-        Tool::Codex => {
-            let (bg, fg) = if t.dark { (Color32::from_rgb(0xf4, 0xf4, 0xf5), Color32::from_rgb(0x14, 0x14, 0x16)) } else { (Color32::from_rgb(0x14, 0x14, 0x16), Color32::WHITE) };
-            p.rect_filled(rect, CornerRadius::same(8), bg);
-            let c = rect.center();
-            let st = Stroke::new(2.2, fg);
-            p.line_segment([pos2(c.x - 8.0, c.y - 5.0), pos2(c.x - 3.0, c.y)], st);
-            p.line_segment([pos2(c.x - 3.0, c.y), pos2(c.x - 8.0, c.y + 5.0)], st);
-            p.line_segment([pos2(c.x + 0.5, c.y + 6.0), pos2(c.x + 8.0, c.y + 6.0)], st);
-        }
-    }
+    let (icon, color) = match tool {
+        Tool::Claude => (Icon::Claude, t.orange),
+        Tool::Codex => (Icon::Codex, t.text),
+    };
+    icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(24.0, 24.0)), icon, color);
 }
 
 fn subtitle(tool: Tool) -> &'static str {
@@ -435,6 +417,31 @@ fn menu_item(ui: &mut Ui, icon: Icon, label: &str, color: Color32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_headers_use_shared_agent_marks_at_every_pixel_density() {
+        for density in [1.0_f32, 1.25, 1.5, 2.0, 3.0] {
+            let ctx = egui::Context::default();
+            let mut input = egui::RawInput::default();
+            input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(density);
+            let mut output = ctx.run_ui(input, |ui| {
+                for tool in Tool::ALL { brand_mark(ui, tool); }
+            });
+            for tool in Tool::ALL {
+                let name = match tool { Tool::Claude => "claude", Tool::Codex => "codex" };
+                let pixels = (24.0 * ctx.pixels_per_point()).ceil() as u32;
+                let texture = ctx.data(|data| data.get_temp::<egui::TextureHandle>(egui::Id::new(("agent-mark", name, pixels))))
+                    .expect("account header must use the shared embedded SVG, not a hand-drawn substitute");
+                let meshes: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => Some(mesh.calc_bounds()),
+                    _ => None,
+                }).collect();
+                assert_eq!(meshes.len(), 1, "missing account logo for {name}");
+                assert_eq!(meshes[0].size(), vec2(24.0, 24.0));
+            }
+            output.textures_delta.clear();
+        }
+    }
 
     #[test]
     fn reset_formatting() {

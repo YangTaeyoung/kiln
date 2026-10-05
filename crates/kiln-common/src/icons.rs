@@ -51,6 +51,7 @@ pub enum Icon {
     Code,
     Plug,
     Columns,
+    Grid,
     Minus,
     History,
     Info,
@@ -321,6 +322,13 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.rect_stroke(r, 2.0 * s, st, egui::StrokeKind::Middle);
             p.line_segment([pos2(r.left() + r.width() / 3.0, r.top()), pos2(r.left() + r.width() / 3.0, r.bottom())], st);
             p.line_segment([pos2(r.left() + r.width() * 2.0 / 3.0, r.top()), pos2(r.left() + r.width() * 2.0 / 3.0, r.bottom())], st);
+        }
+        Icon::Grid => {
+            for x in [-4.0, 4.0] {
+                for y in [-4.0, 4.0] {
+                    p.rect_stroke(Rect::from_center_size(at(x, y), vec2(6.0 * s, 6.0 * s)), 1.0 * s, st, egui::StrokeKind::Middle);
+                }
+            }
         }
         Icon::Minus => {
             p.line_segment([at(-5.5, 0.0), at(5.5, 0.0)], st);

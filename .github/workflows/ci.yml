@@ -27,11 +27,15 @@ jobs:
       - name: Foreground process identity regression
         run: cargo test --locked -p kiln-daemon --lib procinfo
       - name: Application unit tests
-        run: cargo test --locked -p kiln --lib
+        run: |
+          cargo test --locked -p kiln --lib
+          cargo test --locked -p kiln-accounts --lib
       - name: Git integration tests
         run: cargo test --locked -p kiln-git
       - name: GUI and session integration
-        run: cargo test --locked -p kiln --test gui
+        run: |
+          cargo test --locked -p kiln --test gui
+          cargo test --locked -p kiln --test portable_icons
       - name: Validate release scripts
         run: |
           bash -n scripts/bundle-macos.sh scripts/release-macos.sh

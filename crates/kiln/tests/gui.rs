@@ -1150,7 +1150,7 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
                 egui::Shape::Path(path) if path.points.len()==33 && [1.0,1.7].contains(&path.stroke.width) => Some(&path.stroke.color),
                 _=>None,
             }).collect();
-            h.query_by_label(&expected).is_some() && match color {
+            h.query_all_by_label(&expected).next().is_some() && match color {
                 Some(color)=>arcs.len()==3 && arcs.iter().all(|actual|**actual==egui::epaint::ColorMode::Solid(color)),
                 None=>arcs.is_empty(),
             }
@@ -1163,9 +1163,11 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
         let marks:Vec<_>=h.output().shapes.iter().filter_map(|s|match &s.shape {
             egui::Shape::Mesh(mesh) if mesh.texture_id==texture.id()=>Some(mesh.calc_bounds()), _=>None,
         }).collect();
-        assert_eq!(marks.len(),2,"both sidebar and panel header must retain the brand, including while spinning");
+        assert_eq!(marks.len(),3,"sidebar, tab and panel header must retain the brand, including while spinning");
         assert!(marks.iter().all(|r|r.size()==egui::vec2(18.0,18.0)));
-        assert!(marks[0].center().distance(marks[1].center())>24.0);
+        for (index,mark) in marks.iter().enumerate() {
+            assert!(marks[index+1..].iter().all(|other|mark.center().distance(other.center())>24.0));
+        }
         let arcs:Vec<_>=h.output().shapes.iter().filter_map(|shape|match &shape.shape {
             egui::Shape::Path(path) if path.points.len()==33 && [1.0,1.7].contains(&path.stroke.width) => Some(&path.stroke.color),
             _=>None,
@@ -1189,7 +1191,7 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
         client.send(kiln_proto::ClientMsg::Input{session,data:format!("printf '\\033]0;{title}\\007'; (exec -a codex /bin/sleep 120)\r").into_bytes()});
         wait_process("codex");
         let expected=format!("Task | personal · Codex · {label}");
-        let ok=pump_until(&mut h,5,|h|h.query_by_label(&expected).is_some());
+        let ok=pump_until(&mut h,5,|h|h.query_all_by_label(&expected).next().is_some());
         let snapshot=client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(1)).unwrap();
         assert!(ok,"missing {expected}: {snapshot:?}");
         if label!="작업 중" {
@@ -1260,6 +1262,62 @@ finally:
     let mut expected=expected.to_vec();expected.push(0x1b);
     assert!(pump_until(&mut h,5,|_|std::fs::read(&captured).unwrap()==expected));
     assert_eq!(std::fs::read(&captured_second).unwrap(),b"x");
+}
+
+#[test]
+fn adaptive_long_titles_keep_controls_bounded_and_switch_restore_grid_working() {
+    use kiln::app::Action;
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let (base,proj)=setup("adaptive-long-title");
+    struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){shutdown(&self.0);}}
+    let _cleanup=Cleanup(base.clone());
+    let mut h=Harness::builder().with_size([1100.0,700.0]).build_eframe(|cc|{
+        let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));
+        app.debug_set_shell("/bin/bash".into());app
+    });
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    let titles=["첫 번째 프론트엔드 인증 흐름과 backend integration 상태를 검토하는 매우 긴 작업 제목입니다", "두 번째 데이터베이스 마이그레이션과 API compatibility 검증을 진행하는 매우 긴 작업 제목입니다", "세 번째 긴 검토 작업 제목과 terminal integration verification"];
+    let mut panes=Vec::new();
+    for (index,title) in titles.iter().enumerate() {
+        if index>0 {
+            h.key_press_modifiers(primary(),egui::Key::D);
+            assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==index+1&&h.state().debug_focused_session().is_some()));
+        }
+        panes.push(h.state().debug_focused_pane_id().unwrap());
+        client.send(kiln_proto::ClientMsg::Input{session:h.state().debug_focused_session().unwrap(),data:format!("printf '\\033]0;{title}\\007'; sleep 120\r").into_bytes()});
+        assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(panes[index]).is_some_and(|name|name.contains("sleep"))));
+    }
+    h.run_steps(3);
+    for scale in [1.0,1.3] {
+        h.ctx.set_zoom_factor(scale);
+        h.set_size(egui::vec2(720.0/scale,440.0/scale));h.run_steps(5);
+        assert_eq!(h.state().debug_pane_rects().len(),1,"narrow layout must enter focus view");
+        let restore=h.get_by_label("분할로 복원").rect();
+        let grid=h.get_by_label("격자로 배치").rect();
+        let combo=h.get_by_role(egui::accesskit::Role::ComboBox);
+        let selector=combo.rect();
+        for rect in [restore,grid,selector] {assert!(h.ctx.content_rect().contains_rect(rect),"scale {scale}: {rect:?}");}
+        assert!(grid.right()<=restore.left()&&restore.right()<=selector.left(),"controls must not overlap");
+        combo.click();h.run_steps(2);
+        let target=if h.state().debug_focused_pane_id()==Some(panes[1]){0}else{1};
+        h.get_by_label(&format!("{} · {}",target+1,titles[target])).click();h.run_steps(3);
+        assert_eq!(h.state().debug_focused_pane_id(),Some(panes[target]));
+        h.get_by_label("분할로 복원").click();h.run_steps(3);
+        assert_eq!(h.state().debug_pane_rects().len(),3);
+        assert!(h.query_by_label("분할로 복원").is_none());
+        h.state_mut().debug_queue_action(Action::ToggleAutoFocus);h.run_steps(3);
+        h.render().unwrap().save(format!("/tmp/kiln-adaptive-long-title-{scale}.png")).unwrap();
+        if scale==1.3 {
+            h.get_by_label("격자로 배치").click();h.run_steps(3);
+            assert_eq!(h.state().debug_pane_count(),3,"grid action must preserve all sessions");
+            h.set_size(egui::vec2(1100.0,700.0));h.run_steps(3);
+            let rects=h.state().debug_pane_rects();
+            assert_eq!(rects.len(),3);
+            assert!(rects.iter().any(|(_,rect)|(rect.top()-rects[0].1.top()).abs()>20.0),"grid must create another row, not leave three horizontal splits");
+            assert!(panes.iter().all(|pane|rects.iter().any(|(id,_)|id==pane)),"grid must preserve pane identities");
+        }
+    }
 }
 
 #[test]
