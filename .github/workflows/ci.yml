@@ -17,6 +17,7 @@ jobs:
         run: cargo check --locked -p kiln
       - name: Localization coverage and font tests
         run: |
+          python3 scripts/test-check-localizations.py
           python3 scripts/check-localizations.py
           cargo test --locked -p kiln-common -p kiln-i18n-macros
       - name: Native IME cancellation regression

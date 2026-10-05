@@ -133,6 +133,17 @@ pub(super) fn session_activity(info: &kiln_proto::SessionInfo, activity: kiln_pr
     title_activity(title, activity, info.exited)
 }
 
+/// A shell command is a running task only with a current process lookup and
+/// no agent identity. An idle agent's launch command can remain open for hours.
+pub(super) fn task_activity(info: &kiln_proto::SessionInfo, telemetry: Option<&kiln_proto::SessionTelemetry>, agent: Option<kiln_accounts::Tool>) -> kiln_proto::AgentActivity {
+    let activity=session_activity(info,telemetry.map(|t|t.activity).unwrap_or_default());
+    if activity==kiln_proto::AgentActivity::Unknown && !info.attention && agent.is_none()
+        && info.fg_process.as_deref().is_some_and(|p|!is_kiro_bridge(p) && super::rotation::tool_for(p).is_none())
+        && telemetry.and_then(|t|t.commands.last()).is_some_and(|c|c.finished_unix.is_none() && !c.command.is_empty()) {
+        kiln_proto::AgentActivity::Running
+    } else { activity }
+}
+
 pub(super) fn running_color(agent: Option<kiln_accounts::Tool>, theme: &Theme) -> Color32 {
     match agent {
         Some(kiln_accounts::Tool::Claude) => theme.orange,
@@ -387,7 +398,7 @@ impl KilnApp {
                     let base = raw_process.split_whitespace().next().unwrap_or(&raw_process);
                     let proc_name = if shells().contains(&base) {base.to_owned()} else {raw_process};
                     let is_shell = shells().contains(&proc_name.as_str()) || proc_name == kiln_common::i18n::tr("셸");
-                    let activity=session_activity(i,session.and_then(|sid|self.conn.telemetry.get(&sid)).map(|x|x.activity).unwrap_or_default());
+                    let activity=task_activity(i,session.and_then(|sid|self.conn.telemetry.get(&sid)),session.and_then(|sid|self.conn.session_agent(sid)));
                     let (dot,pulse,status)=match (i.exited,activity) {
                         (Some(0),_) => (t.text_dim,false,kiln_common::i18n::tr("종료됨")),
                         (Some(_),_) => (t.red,false,kiln_common::i18n::tr("오류 종료")),
@@ -810,7 +821,7 @@ impl KilnApp {
                     ui.close();
                 }
                 if ui.button(RichText::new(kiln_common::i18n::tr("세션 종료")).color(t.red)).clicked() {
-                    self.confirm = Some(Confirm {
+                    self.confirm = Some(Confirm { skip_running_confirmation: None,
                         title: kiln_common::i18n::tr("세션을 종료할까요?").into(),
                         body: kiln_common::i18n::tr("이 터미널에서 실행 중인 명령과 프로세스가 종료됩니다. 이 작업은 되돌릴 수 없습니다.").into(),
                         ok: kiln_common::i18n::tr("세션 종료").into(),
@@ -1015,8 +1026,10 @@ impl KilnApp {
         ui.painter().rect_filled(rect, CornerRadius::ZERO, if focused { t.bg_panel } else { widgets::canvas_color(&t) });
         ui.painter().line_segment([pos2(rect.left() + 1.0, rect.bottom()), pos2(rect.right() - 1.0, rect.bottom())], Stroke::new(1.0, t.border));
 
+        let show_identity = rect.width() >= 160.0;
         let branded = matches!(info.icon, Icon::Claude | Icon::Codex);
         let icon_rect = egui::Rect::from_center_size(pos2(rect.left() + 30.0, cy), vec2(18.0, 18.0));
+        if show_identity {
         if info.running && branded { paint_agent_progress(ui, icon_rect.center(), agent_ink(info.icon, &t)); }
         else if info.running { paint_running(ui, pos2(rect.left() + 12.0, cy), info.dot); }
         else { widgets::status_dot(ui, pos2(rect.left() + 12.0, cy), info.dot, info.pulse); }
@@ -1034,12 +1047,20 @@ impl KilnApp {
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
             response.on_hover_text(label);
         }
-        let mut x = rect.left() + 47.0;
+        }
+        let mut x = rect.left() + if show_identity {47.0}else{8.0};
         let is_terminal = matches!(self.panes.get(&pid).map(|p|&p.kind),Some(PaneKind::Term {..}));
-        let show_history = is_terminal && rect.width() >= 240.0;
-        let buttons_w = if show_history { 82.0 } else { 56.0 };
+        // Preserve the three frequent actions at narrow widths. Secondary actions
+        // move into More before the title or button hit targets overlap.
+        let show_splits = rect.width() >= 100.0;
+        let show_close = rect.width() >= 68.0;
+        let show_more = !show_splits || rect.width() >= 220.0;
+        let show_zoom = rect.width() >= 280.0;
+        let show_history = is_terminal && rect.width() >= 360.0;
+        let button_count = usize::from(show_close) + 2*usize::from(show_splits) + usize::from(show_more) + usize::from(show_zoom) + usize::from(show_history);
+        let buttons_w = button_count as f32 * 28.0 + 8.0;
         let right_limit = rect.right() - 10.0 - buttons_w;
-        let clip = egui::Rect::from_min_max(pos2(x, rect.top()), pos2(right_limit, rect.bottom()));
+        let clip = egui::Rect::from_min_max(pos2(x, rect.top()), pos2(right_limit.max(x), rect.bottom()));
         let p = ui.painter().with_clip_rect(clip);
         let g = card_title_galley(ui, &info.name, if focused || !multi { t.text } else { t.text_dim }, (right_limit-x).max(0.0));
         let name_w = g.size().x;
@@ -1052,21 +1073,36 @@ impl KilnApp {
             let _ = w;
         }
         // Paths and integration diagnostics belong to the header tooltip, not every pane.
-        let br = egui::Rect::from_min_max(pos2(rect.right()-buttons_w,cy-12.0),pos2(rect.right()-4.0,cy+12.0));
-        let mut bui=ui.new_child(UiBuilder::new().max_rect(br).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        let br = egui::Rect::from_min_max(pos2(rect.right()-buttons_w,cy-13.0),pos2(rect.right()-4.0,cy+13.0));
+        let mut bui=ui.new_child(UiBuilder::new().id_salt(("pane-actions",pid)).max_rect(br).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        bui.set_clip_rect(rect);
         bui.spacing_mut().item_spacing.x=2.0;
-        let menu=widgets::icon_button(&mut bui,Icon::More,24.0,false,kiln_common::i18n::tr("패널 작업"));
-        egui::Popup::menu(&menu).show(|ui| {
-            self.terminal_header_menu(ui,pid);
-            if ui.button(kiln_common::i18n::tr("오른쪽으로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Horizontal));ui.close();}
-            if ui.button(kiln_common::i18n::tr("아래로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Vertical));ui.close();}
-            ui.separator();
-            if ui.button(kiln_common::i18n::tr("패널 닫기")).clicked(){self.actions.push(Action::ClosePane(pid,false));ui.close();}
-        });
-        if widgets::icon_button(&mut bui,if zoomed {Icon::Restore}else{Icon::Maximize},24.0,false,&kiln_common::trf!("크게 보기 / 복원 ({})",self.keymap.label("focus_panel","⇧⌘↩"))).clicked(){self.actions.push(Action::ToggleZoom(Some(pid)));}
+        if show_close {
+        let close = widgets::icon_button(&mut bui,Icon::Close,26.0,false,kiln_common::i18n::tr("패널 닫기"));
+        if close.hovered() { icons::paint(bui.painter(),egui::Rect::from_center_size(close.rect.center(),vec2(26.0*0.56,26.0*0.56)),Icon::Close,t.red); }
+        if close.clicked() { self.actions.push(Action::ClosePane(pid,false)); }
+        bui.add_space(4.0);
+        }
+        if show_splits {
+        if widgets::icon_button(&mut bui,Icon::SplitDown,26.0,false,kiln_common::i18n::tr("아래로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Vertical));}
+        if widgets::icon_button(&mut bui,Icon::SplitRight,26.0,false,kiln_common::i18n::tr("오른쪽으로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Horizontal));}
+        }
+        if show_more {
+            let menu=widgets::icon_button(&mut bui,Icon::More,26.0,false,kiln_common::i18n::tr("패널 작업"));
+            egui::Popup::menu(&menu).show(|ui| {
+                self.terminal_header_menu(ui,pid);
+                if !show_splits {
+                    if ui.button(kiln_common::i18n::tr("오른쪽으로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Horizontal));ui.close();}
+                    if ui.button(kiln_common::i18n::tr("아래로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Vertical));ui.close();}
+                }
+                if ui.button(kiln_common::i18n::tr("크게 보기 / 복원")).clicked(){self.actions.push(Action::ToggleZoom(Some(pid)));ui.close();}
+                if !show_close && ui.button(kiln_common::i18n::tr("패널 닫기")).clicked(){self.actions.push(Action::ClosePane(pid,false));ui.close();}
+            });
+        }
+        if show_zoom && widgets::icon_button(&mut bui,if zoomed {Icon::Restore}else{Icon::Maximize},26.0,false,&kiln_common::trf!("크게 보기 / 복원 ({})",self.keymap.label("focus_panel","⇧⌘↩"))).clicked(){self.actions.push(Action::ToggleZoom(Some(pid)));}
         if show_history {
             if let Some(Pane{kind:PaneKind::Term{view:Some(view),..},..})=self.panes.get_mut(&pid) {
-                if widgets::icon_button(&mut bui,Icon::History,24.0,view.inspector_open(),kiln_common::i18n::tr("명령 기록")).clicked(){view.open_history();}
+                if widgets::icon_button(&mut bui,Icon::History,26.0,view.inspector_open(),kiln_common::i18n::tr("명령 기록")).clicked(){view.open_history();}
             }
         }
     }
@@ -1248,10 +1284,10 @@ impl KilnApp {
         let mut close_confirm = false;
         let mut preserve_quit = false;
         let mut ok = false;
-        if let Some(c) = &self.confirm {
+        if let Some(c) = &mut self.confirm {
             let frame = Frame::new().fill(t.bg_elevated).stroke(Stroke::new(1.0, t.border_strong)).corner_radius(CornerRadius::same(14)).shadow(t.shadow()).inner_margin(Margin::same(22));
             egui::Modal::new(egui::Id::new("confirm")).frame(frame).backdrop_color(Color32::from_black_alpha(110)).show(ctx, |ui| {
-                ui.set_width(390.0);
+                ui.set_width(390.0f32.min((ctx.content_rect().width()-56.0).max(220.0)));
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
                     ui.painter().rect_filled(r, CornerRadius::same(10), Color32::from_rgba_unmultiplied(t.red.r(), t.red.g(), t.red.b(), 36));
@@ -1264,10 +1300,16 @@ impl KilnApp {
                     });
                 });
                 ui.add_space(10.0);
-                egui::ScrollArea::vertical().id_salt("confirm-details").max_height((ctx.content_rect().height() - 190.0).clamp(80.0, 280.0)).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("confirm-details").max_height((ctx.content_rect().height() - if c.skip_running_confirmation.is_some(){260.0}else{190.0}).clamp(48.0, 280.0)).show(ui, |ui| {
                     ui.add(egui::Label::new(RichText::new(&c.body).size(13.0).color(t.text_dim)).wrap());
                 });
                 ui.add_space(16.0);
+                if let Some(skip) = &mut c.skip_running_confirmation {
+                    ui.checkbox(skip,kiln_common::i18n::tr("다시 묻지 않기"))
+                        .on_hover_text(kiln_common::i18n::tr("실행 중인 패널·탭·작업 공간의 종료 확인을 생략합니다. 설정에서 다시 켤 수 있습니다."));
+                    ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("패널·탭·작업 공간에 적용됩니다. 설정에서 다시 켤 수 있습니다.")).size(11.5).color(t.text_dim)).wrap());
+                    ui.add_space(12.0);
+                }
                 if matches!(c.action, Action::QuitConfirmed) && !self.launchers.has_unsaved_edits() && !self.projects.has_unsaved_edits() && !self.keymap.has_unsaved_edits() {
                     if widgets::button(ui,kiln_common::i18n::tr("작성 내용 남기고 종료"),ButtonKind::Primary).clicked(){preserve_quit=true;}
                 }
@@ -1284,6 +1326,10 @@ impl KilnApp {
         if preserve_quit { self.confirm=None; self.actions.push(Action::QuitPreservingDrafts); }
         if ok {
             if let Some(c) = self.confirm.take() {
+                if c.skip_running_confirmation == Some(true) {
+                    self.settings.confirm_close_running = false;
+                    self.save_if_changed(true);
+                }
                 self.actions.push(c.action);
             }
         }
@@ -1411,17 +1457,20 @@ impl KilnApp {
                     let detail = if path.is_empty() { info.detail } else { path };
 
                     let command=pane.session().and_then(|sid|self.conn.telemetry.get(&sid)).and_then(|telemetry|telemetry.commands.last());
-                    let title=if let Some(command)=command.filter(|command|!command.command.is_empty()) {
+                    // Agent launch commands stay open while awaiting input. Show
+                    // the actual task title rather than calling that launch busy.
+                    let title=if let Some(command)=command.filter(|command|!command.command.is_empty() && (command.finished_unix.is_some() || !matches!(info.icon,Icon::Codex|Icon::Claude))) {
                         format!("{} · {}",if command.finished_unix.is_some(){kiln_common::i18n::tr("최근 명령")}else{kiln_common::i18n::tr("실행 중")},command.command)
                     }else if let Some(name)=page.title.as_ref().filter(|name|*name!=&info.name) {format!("{name} · {}",info.name)}else{info.name.clone()};
                     let title=if pane.session().is_some(){kiln_common::trf!("터미널 {}.{} · {}",page_index+1,pane_index+1,title)}else{title};
                     let label=kiln_common::trf!("{title}\n{} · 작업 {} / 패널 {} · {}",ws.name,page_index+1,pane_index+1,detail);
-                    open_tasks.push((self.recent_panes.iter().position(|p| *p == id).unwrap_or(usize::MAX), info.icon, label, kind, id));
+                    let running = info.running;
+                    open_tasks.push((!running,self.recent_panes.iter().position(|p| *p == id).unwrap_or(usize::MAX), info.icon, label, kind, id));
                 }
             }
         }
-        open_tasks.sort_by_key(|item| item.0);
-        for (_, icon, label, kind, id) in open_tasks {
+        open_tasks.sort_by_key(|item| (item.0,item.1));
+        for (_, _, icon, label, kind, id) in open_tasks {
             add(Group::Sessions, icon, label, kind, Action::RevealPane(id));
         }
         add(Group::Commands,Icon::Folder,kiln_common::i18n::tr("폴더 열기").into(),"",Action::OpenFolder);

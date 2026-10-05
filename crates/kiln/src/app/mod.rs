@@ -237,6 +237,8 @@ pub(crate) struct Confirm {
     body: String,
     ok: String,
     action: Action,
+    /// Present only for a running-process panel close; never mutate settings on cancel.
+    skip_running_confirmation: Option<bool>,
 }
 
 pub struct KilnApp {
@@ -720,7 +722,7 @@ impl KilnApp {
                     let dirty = self.unsaved_items(Some(i));
                     let busy:Vec<String>=if self.settings.confirm_close_running{ws.all_panes().iter().filter_map(|p|self.pane_is_busy(*p)).collect()}else{vec![]};
                     if !dirty.is_empty() || !busy.is_empty() {
-                        self.confirm = Some(Confirm {
+                        self.confirm = Some(Confirm { skip_running_confirmation: None,
                             title: kiln_common::trf!("{} 작업 공간을 닫을까요?", ws.name),
                             body: kiln_common::trf!("이 작업 공간의 터미널 세션이 종료됩니다.\n실행 중: {}\n저장하지 않은 변경:\n{}", if busy.is_empty(){kiln_common::i18n::tr("없음").into()}else{busy.join(", ")},if dirty.is_empty(){kiln_common::i18n::tr("없음").into()}else{dirty.join("\n")}),
                             ok: if dirty.is_empty() { kiln_common::i18n::tr("실행 종료 후 작업 공간 닫기") } else { kiln_common::i18n::tr("변경 버리고 작업 공간 닫기") }.into(),
@@ -825,7 +827,7 @@ impl KilnApp {
                         if !dirty.is_empty() {
                             parts.push(kiln_common::trf!("버릴 변경: {}", dirty.join(", ")));
                         }
-                        self.confirm = Some(Confirm { title: kiln_common::i18n::tr("작업 탭을 닫을까요?").into(), body: kiln_common::trf!("{}\n이 탭의 패널과 터미널 세션이 모두 닫힙니다.",parts.join("\n")), ok: if dirty.is_empty(){kiln_common::i18n::tr("실행 종료 후 탭 닫기")}else{kiln_common::i18n::tr("변경 버리고 탭 닫기")}.into(), action: Action::ClosePage(i, true) });
+                        self.confirm = Some(Confirm { skip_running_confirmation: None, title: kiln_common::i18n::tr("작업 탭을 닫을까요?").into(), body: kiln_common::trf!("{}\n이 탭의 패널과 터미널 세션이 모두 닫힙니다.",parts.join("\n")), ok: if dirty.is_empty(){kiln_common::i18n::tr("실행 종료 후 탭 닫기")}else{kiln_common::i18n::tr("변경 버리고 탭 닫기")}.into(), action: Action::ClosePage(i, true) });
                         return;
                     }
                 }
@@ -868,11 +870,11 @@ impl KilnApp {
                 if self.block_disconnected_close(&[p]) { return; }
                 if !force {
                     if self.terminal_launch_drafts.get(&p).is_some_and(|draft|draft.command.is_some()) {
-                        self.confirm=Some(Confirm { title:kiln_common::i18n::tr("보관한 실행 요청을 버릴까요?").into(), body:kiln_common::i18n::tr("이 패널의 실행 요청이 삭제됩니다.").into(), ok:kiln_common::i18n::tr("요청 버리고 닫기").into(), action:Action::ClosePane(p,true) });
+                        self.confirm=Some(Confirm { skip_running_confirmation: None, title:kiln_common::i18n::tr("보관한 실행 요청을 버릴까요?").into(), body:kiln_common::i18n::tr("이 패널의 실행 요청이 삭제됩니다.").into(), ok:kiln_common::i18n::tr("요청 버리고 닫기").into(), action:Action::ClosePane(p,true) });
                         return;
                     }
                     if let Some(proc_name) = self.pane_is_busy(p).filter(|_| self.settings.confirm_close_running) {
-                        self.confirm = Some(Confirm {
+                        self.confirm = Some(Confirm { skip_running_confirmation: Some(false),
                             title: kiln_common::i18n::tr("실행 중인 프로세스를 종료할까요?").into(),
                             body: kiln_common::trf!("프로세스: {proc_name}\n이 패널을 닫으면 위 프로세스도 함께 종료됩니다."),
                             ok: kiln_common::i18n::tr("종료하고 닫기").into(),
@@ -881,7 +883,7 @@ impl KilnApp {
                         return;
                     }
                     if let Some(t) = self.panes.get(&p).and_then(|x| x.tool()).filter(|t| t.is_dirty()) {
-                        self.confirm = Some(Confirm {
+                        self.confirm = Some(Confirm { skip_running_confirmation: None,
                             title: kiln_common::i18n::tr("저장하지 않은 변경").into(),
                             body: kiln_common::trf!("대상: {}\n저장하지 않은 변경을 버리고 패널을 닫습니다.", t.title()),
                             ok: kiln_common::i18n::tr("버리고 닫기").into(),
@@ -1028,7 +1030,7 @@ impl KilnApp {
                 self.focus_terminal = true;
             }
             Action::OpenPalette => self.palette.open(),
-            Action::OpenRecent => self.palette.open_recent(),
+            Action::OpenRecent => self.palette.open_recent(self.focused_pane().map(|id| format!("pane:{id}"))),
             Action::OpenLaunchers => self.launchers.open(),
             Action::RevealPane(p) => {
                 self.reveal_pane(p);
@@ -1600,7 +1602,7 @@ impl KilnApp {
             let previous = ctx.memory(|m| m.focused());
             ctx.data_mut(|data| data.insert_temp(egui::Id::new("quit-return-focus"), previous));
         }
-        self.confirm = Some(Confirm {
+        self.confirm = Some(Confirm { skip_running_confirmation: None,
             title: kiln_common::i18n::tr("저장하지 않은 변경이 있습니다").into(),
             body: kiln_common::trf!("{}\n실행 중인 터미널 작업은 계속됩니다.\n\n작성 중인 내용:\n{}",
                 if !self.launchers.has_unsaved_edits() && !self.projects.has_unsaved_edits() && !self.keymap.has_unsaved_edits() {
@@ -1624,6 +1626,10 @@ impl KilnApp {
     pub fn debug_pending_launches(&self) -> usize { self.pending_creates.len() }
     #[doc(hidden)]
     pub fn debug_focused_pane_id(&self) -> Option<PaneId> { self.focused_pane() }
+    #[doc(hidden)]
+    pub fn debug_busy_process(&self, pane: PaneId) -> Option<String> { self.pane_is_busy(pane) }
+    #[doc(hidden)]
+    pub fn debug_pane_rects(&self) -> Vec<(PaneId,egui::Rect)> { self.workspaces[self.active].page().rects.clone() }
     #[doc(hidden)]
     pub fn debug_disconnect(&mut self, ctx:&egui::Context) {
         let mut offline=Conn::offline(ctx.clone());

@@ -1776,8 +1776,8 @@
   },
   "\n상위 공통 지침: {}\n": {
     "en": "\nShared parent instructions: {}\n",
-    "ja": "\n上位フォルダーの共通指示: {}\n",
-    "zh-CN": "\n上级通用指令：{}\n"
+    "ja": "\n親フォルダの共通指示: {}\n",
+    "zh-CN": "\n上级通用指引：{}\n"
   },
   "\n실행 중: {}": {
     "en": "\nRunning: {}",
@@ -1790,9 +1790,9 @@
     "zh-CN": "\n无法读取的文件夹：{} 个。"
   },
   "\n탐색 범위/권한 제한이 있으므로 필요한 저장소와 파일을 추가 확인하세요.\n": {
-    "en": "\nSearch scope and permissions are limited. Check any additional repositories and files needed.\n",
-    "ja": "\n探索範囲と権限に制限があります。必要なリポジトリとファイルを追加で確認してください。\n",
-    "zh-CN": "\n搜索范围和权限有限，请进一步检查所需的仓库和文件。\n"
+    "en": "\nDiscovery was limited by scope or permissions. Check any additional repositories and files needed.\n",
+    "ja": "\n検索範囲または権限に制限があるため、必要なリポジトリとファイルを追加で確認してください。\n",
+    "zh-CN": "\n扫描受范围或权限限制。请进一步检查所需的仓库和文件。\n"
   },
   "\n탐색 한도 때문에 확인하지 않은 경로가 있습니다.": {
     "en": "\nSome paths were not checked due to search limits.",
@@ -1800,14 +1800,14 @@
     "zh-CN": "\n受搜索上限限制，部分路径尚未检查。"
   },
   "  - 확인할 파일: ": {
-    "en": "  - Files to check: ",
+    "en": "  - File to check: ",
     "ja": "  - 確認するファイル: ",
-    "zh-CN": "  - 待检查文件："
+    "zh-CN": "  - 要检查的文件："
   },
   "  - 확인할 파일: {name}\n": {
     "en": "  - File to check: {name}\n",
     "ja": "  - 確認するファイル: {name}\n",
-    "zh-CN": "  - 待检查文件：{name}\n"
+    "zh-CN": "  - 要检查的文件：{name}\n"
   },
   " · {} 변경": {
     "en": " · {} changes",
@@ -1820,9 +1820,9 @@
     "zh-CN": " · 与磁盘更改冲突：保存前需检查"
   },
   "# Kiln 작업 공간\n\n루트: {}\n\n이 상위 폴더를 하나의 작업 공간으로 유지하세요. 요청을 구현하는 데 필요한 여러 저장소를 함께 조사하고 변경하세요. 각 저장소의 지침과 API/의존 관계를 직접 확인하고, 이름만으로 프론트/백 역할이나 연결 관계를 단정하지 마세요. Git 명령은 해당 저장소에서 실행하세요.\n\n## 저장소 구성\n": {
-    "en": "# Kiln Workspace\n\nRoot: {}\n\nKeep this parent folder as a single workspace. Investigate and change all repositories needed to implement the request. Check each repository’s instructions and API/dependency relationships directly; do not infer frontend/backend roles or relationships from names alone. Run Git commands in the relevant repository.\n\n## Repository Layout\n",
-    "ja": "# Kiln ワークスペース\n\nルート: {}\n\nこの親フォルダーを 1 つのワークスペースとして維持してください。リクエストの実装に必要な複数のリポジトリを一緒に調査・変更してください。各リポジトリの指示と API・依存関係を直接確認し、名前だけでフロント・バックの役割や関連性を断定しないでください。Git コマンドは該当するリポジトリで実行してください。\n\n## リポジトリ構成\n",
-    "zh-CN": "# Kiln 工作区\n\n根目录：{}\n\n请将此上级文件夹作为单一工作区。共同调查并修改实现请求所需的多个仓库。直接检查各仓库的指令和 API/依赖关系，不要仅凭名称判断前后端角色或关联关系。请在相应仓库中运行 Git 命令。\n\n## 仓库结构\n"
+    "en": "# Kiln workspace\n\nRoot: {}\n\nKeep this parent folder as a single workspace. Investigate and update the repositories needed to implement the request together. Check each repository’s instructions and API/dependency relationships directly. Do not infer frontend/backend roles or connections from names alone. Run Git commands in the corresponding repository.\n\n## Repositories\n",
+    "ja": "# Kiln ワークスペース\n\nルート: {}\n\nこの親フォルダを一つのワークスペースとして維持してください。リクエストの実装に必要な複数のリポジトリをまとめて調査・変更してください。各リポジトリの指示と API・依存関係を直接確認し、名前だけでフロントエンド・バックエンドの役割や接続関係を判断しないでください。Git コマンドは対象のリポジトリで実行してください。\n\n## リポジトリ構成\n",
+    "zh-CN": "# Kiln 工作区\n\n根目录：{}\n\n将此上级文件夹保留为一个工作区。一起调查并修改实现请求所需的多个仓库。直接确认各仓库的指引以及 API 和依赖关系，不要仅凭名称推断前端、后端的角色或关联。在对应仓库中运行 Git 命令。\n\n## 仓库结构\n"
   },
   "Cmd / Ctrl / Alt 등의 수식키를 포함하세요.": {
     "en": "Include a modifier such as Cmd, Ctrl, or Alt.",
@@ -8748,5 +8748,75 @@
     "en": "Added by us",
     "ja": "現在側で追加",
     "zh-CN": "己方已添加"
+  },
+  "Fetch": {
+    "en": "Fetch",
+    "ja": "フェッチ",
+    "zh-CN": "获取"
+  },
+  "GitHub 저장소 URL이 없습니다": {
+    "en": "GitHub repository URL is missing",
+    "ja": "GitHub リポジトリの URL がありません",
+    "zh-CN": "缺少 GitHub 仓库 URL"
+  },
+  "Kiln {} · 빌드 {}": {
+    "en": "Kiln {} · Build {}",
+    "ja": "Kiln {} · ビルド {}",
+    "zh-CN": "Kiln {} · 构建 {}"
+  },
+  "Pull": {
+    "en": "Pull",
+    "ja": "プル",
+    "zh-CN": "拉取"
+  },
+  "Pull {}": {
+    "en": "Pull {}",
+    "ja": "プル {}",
+    "zh-CN": "拉取 {}"
+  },
+  "Push": {
+    "en": "Push",
+    "ja": "プッシュ",
+    "zh-CN": "推送"
+  },
+  "Push {}": {
+    "en": "Push {}",
+    "ja": "プッシュ {}",
+    "zh-CN": "推送 {}"
+  },
+  "다시 묻지 않기": {
+    "en": "Don’t ask again",
+    "ja": "次回から確認しない",
+    "zh-CN": "不再询问"
+  },
+  "실행 중인 패널·탭·작업 공간의 종료 확인을 생략합니다. 설정에서 다시 켤 수 있습니다.": {
+    "en": "Skip confirmation when closing running panels, tabs, or workspaces. You can enable it again in Settings.",
+    "ja": "実行中のパネル・タブ・ワークスペースを閉じる際の確認を省略します。設定で再び有効にできます。",
+    "zh-CN": "关闭正在运行的面板、标签页或工作区时不再确认。可在设置中重新开启。"
+  },
+  "열린 작업 · 실행 중 우선": {
+    "en": "Open tasks · Running first",
+    "ja": "開いている作業 · 実行中を優先",
+    "zh-CN": "已打开任务 · 运行中优先"
+  },
+  "일반 텍스트": {
+    "en": "Plain Text",
+    "ja": "プレーンテキスト",
+    "zh-CN": "纯文本"
+  },
+  "패널·탭·작업 공간에 적용됩니다. 설정에서 다시 켤 수 있습니다.": {
+    "en": "Applies to panels, tabs, and workspaces. You can enable it again in Settings.",
+    "ja": "パネル・タブ・ワークスペースに適用されます。設定で再び有効にできます。",
+    "zh-CN": "适用于面板、标签页和工作区。可在设置中重新开启。"
+  },
+  "실행 중인 프로세스를 종료하기 전 확인": {
+    "en": "Confirm before ending running processes",
+    "ja": "実行中のプロセスを終了する前に確認",
+    "zh-CN": "结束正在运行的进程前确认"
+  },
+  "패널·탭·작업 공간을 닫을 때 실행 중인 프로세스가 있으면 확인합니다": {
+    "en": "Ask before closing a panel, tab, or workspace that has running processes",
+    "ja": "パネル・タブ・ワークスペースを閉じる際に、実行中のプロセスがあれば確認します",
+    "zh-CN": "关闭有进程正在运行的面板、标签页或工作区时询问"
   }
 }

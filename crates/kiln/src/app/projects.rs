@@ -388,7 +388,7 @@ impl Projects {
                         name: tree
                             .branch
                             .clone()
-                            .unwrap_or_else(|| "Detached HEAD".into()),
+                            .unwrap_or_else(|| kiln_common::i18n::tr("분리된 HEAD").into()),
                         note: String::new(),
                         status: TaskStatus::Active,
                         archived: false,

@@ -14,6 +14,8 @@ pub struct Palette {
     recent_only: bool,
     project_filter: String,
     frozen: Vec<String>,
+    recent_current: Option<String>,
+    selected_key: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -28,7 +30,7 @@ pub enum Group {
 impl Group {
     fn label(&self) -> &'static str {
         match self {
-            Group::Sessions => kiln_common::i18n::tr("열린 작업 · 최근 사용순"),
+            Group::Sessions => kiln_common::i18n::tr("열린 작업 · 실행 중 우선"),
             Group::Commands => kiln_common::i18n::tr("명령"),
             Group::Tools => kiln_common::i18n::tr("도구"),
             Group::Spaces => kiln_common::i18n::tr("작업 공간"),
@@ -91,11 +93,13 @@ impl Palette {
         self.query.clear();
         self.project_filter.clear();
         self.frozen.clear();
+        self.recent_current = None;
+        self.selected_key = None;
         self.selected = 0;
         self.just_opened = true;
     }
 
-    pub fn open_recent(&mut self) { self.open(); self.recent_only = true; self.selected = 1; }
+    pub fn open_recent(&mut self, current: Option<String>) { self.open(); self.recent_only = true; self.recent_current = current; }
 
     pub fn is_open(&self) -> bool {
         self.open
@@ -104,7 +108,12 @@ impl Palette {
     pub fn ui<A>(&mut self, ctx: &egui::Context, items: Vec<Item<A>>) -> Option<A> {
         if !self.open { return None; }
         let mut items: Vec<_> = items.into_iter().filter(|item| !self.recent_only || item.group == Group::Sessions).collect();
-        if self.just_opened { self.frozen=items.iter().map(|i|i.key.clone()).collect(); }
+        if self.just_opened {
+            self.frozen=items.iter().map(|i|i.key.clone()).collect();
+            if self.recent_only {
+                self.selected=items.iter().position(|i|Some(&i.key)!=self.recent_current.as_ref()).unwrap_or(0);
+            }
+        }
         items.retain(|i|self.frozen.contains(&i.key));
         items.sort_by_key(|i|self.frozen.iter().position(|k|k==&i.key).unwrap_or(usize::MAX));
         let mut projects:Vec<_>=items.iter().filter(|i|!i.project.is_empty()).map(|i|i.project.clone()).collect(); projects.sort(); projects.dedup();
@@ -129,7 +138,7 @@ impl Palette {
                         .frame(egui::Frame::NONE).desired_width(width - 50.0));
                     if opened { te.request_focus(); self.just_opened = false; }
                     changed = te.changed();
-                    if changed { self.selected = 0; }
+                    if changed { self.selected = 0; self.selected_key = None; }
                 });
                 if self.recent_only {
                     ui.horizontal(|ui|{
@@ -151,11 +160,16 @@ impl Palette {
                 if self.query.trim().is_empty() { scored.sort_by_key(|(_, it)| it.group); }
                 else { scored.sort_by_key(|x| std::cmp::Reverse(x.0)); }
                 let n = scored.len();
+                if changed { self.selected_key = None; }
+                if let Some(key)=&self.selected_key {
+                    if let Some(index)=scored.iter().position(|(_,item)|&item.key==key){self.selected=index;}
+                }
                 let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown));
                 let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowUp));
                 self.selected = self.selected.min(n.saturating_sub(1));
                 if down && n > 0 { self.selected = (self.selected + 1) % n; }
                 if up && n > 0 { self.selected = (self.selected + n - 1) % n; }
+                self.selected_key=scored.get(self.selected).map(|(_,item)|item.key.clone());
                 if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter)) && n > 0 { chosen = Some(self.selected); }
                 let follow_selection = opened || changed || down || up;
                 egui::ScrollArea::vertical().id_salt("palette-results")
@@ -244,9 +258,28 @@ mod responsive_tests {
     use super::*;
     use egui_kittest::{Harness,kittest::Queryable};
     #[test]
+    fn running_first_recent_selection_skips_current_and_freezes_live_activity_order() {
+        let mut palette=Palette::default();palette.open_recent(Some("current".into()));
+        let mut initialized=false;
+        let mut reordered=false;
+        let mut chosen=None;
+        let mut h=Harness::builder().with_size([800.0,600.0]).build_ui_state(|ui,p:&mut Palette| {
+            if !initialized {fonts::install(ui.ctx());Theme::current().apply(ui.ctx());initialized=true;return;}
+            let keys=if reordered{["idle","current","running"]}else{["running","current","idle"]};
+            let items=keys.into_iter().map(|key|Item{key:key.into(),project:"fixture".into(),group:Group::Sessions,icon:Icon::Terminal,label:key.into(),hint:String::new(),detail:String::new(),action:key}).collect();
+            if let Some(action)=p.ui(ui.ctx(),items){chosen=Some(action);}
+            reordered=true;
+        },palette);
+        h.run_steps(4);
+        assert_eq!(h.state().selected,0);
+        assert_eq!(h.state().frozen,["running","current","idle"]);
+        h.key_press(egui::Key::Enter);h.run_steps(2);drop(h);
+        assert_eq!(chosen,Some("running"));
+    }
+    #[test]
     fn recent_project_menu_stays_inside_minimum_viewport_and_resets_empty_filter() {
         let project="매우 긴 프로젝트 이름 · /workspace/".repeat(8);
-        let mut palette=Palette::default();palette.open_recent();
+        let mut palette=Palette::default();palette.open_recent(None);
         let mut initialized=false;
         let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).build_ui_state(|ui,p:&mut Palette| {
             if !initialized {fonts::install(ui.ctx());Theme::current().apply(ui.ctx());initialized=true;return;}

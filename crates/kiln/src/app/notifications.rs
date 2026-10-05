@@ -25,6 +25,9 @@ pub struct Notification {
     pub category: NotificationCategory,
     #[serde(default)]
     pub rotate_tool: Option<kiln_accounts::Tool>,
+    /// Application-owned activity titles remain translatable after restoring the inbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<kiln_proto::AgentActivity>,
 }
 
 #[derive(Default)]
@@ -52,7 +55,7 @@ impl NotificationCenter {
         self.items.push(Notification {
             title: title.chars().take(240).collect(), body: body.chars().take(4000).collect(), session,
             category: match kind { ToastKind::Error=>NotificationCategory::Error, ToastKind::Info=>NotificationCategory::Info, _=>NotificationCategory::Attention },
-            workspace, timestamp: now(), read: kind == ToastKind::Info, error: kind == ToastKind::Error, rotate_tool: None,
+            workspace, timestamp: now(), read: kind == ToastKind::Info, error: kind == ToastKind::Error, rotate_tool: None, activity: None,
         });
     }
 
@@ -60,7 +63,7 @@ impl NotificationCenter {
         use kiln_proto::AgentActivity;
         let category = match activity { AgentActivity::Waiting=>NotificationCategory::Attention,AgentActivity::Done=>NotificationCategory::Completed,AgentActivity::Failed=>NotificationCategory::Error,_=>return };
         self.push(kiln_common::i18n::tr(activity.label()),body,if category==NotificationCategory::Error {ToastKind::Error}else{ToastKind::Notify},Some(session),workspace);
-        if let Some(item)=self.items.last_mut(){item.category=category;}
+        if let Some(item)=self.items.last_mut(){item.category=category;item.activity=Some(activity);}
     }
 
     pub fn unread_count(&self) -> usize { self.items.iter().filter(|n| !n.read).count() }
@@ -83,17 +86,22 @@ fn age(timestamp: u64) -> String {
 #[derive(Default, PartialEq, Debug)]
 enum RowAction { #[default] None, Reveal, Rotate, Dismiss }
 
+fn notification_title(item: &Notification) -> &str {
+    item.activity.map(|activity| kiln_common::i18n::tr(activity.label())).unwrap_or(&item.title)
+}
+
 fn notification_row(ui: &mut egui::Ui, item: &mut Notification, available: bool, can_rotate: bool) -> RowAction {
     let t = kiln_common::Theme::current();
     let mut action = RowAction::None;
+    let title = notification_title(item).to_owned();
     let color = if item.error { t.red } else if item.read { t.text_dim } else { t.accent };
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), egui::Sense::hover());
         kiln_common::icons::paint(ui.painter(), r.shrink2(vec2(0.0, 2.0)), if item.error { Icon::Warning } else { Icon::Bell }, color);
         let title_width=(ui.available_width()-60.0).max(40.0);
-        let galley=ui.painter().layout(item.title.clone(),fonts::semibold(13.5),t.text,(title_width-8.0).max(32.0));
+        let galley=ui.painter().layout(title.clone(),fonts::semibold(13.5),t.text,(title_width-8.0).max(32.0));
         let (rect,response)=ui.allocate_exact_size(vec2(title_width,(galley.size().y+8.0).max(24.0)),if available{egui::Sense::click()}else{egui::Sense::hover()});
-        response.widget_info(||egui::WidgetInfo::labeled(if available{egui::WidgetType::Button}else{egui::WidgetType::Label},ui.is_enabled(),&item.title));
+        response.widget_info(||egui::WidgetInfo::labeled(if available{egui::WidgetType::Button}else{egui::WidgetType::Label},ui.is_enabled(),&title));
         if available && response.hovered(){ui.painter().rect_filled(rect,4,t.bg_hover);ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);}
         ui.painter().galley(egui::pos2(rect.left()+4.0,rect.center().y-galley.size().y/2.0),galley,t.text);
         widgets::focus_ring(ui,&response,4);
@@ -109,7 +117,7 @@ fn notification_row(ui: &mut egui::Ui, item: &mut Notification, available: bool,
     ui.horizontal_wrapped(|ui| {
         let context = if item.workspace.is_empty() { age(item.timestamp) } else { format!("{} · {}", item.workspace, age(item.timestamp)) };
         ui.label(RichText::new(context).size(11.5).color(t.text_dim));
-        if item.title != item.category.label() { ui.label(RichText::new(item.category.label()).size(11.5).color(color)); }
+        if title != item.category.label() { ui.label(RichText::new(item.category.label()).size(11.5).color(color)); }
         if item.session.is_some() && !available { ui.label(RichText::new(kiln_common::i18n::tr("세션 연결 안 됨")).size(11.5).color(t.text_dim)); }
         if item.rotate_tool.is_some() && item.session.is_some() {
             ui.add_enabled_ui(can_rotate, |ui| {
@@ -264,6 +272,34 @@ mod tests {
         let old=r#"[{"title":"old error","body":"failed","session":null,"workspace":"","timestamp":0,"read":false,"error":true}]"#;
         assert_eq!(NotificationCenter::new(serde_json::from_str(old).unwrap()).items[0].category,NotificationCategory::Error);
     }
+    #[test]
+    fn activity_titles_follow_locale_after_persistence_without_translating_user_text() {
+        use kiln_common::i18n::{Language, with_language};
+        let mut center = NotificationCenter::default();
+        with_language(Language::Korean, || {
+            center.push_activity(kiln_proto::AgentActivity::Done, 7, "My project".into(), "User output 완료");
+            center.push("완료", "User notification", ToastKind::Notify, Some(8), "Project".into());
+        });
+        let bytes = serde_json::to_vec(&center.items).unwrap();
+        let restored = NotificationCenter::new(serde_json::from_slice(&bytes).unwrap());
+        for language in Language::ALL {
+            with_language(language, || {
+                assert_eq!(notification_title(&restored.items[0]), kiln_common::i18n::tr("완료"));
+                assert_eq!(restored.items[0].body, "User output 완료");
+                assert_eq!(notification_title(&restored.items[1]), "완료", "User titles must retain their original content");
+                use egui_kittest::{Harness, kittest::Queryable};
+                let mut initialized = false;
+                let mut harness = Harness::builder().with_size([400.0, 240.0]).build_ui_state(|ui, item: &mut Notification| {
+                    if !initialized { kiln_common::fonts::install(ui.ctx()); kiln_common::Theme::current().apply(ui.ctx()); initialized = true; return; }
+                    notification_row(ui, item, true, false);
+                }, restored.items[0].clone());
+                harness.run_steps(3);
+                assert!(harness.query_by_label(kiln_common::i18n::tr("완료")).is_some(), "Activity title must render in {language:?}");
+                assert!(harness.query_by_label("User output 완료").is_some(), "Terminal content must remain unchanged");
+            });
+        }
+    }
+
     #[test]
     fn inbox_is_bounded_and_restores_read_state() {
         let mut center = NotificationCenter::default();

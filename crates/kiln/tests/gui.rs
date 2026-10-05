@@ -1261,3 +1261,125 @@ finally:
     assert!(pump_until(&mut h,5,|_|std::fs::read(&captured).unwrap()==expected));
     assert_eq!(std::fs::read(&captured_second).unwrap(),b"x");
 }
+
+#[test]
+fn direct_panel_actions_target_the_clicked_split_and_stay_inside_narrow_headers() {
+    use kiln::app::Action;
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let (base,proj)=setup("panel-toolbar");
+    struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){shutdown(&self.0);}}
+    let _cleanup=Cleanup(base.clone());
+    unsafe {std::env::set_var("SHELL","/bin/sh");}
+    let mut h=Harness::builder().with_size([1100.0,700.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    h.get_by_label("오른쪽으로 나누기").click();
+    assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2&&h.state().debug_focused_session().is_some()));
+    let rects=h.state().debug_pane_rects();
+    let left=rects.iter().min_by(|a,b|a.1.left().total_cmp(&b.1.left())).unwrap().0;
+    let right=rects.iter().max_by(|a,b|a.1.left().total_cmp(&b.1.left())).unwrap().0;
+    assert_eq!(h.state().debug_focused_pane_id(),Some(right));
+    let button=h.get_all_by_label("아래로 나누기").min_by(|a,b|a.rect().left().total_cmp(&b.rect().left())).unwrap();
+    button.click();
+    assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==3&&h.state().debug_focused_session().is_some()));
+    let rects=h.state().debug_pane_rects();
+    let left_rect=rects.iter().find(|(id,_)|*id==left).unwrap().1;
+    let right_rect=rects.iter().find(|(id,_)|*id==right).unwrap().1;
+    assert!(left_rect.height()<right_rect.height()*0.6,"inactive left pane must split, not focused right pane");
+    let close=h.get_all_by_label("패널 닫기").filter(|n|n.rect().left()<right_rect.left()).max_by(|a,b|a.rect().top().total_cmp(&b.rect().top())).unwrap();
+    close.click();h.run_steps(4);
+    assert_eq!(h.state().debug_pane_count(),2);
+    assert!(h.state().debug_pane_rects().iter().any(|(id,_)|*id==right));
+    // Force a reachable manual divider near its edge, including ~80pt fallback.
+    h.state_mut().debug_queue_action(Action::ToggleSidebar);h.run_steps(3);
+    h.set_size(egui::vec2(720.0,700.0));h.run_steps(3);
+    for target in [180.0,120.0,80.0,40.0] {
+        let rects=h.state().debug_pane_rects();
+        let divider=(rects[0].1.right()+rects[1].1.left())*0.5;
+        let y=(rects[0].1.top()+rects[0].1.bottom())*0.5;
+        let origin=rects.iter().map(|r|r.1.left()).fold(f32::INFINITY,f32::min);
+        // Node's minimum ratio limits the smallest test to its actual supported width.
+        h.event(egui::Event::PointerMoved(egui::pos2(divider,y)));
+        h.event(egui::Event::PointerButton{pos:egui::pos2(divider,y),button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::NONE});h.step();
+        h.event(egui::Event::PointerMoved(egui::pos2(origin+target,y)));h.step();
+        h.event(egui::Event::PointerButton{pos:egui::pos2(origin+target,y),button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::NONE});h.run_steps(3);
+        if let Some(restore)=h.query_by_label("분할로 복원"){restore.click();h.run_steps(3);}
+        let pane=h.state().debug_pane_rects().into_iter().min_by(|a,b|a.1.left().total_cmp(&b.1.left())).unwrap().1;
+        let controls:Vec<_>=["패널 닫기","오른쪽으로 나누기","아래로 나누기","패널 작업"].into_iter().flat_map(|label|h.query_all_by_label(label)).filter(|n|n.rect().center().x<pane.right()).collect();
+        assert!(!controls.is_empty());
+        for node in &controls {assert!(pane.contains_rect(node.rect()),"target {target}: button {:?} outside {pane:?}",node.rect());assert!(node.rect().width()>=24.0);}
+        for pair in controls.windows(2){assert!(!pair[0].rect().intersects(pair[1].rect()));}
+        h.render().unwrap().save(format!("/tmp/kiln-panel-toolbar-{target:.0}.png")).unwrap();
+    }
+    // Closing the last idle pane creates an empty terminal, never closes the app.
+    for (id,_) in h.state().debug_pane_rects(){h.state_mut().debug_queue_action(Action::ClosePane(id,false));}h.run_steps(5);
+    assert_eq!(h.state().debug_pane_count(),1);
+    assert!(!has_viewport_command(&h,egui::ViewportCommand::Close));
+}
+
+#[test]
+fn running_close_opt_out_persists_only_on_confirmation_and_keeps_unsaved_guards() {
+    use kiln::app::Action;
+    use kiln_common::i18n::{self,Language};
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let (base,proj)=setup("close-opt-out");
+    struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){shutdown(&self.0);i18n::set_language(Language::Korean);}}
+    let _cleanup=Cleanup(base.clone());
+    unsafe{std::env::set_var("SHELL","/bin/sh");}
+    let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
+    h.run_steps(3);
+    let pane=h.state().debug_focused_pane_id().unwrap();
+    h.event(egui::Event::Text("sleep 90".into()));h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(pane).is_some_and(|p|p.contains("sleep"))));
+    for language in Language::ALL {
+        i18n::with_language(language,||{
+            h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(3);
+            for key in ["다시 묻지 않기","취소","종료하고 닫기"] {
+                let rect=h.get_by_label(i18n::tr(key)).rect();
+                assert!(h.ctx.content_rect().contains_rect(rect),"{language:?}/{key}: {rect:?}");
+            }
+            h.render().unwrap().save(format!("/tmp/kiln-close-opt-out-{}.png",language.code())).unwrap();
+            h.get_by_label(i18n::tr("다시 묻지 않기")).click();h.run_steps(2);
+            h.get_by_label(i18n::tr("취소")).click();h.run_steps(3);
+            assert!(h.state().debug_busy_process(pane).is_some());
+        });
+    }
+    let settings=||serde_json::from_slice::<serde_json::Value>(&std::fs::read(base.join("cfg/state.json")).unwrap()).unwrap()["settings"]["confirm_close_running"].as_bool().unwrap();
+    assert!(settings(),"checking and cancelling never changes the setting");
+    h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(3);
+    h.get_by_label("다시 묻지 않기").click();h.run_steps(2);h.key_press(egui::Key::Escape);h.run_steps(3);
+    assert!(settings());
+    h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(3);
+    h.get_by_label("다시 묻지 않기").click();h.run_steps(2);
+    h.get_by_label("종료하고 닫기").click();h.run_steps(5);
+    assert!(!settings());assert_ne!(h.state().debug_focused_pane_id(),Some(pane));
+    assert!(!has_viewport_command(&h,egui::ViewportCommand::Close));
+    drop(h);
+    let mut h=Harness::builder().with_size([1100.0,750.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,None));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
+    h.run_steps(3);
+    let pane=h.state().debug_focused_pane_id().unwrap();
+    h.event(egui::Event::Text("sleep 90".into()));h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(pane).is_some()));
+    h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(5);
+    assert!(h.query_by_label("실행 중인 프로세스를 종료할까요?").is_none());
+    assert_ne!(h.state().debug_focused_pane_id(),Some(pane));
+    edit_file_without_saving(&mut h,proj.join("src/main.rs"));
+    let dirty=h.state().debug_focused_pane_id().unwrap();
+    h.state_mut().debug_queue_action(Action::ClosePane(dirty,false));h.run_steps(3);
+    assert!(h.query_by_label("저장하지 않은 변경").is_some());
+    assert!(h.query_by_label("다시 묻지 않기").is_none());
+    h.get_by_label("취소").click();h.run_steps(3);
+    h.state_mut().debug_open_settings(2);h.run_steps(3);
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox,"실행 중인 프로세스를 종료하기 전 확인").click();h.run_steps(3);
+    h.key_press(egui::Key::Escape);h.run_steps(3);
+    // Existing global preference can be re-enabled in settings.
+    h.state_mut().debug_queue_action(Action::NewPage);h.run_steps(4);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
+    h.run_steps(3);
+    let pane=h.state().debug_focused_pane_id().unwrap();
+    h.event(egui::Event::Text("sleep 90".into()));h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(pane).is_some()));
+    h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(3);
+    assert!(h.query_by_label("실행 중인 프로세스를 종료할까요?").is_some());
+}

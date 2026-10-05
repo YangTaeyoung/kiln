@@ -14,7 +14,7 @@ impl TaskPhase {
         Self::Running=>kiln_common::i18n::tr("작업 중"), Self::Done=>kiln_common::i18n::tr("완료"), Self::Unknown=>kiln_common::i18n::tr("세션 열림"),
     }}
     fn priority(self) -> u8 { match self {
-        Self::Waiting=>0, Self::Running=>1, Self::Attention=>2, Self::Failed=>3, Self::Done=>4, Self::Unknown=>5,
+        Self::Waiting=>1, Self::Running=>0, Self::Attention=>2, Self::Failed=>3, Self::Done=>4, Self::Unknown=>5,
     }}
     fn appearance(self, t: &Theme) -> (Icon, Color32) { match self {
         Self::Failed=>(Icon::Warning,t.red), Self::Waiting|Self::Attention=>(Icon::Bell,t.orange),
@@ -37,7 +37,8 @@ pub(super) struct WorkspaceTask {
 }
 
 fn phase(info: &SessionInfo, telemetry: Option<&SessionTelemetry>) -> TaskPhase {
-    let activity = super::ui::session_activity(info,telemetry.map(|t|t.activity).unwrap_or_default());
+    let agent=info.fg_process.as_deref().and_then(super::rotation::tool_for);
+    let activity = super::ui::task_activity(info,telemetry,agent);
     match activity {
         AgentActivity::Failed=>TaskPhase::Failed,
         AgentActivity::Waiting=>TaskPhase::Waiting,
@@ -271,6 +272,25 @@ mod tests {
         info.fg_process=Some("claude".into());
         info.title="◑ Claude task".into(); assert_eq!(phase(&info,Some(&t)),TaskPhase::Running);
         info.title="✳ Claude task".into(); assert_eq!(phase(&info,Some(&t)),TaskPhase::Unknown);
+    }
+
+    #[test]
+    fn running_shell_and_agent_tasks_precede_waiting_without_reviving_idle_agents() {
+        let command=kiln_proto::CommandRecord{command:"build fixture".into(),started_unix:10,..Default::default()};
+        let mut telemetry=SessionTelemetry{shell_integration:true,commands:vec![command],..Default::default()};
+        let mut info=SessionInfo{fg_process:Some("sleep".into()),..Default::default()};
+        assert_eq!(phase(&info,Some(&telemetry)),TaskPhase::Running);
+        info.fg_process=Some("codex".into());
+        assert_eq!(phase(&info,Some(&telemetry)),TaskPhase::Unknown,"an idle agent's launch command is not a running task");
+        telemetry.activity=AgentActivity::Waiting;
+        assert_eq!(phase(&info,Some(&telemetry)),TaskPhase::Waiting);
+        telemetry.activity=AgentActivity::Running;
+        assert_eq!(phase(&info,Some(&telemetry)),TaskPhase::Running);
+        telemetry.activity=AgentActivity::Done;
+        assert_eq!(phase(&info,Some(&telemetry)),TaskPhase::Done);
+        let mut phases=[TaskPhase::Waiting,TaskPhase::Done,TaskPhase::Running,TaskPhase::Failed];
+        phases.sort_by_key(|p|p.priority());
+        assert_eq!(phases,[TaskPhase::Running,TaskPhase::Waiting,TaskPhase::Failed,TaskPhase::Done]);
     }
 
     #[test]

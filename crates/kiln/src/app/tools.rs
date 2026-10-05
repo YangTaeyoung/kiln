@@ -300,7 +300,7 @@ impl ToolTab for EditorTab {
     }
     fn status_text(&self) -> Option<String> {
         let s = self.ed.status();
-        Some(kiln_common::trf!("줄 {}, 열 {}   {}   {}   {}", s.line, s.col, s.language, s.encoding.label(), match s.line_ending {
+        Some(kiln_common::trf!("줄 {}, 열 {}   {}   {}   {}", s.line, s.col, if s.language == "Plain Text" { kiln_common::i18n::tr("일반 텍스트") } else { &s.language }, s.encoding.label(), match s.line_ending {
             kiln_editor::LineEnding::Lf => "LF",
             kiln_editor::LineEnding::CrLf => "CRLF",
         }))

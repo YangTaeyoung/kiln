@@ -33,9 +33,23 @@ instead of assembling grammatical fragments.
 - Tests use scoped language overrides or isolated config/socket paths. Never use
   the real session daemon to test the destructive menu action.
 
+The checker also rejects untranslated literals at direct UI text sinks and requires
+all literal translation keys, including English Git labels, to exist in the catalog.
+Only test-only items are excluded; production UI after an inline test module
+remains checked. Lexer regression tests cover nested comments, raw strings,
+character literals, conditional test guards, and unchanged source line numbers.
+Product names, key chords, commands, and connection examples use an explicit
+allowlist. This guard complements the rendered-language tests; it does not infer
+meaning from arbitrary runtime text. Activity notifications store their event type
+so their titles follow the selected language after restarting. Agent-supplied
+notification titles and bodies retain their original content. Generated workspace
+instructions follow the selected language, while existing saved requests keep
+their original delimiter and contents.
+
 Run:
 
 ```sh
+python3 scripts/test-check-localizations.py
 python3 scripts/check-localizations.py
 cargo test -p kiln-common -p kiln-i18n-macros
 cargo test -p kiln --lib

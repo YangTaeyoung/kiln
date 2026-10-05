@@ -428,23 +428,23 @@ impl GitPanel {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.add_enabled_ui(!busy, |ui| {
-                if tool_button(ui, Some(Icon::Refresh), "Fetch").on_hover_text("git fetch --all --prune").clicked() {
-                    self.submit(JobKind::Sync, "Fetch", repo::fetch);
+                if tool_button(ui, Some(Icon::Refresh), kiln_common::i18n::tr("Fetch")).on_hover_text("git fetch --all --prune").clicked() {
+                    self.submit(JobKind::Sync, kiln_common::i18n::tr("Fetch"), repo::fetch);
                 }
-                let pull_label = if br.behind > 0 { format!("Pull {}", br.behind) } else { "Pull".into() };
+                let pull_label = if br.behind > 0 { kiln_common::trf!("Pull {}", br.behind) } else { kiln_common::i18n::tr("Pull").into() };
                 if tool_button(ui, Some(Icon::ArrowDown), &pull_label).on_hover_text("git pull").clicked() {
-                    self.submit(JobKind::Sync, "Pull", repo::pull);
+                    self.submit(JobKind::Sync, kiln_common::i18n::tr("Pull"), repo::pull);
                 }
                 let push_label = if br.ahead > 0 {
-                    format!("Push {}", br.ahead)
+                    kiln_common::trf!("Push {}", br.ahead)
                 } else {
-                    "Push".into()
+                    kiln_common::i18n::tr("Push").into()
                 };
                 if tool_button(ui, Some(Icon::ArrowUp), &push_label)
                     .on_hover_text(if br.upstream.is_none() { kiln_common::i18n::tr("원격 브랜치에 Push하고 추적 브랜치로 연결") } else { "git push" })
                     .clicked()
                 {
-                    self.submit(JobKind::Sync, "Push", repo::push);
+                    self.submit(JobKind::Sync, kiln_common::i18n::tr("Push"), repo::push);
                 }
             });
             if let Some(r) = &running {

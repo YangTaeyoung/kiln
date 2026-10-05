@@ -276,7 +276,7 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
 
 fn behavior(ui: &mut egui::Ui, s: &mut Settings) {
     widgets::group(ui, kiln_common::i18n::tr("안전"), |ui| {
-        widgets::setting_toggle(ui, kiln_common::i18n::tr("실행 중인 패널을 닫기 전 확인"), kiln_common::i18n::tr("에이전트나 명령이 실행 중이면 종료 전에 확인합니다"), &mut s.confirm_close_running);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("실행 중인 프로세스를 종료하기 전 확인"), kiln_common::i18n::tr("패널·탭·작업 공간을 닫을 때 실행 중인 프로세스가 있으면 확인합니다"), &mut s.confirm_close_running);
     });
     widgets::group(ui, kiln_common::i18n::tr("알림"), |ui| {
         widgets::setting_toggle(ui, kiln_common::i18n::tr("방해 금지"), kiln_common::i18n::tr("에이전트 팝업과 시스템 알림을 끕니다. 알림 센터에는 계속 보관됩니다."), &mut s.do_not_disturb);
@@ -327,7 +327,7 @@ fn about_page(ui: &mut egui::Ui, about: &AboutInfo, acts: &mut Vec<Action>) {
         });
     });
     widgets::group(ui, kiln_common::i18n::tr("앱"), |ui| {
-        widgets::setting_row(ui, kiln_common::i18n::tr("버전"), &format!("Kiln {} · build {}", env!("CARGO_PKG_VERSION"), kiln_daemon::build_id()), |_| {});
+        widgets::setting_row(ui, kiln_common::i18n::tr("버전"), &kiln_common::trf!("Kiln {} · 빌드 {}", env!("CARGO_PKG_VERSION"), kiln_daemon::build_id()), |_| {});
         #[cfg(target_os = "macos")]
         { widgets::divider(ui); super::updater::settings(ui); }
         widgets::divider(ui);

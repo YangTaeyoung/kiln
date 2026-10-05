@@ -152,6 +152,7 @@ pub(super) struct RepositoryWorkspace {
     focus_prompt: bool,
     discard: Option<PathBuf>,
     context_cache: String,
+    context_language: kiln_common::i18n::Language,
     last_refresh: Instant,
     last_scan: Instant,
 }
@@ -177,6 +178,7 @@ impl RepositoryWorkspace {
             focus_prompt: false,
             discard: None,
             context_cache: String::new(),
+            context_language: kiln_common::i18n::language(),
             last_refresh: Instant::now(),
             last_scan: Instant::now(),
         }
@@ -295,6 +297,7 @@ impl RepositoryWorkspace {
         }
         self.inventory = Some(found);
         self.context_cache = self.context();
+        self.context_language = kiln_common::i18n::language();
         self.last_scan = Instant::now();
         self.scan = None;
     }
@@ -541,7 +544,7 @@ impl RepositoryWorkspace {
                 repo.github_target_task = Some(Task::spawn(ctx, move || {
                     GhBackend::new(path).repo_info(None).and_then(|info| {
                         if info.url.is_empty() {
-                            Err(GitError::Parse("GitHub repository URL missing".into()))
+                            Err(GitError::Parse(kiln_common::i18n::tr("GitHub 저장소 URL이 없습니다").into()))
                         } else {
                             Ok(info.url.trim_end_matches('/').to_lowercase())
                         }
@@ -663,7 +666,7 @@ impl RepositoryWorkspace {
             })
     }
     fn context(&self) -> String {
-        let mut s = format!(
+        let mut s = kiln_common::trf!(
             "# Kiln 작업 공간\n\n루트: {}\n\n이 상위 폴더를 하나의 작업 공간으로 유지하세요. 요청을 구현하는 데 필요한 여러 저장소를 함께 조사하고 변경하세요. 각 저장소의 지침과 API/의존 관계를 직접 확인하고, 이름만으로 프론트/백 역할이나 연결 관계를 단정하지 마세요. Git 명령은 해당 저장소에서 실행하세요.\n\n## 저장소 구성\n",
             self.root.display()
         );
@@ -685,13 +688,13 @@ impl RepositoryWorkspace {
                 "compose.yaml",
             ] {
                 if p.join(name).is_file() {
-                    s.push_str(&format!("  - 확인할 파일: {name}\n"));
+                    s.push_str(&kiln_common::trf!("  - 확인할 파일: {name}\n"));
                 }
             }
         }
         for name in ["AGENTS.md", "CLAUDE.md"] {
             if self.root.join(name).is_file() {
-                s.push_str(&format!(
+                s.push_str(&kiln_common::trf!(
                     "\n상위 공통 지침: {}\n",
                     self.root.join(name).display()
                 ));
@@ -703,19 +706,20 @@ impl RepositoryWorkspace {
             .is_some_and(|i| i.limited || i.unreadable > 0)
         {
             s.push_str(
-                "\n탐색 범위/권한 제한이 있으므로 필요한 저장소와 파일을 추가 확인하세요.\n",
+                kiln_common::i18n::tr("\n탐색 범위/권한 제한이 있으므로 필요한 저장소와 파일을 추가 확인하세요.\n"),
             );
         }
         s
     }
     fn context_files(&self, path: &Path) -> Vec<&str> {
         let heading = format!("- {} ({})", self.label(path), path.display());
+        let prefix = kiln_common::i18n::with_language(self.context_language, || kiln_common::i18n::tr("  - 확인할 파일: ").to_owned());
         self.context_cache
             .lines()
             .skip_while(|line| *line != heading)
             .skip(1)
-            .take_while(|line| line.starts_with("  - 확인할 파일: "))
-            .filter_map(|line| line.strip_prefix("  - 확인할 파일: "))
+            .take_while(|line| line.starts_with(&prefix))
+            .filter_map(|line| line.strip_prefix(&prefix))
             .collect()
     }
     fn review_roots(&mut self, kind: ToolKind) -> Vec<PathBuf> {
@@ -765,6 +769,10 @@ impl RepositoryWorkspace {
     }
     pub fn ui(&mut self, ui: &mut Ui, kind: ToolKind) -> Vec<Action> {
         self.tick();
+        if self.context_language != kiln_common::i18n::language() {
+            self.context_cache = self.context();
+            self.context_language = kiln_common::i18n::language();
+        }
         let mut actions = vec![];
         let theme = Theme::current();
         if self.context_open {
@@ -1633,6 +1641,32 @@ mod tests {
         w.context_cache = w.context();
         w
     }
+    #[test]
+    fn generated_workspace_context_and_file_metadata_follow_all_locales() {
+        use kiln_common::i18n::{Language, with_language};
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("user-project");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::write(repo.join("AGENTS.md"), "User instructions remain unchanged").unwrap();
+        std::fs::write(repo.join("README.md"), "User content").unwrap();
+        let mut workspace = fixture(0);
+        workspace.root = dir.path().to_path_buf();
+        workspace.repos.insert(repo.clone(), Repository::new(repo.clone()));
+        for language in Language::ALL {
+            with_language(language, || {
+                workspace.accept_inventory(kiln_git::discovery::Inventory { roots: vec![repo.clone()], ..Default::default() });
+                let context = &workspace.context_cache;
+                assert!(context.contains(&dir.path().display().to_string()));
+                assert!(context.contains("user-project"));
+                assert_eq!(workspace.context_files(&repo), vec!["AGENTS.md", "README.md"]);
+                if language != Language::Korean {
+                    assert!(!context.chars().any(|c| ('가'..='힣').contains(&c)), "Korean context remains in {language:?}");
+                }
+            });
+        }
+        assert_eq!(std::fs::read_to_string(repo.join("AGENTS.md")).unwrap(), "User instructions remain unchanged");
+    }
+
     #[test]
     fn periodic_refresh_retains_all_snapshots_while_only_four_repositories_reload() {
         let mut workspace = fixture(12);
