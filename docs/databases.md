@@ -32,6 +32,47 @@ literals and active IME composition. Metadata loads asynchronously from an
 existing connection; it does not reconnect a connection you explicitly closed.
 Failures leave your SQL intact and can be retried with the refresh icon.
 
+## Tables, columns and indexes
+
+Open a table and use **Data**, **Columns**, **Indexes** or **DDL**. The explorer's
+context menu opens the same sections and actions, including an already open tab.
+The table menu offers rename and delete. Column rows offer edit, rename and drop;
+use **Add column** for a new name, SQL type, nullability and optional SQL default.
+String defaults need SQL quotes, for example `'guest'`, while `CURRENT_TIMESTAMP`
+is an expression. Generated/identity columns and primary-key removal require
+manual DDL rather than a partial form that would silently change their properties.
+
+The **Indexes** section lists key columns in order, uniqueness, method and full
+available definitions. Partial predicates, included columns and invalid status
+appear when supplied by the database. Add an index by selecting columns, adjusting
+their order and direction, and optionally enforcing uniqueness. Primary-key and
+constraint-owned indexes cannot be dropped through this form. Expression, partial,
+included-column and engine-specific index creation remain available in the SQL
+console; the form creates ordinary column indexes.
+
+Every form follows **Preview SQL → review → Apply to database**. Opening the form
+and previewing do not execute DDL. Editing a field invalidates the preview and its
+approval. Deleting a table also requires its exact name. Failed operations keep
+your input for correction. Restored forms keep input only: saved SQL, approval and
+execution are never replayed. If Kiln closed during an operation, inspect the
+actual database result before preparing another change.
+
+Schema operations require the existing connected pool. A changed connection or
+reviewed structure invalidates a plan. Changes in another table tab refresh clean
+views and preserve pending row edits while blocking submission against stale
+metadata. Successful operations refresh the explorer and completion metadata;
+external DDL can be refreshed explicitly. Renamed tables retain the correct tab
+identity and restore target. Deleted tables are not restored on restart.
+
+PostgreSQL applies changes transactionally after acquiring a table lock and
+revalidating raw catalogs on that connection. MySQL/MariaDB apply a single native
+DDL statement; no multi-statement rollback or atomic external-DDL race guarantee
+is implied. SQLite attribute edits rebuild within a transaction, preserving
+values, generated columns, rowids, sequence high-water marks, table constraints,
+explicit indexes, triggers and dependent views, then check foreign keys before
+commit. A failed copy or validation rolls back. Dependent objects can prevent a
+column or table drop; Kiln does not silently cascade their deletion.
+
 ## Scope and connection state
 
 Completion reads catalog metadata through the connection pool, independently of
@@ -50,3 +91,8 @@ References: [DataGrip completion](https://www.jetbrains.com/help/datagrip/auto-c
 [DBeaver SQL assist](https://dbeaver.com/docs/dbeaver/SQL-Assist-and-Auto-Complete/),
 [PostgreSQL identifiers](https://www.postgresql.org/docs/current/sql-syntax-lexical.html),
 and [macOS Spotlight shortcuts](https://support.apple.com/en-gb/guide/mac-help/mh26783/26/mac/26).
+
+Schema references: [DataGrip modification dialogs](https://www.jetbrains.com/help/datagrip/create-and-modify-dialogs.html),
+[SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html),
+[PostgreSQL ALTER TABLE](https://www.postgresql.org/docs/current/sql-altertable.html),
+and [MySQL ALTER TABLE](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html).

@@ -10,7 +10,7 @@ use egui::Ui;
 pub(crate) use console::ConsoleView;
 pub use console::ConsoleDocument;
 pub(crate) use table::TableView;
-pub use table::TableDraft;
+pub use table::{TableDraft, TableSection};
 
 enum Kind {
     Table(Box<TableView>),
@@ -97,7 +97,7 @@ impl DbTab {
     /// Closing requires confirmation for pending table edits and SQL drafts.
     pub fn has_unsaved_changes(&self) -> bool {
         match &self.kind {
-            Kind::Table(t) => t.pending_changes() > 0,
+            Kind::Table(t) => t.pending_changes() > 0 || t.schema_has_draft(),
             Kind::Console(c) => c.has_draft(),
         }
     }
@@ -127,6 +127,15 @@ impl DbTab {
     pub fn restore_console_document(&mut self,document:&ConsoleDocument){if let Kind::Console(c)=&mut self.kind{c.restore_document(document);}}
     pub fn console_text(&self) -> Option<&str> {
         match &self.kind { Kind::Console(c) => Some(c.text()), _ => None }
+    }
+    pub fn table_ref(&self) -> Option<&crate::TableRef> {
+        match &self.kind { Kind::Table(t) => t.table_ref(), _ => None }
+    }
+    pub fn show_table_section(&mut self, section: TableSection) {
+        if let Kind::Table(t) = &mut self.kind { t.show_section(section, &self.manager); }
+    }
+    pub fn request_schema_action(&mut self, action: crate::schema::SchemaAction) {
+        if let Kind::Table(t) = &mut self.kind { t.request_schema_action(action); }
     }
     pub fn request_focus(&mut self) {
         if let Kind::Console(c) = &mut self.kind { c.request_focus(); }

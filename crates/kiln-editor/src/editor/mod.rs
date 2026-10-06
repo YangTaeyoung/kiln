@@ -1,5 +1,7 @@
 //! 파일 하나를 여는 코드 편집기.
 
+mod local_completion;
+
 mod cursors;
 mod display;
 mod find;
@@ -219,6 +221,8 @@ pub struct Editor {
     pub(crate) indent: Indent,
     comment: Option<CommentStyle>,
     language: String,
+    language_override: Option<String>,
+    language_version: u64,
     encoding: Encoding,
     pub(crate) read_only: bool,
     large: bool,
@@ -238,6 +242,30 @@ pub struct Editor {
 }
 
 impl Editor {
+    /// None restores automatic detection; explicit Plain Text disables language servers.
+    pub fn set_language_override(&mut self, name: Option<String>) {
+        self.language_override=name;
+        self.language_version=u64::MAX;
+        self.refresh_language();
+        if let Some(manager)=self.lsp.as_ref().map(|s|s.manager()){self.set_lsp(manager);}
+    }
+    pub fn language_override(&self)->Option<&str>{self.language_override.as_deref()}
+    pub(crate) fn refresh_language(&mut self) {
+        if self.large || self.is_binary() || self.language_version==self.buf.version(){return;}
+        self.language_version=self.buf.version();
+        let sample=self.buf.lines().iter().take(100).flat_map(|l|l.chars().chain(std::iter::once('\n'))).take(8192).collect::<String>();
+        let syntax=match self.language_override.as_deref(){
+            Some("Plain Text")=>None,
+            Some(name)=>syntax::assets().set.find_syntax_by_name(name),
+            None=>syntax::detect_document(&self.path,&sample),
+        };
+        let language=syntax.map_or("Plain Text",|s|s.name.as_str()).to_owned();
+        if language==self.language {return;}
+        self.language=language;self.comment=syntax::comment_style(&self.language);
+        self.hl.set_syntax(syntax,self.buf.line_count());
+        if let Some(manager)=self.lsp.as_ref().map(|s|s.manager()){self.set_lsp(manager);}
+    }
+
     /// 파일을 연다. 이진 파일은 읽기 전용 자리표시로 연다.
     pub fn open(path: impl Into<PathBuf>) -> anyhow::Result<Editor> {
         let path: PathBuf = path.into();
@@ -260,8 +288,7 @@ impl Editor {
 
     fn from_decoded(path: PathBuf, d: Decoded, large: bool) -> Editor {
         let buf = Buffer::from_text(&d.text);
-        let first = buf.line(0).to_owned();
-        let syntax_ref = if large || d.encoding == Encoding::Binary { None } else { syntax::detect(&path, &first) };
+        let syntax_ref = if large || d.encoding == Encoding::Binary { None } else { syntax::detect_document(&path, &d.text) };
         let language = syntax_ref.map_or_else(|| "Plain Text".to_owned(), |s| s.name.clone());
         let comment = syntax::comment_style(&language);
         let hl = Highlighter::new(syntax_ref, buf.line_count());
@@ -286,6 +313,8 @@ impl Editor {
             indent,
             comment,
             language,
+            language_override: None,
+            language_version: u64::MAX,
             encoding: d.encoding,
             large,
             file_len: d.text.len() as u64,
@@ -578,6 +607,7 @@ impl Editor {
         self.buf.mark_saved();
         let snap = self.cursor_snapshot();
         self.restore_cursors(&snap);
+        self.refresh_language();
         Ok(())
     }
 

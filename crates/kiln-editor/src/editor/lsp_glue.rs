@@ -55,6 +55,7 @@ struct CompletionState {
     anchor: Pos,
     incomplete: bool,
     version: u64,
+    head: Pos,
 }
 
 struct ListPopup {
@@ -88,7 +89,7 @@ pub(crate) struct LspState {
     hover: Option<HoverPopup>,
     hover_req: Option<(Pending<Option<String>>, Pos, bool)>,
     completion: Option<CompletionState>,
-    completion_req: Option<(Pending<lsp::CompletionList>, Pos)>,
+    completion_req: Option<(Pending<lsp::CompletionList>, Pos, u64, Pos)>,
     definition_req: Option<Pending<Vec<Location>>>,
     references_req: Option<Pending<Vec<Location>>>,
     list: Option<ListPopup>,
@@ -151,7 +152,9 @@ impl Editor {
     pub fn set_lsp(&mut self, mgr: LspManager) {
         self.lsp = None;
         let path = lsp_path(&self.path);
-        let opened = !self.is_binary() && !self.is_large() && mgr.open_document(&path, &self.buf.lines().join("\n"));
+        let text=self.buf.lines().join("\n");
+        let language=if self.language_override.is_some(){crate::syntax::language_id(&self.language).map(str::to_owned)}else{mgr.language_for_syntax(&path,&self.language)};
+        let opened = !self.is_binary() && !self.is_large() && mgr.open_document_as(&path, &text, language.as_deref());
         self.buf.set_track_deltas(opened);
         self.lsp = Some(LspState {
             mgr,
@@ -373,15 +376,16 @@ impl Editor {
             }
         }
 
-        if let Some((req, anchor)) = &mut st.completion_req
+        if let Some((req, anchor, version, requested_head)) = &mut st.completion_req
             && let Some(res) = req.poll()
         {
             let anchor = *anchor;
+            let valid = *version == self.buf.version() && *requested_head == self.sel.head;
             st.completion_req = None;
             match res {
                 Ok(list) => {
                     let head = self.sel.head;
-                    if head.line == anchor.line && head.col >= anchor.col {
+                    if valid && head.line == anchor.line && head.col >= anchor.col {
                         let st = self.lsp.as_mut().expect("lsp");
                         st.completion = Some(CompletionState {
                             items: list.items,
@@ -391,11 +395,12 @@ impl Editor {
                             anchor,
                             incomplete: list.is_incomplete,
                             version: u64::MAX,
+                            head,
                         });
                         self.update_completion_filter();
                     }
                 }
-                Err(e) => self.toast(kiln_common::trf!("자동 완성 실패: {e}")),
+                Err(_) => self.local_completion(),
             }
         }
 
@@ -529,6 +534,7 @@ impl Editor {
     }
 
     fn request_hover(&mut self, at: Pos, from_mouse: bool) {
+        let at=self.buf.clamp(at);
         let Some(st) = &self.lsp else { return };
         let (wa, _) = self.buf.word_at(at);
         let anchor = if wa.col <= at.col { wa } else { at };
@@ -636,11 +642,26 @@ impl Editor {
         Pos::new(p.line, start)
     }
 
+    pub(crate) fn lsp_dismiss_completion(&mut self){if let Some(st)=&mut self.lsp {st.completion=None;st.completion_req=None;}}
+    fn local_completion(&mut self) {
+        if self.is_binary() || self.is_large() || self.read_only || self.view.preedit.is_some() || !self.sel.is_empty(){return;}
+        if self.lsp.is_none(){
+            self.set_lsp(LspManager::with_config(self.path.parent().unwrap_or(Path::new(".")).to_path_buf(),lsp::LspConfig::default()));
+        }
+        let anchor=self.word_start_before(self.sel.head);
+        let prefix=&self.buf.line(self.sel.head.line)[anchor.col..self.sel.head.col];
+        let mut items=super::local_completion::items(&self.language,self.buf.lines(),prefix);
+        let line=self.buf.line(self.sel.head.line);
+        let end=self.sel.head.col+line[self.sel.head.col..].char_indices().take_while(|(_,c)|is_ident(*c)).map(|(i,c)|i+c.len_utf8()).last().unwrap_or(0);
+        let range=Range{start:self.to_lsp(anchor),end:self.to_lsp(Pos::new(self.sel.head.line,end))};
+        for item in &mut items {item.edit=Some(TextEdit{range,new_text:item.insert_text.clone()});}
+        self.lsp.as_mut().unwrap().completion=Some(CompletionState{items,shown:vec![],selected:0,top:0,anchor,incomplete:false,version:u64::MAX,head:self.sel.head});
+        self.update_completion_filter();
+    }
     pub(crate) fn lsp_trigger_completion(&mut self, trigger: Option<String>) {
+        if self.view.preedit.is_some() || !self.sel.is_empty(){return;}
         if !self.lsp.as_ref().is_some_and(|s| s.opened) {
-            if trigger.is_none() {
-                self.lsp_ready_for_requests();
-            }
+            self.local_completion();
             return;
         }
         self.lsp_flush();
@@ -648,15 +669,18 @@ impl Editor {
         let anchor = self.word_start_before(head);
         let pos = self.to_lsp(head);
         let st = self.lsp.as_mut().expect("lsp");
-        st.completion_req = Some((st.mgr.completion(&st.path, pos, trigger), anchor));
+        st.completion_req = Some((st.mgr.completion(&st.path, pos, trigger), anchor, self.buf.version(), head));
     }
 
     /// 글자를 입력한 뒤: 완성·서명 도움말을 띄우거나 거른다.
     pub(crate) fn lsp_after_typed(&mut self, s: &str) {
-        let Some(st) = &self.lsp else { return };
-        if !st.opened {
+        self.refresh_language();
+        if !self.lsp.as_ref().is_some_and(|s|s.opened){
+            let head=self.sel.head;
+            if s.chars().last().is_some_and(is_ident) && self.buf.line(head.line)[self.word_start_before(head).col..head.col].chars().count()>=2 {self.local_completion();}
             return;
         }
+        let st=self.lsp.as_ref().unwrap();
         let Some(last) = s.chars().last() else { return };
         let ch = last.to_string();
         let triggers = st.mgr.completion_triggers(&st.path);
@@ -674,7 +698,8 @@ impl Editor {
             let head = self.sel.head;
             let prefix_len = head.col - self.word_start_before(head).col;
             let incomplete = self.lsp.as_ref().and_then(|s| s.completion.as_ref()).is_some_and(|c| c.incomplete);
-            if (!open && prefix_len >= 2) || (open && incomplete) {
+            let stale_edits=self.lsp.as_ref().and_then(|s|s.completion.as_ref()).is_some_and(|c|c.items.iter().any(|i|i.edit.is_some()||!i.additional_edits.is_empty()));
+            if (!open && prefix_len >= 2) || (open && (incomplete||stale_edits)) {
                 self.lsp_trigger_completion(None);
             }
         } else if open {
@@ -684,6 +709,7 @@ impl Editor {
             let pos = self.to_lsp(self.sel.head);
             let head = self.sel.head;
             let st = self.lsp.as_mut().expect("lsp");
+            st.signature = None;
             st.signature_req = Some((st.mgr.signature_help(&st.path, pos), head));
         }
     }
@@ -694,6 +720,13 @@ impl Editor {
         let head = self.sel.head;
         let Some(st) = &self.lsp else { return };
         let Some(c) = &st.completion else { return };
+        if c.version != u64::MAX && c.version != v && c.items.iter().any(|i| i.edit.is_some() || !i.additional_edits.is_empty()) {
+            self.lsp.as_mut().expect("lsp").completion = None;
+            return;
+        }
+        if c.version == v && c.head != head {
+            self.lsp.as_mut().expect("lsp").completion=None;return;
+        }
         if c.version == v && !c.shown.is_empty() {
             return;
         }
@@ -731,6 +764,7 @@ impl Editor {
         c.selected = 0;
         c.top = 0;
         c.version = v;
+        c.head = head;
     }
 
     /// 고른 완성 항목을 모든 커서에 넣는다. 주 커서는 항목의 편집 범위(없으면 단어 앞부분)를 바꾸고,
@@ -741,14 +775,15 @@ impl Editor {
         let Some(&idx) = c.shown.get(c.selected) else { return };
         let item = c.items[idx].clone();
         let head = self.sel.head;
-        let (start, text) = match &item.edit {
-            Some(e) => (self.pos_from_lsp(e.range.start), e.new_text.clone()),
-            None => (c.anchor, item.insert_text.clone()),
+        if c.version != self.buf.version() || c.head != head { return; }
+        let (start, end, text) = match &item.edit {
+            Some(e) => (self.pos_from_lsp(e.range.start), self.pos_from_lsp(e.range.end), e.new_text.clone()),
+            None => (c.anchor, head, item.insert_text.clone()),
         };
-        let start = if start.line == head.line && start <= head { start } else { c.anchor };
+        if start > end || start.line != head.line || start > head { return; }
         let prefix_chars = self.buf.line(head.line)[start.col.min(head.col)..head.col].chars().count();
         let mut edits: Vec<TextEdit> = item.additional_edits.clone();
-        edits.push(TextEdit { range: Range { start: self.to_lsp(start), end: self.to_lsp(head) }, new_text: text.clone() });
+        edits.push(TextEdit { range: Range { start: self.to_lsp(start), end: self.to_lsp(end) }, new_text: text.clone() });
         let mut floor = Pos::default();
         for s in self.cursors() {
             let h = s.head;
@@ -823,6 +858,7 @@ impl Editor {
 
     /// 팝업이 열려 있을 때의 키 처리. 처리했으면 `true`.
     pub(crate) fn lsp_popup_key(&mut self, key: Key, m: Modifiers) -> bool {
+        if key==Key::Escape && m.alt && !m.command && !m.ctrl {self.lsp_trigger_completion(None);return true;}
         let Some(st) = &mut self.lsp else { return false };
         if let Some(c) = &mut st.completion
             && !c.shown.is_empty()
@@ -964,6 +1000,7 @@ impl Editor {
         let target = match pointer {
             Some(p) if resp.hovered() && !any_down => {
                 let pos = self.pos_at(ui, p, origin, font);
+                let pos = self.buf.clamp(pos);
                 let (wa, wb) = self.buf.word_at(pos);
                 let on_diag = self.lsp.as_ref().is_some_and(|s| s.diags.iter().any(|d| d.a <= pos && pos <= d.b));
                 ((wa != wb && self.buf.line(pos.line)[wa.col..wb.col].chars().any(is_ident)) || on_diag).then_some((pos, wa, p))
@@ -979,7 +1016,7 @@ impl Editor {
                 }
             }
             Some((pos, word_start, p)) => {
-                let same_word = st.rest.as_ref().is_some_and(|(q, _, _)| self.buf.word_at(*q).0 == word_start);
+                let same_word = st.rest.as_ref().is_some_and(|(q, _, _)| self.buf.word_at(self.buf.clamp(*q)).0 == word_start);
                 if !same_word {
                     st.rest = Some((pos, now, p));
                     if st.hover.as_ref().is_some_and(|h| h.from_mouse && h.anchor != word_start) {
@@ -1115,10 +1152,14 @@ impl Editor {
         };
         let row = self.row_rect_of(ui, anchor, inner);
         let t = Theme::current();
-        let st = self.lsp.as_ref().expect("lsp");
-        let c = st.completion.as_ref().expect("completion");
+        let st = self.lsp.as_mut().expect("lsp");
+        let c = st.completion.as_mut().expect("completion");
         let n = c.shown.len();
-        let visible = n.min(COMPLETION_ROWS);
+        let visible = n.min(COMPLETION_ROWS).min(((inner.height()-20.0)/COMPLETION_ROW_H).max(1.0) as usize);
+        // Keyboard navigation uses a maximum page size; a short viewport can
+        // display fewer rows. Keep the accepted candidate visible at that size.
+        keep_visible(&mut c.top, c.selected, visible);
+        c.top = c.top.min(n.saturating_sub(visible));
         let height = visible as f32 * COMPLETION_ROW_H + 10.0;
         let below = inner.bottom() - row.bottom() > height + 8.0 || row.top() - inner.top() < height + 8.0;
         let (pivot, at) = if below { (Align2::LEFT_TOP, row.left_bottom() + vec2(-26.0, 2.0)) } else { (Align2::LEFT_BOTTOM, row.left_top() - vec2(26.0, 2.0)) };
@@ -1127,18 +1168,20 @@ impl Editor {
         let selected = c.selected;
         let mut clicked: Option<usize> = None;
         let mut scroll: f32 = 0.0;
+        let width=(inner.width()-16.0).clamp(80.0,440.0);
         let resp = Area::new(self.id().with("lsp-completion"))
             .order(Order::Foreground)
             .pivot(pivot)
             .fixed_pos(at)
-            .constrain_to(ui.ctx().content_rect())
+            .constrain_to(inner.intersect(ui.ctx().content_rect()))
             .show(ui.ctx(), |ui| {
                 popup_frame().inner_margin(5).show(ui, |ui| {
-                    let width = 440.0;
                     ui.set_width(width);
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                     for (k, it) in &rows {
                         let (r, resp) = ui.allocate_exact_size(vec2(width, COMPLETION_ROW_H), Sense::click());
+                        resp.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel,true,*k==selected,format!("{} · {}",it.label,it.detail.as_deref().unwrap_or("LSP"))));
+                        resp.clone().on_hover_text(format!("{} · {}",it.label,it.detail.as_deref().unwrap_or("LSP")));
                         let p = ui.painter();
                         if *k == selected {
                             p.rect_filled(r, 6.0, t.accent_soft(if t.dark { 44 } else { 30 }));
@@ -1150,7 +1193,7 @@ impl Editor {
                         p.rect_filled(br, 5.0, kiln_common::widgets::tint(color, if t.dark { 0.18 } else { 0.12 }));
                         p.text(br.center(), Align2::CENTER_CENTER, badge, kiln_common::fonts::semibold(10.0), color);
                         let label_font = FontId::monospace(12.5);
-                        let label = p.layout_no_wrap(it.label.clone(), label_font, t.text);
+                        let label = p.layout_no_wrap(elide(&it.label,((width-48.0)/8.0).max(2.0) as usize), label_font, t.text);
                         let lw = label.size().x;
                         p.galley(pos2(r.left() + 32.0, r.center().y - label.size().y / 2.0), label, t.text);
                         if let Some(d) = &it.detail {
@@ -1175,6 +1218,9 @@ impl Editor {
             if scroll != 0.0 {
                 let steps = (scroll / COMPLETION_ROW_H).round() as isize;
                 c.top = (c.top as isize - steps).clamp(0, n.saturating_sub(visible) as isize) as usize;
+                // Scrolling must not snap back to an off-screen selection on
+                // the next frame, or allow Enter to accept an invisible row.
+                c.selected = c.selected.clamp(c.top, (c.top + visible - 1).min(n - 1));
             }
             if let Some(k) = clicked {
                 c.selected = k;
@@ -1564,5 +1610,43 @@ mod tests {
         assert!(!is_subsequence("xyz", "println"));
         assert_eq!(elide("abcdef", 4), "abc…");
         assert_eq!(elide("ab", 4), "ab");
+    }
+}
+
+#[cfg(test)]
+mod completion_safety_tests {
+    use super::*;
+    #[test]
+    fn delayed_completion_is_rejected_after_edits_or_caret_movement(){
+        for move_only in [false,true]{
+            let mut ed=Editor::from_text("fixture.rs","someprefix other");ed.goto(1,5);ed.local_completion();
+            let (tx,pending)=Pending::channel();
+            let version=ed.buf.version();let head=ed.sel.head;
+            ed.lsp.as_mut().unwrap().completion=None;
+            ed.lsp.as_mut().unwrap().completion_req=Some((pending,Pos::new(0,0),version,head));
+            if move_only {ed.goto(1,7);}else{ed.insert_text("x");}
+            let before=ed.text();
+            let item=super::super::local_completion::items("Rust",&[],"ret").remove(0);
+            tx.send(Ok(lsp::CompletionList{is_incomplete:false,items:vec![item]})).unwrap();
+            ed.poll_lsp();assert!(ed.lsp.as_ref().unwrap().completion.is_none());assert_eq!(ed.text(),before);
+        }
+    }
+    #[test]
+    fn full_replacement_and_additional_import_are_one_undo() {
+        let mut ed=Editor::from_text("fixture.rs","// 한글🙂\nfoobar");
+        ed.set_selection(Selection::caret(Pos::new(1,3)));
+        ed.local_completion();
+        let item=CompletionItem{label:"finished".into(),detail:None,kind:None,filter_text:String::new(),sort_text:String::new(),insert_text:"finished".into(),cursor_offset:None,
+            edit:Some(TextEdit{range:Range{start:Position{line:1,character:0},end:Position{line:1,character:6}},new_text:"finished".into()}),
+            additional_edits:vec![TextEdit{range:Range{start:Position{line:0,character:0},end:Position{line:0,character:0}},new_text:"use thing;\n".into()}]};
+        ed.lsp.as_mut().unwrap().completion=Some(CompletionState{items:vec![item],shown:vec![0],selected:0,top:0,anchor:Pos::new(1,0),incomplete:false,version:ed.buf.version(),head:ed.sel.head});
+        ed.accept_completion();assert_eq!(ed.text(),"use thing;\n// 한글🙂\nfinished");
+        ed.undo();assert_eq!(ed.text(),"// 한글🙂\nfoobar");
+    }
+    #[test]
+    fn local_keywords_and_words_work_without_a_server_and_keep_undo() {
+        let mut ed=Editor::from_text("script.py","example_word\nret");ed.goto(2,4);ed.local_completion();
+        let c=ed.lsp.as_ref().unwrap().completion.as_ref().unwrap();assert!(c.items.iter().any(|i|i.label=="return"));
+        ed.accept_completion();assert_eq!(ed.text(),"example_word\nreturn");ed.undo();assert_eq!(ed.text(),"example_word\nret");
     }
 }

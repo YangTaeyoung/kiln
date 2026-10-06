@@ -47,12 +47,18 @@ impl ColumnDef {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct IndexInfo {
     pub name: String,
     pub columns: Vec<String>,
     pub unique: bool,
     pub primary: bool,
+    pub definition: String,
+    pub method: String,
+    pub predicate: Option<String>,
+    pub included_columns: Vec<String>,
+    pub constraint: bool,
+    pub valid: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -251,9 +257,14 @@ async fn pg_details(pool: &DbPool, schema: &str, table: &str) -> DbResult<TableD
         .query(&format!(
             "SELECT i.relname::text, ix.indisunique::text, ix.indisprimary::text, \
              (SELECT string_agg(pg_get_indexdef(ix.indexrelid, k, true), chr(31) ORDER BY k) \
-              FROM generate_series(1, ix.indnkeyatts) k) \
+              FROM generate_series(1, ix.indnkeyatts) k), \
+             pg_get_indexdef(ix.indexrelid), am.amname::text, pg_get_expr(ix.indpred,ix.indrelid), \
+             (SELECT string_agg(pg_get_indexdef(ix.indexrelid,k,true),chr(31) ORDER BY k) \
+              FROM generate_series(ix.indnkeyatts+1,ix.indnatts) k), \
+             EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid=ix.indexrelid), ix.indisvalid \
              FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid \
              JOIN pg_class c ON c.oid = ix.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             JOIN pg_am am ON am.oid = i.relam \
              WHERE n.nspname = {ns} AND c.relname = {tb} ORDER BY ix.indisprimary DESC, i.relname"
         ))
         .await?;
@@ -263,6 +274,8 @@ async fn pg_details(pool: &DbPool, schema: &str, table: &str) -> DbResult<TableD
             unique: truthy(&s(&idx, r, 1)),
             primary: truthy(&s(&idx, r, 2)),
             columns: split_sep(&s(&idx, r, 3)),
+            definition: s(&idx,r,4), method:s(&idx,r,5), predicate:opt(&idx,r,6),
+            included_columns:split_sep(&s(&idx,r,7)), constraint:truthy(&s(&idx,r,8)), valid:truthy(&s(&idx,r,9)),
         })
         .collect();
     let fks = pool
@@ -335,7 +348,7 @@ async fn my_details(pool: &DbPool, schema: Option<&str>, table: &str) -> DbResul
         .await?;
     let stats = pool
         .query(&format!(
-            "SELECT index_name, non_unique, column_name FROM information_schema.statistics \
+            "SELECT index_name, non_unique, COALESCE(column_name,'(expression)'), collation, sub_part, index_type FROM information_schema.statistics \
              WHERE table_schema = {ns} AND table_name = {tb} \
              ORDER BY index_name = 'PRIMARY' DESC, index_name, seq_in_index"
         ))
@@ -343,22 +356,27 @@ async fn my_details(pool: &DbPool, schema: Option<&str>, table: &str) -> DbResul
     let mut indexes: Vec<IndexInfo> = Vec::new();
     for r in 0..stats.len() {
         let name = s(&stats, r, 0);
-        let col = s(&stats, r, 2);
+        let mut col = s(&stats, r, 2);
+        if let Some(prefix)=opt(&stats,r,4) {col.push_str(&format!("({prefix})"));}
+        if s(&stats,r,3)=="D" {col.push_str(" DESC");}
         match indexes.iter_mut().find(|i| i.name == name) {
             Some(i) => i.columns.push(col),
             None => indexes.push(IndexInfo {
                 primary: name == "PRIMARY",
                 unique: s(&stats, r, 1) == "0",
                 name,
-                columns: vec![col],
+                columns: vec![col], method:s(&stats,r,5), valid:true,
+                constraint:s(&stats,r,0)=="PRIMARY", ..Default::default()
             }),
         }
     }
-    let pk: Vec<String> = indexes
-        .iter()
-        .find(|i| i.primary)
-        .map(|i| i.columns.clone())
-        .unwrap_or_default();
+    let pk:Vec<String>=(0..stats.len()).filter(|r|s(&stats,*r,0)=="PRIMARY").map(|r|s(&stats,r,2)).collect();
+    let create=pool.query(&format!("SHOW CREATE TABLE {}",qualified(d,schema,table))).await?;
+    let definition=s(&create,0,1);
+    for ix in &mut indexes {
+        ix.definition=crate::schema::index_definition(&definition,d,&ix.name)
+            .map(|clause|format!("ALTER TABLE {} ADD {clause};",qualified(d,schema,table))).unwrap_or_default();
+    }
     let columns = (0..cols.len())
         .map(|r| {
             let name = s(&cols, r, 0);
@@ -431,17 +449,18 @@ async fn lite_details(pool: &DbPool, schema: &str, table: &str) -> DbResult<Tabl
     let tb = quote_literal(d, table);
     let cols = pool
         .query(&format!(
-            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info({tb}, {ns}) ORDER BY cid"
+            "SELECT name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo({tb}, {ns}) ORDER BY cid"
         ))
         .await?;
     let n_pk = (0..cols.len()).filter(|r| s(&cols, *r, 4) != "0").count();
+    let pk_index = pool.query(&format!("SELECT count(*) FROM pragma_index_list({tb}, {ns}) WHERE origin='pk'")).await?.scalar_string().as_deref()!=Some("0");
     let columns = (0..cols.len())
         .map(|r| {
             let data_type = s(&cols, r, 1);
             let pk_ordinal: u32 = s(&cols, r, 4).parse().unwrap_or(0);
             // INTEGER PRIMARY KEY 단일 컬럼은 rowid 별칭이라 자동 증가한다.
             let rowid_alias =
-                pk_ordinal > 0 && n_pk == 1 && data_type.eq_ignore_ascii_case("integer");
+                pk_ordinal > 0 && n_pk == 1 && !pk_index && data_type.eq_ignore_ascii_case("integer");
             ColumnDef {
                 name: s(&cols, r, 0),
                 class: TypeClass::from_type_name(&data_type),
@@ -450,28 +469,31 @@ async fn lite_details(pool: &DbPool, schema: &str, table: &str) -> DbResult<Tabl
                 nullable: s(&cols, r, 2) == "0",
                 default: opt(&cols, r, 3),
                 pk_ordinal,
-                auto_increment: rowid_alias,
+                auto_increment: rowid_alias || s(&cols,r,5)!="0",
             }
         })
         .collect();
     let idx = pool
         .query(&format!(
-            "SELECT il.name, il.\"unique\", il.origin, ii.name \
-             FROM pragma_index_list({tb}, {ns}) il, pragma_index_info(il.name, {ns}) ii \
-             ORDER BY il.origin = 'pk' DESC, il.name, ii.seqno"
+            "SELECT il.name, il.\"unique\", il.origin, COALESCE(ii.name,'(expression)'), ii.desc, sm.sql \
+             FROM pragma_index_list({tb}, {ns}) il JOIN pragma_index_xinfo(il.name, {ns}) ii ON ii.key=1 \
+             LEFT JOIN {}.sqlite_schema sm ON sm.name=il.name \
+             ORDER BY il.origin = 'pk' DESC, il.name, ii.seqno",quote_ident(d,schema)
         ))
         .await?;
     let mut indexes: Vec<IndexInfo> = Vec::new();
     for r in 0..idx.len() {
         let name = s(&idx, r, 0);
-        let col = s(&idx, r, 3);
+        let col = format!("{}{}",s(&idx,r,3),if s(&idx,r,4)=="1"{" DESC"}else{""});
         match indexes.iter_mut().find(|i| i.name == name) {
             Some(i) => i.columns.push(col),
             None => indexes.push(IndexInfo {
                 unique: s(&idx, r, 1) == "1",
                 primary: s(&idx, r, 2) == "pk",
                 name,
-                columns: vec![col],
+                columns: vec![col], definition:s(&idx,r,5), method:"BTREE".into(),
+                predicate:crate::schema::index_predicate(&s(&idx,r,5),d),
+                constraint:s(&idx,r,2)!="c",valid:true, ..Default::default()
             }),
         }
     }

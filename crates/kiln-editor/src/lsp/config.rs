@@ -94,6 +94,14 @@ impl LspConfig {
         builtin_language(&ext).map(str::to_owned)
     }
 
+    pub fn language_for_syntax(&self,path:&Path,syntax:&str)->Option<String>{
+        if let Some(ext)=path.extension().and_then(|s|s.to_str()) {
+            let mut keys:Vec<_>=self.languages.keys().collect();keys.sort();
+            for k in keys {if self.languages[k].extensions.iter().any(|e|e.trim_start_matches('.').eq_ignore_ascii_case(ext)){return Some(k.clone());}}
+        }
+        crate::syntax::language_id(syntax).map(str::to_owned).or_else(||self.language_for(path))
+    }
+
     /// 언어 ID 의 서버 설정과 계열 이름. 언어 ID 항목이 계열 항목보다 우선한다.
     pub fn spec_for(&self, language: &str) -> Option<(String, ServerSpec)> {
         if let Some(s) = self.languages.get(language) {
@@ -205,9 +213,6 @@ pub fn find_executable(cmd: &str) -> Option<PathBuf> {
 
 /// 파일이 속한 작업 공간 루트. `root` 아래면 `root`, 아니면 표지 파일이 있는 가장 가까운 조상.
 pub fn workspace_root(root: &Path, file: &Path) -> PathBuf {
-    if file.starts_with(root) {
-        return root.to_path_buf();
-    }
     const MARKERS: &[&str] =
         &["Cargo.toml", "go.mod", "package.json", "pyproject.toml", "setup.py", "compile_commands.json", ".git"];
     let parent = file.parent().unwrap_or(file);
@@ -216,6 +221,7 @@ pub fn workspace_root(root: &Path, file: &Path) -> PathBuf {
         if MARKERS.iter().any(|m| d.join(m).exists()) {
             return d.to_path_buf();
         }
+        if d == root { return root.to_path_buf(); }
         dir = d.parent();
     }
     parent.to_path_buf()
@@ -276,5 +282,42 @@ mod tests {
         assert!(find_executable("sh").is_some());
         assert!(find_executable("definitely-not-a-real-binary-kiln").is_none());
         assert!(find_executable("/bin/sh").is_some());
+    }
+}
+
+/// Child interpreters (for example env node) need the same search directories as server discovery.
+pub(crate) fn child_path(exe: &Path) -> std::ffi::OsString {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p|std::env::split_paths(&p).collect()).unwrap_or_default();
+    if let Some(parent)=exe.parent() { dirs.push(parent.to_path_buf()); }
+    dirs.extend(extra_dirs());
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod nested_root_tests {
+    use super::*;
+    #[test]
+    fn parent_workspace_keeps_independent_child_language_roots(){
+        let temp=tempfile::tempdir().unwrap();let root=temp.path();
+        for (name,manifest,file) in [("frontend","package.json","a.ts"),("backend","go.mod","a.go")]{
+            let child=root.join(name);std::fs::create_dir(&child).unwrap();std::fs::write(child.join(manifest),"").unwrap();
+            assert_eq!(workspace_root(root,&child.join(file)),child);
+        }
+        assert_eq!(workspace_root(root,&root.join("notes.rs")),root);
+    }
+}
+
+#[cfg(all(test,unix))]
+mod child_interpreter_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn discovered_server_can_find_an_interpreter_next_to_it(){
+        let dir=tempfile::tempdir().unwrap();let runtime=dir.path().join("kiln-fixture-runtime");let server=dir.path().join("server");
+        std::fs::write(&runtime,"#!/bin/sh\nprintf fixture-interpreter-ok").unwrap();
+        std::fs::write(&server,"#!/usr/bin/env kiln-fixture-runtime\n").unwrap();
+        for p in [&runtime,&server]{std::fs::set_permissions(p,std::fs::Permissions::from_mode(0o700)).unwrap();}
+        let output=std::process::Command::new(&server).env_clear().env("PATH",child_path(&server)).output().unwrap();
+        assert!(output.status.success());assert_eq!(output.stdout,b"fixture-interpreter-ok");
     }
 }

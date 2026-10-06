@@ -431,6 +431,11 @@ impl DbManager {
         self.inner.live.lock().get(&id).and_then(|l| l.pool.clone())
     }
 
+    pub(crate) fn schema_changed(&self,id:ConnId) {
+        *self.inner.connection_epochs.lock().entry(id).or_default() += 1;
+        self.bump();
+    }
+
     /// Invalidates asynchronous metadata when this connection is replaced or closed.
     pub(crate) fn connection_epoch(&self, id: ConnId) -> u64 {
         self.inner

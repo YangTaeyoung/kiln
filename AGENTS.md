@@ -16,6 +16,7 @@ the user's shells, agents, builds, or servers.
   setup, never passwords or private keys.
 - [Native updater validation](docs/maintainers/updater-validation.md) — isolated
   old/new fixtures, cancellation, relaunch and session survival checks.
+- [0.1.9 release verification](docs/maintainers/0.1.9-status.md) — schema editing, file-language assistance and distribution evidence.
 - [0.1.8 release verification](docs/maintainers/0.1.8-status.md) — SQL completion, connected metadata, editor regressions and distribution evidence.
 - [0.1.7 release verification](docs/maintainers/0.1.7-status.md) — database inspector, terminal palette queries, ordinal-free task names and published artifact verification.
 - [0.1.6 release verification](docs/maintainers/0.1.6-status.md) — shared branding, saved appearance, portable icon rendering and published artifacts; installed-device update observation is pending.

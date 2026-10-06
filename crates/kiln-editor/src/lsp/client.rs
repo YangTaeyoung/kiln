@@ -317,6 +317,7 @@ impl Supervisor {
 
     fn start(&mut self) -> Result<Proc, String> {
         let mut child = Command::new(&self.exe)
+            .env("PATH", super::config::child_path(&self.exe))
             .args(&self.args)
             .current_dir(&self.key.0)
             .stdin(Stdio::piped())

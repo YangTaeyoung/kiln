@@ -369,12 +369,23 @@ macro_rules! driver_ops {
                     .collect()
             }
 
+            async fn refresh_schema(conn: &mut $Conn) -> DbResult<()> {
+                if $drv == Driver::Sqlite {
+                    // SQLite reloads its catalog lazily after DDL on another connection.
+                    // Force that reload before SQLx captures result column metadata.
+                    sqlx::Connection::clear_cached_statements(&mut *conn).await?;
+                    sqlx::raw_sql("SELECT name FROM main.sqlite_schema LIMIT 1").execute(&mut *conn).await?;
+                }
+                Ok(())
+            }
+
             /// 문장 하나를 텍스트 프로토콜로 실행하고 결과를 모은다.
             pub async fn run_sql(
                 conn: &mut $Conn,
                 sql: &str,
                 max_rows: Option<usize>,
             ) -> DbResult<StmtOutcome> {
+                refresh_schema(conn).await?;
                 let mut out = StmtOutcome::default();
                 let mut cols: Option<Vec<ColumnInfo>> = None;
                 let mut rows = Vec::new();
@@ -428,6 +439,7 @@ macro_rules! driver_ops {
             }
 
             pub async fn query_bound(conn:&mut $Conn,sql:&str,values:&[Value])->DbResult<ResultSet>{
+                refresh_schema(conn).await?;
                 let mut args=<$DB as sqlx::Database>::Arguments::default();
                 for value in values {<$DB as DbKind>::add_arg(&mut args,value).map_err(|e|DbError::msg(e.to_string()))?;}
                 let rows=sqlx::query_with(sqlx::AssertSqlSafe(sql.to_owned()),args).persistent(false).fetch_all(&mut *conn).await?;
@@ -445,6 +457,7 @@ macro_rules! driver_ops {
                 sql: &str,
                 sink: &mut RowSink<'_>,
             ) -> DbResult<u64> {
+                refresh_schema(conn).await?;
                 let mut cols: Option<Vec<ColumnInfo>> = None;
                 let mut n = 0u64;
                 let mut stream = sqlx::raw_sql(sqlx::AssertSqlSafe(sql.to_string())).fetch(&mut *conn);

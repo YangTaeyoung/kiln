@@ -297,3 +297,56 @@ mod tests {
         assert_eq!(comment_style("Plain Text"), None);
     }
 }
+
+/// Bounded, conservative content detection. Explicit filenames/extensions take precedence.
+pub fn detect_document(path: &Path, text: &str) -> Option<&'static SyntaxReference> {
+    let sample: String = text.chars().take(8192).collect();
+    let first = sample.lines().next().unwrap_or("").trim_start_matches('\u{feff}');
+    if let Some(s) = detect(path, "") { return Some(s); }
+    let trimmed = sample.trim_start_matches('\u{feff}').trim_start();
+    let name = if trimmed.starts_with("#!/") {
+        let executable = first.split_whitespace().collect::<Vec<_>>();
+        if executable.iter().any(|s| s.contains("python")) { "Python" }
+        else if executable.iter().any(|s| s.ends_with("node") || s.ends_with("nodejs")) { "JavaScript" }
+        else if executable.iter().any(|s| s.ends_with("ruby")) { "Ruby" }
+        else { return detect(path, first); }
+    } else if trimmed.starts_with("<?xml") { "XML" }
+    else if trimmed.to_ascii_lowercase().starts_with("<!doctype html") { "HTML" }
+    else if trimmed.starts_with("<?php") { "PHP" }
+    else if (trimmed.starts_with('{') || trimmed.starts_with('[')) && serde_json::from_str::<serde_json::Value>(trimmed).is_ok() { "JSON" }
+    else { return detect(path,first); };
+    assets().set.find_syntax_by_name(name)
+}
+
+/// Map the selected highlighting grammar to the LSP language identity.
+pub fn language_id(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "Rust"=>"rust", "Go"=>"go", "Python"=>"python", "C"=>"c", "C++"=>"cpp",
+        "JavaScript"=>"javascript", "TypeScript"=>"typescript", "TypeScriptReact"|"TSX"=>"typescriptreact",
+        "JavaScript (Babel)"|"JSX"=>"javascriptreact", "Lua"=>"lua", "Ruby"=>"ruby",
+        "JSON"=>"json", "YAML"=>"yaml", "TOML"=>"toml", "HTML"=>"html", "CSS"=>"css",
+        "Bourne Again Shell (bash)"=>"shellscript", "Dockerfile"=>"dockerfile", "Markdown"=>"markdown",
+        "Java"=>"java", "Kotlin"=>"kotlin", "Swift"=>"swift", "SQL"=>"sql", "PHP"=>"php",
+        _=>return None,
+    })
+}
+
+#[cfg(test)]
+mod document_detection_tests {
+    use super::*;
+    #[test]
+    fn extension_shebang_content_and_override_precedence() {
+        for (p,text,expected) in [("script","#!/usr/bin/env python3\nprint(1)","Python"),("data","{\"a\":1}","JSON"),("page","<!DOCTYPE html>\n<html>","HTML"),("x.py","{\"a\":1}","Python")]{
+            assert_eq!(detect_document(Path::new(p),text).unwrap().name,expected);
+        }
+        assert!(detect_document(Path::new("unknown"),"Some ordinary prose about fn and class").is_none());
+    }
+    #[test]
+    fn bundled_shell_shebang_detection_survives_document_inference() {
+        for first in ["#!/usr/bin/env bash", "#!/bin/bash"] {
+            let text=format!("{first}\necho hello");
+            assert_eq!(detect_document(Path::new("script"),&text).unwrap().name,"Bourne Again Shell (bash)");
+            assert_eq!(crate::Editor::from_text("script",&text).status().language,"Bourne Again Shell (bash)");
+        }
+    }
+}

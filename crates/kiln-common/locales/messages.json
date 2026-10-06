@@ -8868,5 +8868,475 @@
     "en": "SQL completion (⌃Space · ⌥Esc)",
     "ja": "SQL 補完 (⌃Space · ⌥Esc)",
     "zh-CN": "SQL 自动补全 (⌃Space · ⌥Esc)"
+  },
+  "DB에 적용": {
+    "en": "Apply to database",
+    "ja": "DBに適用",
+    "zh-CN": "应用到数据库"
+  },
+  "DB에 적용 중… 탭을 닫아도 실행은 취소되지 않습니다.": {
+    "en": "Applying to database… Closing the tab does not cancel this operation.",
+    "ja": "DBに適用中… タブを閉じても実行は取り消されません。",
+    "zh-CN": "正在应用到数据库… 关闭标签页不会取消操作。"
+  },
+  "DDL 보기": {
+    "en": "View DDL",
+    "ja": "DDL を表示",
+    "zh-CN": "查看 DDL"
+  },
+  "SQL 미리보기": {
+    "en": "Preview SQL",
+    "ja": "SQLをプレビュー",
+    "zh-CN": "预览 SQL"
+  },
+  "SQLite의 세션 전용 연결 스키마는 이 화면에서 변경할 수 없습니다.": {
+    "en": "Session-local SQLite schemas cannot be changed here.",
+    "ja": "SQLiteのセッション専用スキーマはここでは変更できません。",
+    "zh-CN": "无法在此修改 SQLite 会话专用结构。"
+  },
+  "SQL과 변경 대상을 확인했습니다.": {
+    "en": "I reviewed the SQL and its target.",
+    "ja": "SQLと変更対象を確認しました。",
+    "zh-CN": "我已确认 SQL 和修改目标。"
+  },
+  "SQL과 현재 구조를 확인 중…": {
+    "en": "Checking SQL and current schema…",
+    "ja": "SQLと現在の構造を確認中…",
+    "zh-CN": "正在检查 SQL 和当前结构…"
+  },
+  "SQL을 확인한 뒤 인덱스를 삭제합니다.": {
+    "en": "Review the SQL before deleting the index.",
+    "ja": "SQLを確認してからインデックスを削除します。",
+    "zh-CN": "确认 SQL 后删除索引。"
+  },
+  "가상 테이블은 이 화면에서 구조를 변경할 수 없습니다.": {
+    "en": "Virtual tables cannot be modified here.",
+    "ja": "ここでは仮想テーブルの構造を変更できません。",
+    "zh-CN": "无法在此修改虚拟表结构。"
+  },
+  "고유 인덱스": {
+    "en": "Unique index",
+    "ja": "一意インデックス",
+    "zh-CN": "唯一索引"
+  },
+  "구조 변경 입력을 복원했습니다. SQL을 다시 미리 보고 적용하세요.": {
+    "en": "Schema change inputs restored. Preview the SQL again before applying.",
+    "ja": "構造変更の入力を復元しました。SQLを再度プレビューしてから適用してください。",
+    "zh-CN": "已恢复结构更改输入。请重新预览 SQL 后再应用。"
+  },
+  "구조 변경을 DB에 적용했습니다.": {
+    "en": "Schema changes applied to the database.",
+    "ja": "構造の変更をDBに適用しました。",
+    "zh-CN": "已将结构更改应用到数据库。"
+  },
+  "구조를 불러오지 못했습니다. 새로고침을 눌러 다시 시도하세요.": {
+    "en": "Could not load the schema. Refresh to try again.",
+    "ja": "構造を読み込めませんでした。更新して再試行してください。",
+    "zh-CN": "无法加载结构。请刷新重试。"
+  },
+  "기본 키 또는 제약 조건의 인덱스는 이 화면에서 삭제할 수 없습니다.": {
+    "en": "Primary key and constraint-owned indexes cannot be dropped here.",
+    "ja": "ここでは主キーや制約に属するインデックスを削除できません。",
+    "zh-CN": "无法在此删除主键或约束索引。"
+  },
+  "기본 키 컬럼은 NULL을 허용할 수 없습니다.": {
+    "en": "Primary key columns cannot allow NULL.",
+    "ja": "主キーの列はNULLを許可できません。",
+    "zh-CN": "主键列不能允许 NULL。"
+  },
+  "기본 키 컬럼은 이 화면에서 삭제할 수 없습니다.": {
+    "en": "Primary key columns cannot be dropped here.",
+    "ja": "ここでは主キーの列を削除できません。",
+    "zh-CN": "无法在此删除主键列。"
+  },
+  "기본값 지정 (SQL 표현식)": {
+    "en": "Set default (SQL expression)",
+    "ja": "デフォルト値を指定（SQL式）",
+    "zh-CN": "设置默认值（SQL 表达式）"
+  },
+  "내림차순": {
+    "en": "Descending",
+    "ja": "降順",
+    "zh-CN": "降序"
+  },
+  "데이터 타입": {
+    "en": "Data type",
+    "ja": "データ型",
+    "zh-CN": "数据类型"
+  },
+  "데이터의 편집 내용을 적용하거나 취소한 뒤 구조를 변경하세요.": {
+    "en": "Apply or discard your data edits before changing the schema.",
+    "ja": "データの編集を適用または破棄してから構造を変更してください。",
+    "zh-CN": "请先应用或放弃数据编辑，再修改结构。"
+  },
+  "먼저 데이터베이스에 연결하세요.": {
+    "en": "Connect to the database first.",
+    "ja": "先にデータベースに接続してください。",
+    "zh-CN": "请先连接数据库。"
+  },
+  "문서의 단어": {
+    "en": "Document word",
+    "ja": "文書内の単語",
+    "zh-CN": "文档中的词语"
+  },
+  "문자열은 'text', 현재 시각은 CURRENT_TIMESTAMP처럼 SQL로 입력하세요.": {
+    "en": "Use SQL expressions: 'text' for a string or CURRENT_TIMESTAMP for the current time.",
+    "ja": "文字列は 'text'、現在時刻は CURRENT_TIMESTAMP のようにSQLで入力してください。",
+    "zh-CN": "请输入 SQL 表达式，如字符串 'text' 或当前时间 CURRENT_TIMESTAMP。"
+  },
+  "변경 계획이 수정되었습니다. 변경 내용을 다시 검토하세요.": {
+    "en": "The change plan was modified. Preview your changes again.",
+    "ja": "変更計画が書き換えられました。再度プレビューしてください。",
+    "zh-CN": "修改计划已变更。请重新预览。"
+  },
+  "변경할 컬럼 속성을 입력하세요.": {
+    "en": "Change a column property before previewing.",
+    "ja": "プレビューする前に列の属性を変更してください。",
+    "zh-CN": "请先修改列属性再预览。"
+  },
+  "삭제…": {
+    "en": "Delete…",
+    "ja": "削除…",
+    "zh-CN": "删除…"
+  },
+  "새로고침": {
+    "en": "Refresh",
+    "ja": "更新",
+    "zh-CN": "刷新"
+  },
+  "숨겨진 rowid를 보존할 수 없어 이 테이블은 재구성하지 않습니다.": {
+    "en": "This table cannot be rebuilt while preserving its hidden rowid.",
+    "ja": "隠しrowidを保持できないため、このテーブルは再構成できません。",
+    "zh-CN": "无法保留隐藏 rowid，因此不能重建此表。"
+  },
+  "실행할 SQL": {
+    "en": "SQL to execute",
+    "ja": "実行するSQL",
+    "zh-CN": "将执行的 SQL"
+  },
+  "아래로": {
+    "en": "Move down",
+    "ja": "下へ",
+    "zh-CN": "下移"
+  },
+  "언어 키워드": {
+    "en": "Language keyword",
+    "ja": "言語キーワード",
+    "zh-CN": "语言关键字"
+  },
+  "연결 또는 구조가 변경되었습니다. 초안을 내보내거나 편집을 취소한 뒤 다시 불러오세요.": {
+    "en": "The connection or schema changed. Export your draft or discard edits before reloading.",
+    "ja": "接続または構造が変更されました。下書きを書き出すか編集を破棄してから再読み込みしてください。",
+    "zh-CN": "连接或结构已更改。请导出草稿或放弃编辑后重新加载。"
+  },
+  "연결이 변경되었습니다. SQL을 다시 미리 보세요.": {
+    "en": "The connection changed. Preview the SQL again.",
+    "ja": "接続が変更されました。SQLをもう一度プレビューしてください。",
+    "zh-CN": "连接已更改。请重新预览 SQL。"
+  },
+  "연결이 변경되었습니다. 변경 내용을 다시 검토하세요.": {
+    "en": "The connection changed. Preview your changes again.",
+    "ja": "接続が変わりました。変更内容を再度プレビューしてください。",
+    "zh-CN": "连接已更改。请重新预览修改。"
+  },
+  "외래 키 검증에 실패했습니다. 변경을 적용하지 않았습니다.": {
+    "en": "Foreign key validation failed. No changes were applied.",
+    "ja": "外部キーの検証に失敗しました。変更は適用されていません。",
+    "zh-CN": "外键验证失败。未应用任何修改。"
+  },
+  "위로": {
+    "en": "Move up",
+    "ja": "上へ",
+    "zh-CN": "上移"
+  },
+  "유효하지 않음": {
+    "en": "Invalid",
+    "ja": "無効",
+    "zh-CN": "无效"
+  },
+  "이 DB에서는 여러 구조 변경을 한 번에 적용할 수 없습니다.": {
+    "en": "This database requires one schema statement per operation.",
+    "ja": "このDBでは一度に一つの構造変更文のみ適用できます。",
+    "zh-CN": "此数据库每次操作只能执行一条结构修改语句。"
+  },
+  "이 인덱스에 표시할 DDL이 없습니다.": {
+    "en": "There is no DDL to display for this index.",
+    "ja": "このインデックスに表示できるDDLはありません。",
+    "zh-CN": "此索引没有可显示的 DDL。"
+  },
+  "이 컬럼의 데이터가 영구 삭제됩니다.": {
+    "en": "This column's data will be permanently deleted.",
+    "ja": "このカラムのデータは完全に削除されます。",
+    "zh-CN": "此列的数据将被永久删除。"
+  },
+  "이 컬럼의 모든 값이 삭제됩니다. 이 작업은 되돌릴 수 없습니다.": {
+    "en": "All values in this column will be deleted. This cannot be undone.",
+    "ja": "この列のすべての値が削除されます。元に戻せません。",
+    "zh-CN": "该列的所有值将被删除。此操作无法撤销。"
+  },
+  "이 테이블 정의를 안전하게 편집할 수 없습니다.": {
+    "en": "This table definition cannot be safely edited here.",
+    "ja": "このテーブル定義はここでは安全に編集できません。",
+    "zh-CN": "无法在此安全地编辑该表定义。"
+  },
+  "이 테이블과 모든 데이터가 영구 삭제됩니다. 테이블 이름을 입력하세요.": {
+    "en": "This table and all its data will be permanently deleted. Enter the table name.",
+    "ja": "このテーブルとすべてのデータは完全に削除されます。テーブル名を入力してください。",
+    "zh-CN": "此表及其所有数据将被永久删除。请输入表名。"
+  },
+  "이 테이블에는 인덱스가 없습니다.": {
+    "en": "This table has no indexes.",
+    "ja": "このテーブルにはインデックスがありません。",
+    "zh-CN": "此表没有索引。"
+  },
+  "이름 변경…": {
+    "en": "Rename…",
+    "ja": "名前を変更…",
+    "zh-CN": "重命名…"
+  },
+  "이름을 입력하세요. 제어 문자는 사용할 수 없습니다.": {
+    "en": "Enter a name without control characters.",
+    "ja": "制御文字を含まない名前を入力してください。",
+    "zh-CN": "请输入不含控制字符的名称。"
+  },
+  "이미 존재하는 인덱스 이름입니다.": {
+    "en": "An index with this name already exists.",
+    "ja": "この名前のインデックスはすでに存在します。",
+    "zh-CN": "已存在同名索引。"
+  },
+  "이미 존재하는 컬럼 이름입니다.": {
+    "en": "A column with this name already exists.",
+    "ja": "この名前の列はすでに存在します。",
+    "zh-CN": "已存在同名列。"
+  },
+  "이전 구조 변경의 실행 결과를 확인하세요. 복원된 폼은 자동 실행되지 않습니다.": {
+    "en": "Check the outcome of the previous schema change. Restored forms never run automatically.",
+    "ja": "以前の構造変更の実行結果を確認してください。復元したフォームは自動実行されません。",
+    "zh-CN": "请检查上次结构更改的执行结果。恢复的表单不会自动执行。"
+  },
+  "인덱스 DDL": {
+    "en": "Index DDL",
+    "ja": "インデックスDDL",
+    "zh-CN": "索引 DDL"
+  },
+  "인덱스 보기": {
+    "en": "View indexes",
+    "ja": "インデックスを表示",
+    "zh-CN": "查看索引"
+  },
+  "인덱스 삭제": {
+    "en": "Delete index",
+    "ja": "インデックスを削除",
+    "zh-CN": "删除索引"
+  },
+  "인덱스 삭제…": {
+    "en": "Drop index…",
+    "ja": "インデックスを削除…",
+    "zh-CN": "删除索引…"
+  },
+  "인덱스 이름": {
+    "en": "Index name",
+    "ja": "インデックス名",
+    "zh-CN": "索引名称"
+  },
+  "인덱스 추가": {
+    "en": "Add index",
+    "ja": "インデックスを追加",
+    "zh-CN": "添加索引"
+  },
+  "인덱스 추가…": {
+    "en": "Add index…",
+    "ja": "インデックスを追加…",
+    "zh-CN": "添加索引…"
+  },
+  "인덱스 컬럼을 중복 선택할 수 없습니다.": {
+    "en": "Each index column can be selected only once.",
+    "ja": "同じインデックス列は一度だけ選択できます。",
+    "zh-CN": "同一索引列只能选择一次。"
+  },
+  "인덱스를 삭제합니다. 테이블의 행은 유지됩니다.": {
+    "en": "The index will be deleted. Table rows will be preserved.",
+    "ja": "インデックスを削除します。テーブルの行は保持されます。",
+    "zh-CN": "将删除索引。表中的行将保留。"
+  },
+  "인덱스를 찾을 수 없습니다. 구조를 새로고침하세요.": {
+    "en": "Index not found. Refresh the schema.",
+    "ja": "インデックスが見つかりません。構造を更新してください。",
+    "zh-CN": "找不到索引。请刷新结构。"
+  },
+  "인덱스에 사용할 컬럼을 선택하세요.": {
+    "en": "Select columns for the index.",
+    "ja": "インデックスに使用する列を選択してください。",
+    "zh-CN": "请选择索引列。"
+  },
+  "일반 테이블만 구조를 변경할 수 있습니다.": {
+    "en": "Only regular tables can be modified here.",
+    "ja": "ここでは通常のテーブルのみ変更できます。",
+    "zh-CN": "此处只能修改普通表。"
+  },
+  "자동 감지": {
+    "en": "Auto detect",
+    "ja": "自動検出",
+    "zh-CN": "自动检测"
+  },
+  "자동 생성 컬럼은 이 화면에서 속성을 변경할 수 없습니다. DDL을 확인하세요.": {
+    "en": "Generated column properties cannot be changed here. See DDL.",
+    "ja": "ここでは自動生成列の属性を変更できません。DDLを確認してください。",
+    "zh-CN": "无法在此修改自动生成列的属性。请查看 DDL。"
+  },
+  "자동완성": {
+    "en": "Complete",
+    "ja": "補完",
+    "zh-CN": "补全"
+  },
+  "자동완성 (⌃Space · ⌥Esc)": {
+    "en": "Complete (⌃Space · ⌥Esc)",
+    "ja": "補完 (⌃Space · ⌥Esc)",
+    "zh-CN": "补全 (⌃Space · ⌥Esc)"
+  },
+  "제거": {
+    "en": "Remove",
+    "ja": "除去",
+    "zh-CN": "移除"
+  },
+  "제약 조건": {
+    "en": "Constraint",
+    "ja": "制約",
+    "zh-CN": "约束"
+  },
+  "제약 조건이 소유한 인덱스는 여기서 삭제할 수 없습니다.": {
+    "en": "Indexes owned by constraints cannot be deleted here.",
+    "ja": "制約が所有するインデックスはここでは削除できません。",
+    "zh-CN": "无法在此删除约束拥有的索引。"
+  },
+  "컬럼 보기": {
+    "en": "View columns",
+    "ja": "列を表示",
+    "zh-CN": "查看列"
+  },
+  "컬럼 삭제": {
+    "en": "Delete column",
+    "ja": "カラムを削除",
+    "zh-CN": "删除列"
+  },
+  "컬럼 삭제…": {
+    "en": "Drop column…",
+    "ja": "列を削除…",
+    "zh-CN": "删除列…"
+  },
+  "컬럼 수정": {
+    "en": "Edit column",
+    "ja": "カラムを編集",
+    "zh-CN": "编辑列"
+  },
+  "컬럼 수정…": {
+    "en": "Edit column…",
+    "ja": "列を編集…",
+    "zh-CN": "编辑列…"
+  },
+  "컬럼 이름": {
+    "en": "Column name",
+    "ja": "カラム名",
+    "zh-CN": "列名"
+  },
+  "컬럼 이름 변경": {
+    "en": "Rename column",
+    "ja": "カラム名を変更",
+    "zh-CN": "重命名列"
+  },
+  "컬럼 이름 변경…": {
+    "en": "Rename column…",
+    "ja": "列名を変更…",
+    "zh-CN": "重命名列…"
+  },
+  "컬럼 이름은 이름 변경 메뉴에서 변경하세요.": {
+    "en": "Use Rename column to change its name.",
+    "ja": "列名の変更には名前変更メニューを使用してください。",
+    "zh-CN": "请使用重命名列菜单修改名称。"
+  },
+  "컬럼 추가": {
+    "en": "Add column",
+    "ja": "カラムを追加",
+    "zh-CN": "添加列"
+  },
+  "컬럼 추가…": {
+    "en": "Add column…",
+    "ja": "列を追加…",
+    "zh-CN": "添加列…"
+  },
+  "컬럼을 선택한 순서대로 인덱스가 생성됩니다.": {
+    "en": "Index columns follow the order selected below.",
+    "ja": "インデックスのカラムは選択した順に並びます。",
+    "zh-CN": "索引列按下方选择顺序排列。"
+  },
+  "컬럼을 찾을 수 없습니다. 구조를 새로고침하세요.": {
+    "en": "Column not found. Refresh the schema.",
+    "ja": "列が見つかりません。構造を更新してください。",
+    "zh-CN": "找不到列。请刷新结构。"
+  },
+  "타입 · 기본값 수정…": {
+    "en": "Edit type and default…",
+    "ja": "型・デフォルト値を編集…",
+    "zh-CN": "编辑类型和默认值…"
+  },
+  "타입 또는 기본값 표현식을 확인하세요.": {
+    "en": "Check the type or default expression.",
+    "ja": "型またはデフォルト値の式を確認してください。",
+    "zh-CN": "请检查类型或默认值表达式。"
+  },
+  "타입 또는 기본값에는 단일 SQL 표현식만 입력하세요.": {
+    "en": "Enter a single SQL expression for the type or default.",
+    "ja": "型またはデフォルト値には単一のSQL式を入力してください。",
+    "zh-CN": "类型或默认值只能包含一个 SQL 表达式。"
+  },
+  "타입 또는 제약 조건 변경은 기존 데이터를 검사하거나 변환하며 테이블을 잠글 수 있습니다.": {
+    "en": "Changing types or constraints can validate or convert existing data and lock the table.",
+    "ja": "型や制約の変更は既存データを検証・変換し、テーブルをロックする場合があります。",
+    "zh-CN": "修改类型或约束会检查或转换现有数据，并可能锁定表。"
+  },
+  "테이블 구조가 변경되었습니다. 변경 내용을 다시 검토하세요.": {
+    "en": "The table schema changed. Preview your changes again.",
+    "ja": "テーブル構造が変わりました。変更内容を再度プレビューしてください。",
+    "zh-CN": "表结构已更改。请重新预览修改。"
+  },
+  "테이블 이름 변경": {
+    "en": "Rename table",
+    "ja": "テーブル名を変更",
+    "zh-CN": "重命名表"
+  },
+  "테이블 이름 변경…": {
+    "en": "Rename table…",
+    "ja": "テーブル名を変更…",
+    "zh-CN": "重命名表…"
+  },
+  "테이블과 모든 데이터가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.": {
+    "en": "The table and all its data will be deleted. This cannot be undone.",
+    "ja": "テーブルとすべてのデータが削除されます。元に戻せません。",
+    "zh-CN": "表及其所有数据将被删除。此操作无法撤销。"
+  },
+  "테이블이 삭제되었습니다. 탐색기에서 다른 테이블을 여세요.": {
+    "en": "The table was deleted. Open another table from the explorer.",
+    "ja": "テーブルが削除されました。エクスプローラーから別のテーブルを開いてください。",
+    "zh-CN": "表已删除。请从资源管理器打开其他表。"
+  },
+  "파일 언어 선택": {
+    "en": "Choose file language",
+    "ja": "ファイルの言語を選択",
+    "zh-CN": "选择文件语言"
+  },
+  "현재 이름과 다른 이름을 입력하세요.": {
+    "en": "Enter a different name.",
+    "ja": "現在とは異なる名前を入力してください。",
+    "zh-CN": "请输入与当前名称不同的名称。"
+  },
+  "이 컬럼의 인덱스 또는 외래 키를 먼저 변경하세요. 종속 항목은 자동 삭제하지 않습니다.": {
+    "en": "Change this column's indexes or foreign keys first. Dependencies are not removed automatically.",
+    "ja": "先にこの列のインデックスや外部キーを変更してください。依存項目は自動削除されません。",
+    "zh-CN": "请先修改该列的索引或外键。不会自动删除依赖项。"
+  },
+  "테이블 이름": {
+    "en": "Table name",
+    "ja": "テーブル名",
+    "zh-CN": "表名"
   }
 }

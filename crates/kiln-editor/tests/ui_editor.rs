@@ -99,16 +99,16 @@ fn clicking_places_caret_and_shift_arrows_select() {
     let mut h = harness(Editor::from_text("a.txt", "hello world\nsecond line\n"));
     h.run();
     // 두 번째 줄 텍스트 위를 클릭한다.
-    let rect = h.ctx.content_rect();
-    h.hover_at(egui::pos2(rect.left() + 90.0, rect.top() + 45.0));
+    let (row_h,_,rect) = h.state().layout_info();
+    h.hover_at(egui::pos2(rect.left() + 30.0, rect.top() + row_h*1.5));
     h.event(Event::PointerButton {
-        pos: egui::pos2(rect.left() + 90.0, rect.top() + 45.0),
+        pos: egui::pos2(rect.left() + 30.0, rect.top() + row_h*1.5),
         button: egui::PointerButton::Primary,
         pressed: true,
         modifiers: Modifiers::NONE,
     });
     h.event(Event::PointerButton {
-        pos: egui::pos2(rect.left() + 90.0, rect.top() + 45.0),
+        pos: egui::pos2(rect.left() + 30.0, rect.top() + row_h*1.5),
         button: egui::PointerButton::Primary,
         pressed: false,
         modifiers: Modifiers::NONE,

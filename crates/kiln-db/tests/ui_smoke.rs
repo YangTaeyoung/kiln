@@ -210,14 +210,25 @@ fn table_view_edits_cell_and_submits_to_database() {
     }
     save_png(&mut h, "table_value_viewer");
     h.get_by_label("셀 내용").click();
-    h.get_by_label("구조").click();
+    h.get_by_label("컬럼").click();
     for _ in 0..3 {
         h.step();
     }
+    assert!(h.query_by_label("VARCHAR(120)").is_some());
     save_png(&mut h, "table_structure");
+    h.get_by_label("인덱스").click();
+    step_until(&mut h, "indexes", |h| h.query_by_label("idx_customers_name").is_some());
+    assert!(h.query_by_label("고유").is_some());
+    save_png(&mut h, "table_indexes");
     h.get_by_label("DDL").click();
     step_until(&mut h, "ddl", |h| h.query_by_label("복사").is_some());
     save_png(&mut h, "table_ddl");
+    let mut orders = DbTab::table(m.clone(), id, Some("main".into()), "orders".into());
+    orders.show_table_section(kiln_db::TableSection::Structure);
+    h.state_mut().tab = orders;
+    step_until(&mut h, "foreign key metadata", |h| h.query_by_label_contains("customers.id").is_some());
+    assert!(h.query_by_label("외래 키").is_some());
+    save_png(&mut h, "table_structure_foreign_keys");
 }
 
 #[test]

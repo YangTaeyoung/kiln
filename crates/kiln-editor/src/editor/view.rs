@@ -110,6 +110,29 @@ impl Editor {
     }
 
     /// 편집기를 그리고 입력을 처리한다. 사용 가능한 영역 전체를 차지한다.
+    fn language_toolbar(&mut self,ui:&mut Ui,rect:Rect){
+        let mut choice=self.language_override.clone();
+        let language_label = if self.language == "Plain Text" { kiln_common::i18n::tr("일반 텍스트").to_owned() } else { self.language.clone() };
+        ui.scope_builder(UiBuilder::new().max_rect(rect.shrink2(vec2(5.0,2.0))),|ui|{
+            ui.horizontal(|ui|{
+                egui::ComboBox::from_id_salt(self.id().with("language"))
+                    .width((rect.width()-130.0).clamp(60.0,210.0))
+                    .selected_text(if choice.is_none(){format!("{} · {}",kiln_common::i18n::tr("자동 감지"),language_label)}else{language_label.to_owned()})
+                    .truncate().show_ui(ui,|ui|{
+                        ui.selectable_value(&mut choice,None,kiln_common::i18n::tr("자동 감지"));
+                        ui.selectable_value(&mut choice,Some("Plain Text".into()),kiln_common::i18n::tr("일반 텍스트"));
+                        for syntax in crate::syntax::assets().set.syntaxes().iter().filter(|s|!s.hidden&&s.name!="Plain Text"){
+                            ui.selectable_value(&mut choice,Some(syntax.name.clone()),&syntax.name);
+                        }
+                    }).response.on_hover_text(kiln_common::i18n::tr("파일 언어 선택"));
+                if ui.small_button(kiln_common::i18n::tr("자동완성")).on_hover_text(kiln_common::i18n::tr("자동완성 (⌃Space · ⌥Esc)")).clicked(){
+                    ui.memory_mut(|m|m.request_focus(self.id()));self.lsp_trigger_completion(None);
+                }
+            });
+        });
+        if choice!=self.language_override {self.set_language_override(choice);}
+    }
+
     pub fn ui(&mut self, ui: &mut Ui) {
         let t = Theme::current();
         let font = self.view.update_metrics(ui);
@@ -120,7 +143,10 @@ impl Editor {
             self.binary_placeholder(ui, full);
             return;
         }
-        let body = self.banners_ui(ui, full);
+        self.refresh_language();
+        let header=Rect::from_min_max(full.min,pos2(full.right(),(full.top()+30.0).min(full.bottom())));
+        self.language_toolbar(ui,header);
+        let body = self.banners_ui(ui, Rect::from_min_max(pos2(full.left(),header.bottom()),full.max));
 
         let focused = ui.memory(|m| m.has_focus(self.id()));
         let overlay_focus = ui.memory(|m| {
@@ -1170,6 +1196,7 @@ impl Editor {
     fn handle_ime(&mut self, ime: &ImeEvent) {
         match ime {
             ImeEvent::Preedit { text, .. } => {
+                self.lsp_dismiss_completion();
                 if text.is_empty() {
                     self.view.preedit = None;
                 } else {
@@ -1233,6 +1260,7 @@ impl Editor {
             Key::F2 => self.lsp_start_rename(),
             Key::F if m.shift && m.alt && !cmd => self.lsp_format(),
             Key::Space if m.ctrl => self.lsp_trigger_completion(None),
+            Key::Escape if m.alt && !cmd => self.lsp_trigger_completion(None),
             Key::ArrowUp if m.shift && m.alt && !cmd && !m.ctrl => self.extend_column(-1, 0),
             Key::ArrowDown if m.shift && m.alt && !cmd && !m.ctrl => self.extend_column(1, 0),
             Key::ArrowLeft if m.shift && m.alt && !cmd && !m.ctrl && self.active_column().is_some() => {

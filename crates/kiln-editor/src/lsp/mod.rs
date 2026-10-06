@@ -126,7 +126,7 @@ pub struct Pending<T> {
 }
 
 impl<T> Pending<T> {
-    fn channel() -> (mpsc::Sender<Result<T, String>>, Self) {
+    pub(crate) fn channel() -> (mpsc::Sender<Result<T, String>>, Self) {
         let (tx, rx) = mpsc::channel();
         (tx, Self { rx: Some(rx), deadline: Instant::now() + REQUEST_TIMEOUT })
     }
@@ -293,6 +293,8 @@ impl LspManager {
         self.inner.config.language_for(path)
     }
 
+    pub fn language_for_syntax(&self,path:&Path,syntax:&str)->Option<String>{self.inner.config.language_for_syntax(path,syntax)}
+
     /// 경로에 맞는 서버를 찾거나 띄운다. 서버가 없거나 꺼져 있으면 `None`.
     fn server_for(&self, path: &Path, language: &str) -> Option<Arc<ServerHandle>> {
         let (family, spec) = self.inner.config.spec_for(language)?;
@@ -317,7 +319,12 @@ impl LspManager {
 
     /// 문서를 연다. 언어를 모르거나 서버가 없으면 `false`. 서버는 백그라운드에서 시작한다.
     pub fn open_document(&self, path: &Path, text: &str) -> bool {
-        let Some(language) = self.language_for(path) else { return false };
+        let language = crate::syntax::detect_document(path,text).and_then(|s|self.language_for_syntax(path,&s.name)).or_else(||self.language_for(path));
+        self.open_document_as(path,text,language.as_deref())
+    }
+
+    pub fn open_document_as(&self,path:&Path,text:&str,language:Option<&str>)->bool {
+        let Some(language) = language.map(str::to_owned) else { return false };
         let Some(server) = self.server_for(path, &language) else { return false };
         let mut docs = self.inner.shared.docs.lock();
         if let Some(old) = docs.remove(path) {

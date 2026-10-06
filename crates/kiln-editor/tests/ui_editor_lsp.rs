@@ -96,7 +96,7 @@ fn completion_popup_filters_and_accepts_text_edit_and_snippet() {
     assert!(wait_popup(&mut h, "completion"));
     h.snapshot("editor_lsp_completion");
     type_text(&mut h, "b");
-    h.run_ok();
+    assert!(wait_popup(&mut h,"completion"),"edited prefixes request fresh server replacement ranges");
     assert_eq!(h.state().lsp_popup_kind(), Some("completion"));
     h.key_press(Key::Enter);
     h.run_ok();
@@ -127,7 +127,7 @@ fn completion_accept_applies_to_every_cursor() {
     type_text(&mut h, ".");
     assert!(wait_popup(&mut h, "completion"));
     type_text(&mut h, "b");
-    h.run_ok();
+    assert!(wait_popup(&mut h,"completion"),"fresh server ranges also apply to multiple cursors");
     assert_eq!(h.state().lsp_popup_kind(), Some("completion"), "커서가 여럿이어도 목록을 유지한다");
     h.key_press(Key::Enter);
     h.run_ok();

@@ -45,13 +45,14 @@ libraries—and keep the whole task in view.
 3. Open your project folder. Use a terminal, or start a task with Codex or Claude.
 
 Requires macOS 11+ on Apple Silicon. Codex, Claude, and `gh` are external tools;
-install and authenticate the ones you use. The app UI is currently primarily Korean.
+install and authenticate the ones you use. The app UI supports Korean, English, Japanese and Simplified Chinese.
 
 [Installation and updates →](docs/getting-started.md)
 
 ### Explore
 
 [Workspaces & agents](docs/workspaces.md) · [Git workflows](docs/git.md) ·
+[File editor](docs/editor.md) · [Database tools](docs/databases.md) ·
 [Terminal integration](docs/terminal-integration.md) · [Architecture](docs/architecture.md)
 
 ### Build and contribute

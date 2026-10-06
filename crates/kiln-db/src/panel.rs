@@ -1,6 +1,8 @@
 //! 데이터베이스 탐색기 패널: 연결 목록, 스키마 트리, 연결 편집 대화상자.
 
 use crate::edit::TableRef;
+use crate::schema::{SchemaAction, ColumnSpec, IndexSpec};
+use crate::TableSection;
 use crate::manager::Job;
 use crate::meta::{TableDetails, TableInfo, TableKind};
 use crate::ui::{self, Glyph, TypedConfirm, chevron, dim, faint, icon_button, status_color, tree_row};
@@ -20,9 +22,9 @@ pub enum DbEvent {
         schema: Option<String>,
         table: String,
     },
-    OpenConsole {
-        conn: ConnId,
-    },
+    OpenConsole { conn: ConnId },
+    OpenTableSection { conn: ConnId, schema: Option<String>, table: String, section: TableSection },
+    SchemaAction { conn: ConnId, schema: Option<String>, table: String, action: SchemaAction },
 }
 
 enum Load<T> {
@@ -71,6 +73,61 @@ struct SchemaNode {
 struct ConnNode {
     open: bool,
     schemas: Option<Load<Vec<SchemaNode>>>,
+    epoch: Option<u64>,
+    schema_expansion: HashMap<String, (bool, bool, bool)>,
+    table_expansion: HashMap<(String, String), (bool, bool, bool)>,
+}
+
+impl ConnNode {
+    fn remember_expansion(&mut self) {
+        if let Some(Load::Ready(schemas)) = &self.schemas {
+            for schema in schemas {
+                self.schema_expansion.insert(schema.name.clone(), (schema.open, schema.tables_open, schema.views_open));
+                if let Load::Ready(tables) = &schema.tables {
+                    for table in tables {
+                        self.table_expansion.insert((schema.name.clone(), table.info.name.clone()), (table.open, table.indexes_open, table.fks_open));
+                    }
+                }
+            }
+        }
+    }
+    fn cancel_loads(&mut self) {
+        match &mut self.schemas {
+            Some(Load::Loading(job)) => job.abort(),
+            Some(Load::Ready(schemas)) => for schema in schemas {
+                match &mut schema.tables {
+                    Load::Loading(job) => job.abort(),
+                    Load::Ready(tables) => for table in tables {
+                        if let Load::Loading(job) = &mut table.details { job.abort(); }
+                    },
+                    _ => {}
+                }
+            },
+            _ => {}
+        }
+    }
+    fn reload(&mut self, manager: &DbManager, id: ConnId) {
+        self.remember_expansion();
+        self.cancel_loads();
+        self.schemas = if self.schemas.is_some() && manager.status(id) == ConnStatus::Connected { Some(load_schemas(manager, id)) } else { None };
+        self.epoch = Some(manager.connection_epoch(id));
+    }
+    fn restore_expansion(&mut self) {
+        if let Some(Load::Ready(schemas)) = &mut self.schemas {
+            for schema in schemas {
+                if let Some((open, tables, views)) = self.schema_expansion.remove(&schema.name) {
+                    schema.open = open; schema.tables_open = tables; schema.views_open = views;
+                }
+                if let Load::Ready(tables) = &mut schema.tables {
+                    for table in tables {
+                        if let Some((open, indexes, fks)) = self.table_expansion.remove(&(schema.name.clone(), table.info.name.clone())) {
+                            table.open = open; table.indexes_open = indexes; table.fks_open = fks;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -286,7 +343,10 @@ impl DbPanel {
     }
 
     fn poll_jobs(&mut self, ctx: &egui::Context) {
-        for n in self.nodes.values_mut() {
+        for (id, n) in &mut self.nodes {
+            let epoch = self.manager.connection_epoch(*id);
+            if n.epoch.is_some_and(|previous| previous != epoch) { n.reload(&self.manager, *id); }
+            n.epoch = Some(epoch);
             if let Some(s) = &mut n.schemas {
                 s.poll();
                 if let Load::Ready(schemas) = s {
@@ -301,6 +361,7 @@ impl DbPanel {
                 }
             }
         }
+        for n in self.nodes.values_mut() { n.restore_expansion(); }
         let mut done = Vec::new();
         let mut reload: Vec<(ConnId, String)> = Vec::new();
         for (i, a) in self.actions.iter_mut().enumerate() {
@@ -389,6 +450,10 @@ impl DbPanel {
             let id = cfg.id;
             let status = self.manager.status(id);
             let node = self.nodes.entry(id).or_default();
+            node.epoch.get_or_insert_with(|| self.manager.connection_epoch(id));
+            if node.open && node.schemas.is_none() && status == ConnStatus::Connected {
+                node.schemas = Some(load_schemas(&self.manager, id));
+            }
             let sel = self.selected == Some(NodeKey::Conn(id));
             let (rect, resp) = tree_row(ui, ROW_H + 4.0, sel, &cfg.display_name());
             let x0 = rect.min.x + 4.0;
@@ -1210,6 +1275,24 @@ fn table_ui(
             });
             ui.close();
         }
+        for (label, section) in [("컬럼 보기", TableSection::Structure), ("인덱스 보기", TableSection::Indexes), ("DDL 보기", TableSection::Ddl)] {
+            if ui.button(kiln_common::i18n::tr(label)).clicked() {
+                events.push(DbEvent::OpenTableSection { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), section });
+                ui.close();
+            }
+        }
+        if t.info.kind == TableKind::Table {
+            for (label, action) in [
+                ("컬럼 추가…", SchemaAction::AddColumn(ColumnSpec { name: String::new(), data_type: "TEXT".into(), nullable: true, default: None })),
+                ("인덱스 추가…", SchemaAction::AddIndex(IndexSpec { name: String::new(), columns: Vec::new(), unique: false })),
+                ("테이블 이름 변경…", SchemaAction::RenameTable { name: t.info.name.clone() }),
+            ] {
+                if ui.button(kiln_common::i18n::tr(label)).clicked() {
+                    events.push(DbEvent::SchemaAction { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), action });
+                    ui.close();
+                }
+            }
+        }
         if ui.button(kiln_common::i18n::tr("새 콘솔")).clicked() {
             events.push(DbEvent::OpenConsole { conn: id });
             ui.close();
@@ -1258,6 +1341,11 @@ fn table_ui(
             ui.close();
         }
         if ui.button(RichText::new(if t.info.kind==TableKind::Table {kiln_common::i18n::tr("테이블 삭제…")}else{kiln_common::i18n::tr("뷰 삭제…")}).color(theme.red)).clicked() {
+            if t.info.kind == TableKind::Table {
+                events.push(DbEvent::SchemaAction { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), action: SchemaAction::DropTable });
+                ui.close();
+                return;
+            }
             *confirm = Some((
                 TypedConfirm {
                     title: kiln_common::trf!(
@@ -1314,6 +1402,19 @@ fn table_ui(
                     tip.push_str(&kiln_common::trf!("\n참조 {f}"));
                 }
                 r.on_hover_text(tip).context_menu(|ui| {
+                    if t.info.kind == TableKind::Table {
+                        for (label, action) in [
+                            ("컬럼 수정…", SchemaAction::AlterColumn { column: c.name.clone(), spec: ColumnSpec::from(c) }),
+                            ("컬럼 이름 변경…", SchemaAction::RenameColumn { column: c.name.clone(), name: c.name.clone() }),
+                            ("컬럼 삭제…", SchemaAction::DropColumn { column: c.name.clone() }),
+                        ] {
+                            if ui.button(kiln_common::i18n::tr(label)).clicked() {
+                                events.push(DbEvent::SchemaAction { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), action });
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
+                    }
                     if ui.button(kiln_common::i18n::tr("이름 복사")).clicked() {
                         ui.ctx().copy_text(c.name.clone());
                         ui.close();
@@ -1355,7 +1456,16 @@ fn table_ui(
                             &ix.name,
                             &suffix,
                             false,
-                        );
+                        ).context_menu(|ui| {
+                            if ui.button(kiln_common::i18n::tr("인덱스 보기")).clicked() {
+                                events.push(DbEvent::OpenTableSection { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), section: TableSection::Indexes });
+                                ui.close();
+                            }
+                            if ui.add_enabled(t.info.kind == TableKind::Table && !ix.primary && !ix.constraint, egui::Button::new(kiln_common::i18n::tr("인덱스 삭제…"))).clicked() {
+                                events.push(DbEvent::SchemaAction { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), action: SchemaAction::DropIndex { name: ix.name.clone() } });
+                                ui.close();
+                            }
+                        });
                     }
                 }
             }
@@ -1458,6 +1568,55 @@ fn driver_chips(ui: &mut Ui, selected: Driver, width: f32) -> Option<Driver> {
 mod dialog_regressions {
     use super::*;
     use egui_kittest::{Harness,kittest::Queryable};
+    fn expanded_schemas() -> Vec<SchemaNode> {
+        vec![SchemaNode { name: "main".into(), open: true, tables_open: true, views_open: true,
+            tables: Load::Ready(vec![TableNode {
+                info: TableInfo { schema: Some("main".into()), name: "customers".into(), kind: TableKind::Table, row_estimate: None, comment: String::new() },
+                open: true, details: Load::Idle, indexes_open: true, fks_open: true,
+            }]),
+        }]
+    }
+
+    #[test]
+    fn explorer_reload_preserves_expansion_without_reconnecting() {
+        let manager = DbManager::in_memory();
+        let id = ConnId(999);
+        let mut node = ConnNode { open: true, schemas: Some(Load::Ready(expanded_schemas())), ..Default::default() };
+        node.reload(&manager, id);
+        assert!(node.open && node.schemas.is_none());
+        let mut fresh = expanded_schemas();
+        fresh[0].open = false;
+        fresh[0].views_open = false;
+        if let Load::Ready(tables) = &mut fresh[0].tables { tables[0].open = false; tables[0].indexes_open = false; }
+        node.schemas = Some(Load::Ready(fresh));
+        node.restore_expansion();
+        let Some(Load::Ready(schemas)) = &mut node.schemas else { panic!() };
+        assert!(schemas[0].open && schemas[0].views_open);
+        let Load::Ready(tables) = &schemas[0].tables else { panic!() };
+        assert!(tables[0].open && tables[0].indexes_open && tables[0].fks_open);
+        schemas[0].open = false;
+        node.restore_expansion();
+        let Some(Load::Ready(schemas)) = &node.schemas else { panic!() };
+        assert!(!schemas[0].open, "restoration must not override later user choices");
+    }
+
+    #[test]
+    fn explorer_reload_discards_old_pending_metadata() {
+        let manager = DbManager::in_memory();
+        let stale = manager.spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            Ok(expanded_schemas())
+        });
+        let id = ConnId(999);
+        let old_epoch = manager.connection_epoch(id).wrapping_add(1);
+        let node = ConnNode { open: true, schemas: Some(Load::Loading(stale)), epoch: Some(old_epoch), ..Default::default() };
+        let mut panel = DbPanel::new(manager);
+        panel.nodes.insert(id, node);
+        panel.poll_jobs(&egui::Context::default());
+        assert!(panel.nodes[&id].schemas.is_none(), "pending old connection results must never return to the tree");
+        assert_eq!(panel.nodes[&id].epoch, Some(panel.manager.connection_epoch(id)));
+    }
+
     #[test]
     fn changed_connection_settings_invalidate_previous_test() {
         let mut d=ConnDialog::new(ConnConfig::default(),"old".into(),true);

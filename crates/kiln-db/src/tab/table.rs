@@ -20,10 +20,13 @@ use kiln_common::{Theme, fonts};
 use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SubTab {
+mod schema_ui;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableSection {
     Data,
     Structure,
+    Indexes,
     Ddl,
 }
 
@@ -352,6 +355,10 @@ pub struct TableDraft {
     order: String,
     #[serde(default)]
     pending_cell: Option<(usize, usize, String)>,
+    #[serde(default)]
+    schema_form: Option<schema_ui::SchemaFormDraft>,
+    #[serde(default)]
+    schema_conflict: bool,
 }
 
 struct RecoveryConflict {
@@ -365,7 +372,7 @@ pub(crate) struct TableView {
     conn: ConnId,
     t: TableRef,
     driver: Driver,
-    sub: SubTab,
+    sub: TableSection,
     details: Option<TableDetails>,
     details_job: Option<Job<DbResult<TableDetails>>>,
     kind_job: Option<Job<DbResult<Option<crate::TableKind>>>>,
@@ -395,6 +402,10 @@ pub(crate) struct TableView {
     recovery_review: bool,
     recovery_conflicts: Vec<RecoveryConflict>,
     recovery_check: Option<Job<DbResult<ResultSet>>>,
+    schema_editor: Option<schema_ui::SchemaEditor>,
+    dropped: bool,
+    observed_epoch: u64,
+    schema_conflict: bool,
 }
 
 impl TableView {
@@ -406,7 +417,7 @@ impl TableView {
             conn,
             t,
             driver,
-            sub: SubTab::Data,
+            sub: TableSection::Data,
             details: None,
             details_job: None,
             kind_job: None,
@@ -436,6 +447,10 @@ impl TableView {
             recovery_review: false,
             recovery_conflicts: Vec::new(),
             recovery_check: None,
+            schema_editor: None,
+            dropped: false,
+            observed_epoch: m.connection_epoch(conn),
+            schema_conflict: false,
         };
         v.load_details(m);
         v.reload(m, true);
@@ -457,16 +472,22 @@ impl TableView {
     }
 
     pub fn recovery_draft(&self) -> Option<TableDraft> {
-        if self.pending_changes() == 0 { return None; }
+        let schema_form=self.schema_form_draft();
+        if self.pending_changes()==0 {
+            return schema_form.map(|form|TableDraft{columns:Vec::new(),rows:Vec::new(),edits:Vec::new(),deleted:Vec::new(),inserted:Vec::new(),page:self.page,page_size:self.page_size,filter:self.applied_filter.clone(),order:self.applied_order.clone(),pending_cell:None,schema_form:Some(form),schema_conflict:false});
+        }
         let data = self.data.as_ref()?;
         let mut edits: Vec<_> = data.edits.iter().map(|(&(r,c),(v,_))| (r,c,v.clone())).collect();
         edits.sort_by_key(|(r,c,_)| (*r,*c));
         Some(TableDraft { columns: data.rs.columns.clone(), rows: data.rs.rows.clone(), edits,
             deleted: data.deleted.iter().copied().collect(), inserted: data.inserted.iter().map(|r| r.iter().map(|v| v.as_ref().map(|(v,_)| v.clone())).collect()).collect(),
-            page: self.page, page_size: self.page_size, filter: self.applied_filter.clone(), order: self.applied_order.clone(), pending_cell: self.pending_cell() })
+            page: self.page, page_size: self.page_size, filter: self.applied_filter.clone(), order: self.applied_order.clone(), pending_cell: self.pending_cell(),schema_form,schema_conflict:self.schema_conflict })
     }
 
     pub fn restore_draft(&mut self, draft: &TableDraft) {
+        self.restore_schema_form(draft.schema_form.as_ref());
+        self.schema_conflict=draft.schema_conflict;
+        if draft.edits.is_empty() && draft.deleted.is_empty() && draft.inserted.is_empty() && draft.pending_cell.is_none() { return; }
         self.load_job = None;
         self.count_job = None;
         self.page = draft.page;
@@ -675,6 +696,7 @@ impl TableView {
     }
 
     fn submit(&mut self, m: &DbManager) {
+        if self.schema_conflict { self.status=Some((kiln_common::i18n::tr("연결 또는 구조가 변경되었습니다. 초안을 내보내거나 편집을 취소한 뒤 다시 불러오세요.").into(),true));return; }
         if let Some(edit) = self.grid.editing.take() {
             self.commit_edit(edit.row, edit.col, &edit.text);
             if self.grid.editing.is_some() { return; }
@@ -746,8 +768,18 @@ impl TableView {
     }
 
     pub fn ui(&mut self, ui: &mut Ui, m: &DbManager) {
+        self.poll_schema(m);
+        self.watch_schema_epoch(m);
+        if self.dropped {
+            ui.centered_and_justified(|ui| { ui.label(kiln_common::i18n::tr("테이블이 삭제되었습니다. 탐색기에서 다른 테이블을 여세요.")); });
+            return;
+        }
         self.poll();
         self.poll_submit(m);
+        if self.schema_conflict {
+            ui.label(RichText::new(kiln_common::i18n::tr("연결 또는 구조가 변경되었습니다. 초안을 내보내거나 편집을 취소한 뒤 다시 불러오세요.")).color(Theme::current().yellow));
+            if ui.button(kiln_common::i18n::tr("초안 내보내기…")).clicked(){self.export_recovery();}
+        }
         if let Some(job) = &mut self.recovery_check && let Some(result) = job.poll() {
             self.recovery_check = None;
             match result {
@@ -792,7 +824,7 @@ impl TableView {
                 .request_repaint_after(std::time::Duration::from_millis(60));
         }
         // 전역 단축키.
-        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter)) {
+        if self.schema_editor.is_none() && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter)) {
             self.submit(m);
         }
         egui::Frame::new().fill(theme.bg).show(ui, |ui| {
@@ -800,11 +832,13 @@ impl TableView {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
             self.sub_tabs(ui, m);
             match self.sub {
-                SubTab::Data => self.data_ui(ui, m),
-                SubTab::Structure => self.structure_ui(ui),
-                SubTab::Ddl => self.ddl_ui(ui, m),
+                TableSection::Data => self.data_ui(ui, m),
+                TableSection::Structure => self.structure_ui(ui, m),
+                TableSection::Indexes => self.indexes_ui(ui, m),
+                TableSection::Ddl => self.ddl_ui(ui, m),
             }
         });
+        self.schema_dialog(ui, m);
     }
 
     fn sub_tabs(&mut self, ui: &mut Ui, m: &DbManager) {
@@ -812,33 +846,43 @@ impl TableView {
         egui::Frame::new()
             .inner_margin(egui::Margin { left: 10, right: 10, top: 8, bottom: 4 })
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     let mut sub = self.sub;
                     if ui::segmented(
                         ui,
                         &mut sub,
-                        &[(SubTab::Data, kiln_common::i18n::tr("데이터")), (SubTab::Structure, kiln_common::i18n::tr("구조")), (SubTab::Ddl, "DDL")],
+                        &[(TableSection::Data, kiln_common::i18n::tr("데이터")), (TableSection::Structure, kiln_common::i18n::tr("컬럼")), (TableSection::Indexes, kiln_common::i18n::tr("인덱스")), (TableSection::Ddl, "DDL")],
                     ) {
                         self.sub = sub;
-                        if sub == SubTab::Ddl && self.ddl.is_none() && self.ddl_job.is_none() {
+                        if sub == TableSection::Ddl && self.ddl.is_none() && self.ddl_job.is_none() {
                             let m2 = m.clone();
                             let (id, t) = (self.conn, self.t.clone());
                             self.ddl_job = Some(m.spawn(async move { m2.table_ddl(id, &t).await }));
                         }
                     }
-                    ui.add_space(4.0);
+                });
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
                     ui::glyph_label(
                         ui,
                         if self.is_view { Icon::Eye } else { Icon::Table },
                         if self.is_view { theme.green } else { theme.blue },
                         14.0,
                     );
-                    ui.label(RichText::new(self.t.sql_name(self.driver)).font(fonts::mono(12.5)).color(theme.text));
+                    schema_ui::left_label(ui,egui::vec2((ui.available_width()-88.0).max(60.0),22.0),RichText::new(self.t.sql_name(self.driver)).font(fonts::mono(12.5)).color(theme.text)).on_hover_text(self.t.sql_name(self.driver));
+                    if !self.is_view {
+                        ui.menu_button(kiln_common::i18n::tr("테이블"), |ui| {
+                            if ui.button(kiln_common::i18n::tr("이름 변경…")).clicked() { self.request_schema_action(crate::schema::SchemaAction::RenameTable { name: self.t.table.clone() }); ui.close(); }
+                            if ui.button(RichText::new(kiln_common::i18n::tr("테이블 삭제…")).color(theme.red)).clicked() { self.request_schema_action(crate::schema::SchemaAction::DropTable); ui.close(); }
+                        });
+                    }
                     if self.is_view {
                         widgets::pill(ui, kiln_common::i18n::tr("뷰"), theme.green);
                     }
-                    if self.sub == SubTab::Data {
+                });
+                if self.sub == TableSection::Data {
+                    ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
                             if ui::toggle_button_icon(ui, Some(Icon::Eye), kiln_common::i18n::tr("셀 내용"), self.show_viewer)
@@ -859,8 +903,8 @@ impl TableView {
                                 }
                             });
                         });
-                    }
-                });
+                    });
+                }
             });
     }
 
@@ -1137,7 +1181,7 @@ impl TableView {
                         ui,
                         Some(Icon::Check),
                         &submit_label,
-                        pending > 0 && self.submit_job.is_none(),
+                        pending > 0 && self.submit_job.is_none() && !self.schema_conflict,
                         true,
                     )
                     .on_hover_text(kiln_common::i18n::tr("모든 변경 사항을 하나의 트랜잭션으로 커밋 (⌘↩)"))
@@ -1382,85 +1426,6 @@ impl TableView {
         self.export_job = Some(m.spawn(async move { m2.export_query(id, &sql, &path, fmt).await }));
     }
 
-    fn structure_ui(&mut self, ui: &mut Ui) {
-        let theme = Theme::current();
-        let Some(det) = &self.details else {
-            ui.centered_and_justified(|ui| {
-                ui.add(egui::Spinner::new().color(theme.text_dim));
-            });
-            return;
-        };
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, theme.border);
-        egui::ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::Frame::new().inner_margin(16).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    section(ui, kiln_common::i18n::tr("컬럼"), det.columns.len());
-                    card(ui, "cols", &["", kiln_common::i18n::tr("이름"), kiln_common::i18n::tr("타입"), kiln_common::i18n::tr("NULL 허용"), kiln_common::i18n::tr("기본값"), kiln_common::i18n::tr("참조")], |ui| {
-                        for c in &det.columns {
-                            let fk = det.fk_target(&c.name);
-                            if c.is_pk() {
-                                ui::glyph_label(ui, Icon::Key, theme.yellow, 13.0).on_hover_text(kiln_common::i18n::tr("기본 키"));
-                            } else if fk.is_some() {
-                                ui::glyph_label(ui, Glyph::Link, theme.blue, 13.0).on_hover_text(kiln_common::i18n::tr("외래 키"));
-                            } else {
-                                ui.label("");
-                            }
-                            ui.label(RichText::new(&c.name).font(fonts::mono(12.5)).color(theme.text));
-                            ui.label(RichText::new(&c.data_type).font(fonts::mono(12.0)).color(theme.purple));
-                            if c.nullable {
-                                ui.label(faint(kiln_common::i18n::tr("예")));
-                            } else {
-                                widgets::pill(ui, "NOT NULL", theme.orange);
-                            }
-                            let def = if c.auto_increment && c.default.is_none() {
-                                kiln_common::i18n::tr("자동").to_string()
-                            } else {
-                                c.default.clone().unwrap_or_default()
-                            };
-                            ui.label(RichText::new(def).font(fonts::mono(12.0)).color(theme.text_dim));
-                            ui.label(RichText::new(fk.unwrap_or_default()).font(fonts::mono(12.0)).color(theme.blue));
-                            ui.end_row();
-                        }
-                    });
-                    ui.add_space(20.0);
-                    section(ui, kiln_common::i18n::tr("인덱스"), det.indexes.len());
-                    card(ui, "idx", &[kiln_common::i18n::tr("이름"), kiln_common::i18n::tr("컬럼"), kiln_common::i18n::tr("종류")], |ui| {
-                        for ix in &det.indexes {
-                            ui.label(RichText::new(&ix.name).font(fonts::mono(12.5)).color(theme.text));
-                            ui.label(RichText::new(ix.columns.join(", ")).font(fonts::mono(12.0)).color(theme.text_dim));
-                            if ix.primary {
-                                widgets::pill(ui, kiln_common::i18n::tr("기본 키"), theme.yellow);
-                            } else if ix.unique {
-                                widgets::pill(ui, kiln_common::i18n::tr("고유"), theme.blue);
-                            } else {
-                                ui.label(faint(kiln_common::i18n::tr("인덱스")));
-                            }
-                            ui.end_row();
-                        }
-                    });
-                    ui.add_space(20.0);
-                    section(ui, kiln_common::i18n::tr("외래 키"), det.foreign_keys.len());
-                    card(ui, "fks", &[kiln_common::i18n::tr("이름"), kiln_common::i18n::tr("컬럼"), kiln_common::i18n::tr("참조"), "ON UPDATE", "ON DELETE"], |ui| {
-                        for fk in &det.foreign_keys {
-                            ui.label(RichText::new(&fk.name).font(fonts::mono(12.5)).color(theme.text));
-                            ui.label(RichText::new(fk.columns.join(", ")).font(fonts::mono(12.0)).color(theme.text_dim));
-                            ui.label(
-                                RichText::new(format!("{}({})", fk.ref_table, fk.ref_columns.join(", ")))
-                                    .font(fonts::mono(12.0))
-                                    .color(theme.blue),
-                            );
-                            ui.label(faint(&fk.on_update));
-                            ui.label(faint(&fk.on_delete));
-                            ui.end_row();
-                        }
-                    });
-                });
-            });
-    }
-
     fn ddl_ui(&mut self, ui: &mut Ui, m: &DbManager) {
         let theme = Theme::current();
         match &self.ddl {
@@ -1551,40 +1516,6 @@ fn sort_from_order(order: &str, cols: &[ColumnInfo], driver: Driver) -> Option<(
                 .then_some((i, desc))
         })
     })
-}
-
-/// 구조 화면 섹션 제목과 개수.
-fn section(ui: &mut Ui, title: &str, count: usize) {
-    let theme = Theme::current();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(RichText::new(title).font(fonts::semibold(13.0)).color(theme.text));
-        ui.label(RichText::new(count.to_string()).font(fonts::medium(12.0)).color(theme.text_faint));
-    });
-    ui.add_space(8.0);
-}
-
-/// 둥근 테두리 카드 안의 표. 첫 줄은 흐린 세미볼드 머리글.
-fn card(ui: &mut Ui, id: &str, headers: &[&str], body: impl FnOnce(&mut Ui)) {
-    let theme = Theme::current();
-    egui::Frame::new()
-        .fill(theme.bg_panel)
-        .stroke(egui::Stroke::new(1.0, theme.border))
-        .corner_radius(10.0)
-        .inner_margin(egui::Margin { left: 14, right: 14, top: 10, bottom: 10 })
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            egui::Grid::new(id)
-                .spacing(egui::vec2(22.0, 10.0))
-                .min_row_height(20.0)
-                .show(ui, |ui| {
-                    for h in headers {
-                        ui.label(RichText::new(*h).font(fonts::semibold(12.0)).color(theme.text_faint));
-                    }
-                    ui.end_row();
-                    body(ui);
-                });
-        });
 }
 
 /// 툴바 구분선.
@@ -1726,7 +1657,7 @@ mod recovery_tests {
     fn restored_table_edits_never_submit_before_review() {
         let manager=DbManager::in_memory();
         let mut tab=TableView::new(&manager,ConnId(999),None,"fixture".into());
-        let draft=TableDraft { columns:vec![ColumnInfo::new("id","INTEGER")], rows:vec![vec![Value::Int(1)]], edits:vec![(0,0,Value::Int(2))],deleted:vec![],inserted:vec![],page:0,page_size:500,filter:String::new(),order:String::new(),pending_cell:None };
+        let draft=TableDraft { columns:vec![ColumnInfo::new("id","INTEGER")], rows:vec![vec![Value::Int(1)]], edits:vec![(0,0,Value::Int(2))],deleted:vec![],inserted:vec![],page:0,page_size:500,filter:String::new(),order:String::new(),pending_cell:None,schema_form:None,schema_conflict:false };
         let draft:TableDraft=serde_json::from_str(&serde_json::to_string(&draft).unwrap()).unwrap();
         tab.restore_draft(&draft); assert_eq!(tab.pending_changes(),1); assert!(tab.load_job.is_none());
         tab.submit(&manager); assert!(tab.submit_job.is_none()); assert!(tab.recovery_review);

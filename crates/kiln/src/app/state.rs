@@ -110,12 +110,12 @@ pub struct PaneP {
 /// 카드에 담긴 도구(터미널이 아닌 카드).
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum ToolP {
-    Editor { path: PathBuf },
+    Editor { path: PathBuf, #[serde(default)] language_override: Option<String> },
     DbTable { conn: u64, schema: Option<String>, table: String },
     DbConsole { conn: u64 },
     History,
     RepositoryHistory { root: PathBuf },
-    EditorDraft { path: PathBuf, draft: kiln_editor::EditorDraft },
+    EditorDraft { path: PathBuf, draft: kiln_editor::EditorDraft, #[serde(default)] language_override: Option<String> },
     DbConsoleDraft { conn: u64, sql: String },
     DbConsoleDocument { conn: u64, document: kiln_db::ConsoleDocument },
     DbTableDraft { conn: u64, schema: Option<String>, table: String, draft: kiln_db::TableDraft },
@@ -163,7 +163,7 @@ impl WorkspaceP {
                     *next_id += 1;
                     let id = *next_id;
                     let tool = match other {
-                        TabP::Editor { path } => ToolP::Editor { path },
+                        TabP::Editor { path } => ToolP::Editor { path, language_override: None },
                         TabP::DbTable { conn, schema, table } => ToolP::DbTable { conn, schema, table },
                         TabP::DbConsole { conn } => ToolP::DbConsole { conn },
                         TabP::Terminal { .. } => unreachable!(),
@@ -293,6 +293,15 @@ mod tests {
         page.manual_split=true;page.zoomed=Some(7);
         let restored:PageP=serde_json::from_slice(&serde_json::to_vec(&page).unwrap()).unwrap();
         assert!(restored.manual_split);assert_eq!(restored.zoomed,Some(7));assert_eq!(restored.panes[0].session,Some(10));
+    }
+
+    #[test]
+    fn editor_language_override_is_optional_for_legacy_state() {
+        let old: ToolP = serde_json::from_str(r#"{"Editor":{"path":"/tmp/query.txt"}}"#).unwrap();
+        assert!(matches!(old, ToolP::Editor { language_override: None, .. }));
+        let selected = ToolP::Editor { path: "/tmp/query.txt".into(), language_override: Some("SQL".into()) };
+        let restored: ToolP = serde_json::from_str(&serde_json::to_string(&selected).unwrap()).unwrap();
+        assert!(restored == selected);
     }
 
     #[test]

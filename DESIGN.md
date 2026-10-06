@@ -204,6 +204,22 @@ Only an actually visible, focused terminal can automatically acknowledge attenti
 
 Recovery routes each draft to its editing surface. Agent-request recovery opens the composer with its contents; repository/GitHub drafts open the correct inspector. A failed shell's settings action opens Terminal settings directly. Recovery does not run retained commands or submit drafts automatically.
 
+### Database schema inspection and changes
+
+Keep schema work in the existing table surface: **Data / Columns / Indexes / DDL** tabs, compact connection/table identity, and local actions. Column and index details use the existing mono font, semantic badges and quiet separators. Index rows show ordered keys, method, uniqueness, included columns and predicates when available; full index DDL stays collapsed until requested. Truncated names retain their full value on hover. Constraint-owned and primary indexes do not expose an enabled drop action. [Schema inspector](crates/kiln-db/src/tab/table/schema_ui.rs:361).
+
+The change flow is **inspect → change → preview → apply**. Forms use a bounded modal with a scrolling field/SQL body and a persistent footer containing Cancel, Preview SQL and Apply to database. Footer actions wrap at narrow widths. Keep connection and table identity above the body, errors visible in their own bounded region, and SQL selectable. Applying requires a prepared plan and explicit review; dropping a table also requires its name. Editing fields invalidates the earlier preview and review. Restored forms require another preview and never execute automatically. [Form rendering and review gates](crates/kiln-db/src/tab/table/schema_ui.rs:396).
+
+These components extend the current Theme and fonts; they do not introduce a new palette or container style. Compact dark-form and light-index fixtures were visually inspected at 420 pixels on 2026-10-06. This is scoped harness evidence, not live-database or installed-OS verification.
+
+### Editor language and completion
+
+The editor starts with a compact, 30-point toolbar containing the language selector and an explicit Completion action. Automatic detection displays the detected language; users can choose a language or Plain Text and return to automatic detection. Keep the selector width bounded so the completion action remains visible. [Toolbar](crates/kiln-editor/src/editor/view.rs:113).
+
+The flow is **detect → choose → complete → undo**. Completion is a caret-adjacent, viewport-constrained list using existing elevated surfaces, semantic kind badges and a selected-row accent. Labels use monospace; origin/detail text is secondary and yields space to the label. Full text remains available on hover. The number of visible rows adapts to editor height, and keyboard navigation keeps the selected candidate visible. Scrolling also keeps the candidate accepted by Enter within the visible rows. Up/Down choose, Enter/Tab accept, and Escape dismisses. [Completion interaction](crates/kiln-editor/src/editor/lsp_glue.rs:860), [list layout](crates/kiln-editor/src/editor/lsp_glue.rs:1149).
+
+Local suggestions identify language keywords or words from the current document. Do not present them as semantic language-server results. The short-height completion fixture was visually inspected on 2026-10-06; preserve its visible selection when extending the popup. Completion edits remain undoable through the editor's edit history. [Local candidates](crates/kiln-editor/src/editor/local_completion.rs:1), [acceptance](crates/kiln-editor/src/editor/lsp_glue.rs:772).
+
 ### Settings and typography validation
 
 Settings use a modal with category navigation and grouped content. Theme options preview actual palettes and show selected state. Descriptions wrap before controls overlap them. Keep selected text on the semantic body foreground and filled controls on their explicit contrasting foreground; custom disabled controls apply disabled opacity once.

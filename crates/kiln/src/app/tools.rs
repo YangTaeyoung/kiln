@@ -3,7 +3,8 @@
 use super::Action;
 use super::state::{ToolP, WorkspaceDrafts};
 use kiln_common::Task;
-use kiln_db::{ConnId, DbEvent, DbManager, DbPanel, DbTab};
+use kiln_db::{ConnId, DbEvent, DbManager, DbPanel, DbTab, TableSection};
+use kiln_db::schema::SchemaAction;
 use kiln_editor::{Decoration, Editor, EditorEvent, FileTree, LspManager, QuickOpen, SearchPanel};
 use kiln_git::github::RepoRef;
 use kiln_git::history::HistoryEvent;
@@ -111,6 +112,8 @@ pub trait ToolTab {
     }
     /// 보이지 않는 탭도 매 프레임 호출된다(LSP 응답 반영 등).
     fn tick(&mut self) {}
+    fn show_db_section(&mut self, _section: TableSection) {}
+    fn request_db_schema_action(&mut self, _action: SchemaAction) {}
     /// 새 페이지 하나를 차지하는 카드인지. 이런 카드는 다른 카드를 열 때 교체되지 않는다.
     fn own_page(&self) -> bool {
         false
@@ -239,6 +242,25 @@ pub fn db_table_factory(db: DbManager, conn: ConnId, schema: Option<String>, tab
     }
 }
 
+fn db_schema_factory(db: DbManager, conn: ConnId, schema: Option<String>, table: String, section: TableSection, action: Option<SchemaAction>) -> TabFactory {
+    let base = db_table_factory(db, conn, schema, table);
+    let key = base.key.clone();
+    let reused_action = action.clone();
+    TabFactory {
+        key,
+        make: Box::new(move |ctx, env| {
+            let mut tab = base.make(ctx, env)?;
+            tab.show_db_section(section);
+            if let Some(action) = action { tab.request_db_schema_action(action); }
+            Ok(tab)
+        }),
+        reuse: Some(Box::new(move |tab| {
+            tab.show_db_section(section);
+            if let Some(action) = reused_action { tab.request_db_schema_action(action); }
+        })),
+    }
+}
+
 pub fn db_console_factory(db: DbManager, conn: ConnId, n: u64) -> TabFactory {
     TabFactory {
         key: format!("dbconsole:{}:{n}", conn.0),
@@ -278,10 +300,11 @@ impl ToolTab for EditorTab {
     }
     fn persist(&self) -> Option<ToolP> {
         let path = self.ed.path().to_path_buf();
+        let language_override = self.ed.language_override().map(str::to_owned);
         if !self.suppress_recovery && let Some(draft) = self.ed.recovery_draft() {
-            return Some(ToolP::EditorDraft { path, draft });
+            return Some(ToolP::EditorDraft { path, draft, language_override });
         }
-        Some(ToolP::Editor { path })
+        Some(ToolP::Editor { path, language_override })
     }
     fn recovery_notice(&self) -> Option<String> {
         (self.recovered && self.ed.is_dirty()).then(|| kiln_common::trf!("{} — 복원된 미저장 파일{}", self.ed.path().display(), if self.ed.recovery_conflict() { kiln_common::i18n::tr(" · 디스크 변경과 충돌: 저장 전 검토 필요") } else { "" }))
@@ -476,10 +499,9 @@ impl ToolTab for DbTabW {
         self.tab.title()
     }
     fn key(&self) -> String {
-        match &self.persist {
-            ToolP::DbTable { conn, schema, table } => format!("db:{conn}:{}.{table}", schema.clone().unwrap_or_default()),
-            _ => format!("dbconsole:{}:{:p}", self.tab.conn().0, self),
-        }
+        if let Some(table) = self.tab.table_ref() {
+            format!("db:{}:{}.{}", self.tab.conn().0, table.schema.clone().unwrap_or_default(), table.table)
+        } else { format!("dbconsole:{}:{:p}", self.tab.conn().0, self) }
     }
     fn ui(&mut self, ui: &mut egui::Ui) -> Vec<Action> {
         self.tab.ui(ui);
@@ -498,8 +520,13 @@ impl ToolTab for DbTabW {
         }
     }
     fn persist(&self) -> Option<ToolP> {
-        if !self.suppress_recovery && let ToolP::DbTable { conn, schema, table } = &self.persist && let Some(draft) = self.tab.table_draft() {
-            return Some(ToolP::DbTableDraft { conn: *conn, schema: schema.clone(), table: table.clone(), draft });
+        if matches!(self.persist, ToolP::DbTable { .. }) {
+            let table = self.tab.table_ref()?;
+            let conn = self.tab.conn().0;
+            if !self.suppress_recovery && let Some(draft) = self.tab.table_draft() {
+                return Some(ToolP::DbTableDraft { conn, schema: table.schema.clone(), table: table.table.clone(), draft });
+            }
+            return Some(ToolP::DbTable { conn, schema: table.schema.clone(), table: table.table.clone() });
         }
         if !self.suppress_recovery && let Some(document) = self.tab.console_document() {
             return Some(ToolP::DbConsoleDocument { conn: self.tab.conn().0, document });
@@ -511,6 +538,8 @@ impl ToolTab for DbTabW {
     }
     fn discard_recovery(&mut self, discard: bool) { self.suppress_recovery = discard; }
     fn request_focus(&mut self) { self.tab.request_focus(); }
+    fn show_db_section(&mut self, section: TableSection) { self.tab.show_table_section(section); }
+    fn request_db_schema_action(&mut self, action: SchemaAction) { self.tab.request_schema_action(action); }
 }
 
 /// `repo` 는 이벤트를 낸 화면이 보고 있는 저장소(없으면 워크스페이스 저장소).
@@ -735,9 +764,10 @@ impl WorkspaceTools {
             let key = issue_factory(root.clone(), repo.clone(), *number).key;
             return Some(Box::new(IssueTab { view, root: root.clone(), repo, number: *number, key, recovered: true, suppress_recovery: false }));
         }
-        if let ToolP::EditorDraft { path, draft } = t {
+        if let ToolP::EditorDraft { path, draft, language_override } = t {
             let mut ed = Editor::open(path).unwrap_or_else(|_| Editor::from_text(path.clone(), ""));
             ed.restore_draft(draft);
+            ed.set_language_override(language_override.clone());
             ed.set_lsp(self.lsp.clone());
             return Some(Box::new(EditorTab { ed, focus_pending: true, recovered: true, suppress_recovery: false }));
         }
@@ -756,13 +786,18 @@ impl WorkspaceTools {
             tab.set_console_text(sql);
             return Some(Box::new(DbTabW { tab, persist: ToolP::DbConsole { conn: *conn }, recovered: true, suppress_recovery: false }));
         }
+        if let ToolP::Editor { path, language_override } = t {
+            let mut ed = Editor::open(path).ok()?;
+            ed.set_language_override(language_override.clone());
+            ed.set_lsp(self.lsp.clone());
+            return Some(Box::new(EditorTab { ed, focus_pending: true, recovered: false, suppress_recovery: false }));
+        }
         let f = match t {
             ToolP::Diff { root, path, staged } => diff_factory(root.clone(), path.clone(), *staged),
             ToolP::Commit { root, sha } => commit_factory(root.clone(), sha.clone()),
             ToolP::Range { root, from, to } => range_factory(root.clone(), from.clone(), to.clone()),
             ToolP::Pr { root, repo, number } => pr_factory(root.clone(), repo.as_deref().and_then(RepoRef::parse), *number),
             ToolP::Issue { root, repo, number } => issue_factory(root.clone(), repo.as_deref().and_then(RepoRef::parse), *number),
-            ToolP::Editor { path } if path.exists() => open_file_factory(path.clone(), None, None),
             ToolP::DbTable { conn, schema, table } => db_table_factory(self.db.clone(), ConnId(*conn), schema.clone(), table.clone()),
             ToolP::DbConsole { conn } => {
                 self.console_seq += 1;
@@ -859,6 +894,8 @@ impl WorkspaceTools {
                 for e in panel.ui(ui) {
                     match e {
                         DbEvent::OpenTable { conn, schema, table } => acts.push(Action::OpenTab(db_table_factory(db.clone(), conn, schema, table))),
+                        DbEvent::OpenTableSection { conn, schema, table, section } => acts.push(Action::OpenTab(db_schema_factory(db.clone(), conn, schema, table, section, None))),
+                        DbEvent::SchemaAction { conn, schema, table, action } => acts.push(Action::OpenTab(db_schema_factory(db.clone(), conn, schema, table, TableSection::Structure, Some(action)))),
                         DbEvent::OpenConsole { conn } => {
                             self.console_seq += 1;
                             acts.push(Action::OpenTab(db_console_factory(db.clone(), conn, self.console_seq)));
@@ -958,13 +995,47 @@ mod recovery_tests {
     }
 
     #[test]
+    fn renamed_database_table_uses_live_target_for_key_and_restore() {
+        let db = DbManager::in_memory();
+        let wrapper = DbTabW { recovered:false, suppress_recovery:false,
+            tab:DbTab::table(db,ConnId(73),Some("main".into()),"renamed".into()),
+            persist:ToolP::DbTable {conn:73,schema:Some("main".into()),table:"old_name".into()} };
+        assert_eq!(wrapper.key(),"db:73:main.renamed");
+        assert!(matches!(wrapper.persist(),Some(ToolP::DbTable {conn:73,table,..}) if table=="renamed"));
+    }
+
+    #[test]
+    fn editor_language_override_survives_clean_and_dirty_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("query.txt");
+        std::fs::write(&path, "select 1").unwrap();
+        let ctx = egui::Context::default();
+        let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory());
+        let clean = ToolP::Editor { path: path.clone(), language_override: Some("SQL".into()) };
+        let tab = tools.restore_tool(&clean, &ctx).unwrap();
+        assert!(tab.persist().as_ref() == Some(&clean));
+        let mut ed = Editor::open(&path).unwrap();
+        ed.insert_text("select 2");
+        let dirty = ToolP::EditorDraft { path, draft: ed.recovery_draft().unwrap(), language_override: Some("SQL".into()) };
+        let restored: ToolP = serde_json::from_str(&serde_json::to_string(&dirty).unwrap()).unwrap();
+        let mut tab = tools.restore_tool(&restored, &ctx).unwrap();
+        assert!(tab.is_dirty());
+        assert!(tab.persist().as_ref() == Some(&dirty));
+        tab.discard_recovery(true);
+        assert!(matches!(tab.persist(), Some(ToolP::Editor { language_override: Some(ref name), .. }) if name == "SQL"));
+        let mut legacy = serde_json::to_value(&dirty).unwrap();
+        legacy.get_mut("EditorDraft").unwrap().as_object_mut().unwrap().remove("language_override");
+        assert!(matches!(serde_json::from_value::<ToolP>(legacy).unwrap(), ToolP::EditorDraft { language_override: None, .. }));
+    }
+
+    #[test]
     fn restored_file_and_sql_drafts_are_visible_and_explicit_discard_is_persisted() {
         let dir=tempfile::tempdir().unwrap(); let path=dir.path().join("draft.txt");
         std::fs::write(&path,"original").unwrap();
         let mut ed=Editor::open(&path).unwrap(); ed.select_all(); ed.insert_text("unsaved");
         let ctx=egui::Context::default();
         let mut tools=WorkspaceTools::new(dir.path(),&ctx,DbManager::in_memory());
-        let mut tab=tools.restore_tool(&ToolP::EditorDraft { path:path.clone(),draft:ed.recovery_draft().unwrap() },&ctx).unwrap();
+        let mut tab=tools.restore_tool(&ToolP::EditorDraft { path:path.clone(),draft:ed.recovery_draft().unwrap(), language_override:None },&ctx).unwrap();
         assert!(tab.is_dirty()); assert!(tab.recovery_notice().is_some());
         assert!(matches!(tab.persist(),Some(ToolP::EditorDraft { .. })));
         assert_eq!(std::fs::read_to_string(&path).unwrap(),"original");
