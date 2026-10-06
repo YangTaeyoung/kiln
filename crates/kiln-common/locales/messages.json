@@ -8818,5 +8818,55 @@
     "en": "Ask before closing a panel, tab, or workspace that has running processes",
     "ja": "パネル・タブ・ワークスペースを閉じる際に、実行中のプロセスがあれば確認します",
     "zh-CN": "关闭有进程正在运行的面板、标签页或工作区时询问"
+  },
+  "키워드": {
+    "en": "Keyword",
+    "ja": "キーワード",
+    "zh-CN": "关键字"
+  },
+  "함수": {
+    "en": "Function",
+    "ja": "関数",
+    "zh-CN": "函数"
+  },
+  "메타데이터 조회 시간이 초과되었습니다": {
+    "en": "Metadata lookup timed out",
+    "ja": "メタデータの取得がタイムアウトしました",
+    "zh-CN": "元数据查询超时"
+  },
+  "메타데이터 조회가 중단되었습니다": {
+    "en": "Metadata lookup was interrupted",
+    "ja": "メタデータの取得が中断されました",
+    "zh-CN": "元数据查询已中断"
+  },
+  "메타데이터를 불러오는 중…": {
+    "en": "Loading metadata…",
+    "ja": "メタデータを読み込み中…",
+    "zh-CN": "正在加载元数据…"
+  },
+  "일치하는 자동완성이 없습니다": {
+    "en": "No matching suggestions",
+    "ja": "一致する候補がありません",
+    "zh-CN": "没有匹配的补全建议"
+  },
+  "메타데이터를 불러오지 못했습니다": {
+    "en": "Could not load metadata",
+    "ja": "メタデータを読み込めませんでした",
+    "zh-CN": "无法加载元数据"
+  },
+  "↑↓ 선택 · Tab/Enter 삽입 · Esc 닫기": {
+    "en": "↑↓ select · Tab/Enter insert · Esc close",
+    "ja": "↑↓ 選択 · Tab/Enter 挿入 · Esc 閉じる",
+    "zh-CN": "↑↓ 选择 · Tab/Enter 插入 · Esc 关闭"
+  },
+  "자동완성 메타데이터 새로고침": {
+    "en": "Refresh completion metadata",
+    "ja": "補完用メタデータを更新",
+    "zh-CN": "刷新自动补全元数据"
+  },
+  "SQL 자동완성 (⌃Space · ⌥Esc)": {
+    "en": "SQL completion (⌃Space · ⌥Esc)",
+    "ja": "SQL 補完 (⌃Space · ⌥Esc)",
+    "zh-CN": "SQL 自动补全 (⌃Space · ⌥Esc)"
   }
 }

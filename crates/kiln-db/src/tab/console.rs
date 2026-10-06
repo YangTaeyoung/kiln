@@ -19,6 +19,8 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod completion_ui;
+
 /// 실행한 문장 하나의 결과.
 struct StmtRun {
     sql: String,
@@ -75,6 +77,11 @@ pub(crate) struct ConsoleView {
     show_viewer: bool,
     run_seq: u64,
     export_job: Option<Job<crate::DbResult<u64>>>,
+    metadata: crate::completion::Metadata,
+    completion: Option<completion_ui::CompletionState>,
+    completion_requested: bool,
+    completion_dismissed: Option<(String, usize)>,
+    ime_composing: bool,
 }
 
 impl ConsoleView {
@@ -107,10 +114,18 @@ impl ConsoleView {
             show_viewer: false,
             run_seq: 0,
             export_job: None,
+            metadata: Default::default(),
+            completion: None,
+            completion_requested: false,
+            completion_dismissed: None,
+            ime_composing: false,
         }
     }
 
     pub fn set_text(&mut self, sql: &str) {
+        self.completion = None;
+        self.completion_requested = false;
+        self.completion_dismissed = None;
         self.sql = sql.to_string();
         self.set_cursor = Some(sql.chars().count());
     }
@@ -356,6 +371,16 @@ impl ConsoleView {
         let finished = r.job.poll().is_some() || !r.job.is_running();
         for run in new {
             let ok = run.outcome.is_ok();
+            if ok && crate::sql::tokenize(&run.sql, self.driver)
+                .iter()
+                .find(|t| t.kind == crate::sql::TokKind::Word)
+                .is_some_and(|t| matches!(
+                    run.sql[t.start..t.end].to_ascii_uppercase().as_str(),
+                    "CREATE" | "ALTER" | "DROP" | "RENAME" | "TRUNCATE"
+                ))
+            {
+                self.metadata.reset();
+            }
             m.push_history(
                 self.conn,
                 HistoryEntry {
@@ -426,11 +451,19 @@ impl ConsoleView {
 
     pub fn ui(&mut self, ui: &mut Ui, m: &DbManager) {
         self.poll(m);
+        if let Some(driver) = m.driver(self.conn) {
+            self.driver = driver;
+        }
+        if !self.metadata.matches_connection(m, self.conn) {
+            self.completion = None;
+        }
+        self.metadata.poll(m, self.conn, &[]);
+        self.completion_keys(ui);
         let focused=ui.memory(|memory|memory.has_focus(self.editor_id));
         if focused && ui.input_mut(|i|i.consume_key(Modifiers::COMMAND|Modifiers::SHIFT,Key::S)){self.choose_save(true);}
         else if focused && ui.input_mut(|i|i.consume_key(Modifiers::COMMAND,Key::S)){self.choose_save(false);}
         let theme = Theme::current();
-        if self.running.is_some() || self.export_job.is_some() {
+        if self.running.is_some() || self.export_job.is_some() || self.metadata.loading() {
             ui.ctx().request_repaint_after(Duration::from_millis(50));
         }
         let (run_all, run_cur) = ui.input_mut(|i| {
@@ -439,12 +472,15 @@ impl ConsoleView {
             (all, cur)
         });
         if run_all {
+            self.completion = None;
             let s = self.all_statements();
             self.run(m, s, false);
         } else if run_cur {
+            self.completion = None;
             let s = self.current_statements();
             self.run(m, s, false);
         }
+        let completion_bounds = ui.max_rect().intersect(ui.ctx().content_rect());
         egui::Frame::new().fill(theme.bg).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             self.document_ui(ui);
@@ -467,7 +503,7 @@ impl ConsoleView {
                 .default_size(editor_h)
                 .min_size(60.0)
                 .frame(egui::Frame::new().fill(theme.bg))
-                .show(ui, |ui| self.editor_ui(ui));
+                .show(ui, |ui| self.editor_ui(ui, m, completion_bounds));
             self.results_ui(ui, m);
         });
     }
@@ -503,6 +539,10 @@ impl ConsoleView {
                     {
                         let s = self.current_statements();
                         self.run(m, s, true);
+                    }
+                    if crate::ui::icon_button(ui, Icon::Code, kiln_common::i18n::tr("SQL 자동완성 (⌃Space · ⌥Esc)")).clicked() {
+                        self.completion_requested = true;
+                        ui.memory_mut(|memory| memory.request_focus(self.editor_id));
                     }
                     let (r, _) = ui.allocate_exact_size(egui::vec2(13.0, 18.0), egui::Sense::hover());
                     ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, theme.border_strong));
@@ -551,7 +591,7 @@ impl ConsoleView {
         ui.painter().rect_filled(r, 0.0, theme.border);
     }
 
-    fn editor_ui(&mut self, ui: &mut Ui) {
+    fn editor_ui(&mut self, ui: &mut Ui, m: &DbManager, completion_bounds: egui::Rect) {
         let theme = Theme::current();
         let driver = self.driver;
         let te_id = self.editor_id;
@@ -564,11 +604,11 @@ impl ConsoleView {
             state.store(ui.ctx(), te_id);
             ui.memory_mut(|m| m.request_focus(te_id));
         }
-        let hl = &mut self.hl;
         egui::ScrollArea::vertical()
             .id_salt(self.editor_id.with("scroll"))
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let hl = &mut self.hl;
                 let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
                     let job = hl.job(buf.as_str(), wrap, driver, 13.0);
                     ui.fonts_mut(|f| f.layout_job(job))
@@ -580,6 +620,12 @@ impl ConsoleView {
                     .desired_width(f32::INFINITY)
                     .desired_rows(8)
                     .lock_focus(true)
+                    .event_filter(egui::EventFilter {
+                        tab: true,
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        escape: self.completion.is_some(),
+                    })
                     .hint_text(RichText::new(kiln_common::i18n::tr("-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⌥↩는 전체를 실행합니다.")).monospace().color(theme.text_faint))
                     .layouter(&mut layouter)
                     .show(ui);
@@ -588,6 +634,7 @@ impl ConsoleView {
                     let r = cr.as_sorted_char_range();
                     self.cursor = Some((r.start.0, r.end.0));
                 }
+                self.completion_overlay(ui, &out, completion_bounds, m);
                 // 편집기 아래 남는 공간 클릭 시 포커스.
                 let rest = ui.available_rect_before_wrap();
                 if rest.height() > 0.0 && ui.interact(rest, te_id.with("rest"), egui::Sense::click()).clicked() {

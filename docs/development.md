@@ -15,6 +15,17 @@ git diff --check
 
 GUI tests use egui_kittest. Daemon tests start real PTYs in isolated configurations.
 Use targeted suites for the files you change, then relevant integration tests.
+SQL completion is tested against real SQLite metadata with keyboard, mouse,
+undo/redo, connection replacement, IME event replay, four languages and bounded
+light/dark popup renders. Run it serially because UI language/theme are global:
+
+```sh
+cargo test --locked -p kiln-db --lib
+cargo test --locked -p kiln-db --test sql_completion -- --test-threads=1
+# Starts and removes isolated PostgreSQL/MySQL containers:
+bash crates/kiln-db/tests/run_docker_tests.sh
+```
+
 Database server tests require their documented local containers; do not point tests
 at a user's real databases or repositories.
 

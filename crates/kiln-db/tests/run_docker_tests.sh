@@ -36,4 +36,5 @@ echo "KILN_TEST_PG_URL=$KILN_TEST_PG_URL"
 echo "KILN_TEST_MYSQL_URL=$KILN_TEST_MYSQL_URL"
 
 cd "$(dirname "$0")/../../.."
-cargo test -p kiln-db --test pg_backend --test mysql_backend "$@"
+cargo test --locked -p kiln-db --test pg_backend --test mysql_backend "$@"
+cargo test --locked -p kiln-db --test sql_completion -- --test-threads=1

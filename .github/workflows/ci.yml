@@ -32,6 +32,11 @@ jobs:
         run: |
           cargo test --locked -p kiln --lib
           cargo test --locked -p kiln-accounts --lib
+      - name: SQL completion and SQLite regressions
+        run: |
+          cargo test --locked -p kiln-db --lib
+          cargo test --locked -p kiln-db --test sqlite_backend --test config_store --test splitter
+          cargo test --locked -p kiln-db --test sql_completion -- --test-threads=1
       - name: Git integration tests
         run: cargo test --locked -p kiln-git
       - name: GUI and session integration

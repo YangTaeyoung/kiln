@@ -1,6 +1,7 @@
 //! Kiln 데이터베이스 클라이언트: 연결 관리, 탐색기 패널, 테이블/콘솔 탭.
 
 mod config;
+mod completion;
 mod driver;
 pub mod edit;
 pub mod export;

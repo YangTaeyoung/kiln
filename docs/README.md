@@ -6,6 +6,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | --- | --- |
 | [Getting started](getting-started.md) | Install, open a workspace, run your first task |
 | [Workspaces and agents](workspaces.md) | Parent folders, multiple repositories, split sessions |
+| [Database tools](databases.md) | Connections, SQL completion, query execution and metadata boundaries |
 | [Git workflows](git.md) | Review changes, squash, cherry-pick, and drop commits |
 | [Terminal integration](terminal-integration.md) | Notifications, explicit activity, shell integration |
 | [Language and native menus](localization.md) | Four UI languages, Settings shortcuts, session controls |

@@ -59,6 +59,7 @@ struct Inner {
     history: Mutex<HashMap<ConnId, Vec<HistoryEntry>>>,
     ctx: Arc<Mutex<Option<egui::Context>>>,
     revision: AtomicU64,
+    connection_epochs: Mutex<HashMap<ConnId, u64>>,
 }
 
 impl Drop for Inner {
@@ -174,6 +175,7 @@ impl DbManager {
                 history: Mutex::new(history),
                 ctx: Arc::new(Mutex::new(None)),
                 revision: AtomicU64::new(1),
+                connection_epochs: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -413,6 +415,7 @@ impl DbManager {
 
     /// 풀을 닫고 상태를 초기화한다.
     pub fn disconnect(&self, id: ConnId) {
+        *self.inner.connection_epochs.lock().entry(id).or_default() += 1;
         let pool = {
             let mut g = self.inner.live.lock();
             g.remove(&id).and_then(|l| l.pool)
@@ -421,6 +424,21 @@ impl DbManager {
             self.rt().spawn(async move { p.close().await });
         }
         self.bump();
+    }
+
+    /// Snapshot only the existing pool. Read-only assistance must never reconnect.
+    pub(crate) fn connected_pool(&self, id: ConnId) -> Option<Arc<DbPool>> {
+        self.inner.live.lock().get(&id).and_then(|l| l.pool.clone())
+    }
+
+    /// Invalidates asynchronous metadata when this connection is replaced or closed.
+    pub(crate) fn connection_epoch(&self, id: ConnId) -> u64 {
+        self.inner
+            .connection_epochs
+            .lock()
+            .get(&id)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// 저장하지 않은 설정으로 접속을 시험하고 서버 버전을 돌려준다.
