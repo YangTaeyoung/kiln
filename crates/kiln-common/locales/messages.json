@@ -9019,6 +9019,11 @@
     "ja": "下へ",
     "zh-CN": "下移"
   },
+  "언어 제안": {
+    "en": "Language suggestion",
+    "ja": "言語の候補",
+    "zh-CN": "语言建议"
+  },
   "언어 키워드": {
     "en": "Language keyword",
     "ja": "言語キーワード",

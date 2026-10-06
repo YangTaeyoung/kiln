@@ -25,7 +25,9 @@ C/C++ (`clangd`) and Lua (`lua-language-server`). Customize languages, extension
 commands and arguments in the existing `lsp.json` configuration.
 
 Without a connected language server, local suggestions are labeled **Language
-keyword** or **Document word**. These are not semantic analysis: they do not
+suggestion** or **Document word**. Language lists are separate, including JavaScript
+and TypeScript; they include common keywords, literals and built-in names.
+These are not semantic analysis: they do not
 resolve imports, types or symbols from other files. Common language keyword sets
 are bundled; other grammars still offer matching words from the open document.
 Local scanning is bounded to avoid blocking large documents. Binary and large
@@ -42,3 +44,4 @@ after the document or caret changes are discarded.
 
 - [syntect SyntaxSet detection](https://docs.rs/syntect/latest/syntect/parsing/struct.SyntaxSet.html)
 - [Language Server Protocol completion](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#completionItem)
+- [Java lexical structure](https://docs.oracle.com/javase/specs/jls/se25/html/jls-3.html#jls-3.9), [Kotlin keywords](https://kotlinlang.org/docs/keyword-reference.html), [Swift lexical structure](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/lexicalstructure/), [C# keywords](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/)

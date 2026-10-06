@@ -11,12 +11,12 @@ fn local_completion_language_override_ime_and_narrow_bounds(){
     common::apply_theme(&h.ctx);h.run_steps(5);
     h.state_mut().goto(2,4);let id=h.state().id();h.ctx.memory_mut(|m|m.request_focus(id));h.run_steps(2);
     h.key_press_modifiers(Modifiers::CTRL,Key::Space);h.run_steps(3);
-    let item=h.get_by_label("return · 언어 키워드");assert!(h.ctx.content_rect().contains_rect(item.rect()));
+    let item=h.get_by_label("return · 언어 제안");assert!(h.ctx.content_rect().contains_rect(item.rect()));
     h.render().unwrap().save("/tmp/kiln-editor-completion-narrow.png").unwrap();
     h.key_press(Key::Enter);h.run_steps(3);assert_eq!(h.state().text(),"result_document_word\nreturn");
     h.key_press_modifiers(Modifiers::COMMAND,Key::Z);h.run_steps(3);assert_eq!(h.state().text(),"result_document_word\nret");
-    h.key_press_modifiers(Modifiers::ALT,Key::Escape);h.run_steps(3);assert!(h.query_by_label("return · 언어 키워드").is_some());
-    h.event(Event::Ime(egui::ImeEvent::Preedit{text:"한".into(),active_range_chars:None}));h.run_steps(2);assert!(h.query_by_label("return · 언어 키워드").is_none());
+    h.key_press_modifiers(Modifiers::ALT,Key::Escape);h.run_steps(3);assert!(h.query_by_label("return · 언어 제안").is_some());
+    h.event(Event::Ime(egui::ImeEvent::Preedit{text:"한".into(),active_range_chars:None}));h.run_steps(2);assert!(h.query_by_label("return · 언어 제안").is_none());
     h.event(Event::Ime(egui::ImeEvent::Commit("한".into())));h.run_steps(3);assert!(h.state().text().ends_with("ret한"));
     h.state_mut().set_language_override(Some("JavaScript".into()));h.run_steps(3);assert_eq!(h.state().status().language,"JavaScript");
     h.state_mut().set_language_override(None);h.run_steps(3);assert_eq!(h.state().status().language,"Python");
