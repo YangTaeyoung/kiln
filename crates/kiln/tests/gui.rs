@@ -1544,6 +1544,15 @@ fn running_close_opt_out_persists_only_on_confirmation_and_keeps_unsaved_guards(
     h.get_by_label("종료하고 닫기").click();h.run_steps(5);
     assert!(!settings());assert_ne!(h.state().debug_focused_pane_id(),Some(pane));
     assert!(!has_viewport_command(&h,egui::ViewportCommand::Close));
+    // Dropping the harness does not run eframe's shutdown hook. Without it,
+    // the throttled autosave still references the just-killed pane/session;
+    // a reconnect can expose its final frame before the live session list.
+    // Exercise a normal app restart, including its forced final checkpoint.
+    eframe::App::on_exit(h.state_mut());
+    let saved:serde_json::Value=serde_json::from_slice(&std::fs::read(base.join("cfg/state.json")).unwrap()).unwrap();
+    let saved_pane=&saved["workspaces"][0]["pages"][0]["panes"][0];
+    assert_eq!(saved_pane["id"].as_u64(),h.state().debug_focused_pane_id());
+    assert_eq!(saved_pane["session"].as_u64(),h.state().debug_focused_session());
     drop(h);
     let mut h=Harness::builder().with_size([1100.0,750.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,None));
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
