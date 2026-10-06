@@ -226,7 +226,7 @@ fn quoted_body(s: &str, at_end: bool) -> String {
     let q = s.chars().next().expect("quoted token");
     let body = &s[q.len_utf8()..];
     // A doubled quote belongs to the name; strip only an actual closing delimiter.
-    let body = if at_end && s.chars().rev().take_while(|c| *c == q).count() % 2 == 1 {
+    let body = if at_end && body.chars().rev().take_while(|c| *c == q).count() % 2 == 1 {
         body.strip_suffix(q).unwrap_or(body)
     } else {
         body
@@ -981,6 +981,8 @@ mod tests {
         assert_eq!(quoted_body("\"\"\"users\"\"\"", true), "\"users\"");
         assert_eq!(quoted_body("\"name\"\"", true), "name\"");
         assert_eq!(quoted_body("`odd``table`", true), "odd`table");
+        assert_eq!(quoted_body("\"\"\"\"", true), "\"");
+        assert_eq!(quoted_body("````", true), "`");
     }
     #[test]
     fn dialect_functions_and_keywords_are_separate() {
