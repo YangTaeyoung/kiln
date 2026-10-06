@@ -34,9 +34,17 @@ Failures leave your SQL intact and can be retried with the refresh icon.
 
 ## Tables, columns and indexes
 
-Open a table and use **Data**, **Columns**, **Indexes** or **DDL**. The explorer's
-context menu opens the same sections and actions, including an already open tab.
-The table menu offers rename and delete. Column rows offer edit, rename and drop;
+The explorer's table context menu offers **Open table**, **Modify table…** and
+**Delete table…**. Modify opens one dialog with **Columns**, **Indexes** and
+**DDL**, plus table rename. It reuses an already open table's state, so pending
+row edits still block structure changes. Choosing an operation opens its reviewed
+form in that dialog; cancelling or applying returns to the structure list.
+The data tab's selected section stays unchanged. Views use the same read-only
+structure browser. DDL can be refreshed and copied there.
+
+Open a table to use **Data**, **Columns**, **Indexes** or **DDL** in the data tab;
+its table menu also opens the modification dialog or deletion form.
+Column rows offer edit, rename and drop;
 use **Add column** for a new name, SQL type, nullability and optional SQL default.
 String defaults need SQL quotes, for example `'guest'`, while `CURRENT_TIMESTAMP`
 is an expression. Generated/identity columns and primary-key removal require

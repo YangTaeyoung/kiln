@@ -403,6 +403,8 @@ pub(crate) struct TableView {
     recovery_conflicts: Vec<RecoveryConflict>,
     recovery_check: Option<Job<DbResult<ResultSet>>>,
     schema_editor: Option<schema_ui::SchemaEditor>,
+    table_editor_open: bool,
+    table_editor_section: TableSection,
     dropped: bool,
     observed_epoch: u64,
     schema_conflict: bool,
@@ -448,6 +450,8 @@ impl TableView {
             recovery_conflicts: Vec::new(),
             recovery_check: None,
             schema_editor: None,
+            table_editor_open: false,
+            table_editor_section: TableSection::Structure,
             dropped: false,
             observed_epoch: m.connection_epoch(conn),
             schema_conflict: false,
@@ -776,6 +780,13 @@ impl TableView {
         }
         self.poll();
         self.poll_submit(m);
+        if self.table_editor_open {
+            if self.details_job.is_some() || self.kind_job.is_some() || self.ddl_job.is_some() {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
+            }
+            self.schema_dialog(ui, m);
+            return;
+        }
         if self.schema_conflict {
             ui.label(RichText::new(kiln_common::i18n::tr("연결 또는 구조가 변경되었습니다. 초안을 내보내거나 편집을 취소한 뒤 다시 불러오세요.")).color(Theme::current().yellow));
             if ui.button(kiln_common::i18n::tr("초안 내보내기…")).clicked(){self.export_recovery();}
@@ -873,7 +884,7 @@ impl TableView {
                     schema_ui::left_label(ui,egui::vec2((ui.available_width()-88.0).max(60.0),22.0),RichText::new(self.t.sql_name(self.driver)).font(fonts::mono(12.5)).color(theme.text)).on_hover_text(self.t.sql_name(self.driver));
                     if !self.is_view {
                         ui.menu_button(kiln_common::i18n::tr("테이블"), |ui| {
-                            if ui.button(kiln_common::i18n::tr("이름 변경…")).clicked() { self.request_schema_action(crate::schema::SchemaAction::RenameTable { name: self.t.table.clone() }); ui.close(); }
+                            if ui.button(kiln_common::i18n::tr("테이블 수정…")).clicked() { self.request_table_editor(); ui.close(); }
                             if ui.button(RichText::new(kiln_common::i18n::tr("테이블 삭제…")).color(theme.red)).clicked() { self.request_schema_action(crate::schema::SchemaAction::DropTable); ui.close(); }
                         });
                     }

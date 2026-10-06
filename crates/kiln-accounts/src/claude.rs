@@ -40,7 +40,7 @@ pub fn read_oauth_account(path: &Path) -> Result<Option<Value>> {
 
 /// 다른 필드는 그대로 두고 `oauthAccount` 만 바꿔 0600 으로 원자적으로 쓴다. `None` 이면 필드를 지운다.
 pub fn write_oauth_account(path: &Path, oauth: Option<&Value>) -> Result<()> {
-    let mut doc = load_doc(path)?;
+    let mut doc = if path.exists() { load_doc(path)? } else { Map::new() };
     match oauth {
         Some(v) => {
             doc.insert("oauthAccount".into(), v.clone());
@@ -154,6 +154,14 @@ mod tests {
         assert!(doc.get("projects").is_some());
         write_oauth_account(&p, None).unwrap();
         assert!(read_oauth_account(&p).unwrap().is_none());
+    }
+
+    #[test]
+    fn first_saved_browser_profile_can_initialize_account_metadata() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("home/.claude.json");
+        write_oauth_account(&path, Some(&serde_json::json!({"emailAddress":"new@example.test"}))).unwrap();
+        assert_eq!(oauth_email(&read_oauth_account(&path).unwrap().unwrap()).as_deref(), Some("new@example.test"));
     }
 
     #[test]

@@ -12,7 +12,8 @@ ownership does not depend on the lifetime of a particular window.
 | `crates/kiln-editor` | Files, editor, search and LSP |
 | `crates/kiln-git` | Git/GitHub operations and history review |
 | `crates/kiln-db` | Database connections, grids and SQL |
-| `crates/kiln-accounts` | Local agent account profiles |
+| `crates/kiln-accounts` | Local agent account profiles and background CLI sign-in |
+| `crates/kiln-remote` | Remote connections, file browser and isolated transfer workers |
 
 On macOS, a separate menu-bar companion reports background sessions. It does not
 own their PTYs. Official app bundles embed Sparkle; only the GUI initializes its updater.

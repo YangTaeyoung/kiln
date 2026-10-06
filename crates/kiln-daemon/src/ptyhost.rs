@@ -62,6 +62,14 @@ struct Shared {
     history: VecDeque<u8>,
     exit: Option<i32>,
     exit_delivered: bool,
+    attachment: u64,
+}
+
+impl Shared {
+    fn clear_attachment(&mut self, attachment: u64) {
+        // A replaced daemon's late EOF must not discard its successor's writer.
+        if self.attachment == attachment { self.writer = None; }
+    }
 }
 
 fn send(w: &mut Option<Box<dyn Write + Send>>, m: &FromHost) {
@@ -83,7 +91,7 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
     let listener = transport::Listener::bind(endpoint)?;
     let pty = Arc::new(Pty::spawn(&spec, session)?);
     let child_pid = pty.pid();
-    let shared = Arc::new(Mutex::new(Shared { writer: None, pending: VecDeque::new(), history: VecDeque::new(), exit: None, exit_delivered: false }));
+    let shared = Arc::new(Mutex::new(Shared { writer: None, pending: VecDeque::new(), history: VecDeque::new(), exit: None, exit_delivered: false, attachment: 0 }));
     let pty_writer = Arc::new(Mutex::new(pty.writer()?));
 
     // PTY 출력 → 데몬(또는 버퍼).
@@ -190,12 +198,13 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
             Ok(Some(ToHost::Attach { replay })) => replay,
             _ => continue,
         };
-        {
+        let attachment = {
             let mut s = shared.lock();
             let hello = FromHost::Hello { host_proto: HOST_PROTO, child_pid, host_pid: std::process::id(), exited: s.exit };
             if write_msg(&mut writer, &hello).is_err() {
                 continue;
             }
+            s.attachment = s.attachment.wrapping_add(1);
             let backlog: Vec<u8> = if replay { s.history.iter().copied().collect() } else { s.pending.iter().copied().collect() };
             s.pending.clear();
             let mut w: Option<Box<dyn Write + Send>> = Some(writer);
@@ -205,7 +214,8 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
                 s.exit_delivered = w.is_some();
             }
             s.writer = w;
-        }
+            s.attachment
+        };
         let shared2 = shared.clone();
         let pty = pty.clone();
         let pty_writer = pty_writer.clone();
@@ -223,15 +233,17 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
                     ToHost::Kill => pty.kill(),
                     ToHost::Detach => {
                         let mut s = shared2.lock();
-                        send(&mut s.writer, &FromHost::Detached);
-                        s.writer = None;
+                        if s.attachment == attachment {
+                            send(&mut s.writer, &FromHost::Detached);
+                            s.clear_attachment(attachment);
+                        }
                         return;
                     }
                     ToHost::Attach { .. } => {}
                 }
             }
             // 연결이 끊기면 이후 출력은 버퍼에 쌓는다.
-            shared2.lock().writer = None;
+            shared2.lock().clear_attachment(attachment);
         });
     }
 }
@@ -242,6 +254,7 @@ pub struct HostPty {
     pub endpoint: String,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     reader: Mutex<Option<Box<dyn Read + Send>>>,
+    shutdown: Option<transport::Shutdown>,
     child_pid: u32,
     pub host_pid: u32,
     exit: Arc<Mutex<Option<i32>>>,
@@ -270,7 +283,7 @@ impl HostPty {
 
     /// 이미 떠 있는 호스트에 붙는다.
     pub fn attach(endpoint: &str, replay: bool) -> io::Result<HostPty> {
-        let Conn { mut reader, mut writer } = transport::connect(endpoint)?;
+        let (Conn { mut reader, mut writer }, shutdown) = transport::connect_with_shutdown(endpoint)?;
         write_msg(&mut writer, &ToHost::Attach { replay })?;
         let hello: FromHost = read_msg(&mut reader)?.ok_or_else(|| io::Error::other("host closed"))?;
         let FromHost::Hello { child_pid, host_pid, exited, .. } = hello else {
@@ -280,6 +293,7 @@ impl HostPty {
             endpoint: endpoint.to_string(),
             writer: Arc::new(Mutex::new(writer)),
             reader: Mutex::new(Some(reader)),
+            shutdown,
             child_pid,
             host_pid,
             exit: Arc::new(Mutex::new(exited)),
@@ -292,8 +306,19 @@ impl HostPty {
     }
 
     pub fn reader(&self) -> io::Result<HostReader> {
-        let inner = self.reader.lock().take().ok_or_else(|| io::Error::other("reader already taken"))?;
-        Ok(HostReader { inner, exit: self.exit.clone(), fg: self.fg.clone(), pending: Vec::new(), pos: 0 })
+        let mut inner = self.reader.lock().take().ok_or_else(|| io::Error::other("reader already taken"))?;
+        // A framed read cannot simply time out halfway through a message: the
+        // next read would mistake its remaining payload for a new length. Keep
+        // complete decoding on a dedicated reader and time out the bounded
+        // delivery queue instead. This also lets the emulator expire redraws
+        // while a hosted child is silent.
+        let (tx, messages) = crossbeam_channel::bounded(16);
+        let decoder = std::thread::Builder::new().name(format!("pty-host-r-{}", self.child_pid)).spawn(move || {
+            while let Ok(Some(message)) = read_msg::<_, FromHost>(&mut inner) {
+                if tx.send(message).is_err() { break; }
+            }
+        })?;
+        Ok(HostReader { messages, decoder: Some(decoder), shutdown: self.shutdown.clone(), exit: self.exit.clone(), fg: self.fg.clone(), pending: Vec::new(), pos: 0 })
     }
 
     pub fn writer(&self) -> io::Result<Box<dyn Write + Send>> {
@@ -344,16 +369,31 @@ impl Write for HostWriter {
 }
 
 pub struct HostReader {
-    inner: Box<dyn Read + Send>,
+    messages: crossbeam_channel::Receiver<FromHost>,
+    decoder: Option<std::thread::JoinHandle<()>>,
+    shutdown: Option<transport::Shutdown>,
     exit: Arc<Mutex<Option<i32>>>,
     fg: Arc<AtomicU32>,
     pending: Vec<u8>,
     pos: usize,
 }
 
+impl Drop for HostReader {
+    fn drop(&mut self) {
+        // Release a decoder waiting for queue capacity before joining it.
+        let (_, empty) = crossbeam_channel::bounded(0);
+        drop(std::mem::replace(&mut self.messages, empty));
+        if let Some(shutdown) = &self.shutdown {
+            shutdown();
+            if let Some(decoder) = self.decoder.take() { let _ = decoder.join(); }
+        }
+    }
+}
+
 impl HostReader {
-    /// 호스트 메시지를 읽어 PTY 읽기처럼 돌려준다. 호스트 연결은 블로킹이라 시간 제한을 쓰지 않는다.
-    pub fn read_timeout(&mut self, buf: &mut [u8], _timeout_ms: i32) -> io::Result<ReadResult> {
+    /// Decode complete host frames while respecting the emulator's idle deadline.
+    pub fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> io::Result<ReadResult> {
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
         loop {
             if self.pos < self.pending.len() {
                 let n = (self.pending.len() - self.pos).min(buf.len());
@@ -361,19 +401,20 @@ impl HostReader {
                 self.pos += n;
                 return Ok(ReadResult::Data(n));
             }
-            match read_msg::<_, FromHost>(&mut self.inner) {
-                Ok(Some(FromHost::Data(d))) => {
+            match self.messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(FromHost::Data(d)) => {
                     self.pending = d;
                     self.pos = 0;
                 }
-                Ok(Some(FromHost::Exit(c))) => {
+                Ok(FromHost::Exit(c)) => {
                     *self.exit.lock() = Some(c);
                     return Ok(ReadResult::Eof);
                 }
-                Ok(Some(FromHost::Detached)) => return Ok(ReadResult::Detached),
-                Ok(Some(FromHost::FgPid(p))) => self.fg.store(p, Ordering::Relaxed),
-                Ok(Some(FromHost::Hello { .. })) => {}
-                Ok(None) | Err(_) => {
+                Ok(FromHost::Detached) => return Ok(ReadResult::Detached),
+                Ok(FromHost::FgPid(p)) => self.fg.store(p, Ordering::Relaxed),
+                Ok(FromHost::Hello { .. }) => {}
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => return Ok(ReadResult::Timeout),
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                     // 호스트가 사라졌다: 자식도 끝난 것으로 본다.
                     let mut e = self.exit.lock();
                     if e.is_none() {
@@ -532,4 +573,69 @@ pub fn handover_in_progress(daemon_socket: &str) -> bool {
         .ok()
         .and_then(|t| t.elapsed().ok())
         .is_some_and(|e| e < Duration::from_secs(15))
+}
+
+#[cfg(all(test, unix))]
+mod recovery_tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    fn reader_fixture() -> (HostPty, HostReader, UnixStream) {
+        let (stream, peer) = UnixStream::pair().unwrap();
+        let cancel = stream.try_clone().unwrap();
+        let connection = transport::split(stream).unwrap();
+        let host = HostPty {
+            endpoint: String::new(), writer: Arc::new(Mutex::new(connection.writer)),
+            reader: Mutex::new(Some(connection.reader)),
+            shutdown: Some(Arc::new(move || { let _ = cancel.shutdown(std::net::Shutdown::Both); })),
+            child_pid: 0, host_pid: 0, exit: Arc::new(Mutex::new(None)), fg: Arc::new(AtomicU32::new(0)),
+        };
+        let reader = host.reader().unwrap();
+        (host, reader, peer)
+    }
+
+    #[test]
+    fn host_deadline_preserves_partial_frame_and_idle_reader_drop_joins_decoder() {
+        let (_host, mut reader, mut peer) = reader_fixture();
+        let frame = kiln_proto::encode(&FromHost::Data("한?".as_bytes().to_vec()));
+        peer.write_all(&frame[..frame.len() - 1]).unwrap();
+        let mut buf = [0; 64];
+        assert!(matches!(reader.read_timeout(&mut buf, 10).unwrap(), ReadResult::Timeout));
+        peer.write_all(&frame[frame.len() - 1..]).unwrap();
+        let ReadResult::Data(n) = reader.read_timeout(&mut buf, 200).unwrap() else { panic!("complete frame lost") };
+        assert_eq!(&buf[..n], "한?".as_bytes());
+        assert!(matches!(reader.read_timeout(&mut buf, 10).unwrap(), ReadResult::Timeout));
+        let start = Instant::now();
+        drop(reader); // joins a decoder blocked in its next framed socket read
+        assert!(start.elapsed() < Duration::from_millis(500));
+        assert_eq!(peer.read(&mut buf).unwrap(), 0);
+    }
+
+    #[test]
+    fn dropping_partial_or_backpressured_host_reader_releases_decoder() {
+        for partial in [true, false] {
+            let (_host, reader, mut peer) = reader_fixture();
+            if partial {
+                let frame = kiln_proto::encode(&FromHost::Data(vec![b'x'; 20]));
+                peer.write_all(&frame[..5]).unwrap();
+            } else {
+                // More than the bounded queue capacity, so the sender waits
+                // for a receiver that is deliberately not being serviced.
+                for _ in 0..64 { write_msg(&mut peer, &FromHost::Data(vec![b'x'; 20])).unwrap(); }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            let start = Instant::now();
+            drop(reader);
+            assert!(start.elapsed() < Duration::from_millis(500));
+        }
+    }
+
+    #[test]
+    fn stale_attachment_cleanup_does_not_clear_replacement_writer() {
+        let mut shared = Shared { writer: Some(Box::new(Vec::<u8>::new())), pending: VecDeque::new(), history: VecDeque::new(), exit: None, exit_delivered: false, attachment: 2 };
+        shared.clear_attachment(1);
+        assert!(shared.writer.is_some());
+        shared.clear_attachment(2);
+        assert!(shared.writer.is_none());
+    }
 }

@@ -9343,5 +9343,570 @@
     "en": "Table name",
     "ja": "テーブル名",
     "zh-CN": "表名"
+  },
+  "8 MB보다 큰 파일은 다운로드해서 편집하세요": {
+    "en": "Download files larger than 8 MB to edit them",
+    "ja": "8 MB を超えるファイルはダウンロードして編集してください",
+    "zh-CN": "请下载大于 8 MB 的文件进行编辑"
+  },
+  "Access Key ID 및 Secret Access Key를 함께 입력하세요": {
+    "en": "Enter both the Access Key ID and Secret Access Key",
+    "ja": "Access Key IDとSecret Access Keyを両方入力してください",
+    "zh-CN": "请同时输入Access Key ID和Secret Access Key"
+  },
+  "ChatGPT 구독 계정으로 로그인하세요": {
+    "en": "Sign in with your ChatGPT subscription account",
+    "ja": "ChatGPT のサブスクリプションアカウントでログインしてください",
+    "zh-CN": "请使用 ChatGPT 订阅账户登录"
+  },
+  "Claude Code로 새 작업": {
+    "en": "New Claude Code task",
+    "ja": "Claude Code の新規タスク",
+    "zh-CN": "新建 Claude Code 任务"
+  },
+  "Codex로 새 작업": {
+    "en": "New Codex task",
+    "ja": "Codex の新規タスク",
+    "zh-CN": "新建 Codex 任务"
+  },
+  "S3, FTP 또는 SSH 연결을 추가하세요": {
+    "en": "Add an S3, FTP or SSH connection",
+    "ja": "S3、FTP または SSH 接続を追加してください",
+    "zh-CN": "添加 S3、FTP 或 SSH 连接"
+  },
+  "SSH Config 가져오기": {
+    "en": "Import SSH Config",
+    "ja": "SSH Config を読み込む",
+    "zh-CN": "导入 SSH Config"
+  },
+  "SSH Config 연결": {
+    "en": "SSH Config connections",
+    "ja": "SSH Config の接続",
+    "zh-CN": "SSH Config 连接"
+  },
+  "SSH Config 파일 선택": {
+    "en": "Choose SSH Config file",
+    "ja": "SSH Config ファイルを選択",
+    "zh-CN": "选择 SSH Config 文件"
+  },
+  "SSH Config와 SSH Agent의 인증을 사용합니다": {
+    "en": "Uses SSH Config and SSH Agent authentication",
+    "ja": "SSH Config と SSH Agent の認証を使用します",
+    "zh-CN": "使用 SSH Config 和 SSH Agent 身份验证"
+  },
+  "SSH 설정 파일을 찾을 수 없습니다.": {
+    "en": "SSH configuration file not found.",
+    "ja": "SSH 設定ファイルが見つかりません。",
+    "zh-CN": "未找到 SSH 配置文件。"
+  },
+  "SSH 연결": {
+    "en": "SSH connections",
+    "ja": "SSH 接続",
+    "zh-CN": "SSH 连接"
+  },
+  "SSH 연결을 읽는 중…": {
+    "en": "Reading SSH connections…",
+    "ja": "SSH 接続を読み込み中…",
+    "zh-CN": "正在读取 SSH 连接…"
+  },
+  "SSH 클라이언트를 찾을 수 없습니다.": {
+    "en": "SSH client not found.",
+    "ja": "SSH クライアントが見つかりません。",
+    "zh-CN": "未找到 SSH 客户端。"
+  },
+  "SSH 터미널 열기": {
+    "en": "Open SSH terminal",
+    "ja": "SSH ターミナルを開く",
+    "zh-CN": "打开 SSH 终端"
+  },
+  "SSH 터미널을 열 수 없습니다": {
+    "en": "Cannot open SSH terminal",
+    "ja": "SSH ターミナルを開けません",
+    "zh-CN": "无法打开 SSH 终端"
+  },
+  "SSH 호스트": {
+    "en": "SSH host",
+    "ja": "SSH ホスト",
+    "zh-CN": "SSH 主机"
+  },
+  "SSH 호스트를 입력하세요": {
+    "en": "Enter an SSH host",
+    "ja": "SSH ホストを入力してください",
+    "zh-CN": "请输入 SSH 主机"
+  },
+  "TLS로 연결 (FTPS)": {
+    "en": "Connect with TLS (FTPS)",
+    "ja": "TLS で接続（FTPS）",
+    "zh-CN": "使用 TLS 连接（FTPS）"
+  },
+  "{} — 저장하지 않은 원격 편집": {
+    "en": "{} — unsaved remote edits",
+    "ja": "{} — 未保存のリモート編集",
+    "zh-CN": "{} — 未保存的远程编辑"
+  },
+  "{} — 진행 중인 원격 전송": {
+    "en": "{} — remote transfer in progress",
+    "ja": "{} — リモート転送中",
+    "zh-CN": "{} — 正在进行远程传输"
+  },
+  "{} 계정을 목록에 저장했습니다": {
+    "en": "Saved the {} account to your list",
+    "ja": "{} のアカウントを一覧に保存しました",
+    "zh-CN": "已将 {} 账户保存到列表"
+  },
+  "{} 로그인 프로그램을 시작하지 못했습니다. 설치 상태를 확인하세요": {
+    "en": "Could not start {} sign-in. Check the installation.",
+    "ja": "{} のログインを開始できませんでした。インストール状態を確認してください",
+    "zh-CN": "无法启动 {} 登录，请检查安装状态"
+  },
+  "{}가 설치되어 있지 않습니다. 설치 후 다시 시도하세요": {
+    "en": "{} is not installed. Install it and try again.",
+    "ja": "{} がインストールされていません。インストールしてからもう一度お試しください",
+    "zh-CN": "尚未安装 {}，请安装后重试"
+  },
+  "경로 방식 주소 사용": {
+    "en": "Use path-style addresses",
+    "ja": "パス形式のアドレスを使用",
+    "zh-CN": "使用路径样式地址"
+  },
+  "계정 이름": {
+    "en": "Account name",
+    "ja": "アカウント名",
+    "zh-CN": "账户名称"
+  },
+  "고급 연결 설정": {
+    "en": "Advanced connection settings",
+    "ja": "詳細接続設定",
+    "zh-CN": "高级连接设置"
+  },
+  "구조 보기…": {
+    "en": "View structure…",
+    "ja": "構造を表示…",
+    "zh-CN": "查看结构…"
+  },
+  "기존 파일을 덮어쓸까요?": {
+    "en": "Overwrite the existing file?",
+    "ja": "既存のファイルを上書きしますか？",
+    "zh-CN": "覆盖现有文件？"
+  },
+  "다운로드": {
+    "en": "Download",
+    "ja": "ダウンロード",
+    "zh-CN": "下载"
+  },
+  "다운로드 중…": {
+    "en": "Downloading…",
+    "ja": "ダウンロード中…",
+    "zh-CN": "正在下载…"
+  },
+  "더 불러오기": {
+    "en": "Load more",
+    "ja": "さらに読み込む",
+    "zh-CN": "加载更多"
+  },
+  "로그인 대기가 종료되었습니다. 다시 시도하세요": {
+    "en": "The sign-in session has ended. Try again.",
+    "ja": "ログインの待機が終了しました。もう一度お試しください",
+    "zh-CN": "登录会话已结束，请重试"
+  },
+  "로그인 대기를 시작하지 못했습니다. 다시 시도하세요": {
+    "en": "Could not start waiting for sign-in. Try again.",
+    "ja": "ログインの待機を開始できませんでした。もう一度お試しください",
+    "zh-CN": "无法开始等待登录，请重试"
+  },
+  "로그인 시간이 만료되었습니다. 다시 시도하세요": {
+    "en": "Sign-in timed out. Try again.",
+    "ja": "ログインの有効時間が切れました。もう一度お試しください",
+    "zh-CN": "登录超时，请重试"
+  },
+  "로그인 취소": {
+    "en": "Cancel sign-in",
+    "ja": "ログインをキャンセル",
+    "zh-CN": "取消登录"
+  },
+  "로그인 취소 중…": {
+    "en": "Cancelling sign-in…",
+    "ja": "ログインをキャンセル中…",
+    "zh-CN": "正在取消登录…"
+  },
+  "로그인 코드": {
+    "en": "Sign-in code",
+    "ja": "ログインコード",
+    "zh-CN": "登录代码"
+  },
+  "로그인 코드를 전달하지 못했습니다. 다시 시도하세요": {
+    "en": "Could not submit the sign-in code. Try again.",
+    "ja": "ログインコードを送信できませんでした。もう一度お試しください",
+    "zh-CN": "无法提交登录代码，请重试"
+  },
+  "로그인 페이지 다시 열기": {
+    "en": "Reopen sign-in page",
+    "ja": "ログインページを再度開く",
+    "zh-CN": "重新打开登录页面"
+  },
+  "로그인은 완료됐지만 계정 정보를 읽지 못했습니다. 다시 시도하세요": {
+    "en": "Signed in, but could not read the account. Try again.",
+    "ja": "ログインしましたが、アカウント情報を読み取れませんでした。もう一度お試しください",
+    "zh-CN": "登录已完成，但无法读取账户信息，请重试"
+  },
+  "로그인을 완료하지 못했습니다. 브라우저와 네트워크 상태를 확인한 뒤 다시 시도하세요": {
+    "en": "Could not complete sign-in. Check your browser and connection, then try again.",
+    "ja": "ログインを完了できませんでした。ブラウザーと接続を確認して、もう一度お試しください",
+    "zh-CN": "无法完成登录，请检查浏览器和网络连接后重试"
+  },
+  "로그인을 취소했습니다": {
+    "en": "Sign-in cancelled",
+    "ja": "ログインをキャンセルしました",
+    "zh-CN": "已取消登录"
+  },
+  "로컬에 보관": {
+    "en": "Keep local copy",
+    "ja": "ローカルに保管",
+    "zh-CN": "保留本地副本"
+  },
+  "리전": {
+    "en": "Region",
+    "ja": "リージョン",
+    "zh-CN": "区域"
+  },
+  "버킷": {
+    "en": "Bucket",
+    "ja": "バケット",
+    "zh-CN": "存储桶"
+  },
+  "버킷 이름을 입력하세요": {
+    "en": "Enter a bucket name",
+    "ja": "バケット名を入力してください",
+    "zh-CN": "请输入存储桶名称"
+  },
+  "브라우저에서 로그인": {
+    "en": "Sign in with browser",
+    "ja": "ブラウザーでログイン",
+    "zh-CN": "通过浏览器登录"
+  },
+  "브라우저에서 로그인 코드를 제공한 경우 여기에 붙여넣으세요": {
+    "en": "If your browser provides a sign-in code, paste it here",
+    "ja": "ブラウザーにログインコードが表示された場合は、ここに貼り付けてください",
+    "zh-CN": "如果浏览器提供了登录代码，请粘贴到此处"
+  },
+  "브라우저에서 로그인을 완료하세요": {
+    "en": "Complete sign-in in your browser",
+    "ja": "ブラウザーでログインを完了してください",
+    "zh-CN": "请在浏览器中完成登录"
+  },
+  "브라우저에서 받은 로그인 코드를 입력하세요": {
+    "en": "Enter the sign-in code from your browser",
+    "ja": "ブラウザーに表示されたログインコードを入力してください",
+    "zh-CN": "请输入浏览器提供的登录代码"
+  },
+  "비밀번호와 키를 비우면 저장된 값을 유지합니다": {
+    "en": "Blank passwords and keys keep the saved values",
+    "ja": "パスワードとキーを空欄にすると保存済みの値を保持します",
+    "zh-CN": "密码和密钥留空时保留已保存的值"
+  },
+  "비어 있는 폴더만 삭제할 수 있습니다": {
+    "en": "Only empty folders can be deleted",
+    "ja": "空のフォルダーのみ削除できます",
+    "zh-CN": "只能删除空文件夹"
+  },
+  "사용자 이름": {
+    "en": "Username",
+    "ja": "ユーザー名",
+    "zh-CN": "用户名"
+  },
+  "상위 폴더": {
+    "en": "Parent folder",
+    "ja": "親フォルダー",
+    "zh-CN": "上级文件夹"
+  },
+  "새 계정을 추가하면 브라우저에서 로그인할 수 있습니다": {
+    "en": "Add an account to sign in with your browser",
+    "ja": "アカウントを追加してブラウザーでログインできます",
+    "zh-CN": "添加账户即可通过浏览器登录"
+  },
+  "새로고침 중…": {
+    "en": "Refreshing…",
+    "ja": "更新中…",
+    "zh-CN": "正在刷新…"
+  },
+  "시작 경로": {
+    "en": "Start path",
+    "ja": "開始パス",
+    "zh-CN": "起始路径"
+  },
+  "업로드 중…": {
+    "en": "Uploading…",
+    "ja": "アップロード中…",
+    "zh-CN": "正在上传…"
+  },
+  "엔드포인트 (선택)": {
+    "en": "Endpoint (optional)",
+    "ja": "エンドポイント（任意）",
+    "zh-CN": "端点（可选）"
+  },
+  "연결 목록을 읽을 수 없습니다": {
+    "en": "Cannot read connections",
+    "ja": "接続一覧を読み込めません",
+    "zh-CN": "无法读取连接列表"
+  },
+  "연결 이름을 입력하세요": {
+    "en": "Enter a connection name",
+    "ja": "接続名を入力してください",
+    "zh-CN": "请输入连接名称"
+  },
+  "연결 저장": {
+    "en": "Save connection",
+    "ja": "接続を保存",
+    "zh-CN": "保存连接"
+  },
+  "연결 추가": {
+    "en": "Add connection",
+    "ja": "接続を追加",
+    "zh-CN": "添加连接"
+  },
+  "연결을 삭제할까요?": {
+    "en": "Delete this connection?",
+    "ja": "この接続を削除しますか？",
+    "zh-CN": "删除此连接？"
+  },
+  "연결하는 중…": {
+    "en": "Connecting…",
+    "ja": "接続中…",
+    "zh-CN": "正在连接…"
+  },
+  "예: 개인 계정, 회사 계정": {
+    "en": "e.g. Personal, Work",
+    "ja": "例：個人用、仕事用",
+    "zh-CN": "例如：个人、工作"
+  },
+  "예상하지 못한 원격 응답입니다": {
+    "en": "Unexpected remote response",
+    "ja": "予期しないリモート応答です",
+    "zh-CN": "收到意外的远程响应"
+  },
+  "오류 상세": {
+    "en": "Error details",
+    "ja": "エラーの詳細",
+    "zh-CN": "错误详情"
+  },
+  "원격 경로": {
+    "en": "Remote path",
+    "ja": "リモートパス",
+    "zh-CN": "远程路径"
+  },
+  "원격 변경을 확인하는 중…": {
+    "en": "Checking remote changes…",
+    "ja": "リモートの変更を確認中…",
+    "zh-CN": "正在检查远程更改…"
+  },
+  "원격 연결": {
+    "en": "Remote connections",
+    "ja": "リモート接続",
+    "zh-CN": "远程连接"
+  },
+  "원격 작업에 실패했습니다": {
+    "en": "Remote operation failed",
+    "ja": "リモート操作に失敗しました",
+    "zh-CN": "远程操作失败"
+  },
+  "원격 저장": {
+    "en": "Save remotely",
+    "ja": "リモート保存",
+    "zh-CN": "远程保存"
+  },
+  "원격 파일 저장 중…": {
+    "en": "Saving remote file…",
+    "ja": "リモートファイルを保存中…",
+    "zh-CN": "正在保存远程文件…"
+  },
+  "원격 파일 편집": {
+    "en": "Edit remote file",
+    "ja": "リモートファイルを編集",
+    "zh-CN": "编辑远程文件"
+  },
+  "원격 파일은 삭제되지 않습니다": {
+    "en": "Remote files will remain",
+    "ja": "リモートファイルは削除されません",
+    "zh-CN": "不会删除远程文件"
+  },
+  "원격 파일을 삭제할까요?": {
+    "en": "Delete this remote file?",
+    "ja": "このリモートファイルを削除しますか？",
+    "zh-CN": "删除此远程文件？"
+  },
+  "원격 파일을 저장했습니다": {
+    "en": "Remote file saved",
+    "ja": "リモートファイルを保存しました",
+    "zh-CN": "远程文件已保存"
+  },
+  "원격 파일이 변경되었습니다. 편집 내용을 로컬에 보관하고 다시 열어 주세요.": {
+    "en": "The remote file changed. Save your edits locally and reopen it.",
+    "ja": "リモートファイルが変更されました。編集をローカルに保存してから開き直してください。",
+    "zh-CN": "远程文件已更改，请将编辑保存到本地后重新打开。"
+  },
+  "원격 편집 내용을 복원했습니다. 원격 저장은 실행되지 않았습니다.": {
+    "en": "Remote edits restored. Nothing was uploaded.",
+    "ja": "リモート編集を復元しました。アップロードは行われていません。",
+    "zh-CN": "已恢复远程编辑，未上传任何内容。"
+  },
+  "유효한 포트를 입력하세요": {
+    "en": "Enter a valid port",
+    "ja": "有効なポートを入力してください",
+    "zh-CN": "请输入有效端口"
+  },
+  "이름 변경 중…": {
+    "en": "Renaming…",
+    "ja": "名前を変更中…",
+    "zh-CN": "正在重命名…"
+  },
+  "이전 원격 전송의 결과를 새로고침해 확인하세요. 작업을 자동으로 재실행하지 않았습니다.": {
+    "en": "Refresh to check the previous transfer result. It was not retried automatically.",
+    "ja": "更新して前回の転送結果を確認してください。操作は自動で再実行されていません。",
+    "zh-CN": "请刷新以检查上次传输结果，操作未自动重试。"
+  },
+  "일반 파일만 업로드할 수 있습니다": {
+    "en": "Only regular files can be uploaded",
+    "ja": "通常のファイルのみアップロードできます",
+    "zh-CN": "只能上传普通文件"
+  },
+  "일치하는 파일이 없습니다": {
+    "en": "No matching files",
+    "ja": "一致するファイルがありません",
+    "zh-CN": "没有匹配的文件"
+  },
+  "자격증명 확인 중…": {
+    "en": "Checking credentials…",
+    "ja": "認証情報を確認中…",
+    "zh-CN": "正在检查凭证…"
+  },
+  "작성 중인 파일을 먼저 원격 저장하거나 로컬에 보관하세요": {
+    "en": "Save the current file remotely or keep a local copy first",
+    "ja": "編集中のファイルを先にリモート保存するか、ローカルに保管してください",
+    "zh-CN": "请先远程保存当前文件或保留本地副本"
+  },
+  "재연결": {
+    "en": "Reconnect",
+    "ja": "再接続",
+    "zh-CN": "重新连接"
+  },
+  "저장된 자격증명 제거": {
+    "en": "Remove saved credentials",
+    "ja": "保存済みの認証情報を削除",
+    "zh-CN": "移除已保存的凭据"
+  },
+  "저장할 Claude Code 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요": {
+    "en": "No Claude Code account to save. Sign in using “Add account”.",
+    "ja": "保存できる Claude Code アカウントがありません。「アカウントを追加」からログインしてください",
+    "zh-CN": "没有可保存的 Claude Code 账户，请通过“添加账户”登录"
+  },
+  "저장할 Codex 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요": {
+    "en": "No Codex account to save. Sign in using “Add account”.",
+    "ja": "保存できる Codex アカウントがありません。「アカウントを追加」からログインしてください",
+    "zh-CN": "没有可保存的 Codex 账户，请通过“添加账户”登录"
+  },
+  "전송 완료": {
+    "en": "Transfer complete",
+    "ja": "転送完了",
+    "zh-CN": "传输完成"
+  },
+  "전송을 중단했습니다. 원격 결과를 새로고침해 확인하세요.": {
+    "en": "Transfer stopped. Refresh to check the remote result.",
+    "ja": "転送を中断しました。更新してリモートの結果を確認してください。",
+    "zh-CN": "传输已停止，请刷新以检查远程结果。"
+  },
+  "추가": {
+    "en": "Add",
+    "ja": "追加",
+    "zh-CN": "添加"
+  },
+  "추가할 SSH 호스트가 없습니다": {
+    "en": "No SSH hosts to add",
+    "ja": "追加できる SSH ホストがありません",
+    "zh-CN": "没有可添加的 SSH 主机"
+  },
+  "키를 비워 두면 기본 AWS 자격증명을 사용합니다": {
+    "en": "Leave keys blank to use default AWS credentials",
+    "ja": "キーを空欄にすると既定の AWS 認証情報を使用します",
+    "zh-CN": "留空密钥以使用默认 AWS 凭证"
+  },
+  "테이블 수정": {
+    "en": "Edit table",
+    "ja": "テーブルを編集",
+    "zh-CN": "编辑表"
+  },
+  "테이블 수정…": {
+    "en": "Edit table…",
+    "ja": "テーブルを編集…",
+    "zh-CN": "编辑表…"
+  },
+  "파일 목록으로 돌아가기": {
+    "en": "Back to files",
+    "ja": "ファイル一覧に戻る",
+    "zh-CN": "返回文件列表"
+  },
+  "파일 목록을 읽는 중…": {
+    "en": "Loading files…",
+    "ja": "ファイル一覧を読み込み中…",
+    "zh-CN": "正在加载文件…"
+  },
+  "파일 업로드": {
+    "en": "Upload file",
+    "ja": "ファイルをアップロード",
+    "zh-CN": "上传文件"
+  },
+  "파일 필터": {
+    "en": "Filter files",
+    "ja": "ファイルを絞り込む",
+    "zh-CN": "筛选文件"
+  },
+  "패널 크기 조절": {
+    "en": "Resize panes",
+    "ja": "パネルのサイズを変更",
+    "zh-CN": "调整面板大小"
+  },
+  "편집 내용을 로컬에 보관했습니다": {
+    "en": "Edits saved locally",
+    "ja": "編集内容をローカルに保存しました",
+    "zh-CN": "编辑已保存到本地"
+  },
+  "편집할 파일을 받는 중…": {
+    "en": "Downloading file for editing…",
+    "ja": "編集するファイルを取得中…",
+    "zh-CN": "正在下载文件以供编辑…"
+  },
+  "폴더 만드는 중…": {
+    "en": "Creating folder…",
+    "ja": "フォルダーを作成中…",
+    "zh-CN": "正在创建文件夹…"
+  },
+  "폴더 만들기": {
+    "en": "New folder",
+    "ja": "フォルダーを作成",
+    "zh-CN": "新建文件夹"
+  },
+  "폴더 이름": {
+    "en": "Folder name",
+    "ja": "フォルダー名",
+    "zh-CN": "文件夹名称"
+  },
+  "폴더가 비어 있습니다": {
+    "en": "This folder is empty",
+    "ja": "フォルダーは空です",
+    "zh-CN": "此文件夹为空"
+  },
+  "폴더에서 열기": {
+    "en": "Open in folder",
+    "ja": "フォルダーで開く",
+    "zh-CN": "在文件夹中打开"
+  },
+  "현재 로그인은 코드 입력을 기다리지 않습니다": {
+    "en": "This sign-in is not waiting for a code",
+    "ja": "このログインではコード入力を待機していません",
+    "zh-CN": "此次登录当前无需输入代码"
+  },
+  "호스트와 사용자 이름을 입력하세요": {
+    "en": "Enter the host and username",
+    "ja": "ホストとユーザー名を入力してください",
+    "zh-CN": "请输入主机和用户名"
   }
 }

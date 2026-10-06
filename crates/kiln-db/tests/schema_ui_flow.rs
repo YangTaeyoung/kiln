@@ -61,6 +61,84 @@ fn schema(m: &DbManager, id: kiln_db::ConnId, table: &str) -> kiln_db::TableDeta
 }
 
 #[test]
+fn table_editor_navigates_and_applies_reviewed_changes_in_one_dialog() {
+    kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+        let (_dir, m, id) = common::sqlite_fixture();
+        m.block_on(m.query(id, "CREATE TABLE editor_items (id INTEGER PRIMARY KEY, name TEXT)", None)).unwrap();
+        let mut tab = DbTab::table(m.clone(), id, None, "editor_items".into());
+        tab.request_table_editor();
+        let mut h = Harness::builder().with_size([900.0, 760.0]).wgpu().build_ui_state(|ui, tab: &mut DbTab| {
+            kiln_common::Theme::current().apply(ui.ctx());
+            if common::install_korean_font(ui.ctx()) { tab.ui(ui); }
+        }, tab);
+        wait(&mut h, "editor columns", |h| h.query_by_label("name").is_some());
+        assert!(h.query_by_label("테이블 수정").is_some());
+        assert!(!h.state().has_unsaved_changes(), "inspection is not an edit draft");
+        h.get_by_label("컬럼 추가…").click();
+        h.run_steps(3);
+        h.get_by_label("컬럼 이름").click();
+        h.event(egui::Event::Text("cancelled_column".into()));
+        h.run_steps(2);
+        assert!(h.state().has_unsaved_changes());
+        h.get_by_label("취소").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("테이블 수정").is_some());
+        assert!(!h.state().has_unsaved_changes());
+        assert!(!schema(&m, id, "editor_items").columns.iter().any(|c| c.name == "cancelled_column"));
+
+        h.get_by_label("컬럼 추가…").click();
+        h.run_steps(3);
+        h.get_by_label("컬럼 이름").click();
+        h.event(egui::Event::Text("delivery_status".into()));
+        h.run_steps(2);
+        preview(&mut h);
+        assert!(!schema(&m, id, "editor_items").columns.iter().any(|c| c.name == "delivery_status"));
+        apply(&mut h);
+        wait(&mut h, "editor refreshed column", |h| h.query_by_label("delivery_status").is_some());
+        assert!(h.query_by_label("테이블 수정").is_some());
+
+        h.get_by_label("인덱스").click();
+        h.run_steps(3);
+        h.get_by_label("인덱스 추가…").click();
+        h.run_steps(3);
+        h.get_by_label("인덱스 이름").click();
+        h.event(egui::Event::Text("idx_editor_status".into()));
+        h.run_steps(2);
+        // ComboBox exposes its selected text as an accessible value, not a label.
+        h.get_by_role(egui::accesskit::Role::ComboBox).click();
+        h.run_steps(2);
+        h.get_by_label("delivery_status").click();
+        h.run_steps(3);
+        preview(&mut h);
+        apply(&mut h);
+        wait(&mut h, "editor refreshed index", |h| h.query_by_label("idx_editor_status").is_some());
+        assert!(schema(&m, id, "editor_items").indexes.iter().any(|i| i.name == "idx_editor_status"));
+        h.get_by_label("삭제…").click();
+        h.run_steps(3);
+        preview(&mut h);
+        apply(&mut h);
+        wait(&mut h, "editor removed index", |h| h.query_by_label("이 테이블에는 인덱스가 없습니다.").is_some());
+        assert!(!schema(&m, id, "editor_items").indexes.iter().any(|i| i.name == "idx_editor_status"));
+
+        h.get_by_label("테이블 이름 변경…").click();
+        h.run_steps(3);
+        h.get_by_label("새 이름").click();
+        h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        h.event(egui::Event::Text("editor_items_renamed".into()));
+        h.run_steps(2);
+        preview(&mut h);
+        apply(&mut h);
+        assert_eq!(h.state().table_ref().unwrap().table, "editor_items_renamed");
+        h.get_by_label("DDL").click();
+        wait(&mut h, "editor DDL", |h| h.query_by_label("CREATE 문").is_some());
+        h.get_by_label("닫기").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("테이블 수정").is_none());
+        assert!(h.query_by_label("셀 내용").is_some(), "closing returns to the original Data section");
+    });
+}
+
+#[test]
 fn reviewed_gui_schema_changes_reach_sqlite_and_refresh_the_table() {
     kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
         let (_dir, m, id) = common::sqlite_fixture();

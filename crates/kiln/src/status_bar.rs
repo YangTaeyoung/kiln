@@ -13,9 +13,10 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationOptions, NSApplicationActivationPolicy,
     NSCellImagePosition, NSImage, NSMenu, NSMenuItem, NSRunningApplication, NSStatusBar,
-    NSStatusItem, NSAlert, NSAlertStyle, NSAlertSecondButtonReturn,
+    NSStatusItem, NSAlert, NSAlertStyle, NSAlertSecondButtonReturn, NSStatusBarButton,
+    NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
 };
-use objc2_foundation::{MainThreadMarker, NSObject, NSSize, NSString, NSTimer};
+use objc2_foundation::{MainThreadMarker, NSObject, NSSize, NSString, NSTimer, NSMutableAttributedString, NSRange};
 use std::{
     cell::RefCell,
     fs::OpenOptions,
@@ -75,6 +76,37 @@ fn menu_title(icon_loaded: bool, badge: &str) -> String {
         (false, false) => format!("Kiln {badge}"),
     }
 }
+/// Keep AppKit's template icon unchanged; style only the unread indicator.
+/// https://developer.apple.com/documentation/appkit/nsbutton/attributedtitle
+unsafe fn set_menu_title(button: &NSStatusBarButton, icon_loaded: bool, badge: &str) {
+    unsafe {
+        let title = menu_title(icon_loaded, badge);
+        button.setTitle(&NSString::from_str(&title));
+        button.setAlternateTitle(&NSString::new());
+        if !badge.is_empty() {
+            let mut attributed = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &NSString::from_str(&title),
+            );
+            let range = NSRange::new(title.encode_utf16().count() - 1, 1);
+            // A 9pt dot occupies roughly one third of the 18pt app symbol.
+            // Attribute the dot alone so the fallback app name remains legible.
+            attributed.addAttribute_value_range(
+                NSFontAttributeName,
+                &NSFont::systemFontOfSize(9.0),
+                range,
+            );
+            attributed.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                &NSColor::systemRedColor(),
+                range,
+            );
+            button.setAttributedTitle(&attributed);
+            button.setAttributedAlternateTitle(&attributed);
+        }
+    }
+}
+
 struct MenuState {
     executable: std::path::PathBuf,
     executable_identity: Option<(u64,u64)>,
@@ -336,7 +368,7 @@ extern "C" fn tick(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {
             unsafe {
                 if let Some(mt) = MainThreadMarker::new() {
                     if let Some(button) = menu.item.button(mt) {
-                        button.setTitle(&NSString::from_str(&menu_title(menu.icon_loaded, &status.title())));
+                        set_menu_title(&button, menu.icon_loaded, &status.title());
                         button.setToolTip(Some(&NSString::from_str(&kiln_common::trf!(
                             "{} · 읽지 않은 알림 {}개",
                             status.description(),
@@ -470,7 +502,7 @@ pub fn run() -> anyhow::Result<()> {
                     }
                 }
             }
-            button.setTitle(&NSString::from_str(&menu_title(icon_loaded, "")));
+            set_menu_title(&button, icon_loaded, "");
         }
         let menu = NSMenu::new(mt);
         menu.setAutoenablesItems(false);

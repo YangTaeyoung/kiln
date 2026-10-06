@@ -13,7 +13,11 @@ anyhow.workspace = true
 log.workspace = true
 parking_lot.workspace = true
 base64 = "0.22"
+tempfile.workspace = true
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
-tempfile.workspace = true
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }

@@ -130,14 +130,17 @@ fn accounts_settings_snapshots() {
     }
     save_png(&mut h, "accounts_light");
 
-    // 새 계정 추가는 백그라운드 sync-back 뒤 RunLogin 이벤트를 낸다.
+    // Adding an account stays in settings and requests a name before browser login.
     h.get_all_by_label("새 계정 추가").next().unwrap().click();
-    let start = std::time::Instant::now();
-    while !h.state().1.contains(&AccountsEvent::RunLogin(Tool::Claude)) {
-        assert!(start.elapsed().as_secs() < 5, "RunLogin event not emitted");
-        h.step();
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    // The action row is replaced by the login form on the following frame.
+    // Let that layout settle before querying/clicking the form's controls.
+    for _ in 0..4 { h.step(); }
+    assert_eq!(h.query_all_by_label("브라우저에서 로그인").count(), 1);
+    assert!(!h.state().1.contains(&AccountsEvent::RunLogin(Tool::Claude)));
+    save_png(&mut h, "accounts_add_browser_light");
+    h.get_by_label("취소").click();
+    for _ in 0..4 { h.step(); }
+    assert_eq!(h.query_all_by_label("브라우저에서 로그인").count(), 0);
 
     kiln_common::Theme::set_current("kiln-dark");
     let e = tempfile::tempdir().unwrap();

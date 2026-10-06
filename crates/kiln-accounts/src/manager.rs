@@ -79,7 +79,11 @@ impl Env {
     }
 
     fn claude_json_path(&self) -> PathBuf {
-        claude::claude_json_path(&self.home)
+        let config_dir = self.claude_config_dir.clone().unwrap_or_else(|| self.home.join(".claude"));
+        let legacy = config_dir.join(".config.json");
+        if legacy.exists() { legacy } else {
+            self.claude_config_dir.as_ref().map(|dir| dir.join(".claude.json")).unwrap_or_else(|| claude::claude_json_path(&self.home))
+        }
     }
 }
 
@@ -97,6 +101,9 @@ struct StoredProfile {
     oauth_account: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_usage: Option<Usage>,
+    /// An isolated browser login is saved but not installed in the live CLI yet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pending_login: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -167,6 +174,8 @@ struct Inner {
     op: Mutex<()>,
     ctx: Mutex<Option<egui::Context>>,
     pub(crate) ui: Mutex<UiState>,
+    login: Mutex<[Option<Arc<crate::login::LoginControl>>; 2]>,
+    shutting_down: std::sync::atomic::AtomicBool,
 }
 
 /// 계정 관리자. 복제해도 같은 상태를 공유한다.
@@ -204,6 +213,8 @@ impl AccountManager {
                 op: Mutex::new(()),
                 ctx: Mutex::new(None),
                 ui: Mutex::new(UiState::default()),
+                login: Mutex::new([None, None]),
+                shutting_down: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
@@ -242,6 +253,10 @@ impl AccountManager {
         self.with_state(|s| s.settings.tool(tool).active.clone())
     }
 
+    pub fn pending_login(&self, tool: Tool, id: &str) -> bool {
+        self.with_state(|s| s.settings.tool(tool).profiles.iter().find(|profile| profile.profile.id == id).is_some_and(|profile| profile.pending_login))
+    }
+
     pub fn usage(&self, tool: Tool, id: &str) -> Option<Usage> {
         self.with_state(|s| s.usage.get(&(tool, id.to_string())).cloned())
     }
@@ -266,6 +281,101 @@ impl AccountManager {
 
     pub fn login_command(&self, tool: Tool) -> String {
         crate::login_command(tool)
+    }
+
+    pub fn login_status(&self, tool: Tool) -> Option<crate::LoginStatus> {
+        self.inner.login.lock()[idx(tool)].as_ref().map(|job| job.status.lock().clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn login_fixture(&self, tool: Tool, status: crate::LoginStatus) -> Arc<crate::login::LoginControl> {
+        let control = Arc::new(crate::login::LoginControl::default());
+        *control.status.lock() = status;
+        self.inner.login.lock()[idx(tool)] = Some(control.clone());
+        self.with_state(|s| s.busy[idx(tool)] = Some(kiln_common::i18n::tr("브라우저에서 로그인을 완료하세요").into()));
+        control
+    }
+
+    pub fn cancel_login(&self, tool: Tool) {
+        if let Some(job) = &self.inner.login.lock()[idx(tool)] {
+            job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.with_state(|s| s.busy[idx(tool)] = Some(kiln_common::i18n::tr("로그인 취소 중…").into()));
+        }
+        self.repaint();
+    }
+
+    /// Stop disposable browser-login CLIs before the GUI process exits.
+    /// Existing terminal sessions and installed live CLI credentials are untouched.
+    pub fn shutdown_logins(&self) -> bool {
+        self.inner.shutting_down.store(true, std::sync::atomic::Ordering::Relaxed);
+        let jobs: Vec<_> = self.inner.login.lock().iter().flatten().cloned().collect();
+        for job in &jobs { job.shutdown(); }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        jobs.iter().all(|job| job.wait_for_cleanup(deadline))
+    }
+
+    pub fn login_is_cancelling(&self, tool: Tool) -> bool {
+        self.inner.login.lock()[idx(tool)].as_ref().is_some_and(|job| job.cancel.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    pub fn submit_login_code(&self, tool: Tool, code: &str) -> Result<()> {
+        let job = self.inner.login.lock()[idx(tool)].clone()
+            .ok_or_else(|| anyhow!(kiln_common::i18n::tr("로그인 대기가 종료되었습니다. 다시 시도하세요")))?;
+        job.send_code(code)
+    }
+
+    /// The browser authenticates the user; no terminal panel or live credential
+    /// mutation is needed while waiting. A successful job saves its own snapshot.
+    pub fn start_login(&self, tool: Tool, label: &str) {
+        let label = label.trim().to_string();
+        if label.is_empty() { return; }
+        if self.login_status(tool).is_some() || self.with_state(|s| s.busy[idx(tool)].is_some()) { return; }
+        let Some(binary) = crate::login::find_cli(&self.inner.env.home, tool) else {
+            self.with_state(|s| s.error[idx(tool)] = Some(kiln_common::trf!("{}가 설치되어 있지 않습니다. 설치 후 다시 시도하세요", tool.display_name())));
+            return;
+        };
+        self.start_login_with_binary(tool, label, binary, std::time::Duration::from_secs(300));
+    }
+
+    fn start_login_with_binary(&self, tool: Tool, label: String, binary: PathBuf, timeout: std::time::Duration) {
+        let control = Arc::new(crate::login::LoginControl::default());
+        {
+            let mut jobs = self.inner.login.lock();
+            if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { return; }
+            if jobs[idx(tool)].is_some() { return; }
+            let reserved = self.with_state(|s| {
+                if s.busy[idx(tool)].is_some() { return false; }
+                s.busy[idx(tool)] = Some(kiln_common::i18n::tr("브라우저에서 로그인을 완료하세요").to_string());
+                s.error[idx(tool)] = None;
+                s.notice[idx(tool)] = None;
+                true
+            });
+            if !reserved { return; }
+            jobs[idx(tool)] = Some(control.clone());
+        }
+        let m = self.clone();
+        let redraw = m.clone();
+        std::thread::spawn(move || {
+            let result = crate::login::run_login(&m.inner.env, tool, &binary, &control, timeout, Arc::new(move || redraw.repaint()))
+                .and_then(|credentials| {
+                    let _op = m.inner.op.lock();
+                    if control.cancel.load(std::sync::atomic::Ordering::Relaxed) { bail!(kiln_common::i18n::tr("로그인을 취소했습니다")); }
+                    // Saving a second account must not silently replace the account
+                    // used by existing agent sessions or revoke its refresh token.
+                    let profile = m.save_credentials_locked(tool, &label, credentials.secret, None, credentials.email, credentials.oauth, false)?;
+                    Ok(kiln_common::trf!("‘{}’ 계정을 저장했습니다", profile.label))
+                });
+            m.inner.login.lock()[idx(tool)] = None;
+            m.with_state(|s| {
+                s.busy[idx(tool)] = None;
+                match result {
+                    Ok(notice) => s.notice[idx(tool)] = Some(notice),
+                    Err(error) => s.error[idx(tool)] = Some(format!("{error:#}")),
+                }
+            });
+            m.repaint();
+        });
+        self.repaint();
     }
 
     /// 목록 순서를 `ids` 순서로 바꾼다. 빠진 id 는 원래 순서대로 뒤에 붙는다.
@@ -294,7 +404,7 @@ impl AccountManager {
     fn read_live(&self, tool: Tool) -> Result<Option<(String, Option<String>)>> {
         let env = &self.inner.env;
         match tool {
-            Tool::Claude if env.claude_live_in_store => Ok(env.store.get_by_service(claude::CLAUDE_SERVICE)?.map(|(v, a)| (v, Some(a)))),
+            Tool::Claude if env.claude_live_in_store => Ok(env.store.get_by_service(&crate::login::claude_service(env.claude_config_dir.as_deref()))?.map(|(v, a)| (v, Some(a)))),
             Tool::Claude => Ok(read_secret(&env.claude_credentials_path())?.map(|v| (v, None))),
             Tool::Codex => Ok(read_secret(&codex::auth_path(&env.codex_home))?.map(|v| (v, None))),
         }
@@ -308,7 +418,7 @@ impl AccountManager {
                     .with_state(|s| s.settings.claude.keychain_account.clone())
                     .filter(|a| !a.is_empty())
                     .unwrap_or_else(|| env.username.clone());
-                env.store.set(claude::CLAUDE_SERVICE, &acct, secret)
+                env.store.set(&crate::login::claude_service(env.claude_config_dir.as_deref()), &acct, secret)
             }
             Tool::Claude => write_secret_atomic(&env.claude_credentials_path(), secret.as_bytes()),
             Tool::Codex => write_secret_atomic(&codex::auth_path(&env.codex_home), secret.as_bytes()),
@@ -352,15 +462,20 @@ impl AccountManager {
     pub fn save_current(&self, tool: Tool, label: &str) -> Result<Profile> {
         let _op = self.inner.op.lock();
         let (secret, acct) = self.read_live(tool)?.ok_or_else(|| match tool {
-            Tool::Claude => anyhow!(kiln_common::trf!("로그인된 Claude Code 계정이 없습니다. 먼저 `claude auth login` 으로 로그인하세요")),
-            Tool::Codex => anyhow!(kiln_common::trf!("로그인된 Codex 계정이 없습니다(auth.json 없음). 먼저 `codex login` 으로 로그인하세요")),
+            Tool::Claude => anyhow!(kiln_common::i18n::tr("저장할 Claude Code 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
+            Tool::Codex => anyhow!(kiln_common::i18n::tr("저장할 Codex 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
         })?;
         if tool == Tool::Codex && !codex::has_chatgpt_tokens(&secret) {
             bail!(kiln_common::trf!("Codex 가 ChatGPT 계정으로 로그인되어 있지 않습니다(API 키 로그인은 저장하지 않습니다)"));
         }
         let (email, oauth) = self.live_identity(tool, Some(&secret));
+        self.save_credentials_locked(tool, label, secret, acct, email, oauth, true)
+    }
+
+    fn save_credentials_locked(&self, tool: Tool, label: &str, secret: String, acct: Option<String>, email: Option<String>, oauth: Option<Value>, activate: bool) -> Result<Profile> {
         let service = profile_service(tool);
         let now = now_unix();
+        let (previous_settings, previous_live) = self.with_state(|s| (s.settings.clone(), s.live_email[idx(tool)].clone()));
 
         let existing = email.as_ref().and_then(|e| {
             self.with_state(|s| {
@@ -373,6 +488,7 @@ impl AccountManager {
             })
         });
         let id = existing.clone().unwrap_or_else(|| new_id(tool));
+        let previous_secret = self.inner.env.store.get(&service, &id)?;
         self.inner.env.store.set(&service, &id, &secret)?;
 
         let profile = self.with_state(|s| {
@@ -380,9 +496,12 @@ impl AccountManager {
             if let Some(a) = acct.filter(|a| !a.is_empty()) {
                 ts.keychain_account = Some(a);
             }
-            ts.active = Some(id.clone());
-            ts.active_since = now;
+            if activate {
+                ts.active = Some(id.clone());
+                ts.active_since = now;
+            }
             let profile = if let Some(p) = ts.profiles.iter_mut().find(|p| p.profile.id == id) {
+                p.pending_login = !activate;
                 if oauth.is_some() {
                     p.oauth_account = oauth.clone();
                 }
@@ -398,13 +517,20 @@ impl AccountManager {
                     kiln_common::trf!("계정 {n}")
                 };
                 let p = Profile { id: id.clone(), tool, label, email: email.clone(), added_unix: now as u64 };
-                ts.profiles.push(StoredProfile { profile: p.clone(), oauth_account: oauth.clone(), last_usage: None });
+                ts.profiles.push(StoredProfile { profile: p.clone(), oauth_account: oauth.clone(), last_usage: None, pending_login: !activate });
                 p
             };
-            s.live_email[idx(tool)] = Some(email.clone());
+            if activate { s.live_email[idx(tool)] = Some(email.clone()); }
             profile
         });
-        self.persist()?;
+        if let Err(error) = self.persist() {
+            self.with_state(|s| { s.settings = previous_settings; s.live_email[idx(tool)] = previous_live; });
+            let rollback = if let Some(secret) = previous_secret {
+                self.inner.env.store.set(&service, &id, &secret)
+            } else { self.inner.env.store.delete(&service, &id).map(|_| ()) };
+            if rollback.is_err() { log::warn!("accounts: profile persistence failed; credential rollback requires retry"); }
+            return Err(error);
+        }
         self.with_state(|s| s.events.push(AccountsEvent::Saved { tool, id: profile.id.clone() }));
         Ok(profile)
     }
@@ -421,6 +547,7 @@ impl AccountManager {
             let ts = s.settings.tool(tool);
             let a = ts.active.clone()?;
             let p = ts.profiles.iter().find(|p| p.profile.id == a)?;
+            if p.pending_login { return None; }
             Some((a, p.profile.email.clone()))
         }) else {
             return Ok(());
@@ -457,7 +584,7 @@ impl AccountManager {
         if let Err(e) = self.sync_back_locked(tool) {
             log::warn!("accounts: sync-back failed: {e:#}");
         }
-        if self.active(tool).as_deref() == Some(id) {
+        if self.active(tool).as_deref() == Some(id) && !self.pending_login(tool, id) {
             return Ok(());
         }
         let secret = self
@@ -477,6 +604,7 @@ impl AccountManager {
             let ts = s.settings.tool_mut(tool);
             ts.active = Some(id.to_string());
             ts.active_since = now_unix();
+            if let Some(profile) = ts.profiles.iter_mut().find(|profile| profile.profile.id == id) { profile.pending_login = false; }
             s.live_email[idx(tool)] = Some(email);
             s.events.push(AccountsEvent::Switched { tool, id: id.to_string() });
         });
@@ -540,6 +668,7 @@ impl AccountManager {
             (0..n)
                 .map(|k| (first + k) % n)
                 .filter(|i| Some(*i) != start)
+                .filter(|i| !ts.profiles[*i].pending_login)
                 .map(|i| &ts.profiles[i].profile)
                 .find(|p| !Self::is_exhausted(s, tool, &p.id, now))
                 .cloned()
@@ -738,6 +867,142 @@ mod tests {
         let raw = std::fs::read_to_string(&env.settings_path).unwrap();
         assert!(!raw.contains("at-a2") && !raw.contains("rt-a2"), "settings must not contain secrets");
         assert!(raw.contains("claude-code-user"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn gui_shutdown_reaps_both_login_children_and_cleans_only_isolated_credentials() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(d.path(), true);
+        let manager = AccountManager::with_env(env.clone());
+        login_codex(&env, "active@example.test", "active");
+        login_claude(&env, &store, "live@example.test", "live");
+        let codex_before = std::fs::read(codex::auth_path(&env.codex_home)).unwrap();
+        let claude_before = store.get_by_service(claude::CLAUDE_SERVICE).unwrap();
+        let fixture_dir = d.path().to_string_lossy().replace('\'', "'\\''");
+        let binary = d.path().join("login-shutdown-fixture");
+        std::fs::write(&binary, format!(
+            "#!/bin/sh\nfixture_dir='{fixture_dir}'\ncase \"$1\" in auth) fixture_tool=claude;; *) fixture_tool=codex;; esac\nprintf '%s\\n' \"$$\" > \"$fixture_dir/$fixture_tool.pid\"\nprintf '%s\\n' \"$HOME\" > \"$fixture_dir/$fixture_tool.home\"\nexec /bin/sleep 60\n"
+        )).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for tool in Tool::ALL {
+            manager.start_login_with_binary(tool, "Disposable".into(), binary.clone(), std::time::Duration::from_secs(90));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut children = Vec::new();
+        for name in ["claude", "codex"] {
+            let home_file = d.path().join(format!("{name}.home"));
+            while std::fs::read_to_string(&home_file).ok().is_none_or(|s| s.trim().is_empty()) {
+                assert!(std::time::Instant::now() < deadline, "fixture login did not start");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let home = PathBuf::from(std::fs::read_to_string(home_file).unwrap().trim());
+            let isolated = home.parent().unwrap().to_path_buf();
+            let pid: i32 = std::fs::read_to_string(d.path().join(format!("{name}.pid"))).unwrap().trim().parse().unwrap();
+            children.push((pid, isolated));
+        }
+        let isolated_claude = children[0].1.join("claude");
+        let service = crate::login::claude_service(Some(&isolated_claude));
+        store.set(&service, "fixture", "disposable").unwrap();
+        let started = std::time::Instant::now();
+        assert!(manager.shutdown_logins(), "GUI exit must wait for login cleanup");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        for (pid, isolated) in children {
+            assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "disposable login process survived GUI shutdown");
+            assert!(!isolated.exists(), "disposable credential files survived GUI shutdown");
+        }
+        assert!(store.get_by_service(&service).unwrap().is_none());
+        assert_eq!(store.get_by_service(claude::CLAUDE_SERVICE).unwrap(), claude_before);
+        assert_eq!(std::fs::read(codex::auth_path(&env.codex_home)).unwrap(), codex_before);
+        let marker = d.path().join("codex.pid");
+        std::fs::remove_file(&marker).unwrap();
+        manager.start_login_with_binary(Tool::Codex, "After exit".into(), binary, std::time::Duration::from_secs(1));
+        assert!(!marker.exists(), "a closing GUI must not admit another login");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn shutdown_before_worker_launch_completes_without_creating_a_child() {
+        let d = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(d.path(), false);
+        let control = Arc::new(crate::login::LoginControl::default());
+        control.shutdown();
+        let result = crate::login::run_login(&env, Tool::Codex, Path::new("/does-not-exist"), &control, std::time::Duration::from_secs(1), Arc::new(|| {}));
+        assert!(result.is_err());
+        assert!(control.wait_for_cleanup(std::time::Instant::now() + std::time::Duration::from_millis(100)));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn background_login_auto_saves_named_profile_and_keeps_active_account() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(d.path(), false);
+        let m = AccountManager::with_env(env.clone());
+        login_codex(&env, "active@example.test", "old");
+        let active = m.save_current(Tool::Codex, "Active").unwrap();
+        m.drain_events();
+        let live_before = std::fs::read(codex::auth_path(&env.codex_home)).unwrap();
+        let script = d.path().join("isolated-login-fixture");
+        let auth = fake_auth("new@example.test", "new");
+        std::fs::write(&script, format!("#!/bin/sh\nprintf '%s' '{}' > \"$CODEX_HOME/auth.json\"\n", auth)).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        m.start_login_with_binary(Tool::Codex, "Company".into(), script, std::time::Duration::from_secs(3));
+        let start = std::time::Instant::now();
+        while m.login_status(Tool::Codex).is_some() {
+            assert!(start.elapsed() < std::time::Duration::from_secs(4));
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let profiles = m.profiles(Tool::Codex);
+        assert_eq!(profiles.len(), 2);
+        let added = profiles.iter().find(|profile| profile.label == "Company").unwrap();
+        assert_eq!(added.email.as_deref(), Some("new@example.test"));
+        assert_eq!(m.active(Tool::Codex).as_deref(), Some(active.id.as_str()));
+        assert_eq!(std::fs::read(codex::auth_path(&env.codex_home)).unwrap(), live_before);
+        assert_eq!(store.get(&profile_service(Tool::Codex), &added.id).unwrap(), Some(auth));
+        assert!(m.next_with_headroom(Tool::Codex).is_none(), "automatic rotation must wait for explicit Apply of a new browser login");
+        let events = m.drain_events();
+        assert!(events.iter().any(|event| matches!(event, AccountsEvent::Saved { id, .. } if id == &added.id)));
+        assert!(!events.iter().any(|event| matches!(event, AccountsEvent::RunLogin(_))));
+        let settings = std::fs::read_to_string(&env.settings_path).unwrap();
+        assert!(!settings.contains("access-new") && !settings.contains("refresh-new"));
+    }
+
+    #[test]
+    fn imported_profile_storage_failure_rolls_back_profile_and_secret() {
+        let d = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(d.path(), false);
+        // A regular file as parent makes atomic settings persistence fail.
+        let blocked = d.path().join("not-a-directory");
+        std::fs::write(&blocked, b"fixture").unwrap();
+        env.settings_path = blocked.join("accounts.json");
+        let m = AccountManager::with_env(env);
+        let error = m.save_credentials_locked(Tool::Codex, "Company", fake_auth("new@example.test", "new"), None, Some("new@example.test".into()), None, false);
+        assert!(error.is_err());
+        assert!(m.profiles(Tool::Codex).is_empty());
+        assert!(m.active(Tool::Codex).is_none());
+        assert!(store.is_empty());
+        assert!(m.drain_events().is_empty());
+    }
+
+    #[test]
+    fn browser_reauthentication_is_kept_until_explicit_apply_even_for_active_profile() {
+        let d = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(d.path(), false);
+        let m = AccountManager::with_env(env.clone());
+        login_codex(&env, "same@example.test", "old");
+        let profile = m.save_current(Tool::Codex, "Personal").unwrap();
+        let fresh = fake_auth("same@example.test", "fresh");
+        let imported = m.save_credentials_locked(Tool::Codex, "Personal", fresh.clone(), None, Some("same@example.test".into()), None, false).unwrap();
+        assert_eq!(imported.id, profile.id);
+        assert!(m.pending_login(Tool::Codex, &profile.id));
+        m.sync_back(Tool::Codex).unwrap();
+        assert_eq!(store.get(&profile_service(Tool::Codex), &profile.id).unwrap(), Some(fresh.clone()), "live token sync must not erase the new isolated login");
+        assert_eq!(std::fs::read_to_string(codex::auth_path(&env.codex_home)).unwrap(), fake_auth("same@example.test", "old"));
+        m.switch_to(Tool::Codex, &profile.id).unwrap();
+        assert_eq!(std::fs::read_to_string(codex::auth_path(&env.codex_home)).unwrap(), fresh);
+        assert!(!m.pending_login(Tool::Codex, &profile.id));
     }
 
     #[test]

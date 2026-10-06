@@ -20,11 +20,12 @@ pub enum ToolKind {
     Git,
     PullRequests,
     Database,
+    Remote,
     Problems,
 }
 
 impl ToolKind {
-    pub const ALL: [ToolKind; 6] = [ToolKind::Explorer, ToolKind::Search, ToolKind::Git, ToolKind::PullRequests, ToolKind::Database, ToolKind::Problems];
+    pub const ALL: [ToolKind; 7] = [ToolKind::Explorer, ToolKind::Search, ToolKind::Git, ToolKind::PullRequests, ToolKind::Database, ToolKind::Remote, ToolKind::Problems];
 
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -33,6 +34,7 @@ impl ToolKind {
             ToolKind::Git => "git",
             ToolKind::PullRequests => "prs",
             ToolKind::Database => "db",
+            ToolKind::Remote => "remote",
             ToolKind::Problems => "problems",
         }
     }
@@ -43,6 +45,7 @@ impl ToolKind {
             "git" => ToolKind::Git,
             "prs" => ToolKind::PullRequests,
             "db" => ToolKind::Database,
+            "remote" => ToolKind::Remote,
             "problems" => ToolKind::Problems,
             _ => ToolKind::Explorer,
         }
@@ -55,6 +58,7 @@ impl ToolKind {
             ToolKind::Git => kiln_common::i18n::tr("소스 제어"),
             ToolKind::PullRequests => "GitHub",
             ToolKind::Database => kiln_common::i18n::tr("데이터베이스"),
+            ToolKind::Remote => kiln_common::i18n::tr("원격 연결"),
             ToolKind::Problems => kiln_common::i18n::tr("문제"),
         }
     }
@@ -66,6 +70,7 @@ impl ToolKind {
             ToolKind::Git => "⇧⌘G",
             ToolKind::PullRequests => "⇧⌘R",
             ToolKind::Database => "⇧⌘B",
+            ToolKind::Remote => "",
             ToolKind::Problems => "⇧⌘M",
         }
     }
@@ -78,6 +83,7 @@ impl ToolKind {
             ToolKind::Git => Icon::Branch,
             ToolKind::PullRequests => Icon::GitHub,
             ToolKind::Database => Icon::Database,
+            ToolKind::Remote => Icon::Plug,
             ToolKind::Problems => Icon::Warning,
         }
     }
@@ -114,6 +120,7 @@ pub trait ToolTab {
     fn tick(&mut self) {}
     fn show_db_section(&mut self, _section: TableSection) {}
     fn request_db_schema_action(&mut self, _action: SchemaAction) {}
+    fn request_db_table_editor(&mut self) {}
     /// 새 페이지 하나를 차지하는 카드인지. 이런 카드는 다른 카드를 열 때 교체되지 않는다.
     fn own_page(&self) -> bool {
         false
@@ -266,6 +273,19 @@ pub fn db_console_factory(db: DbManager, conn: ConnId, n: u64) -> TabFactory {
         key: format!("dbconsole:{}:{n}", conn.0),
         make: Box::new(move |_, _| Ok(Box::new(DbTabW { recovered: false, suppress_recovery: false, tab: DbTab::console(db, conn), persist: ToolP::DbConsole { conn: conn.0 } }) as Box<dyn ToolTab>)),
         reuse: None,
+    }
+}
+
+fn db_table_editor_factory(db: DbManager, conn: ConnId, schema: Option<String>, table: String) -> TabFactory {
+    let base = db_table_factory(db, conn, schema, table);
+    TabFactory {
+        key: base.key.clone(),
+        make: Box::new(move |ctx, env| {
+            let mut tab = base.make(ctx, env)?;
+            tab.request_db_table_editor();
+            Ok(tab)
+        }),
+        reuse: Some(Box::new(|tab| tab.request_db_table_editor())),
     }
 }
 
@@ -540,6 +560,7 @@ impl ToolTab for DbTabW {
     fn request_focus(&mut self) { self.tab.request_focus(); }
     fn show_db_section(&mut self, section: TableSection) { self.tab.show_table_section(section); }
     fn request_db_schema_action(&mut self, action: SchemaAction) { self.tab.request_schema_action(action); }
+    fn request_db_table_editor(&mut self) { self.tab.request_table_editor(); }
 }
 
 /// `repo` 는 이벤트를 낸 화면이 보고 있는 저장소(없으면 워크스페이스 저장소).
@@ -591,6 +612,8 @@ pub struct WorkspaceTools {
     git: Option<GitPanel>,
     hub: Option<GithubHub>,
     db_panel: Option<DbPanel>,
+    remote: kiln_remote::ui::RemoteManager,
+    remote_panel: Option<kiln_remote::ui::RemotePanel>,
     quick: QuickOpen,
     summary: Option<RepoSummary>,
     summary_task: Option<Task<Option<RepoSummary>>>,
@@ -621,6 +644,8 @@ impl WorkspaceTools {
             git: None,
             hub: None,
             db_panel: None,
+            remote: kiln_remote::ui::RemoteManager::load(),
+            remote_panel: None,
             quick: QuickOpen::new(),
             summary: None,
             summary_task: None,
@@ -803,6 +828,10 @@ impl WorkspaceTools {
                 self.console_seq += 1;
                 db_console_factory(self.db.clone(), ConnId(*conn), self.console_seq)
             }
+            ToolP::Remote { connection, path, draft, profile, pending_operation } => {
+                let profile = self.remote.get(connection).or_else(||profile.clone())?;
+                remote_factory(self.remote.clone(), profile, path.clone(), draft.clone(), false, pending_operation.is_some())
+            },
             ToolP::History => history_factory(self.root.clone()),
             ToolP::RepositoryHistory {root} => history_factory(root.clone()),
             _ => return None,
@@ -887,6 +916,14 @@ impl WorkspaceTools {
                 ev.into_iter().filter_map(|e| git_event_action(&root, repo.as_ref(), e)).collect()
             }
             ToolKind::Problems => kiln_editor::diagnostics_ui(ui, &self.lsp).into_iter().filter_map(editor_event_action).collect(),
+            ToolKind::Remote => {
+                let manager = self.remote.clone();
+                let panel = self.remote_panel.get_or_insert_with(|| kiln_remote::ui::RemotePanel::new(manager.clone()));
+                panel.ui(ui).into_iter().filter_map(|event| match event {
+                    kiln_remote::ui::RemoteEvent::Open { connection, path } => manager.get(&connection).map(|profile| Action::OpenTab(remote_factory(manager.clone(), profile, path, None, true, false))),
+                    kiln_remote::ui::RemoteEvent::Ssh { alias, config_path } => Some(Action::OpenSsh { alias, config_path }),
+                }).collect()
+            },
             ToolKind::Database => {
                 let db = self.db.clone();
                 let panel = self.db_panel.get_or_insert_with(|| DbPanel::new(db.clone()));
@@ -894,6 +931,7 @@ impl WorkspaceTools {
                 for e in panel.ui(ui) {
                     match e {
                         DbEvent::OpenTable { conn, schema, table } => acts.push(Action::OpenTab(db_table_factory(db.clone(), conn, schema, table))),
+                        DbEvent::EditTable { conn, schema, table } => acts.push(Action::OpenTab(db_table_editor_factory(db.clone(), conn, schema, table))),
                         DbEvent::OpenTableSection { conn, schema, table, section } => acts.push(Action::OpenTab(db_schema_factory(db.clone(), conn, schema, table, section, None))),
                         DbEvent::SchemaAction { conn, schema, table, action } => acts.push(Action::OpenTab(db_schema_factory(db.clone(), conn, schema, table, TableSection::Structure, Some(action)))),
                         DbEvent::OpenConsole { conn } => {
@@ -1179,4 +1217,27 @@ mod language_title_tests {
             });
         }
     }
+}
+
+fn remote_factory(manager: kiln_remote::ui::RemoteManager, profile: kiln_remote::ConnectionProfile, path: String, draft: Option<kiln_remote::ui::RemoteDraft>, connect: bool, interrupted: bool) -> TabFactory {
+    let key = format!("remote:{}",profile.id);
+    TabFactory { key:key.clone(), make: Box::new(move |ctx,_| {
+        let mut browser=kiln_remote::ui::RemoteBrowser::new(manager,profile,path);
+        if let Some(draft)=draft {browser.restore(&draft);}
+        if interrupted {browser.restore_pending_notice();}
+        if connect {browser.connect(ctx);}
+        Ok(Box::new(RemoteTab { browser,key,suppress_recovery:false,ctx:ctx.clone() }))
+    }), reuse:Some(Box::new(|tab|tab.on_focus_regained())) }
+}
+struct RemoteTab { browser:kiln_remote::ui::RemoteBrowser,key:String,suppress_recovery:bool,ctx:egui::Context }
+impl ToolTab for RemoteTab {
+    fn title(&self)->String{self.browser.title()}
+    fn key(&self)->String{self.key.clone()}
+    fn ui(&mut self,ui:&mut egui::Ui)->Vec<Action>{self.browser.ui(ui);Vec::new()}
+    fn is_dirty(&self)->bool{self.browser.is_dirty()||self.browser.pending_operation().is_some()}
+    fn persist(&self)->Option<ToolP>{Some(ToolP::Remote {connection:self.browser.connection().into(),path:self.browser.path().into(),draft:if self.suppress_recovery{None}else{self.browser.draft()},profile:Some(self.browser.profile().clone()),pending_operation:self.browser.pending_operation()})}
+    fn recovery_notice(&self)->Option<String>{if self.browser.pending_operation().is_some(){Some(kiln_common::trf!("{} — 진행 중인 원격 전송",self.browser.title()))}else{self.is_dirty().then(||kiln_common::trf!("{} — 저장하지 않은 원격 편집",self.browser.title()))}}
+    fn discard_recovery(&mut self,suppress:bool){self.suppress_recovery=suppress;}
+    fn tick(&mut self){self.browser.tick(&self.ctx);}
+    fn paint_icon(&self,ui:&egui::Ui,rect:egui::Rect)->bool{kiln_common::icons::paint(ui.painter(),rect,kiln_common::icons::Icon::Plug,kiln_common::Theme::current().text);true}
 }

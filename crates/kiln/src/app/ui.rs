@@ -547,8 +547,18 @@ impl KilnApp {
             pui.spacing_mut().item_spacing.x = 6.0;
             let create=widgets::button_with(&mut pui,Some(Icon::Plus),kiln_common::i18n::tr("새 작업"),ButtonKind::Secondary,true);
             egui::Popup::menu(&create).show(|ui| {
+                if widgets::button_with(ui,Some(Icon::Codex),"Codex",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::DirectAgent { tool: kiln_accounts::Tool::Codex, cwd: None });ui.close();}
+                if widgets::button_with(ui,Some(Icon::Claude),"Claude Code",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::DirectAgent { tool: kiln_accounts::Tool::Claude, cwd: None });ui.close();}
+                ui.separator();
                 if widgets::button_with(ui,Some(Icon::Sparkle),kiln_common::i18n::tr("에이전트 요청"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::NewAgentTask);ui.close();}
                 if widgets::button_with(ui,Some(Icon::Terminal),kiln_common::i18n::tr("새 터미널"),ButtonKind::Ghost,true).on_hover_text(self.keymap.label("new_task","⌘T")).clicked(){self.actions.push(Action::NewPage);ui.close();}
+                if widgets::button_with(ui,Some(Icon::Plug),kiln_common::i18n::tr("SSH 연결"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenSheet(tools::ToolKind::Remote));ui.close();}
+                ui.separator();
+                ui.menu_button(kiln_common::i18n::tr("폴더에서 열기"), |ui| {
+                    if widgets::button_with(ui,Some(Icon::Codex),"Codex",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Codex));ui.close();}
+                    if widgets::button_with(ui,Some(Icon::Claude),"Claude Code",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Claude));ui.close();}
+                    if widgets::button_with(ui,Some(Icon::Terminal),kiln_common::i18n::tr("터미널"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenFolder);ui.close();}
+                });
             });
             let tab_max=(lane.width()-create.rect.width()-6.0).clamp(80.0,360.0);
             let active = self.workspaces[self.active].active_page;
@@ -864,6 +874,8 @@ impl KilnApp {
                 ui.painter().text(banner.left_center()+vec2(12.0,0.0),Align2::LEFT_CENTER,kiln_common::i18n::tr("세션에 다시 연결하는 중…"),fonts::regular(12.0),t.orange);
                 area.min.y+=28.0;
             }
+            let layout_enabled=ui.memory(|m|m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces[self.active].page().zoomed.is_none();
+            self.prepare_pane_layout(ui,area,layout_enabled);
             let ws_idx = self.active;
             let (root_node, focused, zoomed) = {
                 let p = self.workspaces[ws_idx].page();
@@ -913,7 +925,8 @@ impl KilnApp {
                 ui.painter().rect_filled(*rect, CornerRadius::ZERO, t.bg);
                 let header = egui::Rect::from_min_size(rect.min, vec2(rect.width(), HEADER_H));
                 let body = egui::Rect::from_min_max(pos2(rect.left() + 1.0, header.bottom() + 1.0), pos2(rect.right() - 1.0, rect.bottom() - 5.0));
-                let hresp = ui.interact(header, ui.id().with(("hdr", *pid)), Sense::click());
+                let hresp = ui.interact(header, ui.id().with(("hdr", *pid)), Sense::click_and_drag());
+                if hresp.drag_started() && layout_enabled && !adaptive { self.start_pane_move(*pid,area); }
                 self.card_header(ui, *pid, header, &info, is_focused, multi, zoomed.is_some());
                 if hresp.clicked() && !is_focused {
                     new_focus = Some(*pid);
@@ -1000,40 +1013,9 @@ impl KilnApp {
                 self.focus_terminal = false;
             }
 
-            // 카드 사이 간격을 끌어 크기를 바꾼다.
-            let mut ratio_change = None;
-            if zoomed.is_none() && !adaptive {
-                let mut seps = Vec::new();
-                root_node.splitters_with_gap(area, 0, self.settings.card_gap, &mut seps);
-                for (path, dir, sep, parent) in seps {
-                    let resp = ui.interact(sep, ui.id().with(("sep", path)), Sense::drag());
-                    if resp.hovered() || resp.dragged() {
-                        let line = match dir {
-                            layout::Dir::Horizontal => egui::Rect::from_center_size(sep.center(), vec2(2.0, (sep.height() - 24.0).max(10.0))),
-                            layout::Dir::Vertical => egui::Rect::from_center_size(sep.center(), vec2((sep.width() - 24.0).max(10.0), 2.0)),
-                        };
-                        ui.painter().rect_filled(line, CornerRadius::same(1), t.accent_soft(170));
-                        ui.ctx().set_cursor_icon(if dir == layout::Dir::Horizontal { CursorIcon::ResizeHorizontal } else { CursorIcon::ResizeVertical });
-                    }
-                    if resp.dragged() {
-                        if let Some(p) = resp.interact_pointer_pos() {
-                            let r = match dir {
-                                layout::Dir::Horizontal => (p.x - parent.left()) / parent.width(),
-                                layout::Dir::Vertical => (p.y - parent.top()) / parent.height(),
-                            };
-                            ratio_change = Some((path, r));
-                        }
-                    }
-                    if resp.double_clicked() {
-                        ratio_change = Some((path, 0.5));
-                    }
-                }
-            }
+            self.interact_pane_layout(ui,area,layout_enabled && zoomed.is_none() && !adaptive);
             let page = self.workspaces[ws_idx].page_mut();
             page.rects = rects;
-            if let Some((path, r)) = ratio_change {
-                page.root.set_ratio(path, r);
-            }
             if let Some(f) = new_focus {
                 page.focused = f;
             }
@@ -1508,6 +1490,9 @@ impl KilnApp {
         add(Group::Commands, Icon::History, kiln_common::i18n::tr("최근 작업 전환").into(), "⌘J", Action::OpenRecent);
         add(Group::Commands, Icon::Terminal, kiln_common::i18n::tr("저장 명령 실행…").into(), "⇧⌘J", Action::OpenLaunchers);
         add(Group::Commands, Icon::Plus, kiln_common::i18n::tr("새 터미널 탭").into(), "⌘T", Action::NewPage);
+        add(Group::Commands, Icon::Codex, kiln_common::i18n::tr("Codex로 새 작업").into(), "", Action::DirectAgent {tool:kiln_accounts::Tool::Codex,cwd:None});
+        add(Group::Commands, Icon::Claude, kiln_common::i18n::tr("Claude Code로 새 작업").into(), "", Action::DirectAgent {tool:kiln_accounts::Tool::Claude,cwd:None});
+        add(Group::Commands, Icon::Plug, kiln_common::i18n::tr("SSH 연결").into(), "", Action::OpenSheet(tools::ToolKind::Remote));
         add(Group::Commands, Icon::SplitRight, kiln_common::i18n::tr("오른쪽으로 나누기").into(), "⌘D", Action::Split(layout::Dir::Horizontal));
         add(Group::Commands, Icon::SplitDown, kiln_common::i18n::tr("아래로 나누기").into(), "⇧⌘D", Action::Split(layout::Dir::Vertical));
         add(Group::Commands, Icon::History, kiln_common::i18n::tr("Git 로그 (히스토리)").into(), "⇧⌘L", Action::OpenHistory);

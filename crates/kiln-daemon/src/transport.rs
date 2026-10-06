@@ -10,6 +10,22 @@ pub struct Conn {
     pub writer: Box<dyn Write + Send>,
 }
 
+/// Close only this IPC connection, leaving the persistent PTY child intact.
+/// Framed host readers use this to unblock their decoder when dropped.
+pub type Shutdown = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+pub fn connect_with_shutdown(name: &str) -> io::Result<(Conn, Option<Shutdown>)> {
+    #[cfg(unix)]
+    {
+        let stream = std::os::unix::net::UnixStream::connect(name)?;
+        let cancel = stream.try_clone()?;
+        let shutdown: Shutdown = std::sync::Arc::new(move || { let _ = cancel.shutdown(std::net::Shutdown::Both); });
+        Ok((imp::split(stream)?, Some(shutdown)))
+    }
+    #[cfg(windows)]
+    { Ok((imp::connect(name)?, None)) }
+}
+
 #[cfg(unix)]
 mod imp {
     use super::*;

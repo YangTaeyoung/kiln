@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 license = "MIT"
 
@@ -15,6 +15,7 @@ kiln-editor = { path = "crates/kiln-editor" }
 kiln-git = { path = "crates/kiln-git" }
 kiln-db = { path = "crates/kiln-db" }
 kiln-accounts = { path = "crates/kiln-accounts" }
+kiln-remote = { path = "crates/kiln-remote" }
 
 egui = "0.36"
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "persistence", "accesskit", "x11", "wayland"] }

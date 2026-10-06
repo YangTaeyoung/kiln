@@ -8,11 +8,13 @@ pub mod claude;
 pub mod codex;
 mod limit;
 mod manager;
+mod login;
 pub mod store;
 mod ui;
 
 pub use limit::{LimitHit, detect_limit};
 pub use manager::{AccountManager, Env};
+pub use login::LoginStatus;
 pub use store::{CredentialStore, FileStore, MemoryStore, SecurityCli};
 pub use ui::{AccountsEvent, accounts_settings_ui};
 

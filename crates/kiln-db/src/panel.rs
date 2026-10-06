@@ -1,7 +1,7 @@
 //! 데이터베이스 탐색기 패널: 연결 목록, 스키마 트리, 연결 편집 대화상자.
 
 use crate::edit::TableRef;
-use crate::schema::{SchemaAction, ColumnSpec, IndexSpec};
+use crate::schema::{SchemaAction, ColumnSpec};
 use crate::TableSection;
 use crate::manager::Job;
 use crate::meta::{TableDetails, TableInfo, TableKind};
@@ -23,6 +23,7 @@ pub enum DbEvent {
         table: String,
     },
     OpenConsole { conn: ConnId },
+    EditTable { conn: ConnId, schema: Option<String>, table: String },
     OpenTableSection { conn: ConnId, schema: Option<String>, table: String, section: TableSection },
     SchemaAction { conn: ConnId, schema: Option<String>, table: String, action: SchemaAction },
 }
@@ -152,7 +153,6 @@ struct ConnDialog {
 }
 
 enum PendingAction {
-    CopyDdl(Job<DbResult<String>>),
     Dangerous {
         job: Job<DbResult<()>>,
         conn: ConnId,
@@ -161,7 +161,6 @@ enum PendingAction {
 }
 
 enum ConfirmKind {
-    Truncate(ConnId, TableRef),
     Drop(ConnId, TableRef, TableKind),
     DeleteConn(ConnId),
 }
@@ -342,7 +341,7 @@ impl DbPanel {
         }
     }
 
-    fn poll_jobs(&mut self, ctx: &egui::Context) {
+    fn poll_jobs(&mut self, _ctx: &egui::Context) {
         for (id, n) in &mut self.nodes {
             let epoch = self.manager.connection_epoch(*id);
             if n.epoch.is_some_and(|previous| previous != epoch) { n.reload(&self.manager, *id); }
@@ -366,19 +365,6 @@ impl DbPanel {
         let mut reload: Vec<(ConnId, String)> = Vec::new();
         for (i, a) in self.actions.iter_mut().enumerate() {
             match a {
-                PendingAction::CopyDdl(job) => {
-                    if let Some(r) = job.poll() {
-                        match r {
-                            Ok(ddl) => {
-                                ctx.copy_text(ddl);
-                                self.toast =
-                                    Some((kiln_common::i18n::tr("DDL을 클립보드에 복사했습니다").into(), false, Instant::now()));
-                            }
-                            Err(e) => self.toast = Some((e.to_string(), true, Instant::now())),
-                        }
-                        done.push(i);
-                    }
-                }
                 PendingAction::Dangerous { job, conn, schema } => {
                     if let Some(r) = job.poll() {
                         match r {
@@ -895,18 +881,6 @@ impl DbPanel {
         if ok {
             let m = self.manager.clone();
             match kind {
-                ConfirmKind::Truncate(id, t) => {
-                    let (id, t) = (*id, t.clone());
-                    let schema = t.schema.clone().unwrap_or_default();
-                    let job = self
-                        .manager
-                        .spawn(async move { m.truncate_table(id, &t).await });
-                    self.actions.push(PendingAction::Dangerous {
-                        job,
-                        conn: id,
-                        schema,
-                    });
-                }
                 ConfirmKind::Drop(id, t, k) => {
                     let (id, t, k) = (*id, t.clone(), *k);
                     let schema = t.schema.clone().unwrap_or_default();
@@ -1218,7 +1192,7 @@ fn table_ui(
     t: &mut TableNode,
     selected: &mut Option<NodeKey>,
     events: &mut Vec<DbEvent>,
-    actions: &mut Vec<PendingAction>,
+    _actions: &mut Vec<PendingAction>,
     confirm: &mut Option<(TypedConfirm, ConfirmKind)>,
 ) {
     let theme = Theme::current();
@@ -1275,71 +1249,11 @@ fn table_ui(
             });
             ui.close();
         }
-        for (label, section) in [("컬럼 보기", TableSection::Structure), ("인덱스 보기", TableSection::Indexes), ("DDL 보기", TableSection::Ddl)] {
-            if ui.button(kiln_common::i18n::tr(label)).clicked() {
-                events.push(DbEvent::OpenTableSection { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), section });
-                ui.close();
-            }
-        }
-        if t.info.kind == TableKind::Table {
-            for (label, action) in [
-                ("컬럼 추가…", SchemaAction::AddColumn(ColumnSpec { name: String::new(), data_type: "TEXT".into(), nullable: true, default: None })),
-                ("인덱스 추가…", SchemaAction::AddIndex(IndexSpec { name: String::new(), columns: Vec::new(), unique: false })),
-                ("테이블 이름 변경…", SchemaAction::RenameTable { name: t.info.name.clone() }),
-            ] {
-                if ui.button(kiln_common::i18n::tr(label)).clicked() {
-                    events.push(DbEvent::SchemaAction { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), action });
-                    ui.close();
-                }
-            }
-        }
-        if ui.button(kiln_common::i18n::tr("새 콘솔")).clicked() {
-            events.push(DbEvent::OpenConsole { conn: id });
+        if ui.button(kiln_common::i18n::tr(if t.info.kind == TableKind::Table { "테이블 수정…" } else { "구조 보기…" })).clicked() {
+            events.push(DbEvent::EditTable { conn: id, schema: Some(schema.into()), table: t.info.name.clone() });
             ui.close();
         }
         ui.separator();
-        if ui.button(kiln_common::i18n::tr("이름 복사")).clicked() {
-            ui.ctx().copy_text(t.info.name.clone());
-            ui.close();
-        }
-        if ui.button(kiln_common::i18n::tr("전체 이름 복사")).clicked() {
-            let d = m.driver(id).unwrap_or(Driver::Postgres);
-            ui.ctx().copy_text(tref.sql_name(d));
-            ui.close();
-        }
-        if ui.button(kiln_common::i18n::tr("DDL 복사")).clicked() {
-            let m2 = m.clone();
-            let tr = tref.clone();
-            actions.push(PendingAction::CopyDdl(
-                m.spawn(async move { m2.table_ddl(id, &tr).await }),
-            ));
-            ui.close();
-        }
-        if ui.button(kiln_common::i18n::tr("새로 고침")).clicked() {
-            t.details = load_details(m, id, tref.clone());
-            ui.close();
-        }
-        ui.separator();
-        if t.info.kind == TableKind::Table
-            && ui
-                .button(RichText::new(kiln_common::i18n::tr("모든 행 삭제…")).color(theme.orange))
-                .clicked()
-        {
-            *confirm = Some((
-                TypedConfirm {
-                    title: kiln_common::i18n::tr("모든 행 삭제").into(),
-                    message: kiln_common::trf!(
-                        "{}의 모든 행을 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
-                        t.info.name
-                    ),
-                    expected: t.info.name.clone(),
-                    input: String::new(),
-                    action_label: kiln_common::i18n::tr("모든 행 삭제").into(),
-                },
-                ConfirmKind::Truncate(id, tref.clone()),
-            ));
-            ui.close();
-        }
         if ui.button(RichText::new(if t.info.kind==TableKind::Table {kiln_common::i18n::tr("테이블 삭제…")}else{kiln_common::i18n::tr("뷰 삭제…")}).color(theme.red)).clicked() {
             if t.info.kind == TableKind::Table {
                 events.push(DbEvent::SchemaAction { conn: id, schema: Some(schema.into()), table: t.info.name.clone(), action: SchemaAction::DropTable });
@@ -1568,6 +1482,43 @@ fn driver_chips(ui: &mut Ui, selected: Driver, width: f32) -> Option<Driver> {
 mod dialog_regressions {
     use super::*;
     use egui_kittest::{Harness,kittest::Queryable};
+    #[test]
+    fn table_context_menu_exposes_three_intents_without_executing_them() {
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            struct Fixture {
+                table: TableNode,
+                selected: Option<NodeKey>,
+                events: Vec<DbEvent>,
+                actions: Vec<PendingAction>,
+                confirm: Option<(TypedConfirm, ConfirmKind)>,
+            }
+            let m = DbManager::in_memory();
+            let fixture = Fixture {
+                table: TableNode { info: TableInfo { schema: Some("main".into()), name: "menu_items".into(), kind: TableKind::Table, row_estimate: None, comment: String::new() }, open: false, details: Load::Idle, indexes_open: false, fks_open: false },
+                selected: None, events: vec![], actions: vec![], confirm: None,
+            };
+            let mut initialized = false;
+            let mut h = Harness::builder().with_size([420.0, 440.0]).wgpu().build_ui_state(|ui, f: &mut Fixture| {
+                if !initialized { fonts::install(ui.ctx()); Theme::current().apply(ui.ctx()); initialized = true; return; }
+                table_ui(ui, &m, ConnId(1), "main", &mut f.table, &mut f.selected, &mut f.events, &mut f.actions, &mut f.confirm);
+            }, fixture);
+            h.run_steps(4);
+            h.get_by_label("menu_items").click_secondary();
+            h.run_steps(3);
+            for label in ["테이블 열기", "테이블 수정…", "테이블 삭제…"] { assert!(h.query_by_label(label).is_some()); }
+            for label in ["컬럼 보기", "인덱스 보기", "DDL 보기", "컬럼 추가…", "인덱스 추가…", "테이블 이름 변경…", "이름 복사", "전체 이름 복사", "DDL 복사", "모든 행 삭제…", "새 콘솔", "새로 고침"] { assert!(h.query_by_label(label).is_none(), "unexpected table command: {label}"); }
+            h.get_by_label("테이블 수정…").click();
+            h.run_steps(3);
+            assert_eq!(h.state().events, vec![DbEvent::EditTable { conn: ConnId(1), schema: Some("main".into()), table: "menu_items".into() }]);
+            assert!(h.state().actions.is_empty() && h.state().confirm.is_none());
+            h.get_by_label("menu_items").click_secondary();
+            h.run_steps(3);
+            h.get_by_label("테이블 삭제…").click();
+            h.run_steps(3);
+            assert!(matches!(h.state().events.last(), Some(DbEvent::SchemaAction { action: SchemaAction::DropTable, .. })));
+            assert!(h.state().actions.is_empty(), "deletion only opens the reviewed confirmation form");
+        });
+    }
     fn expanded_schemas() -> Vec<SchemaNode> {
         vec![SchemaNode { name: "main".into(), open: true, tables_open: true, views_open: true,
             tables: Load::Ready(vec![TableNode {

@@ -6,6 +6,9 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | --- | --- |
 | [Getting started](getting-started.md) | Install, open a workspace, run your first task |
 | [Workspaces and agents](workspaces.md) | Parent folders, multiple repositories, split sessions |
+| [Pane layout](pane-layout.md) | Drag panes, resize local or linked boundaries, snap and cancel |
+| [Remote files and SSH](remote-files.md) | S3, FTP/SFTP, file transfers and SSH terminals |
+| [Agent accounts](accounts.md) | Browser sign-in, saved profiles and account switching |
 | [Database tools](databases.md) | Connections, SQL completion, schema editing and metadata boundaries |
 | [File editor](editor.md) | Language detection, completion and language-server setup |
 | [Git workflows](git.md) | Review changes, squash, cherry-pick, and drop commits |

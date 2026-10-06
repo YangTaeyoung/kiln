@@ -273,7 +273,16 @@ impl Daemon {
             if self.upgrading.load(Ordering::SeqCst) {
                 break;
             }
-            match reader.read_timeout(&mut buf, 100) {
+            let (sync_events, timeout_ms) = {
+                let mut emu = sess.emu.lock();
+                (emu.expire_sync(), emu.read_timeout_ms())
+            };
+            if let Some(events) = sync_events {
+                sess.generation.fetch_add(1, Ordering::SeqCst);
+                self.handle_events(&sess, events, &mut osc_events);
+                self.wake_attached(sess.id);
+            }
+            match reader.read_timeout(&mut buf, timeout_ms) {
                 Ok(ReadResult::Data(n)) => {
                     let data = &buf[..n];
                     let cwd = sess.info.lock().cwd.clone();
@@ -303,6 +312,12 @@ impl Daemon {
         self.readers_running.fetch_sub(1, Ordering::SeqCst);
         if !eof {
             return;
+        }
+        let final_events = sess.emu.lock().finish_sync();
+        if let Some(events) = final_events {
+            sess.generation.fetch_add(1, Ordering::SeqCst);
+            self.handle_events(&sess, events, &mut osc_events);
+            self.wake_attached(sess.id);
         }
         let mut code = None;
         for _ in 0..50 {

@@ -32,6 +32,11 @@ jobs:
         run: |
           cargo test --locked -p kiln --lib
           cargo test --locked -p kiln-accounts --lib
+      - name: Remote files and direct agent launches
+        run: |
+          cargo test --locked -p kiln-remote --lib --test transfers --test s3_pagination -- --test-threads=1
+          cargo test --locked -p kiln --test direct_terminal_launch -- --test-threads=1
+          cargo test --locked -p kiln --test terminal_recovery -- --test-threads=1
       - name: SQL completion and SQLite regressions
         run: |
           cargo test --locked -p kiln-db --lib
@@ -46,6 +51,7 @@ jobs:
       - name: GUI and session integration
         run: |
           cargo test --locked -p kiln --test gui
+          cargo test --locked -p kiln --test pane_layout -- --test-threads=1
           cargo test --locked -p kiln --test portable_icons
       - name: Validate release scripts
         run: |

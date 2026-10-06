@@ -36,7 +36,8 @@ libraries—and keep the whole task in view.
 - **Review without leaving the workspace.** Inspect diffs and pull requests,
   drag-select commits to squash, cherry-pick from another branch, or drop a commit.
 - **Use the tools around your terminal.** File editing and LSP, project search,
-  SQL consoles, database grids, command history, and a notification center.
+  SQL consoles, database grids, S3/FTP/SFTP files, SSH terminals, command history,
+  and a notification center. Sign in to agent accounts through your browser.
 
 ### Start in a minute
 
@@ -53,6 +54,7 @@ install and authenticate the ones you use. The app UI supports Korean, English, 
 
 [Workspaces & agents](docs/workspaces.md) · [Git workflows](docs/git.md) ·
 [File editor](docs/editor.md) · [Database tools](docs/databases.md) ·
+[Remote files & SSH](docs/remote-files.md) · [Agent accounts](docs/accounts.md) ·
 [Terminal integration](docs/terminal-integration.md) · [Architecture](docs/architecture.md)
 
 ### Build and contribute

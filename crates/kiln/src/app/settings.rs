@@ -140,7 +140,7 @@ fn accounts_page(ui: &mut egui::Ui, mgr: &kiln_accounts::AccountManager, acts: &
                 let name = mgr.active(tool).and_then(|id| mgr.profiles(tool).into_iter().find(|p| p.id == id)).map(|p| p.label).unwrap_or_default();
                 acts.push(Action::Toast(kiln_common::trf!("{} 계정을 {name}(으)로 바꿨습니다. 새로 시작하는 세션부터 적용됩니다", tool.display_name())));
             }
-            AccountsEvent::Saved { tool, .. } => acts.push(Action::Toast(kiln_common::trf!("현재 {} 로그인을 계정 목록에 저장했습니다", tool.display_name()))),
+            AccountsEvent::Saved { tool, .. } => acts.push(Action::Toast(kiln_common::trf!("{} 계정을 목록에 저장했습니다", tool.display_name()))),
         }
     }
 }

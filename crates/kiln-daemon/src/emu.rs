@@ -11,6 +11,7 @@ use kiln_proto::{Cell, Color, Cursor, CursorShape, Line, ScrollTo, flags, mode};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Instant;
 
 pub const HISTORY: usize = 10_000;
 
@@ -61,8 +62,38 @@ impl Emu {
 
     /// 바이트를 처리하고 발생한 이벤트를 돌려준다.
     pub fn advance(&mut self, bytes: &[u8]) -> Vec<Event> {
+        // A TUI may omit its ESU marker after interruption or a failed redraw.
+        // Processor buffers bytes until ESU; its owner must service the deadline.
+        self.expire_sync_at(Instant::now());
         self.parser.advance(&mut self.term, bytes);
         std::mem::take(&mut *self.proxy.0.lock())
+    }
+
+    fn expire_sync_at(&mut self, now: Instant) -> bool {
+        if self.parser.sync_timeout().sync_timeout().is_some_and(|deadline| deadline <= now) {
+            self.parser.stop_sync(&mut self.term);
+            true
+        } else { false }
+    }
+
+    /// Release an incomplete synchronized redraw even when the PTY is idle.
+    /// `Some` means the screen changed and needs publishing, including events
+    /// generated while processing the buffered bytes.
+    pub fn expire_sync(&mut self) -> Option<Vec<Event>> {
+        self.expire_sync_at(Instant::now()).then(|| std::mem::take(&mut *self.proxy.0.lock()))
+    }
+
+    /// EOF must not discard the final buffered screen.
+    pub fn finish_sync(&mut self) -> Option<Vec<Event>> {
+        self.parser.sync_timeout().sync_timeout()?;
+        self.parser.stop_sync(&mut self.term);
+        Some(std::mem::take(&mut *self.proxy.0.lock()))
+    }
+
+    pub fn read_timeout_ms(&self) -> i32 {
+        self.parser.sync_timeout().sync_timeout().map_or(100, |deadline| {
+            deadline.saturating_duration_since(Instant::now()).as_millis().clamp(1, 100) as i32
+        })
     }
 
     /// OSC overrides belong to the application and take precedence over GUI defaults.
@@ -449,6 +480,35 @@ fn convert_row(grid: &Grid<TCell>, line: GLine, cols: usize) -> Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_synchronized_redraw_expires_and_input_echo_becomes_visible() {
+        let mut e = Emu::new(40, 4);
+        e.advance(b"ready\r\n\x1b[?2026hworking");
+        e.advance("한?".as_bytes());
+        assert!(!e.text(0).contains("working"), "valid synchronized redraw remains atomic");
+        let deadline = e.parser.sync_timeout().sync_timeout().unwrap();
+        assert!(!e.expire_sync_at(deadline - std::time::Duration::from_nanos(1)));
+        assert!(e.expire_sync_at(deadline));
+        assert!(e.text(0).contains("working한?"));
+        e.advance(b"\r\nnext");
+        assert!(e.text(0).contains("next"));
+        assert!(!e.expire_sync_at(deadline));
+    }
+
+    #[test]
+    fn complete_synchronized_redraw_is_not_replayed_and_eof_flushes_partial_redraw() {
+        let mut e = Emu::new(40, 4);
+        e.advance(b"\x1b[?2026hone\x1b[?2026l");
+        assert!(e.text(0).contains("one"));
+        assert!(e.finish_sync().is_none());
+        e.advance(b"\r\n\x1b[?2026htwo\x07");
+        assert!(!e.text(0).contains("two"));
+        let events = e.finish_sync().unwrap();
+        assert!(e.text(0).contains("two"));
+        assert!(events.iter().any(|event| matches!(event, Event::Bell)));
+        assert!(e.finish_sync().is_none());
+    }
 
     #[test]
     fn renders_text_and_colors() {

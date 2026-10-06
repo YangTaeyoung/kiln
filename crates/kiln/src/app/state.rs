@@ -105,11 +105,14 @@ pub struct PaneP {
     pub cwd: Option<String>,
     #[serde(default)]
     pub tool: Option<ToolP>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<kiln_proto::SpawnSpec>,
 }
 
 /// 카드에 담긴 도구(터미널이 아닌 카드).
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum ToolP {
+    Remote { connection: String, path: String, #[serde(default)] draft: Option<kiln_remote::ui::RemoteDraft>, #[serde(default)] profile:Option<kiln_remote::ConnectionProfile>, #[serde(default)] pending_operation:Option<String> },
     Editor { path: PathBuf, #[serde(default)] language_override: Option<String> },
     DbTable { conn: u64, schema: Option<String>, table: String },
     DbConsole { conn: u64 },
@@ -168,7 +171,7 @@ impl WorkspaceP {
                         TabP::DbConsole { conn } => ToolP::DbConsole { conn },
                         TabP::Terminal { .. } => unreachable!(),
                     };
-                    PageP { manual_split:false, zoomed:None, root: Node::Leaf(id), focused: id, panes: vec![PaneP { id, session: None, cwd: None, tool: Some(tool) }], title: None,agent_request:None,agent_request_offset:0 }
+                    PageP { manual_split:false, zoomed:None, root: Node::Leaf(id), focused: id, panes: vec![PaneP { id, session: None, cwd: None, tool: Some(tool), launch: None }], title: None,agent_request:None,agent_request_offset:0 }
                 }
             };
             self.pages.push(page);

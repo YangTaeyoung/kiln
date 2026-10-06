@@ -7,7 +7,7 @@ static SEQUENCE:AtomicU64=AtomicU64::new(0);
 
 pub struct Prepared { pub command:String, pub title:String, pub request_path:PathBuf, pub request_offset:usize }
 fn quote(value:&str)->String {format!("'{}'",value.replace('\'',"'\\''"))}
-fn executable(name:&str)->Option<PathBuf>{
+pub(super) fn executable(name:&str)->Option<PathBuf>{
     let mut dirs:Vec<_>=std::env::var_os("PATH").map(|p|std::env::split_paths(&p).collect()).unwrap_or_default();
     if let Some(home)=std::env::var_os("HOME").or_else(||std::env::var_os("USERPROFILE")) {dirs.push(PathBuf::from(home).join(".local/bin"));}
     dirs.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);

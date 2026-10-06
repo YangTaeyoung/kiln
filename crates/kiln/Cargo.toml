@@ -21,6 +21,7 @@ kiln-editor.workspace = true
 kiln-git.workspace = true
 kiln-db.workspace = true
 kiln-accounts.workspace = true
+kiln-remote.workspace = true
 egui.workspace = true
 eframe.workspace = true
 serde.workspace = true
@@ -52,8 +53,8 @@ egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5.2"
-objc2-app-kit = { version = "0.2.2", default-features = false, features = ["NSApplication", "NSWindow", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSRunningApplication", "NSImage", "NSButton", "NSControl", "NSResponder", "NSView", "NSCell", "NSAlert", "NSEvent"] }
-objc2-foundation = { version = "0.2.2", default-features = false, features = ["NSArray", "NSThread", "NSTimer", "NSDate", "NSString"] }
+objc2-app-kit = { version = "0.2.2", default-features = false, features = ["NSApplication", "NSWindow", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSRunningApplication", "NSImage", "NSButton", "NSControl", "NSResponder", "NSView", "NSCell", "NSAlert", "NSEvent", "NSAttributedString", "NSFont", "NSColor"] }
+objc2-foundation = { version = "0.2.2", default-features = false, features = ["NSArray", "NSThread", "NSTimer", "NSDate", "NSString", "NSAttributedString", "NSRange"] }
 
 [[test]]
 name = "native_ime"

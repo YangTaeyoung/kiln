@@ -137,6 +137,10 @@ impl DbTab {
     pub fn request_schema_action(&mut self, action: crate::schema::SchemaAction) {
         if let Kind::Table(t) = &mut self.kind { t.request_schema_action(action); }
     }
+    /// Open the structure editor without changing the data tab's selected section.
+    pub fn request_table_editor(&mut self) {
+        if let Kind::Table(t) = &mut self.kind { t.request_table_editor(); }
+    }
     pub fn request_focus(&mut self) {
         if let Kind::Console(c) = &mut self.kind { c.request_focus(); }
     }

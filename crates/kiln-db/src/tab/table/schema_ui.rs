@@ -119,6 +119,11 @@ impl TableView {
     pub fn schema_has_draft(&self) -> bool {
         self.schema_editor.is_some()
     }
+    pub fn request_table_editor(&mut self) {
+        if !self.dropped {
+            self.table_editor_open = true;
+        }
+    }
     pub fn show_section(&mut self, section: TableSection, m: &DbManager) {
         self.sub = section;
         if section == TableSection::Ddl && self.ddl.is_none() && self.ddl_job.is_none() {
@@ -244,17 +249,11 @@ impl TableView {
                         ui.push_id(&c.name, |ui| {
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
-                                left_label(
-                                    ui,
-                                    egui::vec2((ui.available_width() - 80.0).max(60.0), 22.0),
-                                    RichText::new(&c.name).font(fonts::mono(13.0)),
-                                )
-                                .on_hover_text(&c.name);
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         ui.add_enabled_ui(allowed, |ui| {
-                                            ui.menu_button(tr("수정"), |ui| {
+                                            ui.menu_button(tr("컬럼 수정…"), |ui| {
                                                 if ui.button(tr("타입 · 기본값 수정…")).clicked()
                                                 {
                                                     action = Some(SchemaAction::AlterColumn {
@@ -289,6 +288,13 @@ impl TableView {
                                                 }
                                             });
                                         });
+                                        // Lay out the action first at its actual localized width.
+                                        left_label(
+                                            ui,
+                                            egui::vec2(ui.available_width().max(0.0), 22.0),
+                                            RichText::new(&c.name).font(fonts::mono(13.0)),
+                                        )
+                                        .on_hover_text(&c.name);
                                     },
                                 );
                             });
@@ -400,6 +406,10 @@ impl TableView {
         }
     }
     pub(super) fn schema_dialog(&mut self, ui: &mut Ui, m: &DbManager) {
+        if self.table_editor_open && self.schema_editor.is_none() {
+            self.table_editor_dialog(ui, m);
+            return;
+        }
         let allowed = self.schema_allowed();
         let Some(mut editor) = self.schema_editor.take() else {
             return;
@@ -539,6 +549,54 @@ impl TableView {
         if !close {
             self.schema_editor = Some(editor);
         }
+    }
+
+    /// One modal owns both inspection and the existing reviewed change forms.
+    /// Choosing an operation replaces its body on the next frame; no modal is stacked.
+    fn table_editor_dialog(&mut self, ui: &mut Ui, m: &DbManager) {
+        let viewport = ui.ctx().content_rect();
+        let mut close = false;
+        let modal = egui::Modal::new(self.grid.id.with("schema-edit")).show(ui.ctx(), |ui| {
+            ui.style_mut().spacing.scroll.floating = false;
+            ui.set_width((viewport.width() - 48.0).clamp(180.0, 720.0));
+            ui.spacing_mut().item_spacing.y = 8.0;
+            ui.strong(tr(if self.is_view { "구조 보기…" } else { "테이블 수정" }));
+            let connection = m.get(self.conn).map(|c| c.display_name())
+                .unwrap_or_else(|| self.driver.label().to_string());
+            let target = format!("{connection} · {}", self.t.sql_name(self.driver));
+            ui.add(egui::Label::new(RichText::new(&target).font(fonts::mono(12.0)).color(Theme::current().text_dim)).truncate())
+                .on_hover_text(&target);
+            ui.horizontal_wrapped(|ui| {
+                crate::ui::segmented(ui, &mut self.table_editor_section, &[
+                    (TableSection::Structure, tr("컬럼")),
+                    (TableSection::Indexes, tr("인덱스")),
+                    (TableSection::Ddl, "DDL"),
+                ]);
+                if ui.add_enabled(self.schema_allowed(), egui::Button::new(tr("테이블 이름 변경…"))).clicked() {
+                    self.request_schema_action(SchemaAction::RenameTable { name: self.t.table.clone() });
+                }
+            });
+            // Give existing inspectors a bounded child rectangle, reserving the footer.
+            let height = (viewport.height() - 210.0).clamp(65.0, 480.0);
+            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_min_height(height);
+                match self.table_editor_section {
+                    TableSection::Structure => self.structure_ui(ui, m),
+                    TableSection::Indexes => self.indexes_ui(ui, m),
+                    TableSection::Ddl => {
+                        if self.ddl.is_none() && self.ddl_job.is_none() {
+                            let (id, t, m2) = (self.conn, self.t.clone(), m.clone());
+                            self.ddl_job = Some(m.spawn(async move { m2.table_ddl(id, &t).await }));
+                        }
+                        self.ddl_ui(ui, m);
+                    }
+                    TableSection::Data => unreachable!("table editor has no data section"),
+                }
+            });
+            ui.separator();
+            if ui.button(tr("닫기")).clicked() { close = true; }
+        });
+        if close || modal.should_close() { self.table_editor_open = false; }
     }
 }
 fn action_title(action: &SchemaAction) -> &str {
@@ -910,5 +968,73 @@ mod tests {
             }
         }
         Theme::set_current(previous);
+    }
+
+    #[test]
+    fn table_editor_navigation_and_forms_stay_bounded_in_all_locales() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        use kiln_common::i18n::{Language, with_language};
+        struct RestoreTheme(String);
+        impl Drop for RestoreTheme { fn drop(&mut self) { Theme::set_current(&self.0); } }
+        let _restore = RestoreTheme(Theme::current().name.to_string());
+        for theme in ["kiln-dark", "kiln-light"] {
+            Theme::set_current(theme);
+            for language in Language::ALL {
+                with_language(language, || {
+                    let m = DbManager::in_memory();
+                    let mut table = TableView::new(&m, ConnId(1), None, "customer_delivery_addresses_with_extended_metadata".into());
+                    table.kind_job = None;
+                    table.load_job = None;
+                    table.details_job = None;
+                    table.count_job = None;
+                    table.details = Some(TableDetails {
+                        columns: vec![crate::ColumnDef { name: "delivery_instructions_long_column_name".into(), data_type: "VARCHAR(255)".into(), cast_type: "varchar".into(), nullable: false, default: Some("'Leave the package at the reception desk'".into()), pk_ordinal: 0, auto_increment: false, class: TypeClass::Text }],
+                        indexes: vec![crate::IndexInfo { name: "idx_customer_delivery_instructions_long_index_name".into(), columns: vec!["customer_id ASC".into(), "created_at DESC".into()], unique: true, primary: false, definition: "CREATE UNIQUE INDEX idx_customer_delivery_instructions ON customer_delivery_addresses (customer_id, created_at DESC)".into(), method: "btree".into(), predicate: None, included_columns: vec![], constraint: false, valid: true }],
+                        foreign_keys: vec![],
+                    });
+                    table.ddl = Some(Ok("CREATE TABLE customer_delivery_addresses_with_extended_metadata (delivery_instructions_long_column_name VARCHAR(255) NOT NULL DEFAULT 'Leave the package at the reception desk');".into()));
+                    table.request_table_editor();
+                    let mut initialized = false;
+                    let mut h = Harness::builder().with_size([420.0 / 1.3, 600.0 / 1.3]).with_pixels_per_point(1.3).wgpu().build_ui_state(|ui, table: &mut TableView| {
+                        if !initialized { fonts::install(ui.ctx()); Theme::current().apply(ui.ctx()); initialized = true; return; }
+                        table.ui(ui, &m);
+                    }, table);
+                    h.run_steps(5);
+                    for section in ["컬럼", "인덱스", "DDL"] {
+                        let label = if section == "DDL" { "DDL" } else { tr(section) };
+                        h.get_by_role_and_label(egui::accesskit::Role::Button, label).click();
+                        h.run_steps(4);
+                        for key in ["닫기", "테이블 이름 변경…"] {
+                            assert!(h.ctx.content_rect().contains_rect(h.get_by_label(tr(key)).rect()), "{theme} {} {section}: {key}", language.code());
+                        }
+                        if section != "DDL" {
+                            let add = if section == "컬럼" { "컬럼 추가…" } else { "인덱스 추가…" };
+                            assert!(h.ctx.content_rect().contains_rect(h.get_by_label(tr(add)).rect()));
+                        }
+                        if section == "컬럼" {
+                            assert!(h.ctx.content_rect().contains_rect(h.get_by_label(tr("컬럼 수정…")).rect()));
+                            assert!(h.query_by_label(tr("수정")).is_none(), "a column action must not use a file-status translation");
+                        }
+                        h.render().unwrap().save(format!("/tmp/kiln-table-editor-{}-{theme}-{section}-420.png", language.code())).unwrap();
+                    }
+                    h.get_by_role_and_label(egui::accesskit::Role::Button, tr("컬럼")).click();
+                    h.run_steps(3);
+                    h.get_by_label(tr("컬럼 추가…")).click();
+                    h.run_steps(4);
+                    for key in ["취소", "SQL 미리보기", "DB에 적용"] {
+                        assert!(h.ctx.content_rect().contains_rect(h.get_by_label(tr(key)).rect()));
+                    }
+                    h.get_by_label(tr("취소")).click();
+                    h.run_steps(4);
+                    assert!(h.state().table_editor_open);
+                    assert!(h.state().schema_editor.is_none());
+                    assert_eq!(h.state().sub, TableSection::Data);
+                    h.get_by_label(tr("닫기")).click();
+                    h.run_steps(3);
+                    assert!(!h.state().table_editor_open);
+                    assert_eq!(h.state().sub, TableSection::Data);
+                });
+            }
+        }
     }
 }
