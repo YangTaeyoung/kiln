@@ -1,5 +1,8 @@
 use super::{icon, protocol, root_path};
-use crate::{ConnectionProfile, RemoteEndpoint, Secrets};
+use crate::{
+    ConnectionProfile, RemoteEndpoint, Secrets,
+    aws_profiles::{self, Authentication, AwsProfile},
+};
 use egui::{RichText, Ui};
 use kiln_accounts::CredentialStore;
 use kiln_common::{Task, Theme, i18n::tr, icons::Icon};
@@ -148,6 +151,17 @@ struct Form {
     session_token: String,
     config_path: Option<PathBuf>,
     clear_secrets: bool,
+    aws_mode: usize,
+    aws_profile: String,
+    aws_profiles: Vec<AwsProfile>,
+    aws_scan: Option<Task<Result<(Vec<AwsProfile>, bool, bool), String>>>,
+    aws_scanned: bool,
+    aws_cli_available: bool,
+    aws_error: Option<String>,
+    auth_touched: bool,
+    region_touched: bool,
+    legacy_auth: bool,
+
     error: Option<String>,
 }
 impl Form {
@@ -160,6 +174,46 @@ impl Form {
             ..Default::default()
         }
     }
+    fn apply_scan(&mut self, profiles: Vec<AwsProfile>, cli: bool, has_saved: bool) {
+        self.aws_profiles = profiles;
+        self.aws_cli_available = cli;
+        if self.auth_touched {
+            return;
+        }
+        if !self.id.is_empty() {
+            if self.legacy_auth {
+                self.aws_mode = if has_saved { 2 } else { 1 };
+            }
+            return;
+        }
+        if self.aws_profile.is_empty() {
+            if let Some(profile) = self
+                .aws_profiles
+                .iter()
+                .find(|p| {
+                    p.name == "default"
+                        && (p.authentication == Authentication::Static
+                            || (p.authentication == Authentication::External && cli))
+                })
+                .or_else(|| {
+                    self.aws_profiles.iter().find(|p| {
+                        p.authentication == Authentication::Static
+                            || (p.authentication == Authentication::External && cli)
+                    })
+                })
+            {
+                self.aws_mode = 0;
+                self.aws_profile = profile.name.clone();
+                if !self.region_touched
+                    && let Some(region) = &profile.region
+                {
+                    self.region = region.clone();
+                }
+            } else {
+                self.aws_mode = 1;
+            }
+        }
+    }
     fn profile(&self) -> Result<ConnectionProfile, String> {
         let name = self.name.trim();
         if name.is_empty() {
@@ -167,6 +221,24 @@ impl Form {
         }
         let endpoint = match self.kind {
             0 => {
+                if self.aws_mode == 0 && self.aws_profile.is_empty() {
+                    return Err(tr("AWS 프로필을 선택하세요").into());
+                }
+                if self.aws_mode == 0 {
+                    let selected = self
+                        .aws_profiles
+                        .iter()
+                        .find(|p| p.name == self.aws_profile)
+                        .ok_or_else(|| tr("선택한 AWS 프로필을 찾을 수 없습니다").to_owned())?;
+                    if selected.authentication == Authentication::Missing {
+                        return Err(tr("이 AWS 프로필에 인증 정보가 없습니다").into());
+                    }
+                    if selected.authentication == Authentication::External
+                        && !self.aws_cli_available
+                    {
+                        return Err(tr("이 AWS 프로필은 AWS CLI v2가 필요합니다").into());
+                    }
+                }
                 if self.bucket.trim().is_empty() {
                     return Err(tr("버킷 이름을 입력하세요").into());
                 }
@@ -177,6 +249,16 @@ impl Form {
                         .then(|| self.endpoint.trim().into()),
                     path_style: self.path_style,
                     prefix: self.root.trim_start_matches('/').into(),
+                    aws_profile: (self.aws_mode == 0).then(|| self.aws_profile.clone()),
+                    aws_auth: if self.aws_mode == 0 {
+                        None
+                    } else {
+                        Some(if self.aws_mode == 1 {
+                            crate::S3Authentication::Default
+                        } else {
+                            crate::S3Authentication::Manual
+                        })
+                    },
                 }
             }
             1 => {
@@ -236,12 +318,24 @@ impl Form {
                 endpoint,
                 path_style,
                 prefix,
+                aws_profile,
+                aws_auth,
             } => {
                 f.bucket = bucket.clone();
                 f.region = region.clone();
                 f.endpoint = endpoint.clone().unwrap_or_default();
                 f.path_style = *path_style;
-                f.root = prefix.clone()
+                f.root = prefix.clone();
+                f.aws_profile = aws_profile.clone().unwrap_or_default();
+                f.aws_mode = if aws_profile.is_some() {
+                    0
+                } else if *aws_auth == Some(crate::S3Authentication::Default) {
+                    1
+                } else {
+                    2
+                };
+                f.legacy_auth = aws_profile.is_none() && aws_auth.is_none();
+                f.region_touched = true;
             }
             RemoteEndpoint::Ftp {
                 host,
@@ -319,7 +413,7 @@ impl RemotePanel {
             }
         }
         ui.horizontal(|ui| {
-            ui.strong(tr("연결"));
+            ui.strong(tr("원격 연결"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon(ui, Icon::Plus, tr("연결 추가")) {
                     self.form = Some(Form::new())
@@ -388,7 +482,12 @@ impl RemotePanel {
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
                                         ui.set_min_width((ui.available_width()).max(50.0));
-                                        super::file_row(ui, &entry, false)
+                                        super::row_with_icon(
+                                            ui,
+                                            &entry,
+                                            false,
+                                            super::provider_icon(&p),
+                                        )
                                     },
                                 )
                                 .inner;
@@ -484,93 +583,166 @@ impl RemotePanel {
     }
     fn form_ui(&mut self, ctx: &egui::Context) {
         let Some(f) = &mut self.form else { return };
+        if !f.aws_scanned {
+            f.aws_scanned = true;
+            if cfg!(test) {
+                if f.aws_profiles.is_empty() && f.aws_profile.is_empty() {
+                    f.aws_mode = 1;
+                }
+            } else {
+                let files = aws_profiles::AwsFiles::current();
+                let store = self.manager.store();
+                let id = f.id.clone();
+                f.aws_scan = Some(Task::spawn(ctx, move || {
+                    let profiles = aws_profiles::discover(&files).map_err(|e| e.to_string())?;
+                    let has_saved = !id.is_empty()
+                        && crate::load_secrets(store.as_ref(), &id)
+                            .map_err(|e| e.to_string())?
+                            .access_key
+                            .is_some();
+                    Ok((profiles, aws_profiles::cli_path().is_some(), has_saved))
+                }));
+            }
+        }
+        if let Some(result) = f.aws_scan.as_mut().and_then(Task::take) {
+            f.aws_scan = None;
+            match result {
+                Ok((profiles, cli, has_saved)) => {
+                    f.apply_scan(profiles, cli, has_saved);
+                }
+                Err(error) => f.aws_error = Some(error),
+            }
+        }
+        if f.aws_scan.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(40));
+        }
         let busy = self.saving.is_some();
         let mut cancel = false;
         let mut save = false;
         egui::Modal::new(egui::Id::new("remote-connect-form")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 60.0).clamp(240.0, 450.0));
-            ui.heading(tr("원격 연결"));
+            ui.heading(if f.id.is_empty() { tr("연결 추가") } else { tr("연결 편집") });
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.add_enabled_ui(!busy, |ui| {
+                    if kiln_common::widgets::segmented_with_icons(ui, &mut f.kind, &[(0, Icon::S3, "S3"), (1, Icon::Server, "FTP"), (2, Icon::Terminal, "SFTP")]) {
+                        f.root = String::new();
+                    }
+                });
+            });
+            ui.add_space(10.0);
             egui::ScrollArea::vertical()
-                .max_height((ctx.content_rect().height() - 200.0).max(130.0))
+                .max_height((ctx.content_rect().height() - 205.0).max(120.0))
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
                     ui.add_enabled_ui(!busy, |ui| {
                         field(ui, tr("연결 이름"), &mut f.name, false);
-                        ui.horizontal_wrapped(|ui| {
-                            for (kind, label) in [(0, "S3"), (1, "FTP / FTPS"), (2, "SFTP / SSH")] {
-                                if ui.selectable_label(f.kind == kind, label).clicked() {
-                                    f.kind = kind;
-                                    f.root = if kind == 0 { String::new() } else { "/".into() };
-                                }
-                            }
-                        });
+                        ui.add_space(8.0);
                         match f.kind {
                             0 => {
                                 field(ui, tr("버킷"), &mut f.bucket, false);
-                                field(ui, tr("리전"), &mut f.region, false);
-                                field(ui, tr("시작 경로"), &mut f.root, false);
-                                field(ui, "Access Key ID", &mut f.access_key, false);
-                                field(ui, "Secret Access Key", &mut f.secret_key, true);
-                                egui::CollapsingHeader::new(tr("고급 연결 설정"))
-                                    .id_salt("remote-s3-advanced")
-                                    .default_open(!f.endpoint.is_empty() || f.path_style)
-                                    .show(ui, |ui| {
-                                        field(ui, tr("엔드포인트 (선택)"), &mut f.endpoint, false);
-                                        field(ui, "Session Token", &mut f.session_token, true);
-                                        ui.checkbox(&mut f.path_style, tr("경로 방식 주소 사용"));
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(tr("리전")).small().color(Theme::current().text_dim));
+                                    f.region_touched |= ui.add(egui::TextEdit::singleline(&mut f.region).desired_width((ui.available_width()).min(210.0))).changed();
+                                });
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(tr("인증 방식")).color(Theme::current().text_dim).small());
+                                egui::ComboBox::from_id_salt("remote-auth-mode")
+                                    .selected_text(tr(["저장된 AWS 프로필", "기본 AWS 인증", "직접 키 입력"][f.aws_mode]))
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        for (mode, label) in [(0, "저장된 AWS 프로필"), (1, "기본 AWS 인증"), (2, "직접 키 입력")] {
+                                            if ui.selectable_value(&mut f.aws_mode, mode, tr(label)).changed() { f.auth_touched = true; f.error = None; }
+                                        }
                                     });
-                                ui.label(
-                                    RichText::new(tr(
-                                        "키를 비워 두면 기본 AWS 자격증명을 사용합니다",
-                                    ))
-                                    .small(),
-                                );
+                                if f.aws_mode == 1 {
+                                    ui.response().on_hover_text(tr("환경 변수와 기본 AWS 설정의 인증을 사용합니다"));
+                                }
+                                ui.add_space(4.0);
+                                match f.aws_mode {
+                                    0 => {
+                                        if f.aws_scan.is_some() {
+                                            ui.horizontal(|ui| { ui.spinner(); ui.label(tr("AWS 프로필 읽는 중…")); });
+                                        } else {
+                                            let selected = if f.aws_profile.is_empty() { tr("AWS 프로필을 선택하세요").to_owned() } else { f.aws_profile.clone() };
+                                            let mut picked = None;
+                                            egui::ComboBox::from_id_salt("remote-aws-profile").selected_text(selected).width(ui.available_width()).show_ui(ui, |ui| {
+                                                ui.set_max_width((ui.ctx().content_rect().width()-56.0).min(380.0));
+                                                for profile in &f.aws_profiles {
+                                                    let usable = profile.authentication == Authentication::Static || (profile.authentication == Authentication::External && f.aws_cli_available);
+                                                    let reason = if profile.authentication == Authentication::Missing { tr("이 AWS 프로필에 인증 정보가 없습니다") } else { tr("이 AWS 프로필은 AWS CLI v2가 필요합니다") };
+                                                    let choice = ui.add_enabled(usable, egui::Button::selectable(f.aws_profile == profile.name, &profile.name).truncate()).on_hover_text(&profile.name).on_disabled_hover_text(reason);
+                                                    if choice.clicked() { picked = Some(profile.clone()); }
+                                                }
+                                            });
+                                            if let Some(profile) = picked { f.aws_profile = profile.name; if !f.region_touched && let Some(region) = profile.region { f.region = region; } }
+                                            if f.aws_profiles.is_empty() { ui.label(RichText::new(tr("저장된 AWS 프로필이 없습니다")).small().color(Theme::current().text_dim)); }
+                                            if let Some(profile) = f.aws_profiles.iter().find(|p| p.name == f.aws_profile) {
+                                                let message = match profile.authentication {
+                                                    Authentication::Missing => Some(tr("이 AWS 프로필에 인증 정보가 없습니다")),
+                                                    Authentication::External if !f.aws_cli_available => Some(tr("이 AWS 프로필은 AWS CLI v2가 필요합니다")),
+                                                    _ => None,
+                                                };
+                                                if let Some(message) = message { ui.colored_label(Theme::current().yellow, message); }
+                                            }
+                                        }
+                                    }
+                                    1 => {}
+                                    _ => {
+                                        field(ui, "Access Key ID", &mut f.access_key, false);
+                                        field(ui, "Secret Access Key", &mut f.secret_key, true);
+                                        let token = egui::CollapsingHeader::new(tr("임시 세션 토큰")).id_salt("remote-session-token").show(ui, |ui| { field(ui, "Session Token", &mut f.session_token, true) });
+                                        if token.header_response.clicked() && let Some(response) = token.body_returned { response.scroll_to_me(Some(egui::Align::Max)); }
+                                        if !f.id.is_empty() {
+                                            ui.label(RichText::new(tr("비밀번호와 키를 비우면 저장된 값을 유지합니다")).small().color(Theme::current().text_dim));
+                                        }
+                                    }
+                                }
+                                if let Some(error) = &f.aws_error { ui.colored_label(Theme::current().red, error); }
+                                ui.add_space(8.0);
+                                let advanced = egui::CollapsingHeader::new(tr("고급 연결 설정")).id_salt("remote-s3-advanced").show(ui, |ui| {
+                                    field(ui, tr("시작 경로"), &mut f.root, false);
+                                    field(ui, tr("엔드포인트 (선택)"), &mut f.endpoint, false);
+                                    ui.checkbox(&mut f.path_style, tr("경로 방식 주소 사용"));
+                                });
+                                if advanced.header_response.clicked() && let Some(body) = advanced.body_response { ui.scroll_to_rect(body.rect,Some(egui::Align::Max)); }
                             }
                             1 => {
                                 field(ui, tr("호스트"), &mut f.host, false);
-                                field(ui, tr("포트"), &mut f.port, false);
                                 field(ui, tr("사용자 이름"), &mut f.user, false);
                                 field(ui, tr("비밀번호"), &mut f.password, true);
-                                field(ui, tr("시작 경로"), &mut f.root, false);
-                                ui.checkbox(&mut f.tls, tr("TLS로 연결 (FTPS)"));
+                                ui.add_space(8.0);
+                                egui::CollapsingHeader::new(tr("고급 연결 설정")).id_salt("remote-ftp-advanced").show(ui, |ui| {
+                                    field(ui, tr("포트"), &mut f.port, false);
+                                    field(ui, tr("시작 경로"), &mut f.root, false);
+                                    ui.checkbox(&mut f.tls, tr("TLS로 연결 (FTPS)"));
+                                });
+                                if !f.id.is_empty() { ui.checkbox(&mut f.clear_secrets, tr("저장된 자격증명 제거")); }
                             }
                             _ => {
                                 field(ui, tr("SSH 호스트"), &mut f.alias, false);
-                                field(ui, tr("시작 경로"), &mut f.root, false);
-                                ui.label(
-                                    RichText::new(tr("SSH Config와 SSH Agent의 인증을 사용합니다"))
-                                        .small(),
-                                );
+                                ui.label(RichText::new(tr("SSH Config와 SSH Agent의 인증을 사용합니다")).small().color(Theme::current().text_dim));
+                                egui::CollapsingHeader::new(tr("고급 연결 설정")).id_salt("remote-ssh-advanced").show(ui, |ui| { field(ui, tr("시작 경로"), &mut f.root, false); });
                             }
-                        }
-                        if !f.id.is_empty() {
-                            ui.checkbox(&mut f.clear_secrets, tr("저장된 자격증명 제거"));
-                            ui.label(
-                                RichText::new(tr("비밀번호와 키를 비우면 저장된 값을 유지합니다"))
-                                    .small(),
-                            );
                         }
                     });
                 });
             if let Some(e) = &f.error {
-                ui.colored_label(Theme::current().red, e);
+                egui::ScrollArea::vertical().id_salt("remote-form-error").max_height(52.0).show(ui, |ui| { ui.colored_label(Theme::current().red, e); });
             }
             ui.separator();
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(!busy, egui::Button::new(tr("취소")))
-                    .clicked()
-                {
-                    cancel = true
-                }
-                if ui
-                    .add_enabled(!busy, egui::Button::new(tr("연결 저장")))
-                    .clicked()
-                {
-                    save = true
-                }
-                if busy {
-                    ui.spinner();
-                }
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(!busy, |ui| {
+                    if kiln_common::widgets::button(ui, tr("취소"), kiln_common::widgets::ButtonKind::Ghost).clicked() { cancel = true; }
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_enabled_ui(!busy && f.aws_scan.is_none(), |ui| {
+                        if kiln_common::widgets::button(ui, tr("연결 저장"), kiln_common::widgets::ButtonKind::Primary).clicked() { save = true; }
+                    });
+                    if busy { ui.spinner(); }
+                });
             });
         });
         if save {
@@ -585,7 +757,14 @@ impl RemotePanel {
                         session_token: (!f.session_token.is_empty())
                             .then(|| f.session_token.clone()),
                     };
-                    let clear = f.clear_secrets;
+                    let profile_auth = f.kind == 0 && f.aws_mode != 2;
+                    let manual = f.kind == 0 && f.aws_mode == 2;
+                    let clear = f.clear_secrets || profile_auth;
+                    let new = if profile_auth {
+                        Secrets::default()
+                    } else {
+                        new
+                    };
                     self.saving = Some(Task::spawn(ctx, move || {
                         let previous = mgr.get(&profile.id);
                         let same_kind = previous.as_ref().is_some_and(|p| {
@@ -598,10 +777,13 @@ impl RemotePanel {
                             crate::load_secrets(mgr.store().as_ref(), &profile.id)
                                 .map_err(|e| e.to_string())?
                         };
+                        if manual && new.access_key.is_some() != new.secret_key.is_some() {
+                            return Err(
+                                tr("Access Key ID 및 Secret Access Key를 함께 입력하세요").into()
+                            );
+                        }
                         let merged = merge_secrets(new, old);
-                        if matches!(profile.endpoint, RemoteEndpoint::S3 { .. })
-                            && merged.access_key.is_some() != merged.secret_key.is_some()
-                        {
+                        if manual && (merged.access_key.is_none() || merged.secret_key.is_none()) {
                             return Err(
                                 tr("Access Key ID 및 Secret Access Key를 함께 입력하세요").into()
                             );
@@ -631,20 +813,256 @@ fn merge_secrets(new: Secrets, old: Secrets) -> Secrets {
         }),
     }
 }
-fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) {
-    ui.label(label);
+fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) -> egui::Response {
+    ui.label(
+        RichText::new(label)
+            .small()
+            .color(Theme::current().text_dim),
+    );
     ui.add(
         egui::TextEdit::singleline(value)
             .password(password)
-            .desired_width(f32::INFINITY)
-            .hint_text(label),
-    );
+            .desired_width(f32::INFINITY),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use egui_kittest::{Harness, kittest::Queryable};
+    pub(super) fn aws_fixture() -> Vec<AwsProfile> {
+        vec![
+            AwsProfile {
+                name: "development".into(),
+                region: Some("ap-northeast-2".into()),
+                authentication: Authentication::Static,
+            },
+            AwsProfile {
+                name: "production".into(),
+                region: Some("eu-west-1".into()),
+                authentication: Authentication::External,
+            },
+        ]
+    }
+    #[test]
+    fn scan_recommendation_preserves_auth_choices_and_edited_regions() {
+        let mut fresh = Form::new();
+        fresh.apply_scan(aws_fixture(), true, false);
+        assert_eq!(fresh.aws_mode, 0);
+        assert_eq!(fresh.aws_profile, "development");
+        assert_eq!(fresh.region, "ap-northeast-2");
+        let mut edited = Form::new();
+        edited.region = "us-west-2".into();
+        edited.region_touched = true;
+        edited.apply_scan(aws_fixture(), true, false);
+        assert_eq!(edited.region, "us-west-2");
+        let mut existing = Form::from_profile(&ConnectionProfile {
+            id: "existing".into(),
+            name: "Default".into(),
+            endpoint: RemoteEndpoint::S3 {
+                bucket: "fixture".into(),
+                region: "eu-central-1".into(),
+                endpoint: None,
+                path_style: false,
+                prefix: String::new(),
+                aws_profile: None,
+                aws_auth: Some(crate::S3Authentication::Default),
+            },
+        });
+        existing.apply_scan(aws_fixture(), true, false);
+        assert_eq!(existing.aws_mode, 1);
+        assert_eq!(existing.region, "eu-central-1");
+        assert!(existing.aws_profile.is_empty());
+        let mut manual = Form::new();
+        manual.aws_mode = 2;
+        manual.auth_touched = true;
+        manual.apply_scan(aws_fixture(), true, false);
+        assert_eq!(manual.aws_mode, 2);
+        let mut missing = Form::new();
+        missing.name = "Missing".into();
+        missing.bucket = "fixture".into();
+        missing.aws_profile = "deleted".into();
+        missing.apply_scan(aws_fixture(), true, false);
+        assert!(missing.profile().is_err());
+    }
+    #[test]
+    fn named_profile_and_manual_auth_have_distinct_actual_ui_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = RemoteManager::with_store(
+            dir.path().join("connections.json"),
+            Arc::new(kiln_accounts::MemoryStore::new()),
+        );
+        let mut panel = RemotePanel::new(manager);
+        let mut form = Form::new();
+        form.name = "Fixture".into();
+        form.bucket = "fixture".into();
+        form.aws_scanned = true;
+        form.apply_scan(aws_fixture(), true, false);
+        panel.form = Some(form);
+        let mut h = Harness::builder().with_size([420.0, 700.0]).build_ui_state(
+            |ui, p: &mut RemotePanel| {
+                if super::super::test_fonts(ui.ctx()) {
+                    p.ui(ui);
+                }
+            },
+            panel,
+        );
+        h.run();
+        assert!(h.query_by_value("development").is_some());
+        assert!(h.query_by_label("Access Key ID").is_none());
+        h.state_mut().form.as_mut().unwrap().region = "us-west-2".into();
+        h.state_mut().form.as_mut().unwrap().region_touched = true;
+        h.get_by_value("development").click();
+        h.run();
+        h.get_by_label("production").click();
+        h.run();
+        assert_eq!(h.state().form.as_ref().unwrap().aws_profile, "production");
+        assert_eq!(h.state().form.as_ref().unwrap().region, "us-west-2");
+        h.get_by_label(tr("연결 저장")).click();
+        for _ in 0..200 {
+            h.step();
+            if h.state().form.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(h.state().form.is_none());
+        let profile = h.state().manager.profiles()[0].clone();
+        assert!(
+            matches!(&profile.endpoint, RemoteEndpoint::S3 {aws_profile:Some(p),region,..} if p == "production" && region == "us-west-2")
+        );
+        let mut form = Form::from_profile(&profile);
+        form.aws_scanned = true;
+        form.apply_scan(aws_fixture(), true, false);
+        h.state_mut().form = Some(form);
+        h.run();
+        assert!(h.query_by_value("production").is_some());
+        h.get_by_label(tr("취소")).click();
+        h.run();
+        assert!(h.state().form.is_none());
+        assert_eq!(h.state().manager.get(&profile.id).unwrap(), profile);
+        let mut form = Form::from_profile(&profile);
+        form.aws_scanned = true;
+        form.apply_scan(aws_fixture(), true, false);
+        h.state_mut().form = Some(form);
+        h.run();
+        h.get_by_value(tr("저장된 AWS 프로필")).click();
+        h.run();
+        h.get_by_label(tr("직접 키 입력")).click();
+        h.run();
+        assert_eq!(h.state().form.as_ref().unwrap().aws_mode, 2);
+        assert!(h.query_by_label("Access Key ID").is_some());
+        h.get_by_value(tr("직접 키 입력")).click();
+        h.run();
+        h.get_by_label(tr("기본 AWS 인증")).click();
+        h.run();
+        assert_eq!(h.state().form.as_ref().unwrap().aws_mode, 1);
+        assert!(h.query_by_label("Access Key ID").is_none());
+        h.get_by_label(tr("고급 연결 설정")).click();
+        h.run();
+        assert!(h.query_by_label(tr("엔드포인트 (선택)")).is_some());
+        h.get_by_label(tr("고급 연결 설정")).click();
+        h.run();
+        assert!(h.query_by_label(tr("엔드포인트 (선택)")).is_none());
+    }
+    #[test]
+    fn manual_half_key_edit_preserves_store_and_default_switch_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(kiln_accounts::MemoryStore::new());
+        let manager = RemoteManager::with_store(dir.path().join("connections.json"), store.clone());
+        let profile = ConnectionProfile {
+            id: "manual".into(),
+            name: "Fixture".into(),
+            endpoint: RemoteEndpoint::S3 {
+                bucket: "fixture".into(),
+                region: "us-east-1".into(),
+                endpoint: None,
+                path_style: false,
+                prefix: String::new(),
+                aws_profile: None,
+                aws_auth: Some(crate::S3Authentication::Manual),
+            },
+        };
+        manager
+            .save(
+                profile.clone(),
+                Secrets {
+                    access_key: Some("old-access".into()),
+                    secret_key: Some("old-secret".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut panel = RemotePanel::new(manager.clone());
+        let mut form = Form::from_profile(&profile);
+        form.aws_scanned = true;
+        form.apply_scan(aws_fixture(), true, true);
+        form.access_key = "new-half-access".into();
+        panel.form = Some(form);
+        let mut h = Harness::builder().with_size([420.0, 700.0]).build_ui_state(
+            |ui, p: &mut RemotePanel| {
+                if super::super::test_fonts(ui.ctx()) {
+                    p.ui(ui);
+                }
+            },
+            panel,
+        );
+        h.run();
+        h.get_by_label(tr("연결 저장")).click();
+        for _ in 0..200 {
+            h.step();
+            if h.state().saving.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(h.state().form.as_ref().unwrap().error.is_some());
+        assert_eq!(
+            crate::load_secrets(store.as_ref(), "manual")
+                .unwrap()
+                .access_key
+                .as_deref(),
+            Some("old-access")
+        );
+        h.run();
+        h.get_by_value(tr("직접 키 입력")).click();
+        h.run();
+        h.get_by_label(tr("기본 AWS 인증")).click();
+        h.run();
+        h.get_by_label(tr("연결 저장")).click();
+        for _ in 0..200 {
+            h.step();
+            if h.state().form.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(h.state().form.is_none());
+        assert!(
+            crate::load_secrets(store.as_ref(), "manual")
+                .unwrap()
+                .access_key
+                .is_none()
+        );
+        let saved = manager.get("manual").unwrap();
+        let mut reopened = Form::from_profile(&saved);
+        reopened.apply_scan(aws_fixture(), true, false);
+        assert_eq!(reopened.aws_mode, 1);
+        assert!(reopened.aws_profile.is_empty());
+    }
+    #[test]
+    fn legacy_s3_metadata_derives_auth_without_changing_identity() {
+        let profile:ConnectionProfile=serde_json::from_str(r#"{"id":"legacy","name":"Legacy","endpoint":{"S3":{"bucket":"fixture","region":"eu-west-1","endpoint":null,"path_style":false,"prefix":"assets/"}}}"#).unwrap();
+        let mut with_keys = Form::from_profile(&profile);
+        with_keys.apply_scan(aws_fixture(), true, true);
+        assert_eq!(with_keys.aws_mode, 2);
+        assert_eq!(with_keys.region, "eu-west-1");
+        assert!(with_keys.aws_profile.is_empty());
+        let mut without_keys = Form::from_profile(&profile);
+        without_keys.apply_scan(aws_fixture(), true, false);
+        assert_eq!(without_keys.aws_mode, 1);
+        assert!(without_keys.aws_profile.is_empty());
+    }
     #[test]
     fn connection_form_keeps_errors_and_stores_only_metadata() {
         let dir = tempfile::tempdir().unwrap();
@@ -660,7 +1078,9 @@ mod tests {
         panel.form = Some(form);
         let mut h = Harness::builder().with_size([620.0, 740.0]).build_ui_state(
             |ui, panel: &mut RemotePanel| {
-                panel.ui(ui);
+                if super::super::test_fonts(ui.ctx()) {
+                    panel.ui(ui);
+                }
             },
             panel,
         );
@@ -783,7 +1203,102 @@ mod tests {
 #[cfg(test)]
 mod visual_tests {
     use super::*;
-    use egui_kittest::Harness;
+    use egui_kittest::{
+        Harness,
+        kittest::{NodeT, Queryable},
+    };
+    #[test]
+    fn provider_connections_and_selector_are_identifiable() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = RemoteManager::with_store(
+            dir.path().join("connections.json"),
+            Arc::new(kiln_accounts::MemoryStore::new()),
+        );
+        let mut s3 = Form::new();
+        s3.name = "Production assets".into();
+        s3.bucket = "fixture-assets".into();
+        s3.aws_mode = 1;
+        manager
+            .save(s3.profile().unwrap(), Secrets::default())
+            .unwrap();
+        let mut ftp = Form::new();
+        ftp.kind = 1;
+        ftp.name = "Build server".into();
+        ftp.host = "127.0.0.1".into();
+        ftp.user = "fixture".into();
+        manager
+            .save(ftp.profile().unwrap(), Secrets::default())
+            .unwrap();
+        let mut ssh = Form::new();
+        ssh.kind = 2;
+        ssh.name = "Remote workspace".into();
+        ssh.alias = "synthetic-host".into();
+        manager
+            .save(ssh.profile().unwrap(), Secrets::default())
+            .unwrap();
+        let shots = PathBuf::from("/tmp/kiln-remote-captures");
+        std::fs::create_dir_all(&shots).unwrap();
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::set_language(language);
+            for theme in ["kiln-dark", "kiln-light"] {
+                Theme::set_current(theme);
+                for width in [420.0, 980.0] {
+                    let panel = RemotePanel::new(manager.clone());
+                    let mut h = Harness::builder()
+                        .with_size([width, 660.0])
+                        .with_pixels_per_point(1.3)
+                        .wgpu()
+                        .build_ui_state(
+                            |ui, panel: &mut RemotePanel| {
+                                Theme::current().apply(ui.ctx());
+                                if super::super::test_fonts(ui.ctx()) {
+                                    panel.ui(ui);
+                                }
+                            },
+                            panel,
+                        );
+                    h.run();
+                    for name in ["Production assets", "Build server", "Remote workspace"] {
+                        assert!(h.query_all_by_label(name).next().is_some());
+                    }
+                    assert!(h.query_by_label(tr("SSH 터미널 열기")).is_some());
+                    h.render()
+                        .unwrap()
+                        .save(shots.join(format!(
+                            "connections-{}-{theme}-{width}.png",
+                            language.code()
+                        )))
+                        .unwrap();
+                    h.get_by_label(tr("연결 추가")).click();
+                    h.run();
+                    h.query_all_by_label("FTP")
+                        .find(|node| node.accesskit_node().toggled().is_some())
+                        .expect("protocol radio")
+                        .click();
+                    h.run();
+                    assert_eq!(h.state().form.as_ref().unwrap().kind, 1);
+                    h.query_all_by_label("SFTP")
+                        .find(|node| node.accesskit_node().toggled().is_some())
+                        .expect("protocol radio")
+                        .click();
+                    h.run();
+                    assert_eq!(h.state().form.as_ref().unwrap().kind, 2);
+                    h.query_all_by_label("S3")
+                        .find(|node| node.accesskit_node().toggled().is_some())
+                        .expect("protocol radio")
+                        .click();
+                    h.run();
+                    assert_eq!(h.state().form.as_ref().unwrap().kind, 0);
+                    h.get_by_label(tr("취소")).click();
+                    h.run();
+                    assert!(h.state().form.is_none());
+                }
+            }
+        }
+        kiln_common::i18n::set_language(kiln_common::i18n::Language::Korean);
+        Theme::set_current("kiln-dark");
+    }
+
     #[test]
     fn connection_forms_fit_the_compact_viewport() {
         let dir = tempfile::tempdir().unwrap();
@@ -799,32 +1314,112 @@ mod visual_tests {
                 Theme::set_current(theme);
                 for width in [420.0, 980.0] {
                     for kind in 0..3 {
-                        let mut panel = RemotePanel::new(manager.clone());
-                        let mut f = Form::new();
-                        f.kind = kind;
-                        f.name = "Production assets".into();
-                        panel.form = Some(f);
-                        let mut h = Harness::builder()
-                            .with_size([width, 700.0])
-                            .with_pixels_per_point(1.3)
-                            .wgpu()
-                            .build_ui_state(
-                                |ui, p: &mut RemotePanel| {
-                                    Theme::current().apply(ui.ctx());
-                                    if super::super::test_fonts(ui.ctx()) {
-                                        p.ui(ui);
-                                    }
-                                },
-                                panel,
-                            );
-                        h.run();
-                        h.render()
-                            .unwrap()
-                            .save(shots.join(format!(
-                                "form-{}-{theme}-{width}-{kind}.png",
-                                language.code()
-                            )))
-                            .unwrap();
+                        for variant in 0..if kind == 0 { 10 } else { 1 } {
+                            let mut panel = RemotePanel::new(manager.clone());
+                            let mut f = Form::new();
+                            f.kind = kind;
+                            f.name = "Production assets".into();
+                            f.aws_scanned = true;
+                            f.apply_scan(tests::aws_fixture(), true, false);
+                            if kind == 0 {
+                                f.bucket = "production-assets".into();
+                                if variant == 1 {
+                                    f.aws_mode = 1;
+                                }
+                                if variant == 2 || variant == 3 {
+                                    f.aws_mode = 2;
+                                }
+                                if variant == 4 {
+                                    f.error =
+                                        Some(tr("선택한 AWS 프로필을 찾을 수 없습니다").into());
+                                    f.aws_profile = "unavailable-profile".into();
+                                }
+                                if variant == 6 {
+                                    f.aws_profiles.clear();
+                                    f.aws_profile.clear();
+                                }
+                                if variant == 8 {
+                                    f.aws_mode = 2;
+                                }
+                                if variant == 9 {
+                                    f.aws_profiles.push(AwsProfile {
+                                        name: "restricted-account-with-a-long-profile-name".into(),
+                                        region: None,
+                                        authentication: Authentication::Missing,
+                                    });
+                                }
+                                if variant == 5 {
+                                    f.id = "edited-fixture".into();
+                                    f.region_touched = true;
+                                }
+                            }
+                            panel.form = Some(f);
+                            let mut busy_release = None;
+                            if kind == 0 && variant == 7 {
+                                let (sender, receiver) = std::sync::mpsc::channel::<()>();
+                                busy_release = Some(sender);
+                                panel.saving =
+                                    Some(Task::spawn(&egui::Context::default(), move || {
+                                        let _ = receiver.recv();
+                                        Ok(())
+                                    }));
+                            }
+                            let mut h = Harness::builder()
+                                .with_size([width, 700.0])
+                                .with_pixels_per_point(1.3)
+                                .wgpu()
+                                .build_ui_state(
+                                    |ui, p: &mut RemotePanel| {
+                                        Theme::current().apply(ui.ctx());
+                                        if super::super::test_fonts(ui.ctx()) {
+                                            p.ui(ui);
+                                        }
+                                    },
+                                    panel,
+                                );
+                            if kind == 0 && variant == 7 {
+                                h.run_steps(4);
+                                assert!(
+                                    h.get_by_label(tr("연결 저장"))
+                                        .accesskit_node()
+                                        .is_disabled()
+                                );
+                            } else {
+                                h.run();
+                            }
+                            if kind == 0 && (variant == 3 || variant == 8) {
+                                let heading = if variant == 3 {
+                                    tr("고급 연결 설정")
+                                } else {
+                                    tr("임시 세션 토큰")
+                                };
+                                h.get_by_label(heading).scroll_to_me();
+                                h.run();
+                                h.get_by_label(heading).click();
+                                h.run();
+                                let expected = if variant == 3 {
+                                    tr("엔드포인트 (선택)")
+                                } else {
+                                    "Session Token"
+                                };
+                                assert!(h.query_by_label(expected).is_some());
+                            }
+                            if kind == 0 && variant == 9 {
+                                h.get_by_value("development").click();
+                                h.run();
+                                h.get_by_label("restricted-account-with-a-long-profile-name")
+                                    .hover();
+                                h.run_steps(45);
+                            }
+                            h.render()
+                                .unwrap()
+                                .save(shots.join(format!(
+                                    "form-{}-{theme}-{width}-{kind}-state{variant}.png",
+                                    language.code()
+                                )))
+                                .unwrap();
+                            drop(busy_release);
+                        }
                     }
                 }
             }

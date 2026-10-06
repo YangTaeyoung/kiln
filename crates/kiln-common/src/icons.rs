@@ -13,6 +13,10 @@ pub enum Icon {
     GitHub,
     Codex,
     Claude,
+    /// Official Amazon S3 architecture mark; original colors are preserved.
+    S3,
+    /// Generic remote file server, independent of any vendor.
+    Server,
     Database,
     Gear,
     Command,
@@ -80,8 +84,16 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let at = |x: f32, y: f32| -> Pos2 { pos2(c.x + x * s, c.y + y * s) };
     match icon {
         Icon::GitHub => paint_github(p, rect, color),
-        Icon::Codex => paint_agent_mark(p, rect, color, "codex", include_str!("../assets/mark-codex.svg")),
-        Icon::Claude => paint_agent_mark(p, rect, color, "claude", include_str!("../assets/mark-claude.svg")),
+        Icon::Codex => paint_bundled_mark(p, rect, color, "codex", include_str!("../assets/mark-codex.svg")),
+        Icon::Claude => paint_bundled_mark(p, rect, color, "claude", include_str!("../assets/mark-claude.svg")),
+        Icon::S3 => paint_bundled_mark(p, rect, Color32::WHITE, "amazon-s3", include_str!("../assets/mark-amazon-s3.svg")),
+        Icon::Server => {
+            for y in [-4.0, 4.0] {
+                p.rect_stroke(Rect::from_min_max(at(-7.0, y - 3.0), at(7.0, y + 3.0)), 1, st, egui::StrokeKind::Inside);
+                p.circle_filled(at(-4.0, y), 0.8 * s, color);
+                p.line_segment([at(0.0, y), at(4.0, y)], st);
+            }
+        }
         Icon::More => {
             for x in [-5.0, 0.0, 5.0] { p.circle_filled(at(x, 0.0), 1.2 * s, color); }
         }
@@ -438,11 +450,11 @@ fn paint_github(p: &Painter, rect: Rect, color: Color32) {
     p.image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), color);
 }
 
-fn paint_agent_mark(p: &Painter, rect: Rect, color: Color32, name: &'static str, svg: &str) {
+fn paint_bundled_mark(p: &Painter, rect: Rect, color: Color32, name: &'static str, svg: &str) {
     let px = (rect.width().min(rect.height()) * p.ctx().pixels_per_point()).ceil().clamp(8.0, 256.0) as u32;
-    let id = egui::Id::new(("agent-mark", name, px));
+    let id = egui::Id::new(("bundled-mark", name, px));
     let texture = p.ctx().data_mut(|data| data.get_temp::<egui::TextureHandle>(id)).unwrap_or_else(|| {
-        let tree = resvg::usvg::Tree::from_str(&svg.replace("currentColor", "white"), &resvg::usvg::Options::default()).expect("bundled agent mark");
+        let tree = resvg::usvg::Tree::from_str(&svg.replace("currentColor", "white"), &resvg::usvg::Options::default()).expect("bundled integration mark");
         let mut pixels = resvg::tiny_skia::Pixmap::new(px, px).expect("bounded icon size");
         resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(px as f32 / tree.size().width(), px as f32 / tree.size().height()), &mut pixels.as_mut());
         let image = egui::ColorImage::from_rgba_premultiplied([px as usize, px as usize], pixels.data());

@@ -9908,5 +9908,85 @@
     "en": "Enter the host and username",
     "ja": "ホストとユーザー名を入力してください",
     "zh-CN": "请输入主机和用户名"
+  },
+  "인증 방식": {
+    "en": "Authentication",
+    "ja": "認証方法",
+    "zh-CN": "认证方式"
+  },
+  "저장된 AWS 프로필": {
+    "en": "Saved AWS profile",
+    "ja": "保存済みAWSプロファイル",
+    "zh-CN": "已保存的 AWS 配置"
+  },
+  "기본 AWS 인증": {
+    "en": "Default AWS authentication",
+    "ja": "既定のAWS認証",
+    "zh-CN": "默认 AWS 认证"
+  },
+  "직접 키 입력": {
+    "en": "Enter keys manually",
+    "ja": "キーを直接入力",
+    "zh-CN": "手动输入密钥"
+  },
+  "AWS 프로필을 선택하세요": {
+    "en": "Choose an AWS profile",
+    "ja": "AWSプロファイルを選択",
+    "zh-CN": "选择 AWS 配置"
+  },
+  "AWS 프로필 읽는 중…": {
+    "en": "Reading AWS profiles…",
+    "ja": "AWSプロファイルを読み込み中…",
+    "zh-CN": "正在读取 AWS 配置…"
+  },
+  "저장된 AWS 프로필이 없습니다": {
+    "en": "No saved AWS profiles",
+    "ja": "保存済みAWSプロファイルがありません",
+    "zh-CN": "没有已保存的 AWS 配置"
+  },
+  "임시 세션 토큰": {
+    "en": "Temporary session token",
+    "ja": "一時セッショントークン",
+    "zh-CN": "临时会话令牌"
+  },
+  "AWS 설정 파일을 읽을 수 없습니다": {
+    "en": "Unable to read AWS configuration files",
+    "ja": "AWS設定ファイルを読み込めません",
+    "zh-CN": "无法读取 AWS 配置文件"
+  },
+  "선택한 AWS 프로필을 찾을 수 없습니다": {
+    "en": "The selected AWS profile was not found",
+    "ja": "選択したAWSプロファイルが見つかりません",
+    "zh-CN": "找不到所选 AWS 配置"
+  },
+  "이 AWS 프로필에 인증 정보가 없습니다": {
+    "en": "This AWS profile has no credentials",
+    "ja": "このAWSプロファイルに認証情報がありません",
+    "zh-CN": "此 AWS 配置没有凭据"
+  },
+  "이 AWS 프로필은 AWS CLI v2가 필요합니다": {
+    "en": "This AWS profile requires AWS CLI v2",
+    "ja": "このAWSプロファイルにはAWS CLI v2が必要です",
+    "zh-CN": "此 AWS 配置需要 AWS CLI v2"
+  },
+  "AWS 프로필 인증을 중단했습니다": {
+    "en": "AWS profile authentication was cancelled",
+    "ja": "AWSプロファイル認証を中止しました",
+    "zh-CN": "AWS 配置认证已取消"
+  },
+  "AWS 프로필 인증에 실패했습니다. AWS CLI 로그인 상태를 확인하세요.": {
+    "en": "AWS profile authentication failed. Check your AWS CLI login.",
+    "ja": "AWSプロファイル認証に失敗しました。AWS CLIのログイン状態を確認してください。",
+    "zh-CN": "AWS 配置认证失败。请检查 AWS CLI 登录状态。"
+  },
+  "AWS 프로필 인증 응답이 올바르지 않습니다": {
+    "en": "Invalid AWS profile authentication response",
+    "ja": "AWSプロファイル認証の応答が不正です",
+    "zh-CN": "AWS 配置认证响应无效"
+  },
+  "환경 변수와 기본 AWS 설정의 인증을 사용합니다": {
+    "en": "Uses authentication from environment variables and default AWS configuration",
+    "ja": "環境変数と既定のAWS設定の認証を使用します",
+    "zh-CN": "使用环境变量和默认 AWS 配置中的认证"
   }
 }

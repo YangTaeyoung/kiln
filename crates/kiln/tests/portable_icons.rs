@@ -10,7 +10,7 @@ use kiln_common::icons::{self, Icon};
 const ICON_SIZE: f32 = 20.0;
 const SPACING: f32 = 40.0;
 const MARGIN: f32 = 20.0;
-const ICONS: [Icon; 16] = [
+const ICONS: [Icon; 18] = [
     Icon::Codex,
     Icon::Claude,
     Icon::GitHub,
@@ -27,6 +27,8 @@ const ICONS: [Icon; 16] = [
     Icon::Search,
     Icon::Play,
     Icon::Stop,
+    Icon::S3,
+    Icon::Server,
 ];
 
 fn crop(image: &RgbaImage, index: usize, row: usize, dpi: f32) -> RgbaImage {
@@ -120,10 +122,32 @@ fn shipped_icons_remain_visible_and_distinct_without_system_fonts_at_all_dpis() 
                     visible >= mask.len() / 50,
                     "{icon:?} is blank or too faint ({visible} pixels): {context}"
                 );
-                assert!(
-                    visible < mask.len() * 9 / 10,
-                    "{icon:?} renders as a solid tile: {context}"
-                );
+                if *icon == Icon::S3 {
+                    // The official S3 asset deliberately has a green square
+                    // background. Require its white bucket and original green
+                    // instead of applying the monochrome silhouette condition.
+                    let bucket = first
+                        .pixels()
+                        .filter(|p| p[0] >= 220 && p[1] >= 220 && p[2] >= 220)
+                        .count();
+                    let green = first
+                        .pixels()
+                        .filter(|p| {
+                            p[0].abs_diff(122) <= 3
+                                && p[1].abs_diff(161) <= 3
+                                && p[2].abs_diff(22) <= 3
+                        })
+                        .count();
+                    assert!(
+                        bucket >= mask.len() / 50 && green > mask.len() / 2,
+                        "S3 bucket or original brand colors are missing: {context}"
+                    );
+                } else {
+                    assert!(
+                        visible < mask.len() * 9 / 10,
+                        "{icon:?} renders as a solid tile: {context}"
+                    );
+                }
                 masks.push(mask);
             }
 
@@ -148,6 +172,17 @@ fn shipped_icons_remain_visible_and_distinct_without_system_fonts_at_all_dpis() 
                         ICONS[second],
                     );
                 }
+            }
+            for (first, second) in [(16, 17), (16, 3), (17, 3)] {
+                let different = masks[first]
+                    .iter()
+                    .zip(&masks[second])
+                    .filter(|(a, b)| a != b)
+                    .count();
+                assert!(
+                    different >= 8,
+                    "remote provider marks are indistinguishable: {context}"
+                );
             }
         }
     }

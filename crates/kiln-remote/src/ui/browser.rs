@@ -422,6 +422,13 @@ impl RemoteBrowser {
         self.tick(ui.ctx());
         let theme = Theme::current();
         ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            kiln_common::icons::paint(
+                ui.painter(),
+                rect,
+                super::provider_icon(&self.profile),
+                theme.text_dim,
+            );
             ui.strong(&self.profile.name);
             ui.label(
                 RichText::new(protocol(&self.profile))
@@ -999,6 +1006,8 @@ mod tests {
             endpoint: None,
             path_style: false,
             prefix: "assets/".into(),
+            aws_profile: None,
+            aws_auth: None,
         });
         assert_eq!(parent_path(&s3, "assets"), None);
         assert_eq!(parent_path(&s3, "assets/folder/"), Some("assets".into()));
@@ -1108,6 +1117,8 @@ mod visual_tests {
                 endpoint: None,
                 path_style: false,
                 prefix: String::new(),
+                aws_profile: None,
+                aws_auth: None,
             },
         };
         let shots = PathBuf::from("/tmp/kiln-remote-captures");

@@ -22,12 +22,18 @@ fn require_object(path: &str) -> Result<&str> {
     };
     Ok(p)
 }
-fn bucket(profile: &ConnectionProfile, secrets: &Secrets) -> Result<Box<Bucket>> {
+fn bucket(
+    profile: &ConnectionProfile,
+    secrets: &Secrets,
+    control: &Control,
+) -> Result<Box<Bucket>> {
     let RemoteEndpoint::S3 {
         bucket,
         region,
         endpoint,
         path_style,
+        aws_profile,
+        aws_auth,
         ..
     } = &profile.endpoint
     else {
@@ -41,6 +47,24 @@ fn bucket(profile: &ConnectionProfile, secrets: &Secrets) -> Result<Box<Bucket>>
     } else {
         region.parse()?
     };
+    let resolved;
+    let secrets = if let Some(name) = aws_profile {
+        resolved = crate::aws_profiles::resolve(name, control)?;
+        &resolved
+    } else if *aws_auth == Some(S3Authentication::Default) {
+        resolved = Secrets::default();
+        &resolved
+    } else {
+        if *aws_auth == Some(S3Authentication::Manual)
+            && (secrets.access_key.is_none() || secrets.secret_key.is_none())
+        {
+            bail!(
+                "{}",
+                kiln_common::i18n::tr("Access Key ID 및 Secret Access Key를 함께 입력하세요")
+            );
+        }
+        secrets
+    };
     let credentials = match (&secrets.access_key, &secrets.secret_key) {
         (Some(a), Some(s)) if !a.is_empty() && !s.is_empty() => Credentials::new(
             Some(a),
@@ -49,7 +73,19 @@ fn bucket(profile: &ConnectionProfile, secrets: &Secrets) -> Result<Box<Bucket>>
             secrets.session_token.as_deref(),
             None,
         )?,
-        (None, None) => Credentials::default()?,
+        (None, None) => {
+            if let Some(s) = crate::aws_profiles::resolve_default(control)? {
+                Credentials::new(
+                    s.access_key.as_deref(),
+                    s.secret_key.as_deref(),
+                    None,
+                    s.session_token.as_deref(),
+                    None,
+                )?
+            } else {
+                Credentials::default()?
+            }
+        }
         _ => bail!("Both access key and secret key are required"),
     };
     let b = Bucket::new(bucket, region, credentials)?;
@@ -77,7 +113,7 @@ pub async fn run(
     op: &Operation,
     c: &Arc<Control>,
 ) -> Result<RemoteResult> {
-    let b = bucket(profile, secrets)?;
+    let b = bucket(profile, secrets, c)?;
     c.check()?;
     match op {
         Operation::List { path, cursor } => {

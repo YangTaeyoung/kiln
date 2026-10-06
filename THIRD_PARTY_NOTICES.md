@@ -13,6 +13,7 @@ fonts, icons and trademarks retain their own terms.
 - **GitHub Octicons**: [MIT license](crates/kiln-common/assets/OCTICONS-LICENSE).
 - **Lobe agent marks**: [MIT license](crates/kiln-common/assets/LOBE-ICONS-LICENSE)
   and [attribution](crates/kiln-common/assets/AGENT-MARKS.md).
+- **Amazon S3 mark**: unchanged AWS architecture artwork; [source and trademark notice](crates/kiln-common/assets/REMOTE-MARKS.md). AWS artwork and marks are excluded from Kiln's MIT license.
 - **Database logos**: [Simple Icons notices](crates/kiln-db/assets/logos/LICENSE-simple-icons.md).
 
 Rust dependency license texts are collected from the locked dependency sources

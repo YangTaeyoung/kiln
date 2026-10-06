@@ -10,6 +10,8 @@ fn profile() -> ConnectionProfile {
             endpoint: Some("http://127.0.0.1:29000".into()),
             path_style: true,
             prefix: "".into(),
+            aws_profile: None,
+            aws_auth: None,
         },
     }
 }

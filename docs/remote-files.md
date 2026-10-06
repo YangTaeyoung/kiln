@@ -9,10 +9,13 @@ and addresses; passwords and S3 credentials use the account credential store
 
 Open **Remote connections** in the tools sidebar, then add a named connection:
 
-- **S3:** bucket, region and optional S3-compatible endpoint. Choose path-style
-  addressing when your provider requires it. Enter access/secret keys and an
-  optional session token, or leave all key fields blank to use the standard AWS
-  credential chain already configured on your machine.
+- **S3:** bucket and region, then choose **Saved AWS profile**, **Default AWS
+  credentials**, or **Enter keys manually**. Saved profiles come from
+  `~/.aws/config` and `~/.aws/credentials` (including `AWS_CONFIG_FILE` and
+  `AWS_SHARED_CREDENTIALS_FILE` overrides). Kiln saves the selected profile name,
+  not a copy of its keys. A profile's region fills the region field until you edit
+  it yourself. Endpoint, starting prefix and path-style addressing are under
+  **Advanced connection settings**.
 - **FTP / FTPS:** host, port and username. FTPS uses explicit TLS and validates
   the server certificate. FTP transfers, including the password, are unencrypted;
   use it only when your server requires it.
@@ -27,11 +30,21 @@ through OpenSSH, then reconnect the file browser. Kiln never disables host-key
 verification. Password-only SSH hosts can be used in the SSH terminal; the
 background SFTP browser requires noninteractive key or agent authentication.
 
-Edit a saved connection to replace credentials. Empty secret fields retain
-saved values; **Remove saved credentials** clears them when you save. Changing
-connection type also clears credentials from the earlier protocol. Replacing
-S3 keys does not retain their old session token. Endpoint, temporary token and
-path-style controls are grouped under **Advanced connection settings**.
+For S3 profiles backed by SSO, roles or `credential_process`, install AWS CLI v2
+and complete the profile's normal AWS login first. Kiln resolves these credentials
+with the CLI when connecting; merely opening the profile selector does not run
+authentication. An unavailable or expired selected profile produces an error
+instead of connecting through another account. Profile discovery never modifies
+your AWS files. See [AWS profile settings](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)
+and [credential export](https://docs.aws.amazon.com/cli/latest/reference/configure/export-credentials.html).
+
+Edit a saved connection to replace credentials. In manual-key mode, empty fields
+retain saved keys; enter access and secret keys together when replacing them.
+Replacing S3 keys clears the old session token unless you enter a new token under
+**Temporary session token**. Switching to a saved profile or default AWS
+credentials removes Kiln's stored manual keys. FTP provides **Remove saved
+credentials** in its edit form. Changing connection type also clears credentials
+from the earlier protocol.
 
 ## Browse, transfer and edit
 

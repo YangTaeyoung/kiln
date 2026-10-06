@@ -19,6 +19,15 @@ pub fn protocol(profile: &ConnectionProfile) -> &'static str {
         RemoteEndpoint::Sftp { .. } => "SFTP",
     }
 }
+/// Integration identity shared by the connection picker, browser and central tab.
+pub fn provider_icon(profile: &ConnectionProfile) -> kiln_common::icons::Icon {
+    use kiln_common::icons::Icon;
+    match profile.endpoint {
+        RemoteEndpoint::S3 { .. } => Icon::S3,
+        RemoteEndpoint::Ftp { .. } => Icon::Server,
+        RemoteEndpoint::Sftp { .. } => Icon::Terminal,
+    }
+}
 pub fn root_path(profile: &ConnectionProfile) -> String {
     match &profile.endpoint {
         RemoteEndpoint::S3 { prefix, .. } => prefix.clone(),
@@ -48,6 +57,24 @@ fn test_fonts(ctx: &egui::Context) -> bool {
 }
 
 fn file_row(ui: &mut egui::Ui, entry: &crate::RemoteEntry, selected: bool) -> egui::Response {
+    row_with_icon(
+        ui,
+        entry,
+        selected,
+        if entry.is_dir {
+            kiln_common::icons::Icon::Folder
+        } else {
+            kiln_common::icons::Icon::File
+        },
+    )
+}
+
+fn row_with_icon(
+    ui: &mut egui::Ui,
+    entry: &crate::RemoteEntry,
+    selected: bool,
+    icon: kiln_common::icons::Icon,
+) -> egui::Response {
     let theme = kiln_common::Theme::current();
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
@@ -77,11 +104,7 @@ fn file_row(ui: &mut egui::Ui, entry: &crate::RemoteEntry, selected: bool) -> eg
             egui::pos2(rect.left() + 14.0, rect.center().y),
             egui::vec2(18.0, 18.0),
         ),
-        if entry.is_dir {
-            kiln_common::icons::Icon::Folder
-        } else {
-            kiln_common::icons::Icon::File
-        },
+        icon,
         theme.text_dim,
     );
     let metadata = if entry.is_dir { 0.0 } else { 76.0 };

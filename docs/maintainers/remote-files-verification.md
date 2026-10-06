@@ -20,7 +20,7 @@ production daemon, SSH configuration, keychain or cloud account.
 Run:
 
 ```sh
-cargo test -p kiln-remote --lib --test transfers -- --test-threads=1
+cargo test -p kiln-remote --lib --test transfers --test aws_profile_ui -- --test-threads=1
 KILN_REMOTE_FIXTURES=1 cargo test -p kiln-remote \
   --test transfers --test s3_pagination -- --ignored --test-threads=1
 ```
@@ -67,22 +67,67 @@ Local evidence logs: `/tmp/kiln-remote-final.log` and
 `/tmp/kiln-remote-protocol-fixtures-final4.log`. These logs are machine-local
 verification evidence; they are not release artifacts.
 
-## Final UI review candidate
+## AWS profile and final UI verification
 
-The current UI harness generates 16 file-list captures and 48 connection-form
-captures: four languages, light/dark themes, 420/980-point viewports, 130% scale,
-and all three connection types for forms. Run the default command above
-serially because these harnesses change the process-global theme and language.
-The synthetic captures are written only under `/tmp/kiln-remote-captures`.
-The final 22-test library/UI run regenerated all 64 captures after the last UI
-changes. Designer and developer-workflow source/render review passed. The six
-protocol checks were run before these UI-only changes; production accounts and
-manual installed-native interaction remain separate boundaries.
+The current UI harness generates 16 file-list captures, 16 saved-connection
+captures and 192 connection-form captures: four languages, light/dark themes, 420/980-point viewports and 130%
+scale. S3 states include named profile, default authentication, manual keys,
+advanced settings after scrolling, validation error, editing, no saved
+profiles, a pending save, temporary token input, and the profile dropdown with
+an unavailable entry and its reason. FTP and SFTP forms remain covered.
+The captures are written only under `/tmp/kiln-remote-captures`; they are not
+release artifacts or evidence of native execution.
 
-Review `files-ko-kiln-dark-420.png`, `files-ja-kiln-light-420.png`,
-`form-ko-kiln-dark-420-0.png`, `form-zh-CN-kiln-light-420-1.png`, and a 980-point
-form alongside their compact counterparts. Inspect text/size separation,
-scrolling form bodies with retained footer controls, advanced S3 disclosure,
-and explicit credential clearing. Then inspect the actual installed app with
-isolated configuration and synthetic storage. Native-installed remote UI and
-a real cloud account remain separate verification boundaries.
+The tested UI interactions include choosing a different named profile,
+preserving an edited region, saving and reopening that identity, cancelling
+without changing saved settings, switching authentication modes, revealing
+advanced/token fields while retaining footer actions, rejecting an incomplete
+manual key replacement without changing saved credentials, and persisting an
+explicit default-authentication choice. Legacy connection metadata without
+new AWS fields remains supported.
+
+AWS profile tests use private temporary config/credentials files and a fake
+AWS CLI. They verify config/profile-section merging, metadata-only discovery,
+explicit-profile failure without another-account fallback, environment-pair
+precedence, missing/empty profile errors, role environment-source preservation
+in an isolated subprocess, bounded output, cancellation, timeout, expired or
+malformed credential responses, and cleanup after failed credential processes.
+No real AWS account, SSO session, credential process or network was used.
+
+The earlier all-fields S3 form was rejected by the user and its UI verdict
+was withdrawn. The replacement source/rendered-flow review passed after
+explicit authentication choices, compact hierarchy, preserved footer actions
+and reachable expanded fields were verified. This replaces the earlier form
+review; it does not certify native discovery or live AWS authorization.
+
+The AWS-authentication serial run passed 33 library/UI tests and one default integration
+test, with three transfer fixture tests ignored: see the machine-local
+`/tmp/kiln-remote-aws-profile-tests8.log`. Designer and DX source/harness reviews
+are separate from installed-app validation. Native asynchronous profile
+discovery/import must be checked with synthetic AWS files before publication;
+real AWS authorization and SSO login remain unverified boundaries.
+
+Implementation references:
+
+- [AWS shared configuration and credential files](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)
+- [AWS CLI credential export](https://docs.aws.amazon.com/cli/latest/reference/configure/export-credentials.html)
+- [AWS role credential sources](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-role.html)
+
+## Provider-identity verification
+
+The remote protocol selector, saved connections and browser heading use the
+same provider identity: the unchanged official bundled Amazon S3 architecture
+mark, Kiln's generic FTP server vector and its generic SFTP terminal vector.
+[Asset provenance and trademark terms](../../crates/kiln-common/assets/REMOTE-MARKS.md)
+record the official package, archive member and SHA-256. AWS artwork is excluded
+from Kiln's MIT license; the symbols do not imply certification or endorsement.
+
+After adding the marks, the serial default invocation passed **34 library/UI
+checks and 1 integration cancellation check**, with 3 loopback transfer tests
+intentionally ignored. Evidence: `/tmp/kiln-remote-provider-icons-tests2.log`.
+The 16 saved-connection captures cover four languages, both themes, 420/980-point
+viewports and 130% scale. The selector fixture clicks FTP, SFTP and S3 through
+the accessible radio controls, verifies the actual selected form and cancels
+without creating a connection. The existing 192 form and 16 file-list captures
+were regenerated with the bundled marks. This is source/rendered-flow evidence;
+the installed central-tab path is verified separately by the release owner.

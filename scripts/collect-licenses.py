@@ -14,7 +14,9 @@ for package in sorted(metadata['packages'],key=lambda p:(p['name'],p['version'])
     declared=package.get('license_file')
     if declared and (base/declared).is_file():texts.append((base/declared).read_text(errors='replace'))
     sections.append(f'{package["name"]} {package["version"]}\nLicense: {package.get("license") or "See upstream"}\nSource: {package.get("repository") or package["source"]}\n\n'+ '\n\n'.join(texts))
-for path in [root/'LICENSE',*sorted((root/'crates/kiln-common/fonts').glob('*LICENSE*')),
+for path in [root/'LICENSE',root/'THIRD_PARTY_NOTICES.md',
+             root/'crates/kiln-common/assets/REMOTE-MARKS.md',
+             *sorted((root/'crates/kiln-common/fonts').glob('*LICENSE*')),
              root/'crates/kiln-common/fonts/JetBrainsMono-OFL.txt',
              root/'crates/kiln-common/fonts/NotoSansCJK-OFL.txt',
              root/'crates/kiln-db/assets/logos/LICENSE-simple-icons.md',

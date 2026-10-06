@@ -1239,5 +1239,5 @@ impl ToolTab for RemoteTab {
     fn recovery_notice(&self)->Option<String>{if self.browser.pending_operation().is_some(){Some(kiln_common::trf!("{} — 진행 중인 원격 전송",self.browser.title()))}else{self.is_dirty().then(||kiln_common::trf!("{} — 저장하지 않은 원격 편집",self.browser.title()))}}
     fn discard_recovery(&mut self,suppress:bool){self.suppress_recovery=suppress;}
     fn tick(&mut self){self.browser.tick(&self.ctx);}
-    fn paint_icon(&self,ui:&egui::Ui,rect:egui::Rect)->bool{kiln_common::icons::paint(ui.painter(),rect,kiln_common::icons::Icon::Plug,kiln_common::Theme::current().text);true}
+    fn paint_icon(&self,ui:&egui::Ui,rect:egui::Rect)->bool{kiln_common::icons::paint(ui.painter(),rect,kiln_remote::ui::provider_icon(self.browser.profile()),kiln_common::Theme::current().text);true}
 }

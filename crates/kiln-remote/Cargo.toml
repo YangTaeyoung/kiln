@@ -19,6 +19,8 @@ quick-xml = { version="0.38", features=["serialize"] }
 chrono = { version="0.4", default-features=false, features=["std"] }
 kiln-accounts.workspace = true
 glob = "0.3"
+rust-ini = "0.21"
+libc = "0.2"
 egui.workspace = true
 kiln-common.workspace = true
 kiln-editor.workspace = true

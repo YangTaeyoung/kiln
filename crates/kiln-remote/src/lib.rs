@@ -1,5 +1,6 @@
 //! Remote files without storing credentials in the application configuration.
 //! Every operation runs on its own worker; dropping a job cancels it.
+pub mod aws_profiles;
 mod ftp;
 mod s3_backend;
 mod sftp;
@@ -24,6 +25,11 @@ pub struct ConnectionProfile {
     pub name: String,
     pub endpoint: RemoteEndpoint,
 }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum S3Authentication {
+    Default,
+    Manual,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RemoteEndpoint {
     S3 {
@@ -32,6 +38,10 @@ pub enum RemoteEndpoint {
         endpoint: Option<String>,
         path_style: bool,
         prefix: String,
+        #[serde(default)]
+        aws_profile: Option<String>,
+        #[serde(default)]
+        aws_auth: Option<S3Authentication>,
     },
     Ftp {
         host: String,

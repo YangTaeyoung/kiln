@@ -46,18 +46,32 @@ fn direct_agents_and_ssh_open_without_shell_commands_and_survive_gui_restore() {
     for path in [&workspace, &bin] {
         std::fs::create_dir_all(path).unwrap();
     }
+    let codex_cwd = base.join("codex-observed-cwd");
+    let claude_cwd = base.join("claude-observed-cwd");
+    let quote =
+        |path: &std::path::Path| format!("'{}'", path.display().to_string().replace('\'', "'\\''"));
     for (program, script) in [
         (
             "codex",
-            "#!/bin/sh\n[ \"$PWD\" = \"$KILN_EXPECT_CWD\" ] && printf 'CWD_MATCH\\n' || printf 'CWD_MISMATCH\\n'\nprintf 'CODEX_READY\\nCWD=%s\\n' \"$PWD\"\nread line\nprintf 'RECEIVED=%s\\n' \"$line\"\nread hold\n",
+            format!(r#"#!/bin/sh
+/bin/pwd -P > {}
+printf 'CODEX_READY\n'
+read line
+printf 'RECEIVED=%s\n' "$line"
+read hold
+"#, quote(&codex_cwd)),
         ),
         (
             "claude",
-            "#!/bin/sh\n[ \"$PWD\" = \"$KILN_EXPECT_CWD\" ] && printf 'CWD_MATCH\\n' || printf 'CWD_MISMATCH\\n'\nprintf 'CLAUDE_READY\\nCWD=%s\\n' \"$PWD\"\nread line\n",
+            format!(r#"#!/bin/sh
+/bin/pwd -P > {}
+printf 'CLAUDE_READY\n'
+read line
+"#, quote(&claude_cwd)),
         ),
         (
             "ssh",
-            "#!/bin/sh\nprintf 'SSH_READY\\n'\nfor arg do printf 'ARG=[%s]\\n' \"$arg\"; done\nprintf 'SSH_ARGV_DONE\\n'\nread line\n",
+            "#!/bin/sh\nprintf 'SSH_READY\\n'\nfor arg do printf 'ARG=[%s]\\n' \"$arg\"; done\nprintf 'SSH_ARGV_DONE\\n'\nread line\n".into(),
         ),
     ] {
         let path = bin.join(program);
@@ -83,7 +97,6 @@ fn direct_agents_and_ssh_open_without_shell_commands_and_survive_gui_restore() {
                 std::env::var("PATH").unwrap_or_default()
             ),
         );
-        std::env::set_var("KILN_EXPECT_CWD", workspace.canonicalize().unwrap());
         std::env::set_var("KILN_EXE", env!("CARGO_BIN_EXE_kiln"));
         std::env::set_var("KILN_NO_AUTO_UPGRADE", "1");
         std::env::set_var("KILN_DB_NO_KEYCHAIN", "1");
@@ -98,12 +111,12 @@ fn direct_agents_and_ssh_open_without_shell_commands_and_survive_gui_restore() {
     h.run_steps(2);
     h.get_by_label("Codex").click();
     pump(&mut h, "CODEX_READY");
-    assert!(
-        h.state()
-            .debug_focused_text()
-            .unwrap()
-            .contains("CWD_MATCH"),
-        "real fixture process must start in workspace root"
+    // Probe the child's physical directory directly. The shell's inherited PWD
+    // spelling and terminal scrollback rendering must not decide this assertion.
+    assert_eq!(
+        std::fs::read_to_string(&codex_cwd).unwrap().trim_end(),
+        workspace.canonicalize().unwrap().to_str().unwrap(),
+        "real Codex fixture must start in the workspace root"
     );
     let agent = h.state().debug_focused_launch_spec().unwrap();
     assert_eq!(agent.program.as_deref(), bin.join("codex").to_str());
@@ -133,6 +146,11 @@ fn direct_agents_and_ssh_open_without_shell_commands_and_survive_gui_restore() {
         },
     );
     pump(&mut h, "CLAUDE_READY");
+    assert_eq!(
+        std::fs::read_to_string(&claude_cwd).unwrap().trim_end(),
+        workspace.canonicalize().unwrap().to_str().unwrap(),
+        "real Claude fixture must start in the workspace root"
+    );
     assert!(
         h.state()
             .debug_focused_launch_spec()

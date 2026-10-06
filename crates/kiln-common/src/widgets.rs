@@ -69,6 +69,38 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
     changed
 }
 
+/// Compact protocol/provider selector with accessible labels and bundled marks.
+pub fn segmented_with_icons<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T, Icon, &str)]) -> bool {
+    let t = Theme::current();
+    let font = fonts::medium(12.5);
+    let widths: Vec<f32> = options.iter().map(|(_, _, label)| ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x + 44.0).collect();
+    let total = widths.iter().sum::<f32>() + 4.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(total, 30.0), Sense::hover());
+    ui.painter().rect_filled(rect, CornerRadius::same(7), t.bg_input);
+    ui.painter().rect_stroke(rect, CornerRadius::same(7), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    let mut x = rect.left() + 2.0;
+    let mut changed = false;
+    for ((v, icon, label), width) in options.iter().zip(widths) {
+        let r = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, rect.height() - 4.0));
+        let response = ui.interact(r, ui.id().with(("provider-segment", label)), Sense::click());
+        let selected = *value == *v;
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), selected, label));
+        focus_ring(ui, &response, 5);
+        if selected {
+            ui.painter().rect_filled(r, CornerRadius::same(5), t.bg_selected);
+            ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, t.border_strong), StrokeKind::Inside);
+        } else if response.hovered() {
+            ui.painter().rect_filled(r, CornerRadius::same(5), t.bg_hover);
+        }
+        let color = if selected { t.text } else { t.text_dim };
+        icons::paint(ui.painter(), Rect::from_center_size(pos2(r.left() + 17.0, r.center().y), vec2(18.0, 18.0)), *icon, color);
+        ui.painter().text(pos2(r.left() + 31.0, r.center().y), Align2::LEFT_CENTER, *label, font.clone(), color);
+        if response.clicked() && !selected { *value = *v; changed = true; }
+        x += width;
+    }
+    changed
+}
+
 /// 단축키 키캡 줄(예: "⌘", "K").
 pub fn keycaps(ui: &mut Ui, keys: &[&str]) {
     let t = Theme::current();
