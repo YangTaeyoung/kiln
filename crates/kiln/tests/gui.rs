@@ -1291,7 +1291,7 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
         h.run_steps(2);
         let name=if process=="claude" {"claude"} else {"codex"};
         let pixels=(18.0*h.ctx.pixels_per_point()).ceil() as u32;
-        let texture=h.ctx.data(|d|d.get_temp::<egui::TextureHandle>(egui::Id::new(("agent-mark",name,pixels)))).expect("brand texture");
+        let texture=h.ctx.data(|d|d.get_temp::<egui::TextureHandle>(egui::Id::new(("bundled-mark",name,pixels)))).expect("brand texture");
         let marks:Vec<_>=h.output().shapes.iter().filter_map(|s|match &s.shape {
             egui::Shape::Mesh(mesh) if mesh.texture_id==texture.id()=>Some(mesh.calc_bounds()), _=>None,
         }).collect();

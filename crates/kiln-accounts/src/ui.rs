@@ -604,10 +604,13 @@ mod tests {
             let mut output = ctx.run_ui(input, |ui| {
                 for tool in Tool::ALL { brand_mark(ui, tool); }
             });
+            // This headless test inspects shapes and cache identities without a renderer.
+            // Clear unapplied deltas before assertions so failures can unwind normally.
+            output.textures_delta.clear();
             for tool in Tool::ALL {
                 let name = match tool { Tool::Claude => "claude", Tool::Codex => "codex" };
                 let pixels = (24.0 * ctx.pixels_per_point()).ceil() as u32;
-                let texture = ctx.data(|data| data.get_temp::<egui::TextureHandle>(egui::Id::new(("agent-mark", name, pixels))))
+                let texture = ctx.data(|data| data.get_temp::<egui::TextureHandle>(egui::Id::new(("bundled-mark", name, pixels))))
                     .expect("account header must use the shared embedded SVG, not a hand-drawn substitute");
                 let meshes: Vec<_> = output.shapes.iter().filter_map(|shape| match &shape.shape {
                     egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => Some(mesh.calc_bounds()),
@@ -616,7 +619,6 @@ mod tests {
                 assert_eq!(meshes.len(), 1, "missing account logo for {name}");
                 assert_eq!(meshes[0].size(), vec2(24.0, 24.0));
             }
-            output.textures_delta.clear();
         }
     }
 
