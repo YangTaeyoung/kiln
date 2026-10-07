@@ -568,6 +568,43 @@ fn database_inspector_tab_is_bounded_localized_and_restores_selection() {
     assert!(!h.state().debug_sheet_open());
 }
 
+/// Render the real dock host together with the remote panel, not the panel alone.
+#[test]
+fn remote_dock_has_one_heading_and_keeps_connection_actions_visible() {
+    use kiln_common::i18n::{self, Language};
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("remote-dock-heading");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { shutdown(&self.0); } }
+    let _cleanup = Cleanup(base.clone());
+    let state = serde_json::json!({"sidebar_open": true, "workspaces": [{
+        "name": "Remote fixture", "root": proj, "sheet": "remote",
+        "pages": [{"root": {"Leaf": 1}, "focused": 1, "panes": [{"id": 1, "session": null, "cwd": proj}]}]
+    }]});
+    std::fs::write(base.join("cfg/state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+    let mut h = Harness::builder().with_size([1100.0, 700.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    for theme in ["kiln-light", "kiln-dark"] {
+        let ctx = h.ctx.clone(); h.state_mut().debug_set_theme(&ctx, theme);
+        for language in Language::ALL {
+            i18n::save_language(language).unwrap();
+            for width in [720.0, 1100.0] {
+                h.set_size(egui::vec2(width, 700.0)); h.run_steps(4);
+                assert_eq!(h.query_all_by_label(i18n::tr("원격 연결")).count(), 1,
+                    "{language:?}/{theme}/{width}: host and panel must not repeat the heading");
+                for label in ["SSH Config 가져오기", "연결 추가"] {
+                    let actions: Vec<_> = h.query_all_by_label(i18n::tr(label)).collect();
+                    assert!(!actions.is_empty(), "missing {label}");
+                    for action in actions {
+                        assert!(h.ctx.content_rect().contains_rect(action.rect()), "{label} overflow at {width}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn sidebar_toggle_changes_layout_at_720_points() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

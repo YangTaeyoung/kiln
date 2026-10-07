@@ -413,7 +413,6 @@ impl RemotePanel {
             }
         }
         ui.horizontal(|ui| {
-            ui.strong(tr("원격 연결"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon(ui, Icon::Plus, tr("연결 추가")) {
                     self.form = Some(Form::new())
