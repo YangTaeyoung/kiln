@@ -15,7 +15,7 @@ the production bundle script rejects that executable.
 
 ```sh
 fixture_root=$(mktemp -d /tmp/kiln-updater-XXXXXXXX)
-KILN_UPDATER_TEST_ROOT="$fixture_root" cargo build --locked --release -p kiln --features updater-test
+KILN_UPDATER_TEST_ROOT="$fixture_root" cargo build --locked --release -p kiln --bins --features updater-test
 python3 scripts/prepare-updater-test.py "$fixture_root" \
   'Developer ID Application: Taeyoung Yang (G54PSSU8W5)'
 python3 -m http.server "$(cat "$fixture_root/port")" --bind 127.0.0.1 \

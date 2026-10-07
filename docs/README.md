@@ -14,6 +14,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Git workflows](git.md) | Review changes, squash, cherry-pick, and drop commits |
 | [Terminal integration](terminal-integration.md) | Notifications, explicit activity, shell integration |
 | [Language and native menus](localization.md) | Four UI languages, Settings shortcuts, session controls |
+| [Local network access](local-network.md) | macOS permission request, terminal connections and verification |
 | [Development](development.md) | Build and test from source |
 | [Architecture](architecture.md) | Crate map and process ownership |
 | [Releases](maintainers/releases.md) | Build, notarize, sign updates, and publish |

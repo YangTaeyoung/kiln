@@ -2,11 +2,14 @@
 # Kiln.app 번들을 만든다. 사용: scripts/bundle-macos.sh [--install]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cargo build --locked --release -p kiln
+cargo build --locked --release -p kiln --bins
 python3 scripts/fetch-sparkle.py
 VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
 if [ "$(target/release/kiln --version)" != "kiln $VERSION" ]; then
   echo 'Refusing to bundle a test or mismatched executable.' >&2; exit 1
+fi
+if [ "$(target/release/kiln-status --version)" != "kiln-status $VERSION" ]; then
+  echo 'Refusing to bundle a mismatched menu companion.' >&2; exit 1
 fi
 APP=target/release/Kiln.app
 rm -rf "$APP"
@@ -51,7 +54,7 @@ PY
 # not a windowless companion process. It ships inside the one installed app.
 HELPER="$APP/Contents/Library/Kiln Status.app"
 mkdir -p "$HELPER/Contents/MacOS"
-cp target/release/kiln "$HELPER/Contents/MacOS/kiln-status"
+cp target/release/kiln-status "$HELPER/Contents/MacOS/kiln-status"
 cat > "$HELPER/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -65,6 +68,7 @@ cat > "$HELPER/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>11.0</string>
 </dict></plist>
 PLIST
+python3 scripts/configure-network-privacy.py "$APP"
 # Local builds use ad-hoc signing. Release builds must provide a Developer ID.
 SIGN_IDENTITY="${KILN_SIGN_IDENTITY:--}"
 if [ "$SIGN_IDENTITY" = "-" ]; then

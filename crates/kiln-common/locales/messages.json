@@ -9988,5 +9988,50 @@
     "en": "Uses authentication from environment variables and default AWS configuration",
     "ja": "環境変数と既定のAWS設定の認証を使用します",
     "zh-CN": "使用环境变量和默认 AWS 配置中的认证"
+  },
+  "개인정보 보호": {
+    "en": "Privacy",
+    "ja": "プライバシー",
+    "zh-CN": "隐私"
+  },
+  "개인정보 보호 및 보안 열기": {
+    "en": "Open Privacy & Security",
+    "ja": "プライバシーとセキュリティを開く",
+    "zh-CN": "打开隐私与安全性"
+  },
+  "로컬 네트워크": {
+    "en": "Local Network",
+    "ja": "ローカルネットワーク",
+    "zh-CN": "本地网络"
+  },
+  "시스템 설정을 열지 못했습니다. 개인정보 보호 및 보안 → 로컬 네트워크를 직접 열어 주세요.": {
+    "en": "Could not open System Settings. Open Privacy & Security → Local Network manually.",
+    "ja": "システム設定を開けませんでした。プライバシーとセキュリティ → ローカルネットワークを手動で開いてください。",
+    "zh-CN": "无法打开系统设置。请手动打开隐私与安全性 → 本地网络。"
+  },
+  "접근 요청": {
+    "en": "Request Access",
+    "ja": "アクセスをリクエスト",
+    "zh-CN": "请求访问"
+  },
+  "접근 요청에 사용할 네트워크를 찾지 못했습니다. Wi-Fi 또는 이더넷 연결을 확인하세요.": {
+    "en": "No network suitable for the access request was found. Check your Wi-Fi or Ethernet connection.",
+    "ja": "アクセスのリクエストに使用できるネットワークが見つかりません。Wi-Fi または Ethernet の接続を確認してください。",
+    "zh-CN": "未找到可用于请求访问的网络。请检查 Wi-Fi 或以太网连接。"
+  },
+  "접근 요청을 시도했습니다. 허용 창이 없으면 시스템 설정 → 로컬 네트워크에서 Kiln을 확인하세요.": {
+    "en": "Access request attempted. If no prompt appears, check Kiln in System Settings → Local Network.",
+    "ja": "アクセスをリクエストしました。許可の画面が表示されない場合は、システム設定 → ローカルネットワークで Kiln を確認してください。",
+    "zh-CN": "已尝试请求访问。如果没有出现提示，请在系统设置 → 本地网络中查看 Kiln。"
+  },
+  "접근 요청을 시작하지 못했습니다. 시스템 설정에서 로컬 네트워크를 확인하세요.": {
+    "en": "Could not start the access request. Check Local Network in System Settings.",
+    "ja": "アクセスのリクエストを開始できませんでした。システム設定でローカルネットワークを確認してください。",
+    "zh-CN": "无法开始请求访问。请在系统设置中查看本地网络。"
+  },
+  "터미널 명령과 SSH·데이터베이스의 로컬 서버 접근을 macOS에서 허용합니다.": {
+    "en": "Allow terminal commands, SSH and databases to access local servers in macOS.",
+    "ja": "ターミナルコマンド、SSH、データベースからローカルサーバーへのアクセスを macOS で許可します。",
+    "zh-CN": "在 macOS 中允许终端命令、SSH 和数据库访问本地服务器。"
   }
 }

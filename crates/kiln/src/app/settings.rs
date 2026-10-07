@@ -278,6 +278,8 @@ fn behavior(ui: &mut egui::Ui, s: &mut Settings) {
     widgets::group(ui, kiln_common::i18n::tr("안전"), |ui| {
         widgets::setting_toggle(ui, kiln_common::i18n::tr("실행 중인 프로세스를 종료하기 전 확인"), kiln_common::i18n::tr("패널·탭·작업 공간을 닫을 때 실행 중인 프로세스가 있으면 확인합니다"), &mut s.confirm_close_running);
     });
+    #[cfg(target_os = "macos")]
+    crate::local_network::settings(ui);
     widgets::group(ui, kiln_common::i18n::tr("알림"), |ui| {
         widgets::setting_toggle(ui, kiln_common::i18n::tr("방해 금지"), kiln_common::i18n::tr("에이전트 팝업과 시스템 알림을 끕니다. 알림 센터에는 계속 보관됩니다."), &mut s.do_not_disturb);
         widgets::divider(ui);

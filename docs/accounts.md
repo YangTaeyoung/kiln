@@ -38,6 +38,13 @@ its own temporary configuration and credential namespace. Cancelling or failing
 an attempt does not change your existing agent login. Temporary login files and
 the attempt's Claude Keychain entry are removed afterwards.
 
+Claude's login process keeps the real home directory so macOS can locate the
+login Keychain; only `CLAUDE_CONFIG_DIR` is isolated. Credential and account
+metadata reads stay inside the disposable configuration. If the official CLI
+falls back to its private credential file, Kiln reads that isolated file first.
+A missing or inaccessible Keychain is an error when saving a profile, not a
+successful save. Kiln does not reset or replace your Keychain.
+
 Kiln stores saved credential snapshots in the macOS Keychain. Other platforms use
 private credential files. Account-list settings contain profile names and
 metadata, not access or refresh tokens. Authorization URLs and fallback codes

@@ -76,6 +76,11 @@ the public signature recorded in `signature.txt`. Check the appcast URL, length,
 version and public key against the exact archive. Smoke-test startup and updater
 initialization. Record what was actually exercised.
 
+Run `python3 scripts/configure-network-privacy.py --verify /path/to/Kiln.app`
+against the extracted signed app. It validates GUI/companion build UUIDs and all
+four native network-permission descriptions. See [local network access](../local-network.md)
+for the separate fresh-user permission and terminal-attribution checks.
+
 For example, from the repository root (replace `0.1.0`):
 
 ```sh

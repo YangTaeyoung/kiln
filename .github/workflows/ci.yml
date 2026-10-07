@@ -56,4 +56,5 @@ jobs:
       - name: Validate release scripts
         run: |
           bash -n scripts/bundle-macos.sh scripts/release-macos.sh
-          python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py
+          python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py scripts/configure-network-privacy.py scripts/prepare-updater-test.py
+          python3 scripts/test-network-privacy.py

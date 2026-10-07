@@ -21,6 +21,15 @@ if not version.endswith('-updater-test'):
 compiled_root = pathlib.Path(subprocess.check_output([binary, 'updater-test-root'], text=True).strip())
 if compiled_root != root:
     raise SystemExit('The compiled fixture root does not match the requested root; rebuild first')
+helper_binary = binary.with_name('kiln-status')
+if not helper_binary.is_file():
+    raise SystemExit('Build both fixture binaries with cargo build -p kiln --bins --features updater-test')
+helper_version = subprocess.check_output([helper_binary, '--version'], text=True).strip()
+if helper_version != version.replace('kiln ', 'kiln-status ', 1):
+    raise SystemExit('Companion must be the same-version updater-test build, not a production/stale executable')
+helper_root = pathlib.Path(subprocess.check_output([helper_binary, 'updater-test-root'], text=True).strip())
+if helper_root != root:
+    raise SystemExit('Companion compiled fixture root does not match; rebuild both binaries first')
 config = json.loads(pathlib.Path('scripts/release-config.json').read_text())
 with socket.socket() as listener:
     listener.bind(('127.0.0.1', 0))
@@ -34,7 +43,7 @@ for folder, number in [('installed', '0.0.1'), ('download', '0.0.2')]:
     subprocess.run(['ditto', 'target/release/Kiln.app', app], check=True)
     shutil.copy2(binary, app / 'Contents/MacOS/kiln')
     helper = app / 'Contents/Library/Kiln Status.app'
-    shutil.copy2(binary, helper / 'Contents/MacOS/kiln-status')
+    shutil.copy2(helper_binary, helper / 'Contents/MacOS/kiln-status')
     for bundle, bundle_id in [(app, 'dev.kiln.updater-test'), (helper, 'dev.kiln.updater-test.statusbar')]:
         info_file = bundle / 'Contents/Info.plist'
         info = plistlib.loads(info_file.read_bytes())

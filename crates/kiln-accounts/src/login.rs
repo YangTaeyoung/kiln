@@ -99,6 +99,7 @@ pub(crate) fn claude_service(config: Option<&Path>) -> String {
 struct IsolatedLogin {
     dir: tempfile::TempDir,
     env: Env,
+    system_home: PathBuf,
 }
 
 impl IsolatedLogin {
@@ -115,7 +116,7 @@ impl IsolatedLogin {
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
             }
         }
-        Ok(Self { dir, env })
+        Ok(Self { dir, env, system_home: source.home.clone() })
     }
 
     fn command(&self, tool: Tool, binary: &Path) -> Command {
@@ -124,9 +125,13 @@ impl IsolatedLogin {
             Tool::Codex => { cmd.args(["login", "-c", "cli_auth_credentials_store=\"file\""]); }
             Tool::Claude => { cmd.args(["auth", "login", "--claudeai"]); }
         }
+        // Keychain lookup uses HOME on macOS. Claude's documented config-dir
+        // isolation is sufficient; changing HOME hides the user's login keychain.
+        // Keep env.home disposable for credential/metadata file reads below.
+        let home = if tool == Tool::Claude { &self.system_home } else { &self.env.home };
         cmd.current_dir(self.dir.path())
-            .env("HOME", &self.env.home)
-            .env("USERPROFILE", &self.env.home)
+            .env("HOME", home)
+            .env("USERPROFILE", home)
             .env("CODEX_HOME", &self.env.codex_home)
             .env("CLAUDE_CONFIG_DIR", self.env.claude_config_dir.as_ref().unwrap())
             .env_remove("CLAUDE_SECURESTORAGE_CONFIG_DIR")
@@ -160,9 +165,13 @@ impl IsolatedLogin {
             }
             Tool::Claude => {
                 let service = claude_service(self.env.claude_config_dir.as_deref());
-                let secret = if self.env.claude_live_in_store {
-                    self.env.store.get_by_service(&service)?.map(|(secret, _)| secret)
-                } else { None }.or(read_secret(&claude::credentials_path(&self.env.home, self.env.claude_config_dir.as_deref()))?)
+                // Official CLI falls back to a private file when Keychain writes
+                // fail. Read only this job's isolated file before asking Keychain.
+                let secret = match read_secret(&claude::credentials_path(&self.env.home, self.env.claude_config_dir.as_deref()))? {
+                    Some(secret) => Some(secret),
+                    None if self.env.claude_live_in_store => self.env.store.get_by_service(&service)?.map(|(secret, _)| secret),
+                    None => None,
+                }
                     .ok_or_else(|| anyhow::anyhow!(kiln_common::i18n::tr("로그인은 완료됐지만 계정 정보를 읽지 못했습니다. 다시 시도하세요")))?;
                 claude::access_token(&secret)?;
                 let config = self.env.claude_config_dir.as_ref().unwrap();
@@ -340,6 +349,46 @@ mod tests {
         assert_eq!(service.len(), claude::CLAUDE_SERVICE.len() + 9);
         assert!(!login.env.home.starts_with(&env.home));
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(login.env.home.metadata().unwrap().permissions().mode() & 0o777, 0o700); }
+    }
+
+    #[test]
+    fn claude_login_keeps_system_home_and_isolates_only_cli_files() {
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(root.path(), true);
+        let login = IsolatedLogin::new(&env).unwrap();
+        for tool in Tool::ALL {
+            let command = login.command(tool, Path::new("fixture-cli"));
+            let vars: std::collections::HashMap<_, _> = command.get_envs().collect();
+            let expected = if tool == Tool::Claude { &env.home } else { &login.env.home };
+            assert_eq!(vars[std::ffi::OsStr::new("HOME")], Some(expected.as_os_str()));
+            assert_eq!(vars[std::ffi::OsStr::new("USERPROFILE")], Some(expected.as_os_str()));
+            assert_eq!(vars[std::ffi::OsStr::new("CLAUDE_CONFIG_DIR")], Some(login.env.claude_config_dir.as_ref().unwrap().as_os_str()));
+            assert_eq!(vars[std::ffi::OsStr::new("CLAUDE_SECURESTORAGE_CONFIG_DIR")], None);
+        }
+        assert_ne!(login.env.home, env.home);
+        assert_ne!(login.env.claude_config_dir, env.claude_config_dir);
+    }
+
+    #[test]
+    fn claude_file_fallback_does_not_read_keychain_or_live_account_metadata() {
+        struct BrokenStore;
+        impl crate::CredentialStore for BrokenStore {
+            fn get(&self, _: &str, _: &str) -> Result<Option<String>> { panic!("must use isolated file") }
+            fn get_by_service(&self, _: &str) -> Result<Option<(String, String)>> { panic!("must use isolated file") }
+            fn set(&self, _: &str, _: &str, _: &str) -> Result<()> { panic!("no writes") }
+            fn delete(&self, _: &str, _: &str) -> Result<bool> { panic!("no deletes") }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), true);
+        env.store = Arc::new(BrokenStore);
+        claude::write_oauth_account(&env.home.join(".claude.json"), Some(&serde_json::json!({"emailAddress":"existing@example.test"}))).unwrap();
+        let mut login = IsolatedLogin::new(&env).unwrap();
+        crate::store::write_secret_atomic(&claude::credentials_path(&login.env.home, login.env.claude_config_dir.as_deref()), br#"{"claudeAiOauth":{"accessToken":"isolated-fixture"}}"#).unwrap();
+        let credential = login.credentials(Tool::Claude).unwrap();
+        assert_eq!(claude::access_token(&credential.secret).unwrap(), "isolated-fixture");
+        assert_eq!(credential.email, None);
+        // This fixture intentionally cannot access a credential store, including Drop.
+        login.env.claude_live_in_store = false;
     }
 
     #[test]

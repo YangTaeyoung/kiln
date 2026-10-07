@@ -75,14 +75,19 @@ fn security(args: &[&str]) -> Result<Option<String>> {
         .stdin(std::process::Stdio::null())
         .output()
         .context("failed to run /usr/bin/security")?;
-    if out.status.success() {
-        return Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()));
-    }
-    let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    if msg.contains("could not be found") {
+    security_result(args.first().copied().unwrap_or_default(), out.status.success(), out.status.code(), &out.stdout, &out.stderr)
+}
+
+fn security_result(operation: &str, success: bool, code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<Option<String>> {
+    if success { return Ok(Some(String::from_utf8_lossy(stdout).into_owned())); }
+    let msg = String::from_utf8_lossy(stderr).trim().to_string();
+    // security returns errSecItemNotFound (-25300) as exit status 44. Only an
+    // absent item in a lookup/delete is optional; a missing keychain/write is not.
+    if matches!(operation, "find-generic-password" | "delete-generic-password")
+        && code == Some(44) && msg.contains("The specified item could not be found in the keychain.") {
         return Ok(None);
     }
-    bail!("security {} failed: {msg}", args.first().copied().unwrap_or_default())
+    bail!("security {operation} failed: {msg}")
 }
 
 fn trim_newline(s: String) -> String {
@@ -248,6 +253,20 @@ fn set_mode(_path: &Path, _mode: u32) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_missing_items_are_optional_and_failed_writes_never_succeed() {
+        let absent = b"security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.";
+        for operation in ["find-generic-password", "delete-generic-password"] {
+            assert_eq!(security_result(operation, false, Some(44), b"", absent).unwrap(), None);
+            assert!(security_result(operation, false, Some(1), b"", b"A default keychain could not be found.").is_err());
+            assert!(security_result(operation, false, Some(44), b"", b"Keychain could not be found.").is_err());
+            assert!(security_result(operation, false, Some(51), b"", b"User interaction is not allowed.").is_err());
+        }
+        assert!(security_result("add-generic-password", false, Some(44), b"", absent).is_err());
+        assert!(security_result("add-generic-password", false, Some(1), b"", b"A default keychain could not be found.").is_err());
+        assert_eq!(security_result("add-generic-password", true, Some(0), b"", b"").unwrap(), Some(String::new()));
+    }
 
     #[test]
     fn parses_keychain_account_attribute() {

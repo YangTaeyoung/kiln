@@ -883,7 +883,7 @@ mod tests {
         let fixture_dir = d.path().to_string_lossy().replace('\'', "'\\''");
         let binary = d.path().join("login-shutdown-fixture");
         std::fs::write(&binary, format!(
-            "#!/bin/sh\nfixture_dir='{fixture_dir}'\ncase \"$1\" in auth) fixture_tool=claude;; *) fixture_tool=codex;; esac\nprintf '%s\\n' \"$$\" > \"$fixture_dir/$fixture_tool.pid\"\nprintf '%s\\n' \"$HOME\" > \"$fixture_dir/$fixture_tool.home\"\nexec /bin/sleep 60\n"
+            "#!/bin/sh\nfixture_dir='{fixture_dir}'\ncase \"$1\" in auth) fixture_tool=claude;; *) fixture_tool=codex;; esac\nprintf '%s\\n' \"$$\" > \"$fixture_dir/$fixture_tool.pid\"\nprintf '%s\\n' \"$HOME\" > \"$fixture_dir/$fixture_tool.home\"\nprintf '%s\\n' \"$CLAUDE_CONFIG_DIR\" > \"$fixture_dir/$fixture_tool.config\"\nexec /bin/sleep 60\n"
         )).unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
         for tool in Tool::ALL {
@@ -898,7 +898,11 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             let home = PathBuf::from(std::fs::read_to_string(home_file).unwrap().trim());
-            let isolated = home.parent().unwrap().to_path_buf();
+            if name == "claude" { assert_eq!(home, env.home, "Claude must retain the system home for Keychain"); }
+            else { assert!(!home.starts_with(&env.home), "Codex home stays disposable"); }
+            let config = PathBuf::from(std::fs::read_to_string(d.path().join(format!("{name}.config"))).unwrap().trim());
+            let isolated = config.parent().unwrap().to_path_buf();
+            assert!(!isolated.starts_with(d.path()), "login configuration is separate from live files");
             let pid: i32 = std::fs::read_to_string(d.path().join(format!("{name}.pid"))).unwrap().trim().parse().unwrap();
             children.push((pid, isolated));
         }

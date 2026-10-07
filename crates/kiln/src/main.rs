@@ -106,9 +106,7 @@ fn connect() -> anyhow::Result<Client> {
 
 fn main() -> anyhow::Result<()> {
     #[cfg(feature = "updater-test")]
-    isolate_updater_fixture()?;
-    #[cfg(target_os = "macos")]
-    if std::env::current_exe()?.file_name().is_some_and(|n|n=="kiln-status") { return kiln::status_bar::run(); }
+    kiln::isolate_updater_fixture()?;
     let cli = Cli::parse();
     #[cfg(feature = "updater-test")]
     match &cli.cmd {
@@ -267,25 +265,4 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
-}
-
-/// Sparkle relaunches through Launch Services without our launch environment.
-/// Compile the fixture root into test builds so every child/relaunch stays isolated.
-#[cfg(feature = "updater-test")]
-fn isolate_updater_fixture() -> anyhow::Result<()> {
-    use std::path::Path;
-    let root = option_env!("KILN_UPDATER_TEST_ROOT")
-        .ok_or_else(|| anyhow::anyhow!("updater-test requires KILN_UPDATER_TEST_ROOT at build time"))?;
-    let root = Path::new(root).canonicalize()?;
-    anyhow::ensure!(root.starts_with("/private/tmp")
-        && root.file_name().is_some_and(|n| n.to_string_lossy().starts_with("kiln-updater-")),
-        "updater-test root must be a dedicated /tmp/kiln-updater-* directory");
-    std::fs::create_dir_all(root.join("config"))?;
-    // First action in main, before AppKit, logging, or any worker thread starts.
-    unsafe {
-        std::env::set_var("KILN_CONFIG_DIR", root.join("config"));
-        std::env::set_var("KILN_SOCKET", root.join("daemon.sock"));
-        std::env::set_var("SHELL", "/bin/sh");
-    }
-    Ok(())
 }
