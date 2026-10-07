@@ -13,6 +13,11 @@ Check the active user authorization, GitHub account (`gh api user --jq .login`),
 remote, branch, and working tree. Refresh the authoritative remote branch without
 resetting or stashing unrelated work. Commit the reviewed release source.
 
+Check the installed `CFBundleVersion` before choosing the public version,
+including any unpublished review candidate. The public bundle and appcast
+versions must be higher if the owner will update through Sparkle. Do not publish
+the same version as an installed review build and expect it to be offered.
+
 Use a new SemVer in the root `Cargo.toml` `[workspace.package]`. All crates inherit
 it. Update `Cargo.lock`, add concise English release notes under `docs/releases/`,
 and verify the intended version does not already exist as a published tag/release.
