@@ -3,6 +3,13 @@
 Kiln uses Rust and egui. The GUI is a client of the local session daemon; terminal
 ownership does not depend on the lifetime of a particular window.
 
+New macOS and Windows panels use one persistent PTY host per terminal; the daemon
+relays their output and owns emulation and session metadata. Retained native Unix
+panels keep their original daemon parent during updates. Mixed native/hosted
+handover replaces that daemon with the same PID and preserves both descriptor
+and endpoint state. See [local-network access](local-network.md) for macOS
+attribution, existing-panel limitations and isolated verification.
+
 | Component | Responsibility |
 | --- | --- |
 | `crates/kiln` | GUI, workspaces, task navigation, macOS integration |

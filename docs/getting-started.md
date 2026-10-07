@@ -12,7 +12,7 @@ Updates** (shown as **업데이트 확인…** in the current Korean interface),
 update control in **Settings → About**, to check manually. Installation uses
 Sparkle's update dialog. Automatic checks can be disabled in Settings.
 
-The app's interface is currently primarily Korean. Documentation is in English.
+The app UI supports English, Korean, Japanese and Simplified Chinese. Documentation is in English.
 
 ## Open a workspace
 
@@ -35,3 +35,19 @@ return to them. A system reboot or explicitly stopping the daemon is different
 from closing the GUI and can terminate sessions.
 
 Next: [workspaces and agents](workspaces.md) · [Git workflows](git.md).
+
+## Terminal installation
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | sh
+```
+
+The installer downloads the latest stable Apple Silicon app, checks the release
+checksum, Developer ID signature, bundle identity and macOS distribution approval,
+and installs it in `/Applications`. It leaves an existing app in place; use
+**Kiln → Check for Updates** for upgrades, keeping running sessions intact.
+To choose another installation folder:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | KILN_INSTALL_DIR="$HOME/Applications" sh
+```

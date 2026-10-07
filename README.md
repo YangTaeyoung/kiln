@@ -41,9 +41,16 @@ libraries—and keep the whole task in view.
 
 ### Start in a minute
 
-1. Download the Apple Silicon build from [Releases](https://github.com/YangTaeyoung/kiln/releases/latest).
-2. Extract it and move **Kiln.app** to **Applications**.
-3. Open your project folder. Use a terminal, or start a task with Codex or Claude.
+Install the latest notarized build with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | sh
+```
+
+Open **Kiln** from Applications, choose your project folder, and start a terminal
+or a task with Codex or Claude. Prefer a download? Get the app from
+[Releases](https://github.com/YangTaeyoung/kiln/releases/latest) and move it to Applications.
+Already installed? Use **Kiln → Check for Updates**.
 
 Requires macOS 11+ on Apple Silicon. Codex, Claude, and `gh` are external tools;
 install and authenticate the ones you use. The app UI supports Korean, English, Japanese and Simplified Chinese.

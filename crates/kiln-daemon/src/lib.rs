@@ -4,6 +4,8 @@
 pub mod client;
 pub mod emu;
 pub mod images;
+#[cfg(target_os = "macos")]
+pub mod macos_responsibility;
 pub mod osc;
 pub mod procinfo;
 pub mod pty;

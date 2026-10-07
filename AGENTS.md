@@ -22,6 +22,7 @@ the user's shells, agents, builds, or servers.
   old/new fixtures, cancellation, relaunch and session survival checks.
 - [0.1.9 release verification](docs/maintainers/0.1.9-status.md) — schema editing, file-language assistance and distribution evidence.
 - [0.1.11 release verification](docs/maintainers/0.1.11-status.md) — pane layout, remote files, browser sign-in, table dialog and terminal recovery.
+- [0.1.13 release verification](docs/maintainers/0.1.13-status.md) — macOS hosted terminal ownership, mixed-session migration and failure recovery.
 - [0.1.12 release verification](docs/maintainers/0.1.12-status.md) — local-network permission metadata, distinct companion identity and Claude Keychain home.
 - [0.1.8 release verification](docs/maintainers/0.1.8-status.md) — SQL completion, connected metadata, editor regressions and distribution evidence.
 - [0.1.7 release verification](docs/maintainers/0.1.7-status.md) — database inspector, terminal palette queries, ordinal-free task names and published artifact verification.

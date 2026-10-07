@@ -132,6 +132,10 @@ fn main() -> anyhow::Result<()> {
             app::run(cli.path)
         }
         Some(Cmd::Daemon { foreground: _, restore, socket, wait_pid }) => {
+            #[cfg(target_os = "macos")]
+            if let Err(error) = kiln_daemon::macos_responsibility::ensure_own_responsibility() {
+                eprintln!("Kiln background identity: {error:#}");
+            }
             let socket = socket.unwrap_or_else(kiln_proto::socket_name);
             #[cfg(target_os = "macos")]
             if socket == kiln_proto::socket_name() { kiln::status_bar::ensure_running(); }
@@ -146,6 +150,10 @@ fn main() -> anyhow::Result<()> {
             kiln_daemon::server::run(kiln_daemon::server::RunOptions { socket, restore, wait_pid })
         }
         Some(Cmd::PtyHost { endpoint, session, spec }) => {
+            #[cfg(target_os = "macos")]
+            if let Err(error) = kiln_daemon::macos_responsibility::ensure_own_responsibility() {
+                eprintln!("Kiln background identity: {error:#}");
+            }
             use base64::Engine;
             let bytes = base64::engine::general_purpose::STANDARD.decode(spec)?;
             let spec: SpawnSpec = postcard::from_bytes(&bytes)?;

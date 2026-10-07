@@ -28,6 +28,8 @@ pub struct Session {
     input: Sender<Vec<u8>>,
     info: Mutex<SessionInfo>,
     generation: AtomicU64,
+    reader_active: AtomicBool,
+    cancelled: AtomicBool,
     images: Mutex<SessionImages>,
     telemetry: Mutex<crate::shell::Tracker>,
 }
@@ -88,6 +90,9 @@ pub struct Daemon {
     next_session: AtomicU64,
     next_client: AtomicU64,
     upgrading: AtomicBool,
+    session_changes: Mutex<()>,
+    reader_lifecycle: Mutex<()>,
+    unreachable_hosts: Mutex<Vec<HostRecord>>,
     readers_running: AtomicUsize,
     socket: String,
     cell_w: AtomicU32,
@@ -111,6 +116,17 @@ struct UpgradeStateV2 {
     base: UpgradeState,
     images: Vec<SavedImages>,
 }
+
+/// Same-PID migration can contain retained native PTYs and new hosted PTYs.
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
+struct UpgradeStateV3 {
+    base: UpgradeState,
+    hosted: Vec<SavedHosted>,
+    images: Vec<SavedImages>,
+}
+#[cfg(unix)]
+const STATE_MAGIC_V3: &[u8] = b"KILNUP3\n";
 
 #[derive(Serialize, Deserialize, Default)]
 struct SavedImages {
@@ -174,6 +190,9 @@ impl Daemon {
             next_session: AtomicU64::new(1),
             next_client: AtomicU64::new(1),
             upgrading: AtomicBool::new(false),
+            session_changes: Mutex::new(()),
+            reader_lifecycle: Mutex::new(()),
+            unreachable_hosts: Mutex::new(Vec::new()),
             readers_running: AtomicUsize::new(0),
             socket,
             cell_w: AtomicU32::new(8),
@@ -207,6 +226,10 @@ impl Daemon {
     }
 
     fn create(self: &Arc<Self>, mut spec: SpawnSpec) -> std::io::Result<SessionId> {
+        let _change = self.session_changes.lock();
+        if self.upgrading.load(Ordering::SeqCst) {
+            return Err(std::io::Error::other("daemon is upgrading; retry after reconnecting"));
+        }
         let id = self.next_session.fetch_add(1, Ordering::SeqCst);
         if spec.cols == 0 {
             spec.cols = 80;
@@ -244,7 +267,7 @@ impl Daemon {
         let (tx, rx) = unbounded::<Vec<u8>>();
         let mut writer = pty.writer()?;
         let reader = pty.reader()?;
-        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()) });
+        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), reader_active: AtomicBool::new(false), cancelled: AtomicBool::new(false), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()) });
         self.sessions.write().insert(id, sess.clone());
         std::thread::Builder::new().name(format!("pty-w-{id}")).spawn(move || {
             while let Ok(data) = rx.recv() {
@@ -256,6 +279,7 @@ impl Daemon {
         })?;
         if sess.info.lock().exited.is_none() {
             let d = self.clone();
+            sess.reader_active.store(true, Ordering::SeqCst);
             self.readers_running.fetch_add(1, Ordering::SeqCst);
             std::thread::Builder::new().name(format!("pty-r-{id}")).spawn(move || d.read_loop(sess, reader))?;
         }
@@ -270,7 +294,7 @@ impl Daemon {
         let mut img_scan = ImageScanner::default();
         let mut eof = false;
         loop {
-            if self.upgrading.load(Ordering::SeqCst) {
+            if self.upgrading.load(Ordering::SeqCst) && sess.pty.host().is_none() {
                 break;
             }
             let (sync_events, timeout_ms) = {
@@ -309,8 +333,15 @@ impl Daemon {
                 }
             }
         }
-        self.readers_running.fetch_sub(1, Ordering::SeqCst);
         if !eof {
+            drop(reader);
+            { let _readers = self.reader_lifecycle.lock();
+                sess.reader_active.store(false, Ordering::SeqCst);
+                self.readers_running.fetch_sub(1, Ordering::SeqCst);
+            }
+            // A detach can arrive after a timed-out upgrade was cancelled.
+            // Recover that late reader without creating duplicate consumers.
+            if !self.upgrading.load(Ordering::SeqCst) { self.resume_reader(&sess); }
             return;
         }
         let final_events = sess.emu.lock().finish_sync();
@@ -340,14 +371,16 @@ impl Daemon {
         self.broadcast(ServerMsg::SessionExited { session: sess.id, code: Some(code) });
         self.wake_attached(sess.id);
         self.save_registry();
+        drop(reader);
+        { let _readers = self.reader_lifecycle.lock();
+            sess.reader_active.store(false, Ordering::SeqCst);
+            self.readers_running.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 
     /// 호스트 방식 세션 목록을 파일에 남긴다(데몬이 비정상 종료되면 다음 데몬이 입양한다).
     fn save_registry(&self) {
-        if !crate::ptyhost::host_mode() {
-            return;
-        }
-        let records: Vec<HostRecord> = self
+        let mut records: Vec<HostRecord> = self
             .sessions
             .read()
             .values()
@@ -360,6 +393,7 @@ impl Daemon {
                 Some(HostRecord { session: s.id, endpoint: h.endpoint.clone(), name: i.name.clone(), workspace: i.workspace.clone(), cwd: i.cwd.clone(), created_unix: i.created_unix })
             })
             .collect();
+        records.extend(self.unreachable_hosts.lock().iter().cloned());
         crate::ptyhost::save_registry(&self.socket, &records);
     }
 
@@ -367,8 +401,11 @@ impl Daemon {
     fn adopt_orphans(self: &Arc<Self>) {
         let mut max_id = 0;
         for r in crate::ptyhost::load_registry(&self.socket) {
-            let Ok(h) = HostPty::attach(&r.endpoint, true) else { continue };
             max_id = max_id.max(r.session);
+            let h = match HostPty::attach(&r.endpoint, true) {
+                Ok(h) => h,
+                Err(_) => { self.unreachable_hosts.lock().push(r); continue; }
+            };
             let info = SessionInfo {
                 id: r.session,
                 pid: h.pid(),
@@ -504,7 +541,7 @@ impl Daemon {
         loop {
             std::thread::sleep(Duration::from_millis(1000));
             if self.upgrading.load(Ordering::SeqCst) {
-                return;
+                continue;
             }
             let sessions: Vec<Arc<Session>> = self.sessions.read().values().cloned().collect();
             for s in sessions {
@@ -655,9 +692,13 @@ impl Daemon {
                 reply(ServerMsg::SearchResult { req, found: found.unwrap_or(false) });
             }
             ClientMsg::Kill { session } => {
+                let _change = self.session_changes.lock();
+                if self.upgrading.load(Ordering::SeqCst) { return true; }
                 let removed = self.sessions.write().remove(&session);
+                self.unreachable_hosts.lock().retain(|r| r.session != session);
                 self.save_registry();
                 if let Some(s) = removed {
+                    s.cancelled.store(true, Ordering::SeqCst);
                     if s.info.lock().exited.is_none() {
                         s.pty.kill();
                         let pty_session = s.clone();
@@ -711,7 +752,10 @@ impl Daemon {
                 }
             }
             ClientMsg::Shutdown => {
+                let _change = self.session_changes.lock();
+                if self.upgrading.load(Ordering::SeqCst) { return true; }
                 for s in self.sessions.read().values() {
+                    s.cancelled.store(true, Ordering::SeqCst);
                     s.pty.kill();
                 }
                 let _ = std::fs::remove_file(&self.socket);
@@ -770,58 +814,132 @@ impl Daemon {
 
     #[cfg(unix)]
     fn upgrade(self: Arc<Self>, exe: &str) -> anyhow::Result<()> {
-        if self.sessions.read().values().any(|s| s.pty.host().is_some()) || crate::ptyhost::host_mode() {
-            return self.upgrade_hosted(exe);
+        let _change = self.session_changes.lock();
+        anyhow::ensure!(!self.upgrading.load(Ordering::SeqCst), "upgrade already in progress");
+        // A retained native child must keep this parent, even when new sessions
+        // use hosts. Routing on host_mode alone silently discarded native PTYs.
+        let has_native = self.sessions.read().values().any(|s| s.pty.native().is_some());
+        if !has_native && (crate::ptyhost::host_mode() || self.sessions.read().values().any(|s| s.pty.host().is_some())) {
+            return self.clone().upgrade_hosted(exe);
         }
         anyhow::ensure!(std::path::Path::new(exe).exists(), "{exe} not found");
         let listener_fd = LISTENER_FD.load(Ordering::SeqCst);
         anyhow::ensure!(listener_fd >= 0, "listener fd unknown");
         self.broadcast(ServerMsg::Upgrading);
-        self.upgrading.store(true, Ordering::SeqCst);
+        { let _readers = self.reader_lifecycle.lock(); self.upgrading.store(true, Ordering::SeqCst); }
+        let sessions: Vec<Arc<Session>> = self.sessions.read().values().cloned().collect();
+        if let Err(error) = self.pause_readers(&sessions) {
+            self.resume_after_failed_upgrade(&sessions);
+            return Err(error);
+        }
+        let path = std::path::Path::new(&self.socket).with_file_name(format!("upgrade-{}.state", std::process::id()));
+        let attempt = (|| -> anyhow::Result<()> {
+            let mut saved = Vec::new();
+            let mut hosted = Vec::new();
+            let mut images = Vec::new();
+            for s in &sessions {
+                let dump = s.emu.lock().dump();
+                if let Some(native) = s.pty.native() {
+                    let fd = native.raw_fd();
+                    crate::pty::set_cloexec(fd, false)?;
+                    saved.push(SavedSession { info: s.info.lock().clone(), fd, pid: s.pty.pid() as i32, dump });
+                } else if let Some(host) = s.pty.host() {
+                    hosted.push(SavedHosted { info: { let mut i = s.info.lock().clone(); i.exited = i.exited.or(s.pty.try_wait()); i }, endpoint: host.endpoint.clone(), dump });
+                }
+                images.push(s.images.lock().save(s.id));
+            }
+            crate::pty::set_cloexec(listener_fd, false)?;
+            let state = UpgradeStateV3 { base: UpgradeState { next_session: self.next_session.load(Ordering::SeqCst), listener_fd, sessions: saved }, hosted, images };
+            let mut bytes = STATE_MAGIC_V3.to_vec(); bytes.extend(postcard::to_stdvec(&state)?);
+            std::fs::write(&path, bytes)?;
+            self.clients.lock().clear();
+            log::info!("exec upgrade preserving {} sessions", sessions.len());
+            Err(exec(exe, &["daemon", "--foreground", "--socket", &self.socket, "--restore", &path.to_string_lossy()]).into())
+        })();
+        // Restore all paused resources on any save/FD/exec failure, not only exec.
+        let _ = std::fs::remove_file(&path);
+        let _ = crate::pty::set_cloexec(listener_fd, true);
+        self.resume_after_failed_upgrade(&sessions);
+        attempt
+    }
+
+    fn pause_readers(&self, sessions: &[Arc<Session>]) -> anyhow::Result<()> {
+        for s in sessions {
+            if let Some(host) = s.pty.host() && s.info.lock().exited.is_none() {
+                host.pause_input();
+                let s = s.clone();
+                // A legacy host can be blocked writing to a child. Never wait
+                // for its control socket while holding the lifecycle lock.
+                std::thread::spawn(move || s.pty.host().unwrap().detach());
+            }
+        }
         let deadline = Instant::now() + Duration::from_secs(3);
-        while self.readers_running.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+        while self.readers_running.load(Ordering::SeqCst) > 0 {
+            anyhow::ensure!(Instant::now() < deadline, "terminal host did not pause; upgrade cancelled, sessions retained");
             std::thread::sleep(Duration::from_millis(10));
         }
-        let mut saved = Vec::new();
-        let mut images = Vec::new();
-        let sessions: Vec<Arc<Session>> = self.sessions.read().values().cloned().collect();
-        for s in &sessions {
-            let dump = s.emu.lock().dump();
-            let fd = s.pty.native().map(|p| p.raw_fd()).unwrap_or(-1);
-            crate::pty::set_cloexec(fd, false)?;
-            saved.push(SavedSession { info: s.info.lock().clone(), fd, pid: s.pty.pid() as i32, dump });
-            images.push(s.images.lock().save(s.id));
+        Ok(())
+    }
+
+    fn resume_after_failed_upgrade(self: &Arc<Self>, sessions: &[Arc<Session>]) {
+        { let _readers = self.reader_lifecycle.lock(); self.upgrading.store(false, Ordering::SeqCst); }
+        for s in sessions {
+            #[cfg(unix)]
+            if let Some(native) = s.pty.native() { let _ = crate::pty::set_cloexec(native.raw_fd(), true); }
+            self.resume_reader(s);
         }
-        crate::pty::set_cloexec(listener_fd, false)?;
-        let n = saved.len();
-        let state = UpgradeStateV2 { base: UpgradeState { next_session: self.next_session.load(Ordering::SeqCst), listener_fd, sessions: saved }, images };
-        let path = std::path::Path::new(&self.socket).with_file_name(format!("upgrade-{}.state", std::process::id()));
-        let mut bytes = STATE_MAGIC_V2.to_vec();
-        bytes.extend(postcard::to_stdvec(&state)?);
-        std::fs::write(&path, bytes)?;
-        // 클라이언트 연결을 닫아 재연결을 유도한다.
-        self.clients.lock().clear();
-        log::info!("exec {exe} for upgrade with {n} sessions");
-        let err = exec(exe, &["daemon", "--foreground", "--restore", &path.to_string_lossy()]);
-        // exec 실패: 원래 상태로 되돌린다.
-        let _ = std::fs::remove_file(&path);
-        self.upgrading.store(false, Ordering::SeqCst);
-        for s in sessions.iter().filter(|s| s.info.lock().exited.is_none()) {
-            if let Some(p) = s.pty.native() {
-                let _ = crate::pty::set_cloexec(p.raw_fd(), true);
-            }
-            let reader = s.pty.reader()?;
-            let d = self.clone();
-            let s2 = s.clone();
+    }
+
+    fn resume_reader(self: &Arc<Self>, s: &Arc<Session>) {
+        {
+            let _readers = self.reader_lifecycle.lock();
+            if self.upgrading.load(Ordering::SeqCst) || s.cancelled.load(Ordering::SeqCst) || s.info.lock().exited.is_some() || s.reader_active.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() { return; }
+            // Count the reservation, including an in-flight host reconnect.
             self.readers_running.fetch_add(1, Ordering::SeqCst);
-            std::thread::spawn(move || d.read_loop(s2, reader));
         }
-        Err(anyhow::anyhow!("exec failed: {err}"))
+        let d = self.clone(); let s = s.clone();
+        // Reconnection is independent of the lifecycle lock. A broken host
+        // must not prevent Ping/Kill/Shutdown or recovering other sessions.
+        std::thread::spawn(move || {
+            #[cfg(unix)]
+            let reader = if let Some(p) = s.pty.native() {
+                let _ = crate::pty::set_cloexec(p.raw_fd(), true);
+                s.pty.reader()
+            } else { s.pty.host().unwrap().reconnect_reader().map(crate::ptyhost::AnyReader::Host) };
+            #[cfg(windows)]
+            let reader = s.pty.host().unwrap().reconnect_reader().map(crate::ptyhost::AnyReader::Host);
+            match reader {
+                Ok(reader) => {
+                    if s.cancelled.load(Ordering::SeqCst) {
+                        // Kill may have targeted the detached writer. The fresh
+                        // connection must carry it too, never revive a removed pane.
+                        s.pty.kill();
+                        drop(reader);
+                        let _readers = d.reader_lifecycle.lock();
+                        s.reader_active.store(false, Ordering::SeqCst);
+                        d.readers_running.fetch_sub(1, Ordering::SeqCst);
+                        return;
+                    }
+                    // A second upgrade may already be waiting for this reserved
+                    // reader. Detach the new attachment before consuming it.
+                    if d.upgrading.load(Ordering::SeqCst) { if let Some(h) = s.pty.host() { h.detach(); } }
+                    d.read_loop(s, reader);
+                }
+                Err(e) => {
+                    { let _readers = d.reader_lifecycle.lock();
+                        s.reader_active.store(false, Ordering::SeqCst);
+                        d.readers_running.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    log::error!("session {}: could not resume reader after failed upgrade: {e}", s.id);
+                }
+            }
+        });
     }
 
     #[cfg(windows)]
     fn upgrade(self: Arc<Self>, exe: &str) -> anyhow::Result<()> {
-        self.upgrade_hosted(exe)
+        let _change = self.session_changes.lock();
+        self.clone().upgrade_hosted(exe)
     }
 
     /// 호스트 방식 업그레이드: 호스트에서 떨어진 뒤 화면 상태를 저장하고, 새 데몬을 띄우고 종료한다.
@@ -833,31 +951,27 @@ impl Daemon {
         #[cfg(unix)]
         let exe_run = std::path::PathBuf::from(exe);
         self.broadcast(ServerMsg::Upgrading);
-        self.upgrading.store(true, Ordering::SeqCst);
+        { let _readers = self.reader_lifecycle.lock(); self.upgrading.store(true, Ordering::SeqCst); }
         let sessions: Vec<Arc<Session>> = self.sessions.read().values().cloned().collect();
-        for s in &sessions {
-            if let Some(h) = s.pty.host() {
-                h.detach();
-            }
+        if let Err(error) = self.pause_readers(&sessions) {
+            self.resume_after_failed_upgrade(&sessions);
+            return Err(error);
         }
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while self.readers_running.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let marker = crate::ptyhost::handover_marker(&self.socket);
+        let path = std::env::temp_dir().join(format!("kiln-upgrade-{}.state", std::process::id()));
+        let attempt = (|| -> anyhow::Result<()> {
         let mut saved = Vec::new();
         let mut images = Vec::new();
         for s in &sessions {
             let Some(h) = s.pty.host() else { continue };
-            saved.push(SavedHosted { info: s.info.lock().clone(), endpoint: h.endpoint.clone(), dump: s.emu.lock().dump() });
+            saved.push(SavedHosted { info: { let mut i = s.info.lock().clone(); i.exited = i.exited.or(s.pty.try_wait()); i }, endpoint: h.endpoint.clone(), dump: s.emu.lock().dump() });
             images.push(s.images.lock().save(s.id));
         }
         let state = HostedState { next_session: self.next_session.load(Ordering::SeqCst), sessions: saved, images };
-        let marker = crate::ptyhost::handover_marker(&self.socket);
         if let Some(dir) = marker.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(&marker, std::process::id().to_string());
-        let path = std::env::temp_dir().join(format!("kiln-upgrade-{}.state", std::process::id()));
+        std::fs::write(&marker, std::process::id().to_string())?;
         let mut bytes = STATE_MAGIC_HOSTED.to_vec();
         bytes.extend(postcard::to_stdvec(&state)?);
         std::fs::write(&path, bytes)?;
@@ -868,14 +982,22 @@ impl Daemon {
         if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(crate::client::daemon_log_path(&self.socket)) {
             cmd.stderr(f);
         }
-        let spawned = crate::client::spawn_detached(&mut cmd);
-        log::info!("upgrade: handing {} sessions to {} ({:?})", state.sessions.len(), exe_run.display(), spawned.as_ref().err());
+        crate::client::spawn_detached(&mut cmd)?;
+        log::info!("upgrade: handing {} hosted sessions to new daemon", state.sessions.len());
+            Ok(())
+        })();
+        if let Err(error) = attempt {
+            let _ = std::fs::remove_file(&marker);
+            let _ = std::fs::remove_file(&path);
+            self.resume_after_failed_upgrade(&sessions);
+            return Err(error);
+        }
         // 새 데몬을 못 띄워도 호스트는 살아 있고 레지스트리가 남아 있으므로 다음 데몬이 입양한다.
         self.clients.lock().clear();
         std::thread::sleep(Duration::from_millis(100));
         #[cfg(unix)]
         let _ = std::fs::remove_file(&self.socket);
-        std::process::exit(if spawned.is_ok() { 0 } else { 1 });
+        std::process::exit(0);
     }
 }
 
@@ -1001,22 +1123,48 @@ fn acquire_instance_lock(socket: &str) -> anyhow::Result<std::fs::File> {
     }
 }
 
+fn retain_unrestored_records(daemon: &Arc<Daemon>, restored: &[SessionId]) {
+    let mut unreachable = daemon.unreachable_hosts.lock();
+    for record in crate::ptyhost::load_registry(&daemon.socket) {
+        if !restored.contains(&record.session) && !unreachable.iter().any(|r| r.session == record.session) {
+            daemon.next_session.fetch_max(record.session + 1, Ordering::SeqCst);
+            unreachable.push(record);
+        }
+    }
+}
+
+fn restore_host_session(daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut Vec<SavedImages>) -> anyhow::Result<()> {
+    let id = s.info.id;
+    let host = if let Some(code) = s.info.exited {
+        HostPty::finished(s.endpoint.clone(), s.info.pid, code)
+    } else {
+        match HostPty::attach(&s.endpoint, false) {
+            Ok(h) => { s.info.exited = h.try_wait(); h },
+            Err(e) => {
+                // A vanished optional host must never destroy inherited native
+                // masters or discard another running host's recovery record.
+                log::warn!("session {id}: host {} unreachable: {e}; retaining recovery record", s.endpoint);
+                daemon.unreachable_hosts.lock().push(HostRecord { session: id, endpoint: s.endpoint,
+                    name: s.info.name, workspace: s.info.workspace, cwd: s.info.cwd,
+                    created_unix: s.info.created_unix });
+                return Ok(());
+            }
+        }
+    };
+    daemon.install(id, AnyPty::Host(host), Emu::restore(s.dump), s.info)?;
+    if let (Some(sess), Some(pos)) = (daemon.session(id), images.iter().position(|i| i.session == id)) {
+        sess.images.lock().load(images.swap_remove(pos));
+    }
+    Ok(())
+}
+
 fn restore_hosted(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<()> {
     let state: HostedState = postcard::from_bytes(bytes)?;
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
     let mut images = state.images;
-    for s in state.sessions {
-        let id = s.info.id;
-        match HostPty::attach(&s.endpoint, false) {
-            Ok(h) => {
-                daemon.install(id, AnyPty::Host(h), Emu::restore(s.dump), s.info)?;
-                if let (Some(sess), Some(pos)) = (daemon.session(id), images.iter().position(|i| i.session == id)) {
-                    sess.images.lock().load(images.swap_remove(pos));
-                }
-            }
-            Err(e) => log::warn!("session {id}: host {} unreachable: {e}", s.endpoint),
-        }
-    }
+    let restored: Vec<_> = state.sessions.iter().map(|s| s.info.id).collect();
+    retain_unrestored_records(daemon, &restored);
+    for s in state.sessions { restore_host_session(daemon, s, &mut images)?; }
     daemon.save_registry();
     Ok(())
 }
@@ -1096,14 +1244,16 @@ pub fn run(opts: RunOptions) -> anyhow::Result<()> {
 #[cfg(unix)]
 fn restore(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<Listener> {
     use std::os::fd::FromRawFd;
-    let (state, mut images) = match bytes.strip_prefix(STATE_MAGIC_V2) {
-        Some(rest) => {
-            let v2: UpgradeStateV2 = postcard::from_bytes(rest)?;
-            (v2.base, v2.images)
-        }
-        None => (postcard::from_bytes::<UpgradeState>(&bytes)?, Vec::new()),
-    };
+    let (state, mut images, hosted) = if let Some(rest) = bytes.strip_prefix(STATE_MAGIC_V3) {
+        let v3: UpgradeStateV3 = postcard::from_bytes(rest)?;
+        (v3.base, v3.images, v3.hosted)
+    } else if let Some(rest) = bytes.strip_prefix(STATE_MAGIC_V2) {
+        let v2: UpgradeStateV2 = postcard::from_bytes(rest)?;
+        (v2.base, v2.images, Vec::new())
+    } else { (postcard::from_bytes::<UpgradeState>(bytes)?, Vec::new(), Vec::new()) };
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
+    let restored: Vec<_> = state.sessions.iter().map(|s| s.info.id).chain(hosted.iter().map(|s| s.info.id)).collect();
+    retain_unrestored_records(daemon, &restored);
     for s in state.sessions {
         let pty = AnyPty::Native(Pty::from_raw(s.fd, s.pid)?);
         let emu = Emu::restore(s.dump);
@@ -1113,6 +1263,8 @@ fn restore(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<Listener> {
             sess.images.lock().load(images.swap_remove(pos));
         }
     }
+    for s in hosted { restore_host_session(daemon, s, &mut images)?; }
+    daemon.save_registry();
     crate::pty::set_cloexec(state.listener_fd, true)?;
     // SAFETY: 이전 프로세스에서 상속한 리스닝 소켓 fd.
     let l = unsafe { std::os::unix::net::UnixListener::from_raw_fd(state.listener_fd) };

@@ -64,3 +64,8 @@ objc2-foundation = { version = "0.2.2", default-features = false, features = ["N
 name = "native_ime"
 path = "tests/native_ime.rs"
 harness = false
+
+[[test]]
+name = "mixed_upgrade"
+path = "tests/mixed_upgrade.rs"
+harness = false

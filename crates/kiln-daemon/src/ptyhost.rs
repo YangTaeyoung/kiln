@@ -2,7 +2,7 @@
 //!
 //! 데몬은 호스트에 로컬 소켓으로 붙어 입출력을 중계한다. 데몬이 떨어져 있는 동안 호스트는 출력을
 //! 버퍼에 모아 두고, 새 데몬이 붙으면 넘겨준다. 그래서 데몬을 교체하거나 데몬이 죽어도 셸과
-//! 에이전트는 계속 돈다. Windows 는 항상 이 방식을 쓰고, Unix 는 `KILN_PTY_HOST=1` 일 때 쓴다.
+//! 에이전트는 계속 돈다. macOS와 Windows는 기본으로 이 방식을 쓴다. 다른 Unix는 `KILN_PTY_HOST=1`일 때 쓴다.
 
 use crate::pty::{Pty, PtyReader, ReadResult};
 use crate::transport::{self, Conn};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 /// 호스트 프로토콜 버전. 오래된 호스트와도 대화해야 하므로 변형은 뒤에만 추가한다.
@@ -92,7 +92,16 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
     let pty = Arc::new(Pty::spawn(&spec, session)?);
     let child_pid = pty.pid();
     let shared = Arc::new(Mutex::new(Shared { writer: None, pending: VecDeque::new(), history: VecDeque::new(), exit: None, exit_delivered: false, attachment: 0 }));
-    let pty_writer = Arc::new(Mutex::new(pty.writer()?));
+    // A child may stop reading stdin. Keep control messages (detach/kill/resize)
+    // independent of that blocking PTY write, as the daemon already does.
+    let (input, queued) = crossbeam_channel::unbounded::<Vec<u8>>();
+    let mut pty_writer = pty.writer()?;
+    std::thread::spawn(move || {
+        while let Ok(data) = queued.recv() {
+            if pty_writer.write_all(&data).is_err() { break; }
+            let _ = pty_writer.flush();
+        }
+    });
 
     // PTY 출력 → 데몬(또는 버퍼).
     {
@@ -213,19 +222,20 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
                 send(&mut w, &FromHost::Exit(code));
                 s.exit_delivered = w.is_some();
             }
+            // A successor must see an unchanged foreground job too. The periodic
+            // sender only emits changes, so each attachment needs a baseline.
+            send(&mut w, &FromHost::FgPid(pty.fg_pid().unwrap_or(0)));
             s.writer = w;
             s.attachment
         };
         let shared2 = shared.clone();
         let pty = pty.clone();
-        let pty_writer = pty_writer.clone();
+        let input = input.clone();
         std::thread::spawn(move || {
             while let Ok(Some(m)) = read_msg::<_, ToHost>(&mut reader) {
                 match m {
                     ToHost::Input(d) => {
-                        let mut w = pty_writer.lock();
-                        let _ = w.write_all(&d);
-                        let _ = w.flush();
+                        if input.send(d).is_err() { break; }
                     }
                     ToHost::Resize { cols, rows } => {
                         let _ = pty.resize(cols, rows);
@@ -255,6 +265,8 @@ pub struct HostPty {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     reader: Mutex<Option<Box<dyn Read + Send>>>,
     shutdown: Option<transport::Shutdown>,
+    input_ready: Arc<AtomicBool>,
+    input_closed: Arc<AtomicBool>,
     child_pid: u32,
     pub host_pid: u32,
     exit: Arc<Mutex<Option<i32>>>,
@@ -270,6 +282,12 @@ impl HostPty {
         let mut cmd = std::process::Command::new(exe);
         cmd.args(["pty-host", "--endpoint", &endpoint, "--session", &session.to_string(), "--spec", &spec_b64]);
         cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        // Startup identity failures must be diagnosable for hosted PTYs too.
+        // Do not log the encoded spawn spec or the terminal's environment.
+        if let Ok(log) = std::fs::OpenOptions::new().create(true).append(true)
+            .open(crate::client::daemon_log_path(daemon_socket)) {
+            cmd.stderr(log);
+        }
         crate::client::spawn_detached(&mut cmd)?;
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -294,11 +312,23 @@ impl HostPty {
             writer: Arc::new(Mutex::new(writer)),
             reader: Mutex::new(Some(reader)),
             shutdown,
+            input_ready: Arc::new(AtomicBool::new(true)),
+            input_closed: Arc::new(AtomicBool::new(exited.is_some())),
             child_pid,
             host_pid,
             exit: Arc::new(Mutex::new(exited)),
             fg: Arc::new(AtomicU32::new(0)),
         })
+    }
+
+    /// A completed session no longer needs a live host endpoint; retain its
+    /// screen and exit status through upgrades without resurrecting a process.
+    pub fn finished(endpoint: String, child_pid: u32, code: i32) -> Self {
+        Self { endpoint, writer: Arc::new(Mutex::new(Box::new(io::sink()))),
+            reader: Mutex::new(Some(Box::new(io::empty()))), shutdown: None,
+            input_ready: Arc::new(AtomicBool::new(false)), input_closed: Arc::new(AtomicBool::new(true)),
+            child_pid, host_pid: 0, exit: Arc::new(Mutex::new(Some(code))),
+            fg: Arc::new(AtomicU32::new(0)) }
     }
 
     fn send(&self, m: &ToHost) -> io::Result<()> {
@@ -318,11 +348,33 @@ impl HostPty {
                 if tx.send(message).is_err() { break; }
             }
         })?;
-        Ok(HostReader { messages, decoder: Some(decoder), shutdown: self.shutdown.clone(), exit: self.exit.clone(), fg: self.fg.clone(), pending: Vec::new(), pos: 0 })
+        Ok(HostReader { messages, decoder: Some(decoder), shutdown: self.shutdown.clone(), exit: self.exit.clone(), fg: self.fg.clone(), input_ready: self.input_ready.clone(), input_closed: self.input_closed.clone(), pending: Vec::new(), pos: 0 })
+    }
+
+    /// Resume a paused host after a failed daemon exec. Existing input writers
+    /// keep their Arc; replace its connection and share the old exit/foreground
+    /// state with the fresh decoder rather than abandoning those handles.
+    pub fn reconnect_reader(&self) -> io::Result<HostReader> {
+        let replacement = Self::attach(&self.endpoint, false)?;
+        let mut reader = replacement.reader()?;
+        reader.exit = self.exit.clone();
+        reader.fg = self.fg.clone();
+        reader.input_ready = self.input_ready.clone();
+        reader.input_closed = self.input_closed.clone();
+        {
+            let mut writer = self.writer.lock();
+            std::mem::swap(&mut *writer, &mut *replacement.writer.lock());
+            *self.exit.lock() = *replacement.exit.lock();
+            if self.exit.lock().is_some() { self.input_closed.store(true, Ordering::SeqCst); }
+            // Publish readiness with the replacement writer. A delayed Detach
+            // cannot clear it and then be overwritten by this worker.
+            self.input_ready.store(true, Ordering::SeqCst);
+        }
+        Ok(reader)
     }
 
     pub fn writer(&self) -> io::Result<Box<dyn Write + Send>> {
-        Ok(Box::new(HostWriter { inner: self.writer.clone() }))
+        Ok(Box::new(HostWriter { inner: self.writer.clone(), ready: self.input_ready.clone(), closed: self.input_closed.clone() }))
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
@@ -338,11 +390,35 @@ impl HostPty {
     }
 
     pub fn kill(&self) {
-        let _ = self.send(&ToHost::Kill);
+        self.input_closed.store(true, Ordering::SeqCst);
+        #[cfg(unix)]
+        {
+            // Closing is independent of a detached or input-blocked writer.
+            // Attach through a bounded control connection, including when a
+            // late Detach races with cancellation before recovery is reserved.
+            let terminate = || -> io::Result<()> {
+                let mut stream = std::os::unix::net::UnixStream::connect(&self.endpoint)?;
+                stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+                stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+                write_msg(&mut stream, &ToHost::Attach { replay: false })?;
+                let hello = read_msg::<_, FromHost>(&mut stream)?;
+                if !matches!(hello, Some(FromHost::Hello { .. })) { return Err(io::Error::other("host closed before termination")); }
+                write_msg(&mut stream, &ToHost::Kill)
+            };
+            if let Err(e) = terminate() { log::warn!("PTY host termination failed: {e}"); }
+        }
+        #[cfg(windows)]
+        { let _ = self.send(&ToHost::Kill); }
     }
 
+    pub fn pause_input(&self) { self.input_ready.store(false, Ordering::SeqCst); }
+
     pub fn detach(&self) {
-        let _ = self.send(&ToHost::Detach);
+        let mut writer = self.writer.lock();
+        // A delayed detach may acquire the replacement writer after rollback.
+        // Stop input under that same lock so it cannot be sent behind Detach.
+        self.input_ready.store(false, Ordering::SeqCst);
+        let _ = write_msg(&mut *writer, &ToHost::Detach);
     }
 
     pub fn fg_pid(&self) -> Option<u32> {
@@ -355,12 +431,21 @@ impl HostPty {
 
 struct HostWriter {
     inner: Arc<Mutex<Box<dyn Write + Send>>>,
+    ready: Arc<AtomicBool>,
+    closed: Arc<AtomicBool>,
 }
 
 impl Write for HostWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        write_msg(&mut *self.inner.lock(), &ToHost::Input(buf.to_vec()))?;
-        Ok(buf.len())
+        loop {
+            if self.closed.load(Ordering::SeqCst) { return Err(io::Error::new(io::ErrorKind::BrokenPipe, "terminal closed")); }
+            if !self.ready.load(Ordering::SeqCst) { std::thread::sleep(Duration::from_millis(10)); continue; }
+            let mut writer = self.inner.lock();
+            if self.closed.load(Ordering::SeqCst) { return Err(io::Error::new(io::ErrorKind::BrokenPipe, "terminal closed")); }
+            if !self.ready.load(Ordering::SeqCst) { continue; }
+            write_msg(&mut *writer, &ToHost::Input(buf.to_vec()))?;
+            return Ok(buf.len());
+        }
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -374,6 +459,8 @@ pub struct HostReader {
     shutdown: Option<transport::Shutdown>,
     exit: Arc<Mutex<Option<i32>>>,
     fg: Arc<AtomicU32>,
+    input_ready: Arc<AtomicBool>,
+    input_closed: Arc<AtomicBool>,
     pending: Vec<u8>,
     pos: usize,
 }
@@ -408,13 +495,15 @@ impl HostReader {
                 }
                 Ok(FromHost::Exit(c)) => {
                     *self.exit.lock() = Some(c);
+                    self.input_closed.store(true, Ordering::SeqCst);
                     return Ok(ReadResult::Eof);
                 }
-                Ok(FromHost::Detached) => return Ok(ReadResult::Detached),
+                Ok(FromHost::Detached) => { self.input_ready.store(false, Ordering::SeqCst); return Ok(ReadResult::Detached); },
                 Ok(FromHost::FgPid(p)) => self.fg.store(p, Ordering::Relaxed),
                 Ok(FromHost::Hello { .. }) => {}
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => return Ok(ReadResult::Timeout),
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                    self.input_closed.store(true, Ordering::SeqCst);
                     // 호스트가 사라졌다: 자식도 끝난 것으로 본다.
                     let mut e = self.exit.lock();
                     if e.is_none() {
@@ -470,9 +559,14 @@ pub fn save_registry(daemon_socket: &str, records: &[HostRecord]) {
 
 // ---------------------------------------------------------------- 세션 PTY(직접 소유 또는 호스트)
 
-/// 호스트 방식을 쓸지. Windows 는 항상, Unix 는 `KILN_PTY_HOST=1` 일 때.
+/// macOS/Windows default to a persistent owner per terminal. Unix fixtures may opt out.
 pub fn host_mode() -> bool {
-    cfg!(windows) || std::env::var("KILN_PTY_HOST").is_ok_and(|v| v == "1")
+    if cfg!(windows) { return true; }
+    match std::env::var("KILN_PTY_HOST").as_deref() {
+        Ok("0") => false,
+        Ok("1") => true,
+        _ => cfg!(target_os = "macos"),
+    }
 }
 
 pub enum AnyPty {
@@ -588,6 +682,7 @@ mod recovery_tests {
             endpoint: String::new(), writer: Arc::new(Mutex::new(connection.writer)),
             reader: Mutex::new(Some(connection.reader)),
             shutdown: Some(Arc::new(move || { let _ = cancel.shutdown(std::net::Shutdown::Both); })),
+            input_ready: Arc::new(AtomicBool::new(true)), input_closed: Arc::new(AtomicBool::new(false)),
             child_pid: 0, host_pid: 0, exit: Arc::new(Mutex::new(None)), fg: Arc::new(AtomicU32::new(0)),
         };
         let reader = host.reader().unwrap();
