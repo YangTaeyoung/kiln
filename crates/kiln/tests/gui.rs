@@ -688,7 +688,9 @@ fn saved_command_requires_preview_then_runs_once_in_selected_directory() {
     save_shot(&mut h, "saved_command_preview");
     assert!(!marker.exists(), "selecting a command must only preview it");
     h.get_by_label("새 터미널에서 실행").click();
-    assert!(pump_until(&mut h, 10, |_| marker.exists()));
+    assert!(pump_until(&mut h, 10, |_| {
+        std::fs::read_to_string(&marker).is_ok_and(|contents| contents.contains("ran-once\n"))
+    }), "saved command did not finish writing its result");
     assert_eq!(std::fs::read_to_string(&marker).unwrap(), "ran-once\n");
     h.run_steps(5);
     assert_eq!(std::fs::read_to_string(&marker).unwrap(), "ran-once\n", "rendering must not repeat a launch");
