@@ -46,6 +46,7 @@ pub struct Emu {
     term: Term<Proxy>,
     parser: Processor,
     proxy: Proxy,
+    sync_started: Option<Instant>,
 }
 
 fn config() -> Config {
@@ -57,7 +58,7 @@ impl Emu {
         let proxy = Proxy::default();
         let d = Dims { cols: cols.max(2) as usize, rows: rows.max(1) as usize };
         let term = Term::new(config(), &d, proxy.clone());
-        Emu { term, parser: Processor::new(), proxy }
+        Emu { term, parser: Processor::new(), proxy, sync_started: None }
     }
 
     /// 바이트를 처리하고 발생한 이벤트를 돌려준다.
@@ -66,12 +67,19 @@ impl Emu {
         // Processor buffers bytes until ESU; its owner must service the deadline.
         self.expire_sync_at(Instant::now());
         self.parser.advance(&mut self.term, bytes);
+        if self.parser.sync_timeout().sync_timeout().is_some() {
+            self.sync_started.get_or_insert_with(Instant::now);
+        } else { self.sync_started = None; }
         std::mem::take(&mut *self.proxy.0.lock())
     }
 
     fn expire_sync_at(&mut self, now: Instant) -> bool {
-        if self.parser.sync_timeout().sync_timeout().is_some_and(|deadline| deadline <= now) {
+        // VTE renews its deadline for every BSU. A malformed but continuously
+        // active spinner must not hold the entire screen indefinitely.
+        if self.parser.sync_timeout().sync_timeout().is_some_and(|deadline| deadline <= now)
+            || self.sync_started.is_some_and(|start| now.saturating_duration_since(start) >= std::time::Duration::from_secs(1)) {
             self.parser.stop_sync(&mut self.term);
+            self.sync_started = None;
             true
         } else { false }
     }
@@ -87,13 +95,16 @@ impl Emu {
     pub fn finish_sync(&mut self) -> Option<Vec<Event>> {
         self.parser.sync_timeout().sync_timeout()?;
         self.parser.stop_sync(&mut self.term);
+        self.sync_started = None;
         Some(std::mem::take(&mut *self.proxy.0.lock()))
     }
 
     pub fn read_timeout_ms(&self) -> i32 {
-        self.parser.sync_timeout().sync_timeout().map_or(100, |deadline| {
+        let timeout = self.parser.sync_timeout().sync_timeout().map_or(100, |deadline| {
             deadline.saturating_duration_since(Instant::now()).as_millis().clamp(1, 100) as i32
-        })
+        });
+        self.sync_started.map_or(timeout, |start| timeout.min(
+            (start + std::time::Duration::from_secs(1)).saturating_duration_since(Instant::now()).as_millis().clamp(1, 100) as i32))
     }
 
     /// OSC overrides belong to the application and take precedence over GUI defaults.
@@ -480,6 +491,21 @@ fn convert_row(grid: &Grid<TCell>, line: GLine, cols: usize) -> Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continuously_renewed_sync_markers_cannot_hide_a_live_terminal() {
+        let mut e = Emu::new(80, 4);
+        e.advance(b"\x1b[?2026hBUFFERED");
+        assert!(!e.text(0).contains("BUFFERED"));
+        // A live spinner renews VTE's deadline before it expires. The owner
+        // must still publish the accumulated screen within a bounded interval.
+        let deadline = Instant::now() + std::time::Duration::from_millis(1200);
+        while Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            e.advance(b"\x1b[?2026h.");
+        }
+        assert!(e.text(0).contains("BUFFERED"), "renewed redraw hid live output for over one second");
+    }
 
     #[test]
     fn interrupted_synchronized_redraw_expires_and_input_echo_becomes_visible() {

@@ -32,6 +32,8 @@ pub struct Session {
     cancelled: AtomicBool,
     images: Mutex<SessionImages>,
     telemetry: Mutex<crate::shell::Tracker>,
+    recovery: Mutex<crate::recovery::Recovery>,
+    control: Mutex<()>,
 }
 
 /// 세션이 표시 중인 이미지. 오래된 것부터 버린다.
@@ -267,7 +269,7 @@ impl Daemon {
         let (tx, rx) = unbounded::<Vec<u8>>();
         let mut writer = pty.writer()?;
         let reader = pty.reader()?;
-        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), reader_active: AtomicBool::new(false), cancelled: AtomicBool::new(false), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()) });
+        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), reader_active: AtomicBool::new(false), cancelled: AtomicBool::new(false), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()), recovery: Mutex::new(Default::default()), control: Mutex::new(()) });
         self.sessions.write().insert(id, sess.clone());
         std::thread::Builder::new().name(format!("pty-w-{id}")).spawn(move || {
             while let Ok(data) = rx.recv() {
@@ -293,10 +295,12 @@ impl Daemon {
         let mut osc_events = Vec::new();
         let mut img_scan = ImageScanner::default();
         let mut eof = false;
+        let mut disconnected = false;
         loop {
             if self.upgrading.load(Ordering::SeqCst) && sess.pty.host().is_none() {
                 break;
             }
+            sess.recovery.lock().pulse(Instant::now());
             let (sync_events, timeout_ms) = {
                 let mut emu = sess.emu.lock();
                 (emu.expire_sync(), emu.read_timeout_ms())
@@ -327,6 +331,7 @@ impl Daemon {
                 }
                 Ok(ReadResult::Timeout) => continue,
                 Ok(ReadResult::Detached) => break,
+                Ok(ReadResult::Disconnected) => { disconnected=true; break; }
                 Ok(ReadResult::Eof) | Err(_) => {
                     eof = true;
                     break;
@@ -339,9 +344,18 @@ impl Daemon {
                 sess.reader_active.store(false, Ordering::SeqCst);
                 self.readers_running.fetch_sub(1, Ordering::SeqCst);
             }
+            if disconnected {
+                sess.recovery.lock().disconnected(Instant::now());
+                self.publish_health(&sess);
+                self.recover_terminal(&sess, false);
+                return;
+            }
             // A detach can arrive after a timed-out upgrade was cancelled.
             // Recover that late reader without creating duplicate consumers.
-            if !self.upgrading.load(Ordering::SeqCst) { self.resume_reader(&sess); }
+            if !self.upgrading.load(Ordering::SeqCst) {
+                sess.recovery.lock().disconnected(Instant::now());
+                self.recover_terminal(&sess,false);
+            }
             return;
         }
         let final_events = sess.emu.lock().finish_sync();
@@ -548,6 +562,11 @@ impl Daemon {
                 if s.info.lock().exited.is_some() {
                     continue;
                 }
+                if s.pty.host().is_some_and(|h|!h.is_connected()) {
+                    s.recovery.lock().disconnected(Instant::now());
+                }
+                s.recovery.lock().inspect(Instant::now());
+                self.recover_terminal(&s, false);
                 let fg = s.pty.fg_pid().and_then(procinfo::foreground_pid);
                 let name = fg.and_then(procinfo::display_name);
                 let cwd = fg.and_then(procinfo::cwd).or_else(|| procinfo::cwd(s.pty.pid()));
@@ -628,6 +647,15 @@ impl Daemon {
                 can_upgrade: true,
             }),
             ClientMsg::Ping { req } => reply(ServerMsg::Pong { req }),
+            ClientMsg::TerminalHealth { req, session } => {
+                if let Some(s) = self.session(session) {
+                    let health = if s.info.lock().exited.is_some() {Default::default()}else{s.recovery.lock().inspect(Instant::now())};
+                    reply(ServerMsg::TerminalHealth {req,session,health});
+                }
+            }
+            ClientMsg::RecoverTerminal { session } => {
+                if let Some(s) = self.session(session) {self.recover_terminal(&s,true);}
+            }
             ClientMsg::ListSessions { req } => {
                 reply(ServerMsg::Sessions { req, sessions: self.list() });
                 for sess in self.sessions.read().values() { reply(ServerMsg::SessionTelemetry { session: sess.id, telemetry: sess.telemetry.lock().state.clone() }); }
@@ -766,14 +794,79 @@ impl Daemon {
     }
 
     fn resize(&self, s: &Session, cols: u16, rows: u16) {
-        let mut emu = s.emu.lock();
-        if emu.size() != (cols, rows) {
+        {
+            let mut emu = s.emu.lock();
+            if emu.size() == (cols, rows) {return;}
             emu.resize(cols, rows);
-            let _ = s.pty.resize(cols, rows);
-            let mut i = s.info.lock();
-            i.cols = cols;
-            i.rows = rows;
-            s.generation.fetch_add(1, Ordering::SeqCst);
+            let mut info=s.info.lock();
+            (info.cols,info.rows)=emu.size();
+            s.generation.fetch_add(1,Ordering::SeqCst);
+        }
+        // A blocked host input writer must not retain the emulator lock: its
+        // output consumer needs that lock to drain the opposite socket direction.
+        let _control=s.control.lock();
+        let (cols,rows)={let info=s.info.lock();(info.cols,info.rows)};
+        let _=s.pty.resize(cols,rows);
+    }
+
+    fn redraw_terminal(&self,s:&Session)->std::io::Result<()> {
+        let _control=s.control.try_lock_for(Duration::from_secs(2)).ok_or_else(||std::io::Error::new(std::io::ErrorKind::TimedOut,"terminal resize control is busy"))?;
+        if self.upgrading.load(Ordering::SeqCst) || s.cancelled.load(Ordering::SeqCst) {return Err(std::io::Error::new(std::io::ErrorKind::Interrupted,"terminal no longer available"));}
+        let (cols,rows)={let info=s.info.lock();if info.exited.is_some(){return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe,"terminal exited"));}(info.cols,info.rows)};
+        // Unchanged TIOCSWINSZ does not emit SIGWINCH on macOS. Briefly change
+        // one column, then restore the latest requested size. No emulator lock
+        // is held across either transport write; the reader stays independent.
+        let temporary=if cols>2 {cols-1}else{cols+1};
+        s.pty.resize(temporary,rows)?;
+        let (cols,rows)={let info=s.info.lock();(info.cols,info.rows)};
+        s.pty.resize(cols,rows)
+    }
+
+    fn publish_health(&self, s:&Session) {
+        let (health,reader_age)={let recovery=s.recovery.lock();(recovery.health,Instant::now().saturating_duration_since(recovery.reader_seen))};
+        log::info!("terminal {} connection {:?}, attempt {}, reader_active={}, reader_age_ms={}, host_ready={}",s.id,health.state,health.attempts,s.reader_active.load(Ordering::SeqCst),reader_age.as_millis(),s.pty.host().is_none_or(|h|h.is_connected()));
+        self.broadcast(ServerMsg::TerminalHealth {req:0,session:s.id,health});
+    }
+
+    /// Reconnect only transport and redraw. Never signal termination, create a
+    /// replacement child, resend a prompt, or replay a completed input frame.
+    fn recover_terminal(self:&Arc<Self>, s:&Arc<Session>, manual:bool) {
+        if self.upgrading.load(Ordering::SeqCst) || s.cancelled.load(Ordering::SeqCst) || s.info.lock().exited.is_some() {return;}
+        if !s.recovery.lock().begin(Instant::now(),manual) {return;}
+        self.publish_health(s);
+        if !s.reader_active.load(Ordering::SeqCst) {
+            self.resume_reader(s);
+            return;
+        }
+        if let Some(h)=s.pty.host().filter(|h|!h.is_connected()) {
+            h.interrupt_transport();
+            s.recovery.lock().failed(Instant::now());
+            self.publish_health(s);
+            return;
+        }
+        let d=self.clone();let s=s.clone();
+        std::thread::spawn(move || {
+            let events=s.emu.try_lock_for(Duration::from_millis(100)).map(|mut e|e.finish_sync().unwrap_or_default());
+            let responsive=Instant::now().saturating_duration_since(s.recovery.lock().reader_seen)<=Duration::from_secs(5);
+            if let Some(events)=events.filter(|_|responsive) {
+                d.handle_events(&s,events,&mut Vec::new());
+                if d.redraw_terminal(&s).is_ok() {
+                    d.refresh_screen(&s);
+                    s.recovery.lock().alive(Instant::now());
+                } else {s.recovery.lock().failed(Instant::now());}
+            } else {s.recovery.lock().failed(Instant::now());}
+            d.publish_health(&s);
+        });
+    }
+
+    fn refresh_screen(&self,s:&Session) {
+        s.generation.fetch_add(1,Ordering::SeqCst);
+        let clients=self.clients.lock().clone();
+        for c in clients {
+            if let Some(mut attached)=c.attached.try_lock() {
+                if let Some(st)=attached.get_mut(&s.id) {st.full=true;}
+            }
+            let _=c.wake.try_send(());
         }
     }
 
@@ -796,7 +889,9 @@ impl Daemon {
                 let (frame, images) = {
                     let mut attached = client.attached.lock();
                     let Some(st) = attached.get_mut(&sid) else { continue };
-                    build_frame(&sess, st)
+                    let result=build_frame(&sess, st);
+                    if st.full || st.generation!=sess.generation.load(Ordering::SeqCst) {let _=client.wake.try_send(());}
+                    result
                 };
                 for m in images {
                     if client.out.send(m).is_err() {
@@ -922,7 +1017,25 @@ impl Daemon {
                     }
                     // A second upgrade may already be waiting for this reserved
                     // reader. Detach the new attachment before consuming it.
-                    if d.upgrading.load(Ordering::SeqCst) { if let Some(h) = s.pty.host() { h.detach(); } }
+                    if d.upgrading.load(Ordering::SeqCst) {
+                        let panel=s.clone();
+                        std::thread::spawn(move || {if let Some(h)=panel.pty.host() {h.detach();}});
+                    }
+                    else {
+                        s.recovery.lock().connected(Instant::now());
+                        d.publish_health(&s);
+                        // Consume the backlog immediately. Resize/Input share a
+                        // writer and can wait for the host to finish replaying;
+                        // awaiting them here deadlocks the bounded decoder queue.
+                        let redraw=d.clone();let panel=s.clone();
+                        std::thread::spawn(move || {
+                            if redraw.redraw_terminal(&panel).is_err() {
+                                panel.recovery.lock().failed(Instant::now());
+                                redraw.publish_health(&panel);
+                            }
+                            redraw.refresh_screen(&panel);
+                        });
+                    }
                     d.read_loop(s, reader);
                 }
                 Err(e) => {
@@ -931,6 +1044,8 @@ impl Daemon {
                         d.readers_running.fetch_sub(1, Ordering::SeqCst);
                     }
                     log::error!("session {}: could not resume reader after failed upgrade: {e}", s.id);
+                    s.recovery.lock().failed(Instant::now());
+                    d.publish_health(&s);
                 }
             }
         });
@@ -1022,7 +1137,7 @@ fn build_frame(sess: &Session, st: &mut AttachState) -> (Option<Frame>, Vec<Serv
     if !st.full && generation == st.generation {
         return (None, Vec::new());
     }
-    let emu = sess.emu.lock();
+    let Some(emu) = sess.emu.try_lock() else {return (None,Vec::new());};
     let (cols, rows) = emu.size();
     let mut full = st.full;
     if st.hashes.len() != rows as usize || st.cols != cols {
@@ -1277,6 +1392,27 @@ mod palette_tests {
     use std::os::unix::net::UnixStream;
 
     #[test]
+    fn a_busy_panel_cannot_block_another_panels_frame_or_health() {
+        let dir=tempfile::tempdir().unwrap();
+        let daemon=Daemon::new(dir.path().join("isolated.sock").to_string_lossy().into_owned());
+        struct Cleanup(Arc<Daemon>);
+        impl Drop for Cleanup {fn drop(&mut self){for s in self.0.sessions.read().values(){s.pty.kill();}}}
+        let _cleanup=Cleanup(daemon.clone());
+        let spec=SpawnSpec {program:Some("/bin/cat".into()),cols:80,rows:24,..Default::default()};
+        let first=daemon.create(spec.clone()).unwrap();let second=daemon.create(spec).unwrap();
+        let first=daemon.session(first).unwrap();let second=daemon.session(second).unwrap();
+        let held=first.emu.lock();
+        let (tx,rx)=bounded(1);let busy=first.clone();
+        let worker=std::thread::spawn(move || {let mut st=AttachState {full:true,..Default::default()};let _=tx.send(build_frame(&busy,&mut st).0);});
+        let result=rx.recv_timeout(Duration::from_millis(200));
+        let mut st=AttachState {full:true,..Default::default()};
+        assert!(build_frame(&second,&mut st).0.is_some());
+        assert_eq!(second.recovery.lock().inspect(Instant::now()).state,TerminalState::Healthy);
+        drop(held);worker.join().unwrap();
+        assert!(matches!(result,Ok(None)),"frame publisher waited on another panel's emulator lock");
+    }
+
+    #[test]
     fn first_child_queries_use_palette_sent_before_create_and_updates_preserve_overrides() {
         assert!(!crate::ptyhost::host_mode(), "run this isolated native PTY test without KILN_PTY_HOST=1");
         let dir=tempfile::Builder::new().prefix("kiln-palette-").tempdir_in("/tmp").unwrap();
@@ -1291,7 +1427,7 @@ mod palette_tests {
         let mut stream=UnixStream::connect(&socket).unwrap();
         stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         write_msg(&mut stream,&ClientMsg::Hello{proto:PROTO_VERSION,build:"test".into(),client:"palette-test".into()}).unwrap();
-        assert!(matches!(read_msg::<_,ServerMsg>(&mut stream).unwrap(),Some(ServerMsg::Hello{proto:4,..})));
+        assert!(matches!(read_msg::<_,ServerMsg>(&mut stream).unwrap(),Some(ServerMsg::Hello{proto:PROTO_VERSION,..})));
         let light=TerminalPalette{fg:[28,29,33],bg:[255;3],cursor:[76,88,210],ansi:[[20,30,40];16]};
         let script=dir.path().join("probe.py");
         std::fs::write(&script,r#"import os,sys,tty,select,time,json

@@ -44,6 +44,7 @@ impl Client {
                 buf.extend_from_slice(&encode(&m));
                 while let Ok(more) = out_rx.try_recv() {
                     buf.extend_from_slice(&encode(&more));
+                    if buf.len()>=1<<20 {break;}
                 }
                 if writer.write_all(&buf).and_then(|_| writer.flush()).is_err() {
                     break;
@@ -111,6 +112,7 @@ impl Client {
                 | ServerMsg::CommandOutput { req, .. }
                 | ServerMsg::Error { req, .. }
                 | ServerMsg::Pong { req }
+                | ServerMsg::TerminalHealth { req, .. }
                 | ServerMsg::SearchResult { req, .. } => Some(*req),
                 _ => None,
             };

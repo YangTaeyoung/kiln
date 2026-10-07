@@ -3,21 +3,24 @@
 use super::*;
 use egui::{Align2, Color32, FontId, Sense, pos2, vec2};
 use kiln_common::{fonts, icons::Icon, widgets};
-use kiln_proto::{AgentActivity, SessionInfo, SessionTelemetry};
+use kiln_proto::{AgentActivity, SessionInfo, SessionTelemetry, TerminalHealth, TerminalState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TaskPhase { Failed, Waiting, Attention, Running, Done, Unknown }
+pub(super) enum TaskPhase { Stalled, Recovering, Failed, Waiting, Attention, Running, Done, Unknown }
 
 impl TaskPhase {
     fn label(self) -> &'static str { match self {
+        Self::Stalled=>kiln_common::i18n::tr("연결 멈춤"), Self::Recovering=>kiln_common::i18n::tr("연결 복구 중"),
         Self::Failed=>kiln_common::i18n::tr("실패"), Self::Waiting=>kiln_common::i18n::tr("입력 대기"), Self::Attention=>kiln_common::i18n::tr("확인 필요"),
         Self::Running=>kiln_common::i18n::tr("작업 중"), Self::Done=>kiln_common::i18n::tr("완료"), Self::Unknown=>kiln_common::i18n::tr("세션 열림"),
     }}
     fn priority(self) -> u8 { match self {
-        Self::Waiting=>1, Self::Running=>0, Self::Attention=>2, Self::Failed=>3, Self::Done=>4, Self::Unknown=>5,
+        Self::Stalled=>0, Self::Recovering=>1, Self::Running=>2, Self::Waiting=>3,
+        Self::Attention=>4, Self::Failed=>5, Self::Done=>6, Self::Unknown=>7,
     }}
     fn appearance(self, t: &Theme) -> (Icon, Color32) { match self {
-        Self::Failed=>(Icon::Warning,t.red), Self::Waiting|Self::Attention=>(Icon::Bell,t.orange),
+        Self::Stalled|Self::Failed=>(Icon::Warning,t.red), Self::Recovering=>(Icon::Refresh,t.orange),
+        Self::Waiting|Self::Attention=>(Icon::Bell,t.orange),
         Self::Running=>(Icon::Play,t.blue), Self::Done=>(Icon::Check,t.green), Self::Unknown=>(Icon::Terminal,t.text_dim),
     }}
 }
@@ -48,6 +51,14 @@ fn phase(info: &SessionInfo, telemetry: Option<&SessionTelemetry>) -> TaskPhase 
     }
 }
 
+fn phase_with_health(info:&SessionInfo, telemetry:Option<&SessionTelemetry>, health:TerminalHealth)->TaskPhase {
+    match health.state {
+        TerminalState::Stalled=>TaskPhase::Stalled,
+        TerminalState::Recovering=>TaskPhase::Recovering,
+        TerminalState::Healthy=>phase(info,telemetry),
+    }
+}
+
 impl KilnApp {
     pub(super) fn workspace_tasks(&self, index: usize) -> Vec<WorkspaceTask> {
         let mut tasks=Vec::new();
@@ -69,7 +80,8 @@ impl KilnApp {
                         .filter(|s:&String|!s.is_empty()).unwrap_or_else(||kiln_common::i18n::tr("터미널").into());
                 }
                 let recorded=Some(command_time.max(notice_time)).filter(|time|*time>0);
-                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),phase:phase(info,telemetry),agent:self.conn.session_agent(session),updated:info.created_unix.max(command_time).max(notice_time),recorded});
+                let health=self.conn.terminal_health.get(&session).copied().unwrap_or_default();
+                tasks.push(WorkspaceTask {pane,title,qualifier:String::new(),phase:phase_with_health(info,telemetry,health),agent:self.conn.session_agent(session),updated:info.created_unix.max(command_time).max(notice_time),recorded});
                 locations.push(info.cwd.as_deref().map(|cwd| {
                     let cwd=Path::new(cwd);
                     cwd.strip_prefix(&self.workspaces[index].root).ok().filter(|p|!p.as_os_str().is_empty())
@@ -110,7 +122,7 @@ fn relative_time(updated:u64)->String {
 }
 
 pub(super) fn summary(tasks:&[WorkspaceTask])->String {
-    [(TaskPhase::Failed,kiln_common::i18n::tr("실패")),(TaskPhase::Waiting,kiln_common::i18n::tr("대기")),(TaskPhase::Attention,kiln_common::i18n::tr("확인")),(TaskPhase::Running,kiln_common::i18n::tr("진행")),(TaskPhase::Done,kiln_common::i18n::tr("완료")),(TaskPhase::Unknown,kiln_common::i18n::tr("열림"))]
+    [(TaskPhase::Stalled,kiln_common::i18n::tr("연결 멈춤")),(TaskPhase::Recovering,kiln_common::i18n::tr("연결 복구 중")),(TaskPhase::Failed,kiln_common::i18n::tr("실패")),(TaskPhase::Waiting,kiln_common::i18n::tr("대기")),(TaskPhase::Attention,kiln_common::i18n::tr("확인")),(TaskPhase::Running,kiln_common::i18n::tr("진행")),(TaskPhase::Done,kiln_common::i18n::tr("완료")),(TaskPhase::Unknown,kiln_common::i18n::tr("열림"))]
         .into_iter().filter_map(|(phase,label)| {let n=tasks.iter().filter(|t|t.phase==phase).count();(n>0).then(||format!("{label} {n}"))}).collect::<Vec<_>>().join(" · ")
 }
 
@@ -153,13 +165,19 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
             if branded { super::ui::paint_agent_progress(ui, center, super::ui::running_color(task.agent, theme)); }
             else { super::ui::paint_running(ui, center, color); }
         }
+        if task.phase == TaskPhase::Recovering { super::ui::paint_agent_progress(ui, center, color); }
         let mark = if branded { super::ui::agent_icon(task.agent) } else { icon };
         if branded || task.phase != TaskPhase::Running {
             icons::paint(ui.painter(), egui::Rect::from_center_size(center, vec2(18.0,18.0)), mark,
                 if branded { super::ui::agent_ink(mark, theme) } else { color });
         }
+        if branded && matches!(task.phase,TaskPhase::Stalled|TaskPhase::Recovering) {
+            let badge=center+vec2(7.5,7.0);
+            ui.painter().circle_filled(badge,6.0,if chosen {theme.bg_panel}else{theme.bg});
+            icons::paint(ui.painter(),egui::Rect::from_center_size(badge,vec2(10.0,10.0)),Icon::Warning,color);
+        }
         let x=rect.left()+34.0;
-        let text_color=if chosen || matches!(task.phase,TaskPhase::Running|TaskPhase::Waiting|TaskPhase::Failed|TaskPhase::Attention){theme.text}else{theme.text_dim};
+        let text_color=if chosen || matches!(task.phase,TaskPhase::Stalled|TaskPhase::Recovering|TaskPhase::Running|TaskPhase::Waiting|TaskPhase::Failed|TaskPhase::Attention){theme.text}else{theme.text_dim};
         let width=rect.right()-x-8.0;
         let qualifier=visible_qualifier(ui,task,width*0.45,theme);
         let suffix=elided(ui,&qualifier,fonts::regular(11.0),theme.text_dim,width*0.45);
@@ -193,6 +211,42 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn terminal_transport_health_overrides_activity_and_surfaces_both_agent_brands() {
+        use egui_kittest::{Harness,kittest::Queryable};
+        use kiln_proto::{TerminalHealth,TerminalState};
+        let info=SessionInfo {fg_process:Some("codex".into()),..Default::default()};
+        let telemetry=SessionTelemetry {activity:AgentActivity::Running,..Default::default()};
+        let healthy=TerminalHealth::default();
+        let recovering=TerminalHealth {state:TerminalState::Recovering,attempts:1};
+        let stalled=TerminalHealth {state:TerminalState::Stalled,attempts:3};
+        assert_eq!(phase_with_health(&info,Some(&telemetry),healthy),TaskPhase::Running);
+        assert_eq!(phase_with_health(&info,Some(&telemetry),recovering),TaskPhase::Recovering);
+        assert_eq!(phase_with_health(&info,Some(&telemetry),stalled),TaskPhase::Stalled);
+        let mut order=[TaskPhase::Running,TaskPhase::Waiting,TaskPhase::Recovering,TaskPhase::Stalled];
+        order.sort_by_key(|p|p.priority());
+        assert_eq!(order,[TaskPhase::Stalled,TaskPhase::Recovering,TaskPhase::Running,TaskPhase::Waiting]);
+        for width in [180.0,300.0] {
+            for theme in [Theme::KILN_DARK,Theme::KILN_LIGHT] {
+                let tasks=vec![
+                    WorkspaceTask {pane:1,title:"API 연결".into(),qualifier:String::new(),phase:TaskPhase::Stalled,agent:Some(kiln_accounts::Tool::Codex),updated:0,recorded:None},
+                    WorkspaceTask {pane:2,title:"코드 검토".into(),qualifier:String::new(),phase:TaskPhase::Recovering,agent:Some(kiln_accounts::Tool::Claude),updated:0,recorded:None},
+                ];
+                let mut installed=false;
+                let mut h=Harness::builder().with_size([width,140.0]).build_ui_state(move|ui,selected:&mut Option<PaneId>| {
+                    if !installed {fonts::install(ui.ctx());theme.apply(ui.ctx());installed=true;return;}
+                    if let Some(pane)=task_rows(ui,&tasks,*selected,&theme){*selected=Some(pane);}
+                },None);
+                h.run_steps(3);
+                let row=h.get_by_label("API 연결 · Codex · 연결 멈춤");
+                assert!(h.ctx.content_rect().contains_rect(row.rect()));
+                row.click();h.run_steps(2);assert_eq!(*h.state(),Some(1));
+                h.get_by_label("코드 검토 · Claude Code · 연결 복구 중");
+                h.render().unwrap().save(format!("/tmp/kiln-terminal-health-rows-{}-{}.png",theme.name,width as u32)).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn idle_and_waiting_rows_identify_agents_at_narrow_and_wide_widths() {
         use egui_kittest::{Harness,kittest::Queryable};

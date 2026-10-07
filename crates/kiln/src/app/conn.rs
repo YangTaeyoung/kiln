@@ -70,6 +70,7 @@ pub struct Conn {
     pub screens: HashMap<SessionId, Screen>,
     pub infos: HashMap<SessionId, SessionInfo>,
     pub telemetry: HashMap<SessionId, SessionTelemetry>,
+    pub terminal_health: HashMap<SessionId, TerminalHealth>,
     observed_agents: HashMap<SessionId, kiln_accounts::Tool>,
     pub command_outputs: HashMap<(SessionId, u64), (String, bool)>,
     /// 붙어 있는 세션과 요청한 크기.
@@ -94,6 +95,7 @@ pub struct Conn {
     terminal_palette: TerminalPalette,
     terminal_focus_candidate: Option<(SessionId, egui::ViewportId, egui::Id)>,
     reported_terminal_focus: Option<SessionId>,
+    last_health_poll: Option<Instant>,
 }
 
 impl Conn {
@@ -104,6 +106,7 @@ impl Conn {
             screens: HashMap::new(),
             infos: HashMap::new(),
             telemetry: HashMap::new(),
+            terminal_health: HashMap::new(),
             observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
             attached: HashMap::new(),
@@ -124,6 +127,7 @@ impl Conn {
             terminal_palette: palette_for_theme(&kiln_common::Theme::current()),
             terminal_focus_candidate: None,
             reported_terminal_focus: None,
+            last_health_poll: None,
         };
         c.try_connect();
         c
@@ -138,6 +142,7 @@ impl Conn {
             screens: HashMap::new(),
             infos: HashMap::new(),
             telemetry: HashMap::new(),
+            terminal_health: HashMap::new(),
             observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
             attached: HashMap::new(),
@@ -158,6 +163,7 @@ impl Conn {
             terminal_palette: palette_for_theme(&kiln_common::Theme::current()),
             terminal_focus_candidate: None,
             reported_terminal_focus: None,
+            last_health_poll: None,
         }
     }
 
@@ -194,6 +200,7 @@ impl Conn {
                 self.textures.clear();
                 // Command ids are local to the daemon lifetime, never reuse stale output after reconnect.
                 self.command_outputs.clear();
+                self.last_health_poll = None;
                 for (sid, (cols, rows)) in &self.attached {
                     c.send(ClientMsg::Attach { session: *sid, cols: *cols, rows: *rows });
                 }
@@ -214,7 +221,8 @@ impl Conn {
         let mut disconnected = false;
         let mut msgs = Vec::new();
         if let Some(c) = &self.client {
-            loop {
+            let started=Instant::now();
+            while msgs.len()<256 && started.elapsed()<Duration::from_millis(2) {
                 match c.rx.try_recv() {
                     Ok(m) => msgs.push(m),
                     Err(crossbeam_channel::TryRecvError::Empty) => break,
@@ -224,9 +232,19 @@ impl Conn {
                     }
                 }
             }
+            if !c.rx.is_empty() {self.ctx.request_repaint();}
         }
         for m in msgs {
             self.handle(m);
+        }
+        if let Some(client) = &self.client {
+            if self.last_health_poll.is_none_or(|t|t.elapsed()>=Duration::from_secs(2)) {
+                for (&session, info) in &self.infos {
+                    if info.exited.is_none() {client.send(ClientMsg::TerminalHealth {req:client.next_req(),session});}
+                }
+                self.last_health_poll=Some(Instant::now());
+            }
+            self.ctx.request_repaint_after(Duration::from_secs(1));
         }
         if disconnected {
             self.client = None;
@@ -253,6 +271,7 @@ impl Conn {
                 for info in sessions.into_iter().filter(|s|!self.closing_sessions.contains(&s.id)).collect::<Vec<_>>() { self.update_info(info); }
                 self.infos.retain(|id,_|live.contains(id));
                 self.observed_agents.retain(|id,_|self.infos.contains_key(id));
+                self.terminal_health.retain(|id,_|self.infos.contains_key(id));
                 self.sessions_listed = true;
             }
             ServerMsg::SessionUpdated(i) => {
@@ -262,6 +281,7 @@ impl Conn {
             ServerMsg::SessionExited { session, code } => {
                 if self.closing_sessions.contains(&session) { return; }
                 self.observed_agents.remove(&session);
+                self.terminal_health.remove(&session);
                 if let Some(i) = self.infos.get_mut(&session) {
                     i.exited = Some(code.unwrap_or(-1));
                 }
@@ -308,6 +328,9 @@ impl Conn {
                     self.textures.insert((session, id), tex);
                 }
             }
+            ServerMsg::TerminalHealth { session, health, .. } => {
+                if !self.closing_sessions.contains(&session) {self.terminal_health.insert(session,health);}
+            }
             ServerMsg::Hello { .. } | ServerMsg::Pong { .. } => {}
         }
     }
@@ -341,6 +364,11 @@ impl Conn {
         if let Some(c) = &self.client {
             c.send(m);
         }
+    }
+
+    pub fn recover_terminal(&mut self, session: SessionId) {
+        self.terminal_health.insert(session,TerminalHealth {state:TerminalState::Recovering,attempts:0});
+        self.send(ClientMsg::RecoverTerminal {session});
     }
 
     /// Share the actual displayed terminal colors, including after reconnection.
@@ -379,7 +407,7 @@ impl Conn {
     }
 
     pub fn input(&self, sid: SessionId, data: Vec<u8>) {
-        if !data.is_empty() {
+        if !data.is_empty() && self.terminal_health.get(&sid).is_none_or(|h|h.state==TerminalState::Healthy) {
             self.send(ClientMsg::Input { session: sid, data });
         }
     }

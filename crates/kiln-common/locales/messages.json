@@ -10033,5 +10033,30 @@
     "en": "Allow terminal commands, SSH and databases to access local servers in macOS.",
     "ja": "ターミナルコマンド、SSH、データベースからローカルサーバーへのアクセスを macOS で許可します。",
     "zh-CN": "在 macOS 中允许终端命令、SSH 和数据库访问本地服务器。"
+  },
+  "터미널 연결 복구 중": {
+    "en": "Reconnecting terminal",
+    "ja": "ターミナルに再接続中",
+    "zh-CN": "正在恢复终端连接"
+  },
+  "터미널 연결이 멈췄습니다": {
+    "en": "Terminal connection stalled",
+    "ja": "ターミナル接続が停止しました",
+    "zh-CN": "终端连接已停滞"
+  },
+  "연결 다시 복구": {
+    "en": "Reconnect",
+    "ja": "再接続",
+    "zh-CN": "重新连接"
+  },
+  "연결 복구 중": {
+    "en": "Reconnecting",
+    "ja": "再接続中",
+    "zh-CN": "正在重新连接"
+  },
+  "연결 멈춤": {
+    "en": "Connection stalled",
+    "ja": "接続停止",
+    "zh-CN": "连接停滞"
   }
 }

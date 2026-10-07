@@ -354,6 +354,9 @@ impl TermView {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, conn: &mut Conn, settings: &TermSettings, focus_request: bool, cwd: Option<&str>) -> TermOutput {
         let mut out = TermOutput::default();
+        // Connection repair never resets the canvas, changes the PTY size or
+        // launches an agent command. Keep the last visible output available.
+        self.health_ui(ui,conn,ui.available_rect_before_wrap(),&kiln_common::Theme::current());
         if self.inspector {
             out.clicked = ui.rect_contains_pointer(ui.max_rect()) && ui.input(|i|i.pointer.any_pressed());
             self.inspector_ui(ui, conn, cwd, &mut out);
@@ -406,7 +409,9 @@ impl TermView {
 
         let screen_exists = conn.screens.contains_key(&self.session);
         if !screen_exists {
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, kiln_common::i18n::tr("연결 중…"), FontId::proportional(13.0), Color32::GRAY);
+            if conn.terminal_health.get(&self.session).is_none_or(|h|h.state==kiln_proto::TerminalState::Healthy) {
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, kiln_common::i18n::tr("연결 중…"), FontId::proportional(13.0), Color32::GRAY);
+            }
             return out;
         }
 
@@ -440,7 +445,8 @@ impl TermView {
             return out;
         }
         let exited = conn.infos.get(&self.session).and_then(|i| i.exited);
-        let accepts_input=resp.has_focus() && ui.memory(|m|m.allows_interaction(ui.layer_id()))
+        let transport_ready=conn.terminal_health.get(&self.session).is_none_or(|h|h.state==kiln_proto::TerminalState::Healthy);
+        let accepts_input=transport_ready && resp.has_focus() && ui.memory(|m|m.allows_interaction(ui.layer_id()))
             && !resp.context_menu_opened() && !self.inspector && self.search.as_ref().is_none_or(|s|!s.focus);
         if accepts_input {
             self.last_input_pass=Some(pass);
@@ -616,6 +622,35 @@ impl TermView {
             conn.note_terminal_focus(self.session, ui.ctx(), id);
         }
         out
+    }
+
+    fn health_ui(&self,ui:&egui::Ui,conn:&mut Conn,rect:Rect,theme:&kiln_common::Theme) {
+        use kiln_common::{fonts,icons::{self,Icon},i18n::tr};
+        use kiln_proto::TerminalState;
+        let state=conn.terminal_health.get(&self.session).map(|h|h.state).unwrap_or_default();
+        if state==TerminalState::Healthy {return;}
+        let color=if state==TerminalState::Stalled {theme.red}else{theme.orange};
+        let width=(rect.width()-20.0).clamp(100.0,300.0);
+        egui::Area::new(ui.id().with(("terminal-health",self.session)))
+            .pivot(egui::Align2::RIGHT_TOP).fixed_pos(rect.right_top()+vec2(-10.0,10.0))
+            .constrain_to(rect).fade_in(false).order(egui::Order::Foreground)
+            .show(ui.ctx(),|ui| {
+                egui::Frame::new().fill(theme.bg_elevated).stroke(Stroke::new(1.0,color.gamma_multiply(0.65)))
+                    .corner_radius(6).inner_margin(8).show(ui,|ui| {
+                        ui.set_max_width(width-16.0);
+                        ui.horizontal(|ui| {
+                            let (mark,_)=ui.allocate_exact_size(vec2(18.0,18.0),Sense::hover());
+                            if state==TerminalState::Recovering {super::ui::paint_running(ui,mark.center(),color);}
+                            else {icons::paint(ui.painter(),mark,Icon::Warning,color);}
+                            ui.add(egui::Label::new(egui::RichText::new(if state==TerminalState::Stalled {
+                                tr("터미널 연결이 멈췄습니다")
+                            }else{tr("터미널 연결 복구 중")}).font(fonts::medium(12.0)).color(theme.text)).wrap());
+                        });
+                        if state==TerminalState::Stalled && ui.button(tr("연결 다시 복구")).clicked() {
+                            conn.recover_terminal(self.session);
+                        }
+                    });
+            });
     }
 
     fn request_size(&mut self, ctx: &egui::Context, conn: &mut Conn, cols: u16, rows: u16) {
@@ -1278,6 +1313,74 @@ pub fn modifiers_none() -> Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_health_recovery_labels_fit_all_four_languages() {
+        use egui_kittest::{Harness,kittest::Queryable};
+        use kiln_common::i18n::{Language,with_language,tr};
+        use kiln_proto::{TerminalHealth,TerminalState};
+        for language in Language::ALL {
+            with_language(language,|| {
+                for theme in [kiln_common::Theme::KILN_DARK,kiln_common::Theme::KILN_LIGHT] {
+                    let mut conn=Conn::offline(egui::Context::default());
+                    conn.screens.insert(1,Screen {cols:20,rows:2,lines:vec![Line::default();2],row_versions:vec![1;2],..Default::default()});
+                    conn.terminal_health.insert(1,TerminalHealth {state:TerminalState::Stalled,attempts:3});
+                    let mut installed=false;
+                    let mut h=Harness::builder().with_size([260.0,180.0]).build_ui_state(move|ui,s:&mut(TermView,Conn)| {
+                        if !installed {ui.ctx().set_fonts(kiln_common::fonts::definitions_for_language(false,language));theme.apply(ui.ctx());installed=true;return;}
+                        let rect=ui.available_rect_before_wrap();
+                        ui.painter().rect_filled(rect,0.0,theme.bg);
+                        s.0.health_ui(ui,&mut s.1,rect,&theme);
+                    },(TermView::new(1),conn));
+                    h.run_steps(3);
+                    for label in [tr("터미널 연결이 멈췄습니다"),tr("연결 다시 복구")] {
+                        assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{language:?}: {label} overflows terminal");
+                    }
+                    h.render().unwrap().save(format!("/tmp/kiln-terminal-health-banner-{}-{}.png",language.code(),theme.name)).unwrap();
+                    h.get_by_label(tr("연결 다시 복구")).click();h.run_steps(3);
+                    assert_eq!(h.state().1.terminal_health[&1].state,TerminalState::Recovering);
+                    h.get_by_label(tr("터미널 연결 복구 중"));
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn terminal_health_recovery_is_nonmodal_and_preserves_the_running_session() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        use kiln_proto::{TerminalHealth, TerminalState};
+        let mut emu = kiln_daemon::emu::Emu::new(80, 3);
+        emu.advance(b"Agent is still running\r\n");
+        let mut conn = Conn::offline(egui::Context::default());
+        conn.screens.insert(1, Screen { cols:80, rows:3,
+            lines:(0..3).map(|r|emu.visible_line(r)).collect(), row_versions:vec![1;3],
+            ..Default::default() });
+        let mut term = TermView::new(1);
+        term.selection = Some(Selection { anchor:Point {line:0,col:0}, head:Point {line:0,col:5}, mode:SelMode::Cell });
+        let original = conn.screens[&1].lines[0].text();
+        let mut installed = false;
+        let mut h = Harness::builder().with_size([760.0,200.0]).build_ui_state(move |ui,s:&mut(TermView,Conn)| {
+            if !installed {kiln_common::fonts::install(ui.ctx());installed=true;return;}
+            s.0.ui(ui,&mut s.1,&TermSettings::default(),false,None);
+        },(term,conn));
+        h.run_steps(3);
+        assert!(h.query_by_label("터미널 연결 복구 중").is_none());
+        assert!(h.query_by_label("연결 다시 복구").is_none());
+        h.state_mut().1.terminal_health.insert(1,TerminalHealth {state:TerminalState::Recovering,attempts:1});
+        h.run_steps(3);
+        h.get_by_label("터미널 연결 복구 중");
+        assert!(h.query_by_label("연결 다시 복구").is_none());
+        h.state_mut().1.terminal_health.insert(1,TerminalHealth {state:TerminalState::Stalled,attempts:3});
+        h.run_steps(3);
+        h.get_by_label("터미널 연결이 멈췄습니다");
+        h.get_by_label("연결 다시 복구").click();h.run_steps(3);
+        assert_eq!(h.state().1.terminal_health[&1].state,TerminalState::Recovering);
+        assert_eq!(h.state().1.screens[&1].lines[0].text(),original,"repair must preserve cached output");
+        assert!(h.state().0.has_selection(),"repair must preserve the user's output selection");
+        h.state_mut().1.terminal_health.insert(1,TerminalHealth::default());h.run_steps(3);
+        assert!(h.query_by_label("터미널 연결 복구 중").is_none());
+        assert!(h.query_by_label("터미널 연결이 멈췄습니다").is_none());
+    }
 
     #[test]
     fn ime_overlay_does_not_survive_window_blur_or_a_hidden_tab() {

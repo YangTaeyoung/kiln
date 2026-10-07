@@ -107,7 +107,7 @@ impl Drop for OwnedStateDirectory {
 struct AttachBarrier {
     original: PathBuf,
     backend: PathBuf,
-    started: mpsc::Receiver<Result<(), String>>,
+    started: mpsc::Receiver<Result<Instant, String>>,
     release: Option<mpsc::Sender<()>>,
     stop: Arc<AtomicBool>,
     sockets: Arc<Mutex<Vec<UnixStream>>>,
@@ -180,7 +180,7 @@ impl AttachBarrier {
                                     return Err(std::io::Error::other("proxy expected actual host Hello"));
                                 }
                                 if hold {
-                                    let _ = started_tx.send(Ok(()));
+                                    let _ = started_tx.send(Ok(Instant::now()));
                                     release_rx.lock().unwrap().recv_timeout(Duration::from_secs(15))
                                         .map_err(|e| std::io::Error::other(format!("Attach barrier unreleased: {e}")))?;
                                 }
@@ -216,9 +216,9 @@ impl AttachBarrier {
         Self { original, backend, started, release: Some(release), stop, sockets, accept: Some(accept) }
     }
 
-    fn wait_started(&self) {
+    fn wait_started(&self) -> Instant {
         self.started.recv_timeout(Duration::from_secs(5)).expect("actual host did not accept rollback Attach")
-            .expect("actual host/proxy handshake failed");
+            .expect("actual host/proxy handshake failed")
     }
 
     fn release(&mut self) {
@@ -360,11 +360,18 @@ fn second_upgrade_waits_for_real_inflight_host_reconnect_and_safely_aborts() {
     let obstruction = OwnedStateDirectory::obstruct(client.server_pid);
     let mut barrier = AttachBarrier::install(&fixture, session);
     failed_upgrade(&client, &exe());
-    barrier.wait_started();
+    let handshake_started = barrier.wait_started();
     let start = Instant::now();
+    assert!(start.duration_since(handshake_started) < Duration::from_millis(250), "fixture did not issue the second upgrade while Hello was still reserved");
     let error = client.request(|req| ClientMsg::Upgrade { req, exe: exe().to_string_lossy().into_owned() }, Duration::from_secs(4))
-        .expect_err("an in-flight reserved reader must prevent handover").to_string();
-    assert!(error.contains("terminal host did not pause"), "expected bounded reader-drain abort, got {error}");
+        .expect_err("the owned state directory must prevent handover after Hello times out").to_string();
+    // The reservation must prevent the second upgrade from reaching its state
+    // write while the real reconnect is waiting for Hello. Its one-second
+    // handshake deadline releases the reservation before the three-second
+    // reader-drain limit, so the subsequent owned EISDIR obstruction is the
+    // precise failure expected here, rather than a reader-drain timeout.
+    assert!(handshake_started.elapsed() >= Duration::from_millis(750), "second upgrade bypassed the in-flight reconnect reservation");
+    assert_eq!(error, format!("upgrade failed: {}", std::io::Error::from_raw_os_error(libc::EISDIR)), "expected the state-write obstruction only after bounded Hello completion");
     assert!(start.elapsed() < Duration::from_secs(4));
     assert_eq!(fixture.connect(Duration::from_secs(1)).server_pid, client.server_pid);
     assert!(obstruction.0.is_dir(), "second upgrade wrote a new snapshot over the obstruction");

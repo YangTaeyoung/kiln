@@ -9,6 +9,18 @@ use kiln_common::fonts;
 pub const TOPBAR_H: f32 = 42.0;
 const HEADER_H: f32 = 30.0;
 
+/// Repairs only the terminal transport, including when a CLI's internal hang
+/// cannot be inferred from its output. Never launches or restarts the process.
+fn terminal_recovery_menu_item(ui:&mut egui::Ui,conn:&mut conn::Conn,session:Option<SessionId>)->bool {
+    let Some(session)=session.filter(|sid|conn.infos.get(sid).is_none_or(|info|info.exited.is_none())) else {return false;};
+    if widgets::button_with(ui,Some(Icon::Refresh),kiln_common::i18n::tr("연결 다시 복구"),ButtonKind::Ghost,true).clicked() {
+        conn.recover_terminal(session);
+        ui.close();
+        return true;
+    }
+    false
+}
+
 fn is_mac() -> bool {
     cfg!(target_os = "macos")
 }
@@ -213,6 +225,34 @@ fn allocate_tab_title(ui: &mut egui::Ui, title: &str, fg: Color32, max_width: f3
 #[cfg(test)]
 mod tab_tests {
     use super::{distinct_tab_titles, meaningful_title, stable_terminal_title};
+
+    #[test]
+    fn healthy_terminal_menu_can_repair_only_its_existing_connection() {
+        use egui_kittest::{Harness,kittest::Queryable};
+        use kiln_proto::{SessionInfo,TerminalState};
+        let mut conn=super::conn::Conn::offline(egui::Context::default());
+        conn.infos.insert(7,SessionInfo {id:7,fg_process:Some("codex".into()),..Default::default()});
+        conn.screens.insert(7,super::conn::Screen::default());
+        let mut installed=false;
+        let mut h=Harness::builder().with_size([350.0,180.0]).build_ui_state(move|ui,s:&mut(super::conn::Conn,u8)| {
+            if !installed {kiln_common::fonts::install(ui.ctx());installed=true;return;}
+            let menu=kiln_common::widgets::icon_button(ui,kiln_common::icons::Icon::More,26.0,false,"패널 작업");
+            egui::Popup::menu(&menu).show(|ui| {
+                if super::terminal_recovery_menu_item(ui,&mut s.0,Some(7)) {s.1+=1;}
+            });
+        },(conn,0));
+        h.run_steps(3);
+        h.get_by_label("패널 작업").click();h.run_steps(2);
+        h.get_by_label("연결 다시 복구").click();h.run_steps(2);
+        assert_eq!(h.state().1,1);
+        assert_eq!(h.state().0.terminal_health[&7].state,TerminalState::Recovering);
+        assert_eq!(h.state().0.infos[&7].fg_process.as_deref(),Some("codex"));
+        assert!(h.state().0.screens.contains_key(&7),"manual repair retains the existing canvas");
+        assert!(h.query_by_label("연결 다시 복구").is_none(),"repair closes the menu");
+        h.state_mut().0.infos.get_mut(&7).unwrap().exited=Some(0);
+        h.get_by_label("패널 작업").click();h.run_steps(2);
+        assert!(h.query_by_label("연결 다시 복구").is_none(),"completed sessions need no repair action");
+    }
 
     #[test]
     fn running_indicator_rotates_without_changing_layout() {
@@ -1114,8 +1154,10 @@ impl KilnApp {
         if let Some(Pane{kind:PaneKind::Term{view:Some(view),..},..})=self.panes.get_mut(&pid) {
             if ui.button(kiln_common::i18n::tr("명령 기록")).clicked(){view.open_history();ui.close();}
             if ui.button(kiln_common::i18n::tr("셸·에이전트 연동")).clicked(){view.open_integration_help();ui.close();}
-            ui.separator();
         }
+        let session=self.panes.get(&pid).and_then(Pane::session);
+        if terminal_recovery_menu_item(ui,&mut self.conn,session) {self.actions.push(Action::FocusPane(pid));}
+        if session.is_some() {ui.separator();}
     }
 
     // ------------------------------------------------------------------ 도구 시트

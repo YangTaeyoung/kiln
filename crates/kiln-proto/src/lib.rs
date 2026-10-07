@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-pub const PROTO_VERSION: u32 = 4;
+pub const PROTO_VERSION: u32 = 5;
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
 
 pub type SessionId = u64;
@@ -91,6 +91,10 @@ pub enum ClientMsg {
     ReadCommandOutput { req: u32, session: SessionId, command: u64 },
     /// Send before Create on the same connection so the first child query is correct.
     SetPalette { palette: TerminalPalette },
+    /// Transport health, independent of an agent's output or work progress.
+    TerminalHealth { req: u32, session: SessionId },
+    /// Repair this terminal's transport/screen without restarting its child.
+    RecoverTerminal { session: SessionId },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -121,6 +125,16 @@ pub enum ServerMsg {
     Image { session: SessionId, id: u32, width: u32, height: u32, rgba: Vec<u8> },
     SessionTelemetry { session: SessionId, telemetry: SessionTelemetry },
     CommandOutput { req: u32, session: SessionId, command: u64, text: String, truncated: bool },
+    TerminalHealth { req: u32, session: SessionId, health: TerminalHealth },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TerminalState { #[default] Healthy, Recovering, Stalled }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TerminalHealth {
+    pub state: TerminalState,
+    pub attempts: u8,
 }
 
 /// Explicit integration signals only. A live foreground process does not imply progress.

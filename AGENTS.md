@@ -13,6 +13,7 @@ the user's shells, agents, builds, or servers.
 - [Remote files and verification](docs/maintainers/remote-files-verification.md) — isolated provider fixtures and explicit coverage boundaries.
 - [Agent accounts](docs/accounts.md) — official CLI browser sign-in and profile isolation.
 - [Localization and native menus](docs/localization.md) — catalog, font caches, and isolated session-control tests.
+- [Terminal recovery](docs/terminal-recovery.md) — preserve child processes, bounded repair, upstream comparisons and isolated regression fixtures.
 - [Local network access](docs/local-network.md) — explicit permission request, distinct executable UUIDs and native verification boundaries.
 - **[Release runbook](docs/maintainers/releases.md)** — versioning, signing,
   notarization, Sparkle updates, GitHub Release publication, and recovery.

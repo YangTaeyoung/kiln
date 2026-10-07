@@ -226,12 +226,22 @@ fn design_review_screens() {
     shot(&mut h, "minimum_settings_130pct");
     h.key_press(egui::Key::Escape); h.run_steps(3);
     h.get_by_label("알림 센터").click(); h.run_steps(4);
-    for label in ["알림 닫기 (Esc)", "방해 금지 꺼짐", "읽은 알림 지우기"] {
+    for label in ["알림 닫기 (Esc)", "방해 금지 켜기", "읽은 알림 지우기"] {
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()), "{label} clipped at 130% zoom");
     }
     shot(&mut h, "minimum_inbox_130pct");
     h.key_press(egui::Key::Escape); h.run_steps(4);
-    assert!(h.ctx.content_rect().contains_rect(h.get_by_label("세션 연결됨").rect()));
+    // Navigation stress selected the final workspace and scrolled the original
+    // labelled session out of view. Reveal its workspace before checking that
+    // the actual clickable row fits the minimum-height sidebar.
+    let canonical_project=proj.canonicalize().unwrap();
+    h.state_mut().debug_queue_action(Action::SelectWorkspace(0));
+    assert!(pump(&mut h,3.0,|h|h.state().debug_active_workspace_root()==canonical_project.as_path()
+        && h.query_by_label("빌드 감시 · 세션 열림").is_some()),
+        "original workspace not ready: root={}, row_present={}",h.state().debug_active_workspace_root().display(),
+        h.query_by_label("빌드 감시 · 세션 열림").is_some());
+    h.run_steps(4);
+    assert!(h.ctx.content_rect().contains_rect(h.get_by_label("빌드 감시 · 세션 열림").rect()));
     shot(&mut h, "minimum_sidebar_130pct");
     h.state_mut().debug_queue_action(Action::OpenRecent); h.run_steps(4);
     h.get_by_value("전체").click(); h.run_steps(3);

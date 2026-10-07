@@ -9,6 +9,8 @@ pub enum ReadResult {
     Eof,
     /// 호스트가 데몬 교체를 위해 연결을 끊었다(세션은 살아 있다).
     Detached,
+    /// Hosted transport disappeared without an explicit child Exit message.
+    Disconnected,
 }
 
 pub fn default_shell() -> String {

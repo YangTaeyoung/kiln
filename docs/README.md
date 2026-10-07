@@ -12,6 +12,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Database tools](databases.md) | Connections, SQL completion, schema editing and metadata boundaries |
 | [File editor](editor.md) | Language detection, completion and language-server setup |
 | [Git workflows](git.md) | Review changes, squash, cherry-pick, and drop commits |
+| [Terminal recovery](terminal-recovery.md) | Connection repair, retry states and investigation boundaries |
 | [Terminal integration](terminal-integration.md) | Notifications, explicit activity, shell integration |
 | [Language and native menus](localization.md) | Four UI languages, Settings shortcuts, session controls |
 | [Local network access](local-network.md) | macOS permission request, terminal connections and verification |

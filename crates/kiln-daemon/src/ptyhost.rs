@@ -129,7 +129,7 @@ pub fn run_host(endpoint: &str, spec: SpawnSpec, session: u64) -> anyhow::Result
                         }
                     }
                     Ok(ReadResult::Timeout) => {}
-                    Ok(ReadResult::Eof) | Ok(ReadResult::Detached) | Err(_) => break,
+                    Ok(ReadResult::Eof) | Ok(ReadResult::Detached) | Ok(ReadResult::Disconnected) | Err(_) => break,
                 }
             }
             let mut code = None;
@@ -264,9 +264,10 @@ pub struct HostPty {
     pub endpoint: String,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     reader: Mutex<Option<Box<dyn Read + Send>>>,
-    shutdown: Option<transport::Shutdown>,
+    shutdown: Mutex<Option<transport::Shutdown>>,
     input_ready: Arc<AtomicBool>,
     input_closed: Arc<AtomicBool>,
+    framing_valid: Arc<AtomicBool>,
     child_pid: u32,
     pub host_pid: u32,
     exit: Arc<Mutex<Option<i32>>>,
@@ -301,19 +302,39 @@ impl HostPty {
 
     /// 이미 떠 있는 호스트에 붙는다.
     pub fn attach(endpoint: &str, replay: bool) -> io::Result<HostPty> {
+        #[cfg(unix)]
+        let (Conn { mut reader, mut writer }, shutdown, handshake) = {
+            let stream = std::os::unix::net::UnixStream::connect(endpoint)?;
+            // Recovery must not wait forever for Hello. Only the initial
+            // connection handshake uses a read deadline; framed output decoding
+            // must remain blocking so a quiet/partial frame is not discarded.
+            // Writes retain a deadline so control can recover a backed-up peer.
+            stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+            let handshake = stream.try_clone()?;
+            let cancel = stream.try_clone()?;
+            let shutdown: transport::Shutdown = Arc::new(move || { let _ = cancel.shutdown(std::net::Shutdown::Both); });
+            (transport::split(stream)?, Some(shutdown), handshake)
+        };
+        #[cfg(not(unix))]
         let (Conn { mut reader, mut writer }, shutdown) = transport::connect_with_shutdown(endpoint)?;
         write_msg(&mut writer, &ToHost::Attach { replay })?;
         let hello: FromHost = read_msg(&mut reader)?.ok_or_else(|| io::Error::other("host closed"))?;
         let FromHost::Hello { child_pid, host_pid, exited, .. } = hello else {
             return Err(io::Error::other("unexpected host hello"));
         };
+        #[cfg(unix)]
+        {
+            handshake.set_read_timeout(None)?;
+        }
         Ok(HostPty {
             endpoint: endpoint.to_string(),
             writer: Arc::new(Mutex::new(writer)),
             reader: Mutex::new(Some(reader)),
-            shutdown,
+            shutdown: Mutex::new(shutdown),
             input_ready: Arc::new(AtomicBool::new(true)),
             input_closed: Arc::new(AtomicBool::new(exited.is_some())),
+            framing_valid: Arc::new(AtomicBool::new(true)),
             child_pid,
             host_pid,
             exit: Arc::new(Mutex::new(exited)),
@@ -325,14 +346,34 @@ impl HostPty {
     /// screen and exit status through upgrades without resurrecting a process.
     pub fn finished(endpoint: String, child_pid: u32, code: i32) -> Self {
         Self { endpoint, writer: Arc::new(Mutex::new(Box::new(io::sink()))),
-            reader: Mutex::new(Some(Box::new(io::empty()))), shutdown: None,
+            reader: Mutex::new(Some(Box::new(io::empty()))), shutdown: Mutex::new(None),
             input_ready: Arc::new(AtomicBool::new(false)), input_closed: Arc::new(AtomicBool::new(true)),
+            framing_valid: Arc::new(AtomicBool::new(false)),
             child_pid, host_pid: 0, exit: Arc::new(Mutex::new(Some(code))),
             fg: Arc::new(AtomicU32::new(0)) }
     }
 
     fn send(&self, m: &ToHost) -> io::Result<()> {
-        write_msg(&mut *self.writer.lock(), m)
+        let mut writer = self.writer.lock();
+        // Windows termination closes input first. Kill remains an ordered
+        // control message on an intact stream, including paused input; it must
+        // never be appended to a damaged partial frame.
+        let terminating = matches!(m, ToHost::Kill);
+        if self.input_closed.load(Ordering::SeqCst) && !terminating {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "terminal closed"));
+        }
+        if !self.framing_valid.load(Ordering::SeqCst)
+            || (!self.input_ready.load(Ordering::SeqCst) && !terminating) {
+            return Err(io::Error::new(io::ErrorKind::NotConnected, "terminal transport is reconnecting"));
+        }
+        if let Err(error) = write_msg(&mut *writer, m) {
+            // A partial control frame also requires a fresh connection. Never
+            // append another message to an incomplete frame on this stream.
+            self.input_ready.store(false, Ordering::SeqCst);
+            self.framing_valid.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn reader(&self) -> io::Result<HostReader> {
@@ -348,33 +389,53 @@ impl HostPty {
                 if tx.send(message).is_err() { break; }
             }
         })?;
-        Ok(HostReader { messages, decoder: Some(decoder), shutdown: self.shutdown.clone(), exit: self.exit.clone(), fg: self.fg.clone(), input_ready: self.input_ready.clone(), input_closed: self.input_closed.clone(), pending: Vec::new(), pos: 0 })
+        Ok(HostReader { messages, decoder: Some(decoder), shutdown: self.shutdown.lock().clone(), exit: self.exit.clone(), fg: self.fg.clone(), input_ready: self.input_ready.clone(), input_closed: self.input_closed.clone(), framing_valid: self.framing_valid.clone(), pending: Vec::new(), pos: 0 })
     }
 
-    /// Resume a paused host after a failed daemon exec. Existing input writers
-    /// keep their Arc; replace its connection and share the old exit/foreground
-    /// state with the fresh decoder rather than abandoning those handles.
+    /// Reattach the same host after interruption, retaining existing input
+    /// workers and exit/foreground state. Replay only detached pending output;
+    /// recent history would duplicate the retained emulator. An incomplete
+    /// in-flight output frame lacks a wire acknowledgement and cannot be
+    /// recovered, so the daemon requests a redraw without restarting the job.
     pub fn reconnect_reader(&self) -> io::Result<HostReader> {
         let replacement = Self::attach(&self.endpoint, false)?;
+        if replacement.child_pid != self.child_pid || replacement.host_pid != self.host_pid {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "terminal host identity changed; original child was not replaced"));
+        }
         let mut reader = replacement.reader()?;
         reader.exit = self.exit.clone();
         reader.fg = self.fg.clone();
         reader.input_ready = self.input_ready.clone();
         reader.input_closed = self.input_closed.clone();
+        reader.framing_valid = self.framing_valid.clone();
         {
             let mut writer = self.writer.lock();
             std::mem::swap(&mut *writer, &mut *replacement.writer.lock());
+            *self.shutdown.lock() = replacement.shutdown.lock().clone();
             *self.exit.lock() = *replacement.exit.lock();
             if self.exit.lock().is_some() { self.input_closed.store(true, Ordering::SeqCst); }
             // Publish readiness with the replacement writer. A delayed Detach
             // cannot clear it and then be overwritten by this worker.
+            self.framing_valid.store(true, Ordering::SeqCst);
             self.input_ready.store(true, Ordering::SeqCst);
         }
         Ok(reader)
     }
 
     pub fn writer(&self) -> io::Result<Box<dyn Write + Send>> {
-        Ok(Box::new(HostWriter { inner: self.writer.clone(), ready: self.input_ready.clone(), closed: self.input_closed.clone() }))
+        Ok(Box::new(HostWriter { inner: self.writer.clone(), ready: self.input_ready.clone(), closed: self.input_closed.clone(), framing_valid: self.framing_valid.clone() }))
+    }
+
+    /// Transport readiness is distinct from child exit and output activity.
+    pub fn is_connected(&self) -> bool { self.input_ready.load(Ordering::SeqCst) }
+
+    /// Interrupt only this attachment to release a stalled decoder/writer.
+    /// Windows has no shutdown handle in its current named-pipe transport;
+    /// callers must not substitute a child signal or a process restart.
+    pub fn interrupt_transport(&self) {
+        self.input_ready.store(false, Ordering::SeqCst);
+        self.framing_valid.store(false, Ordering::SeqCst);
+        if let Some(shutdown) = self.shutdown.lock().as_ref() { shutdown(); }
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
@@ -402,7 +463,12 @@ impl HostPty {
                 stream.set_write_timeout(Some(Duration::from_secs(1)))?;
                 write_msg(&mut stream, &ToHost::Attach { replay: false })?;
                 let hello = read_msg::<_, FromHost>(&mut stream)?;
-                if !matches!(hello, Some(FromHost::Hello { .. })) { return Err(io::Error::other("host closed before termination")); }
+                match hello {
+                    Some(FromHost::Hello { child_pid, host_pid, .. })
+                        if child_pid == self.child_pid && host_pid == self.host_pid => {}
+                    Some(FromHost::Hello { .. }) => return Err(io::Error::new(io::ErrorKind::InvalidData, "terminal host identity changed; refusing termination")),
+                    _ => return Err(io::Error::other("host closed before termination")),
+                }
                 write_msg(&mut stream, &ToHost::Kill)
             };
             if let Err(e) = terminate() { log::warn!("PTY host termination failed: {e}"); }
@@ -418,7 +484,8 @@ impl HostPty {
         // A delayed detach may acquire the replacement writer after rollback.
         // Stop input under that same lock so it cannot be sent behind Detach.
         self.input_ready.store(false, Ordering::SeqCst);
-        let _ = write_msg(&mut *writer, &ToHost::Detach);
+        if !self.framing_valid.load(Ordering::SeqCst) {self.interrupt_transport();return;}
+        if write_msg(&mut *writer, &ToHost::Detach).is_err() {self.framing_valid.store(false, Ordering::SeqCst);self.interrupt_transport();}
     }
 
     pub fn fg_pid(&self) -> Option<u32> {
@@ -433,6 +500,7 @@ struct HostWriter {
     inner: Arc<Mutex<Box<dyn Write + Send>>>,
     ready: Arc<AtomicBool>,
     closed: Arc<AtomicBool>,
+    framing_valid: Arc<AtomicBool>,
 }
 
 impl Write for HostWriter {
@@ -443,8 +511,23 @@ impl Write for HostWriter {
             let mut writer = self.inner.lock();
             if self.closed.load(Ordering::SeqCst) { return Err(io::Error::new(io::ErrorKind::BrokenPipe, "terminal closed")); }
             if !self.ready.load(Ordering::SeqCst) { continue; }
-            write_msg(&mut *writer, &ToHost::Input(buf.to_vec()))?;
-            return Ok(buf.len());
+            let frame = kiln_proto::encode(&ToHost::Input(buf.to_vec()));
+            match writer.write_all(&frame) {
+                Ok(()) => {
+                    // Once the complete frame was written, a later flush error
+                    // must not replay it and inject the user's input twice.
+                    let _ = writer.flush();
+                    return Ok(buf.len());
+                },
+                Err(_) => {
+                    // Keep this Input in the existing worker while the reader
+                    // reconnects the same child. A failed framed write has no
+                    // complete Input for the host to decode; retry only after
+                    // the replacement writer/readiness is published together.
+                    self.ready.store(false, Ordering::SeqCst);
+                    self.framing_valid.store(false, Ordering::SeqCst);
+                }
+            }
         }
     }
 
@@ -461,6 +544,7 @@ pub struct HostReader {
     fg: Arc<AtomicU32>,
     input_ready: Arc<AtomicBool>,
     input_closed: Arc<AtomicBool>,
+    framing_valid: Arc<AtomicBool>,
     pending: Vec<u8>,
     pos: usize,
 }
@@ -503,13 +587,16 @@ impl HostReader {
                 Ok(FromHost::Hello { .. }) => {}
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => return Ok(ReadResult::Timeout),
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    self.input_closed.store(true, Ordering::SeqCst);
-                    // 호스트가 사라졌다: 자식도 끝난 것으로 본다.
-                    let mut e = self.exit.lock();
-                    if e.is_none() {
-                        *e = Some(-1);
+                    self.input_ready.store(false, Ordering::SeqCst);
+                    self.framing_valid.store(false, Ordering::SeqCst);
+                    // IPC EOF/decoding failure is not evidence that the PTY
+                    // child exited. The daemon can repair this attachment;
+                    // only an explicit Exit/Hello status closes user input.
+                    if self.exit.lock().is_some() {
+                        self.input_closed.store(true, Ordering::SeqCst);
+                        return Ok(ReadResult::Eof);
                     }
-                    return Ok(ReadResult::Eof);
+                    return Ok(ReadResult::Disconnected);
                 }
             }
         }
@@ -681,12 +768,48 @@ mod recovery_tests {
         let host = HostPty {
             endpoint: String::new(), writer: Arc::new(Mutex::new(connection.writer)),
             reader: Mutex::new(Some(connection.reader)),
-            shutdown: Some(Arc::new(move || { let _ = cancel.shutdown(std::net::Shutdown::Both); })),
+            shutdown: Mutex::new(Some(Arc::new(move || { let _ = cancel.shutdown(std::net::Shutdown::Both); }))),
             input_ready: Arc::new(AtomicBool::new(true)), input_closed: Arc::new(AtomicBool::new(false)),
+            framing_valid: Arc::new(AtomicBool::new(true)),
             child_pid: 0, host_pid: 0, exit: Arc::new(Mutex::new(None)), fg: Arc::new(AtomicU32::new(0)),
         };
         let reader = host.reader().unwrap();
         (host, reader, peer)
+    }
+
+    #[test]
+    fn termination_control_survives_closed_paused_input_only_on_an_intact_stream() {
+        let (host, _reader, mut peer) = reader_fixture();
+        host.pause_input();
+        host.input_closed.store(true, Ordering::SeqCst);
+        assert_eq!(host.resize(120, 30).unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+        host.send(&ToHost::Kill).unwrap();
+        assert!(matches!(read_msg::<_, ToHost>(&mut peer).unwrap(), Some(ToHost::Kill)));
+        host.framing_valid.store(false, Ordering::SeqCst);
+        assert_eq!(host.send(&ToHost::Kill).unwrap_err().kind(), io::ErrorKind::NotConnected);
+    }
+
+    #[test]
+    fn termination_refuses_a_replaced_host_or_child_identity() {
+        for changed_child in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let endpoint = dir.path().join("host.sock");
+            let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+            let peer = std::thread::spawn(move || {
+                let (mut initial, _) = listener.accept().unwrap();
+                assert!(matches!(read_msg::<_, ToHost>(&mut initial).unwrap(), Some(ToHost::Attach { .. })));
+                write_msg(&mut initial, &FromHost::Hello { host_proto: HOST_PROTO, child_pid: 12, host_pid: 34, exited: None }).unwrap();
+                let (mut termination, _) = listener.accept().unwrap();
+                assert!(matches!(read_msg::<_, ToHost>(&mut termination).unwrap(), Some(ToHost::Attach { .. })));
+                write_msg(&mut termination, &FromHost::Hello { host_proto: HOST_PROTO, child_pid: if changed_child {99} else {12}, host_pid: if changed_child {34} else {99}, exited: None }).unwrap();
+                assert!(read_msg::<_, ToHost>(&mut termination).unwrap().is_none(), "replacement must not receive Kill");
+            });
+            let host = HostPty::attach(endpoint.to_str().unwrap(), false).unwrap();
+            host.kill();
+            peer.join().unwrap();
+            assert_eq!(host.pid(), 12);
+            assert_eq!(host.try_wait(), None);
+        }
     }
 
     #[test]
@@ -732,5 +855,261 @@ mod recovery_tests {
         assert!(shared.writer.is_some());
         shared.clear_attachment(2);
         assert!(shared.writer.is_none());
+    }
+
+    #[test]
+    fn host_transport_loss_preserves_child_and_drains_received_output() {
+        for malformed in [false, true] {
+            let (host, mut reader, mut peer) = reader_fixture();
+            write_msg(&mut peer, &FromHost::Data(b"completed output".to_vec())).unwrap();
+            if malformed {
+                // A truncated frame must not become an invented child exit.
+                peer.write_all(&[4, 0, 0, 0, 255]).unwrap();
+            }
+            drop(peer);
+            let mut buf = [0; 64];
+            let ReadResult::Data(n) = reader.read_timeout(&mut buf, 1000).unwrap() else { panic!("received output lost") };
+            assert_eq!(&buf[..n], b"completed output");
+            let result = reader.read_timeout(&mut buf, 1000).unwrap();
+            assert_eq!(host.try_wait(), None, "transport EOF is not a child exit");
+            assert!(!host.input_closed.load(Ordering::SeqCst), "same child must remain recoverable");
+            assert!(!host.input_ready.load(Ordering::SeqCst), "input must wait for a replacement attachment");
+            assert!(matches!(result, ReadResult::Disconnected));
+        }
+    }
+
+    #[test]
+    fn explicit_host_exit_remains_final_when_transport_closes() {
+        let (host, mut reader, mut peer) = reader_fixture();
+        write_msg(&mut peer, &FromHost::Exit(42)).unwrap();
+        drop(peer);
+        let mut buf = [0; 64];
+        assert!(matches!(reader.read_timeout(&mut buf, 1000).unwrap(), ReadResult::Eof));
+        assert_eq!(host.try_wait(), Some(42));
+        assert!(host.input_closed.load(Ordering::SeqCst));
+        assert!(matches!(reader.read_timeout(&mut buf, 1000).unwrap(), ReadResult::Eof));
+        assert_eq!(host.try_wait(), Some(42));
+    }
+
+    #[test]
+    fn host_input_waits_for_replacement_after_transport_write_failure() {
+        let (host, reader, peer) = reader_fixture();
+        drop(peer);
+        let mut writer = host.writer().unwrap();
+        let (done, completed) = crossbeam_channel::bounded(1);
+        let worker = std::thread::spawn(move || { let _ = done.send(writer.write_all(b"pending input")); });
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while host.input_ready.load(Ordering::SeqCst) && completed.is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(completed.is_empty(), "transient socket failure must not terminate the session's input worker");
+        assert!(!host.input_ready.load(Ordering::SeqCst));
+        let (replacement, mut peer) = UnixStream::pair().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        {
+            let mut target = host.writer.lock();
+            *target = Box::new(replacement);
+            host.input_ready.store(true, Ordering::SeqCst);
+        }
+        let ToHost::Input(data) = read_msg::<_, ToHost>(&mut peer).unwrap().unwrap() else { panic!("expected retried input") };
+        assert_eq!(data, b"pending input");
+        assert!(completed.recv_timeout(Duration::from_secs(1)).unwrap().is_ok());
+        worker.join().unwrap();
+        drop(reader);
+    }
+
+    #[test]
+    fn host_input_completed_frame_is_not_retried_on_flush_failure() {
+        struct FlushFailure(Arc<Mutex<Vec<u8>>>);
+        impl Write for FlushFailure {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> { Err(io::Error::other("flush failed after accepted frame")) }
+        }
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut writer = HostWriter { inner: Arc::new(Mutex::new(Box::new(FlushFailure(bytes.clone())))), ready: Arc::new(AtomicBool::new(true)), closed: Arc::new(AtomicBool::new(false)), framing_valid: Arc::new(AtomicBool::new(true)) };
+        assert_eq!(writer.write(b"exactly once").unwrap(), 12);
+        assert_eq!(*bytes.lock(), kiln_proto::encode(&ToHost::Input(b"exactly once".to_vec())));
+        assert!(writer.ready.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn cancelled_host_input_does_not_wait_for_reconnect() {
+        let mut writer = HostWriter { inner: Arc::new(Mutex::new(Box::new(io::sink()))), ready: Arc::new(AtomicBool::new(false)), closed: Arc::new(AtomicBool::new(true)), framing_valid: Arc::new(AtomicBool::new(false)) };
+        assert_eq!(writer.write(b"must not reach child").unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn host_control_never_appends_to_a_failed_partial_input_frame() {
+        struct PartialFailure(Arc<Mutex<Vec<u8>>>,Arc<AtomicU32>);
+        impl Write for PartialFailure {
+            fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+                self.1.fetch_add(1,Ordering::SeqCst);
+                let mut bytes=self.0.lock();
+                if bytes.is_empty(){bytes.extend_from_slice(&data[..3]);Ok(3)}
+                else {Err(io::Error::new(io::ErrorKind::BrokenPipe,"partial socket frame"))}
+            }
+            fn flush(&mut self)->io::Result<()> {Ok(())}
+        }
+        let (host,mut reader,_peer)=reader_fixture();
+        let bytes=Arc::new(Mutex::new(Vec::new()));
+        let calls=Arc::new(AtomicU32::new(0));
+        *host.writer.lock()=Box::new(PartialFailure(bytes.clone(),calls.clone()));
+        let mut writer=host.writer().unwrap();let closed=host.input_closed.clone();
+        let worker=std::thread::spawn(move||writer.write_all(b"held input"));
+        let deadline=Instant::now()+Duration::from_secs(1);
+        while host.is_connected() && Instant::now()<deadline {std::thread::sleep(Duration::from_millis(1));}
+        let result=host.resize(121,32);
+        host.detach();
+        let mut output=[0;16];
+        assert!(matches!(reader.read_timeout(&mut output,1000).unwrap(),ReadResult::Disconnected));
+        let captured=bytes.lock().clone();
+        closed.store(true,Ordering::SeqCst);
+        assert_eq!(worker.join().unwrap().unwrap_err().kind(),io::ErrorKind::BrokenPipe);
+        assert_eq!(result.unwrap_err().kind(),io::ErrorKind::NotConnected);
+        assert_eq!(calls.load(Ordering::SeqCst),2,"Resize and Detach must not even attempt a write on the damaged frame");
+        assert_eq!(captured,kiln_proto::encode(&ToHost::Input(b"held input".to_vec()))[..3].to_vec());
+        drop(reader);
+    }
+
+    #[test]
+    fn paused_input_still_sends_ordered_detach_when_framing_is_valid() {
+        let (host,mut reader,mut peer)=reader_fixture();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        host.pause_input();host.detach();
+        assert!(matches!(read_msg::<_,ToHost>(&mut peer).unwrap(),Some(ToHost::Detach)));
+        write_msg(&mut peer,&FromHost::Detached).unwrap();
+        let mut output=[0;16];
+        assert!(matches!(reader.read_timeout(&mut output,1000).unwrap(),ReadResult::Detached));
+        assert_eq!(host.try_wait(),None);
+        assert!(!host.is_connected());assert!(host.framing_valid.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn attached_host_write_timeout_releases_a_backpressured_input_for_recovery() {
+        let dir=tempfile::tempdir().unwrap();let endpoint=dir.path().join("slow.sock");
+        let listener=std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+        let (release,wait)=crossbeam_channel::bounded(1);
+        let peer=std::thread::spawn(move||{
+            let (mut stream,_)=listener.accept().unwrap();
+            assert!(matches!(read_msg::<_,ToHost>(&mut stream).unwrap(),Some(ToHost::Attach{..})));
+            write_msg(&mut stream,&FromHost::Hello{host_proto:HOST_PROTO,child_pid:12,host_pid:34,exited:None}).unwrap();
+            let _=wait.recv_timeout(Duration::from_secs(5)); // deliberately never read Input
+        });
+        let host=HostPty::attach(endpoint.to_str().unwrap(),false).unwrap();
+        let mut writer=host.writer().unwrap();let closed=host.input_closed.clone();
+        let worker=std::thread::spawn(move||writer.write_all(&vec![b'x';8*1024*1024]));
+        let deadline=Instant::now()+Duration::from_secs(3);
+        while host.is_connected() && Instant::now()<deadline{std::thread::sleep(Duration::from_millis(5));}
+        let interrupted=!host.is_connected();
+        closed.store(true,Ordering::SeqCst);host.interrupt_transport();
+        let _=release.send(());peer.join().unwrap();
+        assert!(worker.join().unwrap().is_err());
+        assert!(interrupted,"socket writes must time out before recovery is stranded");
+        assert_eq!(host.try_wait(),None,"a write timeout does not prove child exit");
+    }
+
+    #[test]
+    fn interrupting_host_attachment_preserves_child_and_uses_replacement_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = dir.path().join("repair.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+        let peer = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                assert!(matches!(read_msg::<_, ToHost>(&mut stream).unwrap(), Some(ToHost::Attach { .. })));
+                write_msg(&mut stream, &FromHost::Hello { host_proto: HOST_PROTO, child_pid: 12, host_pid: 34, exited: None }).unwrap();
+                assert!(read_msg::<_, ToHost>(&mut stream).unwrap().is_none(), "only the socket must close");
+            }
+        });
+        let host = HostPty::attach(endpoint.to_str().unwrap(), false).unwrap();
+        let mut reader = host.reader().unwrap();
+        let mut buf = [0; 16];
+        for pass in 0..2 {
+            assert!(host.is_connected());
+            host.interrupt_transport();
+            assert!(!host.is_connected());
+            assert!(matches!(reader.read_timeout(&mut buf, 1000).unwrap(), ReadResult::Disconnected));
+            assert_eq!(host.pid(), 12);
+            assert_eq!(host.try_wait(), None);
+            assert!(!host.input_closed.load(Ordering::SeqCst));
+            if pass == 1 {drop(reader);break;}
+            let replacement=host.reconnect_reader().unwrap();
+            drop(reader); // stale reader Drop must not invalidate the successor
+            assert!(host.is_connected());assert!(host.framing_valid.load(Ordering::SeqCst));
+            reader=replacement;
+        }
+        peer.join().unwrap();
+    }
+
+    #[test]
+    fn host_reconnect_rejects_changed_child_or_host_identity() {
+        for changed_child in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let endpoint = dir.path().join("identity.sock");
+            let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+            let peer = std::thread::spawn(move || {
+                for pass in 0..2 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                    assert!(matches!(read_msg::<_, ToHost>(&mut stream).unwrap(), Some(ToHost::Attach { .. })));
+                    let wrong = pass == 1;
+                    write_msg(&mut stream, &FromHost::Hello { host_proto: HOST_PROTO, child_pid: if wrong && changed_child {99}else{12}, host_pid: if wrong && !changed_child {99}else{34}, exited: None }).unwrap();
+                    assert!(read_msg::<_, ToHost>(&mut stream).unwrap().is_none());
+                }
+            });
+            let host = HostPty::attach(endpoint.to_str().unwrap(), false).unwrap();
+            let reader = host.reader().unwrap();
+            host.interrupt_transport();
+            drop(reader);
+            let replacement = host.reconnect_reader();
+            // On the old implementation, drop the wrong attachment before
+            // asserting so the owned peer fixture still closes deterministically.
+            let accepted = replacement.is_ok();
+            drop(replacement);
+            peer.join().unwrap();
+            assert!(!accepted, "must not replace a terminal with another host or child");
+            assert_eq!(host.pid(), 12);
+            assert_eq!(host.host_pid, 34);
+            assert_eq!(host.try_wait(), None);
+            assert!(!host.is_connected());
+        }
+    }
+
+    #[test]
+    fn host_attach_hello_is_bounded_but_output_reader_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let endpoint = dir.path().join("host.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+        let (release, wait) = crossbeam_channel::bounded(1);
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(matches!(read_msg::<_, ToHost>(&mut stream).unwrap(), Some(ToHost::Attach { .. })));
+            let _ = wait.recv_timeout(Duration::from_secs(3));
+        });
+        let started = Instant::now();
+        assert!(HostPty::attach(endpoint.to_str().unwrap(), false).is_err());
+        assert!(started.elapsed() < Duration::from_secs(2), "unresponsive host hello must not strand recovery");
+        let _ = release.send(());
+        peer.join().unwrap();
+
+        let listener = std::os::unix::net::UnixListener::bind(dir.path().join("ready.sock")).unwrap();
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(matches!(read_msg::<_, ToHost>(&mut stream).unwrap(), Some(ToHost::Attach { .. })));
+            write_msg(&mut stream, &FromHost::Hello { host_proto: HOST_PROTO, child_pid: 12, host_pid: 34, exited: None }).unwrap();
+            // A quiet, healthy terminal must survive longer than the handshake timeout.
+            std::thread::sleep(Duration::from_millis(1100));
+            write_msg(&mut stream, &FromHost::Data(b"still alive".to_vec())).unwrap();
+        });
+        let host = HostPty::attach(dir.path().join("ready.sock").to_str().unwrap(), false).unwrap();
+        let mut reader = host.reader().unwrap();
+        let mut buf = [0; 64];
+        let ReadResult::Data(n) = reader.read_timeout(&mut buf, 2000).unwrap() else { panic!("handshake timeout leaked into output decoder") };
+        assert_eq!(&buf[..n], b"still alive");
+        peer.join().unwrap();
     }
 }
