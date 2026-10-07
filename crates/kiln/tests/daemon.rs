@@ -179,23 +179,29 @@ fn frames_are_incremental_after_first_full_frame() {
     let c = d.client();
     let s = create(&c, "/bin/sh", &[]);
     c.send(ClientMsg::Attach { session: s, cols: 80, rows: 24 });
-    let mut first_full = None;
-    let mut partial_seen = false;
     let deadline = Instant::now() + Duration::from_secs(5);
-    type_line(&c, s, "echo x");
-    while Instant::now() < deadline && !partial_seen {
-        if let Ok(ServerMsg::Frame(f)) = c.rx.recv_timeout(Duration::from_millis(200)) {
-            if first_full.is_none() {
+    loop {
+        if let Ok(ServerMsg::Frame(f)) = c.rx.recv_timeout(Duration::from_millis(200))
+            && f.session == s {
                 assert!(f.full);
                 assert_eq!(f.lines.len(), 24);
-                first_full = Some(());
-            } else if !f.full {
-                assert!(f.lines.len() < 24);
-                partial_seen = true;
-            }
+                break;
         }
+        assert!(Instant::now() < deadline, "initial full frame was not received");
     }
-    assert!(first_full.is_some() && partial_seen);
+    // Input sent before the first frame can be coalesced into that full frame.
+    // Trigger the update only after observing the attachment baseline.
+    type_line(&c, s, "echo x");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(ServerMsg::Frame(f)) = c.rx.recv_timeout(Duration::from_millis(200))
+            && f.session == s && !f.full {
+                assert!(f.lines.len() < 24);
+                break;
+        }
+        assert!(Instant::now() < deadline, "incremental frame was not received after input");
+    }
+    wait_for(&c, s, "x");
 }
 
 #[test]
