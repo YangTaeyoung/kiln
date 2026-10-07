@@ -208,7 +208,18 @@ fn frames_are_incremental_after_first_full_frame() {
 fn exit_code_is_reported() {
     let d = Daemon::start("exit");
     let c = d.client();
-    let s = create(&c, "/bin/sh", &["-c", "exit 7"]);
+    // Client::request is a CLI helper that discards unrelated broadcasts.
+    // An immediate exit can be consumed while it awaits Created. Hold the
+    // owned child until that response arrives, then observe the exit event.
+    let s = create(
+        &c,
+        "/bin/sh",
+        &[
+            "-c",
+            "IFS= read -r trigger; [ \"$trigger\" = kiln-exit ] || exit 99; exit 7",
+        ],
+    );
+    type_line(&c, s, "kiln-exit");
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(ServerMsg::SessionExited { session, code }) = c.rx.recv_timeout(Duration::from_millis(200))
