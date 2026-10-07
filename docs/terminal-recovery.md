@@ -18,6 +18,7 @@ when the connection still reports healthy. It resets the retry budget for that p
 The existing session and child process are preserved. Previously displayed text stays
 visible during recovery. Input is paused while recovery is reported, so typing does not
 silently queue new commands behind a broken connection.
+Completed panels retain their screen and ignore delayed connection-recovery events.
 
 ## What this fixes
 

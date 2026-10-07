@@ -329,13 +329,21 @@ impl Conn {
                 }
             }
             ServerMsg::TerminalHealth { session, health, .. } => {
-                if !self.closing_sessions.contains(&session) {self.terminal_health.insert(session,health);}
+                if !self.closing_sessions.contains(&session) && self.is_alive(session) {self.terminal_health.insert(session,health);}
             }
             ServerMsg::Hello { .. } | ServerMsg::Pong { .. } => {}
         }
     }
 
-    fn update_info(&mut self, info: SessionInfo) {
+    fn update_info(&mut self, mut info: SessionInfo) {
+        // A snapshot captured before exit can be queued after the exit event.
+        // Preserve completion only for the same process, allowing a new owner.
+        if info.exited.is_none()
+            && let Some(previous)=self.infos.get(&info.id)
+            && previous.pid==info.pid && previous.created_unix==info.created_unix {
+                info.exited=previous.exited;
+        }
+        if info.exited.is_some() {self.terminal_health.remove(&info.id);}
         let agent = if info.exited.is_some() { None } else {
             super::ui::session_agent(&info).or_else(|| {
                 let previous = self.infos.get(&info.id)?;
@@ -367,6 +375,7 @@ impl Conn {
     }
 
     pub fn recover_terminal(&mut self, session: SessionId) {
+        if self.closing_sessions.contains(&session) || !self.is_alive(session) {return;}
         self.terminal_health.insert(session,TerminalHealth {state:TerminalState::Recovering,attempts:0});
         self.send(ClientMsg::RecoverTerminal {session});
     }
@@ -493,6 +502,7 @@ impl Conn {
         self.screens.remove(&sid);
         self.infos.remove(&sid);
         self.observed_agents.remove(&sid);
+        self.terminal_health.remove(&sid);
         self.textures.retain(|(s, _), _| *s != sid);
         true
     }
@@ -518,6 +528,49 @@ pub fn daemon_exe() -> std::path::PathBuf {
 #[cfg(test)]
 mod terminal_focus_tests {
     use super::*;
+    #[test]
+    fn completed_sessions_ignore_late_recovery_and_manual_repair() {
+        for finish in 0..3 {
+            let mut conn=Conn::offline(egui::Context::default());
+            let mut info=SessionInfo {id:7,..Default::default()};
+            let live=info.clone();
+            conn.handle(ServerMsg::SessionUpdated(info.clone()));
+            conn.screens.insert(7,Screen {cols:80,rows:24,..Default::default()});
+            conn.handle(ServerMsg::TerminalHealth {req:0,session:7,health:TerminalHealth {state:TerminalState::Recovering,attempts:1}});
+            assert_eq!(conn.terminal_health[&7].state,TerminalState::Recovering);
+            info.exited=Some(0);
+            match finish {
+                0=>conn.handle(ServerMsg::SessionExited {session:7,code:Some(0)}),
+                1=>conn.handle(ServerMsg::SessionUpdated(info)),
+                _=>conn.handle(ServerMsg::Sessions {req:1,sessions:vec![info]}),
+            }
+            assert!(!conn.terminal_health.contains_key(&7),"completion path {finish}");
+            for state in [TerminalState::Recovering,TerminalState::Stalled] {
+                conn.handle(ServerMsg::TerminalHealth {req:0,session:7,health:TerminalHealth {state,attempts:3}});
+                assert!(!conn.terminal_health.contains_key(&7),"late {state:?} on completed session");
+            }
+            conn.recover_terminal(7);
+            assert!(!conn.terminal_health.contains_key(&7));
+            assert_eq!(conn.infos[&7].exited,Some(0));
+            assert_eq!(conn.screens.len(),1,"completed screen must be retained");
+            assert_eq!(conn.screens[&7].cols,80);
+            for stale in [ServerMsg::SessionUpdated(live.clone()),ServerMsg::Sessions {req:2,sessions:vec![live]}] {
+                conn.handle(stale);
+                assert_eq!(conn.infos[&7].exited,Some(0),"stale live snapshot must not revive the same process");
+                conn.handle(ServerMsg::TerminalHealth {req:0,session:7,health:TerminalHealth {state:TerminalState::Stalled,attempts:3}});
+                conn.recover_terminal(7);
+                assert!(!conn.terminal_health.contains_key(&7));
+            }
+            conn.handle(ServerMsg::SessionUpdated(SessionInfo {id:7,pid:12,created_unix:34,..Default::default()}));
+            conn.recover_terminal(7);
+            assert!(conn.is_alive(7),"a genuinely different process remains eligible for repair");
+            assert_eq!(conn.terminal_health[&7].state,TerminalState::Recovering);
+        }
+        let mut conn=Conn::offline(egui::Context::default());
+        conn.recover_terminal(99);
+        conn.handle(ServerMsg::TerminalHealth {req:0,session:99,health:TerminalHealth {state:TerminalState::Stalled,attempts:3}});
+        assert!(conn.terminal_health.is_empty(),"unknown session must not be resurrected");
+    }
     #[test]
     fn foreground_identity_is_available_on_first_idle_snapshot_and_reconnect() {
         use kiln_accounts::Tool;
@@ -609,15 +662,19 @@ mod terminal_focus_tests {
         conn.state=State::Connected;
         let info=SessionInfo { id:42, ..Default::default() };
         conn.infos.insert(42,info.clone());
+        conn.terminal_health.insert(42,TerminalHealth {state:TerminalState::Recovering,attempts:1});
         assert!(conn.kill(42));
+        assert!(!conn.terminal_health.contains_key(&42));
         for message in [
             ServerMsg::SessionExited { session:42,code:None },
             ServerMsg::SessionUpdated(SessionInfo { exited:Some(1),..info.clone() }),
             ServerMsg::SessionExited { session:42,code:Some(1) },
             ServerMsg::Sessions { req:3,sessions:vec![info] },
             ServerMsg::Notification { session:42,title:"late".into(),body:String::new() },
+            ServerMsg::TerminalHealth {req:0,session:42,health:TerminalHealth {state:TerminalState::Stalled,attempts:3}},
         ] { conn.handle(message); }
         assert!(!conn.exists(42));
+        assert!(!conn.terminal_health.contains_key(&42));
         assert!(conn.events.is_empty(),"intentional close must not report a failure or notification");
     }
 

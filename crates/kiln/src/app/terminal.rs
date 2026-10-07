@@ -1323,6 +1323,7 @@ mod tests {
             with_language(language,|| {
                 for theme in [kiln_common::Theme::KILN_DARK,kiln_common::Theme::KILN_LIGHT] {
                     let mut conn=Conn::offline(egui::Context::default());
+                    conn.infos.insert(1,kiln_proto::SessionInfo {id:1,..Default::default()});
                     conn.screens.insert(1,Screen {cols:20,rows:2,lines:vec![Line::default();2],row_versions:vec![1;2],..Default::default()});
                     conn.terminal_health.insert(1,TerminalHealth {state:TerminalState::Stalled,attempts:3});
                     let mut installed=false;
@@ -1352,6 +1353,7 @@ mod tests {
         let mut emu = kiln_daemon::emu::Emu::new(80, 3);
         emu.advance(b"Agent is still running\r\n");
         let mut conn = Conn::offline(egui::Context::default());
+        conn.infos.insert(1,kiln_proto::SessionInfo {id:1,..Default::default()});
         conn.screens.insert(1, Screen { cols:80, rows:3,
             lines:(0..3).map(|r|emu.visible_line(r)).collect(), row_versions:vec![1;3],
             ..Default::default() });
