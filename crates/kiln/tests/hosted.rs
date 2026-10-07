@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
+#[path = "support/upgrade.rs"]
+mod upgrade;
+
 static INIT: Once = Once::new();
 
 fn init() {
@@ -126,7 +129,7 @@ fn hosted_upgrade_keeps_sessions_and_output_produced_during_handover() {
     type_line(&c, s, "(sleep 0.3; echo during-handover) &");
     std::thread::sleep(Duration::from_millis(100));
     c.send(ClientMsg::Upgrade { req: 1, exe: exe().to_string_lossy().into_owned() });
-    std::thread::sleep(Duration::from_millis(200));
+    upgrade::disconnected(&c, 1);
     let c2 = d.reconnect();
     assert_ne!(c2.server_pid, old_daemon, "호스트 방식은 새 데몬 프로세스로 바뀐다");
     assert!(alive(shell));

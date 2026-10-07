@@ -5,6 +5,9 @@ use kiln_proto::{ClientMsg, ServerMsg, SessionId, SpawnSpec};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+#[path = "support/upgrade.rs"]
+mod upgrade;
+
 struct Daemon {
     socket: String,
     dir: PathBuf,
@@ -54,6 +57,7 @@ fn create(c: &Client, program: &str, args: &[&str]) -> SessionId {
     }
 }
 
+#[track_caller]
 fn read(c: &Client, s: SessionId) -> String {
     match c.request(|req| ClientMsg::ReadText { req, session: s, history: 1000 }, Duration::from_secs(5)).unwrap() {
         ServerMsg::Text { text, .. } => text,
@@ -61,6 +65,7 @@ fn read(c: &Client, s: SessionId) -> String {
     }
 }
 
+#[track_caller]
 fn wait_for(c: &Client, s: SessionId, needle: &str) -> String {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -123,6 +128,7 @@ fn hot_upgrade_keeps_processes_screen_and_io() {
     let bg_pid: u32 = text.lines().filter_map(|l| l.trim().strip_prefix("bg=")).filter_map(|v| v.trim().parse().ok()).next_back().expect("bg pid");
 
     c.send(ClientMsg::Upgrade { req: 99, exe: exe().to_string_lossy().into_owned() });
+    upgrade::disconnected(&c, 99);
     // 업그레이드 후 재연결.
     let deadline = Instant::now() + Duration::from_secs(10);
     let c2 = loop {
@@ -275,7 +281,7 @@ fn inline_image_is_sent_once_and_placed_in_frames_across_upgrade() {
 
     // 업그레이드 후에도 이미지가 다시 전달되고 같은 자리에 있다.
     c.send(ClientMsg::Upgrade { req: 1, exe: exe().to_string_lossy().into_owned() });
-    std::thread::sleep(Duration::from_millis(300));
+    upgrade::disconnected(&c, 1);
     let deadline = Instant::now() + Duration::from_secs(10);
     let c2 = loop {
         if let Ok(c2) = Client::connect(&d.socket, None) {

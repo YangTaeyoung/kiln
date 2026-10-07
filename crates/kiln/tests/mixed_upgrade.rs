@@ -1,6 +1,9 @@
 //! Real migration from the published native V2 restore format to mixed PTYs.
 //! The fixture owns every process/socket/FD; no installed app or user session is used.
 #[cfg(unix)]
+#[path = "support/upgrade.rs"]
+mod upgrade;
+#[cfg(unix)]
 mod unix {
     use kiln_daemon::{
         client::Client,
@@ -280,8 +283,8 @@ mod unix {
             req: 70,
             exe: env!("CARGO_BIN_EXE_kiln").into(),
         });
+        super::upgrade::disconnected(&c, 70);
         drop(c);
-        std::thread::sleep(Duration::from_millis(250));
         let c = owner.client();
         let rows = sessions(&c);
         assert_eq!(
@@ -352,8 +355,8 @@ mod unix {
             req: 71,
             exe: env!("CARGO_BIN_EXE_kiln").into(),
         });
+        super::upgrade::disconnected(&c, 71);
         drop(c);
-        std::thread::sleep(Duration::from_millis(250));
         let c = owner.client();
         assert!(
             sessions(&c)
@@ -380,8 +383,8 @@ mod unix {
             req: 72,
             exe: env!("CARGO_BIN_EXE_kiln").into(),
         });
+        super::upgrade::disconnected(&c, 72);
         drop(c);
-        std::thread::sleep(Duration::from_millis(250));
         let c = missing.client();
         assert_eq!(c.server_pid, pid);
         send(&c, 1, "retained");
