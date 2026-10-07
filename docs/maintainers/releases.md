@@ -156,6 +156,20 @@ signature, notarization ticket and Gatekeeper result again. Confirm the stable f
 returns the intended version. Open **Check for Updates** in the installed official
 build and verify the latest-version/update result.
 
+Also exercise the README installer against the newly published release in an
+owned empty folder. Confirm the version and binary match the verified public
+archive, then run it again to confirm an existing app remains unchanged. This
+checks the one-line install path without replacing the owner's app or launching
+another session daemon.
+
+```sh
+installer_check_dir=$(mktemp -d "${TMPDIR:-/tmp}/kiln-installer-check.XXXXXX")
+curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | \
+  KILN_INSTALL_DIR="$installer_check_dir" sh
+```
+
+Keep the recorded directory for verification, then remove only that directory.
+
 When replacing a local app, record `kiln ls --json` before and after. Close the GUI
 through its save/quit flow; preserve the daemon and PTYs. Verify the helper is current,
 the workspace restores and all original shell PIDs remain alive. Remove only your
