@@ -567,7 +567,7 @@ impl KilnApp {
             let cy = bar.center().y;
             let left = bar.left() + if is_mac() && !ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false)) { 80.0 } else { 8.0 };
             let mut lui = ui.new_child(UiBuilder::new().max_rect(egui::Rect::from_min_size(pos2(left, cy - 15.0), vec2(30.0, 30.0))));
-            if widgets::icon_button(&mut lui, Icon::Sidebar, 30.0, self.sidebar_open, &kiln_common::trf!("작업 공간 사이드바 ({})",self.keymap.label("sidebar","⌘B"))).clicked() {
+            if widgets::icon_button(&mut lui, Icon::Sidebar, 30.0, self.sidebar_open, &kiln_common::trf!("워크스페이스 사이드바 ({})",self.keymap.label("sidebar","⌘B"))).clicked() {
                 self.actions.push(Action::ToggleSidebar);
             }
             let tool_label = kiln_common::i18n::tr("도구");
@@ -705,9 +705,9 @@ impl KilnApp {
             .show(root, |ui| {
                 ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
                 ui.horizontal(|ui| {
-                    if wide {ui.label(RichText::new(kiln_common::i18n::tr("작업 공간")).font(fonts::semibold(12.0)).color(t.text_dim));}
+                    if wide {ui.label(RichText::new(kiln_common::i18n::tr("워크스페이스")).font(fonts::semibold(12.0)).color(t.text_dim));}
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::icon_button(ui,Icon::Plus,26.0,false,kiln_common::i18n::tr("폴더 열기")).clicked(){self.actions.push(Action::OpenFolder);}
+                        if widgets::icon_button(ui,Icon::Plus,26.0,false,kiln_common::i18n::tr("새 워크스페이스")).clicked(){self.actions.push(Action::NewWorkspace(None));}
                         if wide && widgets::icon_button(ui,Icon::History,26.0,false,&kiln_common::trf!("작업 검색 ({})",self.keymap.label("recent","⌘J"))).clicked(){self.actions.push(Action::OpenRecent);}
                     });
                 });
@@ -823,6 +823,9 @@ impl KilnApp {
             self.workspaces[i].renaming = Some(name.clone());
         }
         resp.context_menu(|ui| {
+            if ui.button(kiln_common::i18n::tr("새 워크스페이스")).clicked() {
+                self.actions.push(Action::NewWorkspaceAt(root_path.clone())); ui.close();
+            }
             if ui.button(kiln_common::i18n::tr("이름 바꾸기")).clicked() {
                 self.workspaces[i].renaming = Some(name.clone());
                 ui.close();
@@ -850,7 +853,7 @@ impl KilnApp {
                 }
             });
             ui.separator();
-            if ui.button(RichText::new(kiln_common::i18n::tr("작업 공간 닫기")).color(t.red)).clicked() {
+            if ui.button(RichText::new(kiln_common::i18n::tr("워크스페이스 닫기")).color(t.red)).clicked() {
                 self.actions.push(Action::CloseWorkspace(i));
                 ui.close();
             }
@@ -927,7 +930,7 @@ impl KilnApp {
                 ui.painter().text(banner.left_center()+vec2(12.0,0.0),Align2::LEFT_CENTER,kiln_common::i18n::tr("세션에 다시 연결하는 중…"),fonts::regular(12.0),t.orange);
                 area.min.y+=28.0;
             }
-            let layout_enabled=ui.memory(|m|m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces[self.active].page().zoomed.is_none();
+            let layout_enabled=ui.memory(|m|m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && self.workspace_dialog.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces[self.active].page().zoomed.is_none();
             self.prepare_pane_layout(ui,area,layout_enabled);
             let ws_idx = self.active;
             let (root_node, focused, zoomed) = {
@@ -949,7 +952,7 @@ impl KilnApp {
                 nav.spacing_mut().item_spacing.x = 4.0;
                 nav.add_space(8.0);
                 if area.width()>260.0 && widgets::icon_button(&mut nav, Icon::Grid, 26.0, false, kiln_common::i18n::tr("격자로 배치")).on_hover_text(kiln_common::i18n::tr("열린 패널을 두 열로 정리합니다")).clicked(){self.actions.push(Action::ArrangeGrid);}
-                if widgets::icon_button(&mut nav, Icon::SplitRight, 26.0, false, kiln_common::i18n::tr("분할로 복원")).on_hover_text(kiln_common::i18n::tr("이 탭의 패널을 분할한 채 유지합니다. 작업 공간을 우클릭한 뒤 패널 배치에서 ‘좁아지면 선택한 패널만 표시’를 다시 켤 수 있습니다.")).clicked(){self.workspaces[ws_idx].page_mut().manual_split=true;}
+                if widgets::icon_button(&mut nav, Icon::SplitRight, 26.0, false, kiln_common::i18n::tr("분할로 복원")).on_hover_text(kiln_common::i18n::tr("이 탭의 패널을 분할한 채 유지합니다. 워크스페이스를 우클릭한 뒤 패널 배치에서 ‘좁아지면 선택한 패널만 표시’를 다시 켤 수 있습니다.")).clicked(){self.workspaces[ws_idx].page_mut().manual_split=true;}
                 let selected_name = self.card_info(focused).name;
                 let selector_width = (nav.available_width() - 8.0).max(1.0);
                 let selector = egui::ComboBox::from_id_salt("adaptive-pane-switcher").selected_text(&selected_name).width(selector_width).truncate().show_ui(&mut nav, |ui| {
@@ -965,7 +968,7 @@ impl KilnApp {
                 rects.push((focused, area));
             }
             let multi = rects.len() > 1;
-            let focus_req = self.focus_terminal && ui.memory(|m| m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none());
+            let focus_req = self.focus_terminal && ui.memory(|m| m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && self.workspace_dialog.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none());
             let mut focus_consumed = false;
             let mut new_focus = None;
             let settings = terminal::TermSettings { font_size: self.settings.font_size, option_as_meta: self.settings.option_as_meta, line_height: self.settings.line_height, copy_on_select: self.settings.copy_on_select, cursor_blink: self.settings.cursor_blink, close_shortcut: Some(self.keymap.resolve("close_panel", KeyboardShortcut::new(if is_mac() { Modifiers::MAC_CMD } else { Modifiers::CTRL | Modifiers::SHIFT }, Key::W))) };
@@ -1260,11 +1263,11 @@ impl KilnApp {
                 widgets::divider(ui);
                 ui.add_space(8.0);
                 let body = ui.available_rect_before_wrap();
-                let mut child = ui.new_child(UiBuilder::new().max_rect(body));
+                let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("workspace-tools", self.workspaces[ws_idx].id)));
                 child.set_clip_rect(body);
                 acts.extend(self.workspaces[ws_idx].tools.panel_ui(&mut child, kind));
             });
-        if exclusive && self.confirm.is_none() && self.agent_request_view.is_none() && !self.launchers.is_open() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open
+        if exclusive && self.confirm.is_none() && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.launchers.is_open() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open
             && !egui::Popup::is_any_open(root.ctx())
             && root.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             acts.push(Action::CloseSheet);
@@ -1279,6 +1282,7 @@ impl KilnApp {
 
     pub(super) fn ui_overlays(&mut self, ctx: &egui::Context) {
         let t = self.theme;
+        self.ui_workspace_dialog(ctx);
         let acts = self.workspaces[self.active].tools.overlay_ui(ctx);
         self.actions.extend(acts);
 
@@ -1315,7 +1319,7 @@ impl KilnApp {
             let frame = Frame::new().fill(t.bg_panel).stroke(Stroke::new(1.0, t.border_strong)).corner_radius(12).inner_margin(Margin::same(20));
             let response = egui::Modal::new(egui::Id::new("rename-workspace")).frame(frame).show(ctx, |ui| {
                 ui.set_width(340.0f32.min(ctx.content_rect().width() - 64.0));
-                ui.label(RichText::new(kiln_common::i18n::tr("작업 공간 이름 바꾸기")).font(fonts::semibold(17.0)));
+                ui.label(RichText::new(kiln_common::i18n::tr("워크스페이스 이름 바꾸기")).font(fonts::semibold(17.0)));
                 ui.add_space(12.0);
                 let buffer = self.workspaces[index].renaming.as_mut().unwrap();
                 let input = ui.add(egui::TextEdit::singleline(buffer).desired_width(f32::INFINITY));
@@ -1369,8 +1373,8 @@ impl KilnApp {
                 ui.add_space(16.0);
                 if let Some(skip) = &mut c.skip_running_confirmation {
                     ui.checkbox(skip,kiln_common::i18n::tr("다시 묻지 않기"))
-                        .on_hover_text(kiln_common::i18n::tr("실행 중인 패널·탭·작업 공간의 종료 확인을 생략합니다. 설정에서 다시 켤 수 있습니다."));
-                    ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("패널·탭·작업 공간에 적용됩니다. 설정에서 다시 켤 수 있습니다.")).size(11.5).color(t.text_dim)).wrap());
+                        .on_hover_text(kiln_common::i18n::tr("실행 중인 패널·탭·워크스페이스의 종료 확인을 생략합니다. 설정에서 다시 켤 수 있습니다."));
+                    ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("패널·탭·워크스페이스에 적용됩니다. 설정에서 다시 켤 수 있습니다.")).size(11.5).color(t.text_dim)).wrap());
                     ui.add_space(12.0);
                 }
                 if matches!(c.action, Action::QuitConfirmed) && !self.launchers.has_unsaved_edits() && !self.projects.has_unsaved_edits() && !self.keymap.has_unsaved_edits() {
@@ -1498,7 +1502,7 @@ impl KilnApp {
         let mut items: Vec<palette::Item<Action>> = Vec::new();
         let mut add = |group: Group, icon: Icon, label: String, hint: &str, a: Action| {
             let (key,project)=match &a {Action::RevealPane(id)=>(format!("pane:{id}"),self.workspaces.iter().find(|w|w.all_panes().contains(id)).map(|w|format!("{} · {}",w.name,short_path(&w.root))).unwrap_or_default()),_=>(format!("{:?}:{label}",group),String::new())};
-            let binding=match &a{Action::OpenRecent=>Some("recent"),Action::OpenLaunchers=>Some("launchers"),Action::OpenProjects|Action::NewWorkspace(None)=>Some("projects"),Action::QuickOpen=>Some("files"),Action::ToggleSidebar=>Some("sidebar"),Action::OpenPalette=>Some("palette"),Action::NewPage=>Some("new_task"),Action::Split(layout::Dir::Horizontal)=>Some("split_right"),Action::Split(layout::Dir::Vertical)=>Some("split_down"),Action::CloseActive=>Some("close_panel"),Action::ToggleZoom(_)=>Some("focus_panel"),Action::Equalize=>Some("equalize"),Action::NextPage(1)=>Some("next_task"),Action::NextPage(-1)=>Some("previous_task"),Action::JumpUnread=>Some("unread"),_=>None};
+            let binding=match &a{Action::OpenRecent=>Some("recent"),Action::OpenLaunchers=>Some("launchers"),Action::NewWorkspace(None)=>Some("projects"),Action::QuickOpen=>Some("files"),Action::ToggleSidebar=>Some("sidebar"),Action::OpenPalette=>Some("palette"),Action::NewPage=>Some("new_task"),Action::Split(layout::Dir::Horizontal)=>Some("split_right"),Action::Split(layout::Dir::Vertical)=>Some("split_down"),Action::CloseActive=>Some("close_panel"),Action::ToggleZoom(_)=>Some("focus_panel"),Action::Equalize=>Some("equalize"),Action::NextPage(1)=>Some("next_task"),Action::NextPage(-1)=>Some("previous_task"),Action::JumpUnread=>Some("unread"),_=>None};
             let hint=binding.map(|id|self.keymap.label(id,hint)).unwrap_or_else(||hint.into());
             let (label, detail) = label.split_once('\n').map(|(title,context)|(title.to_owned(),context.to_owned())).unwrap_or((label,String::new()));
             items.push(palette::Item { key, project, group, icon, label, hint, detail, action: a });
@@ -1539,7 +1543,8 @@ impl KilnApp {
         add(Group::Commands,Icon::Folder,kiln_common::i18n::tr("폴더 열기").into(),"",Action::OpenFolder);
         add(Group::Commands,Icon::Folder,kiln_common::i18n::tr("파일 살펴보기").into(),"",Action::OpenSheet(tools::ToolKind::Explorer));
         add(Group::Commands,Icon::Sparkle,kiln_common::i18n::tr("새 에이전트 작업").into(),"",Action::NewAgentTask);
-        add(Group::Commands, Icon::Folder, kiln_common::i18n::tr("프로젝트 관리").into(), "⌘N", Action::OpenProjects);
+        add(Group::Commands, Icon::Folder, kiln_common::i18n::tr("새 워크스페이스").into(), "⌘N", Action::NewWorkspace(None));
+        add(Group::Commands, Icon::Folder, kiln_common::i18n::tr("프로젝트 관리").into(), "", Action::OpenProjects);
         add(Group::Commands, Icon::History, kiln_common::i18n::tr("작업 복구 센터").into(), "", Action::OpenRecovery);
         add(Group::Commands, Icon::Terminal, kiln_common::i18n::tr("빠른 터미널").into(), "Ctrl+`", Action::ToggleQuickTerminal);
         add(Group::Commands, Icon::History, kiln_common::i18n::tr("최근 작업 전환").into(), "⌘J", Action::OpenRecent);
@@ -1559,7 +1564,7 @@ impl KilnApp {
         add(Group::Commands, Icon::File, kiln_common::i18n::tr("파일 빠르게 열기").into(), "⌘P", Action::QuickOpen);
         add(Group::Commands, Icon::Search, kiln_common::i18n::tr("터미널·에디터에서 찾기").into(), "⌘F", Action::FindInFocused);
 
-        add(Group::Commands, Icon::Sidebar, kiln_common::i18n::tr("작업 공간 목록 접기/펴기").into(), "⌘B", Action::ToggleSidebar);
+        add(Group::Commands, Icon::Sidebar, kiln_common::i18n::tr("워크스페이스 목록 접기/펴기").into(), "⌘B", Action::ToggleSidebar);
         add(Group::Commands, Icon::Bell, kiln_common::i18n::tr("알림 센터 열기").into(), "", Action::ToggleNotifications);
         add(Group::Commands, Icon::Bell, kiln_common::i18n::tr("읽지 않은 알림으로 이동").into(), "⇧⌘U", Action::JumpUnread);
         for k in tools::ToolKind::ALL {

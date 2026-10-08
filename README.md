@@ -28,7 +28,8 @@ libraries—and keep the whole task in view.
 ### Keep the task together
 
 - **Work across repositories.** Give an agent one request at the parent-folder level,
-  while keeping Git operations scoped to the repository you choose.
+  while keeping Git operations scoped to the repository you choose. Create separate
+  named workspaces for the same folder when tasks need their own terminals and layouts.
 - **See what needs attention.** Workspace task rows show reported running, waiting,
   completed, and failed states. Jump directly to the relevant split or session.
 - **Keep sessions independent of the window.** A separate local daemon owns your
@@ -36,7 +37,7 @@ libraries—and keep the whole task in view.
 - **Review without leaving the workspace.** Inspect diffs and pull requests,
   drag-select commits to squash, cherry-pick from another branch, or drop a commit.
 - **Use the tools around your terminal.** File editing and LSP, project search,
-  SQL consoles, database grids, S3/FTP/SFTP files, SSH terminals, command history,
+  SQL consoles, database grids, S3/OCI/GCS/R2 and FTP/SFTP files, SSH terminals, command history,
   and a notification center. Sign in to agent accounts through your browser.
 
 ### Start in a minute

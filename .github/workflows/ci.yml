@@ -35,7 +35,7 @@ jobs:
           cargo test --locked -p kiln-accounts --lib
       - name: Remote files and direct agent launches
         run: |
-          cargo test --locked -p kiln-remote --lib --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui -- --test-threads=1
+          cargo test --locked -p kiln-remote --lib --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1
           cargo test --locked -p kiln --test direct_terminal_launch -- --test-threads=1
           cargo test --locked -p kiln --test terminal_recovery -- --test-threads=1
           KILN_PTY_HOST=0 cargo test --locked -p kiln --test daemon -- --test-threads=1

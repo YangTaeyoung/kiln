@@ -33,7 +33,7 @@ impl Group {
             Group::Sessions => kiln_common::i18n::tr("열린 작업 · 실행 중 우선"),
             Group::Commands => kiln_common::i18n::tr("명령"),
             Group::Tools => kiln_common::i18n::tr("도구"),
-            Group::Spaces => kiln_common::i18n::tr("작업 공간"),
+            Group::Spaces => kiln_common::i18n::tr("워크스페이스"),
             Group::Settings => kiln_common::i18n::tr("설정"),
         }
     }
@@ -142,7 +142,7 @@ impl Palette {
                 });
                 if self.recent_only {
                     ui.horizontal(|ui|{
-                        ui.label(kiln_common::i18n::tr("작업 공간"));
+                        ui.label(kiln_common::i18n::tr("워크스페이스"));
                         let menu_width=(ui.available_width()-16.0).min(420.0);
                         egui::ComboBox::from_id_salt("recent-project-filter").width(menu_width).truncate().selected_text(if self.project_filter.is_empty(){kiln_common::i18n::tr("전체")}else{&self.project_filter}).show_ui(ui,|ui|{
                             if ui.selectable_value(&mut self.project_filter,String::new(),kiln_common::i18n::tr("전체")).changed(){changed=true;}
@@ -215,7 +215,7 @@ impl Palette {
                         ui.add_space(28.0);
                         ui.vertical_centered(|ui| {
                             ui.label(RichText::new(kiln_common::i18n::tr("검색 결과가 없습니다")).font(fonts::semibold(14.0)));
-                            ui.label(RichText::new(if self.recent_only {kiln_common::i18n::tr("다른 검색어를 입력하거나 작업 공간 필터를 전체로 바꾸세요.")} else {kiln_common::i18n::tr("다른 검색어를 입력하거나 검색어를 지워 전체 명령을 확인하세요.")}).color(t.text_dim));
+                            ui.label(RichText::new(if self.recent_only {kiln_common::i18n::tr("다른 검색어를 입력하거나 워크스페이스 필터를 전체로 바꾸세요.")} else {kiln_common::i18n::tr("다른 검색어를 입력하거나 검색어를 지워 전체 명령을 확인하세요.")}).color(t.text_dim));
                             if (!self.query.is_empty() || !self.project_filter.is_empty()) && ui.button(kiln_common::i18n::tr("검색 초기화")).clicked(){self.query.clear();self.project_filter.clear();self.selected=0;}
                         });
                         ui.add_space(28.0);

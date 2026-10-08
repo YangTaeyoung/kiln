@@ -19,3 +19,15 @@ FTP uses Kiln's generic server vector; SFTP uses Kiln's generic terminal vector.
 These are protocol symbols, not third-party product logos. All three identities
 are painted from bundled SVG or vector paths, with no system font or external
 file dependency.
+
+## Additional cloud provider marks
+
+Provider identities are identification marks, not Kiln branding or endorsement.
+
+- Cloudflare and Google Cloud: Lobe Icons, MIT; `LOBE-ICONS-LICENSE`.
+  - https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/cloudflare.svg
+  - https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/googlecloud.svg
+- Oracle: Simple Icons v11.0.0, CC0; `SIMPLE-ICONS-LICENSE`.
+  - https://raw.githubusercontent.com/simple-icons/simple-icons/11.0.0/icons/oracle.svg
+
+Downloaded 2026-10-08. Paths are unchanged. Oracle adds `fill="currentColor"` for the same monochrome theme tint used by the other marks. Brand rights remain with their owners.

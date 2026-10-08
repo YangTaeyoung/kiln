@@ -167,7 +167,7 @@ impl<T> Pending<T> {
     }
 }
 
-/// 서버 식별자: (작업 공간 루트, 서버 계열).
+/// 서버 식별자: (워크스페이스 루트, 서버 계열).
 pub(crate) type ServerKey = (PathBuf, String);
 
 pub(crate) struct Doc {
@@ -247,7 +247,7 @@ fn shutdown_servers(servers: &Mutex<HashMap<ServerKey, Arc<ServerHandle>>>, shar
     }
 }
 
-/// 작업 공간 하나의 언어 서버들. 복제하면 같은 서버들을 공유한다. 마지막 복제본이 사라지면 서버를 끈다.
+/// 워크스페이스 하나의 언어 서버들. 복제하면 같은 서버들을 공유한다. 마지막 복제본이 사라지면 서버를 끈다.
 #[derive(Clone)]
 pub struct LspManager {
     inner: Arc<Inner>,

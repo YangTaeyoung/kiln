@@ -5,9 +5,10 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | Guide | What you will find |
 | --- | --- |
 | [Getting started](getting-started.md) | Install, open a workspace, run your first task |
-| [Workspaces and agents](workspaces.md) | Parent folders, multiple repositories, split sessions |
+| [Workspaces and agents](workspaces.md) | Named workspaces, shared folders, multiple repositories, split sessions |
 | [Pane layout](pane-layout.md) | Drag panes, resize local or linked boundaries, snap and cancel |
-| [Remote files and SSH](remote-files.md) | S3, FTP/SFTP, file transfers and SSH terminals |
+| [Remote files and SSH](remote-files.md) | S3/OCI/GCS/R2, CLI profiles, FTP/SFTP, file transfers and SSH terminals |
+| [Object storage](object-storage.md) | AWS, OCI, Google and Cloudflare profiles, authentication and transfer limits |
 | [Agent accounts](accounts.md) | Browser sign-in, saved profiles and account switching |
 | [Database tools](databases.md) | Connections, SQL completion, schema editing and metadata boundaries |
 | [File editor](editor.md) | Language detection, completion and language-server setup |

@@ -604,6 +604,7 @@ pub struct WorkspaceTools {
     repositories: super::workspace_repos::RepositoryWorkspace,
     pub root: PathBuf,
     canonical_root: PathBuf,
+    workspace_id: u64,
     pub lsp: LspManager,
     ctx: egui::Context,
     db: DbManager,
@@ -629,12 +630,13 @@ pub struct WorkspaceTools {
 }
 
 impl WorkspaceTools {
-    pub fn new(root: &Path, ctx: &egui::Context, db: DbManager) -> Self {
+    pub fn new(root: &Path, ctx: &egui::Context, db: DbManager, workspace_id: u64) -> Self {
         let lsp = LspManager::new(root.to_path_buf());
         lsp.set_repaint_ctx(ctx);
         WorkspaceTools {
-            repositories: super::workspace_repos::RepositoryWorkspace::new(root,ctx),
+            repositories: super::workspace_repos::RepositoryWorkspace::new(root,ctx).with_id_salt(workspace_id),
             root: root.to_path_buf(),
+            workspace_id,
             canonical_root: root.canonicalize().unwrap_or_else(|_| root.to_path_buf()),
             lsp,
             ctx: ctx.clone(),
@@ -646,7 +648,7 @@ impl WorkspaceTools {
             db_panel: None,
             remote: kiln_remote::ui::RemoteManager::load(),
             remote_panel: None,
-            quick: QuickOpen::new(),
+            quick: QuickOpen::new().with_id_salt(workspace_id),
             summary: None,
             summary_task: None,
             summary_at: None,
@@ -704,7 +706,7 @@ impl WorkspaceTools {
 
     fn git(&mut self) -> &mut GitPanel {
         let root = self.root.clone();
-        self.git.get_or_insert_with(|| GitPanel::new(root))
+        self.git.get_or_insert_with(|| GitPanel::new(root).with_id_salt(self.workspace_id))
     }
 
     /// 매 프레임: 저장소 요약 갱신, 파일 트리 git 색상 반영.
@@ -750,7 +752,7 @@ impl WorkspaceTools {
         match kind {
             ToolKind::Explorer => {
                 let root = self.root.clone();
-                self.tree.get_or_insert_with(|| FileTree::new(root)).request_focus();
+                self.tree.get_or_insert_with(|| FileTree::new(root).with_id_salt(self.workspace_id)).request_focus();
             }
             ToolKind::Search => self.focus_search = true,
             ToolKind::Git => self.git().refresh(),
@@ -845,7 +847,7 @@ impl WorkspaceTools {
 
     pub fn file_menu_ui(&mut self, ui: &mut egui::Ui) -> Vec<Action> {
         let root = self.root.clone();
-        self.tree.get_or_insert_with(|| FileTree::new(root)).menu_ui(ui)
+        self.tree.get_or_insert_with(|| FileTree::new(root).with_id_salt(self.workspace_id)).menu_ui(ui)
             .into_iter().filter_map(editor_event_action).collect()
     }
 
@@ -857,7 +859,7 @@ impl WorkspaceTools {
         }
         let root = self.root.clone();
         if matches!(kind, ToolKind::Git | ToolKind::PullRequests) && self.repositories.loading() {
-            ui.horizontal(|ui| { ui.spinner(); ui.label(kiln_common::i18n::tr("작업 공간의 저장소를 찾는 중…")); });
+            ui.horizontal(|ui| { ui.spinner(); ui.label(kiln_common::i18n::tr("워크스페이스의 저장소를 찾는 중…")); });
             return Vec::new();
         }
         if matches!(kind, ToolKind::Git | ToolKind::PullRequests) && self.repositories.is_multi() {
@@ -894,12 +896,12 @@ impl WorkspaceTools {
         }
         match kind {
             ToolKind::Explorer => {
-                let tree = self.tree.get_or_insert_with(|| FileTree::new(root.clone()));
+                let tree = self.tree.get_or_insert_with(|| FileTree::new(root.clone()).with_id_salt(self.workspace_id));
                 self.deco_at = None;
                 tree.ui_embedded(ui).into_iter().filter_map(editor_event_action).collect()
             }
             ToolKind::Search => {
-                let s = self.search.get_or_insert_with(|| SearchPanel::new(root.clone()));
+                let s = self.search.get_or_insert_with(|| SearchPanel::new(root.clone()).with_id_salt(self.workspace_id));
                 if std::mem::take(&mut self.focus_search) {
                     s.focus();
                 }
@@ -1001,7 +1003,7 @@ mod recovery_tests {
     fn github_comment_and_workspace_drafts_roundtrip_and_reversible_discard() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = egui::Context::default();
-        let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory());
+        let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory(), 1);
         for doc in [
             ToolP::PrDraft { root: dir.path().into(), repo: Some("owner/repo".into()), number: 7, body: "review draft".into() },
             ToolP::IssueDraft { root: dir.path().into(), repo: Some("owner/repo".into()), number: 8, body: "comment draft".into() },
@@ -1048,7 +1050,7 @@ mod recovery_tests {
         let path = dir.path().join("query.txt");
         std::fs::write(&path, "select 1").unwrap();
         let ctx = egui::Context::default();
-        let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory());
+        let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory(), 1);
         let clean = ToolP::Editor { path: path.clone(), language_override: Some("SQL".into()) };
         let tab = tools.restore_tool(&clean, &ctx).unwrap();
         assert!(tab.persist().as_ref() == Some(&clean));
@@ -1072,7 +1074,7 @@ mod recovery_tests {
         std::fs::write(&path,"original").unwrap();
         let mut ed=Editor::open(&path).unwrap(); ed.select_all(); ed.insert_text("unsaved");
         let ctx=egui::Context::default();
-        let mut tools=WorkspaceTools::new(dir.path(),&ctx,DbManager::in_memory());
+        let mut tools=WorkspaceTools::new(dir.path(),&ctx,DbManager::in_memory(),1);
         let mut tab=tools.restore_tool(&ToolP::EditorDraft { path:path.clone(),draft:ed.recovery_draft().unwrap(), language_override:None },&ctx).unwrap();
         assert!(tab.is_dirty()); assert!(tab.recovery_notice().is_some());
         assert!(matches!(tab.persist(),Some(ToolP::EditorDraft { .. })));
@@ -1100,7 +1102,7 @@ mod recovery_tests {
   let file = dir.path().join("README.md");
   std::fs::write(&file, "hello").unwrap();
   let ctx = egui::Context::default();
-  let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory());
+  let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory(), 1);
   tools.on_show(ToolKind::Explorer);
   let mut h = Harness::builder().with_size([500., 500.]).build_ui_state(
    |ui, state: &mut (WorkspaceTools, Vec<Action>, usize)| {
@@ -1122,7 +1124,7 @@ mod recovery_tests {
   use egui_kittest::{Harness, kittest::Queryable};
   let dir = tempfile::tempdir().unwrap();
   let ctx = egui::Context::default();
-  let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory());
+  let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory(), 1);
   let mut drafts = WorkspaceDrafts::default();
   drafts.commit_message = "keep legacy draft".into();
   tools.restore_drafts(&drafts);
@@ -1143,7 +1145,7 @@ mod recovery_tests {
   for kind in [ToolKind::Git, ToolKind::PullRequests] {
    let dir = tempfile::tempdir().unwrap();
    let ctx = egui::Context::default();
-   let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory());
+   let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory(), 1);
    let mut draft = WorkspaceDrafts::default();
    draft.commit_message = "original root message".into();
    draft.github.repositories.insert("owner/old".into(), kiln_git::RepositoryDrafts {

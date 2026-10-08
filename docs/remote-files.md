@@ -1,6 +1,8 @@
 # Remote files and SSH
 
-Kiln can browse S3 buckets, FTP/FTPS servers and SFTP hosts alongside your
+For AWS, Oracle, Google and Cloudflare connections, see [object storage](object-storage.md).
+
+Kiln can browse AWS, Oracle, Google and Cloudflare object storage, FTP/FTPS servers and SFTP hosts alongside your
 terminals, databases and local files. Saved connection settings contain names
 and addresses; passwords and S3 credentials use the account credential store
 (macOS Keychain).

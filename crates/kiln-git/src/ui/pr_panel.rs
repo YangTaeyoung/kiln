@@ -257,7 +257,7 @@ impl PrPanel {
                     self.set_filter(f);
                 }
                 ui.add_space(8.0);
-                let sid = Id::new("kiln_pr_search");
+                let sid = ui.make_persistent_id("kiln_pr_search");
                 let focused = ui.memory(|m| m.has_focus(sid));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search)

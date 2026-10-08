@@ -36,6 +36,7 @@ struct Draft {
 
 /// 이슈 상세 뷰.
 pub struct IssueView {
+    widget_scope: Id,
     repo: Option<RepoRef>,
     number: u64,
     backend: Arc<dyn GithubBackend>,
@@ -64,6 +65,7 @@ impl IssueView {
     /// 데이터 소스를 주입해 만든다.
     pub fn with_backend(repo: Option<RepoRef>, number: u64, backend: Arc<dyn GithubBackend>) -> Self {
         Self {
+            widget_scope: Id::NULL,
             repo,
             number,
             backend,
@@ -183,6 +185,7 @@ impl IssueView {
 
     /// 뷰를 그린다.
     pub fn ui(&mut self, ui: &mut Ui) -> Vec<GitEvent> {
+        self.widget_scope = ui.make_persistent_id(("issue-view", &self.repo, self.number));
         let mut events = Vec::new();
         self.pump(ui.ctx());
         let t = theme();
@@ -341,7 +344,7 @@ impl IssueView {
                     ui.label(RichText::new(kiln_common::i18n::tr("댓글 작성")).font(kiln_common::fonts::semibold(13.5)).color(t.text));
                 });
                 ui.add_space(8.0);
-                let cid = Id::new(("kiln_issue_comment", self.number));
+                let cid = self.widget_scope.with("kiln_issue_comment");
                 let focused = ui.memory(|m| m.has_focus(cid));
                 ui.add(
                     egui::TextEdit::multiline(&mut self.comment)
@@ -374,7 +377,7 @@ impl IssueView {
         // 담당자
         let r = ui.add_enabled_ui(!busy, |ui| sidebar_heading(ui, kiln_common::i18n::tr("담당자"), true)).inner;
         if let Some(r) = r {
-            let pid = Id::new(("issue_assignees_pick", self.number));
+            let pid = self.widget_scope.with("issue_assignees_pick");
             if r.clicked() {
                 egui::Popup::toggle_id(ui.ctx(), pid);
                 if self.users_draft.is_none() {
@@ -412,7 +415,7 @@ impl IssueView {
         // 라벨
         let r = ui.add_enabled_ui(!busy, |ui| sidebar_heading(ui, kiln_common::i18n::tr("라벨"), true)).inner;
         if let Some(r) = r {
-            let pid = Id::new(("issue_labels_pick", self.number));
+            let pid = self.widget_scope.with("issue_labels_pick");
             if r.clicked() {
                 egui::Popup::toggle_id(ui.ctx(), pid);
                 if self.labels_draft.is_none() {
@@ -481,8 +484,8 @@ impl IssueView {
     /// 편집 팝업이 닫혔으면 변경분을 `gh issue edit` 으로 반영한다.
     fn finish_drafts(&mut self, ctx: &egui::Context) {
         self.meta_pump_if_needed(ctx);
-        let lid = Id::new(("issue_labels_pick", self.number));
-        let uid = Id::new(("issue_assignees_pick", self.number));
+        let lid = self.widget_scope.with("issue_labels_pick");
+        let uid = self.widget_scope.with("issue_assignees_pick");
         let mut edit = IssueEdit::default();
         if self.labels_draft.is_some() && !egui::Popup::is_id_open(ctx, lid) {
             let dr = self.labels_draft.take().unwrap();

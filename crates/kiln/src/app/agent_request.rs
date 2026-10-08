@@ -33,7 +33,7 @@ impl KilnApp {
                 Ok((body,context))=>{
                     egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-210.0).max(70.0)).show(ui,|ui|{
                         ui.add(egui::TextEdit::multiline(&mut body.as_str()).desired_width(f32::INFINITY));
-                        egui::CollapsingHeader::new(kiln_common::i18n::tr("함께 전달한 작업 공간 정보")).show(ui,|ui|{
+                        egui::CollapsingHeader::new(kiln_common::i18n::tr("함께 전달한 워크스페이스 정보")).show(ui,|ui|{
                             ui.add(egui::TextEdit::multiline(&mut context.as_str()).desired_width(f32::INFINITY));
                         });
                     });

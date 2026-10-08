@@ -15,6 +15,9 @@ pub enum Icon {
     Claude,
     /// Official Amazon S3 architecture mark; original colors are preserved.
     S3,
+    OracleCloud,
+    GoogleCloud,
+    Cloudflare,
     /// Generic remote file server, independent of any vendor.
     Server,
     Database,
@@ -87,6 +90,9 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Codex => paint_bundled_mark(p, rect, color, "codex", include_str!("../assets/mark-codex.svg")),
         Icon::Claude => paint_bundled_mark(p, rect, color, "claude", include_str!("../assets/mark-claude.svg")),
         Icon::S3 => paint_bundled_mark(p, rect, Color32::WHITE, "amazon-s3", include_str!("../assets/mark-amazon-s3.svg")),
+        Icon::OracleCloud => paint_bundled_mark(p, rect, color, "oracle-cloud", include_str!("../assets/mark-oracle-cloud.svg")),
+        Icon::GoogleCloud => paint_bundled_mark(p, rect, color, "google-cloud", include_str!("../assets/mark-google-cloud.svg")),
+        Icon::Cloudflare => paint_bundled_mark(p, rect, color, "cloudflare", include_str!("../assets/mark-cloudflare.svg")),
         Icon::Server => {
             for y in [-4.0, 4.0] {
                 p.rect_stroke(Rect::from_min_max(at(-7.0, y - 3.0), at(7.0, y + 3.0)), 1, st, egui::StrokeKind::Inside);

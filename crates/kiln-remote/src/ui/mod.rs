@@ -6,6 +6,7 @@
 //! FORM: established file-browser extension, no new visual identity.
 //! FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md.
 mod browser;
+mod cloud_form;
 mod panel;
 mod ssh_form;
 pub use browser::{RemoteBrowser, RemoteDraft};
@@ -15,6 +16,7 @@ use crate::{ConnectionProfile, RemoteEndpoint};
 pub fn protocol(profile: &ConnectionProfile) -> &'static str {
     match profile.endpoint {
         RemoteEndpoint::S3 { .. } => "S3",
+        RemoteEndpoint::ObjectStorage { provider, .. } => provider.label(),
         RemoteEndpoint::Ftp { tls: true, .. } => "FTPS",
         RemoteEndpoint::Ftp { .. } => "FTP",
         RemoteEndpoint::Sftp { .. } => "SFTP",
@@ -25,13 +27,18 @@ pub fn provider_icon(profile: &ConnectionProfile) -> kiln_common::icons::Icon {
     use kiln_common::icons::Icon;
     match profile.endpoint {
         RemoteEndpoint::S3 { .. } => Icon::S3,
+        RemoteEndpoint::ObjectStorage { provider, .. } => match provider {
+            crate::ObjectProvider::Oracle => Icon::OracleCloud,
+            crate::ObjectProvider::Google => Icon::GoogleCloud,
+            crate::ObjectProvider::Cloudflare => Icon::Cloudflare,
+        },
         RemoteEndpoint::Ftp { .. } => Icon::Server,
         RemoteEndpoint::Sftp { .. } => Icon::Terminal,
     }
 }
 pub fn root_path(profile: &ConnectionProfile) -> String {
     match &profile.endpoint {
-        RemoteEndpoint::S3 { prefix, .. } => prefix.clone(),
+        RemoteEndpoint::S3 { prefix, .. } | RemoteEndpoint::ObjectStorage { prefix, .. } => prefix.clone(),
         RemoteEndpoint::Ftp { root, .. } | RemoteEndpoint::Sftp { root, .. } => {
             if root.is_empty() {
                 ".".into()

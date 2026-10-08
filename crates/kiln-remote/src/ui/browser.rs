@@ -374,6 +374,12 @@ impl RemoteBrowser {
             self.error = Some(tr("일반 파일만 업로드할 수 있습니다").into());
             return;
         }
+        if matches!(self.profile.endpoint,RemoteEndpoint::ObjectStorage {provider:crate::ObjectProvider::Cloudflare,authentication:crate::ObjectAuthentication::Cli {..},..})
+            && std::fs::metadata(&local).is_ok_and(|meta|meta.len()>crate::R2_API_MAX_UPLOAD_BYTES) {
+            self.uploads.clear();
+            self.error=Some(tr("R2 CLI 인증은 파일당 300 MB까지 업로드할 수 있습니다. 더 큰 파일은 S3 키 인증을 사용하세요.").into());
+            return;
+        }
         let Some(name) = local.file_name().and_then(|n| n.to_str()) else {
             self.uploads.clear();
             self.error = Some(tr("일반 파일만 업로드할 수 있습니다").into());
@@ -537,7 +543,8 @@ impl RemoteBrowser {
         }
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(!self.busy(), |ui| {
-                if icon(ui, Icon::Upload, tr("파일 업로드")) {
+                let upload_label=if matches!(self.profile.endpoint,RemoteEndpoint::ObjectStorage {provider:crate::ObjectProvider::Cloudflare,authentication:crate::ObjectAuthentication::Cli {..},..}) {tr("파일 업로드 · 최대 300 MB")}else{tr("파일 업로드")};
+                if icon(ui, Icon::Upload, upload_label) {
                     if let Some(paths) = rfd::FileDialog::new().pick_files() {
                         if !paths.is_empty() {
                             self.uploads.extend(paths);
@@ -906,7 +913,7 @@ impl Drop for RemoteBrowser {
     }
 }
 fn can_rename(profile: &ConnectionProfile, entry: &RemoteEntry) -> bool {
-    !entry.is_dir || !matches!(profile.endpoint, RemoteEndpoint::S3 { .. })
+    !entry.is_dir || !matches!(profile.endpoint, RemoteEndpoint::S3 { .. } | RemoteEndpoint::ObjectStorage { .. })
 }
 fn parent_path(profile: &ConnectionProfile, path: &str) -> Option<String> {
     let normalized = |value: &str| value.trim_end_matches('/').to_owned();
@@ -916,7 +923,7 @@ fn parent_path(profile: &ConnectionProfile, path: &str) -> Option<String> {
     }
     let parent = parent(path);
     Some(
-        if parent.is_empty() && !matches!(profile.endpoint, RemoteEndpoint::S3 { .. }) {
+        if parent.is_empty() && !matches!(profile.endpoint, RemoteEndpoint::S3 { .. } | RemoteEndpoint::ObjectStorage { .. }) {
             ".".into()
         } else {
             parent
@@ -1028,6 +1035,17 @@ mod tests {
         };
         assert!(!can_rename(&s3, &folder));
         assert!(can_rename(&sftp, &folder));
+    }
+    #[test]
+    fn native_r2_size_limit_is_reported_before_any_upload_is_queued() {
+        let dir=tempfile::tempdir().unwrap();
+        let manager=RemoteManager::with_store(dir.path().join("connections.json"),std::sync::Arc::new(kiln_accounts::MemoryStore::new()));
+        let profile=fixture(RemoteEndpoint::ObjectStorage {provider:crate::ObjectProvider::Cloudflare,bucket:"fixture-bucket".into(),prefix:String::new(),authentication:crate::ObjectAuthentication::Cli{profile:"studio".into(),config_path:None},region:None,namespace:None,account_id:Some("0123456789abcdef0123456789abcdef".into())});
+        let mut browser=RemoteBrowser::new(manager,profile,String::new());
+        let path=dir.path().join("large.bin");let file=std::fs::File::create(&path).unwrap();file.set_len(crate::R2_API_MAX_UPLOAD_BYTES+1).unwrap();
+        browser.upload(path.clone());assert!(browser.pending.is_empty());assert!(browser.error.as_ref().is_some_and(|e|e.contains("300 MB")));
+        if let RemoteEndpoint::ObjectStorage{authentication,..}=&mut browser.profile.endpoint {*authentication=crate::ObjectAuthentication::S3{region:"auto".into(),endpoint:"https://example.r2.cloudflarestorage.com".into(),path_style:true,aws_profile:None,aws_auth:Some(crate::S3Authentication::Manual)};}
+        browser.error=None;browser.upload(path);assert_eq!(browser.pending.len(),1,"S3-compatible credentials use their own multipart backend");
     }
     #[test]
     fn multi_file_upload_keeps_later_files_while_waiting_for_overwrite() {

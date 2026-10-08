@@ -135,6 +135,7 @@ impl Repository {
     }
 }
 pub(super) struct RepositoryWorkspace {
+    workspace_id: u64,
     root: PathBuf,
     ctx: egui::Context,
     scan: Option<Task<kiln_git::discovery::Inventory>>,
@@ -157,10 +158,12 @@ pub(super) struct RepositoryWorkspace {
     last_scan: Instant,
 }
 impl RepositoryWorkspace {
+    pub fn with_id_salt(mut self, workspace_id: u64) -> Self { self.workspace_id=workspace_id; self }
     pub fn new(root: &Path, ctx: &egui::Context) -> Self {
         let path = root.to_path_buf();
         let scan = Task::spawn(ctx, move || kiln_git::discovery::discover(&path));
         Self {
+            workspace_id: 0,
             root: root.into(),
             ctx: ctx.clone(),
             scan: Some(scan),
@@ -667,7 +670,7 @@ impl RepositoryWorkspace {
     }
     fn context(&self) -> String {
         let mut s = kiln_common::trf!(
-            "# Kiln 작업 공간\n\n루트: {}\n\n이 상위 폴더를 하나의 작업 공간으로 유지하세요. 요청을 구현하는 데 필요한 여러 저장소를 함께 조사하고 변경하세요. 각 저장소의 지침과 API/의존 관계를 직접 확인하고, 이름만으로 프론트/백 역할이나 연결 관계를 단정하지 마세요. Git 명령은 해당 저장소에서 실행하세요.\n\n## 저장소 구성\n",
+            "# Kiln 워크스페이스\n\n루트: {}\n\n이 상위 폴더를 하나의 워크스페이스로 유지하세요. 요청을 구현하는 데 필요한 여러 저장소를 함께 조사하고 변경하세요. 각 저장소의 지침과 API/의존 관계를 직접 확인하고, 이름만으로 프론트/백 역할이나 연결 관계를 단정하지 마세요. Git 명령은 해당 저장소에서 실행하세요.\n\n## 저장소 구성\n",
             self.root.display()
         );
         for p in self
@@ -981,9 +984,9 @@ impl RepositoryWorkspace {
                     .color(kiln_common::Theme::current().text),
             );
             if let Some(repo) = self.repos.get_mut(&path) {
-                let events = if kind == ToolKind::Git {
+                let events = ui.push_id(("repository-detail", &path), |ui| if kind == ToolKind::Git {
                     let git = repo.git.get_or_insert_with(|| {
-                        let mut git = GitPanel::new(path.clone());
+                        let mut git = GitPanel::new(path.clone()).with_id_salt(self.workspace_id);
                         *git.commit_message_mut() = repo.draft.commit_message.clone();
                         git
                     });
@@ -998,7 +1001,7 @@ impl RepositoryWorkspace {
                     // against the old target until the deferred hub replacement is safe.
                     ui.add_enabled_ui(!repo.github_hub_stale, |ui| hub.ui(ui))
                         .inner
-                };
+                }).inner;
                 let remote = repo.hub.as_ref().and_then(GithubHub::repo);
                 actions.extend(
                     events

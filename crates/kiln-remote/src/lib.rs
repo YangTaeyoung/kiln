@@ -1,6 +1,10 @@
 //! Remote files without storing credentials in the application configuration.
 //! Every operation runs on its own worker; dropping a job cancels it.
 pub mod aws_profiles;
+pub mod object_profiles;
+mod object_backend;
+mod object_oci;
+mod cloud_cli;
 mod ftp;
 mod s3_backend;
 mod sftp;
@@ -30,8 +34,33 @@ pub enum S3Authentication {
     Default,
     Manual,
 }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ObjectProvider { Oracle, Google, Cloudflare }
+/// Conservative decimal limit documented for Cloudflare's native REST upload.
+pub const R2_API_MAX_UPLOAD_BYTES: u64 = 300_000_000;
+impl ObjectProvider {
+    pub fn label(self) -> &'static str { match self { Self::Oracle => "Oracle Object Storage", Self::Google => "Google Cloud Storage", Self::Cloudflare => "Cloudflare R2" } }
+    pub fn cli(self) -> &'static str { match self { Self::Oracle => "oci", Self::Google => "gcloud", Self::Cloudflare => "wrangler" } }
+}
+/// Provider-native CLI authentication is distinct from S3 interoperability keys.
+/// Only profile names and source paths are saved; tokens remain transient.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ObjectAuthentication {
+    Cli { profile: String, config_path: Option<PathBuf> },
+    GoogleAdc { credentials_path: Option<PathBuf> },
+    S3 { region: String, endpoint: String, path_style: bool, aws_profile: Option<String>, aws_auth: Option<S3Authentication> },
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RemoteEndpoint {
+    ObjectStorage {
+        provider: ObjectProvider,
+        bucket: String,
+        prefix: String,
+        authentication: ObjectAuthentication,
+        region: Option<String>,
+        namespace: Option<String>,
+        account_id: Option<String>,
+    },
     S3 {
         bucket: String,
         region: String,
@@ -61,13 +90,14 @@ pub enum RemoteEndpoint {
 impl RemoteEndpoint {
     pub fn root(&self) -> &str {
         match self {
-            Self::S3 { prefix, .. } => prefix,
+            Self::S3 { prefix, .. } | Self::ObjectStorage { prefix, .. } => prefix,
             Self::Ftp { root, .. } | Self::Sftp { root, .. } => root,
         }
     }
     pub fn protocol(&self) -> &'static str {
         match self {
             Self::S3 { .. } => "S3",
+            Self::ObjectStorage { provider, .. } => match provider { ObjectProvider::Oracle => "OCI", ObjectProvider::Google => "GCS", ObjectProvider::Cloudflare => "R2" },
             Self::Ftp { tls: true, .. } => "FTPS",
             Self::Ftp { .. } => "FTP",
             Self::Sftp { .. } => "SFTP",
@@ -82,6 +112,21 @@ impl ConnectionProfile {
             bail!("A connection name is required");
         }
         match &self.endpoint {
+            RemoteEndpoint::ObjectStorage { provider, bucket, prefix, authentication, region, namespace, account_id } => {
+                validate_bucket(bucket)?;
+                safe_text(prefix)?;
+                for value in [region, namespace, account_id].into_iter().flatten() { safe_text(value)?; }
+                match authentication {
+                    ObjectAuthentication::Cli { profile, config_path } => {
+                        object_profiles::validate_provider_profile(*provider, profile)?;
+                        if let Some(p) = config_path { safe_text(&p.to_string_lossy())?; }
+                        if *provider == ObjectProvider::Cloudflare && account_id.as_ref().is_none_or(|a| a.len()!=32 || !a.chars().all(|c|c.is_ascii_hexdigit())) { bail!("A valid Cloudflare account ID is required"); }
+                    }
+                    ObjectAuthentication::GoogleAdc { .. } if *provider != ObjectProvider::Google => bail!("Application Default Credentials are only supported by Google Cloud Storage"),
+                    ObjectAuthentication::GoogleAdc { .. } => {},
+                    ObjectAuthentication::S3 { region, endpoint, .. } => { if region.is_empty() { bail!("A signing region is required"); } safe_text(region)?; validate_endpoint(endpoint)?; }
+                }
+            }
             RemoteEndpoint::S3 {
                 bucket,
                 region,
@@ -289,6 +334,10 @@ pub fn spawn(profile: ConnectionProfile, secrets: Secrets, operation: Operation)
                         .build()?;
                     rt.block_on(async {if matches!(operation,Operation::Upload{..}) {s3_backend::run(&profile,&secrets,&operation,&c).await} else {tokio::select! {result=s3_backend::run(&profile,&secrets,&operation,&c)=>result,_=cancelled(&c)=>Err(anyhow::anyhow!("Operation cancelled"))}}})
                 }
+                RemoteEndpoint::ObjectStorage { .. } => {
+                    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+                    rt.block_on(object_backend::run(&profile, &secrets, &operation, &c))
+                }
                 RemoteEndpoint::Ftp { .. } => ftp::run(&profile, &secrets, &operation, &c),
                 RemoteEndpoint::Sftp { .. } => sftp::run(&profile, &operation, &c),
             }
@@ -309,6 +358,15 @@ pub(crate) fn safe_text(value: &str) -> Result<()> {
     if value.chars().any(|c| c == '\0' || c == '\r' || c == '\n') {
         bail!("Names and paths cannot contain control characters")
     }
+    Ok(())
+}
+fn validate_bucket(bucket: &str) -> Result<()> {
+    if bucket.is_empty() || bucket.len()>255 || !bucket.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c,'.'|'_'|'-')) { bail!("A valid bucket name is required"); }
+    Ok(())
+}
+fn validate_endpoint(endpoint: &str) -> Result<()> {
+    let u=url::Url::parse(endpoint)?;
+    if !matches!(u.scheme(),"https"|"http") || u.host_str().is_none() || !u.username().is_empty() || u.password().is_some() || u.query().is_some() || u.fragment().is_some() { bail!("Use an HTTP(S) endpoint without embedded credentials"); }
     Ok(())
 }
 pub(crate) fn modified_time(time: std::time::SystemTime) -> String {

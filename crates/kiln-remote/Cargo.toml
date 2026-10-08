@@ -21,6 +21,9 @@ kiln-accounts.workspace = true
 glob = "0.3"
 rust-ini = "0.21"
 libc = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
 egui.workspace = true
 kiln-common.workspace = true
 kiln-editor.workspace = true

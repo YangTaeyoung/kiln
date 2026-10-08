@@ -41,6 +41,12 @@ impl Default for QuickOpen {
 }
 
 impl QuickOpen {
+    /// Separate widget memory for multiple views of the same directory.
+    pub fn with_id_salt(mut self, salt: u64) -> Self {
+        self.id = self.id.with(salt);
+        self
+    }
+
     pub fn new() -> Self {
         Self {
             id: Id::new("kiln-quick-open"),

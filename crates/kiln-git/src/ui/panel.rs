@@ -84,6 +84,7 @@ struct BranchPicker {
 /// 소스 컨트롤 패널.
 pub struct GitPanel {
     root: PathBuf,
+    id_salt: Option<u64>,
     worker: Option<Worker<JobKind>>,
     load: Option<Task<GitResult<Snapshot>>>,
     snap: Option<Snapshot>,
@@ -104,6 +105,13 @@ pub struct GitPanel {
 }
 
 impl GitPanel {
+    /// Keep draft cursor/undo and confirmation state local to this workspace.
+    pub fn with_id_salt(mut self, salt: u64) -> Self { self.id_salt=Some(salt); self }
+    fn widget_id(&self, kind: &str) -> Id {
+        let id=Id::new((kind,&self.root));
+        self.id_salt.map_or(id,|salt|id.with(salt))
+    }
+
     pub fn new(root: PathBuf) -> Self {
         let open = [
             (Section::Conflicts, true),
@@ -117,6 +125,7 @@ impl GitPanel {
         .collect();
         Self {
             root,
+            id_salt: None,
             worker: None,
             load: None,
             snap: None,
@@ -631,7 +640,7 @@ impl GitPanel {
         let busy = self.mutation_busy();
         ui.add_space(10.0);
 
-        let te_id = Id::new(("kiln_git_commit_msg", &self.root));
+        let te_id = self.widget_id("kiln_git_commit_msg");
         let focused = ui.memory(|m| m.has_focus(te_id));
         let submit = focused && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
 
@@ -1116,7 +1125,7 @@ impl GitPanel {
 
     fn ui_confirm(&mut self, ctx: &egui::Context) {
         let Some(c) = self.confirm.clone() else { return };
-        let id = Id::new(("kiln_git_confirm", &self.root));
+        let id = self.widget_id("kiln_git_confirm");
         let (title, msg, ok, danger) = match &c {
             Confirm::Discard { paths, untracked: false } => (
                 kiln_common::i18n::tr("선택한 파일의 변경을 버릴까요?").to_string(),

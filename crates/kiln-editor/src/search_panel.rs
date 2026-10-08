@@ -56,6 +56,12 @@ pub struct SearchPanel {
 }
 
 impl SearchPanel {
+    /// Separate widget memory for multiple views of the same directory.
+    pub fn with_id_salt(mut self, salt: u64) -> Self {
+        self.id = self.id.with(salt);
+        self
+    }
+
     pub fn new(root: PathBuf) -> Self {
         Self {
             id: Id::new(("kiln-search-panel", root.clone())),

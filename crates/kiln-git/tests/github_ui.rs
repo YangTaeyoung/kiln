@@ -557,3 +557,35 @@ fn issue_creation_long_repository_fits_360_points() {
     }
     for input in h.query_all_by_role(Role::TextInput) {assert!(h.ctx.content_rect().contains_rect(input.rect()),"input overflow {:?}",input.rect());}
 }
+
+#[test]
+fn same_repository_workspace_issue_forms_keep_focus_and_undo_separate() {
+    struct State { panels: [IssuePanel; 2], active: usize }
+    let backend=Arc::new(FakeGh::default());
+    let panels=std::array::from_fn(|_|IssuePanel::with_backend(backend.clone(),Some(RepoRef::new("cli","cli"))));
+    let mut h=Harness::builder().with_size(vec2(460.0,720.0)).wgpu().build_ui_state(|ui,s:&mut State|{
+        if theme(ui) {ui.push_id(("workspace",s.active),|ui|{s.panels[s.active].ui(ui);});}
+    },State{panels,active:0});
+    for active in 0..2 {
+        h.state_mut().active=active;
+        settle(&mut h,|s|s.panels[s.active].is_loading());
+        h.get_by_label("새 이슈").click();h.run_steps(2);
+        settle(&mut h,|s|s.panels[s.active].is_loading());
+        h.get_by_role(Role::MultilineTextInput).focus();h.run_steps(2);
+        h.get_by_role(Role::MultilineTextInput).type_text(if active==0{"Workspace A private draft"}else{"Workspace B independent draft"});
+        h.run_steps(3);
+    }
+    let a=h.state().panels[0].creation_draft().unwrap().body;
+    assert_eq!(a,"Workspace A private draft");
+    h.state_mut().active=0;h.run_steps(3);
+    assert!(!h.get_by_role(Role::MultilineTextInput).is_focused(),"switching workspaces must not inherit another form's focus");
+    h.get_by_role(Role::MultilineTextInput).focus();h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::Z);h.run_steps(3);
+    assert_eq!(h.state().panels[0].creation_draft().map(|d|d.body).unwrap_or_default(),"");
+    assert_eq!(h.state().panels[1].creation_draft().unwrap().body,"Workspace B independent draft");
+    h.state_mut().active=1;h.run_steps(3);
+    h.get_by_role(Role::MultilineTextInput).focus();h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::Z);h.run_steps(3);
+    assert_eq!(h.state().panels[1].creation_draft().map(|d|d.body).unwrap_or_default(),"");
+    assert!(!backend.calls().iter().any(|c|c.starts_with("create_issue")));
+}

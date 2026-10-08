@@ -17,7 +17,7 @@ fn manager(root: &Path) -> LspManager {
     LspManager::with_config(root.to_path_buf(), cfg)
 }
 
-/// 임시 작업 공간(정규화한 경로)에 `main.rs` 를 만들고 언어 서버를 붙여 연다.
+/// 임시 워크스페이스(정규화한 경로)에 `main.rs` 를 만들고 언어 서버를 붙여 연다.
 fn setup(text: &str) -> (tempfile::TempDir, PathBuf, Harness<'static, Editor>) {
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();

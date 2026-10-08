@@ -211,7 +211,7 @@ pub fn find_executable(cmd: &str) -> Option<PathBuf> {
     None
 }
 
-/// 파일이 속한 작업 공간 루트. `root` 아래면 `root`, 아니면 표지 파일이 있는 가장 가까운 조상.
+/// 파일이 속한 워크스페이스 루트. `root` 아래면 `root`, 아니면 표지 파일이 있는 가장 가까운 조상.
 pub fn workspace_root(root: &Path, file: &Path) -> PathBuf {
     const MARKERS: &[&str] =
         &["Cargo.toml", "go.mod", "package.json", "pyproject.toml", "setup.py", "compile_commands.json", ".git"];

@@ -3205,6 +3205,7 @@ dependencies = [
  "crossbeam-channel",
  "egui",
  "egui_kittest",
+ "futures-util",
  "glob",
  "image",
  "kiln-accounts",
@@ -3213,6 +3214,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "quick-xml 0.38.4",
+ "reqwest",
  "rfd",
  "rust-ini",
  "rust-s3",
@@ -3221,6 +3223,7 @@ dependencies = [
  "suppaftp",
  "tempfile",
  "tokio",
+ "tokio-util",
  "url",
 ]
 

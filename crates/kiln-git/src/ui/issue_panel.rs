@@ -340,7 +340,7 @@ impl IssuePanel {
             self.set_filter(f);
         }
         ui.add_space(8.0);
-        let sid = Id::new("kiln_issue_search");
+        let sid = ui.make_persistent_id("kiln_issue_search");
         let focused = ui.memory(|m| m.has_focus(sid));
         let r = ui.add(
             egui::TextEdit::singleline(&mut self.search)
@@ -510,7 +510,7 @@ impl IssuePanel {
         let submitting = form.submit.is_some();
         ui.add_enabled_ui(!submitting, |ui| {
             field_label(ui, kiln_common::i18n::tr("제목"));
-            let tid = Id::new("kiln_issue_create_title");
+            let tid = ui.make_persistent_id("kiln_issue_create_title");
             let focused = ui.memory(|m| m.has_focus(tid));
             ui.add(
                 egui::TextEdit::singleline(&mut form.req.title)
@@ -521,7 +521,7 @@ impl IssuePanel {
             );
             ui.add_space(10.0);
             field_label(ui, kiln_common::i18n::tr("설명"));
-            let bid = Id::new("kiln_issue_create_body");
+            let bid = ui.make_persistent_id("kiln_issue_create_body");
             let focused = ui.memory(|m| m.has_focus(bid));
             ui.add(
                 egui::TextEdit::multiline(&mut form.req.body)
@@ -534,11 +534,13 @@ impl IssuePanel {
             ui.add_space(12.0);
             // 라벨
             let meta = &self.meta;
+            let label_picker_id = ui.make_persistent_id("issue_create_labels");
+            let assignee_picker_id = ui.make_persistent_id("issue_create_assignees");
             picker_field(
                 ui,
                 kiln_common::i18n::tr("라벨"),
                 kiln_common::i18n::tr("라벨 선택"),
-                Id::new("issue_create_labels"),
+                label_picker_id,
                 &mut form.label_pick,
                 &label_options(&meta.labels),
                 &mut form.req.labels,
@@ -553,7 +555,7 @@ impl IssuePanel {
                 ui,
                 kiln_common::i18n::tr("담당자"),
                 kiln_common::i18n::tr("담당자 선택"),
-                Id::new("issue_create_assignees"),
+                assignee_picker_id,
                 &mut form.user_pick,
                 &user_options(&meta.users),
                 &mut form.req.assignees,

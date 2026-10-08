@@ -131,6 +131,15 @@ pub enum RemoteEvent {
         options: crate::ssh_config::SshOptions,
     },
 }
+fn provider_choice(kind:usize)->(Icon,&'static str) {
+    match kind {
+        0=>(Icon::S3,"Amazon S3"),1=>(Icon::Server,"FTP / FTPS"),2=>(Icon::Terminal,"SFTP"),
+        3=>(Icon::GoogleCloud,"Google Cloud Storage"),4=>(Icon::OracleCloud,"OCI Object Storage"),_=>(Icon::Cloudflare,"Cloudflare R2"),
+    }
+}
+fn cloud_provider(kind:usize)->crate::ObjectProvider {
+    match kind {3=>crate::ObjectProvider::Google,4=>crate::ObjectProvider::Oracle,_=>crate::ObjectProvider::Cloudflare}
+}
 #[derive(Default)]
 struct Form {
     id: String,
@@ -161,6 +170,7 @@ struct Form {
     auth_touched: bool,
     region_touched: bool,
     legacy_auth: bool,
+    cloud: super::cloud_form::CloudForm,
 
     error: Option<String>,
 }
@@ -276,7 +286,8 @@ impl Form {
                     root: self.root.clone(),
                 }
             }
-            _ => self.ssh.endpoint(&self.root)?,
+            2 => self.ssh.endpoint(&self.root)?,
+            _ => self.cloud.endpoint(cloud_provider(self.kind), &self.bucket, &self.root)?,
         };
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = if self.id.is_empty() {
@@ -328,6 +339,11 @@ impl Form {
                 f.legacy_auth = aws_profile.is_none() && aws_auth.is_none();
                 f.region_touched = true;
             }
+            RemoteEndpoint::ObjectStorage {provider,bucket,prefix,..} => {
+                f.kind=match provider {crate::ObjectProvider::Google=>3,crate::ObjectProvider::Oracle=>4,crate::ObjectProvider::Cloudflare=>5};
+                f.bucket=bucket.clone(); f.root=prefix.clone();
+                f.cloud=super::cloud_form::CloudForm::from_endpoint(&p.endpoint);
+            }
             RemoteEndpoint::Ftp {
                 host,
                 port,
@@ -359,6 +375,7 @@ impl Form {
 pub struct RemotePanel {
     manager: RemoteManager,
     ssh_config_path: Option<PathBuf>,
+    object_sources: Vec<(crate::ObjectProvider,crate::object_profiles::ProfileFiles)>,
     form: Option<Form>,
     saving: Option<Task<Result<(), String>>>,
     error: Option<String>,
@@ -369,6 +386,7 @@ impl RemotePanel {
         Self {
             manager,
             ssh_config_path: None,
+            object_sources: Vec::new(),
             form: None,
             saving: None,
             error: None,
@@ -380,6 +398,11 @@ impl RemotePanel {
     pub fn with_ssh_config_path(mut self, path: PathBuf) -> Self {
         self.ssh_config_path = Some(path);
         self
+    }
+    /// Discover profiles from an explicit CLI configuration source.
+    pub fn with_object_profile_files(mut self, provider:crate::ObjectProvider, files:crate::object_profiles::ProfileFiles)->Self {
+        self.object_sources.retain(|(p,_)|*p!=provider);
+        self.object_sources.push((provider,files));self
     }
     fn new_form(&self) -> Form {
         let mut form = Form::new();
@@ -442,7 +465,7 @@ impl RemotePanel {
         let profiles = self.manager.profiles();
         if profiles.is_empty() {
             ui.add_space(20.0);
-            ui.label(tr("S3, FTP 또는 SSH 연결을 추가하세요"));
+            ui.label(tr("클라우드 저장소 또는 서버를 연결하세요"));
             if ui.button(tr("연결 추가")).clicked() {
                 self.form = Some(self.new_form());
             }
@@ -531,6 +554,7 @@ impl RemotePanel {
         events
     }
     fn form_ui(&mut self, ctx: &egui::Context) {
+        let object_sources=self.object_sources.clone();
         let Some(f) = &mut self.form else { return };
         if f.kind == 0 && !f.aws_scanned {
             f.aws_scanned = true;
@@ -572,11 +596,21 @@ impl RemotePanel {
             ui.set_width((ctx.content_rect().width() - 60.0).clamp(240.0, 450.0));
             ui.heading(if f.id.is_empty() { tr("연결 추가") } else { tr("연결 편집") });
             ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.add_enabled_ui(!busy, |ui| {
-                    if kiln_common::widgets::segmented_with_icons(ui, &mut f.kind, &[(0, Icon::S3, "S3"), (1, Icon::Server, "FTP"), (2, Icon::Terminal, "SFTP")]) {
-                        f.root = String::new();
-                    }
+            ui.add_enabled_ui(!busy, |ui| {
+                let (mark,label)=provider_choice(f.kind);
+                ui.horizontal(|ui| {
+                    let (rect,_)=ui.allocate_exact_size(egui::vec2(22.0,28.0),egui::Sense::hover());
+                    kiln_common::icons::paint(ui.painter(),rect.shrink2(egui::vec2(1.0,4.0)),mark,Theme::current().text);
+                    egui::ComboBox::from_id_salt("remote-provider").selected_text(label).width(ui.available_width()).show_ui(ui,|ui| {
+                        for kind in [0,3,4,5,2,1] {
+                            let (mark,label)=provider_choice(kind);
+                            ui.horizontal(|ui| {
+                                let (rect,_)=ui.allocate_exact_size(egui::vec2(18.0,24.0),egui::Sense::hover());
+                                kiln_common::icons::paint(ui.painter(),rect.shrink2(egui::vec2(0.0,3.0)),mark,Theme::current().text);
+                                if ui.selectable_value(&mut f.kind,kind,label).changed() {f.root.clear();f.error=None;f.cloud=Default::default();f.access_key.clear();f.secret_key.clear();f.session_token.clear();}
+                            });
+                        }
+                    });
                 });
             });
             ui.add_space(10.0);
@@ -597,7 +631,12 @@ impl RemotePanel {
                                 ui.add_space(8.0);
                                 ui.separator();
                                 ui.add_space(6.0);
-                                ui.label(RichText::new(tr("인증 방식")).color(Theme::current().text_dim).small());
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(tr("인증 방식")).color(Theme::current().text_dim).small());
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
+                                        if icon(ui,Icon::Refresh,tr("프로필 새로고침")) && f.aws_scan.is_none() {f.aws_scanned=false;f.aws_error=None;f.auth_touched=true;}
+                                    });
+                                });
                                 egui::ComboBox::from_id_salt("remote-auth-mode")
                                     .selected_text(tr(["저장된 AWS 프로필", "기본 AWS 인증", "직접 키 입력"][f.aws_mode]))
                                     .width(ui.available_width())
@@ -670,9 +709,29 @@ impl RemotePanel {
                                 });
                                 if !f.id.is_empty() { ui.checkbox(&mut f.clear_secrets, tr("저장된 자격증명 제거")); }
                             }
-                            _ => {
+                            2 => {
                                 f.ssh.ui(ui, &mut f.name);
                                 field(ui, tr("시작 경로"), &mut f.root, false);
+                            }
+                            _ => {
+                                field(ui,tr("버킷"),&mut f.bucket,false);
+                                ui.add_space(8.0);
+                                if f.cloud.files.is_none() {f.cloud.files=object_sources.iter().find(|(provider,_)|*provider==cloud_provider(f.kind)).map(|(_,files)|files.clone());}
+                                f.cloud.ui(ui,cloud_provider(f.kind));
+                                if f.cloud.mode==1 {
+                                    field(ui,"Access Key ID",&mut f.access_key,false);
+                                    field(ui,"Secret Access Key",&mut f.secret_key,true);
+                                    egui::CollapsingHeader::new(tr("임시 세션 토큰")).id_salt("object-session-token").show(ui,|ui|{field(ui,"Session Token",&mut f.session_token,true);});
+                                    if !f.id.is_empty(){ui.label(egui::RichText::new(tr("비밀번호와 키를 비우면 저장된 값을 유지합니다")).small().color(Theme::current().text_dim));}
+                                }
+                                egui::CollapsingHeader::new(tr("고급 연결 설정")).id_salt("object-advanced").show(ui,|ui|{
+                                    field(ui,tr("시작 경로"),&mut f.root,false);
+                                    if f.cloud.mode!=0 {field(ui,tr("엔드포인트 (선택)"),&mut f.cloud.endpoint,false);}
+                                    if f.kind==4 && f.cloud.mode==0 {
+                                        f.cloud.region_touched |= field(ui,tr("리전"),&mut f.cloud.region,false).changed();
+                                        field(ui,tr("네임스페이스"),&mut f.cloud.namespace,false);
+                                    }
+                                });
                             }
                         }
                     });
@@ -686,7 +745,7 @@ impl RemotePanel {
                     if kiln_common::widgets::button(ui, tr("취소"), kiln_common::widgets::ButtonKind::Ghost).clicked() { cancel = true; }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_enabled_ui(!busy && (f.kind != 0 || f.aws_scan.is_none()), |ui| {
+                    ui.add_enabled_ui(!busy && (f.kind != 0 || f.aws_scan.is_none()) && (f.kind < 3 || !f.cloud.loading()), |ui| {
                         if kiln_common::widgets::button(ui, tr("연결 저장"), kiln_common::widgets::ButtonKind::Primary).clicked() { save = true; }
                     });
                     if busy { ui.spinner(); }
@@ -705,8 +764,8 @@ impl RemotePanel {
                         session_token: (!f.session_token.is_empty())
                             .then(|| f.session_token.clone()),
                     };
-                    let profile_auth = f.kind == 0 && f.aws_mode != 2;
-                    let manual = f.kind == 0 && f.aws_mode == 2;
+                    let profile_auth = f.kind == 0 && f.aws_mode != 2 || f.kind >= 3 && f.cloud.mode != 1;
+                    let manual = f.kind == 0 && f.aws_mode == 2 || f.kind >= 3 && f.cloud.mode == 1;
                     let clear = f.clear_secrets || profile_auth;
                     let new = if profile_auth {
                         Secrets::default()
@@ -716,8 +775,10 @@ impl RemotePanel {
                     self.saving = Some(Task::spawn(ctx, move || {
                         let previous = mgr.get(&profile.id);
                         let same_kind = previous.as_ref().is_some_and(|p| {
-                            std::mem::discriminant(&p.endpoint)
-                                == std::mem::discriminant(&profile.endpoint)
+                            match (&p.endpoint,&profile.endpoint) {
+                                (RemoteEndpoint::ObjectStorage {provider:a,..},RemoteEndpoint::ObjectStorage {provider:b,..})=>a==b,
+                                _=>std::mem::discriminant(&p.endpoint)==std::mem::discriminant(&profile.endpoint),
+                            }
                         });
                         let old = if clear || !same_kind {
                             Secrets::default()
@@ -1220,24 +1281,19 @@ mod visual_tests {
                         .unwrap();
                     h.get_by_label(tr("연결 추가")).click();
                     h.run();
-                    h.query_all_by_label("FTP")
-                        .find(|node| node.accesskit_node().toggled().is_some())
-                        .expect("protocol radio")
-                        .click();
-                    h.run();
-                    assert_eq!(h.state().form.as_ref().unwrap().kind, 1);
-                    h.query_all_by_label("SFTP")
-                        .find(|node| node.accesskit_node().toggled().is_some())
-                        .expect("protocol radio")
-                        .click();
-                    h.run();
-                    assert_eq!(h.state().form.as_ref().unwrap().kind, 2);
-                    h.query_all_by_label("S3")
-                        .find(|node| node.accesskit_node().toggled().is_some())
-                        .expect("protocol radio")
-                        .click();
-                    h.run();
-                    assert_eq!(h.state().form.as_ref().unwrap().kind, 0);
+                    for (current,next,kind) in [("Amazon S3","FTP / FTPS",1),("FTP / FTPS","SFTP",2),("SFTP","Amazon S3",0)] {
+                        h.query_all_by_value(current)
+                            .find(|node| node.accesskit_node().role() == egui::accesskit::Role::ComboBox)
+                            .expect("provider selector")
+                            .click();
+                        h.run();
+                        h.query_all_by_label(next)
+                            .find(|node| node.accesskit_node().role() == egui::accesskit::Role::Button)
+                            .expect("provider choice button")
+                            .click();
+                        h.run();
+                        assert_eq!(h.state().form.as_ref().unwrap().kind,kind);
+                    }
                     h.get_by_label(tr("취소")).click();
                     h.run();
                     assert!(h.state().form.is_none());
@@ -1245,6 +1301,41 @@ mod visual_tests {
             }
         }
         kiln_common::i18n::set_language(kiln_common::i18n::Language::Korean);
+        Theme::set_current("kiln-dark");
+    }
+
+    #[test]
+    fn cloud_provider_forms_keep_profile_choice_and_primary_action_visible() {
+        let dir=tempfile::tempdir().unwrap();
+        let manager=RemoteManager::with_store(dir.path().join("connections.json"),Arc::new(kiln_accounts::MemoryStore::new()));
+        let shots=PathBuf::from("/tmp/kiln-remote-captures");std::fs::create_dir_all(&shots).unwrap();
+        kiln_common::i18n::set_language(kiln_common::i18n::Language::Korean);
+        for theme in ["kiln-dark","kiln-light"] {
+            Theme::set_current(theme);
+            for width in [420.0,980.0] {
+                for kind in [3,4,5] {
+                    let mut panel=RemotePanel::new(manager.clone());
+                    let mut form=Form::new();form.kind=kind;form.name="Release assets".into();form.bucket="fixture-bucket".into();
+                    form.cloud.region="us-ashburn-1".into();form.cloud.namespace="fixture".into();form.cloud.account="0123456789abcdef0123456789abcdef".into();
+                    let authentication=crate::ObjectAuthentication::Cli{profile:"studio".into(),config_path:Some("/fixture/provider-config".into())};
+                    form.cloud.selected="studio".into();form.cloud.authentication=Some(authentication.clone());
+                    form.cloud.profiles=vec![crate::object_profiles::ObjectProfile {name:"studio".into(),region:None,project:Some("Release project".into()),account_id:None,config_path:Some("/fixture/provider-config".into()),available:true,reason:None,authentication}];
+                    form.cloud.scanned=true;panel.form=Some(form);
+                    let mut h=Harness::builder().with_size([width,660.0]).with_pixels_per_point(1.3).wgpu().build_ui_state(|ui,p:&mut RemotePanel| {
+                        Theme::current().apply(ui.ctx());if super::super::test_fonts(ui.ctx()){assert!(p.ui(ui).is_empty());}
+                    },panel);
+                    h.run();
+                    assert!(h.query_by_value("studio").is_some());
+                    assert!(h.query_by_label("Access Key ID").is_none(),"CLI auth must not ask for S3 keys");
+                    for label in [tr("취소"),tr("연결 저장")] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} clipped at {width}");}
+                    h.render().unwrap().save(shots.join(format!("cloud-{kind}-{theme}-{width}.png"))).unwrap();
+                    h.get_by_value(tr("CLI 프로필")).click();h.run();h.get_by_label(tr("직접 키 입력")).click();h.run();
+                    h.get_by_label("Access Key ID").scroll_to_me();h.run();
+                    assert!(h.query_by_label("Secret Access Key").is_some());
+                    h.get_by_label(tr("취소")).click();h.run();assert!(h.state().form.is_none());
+                }
+            }
+        }
         Theme::set_current("kiln-dark");
     }
 

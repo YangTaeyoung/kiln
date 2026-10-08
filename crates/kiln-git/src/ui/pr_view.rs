@@ -282,7 +282,7 @@ impl PrView {
                 }
             }
         });
-        self.ui_merge_dialog(ui.ctx());
+        self.ui_merge_dialog(ui.ctx(), ui.make_persistent_id(("pr_merge", &self.root, self.number)));
         events
     }
 
@@ -564,7 +564,7 @@ impl PrView {
             });
     }
 
-    fn ui_merge_dialog(&mut self, ctx: &egui::Context) {
+    fn ui_merge_dialog(&mut self, ctx: &egui::Context, id: Id) {
         let Some(m) = &mut self.merge else { return };
         let Some(d) = &self.detail else { return };
         let t = theme();
@@ -572,7 +572,7 @@ impl PrView {
         let mut delete = m.delete_branch;
         let head = d.head_ref_name.clone();
         let msg = kiln_common::trf!("풀 리퀘스트 #{} · {}\n대상 브랜치: {}", d.number, d.title, d.base_ref_name);
-        let r = confirm_modal(ctx, Id::new(("pr_merge", self.number)), kiln_common::i18n::tr("풀 리퀘스트 병합"), &msg, kiln_common::i18n::tr("병합 확인"), false, |ui| {
+        let r = confirm_modal(ctx, id, kiln_common::i18n::tr("풀 리퀘스트 병합"), &msg, kiln_common::i18n::tr("병합 확인"), false, |ui| {
             ui.add_space(10.0);
             for mm in [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase] {
                 if radio_row(ui, method == mm, mm.label()) {

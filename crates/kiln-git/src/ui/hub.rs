@@ -330,7 +330,8 @@ impl GithubHub {
             });
             let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
             ui.painter().rect_filled(line, 0.0, t.border);
-            self.ui_body(ui, &mut events);
+            let repo = self.repo();
+            ui.push_id(("github-repository", repo), |ui| self.ui_body(ui, &mut events));
         });
         events
     }

@@ -1,5 +1,5 @@
 //! End-to-end navigation and visual proof for the compact development workspace.
-use egui_kittest::{Harness,kittest::Queryable};
+use egui_kittest::{Harness,kittest::{Queryable,NodeT}};
 use kiln::app::{Action,KilnApp};
 use std::{path::{Path,PathBuf},time::{Duration,Instant},process::Command};
 fn git(path:&Path,args:&[&str]) {
@@ -21,7 +21,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  git(&frontend,&["add","."]);git(&frontend,&["commit","-qm","initial web"]);
  std::fs::write(frontend.join("src/app.ts"),"export const app = 'updated';\n").unwrap();
  let shell=base.join("shell");std::fs::create_dir_all(&shell).unwrap();std::fs::write(shell.join(".zshrc"),"PROMPT='%1~ > '\n").unwrap();
- unsafe {for (name,value) in [("KILN_SOCKET",base.join("d.sock")),("KILN_CONFIG_DIR",base.join("cfg")),("KILN_ACCOUNTS_SANDBOX",base.join("accounts")),("ZDOTDIR",shell)]{std::env::set_var(name,value);}std::env::set_var("KILN_EXE",env!("CARGO_BIN_EXE_kiln"));std::env::set_var("KILN_NO_AUTO_UPGRADE","1");std::env::set_var("KILN_DB_NO_KEYCHAIN","1");}
+ unsafe {for (name,value) in [("KILN_SOCKET",base.join("d.sock")),("KILN_CONFIG_DIR",base.join("cfg")),("KILN_ACCOUNTS_SANDBOX",base.join("accounts")),("ZDOTDIR",shell)]{std::env::set_var(name,value);}std::env::set_var("KILN_EXE",env!("CARGO_BIN_EXE_kiln"));std::env::set_var("KILN_NO_AUTO_UPGRADE","1");std::env::set_var("KILN_DB_NO_KEYCHAIN","1");std::env::set_var("SHELL","/bin/zsh");}
  let mut h=Harness::builder().with_size([1440.,900.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(parent.clone())));
  pump(&mut h,|h|h.state().debug_focused_text().is_some_and(|s|!s.is_empty()));
  for p in [&repo,&wt]{h.state_mut().debug_queue_action(Action::NewWorkspace(Some(p.clone())));h.run_steps(3);}
@@ -34,7 +34,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  h.render().unwrap().save(output.join("workspace-1440.png")).unwrap();
  h.query_all_by_label("personal").next().unwrap().click();h.run_steps(3);assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
  // The workspace sidebar only switches work. Inspection is a separate surface.
- assert!(h.query_by_label("작업 공간 메뉴").is_none());
+ assert!(h.query_by_label("워크스페이스 메뉴").is_none());
  assert!(h.query_by_label("데이터베이스").is_none());
  h.get_by_label("도구").click();h.run_steps(2);h.get_by_label("파일").click();h.run_steps(4);
  for label in ["파일","변경","GitHub"] {h.get_by_label(label);}
@@ -80,9 +80,15 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  h.get_by_label("도구 닫기").click();h.run_steps(3);assert!(!h.state().debug_sheet_open());
  h.get_by_label("도구").click();h.run_steps(2);h.get_by_label("소스 제어").click();h.run_steps(4);
  assert!(h.query_by_label_contains("app.ts").is_some(),"reopening inspection must return to changes");
- h.query_all_by_label("product").next().unwrap().click();h.run_steps(3);
- h.query_all_by_label("personal").next().unwrap().click_secondary();h.run_steps(3);
- h.query_all_by_label("도구").find(|node| node.rect().top() > 42.0).expect("workspace context tools, not titlebar tools").click();h.run_steps(2);
+ // Select the interactive sidebar row, not the duplicated title/painted label.
+ h.query_all_by_label("product").find(|node| node.accesskit_node().role()==egui::accesskit::Role::Button && node.rect().left()<300. && node.rect().height()>=44.).expect("product sidebar row").click();h.run_steps(3);
+ h.query_all_by_label("personal").find(|node| node.accesskit_node().role()==egui::accesskit::Role::Button && node.rect().left()<300. && node.rect().height()>=44.).expect("personal sidebar row").click_secondary();h.run_steps(3);
+ assert!(egui::Popup::is_any_open(&h.ctx), "right-clicking the parent sidebar row opens its context menu");
+ // egui SubMenuButton appends its right-arrow atom to the accessible label.
+ // Match the interactive submenu, excluding the titlebar button and painted text.
+ h.query_all_by_label_contains("도구")
+  .find(|node| node.accesskit_node().role()==egui::accesskit::Role::Button && node.rect().top()>42.0 && node.rect().left()<300.)
+  .expect("workspace context tools submenu, not titlebar tools").click();h.run_steps(2);
  h.get_by_label("소스 제어").click();h.run_steps(4);
  assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
  assert!(h.state().debug_sheet_open(),"explicit workspace menu must open, never toggle closed");
@@ -103,7 +109,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
   h.ctx.set_zoom_factor(scale);h.run_steps(3);h.set_size(egui::vec2(w/scale,height/scale));h.run_steps(4);
   let size=h.ctx.content_rect().size();assert!((size.x-w/scale).abs()<1.0 && (size.y-height/scale).abs()<1.0,"expected {}x{} got {size:?}",w/scale,height/scale);
   for label in ["도구","새 작업","설정 (⌘,)","알림 센터"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} outside viewport");}
-  assert!(h.query_by_label("작업 공간 메뉴").is_none());
+  assert!(h.query_by_label("워크스페이스 메뉴").is_none());
   let img=h.render().unwrap();assert_eq!(img.dimensions(),(w as u32,height as u32));img.save(output.join(name)).unwrap();
   if scale>1.0 {
     h.get_by_label("도구").click();h.run_steps(2);h.get_by_label("파일").click();h.run_steps(4);
@@ -119,6 +125,6 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  let ctx=h.ctx.clone();h.state_mut().debug_set_theme(&ctx,"kiln-light");h.run_steps(4);
  h.render().unwrap().save(output.join("workspace-light-2560.png")).unwrap();
  h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().fullscreen=Some(true);h.run_steps(4);
- assert!(h.get_by_label("작업 공간 사이드바 (⌘B)").rect().left()<20.0);
+ assert!(h.get_by_label("워크스페이스 사이드바 (⌘B)").rect().left()<20.0);
  h.render().unwrap().save(output.join("workspace-fullscreen-light.png")).unwrap();
 }

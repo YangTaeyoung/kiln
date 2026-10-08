@@ -204,6 +204,12 @@ pub struct FileTree {
 }
 
 impl FileTree {
+    /// Separate widget memory for multiple views of the same directory.
+    pub fn with_id_salt(mut self, salt: u64) -> Self {
+        self.id = self.id.with(salt);
+        self
+    }
+
     pub fn new(root: PathBuf) -> Self {
         crate::syntax::prewarm();
         let canon_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());

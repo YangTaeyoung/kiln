@@ -21,6 +21,7 @@ pub mod terminal;
 mod tools;
 mod workspace_repos;
 mod workspace_activity;
+mod workspace_dialog;
 mod agent_launch;
 mod remote_terminal;
 mod pane_layout;
@@ -142,6 +143,8 @@ impl Workspace {
 
 pub enum Action {
     NewWorkspace(Option<PathBuf>),
+    CreateWorkspace { root: PathBuf, name: String },
+    NewWorkspaceAt(PathBuf),
     SelectWorkspace(usize),
     CloseWorkspace(usize),
     CloseWorkspaceConfirmed(usize),
@@ -268,6 +271,7 @@ pub struct KilnApp {
     recent_panes: Vec<PaneId>,
     launchers: launchers::Launcher,
     projects: projects::Projects,
+    workspace_dialog: Option<workspace_dialog::WorkspaceDialog>,
     keymap: keymap::Keymap,
     quick: quick::QuickTerminal,
     recovery_open: bool,
@@ -356,6 +360,7 @@ impl KilnApp {
             recent_panes: persisted.recent_panes.clone(),
             launchers: launchers::Launcher::default(),
             projects: projects::Projects::default(),
+            workspace_dialog: None,
             keymap: keymap::Keymap::load(),
             quick: quick::QuickTerminal::default(),
             recovery_open: load_report.warning.is_some(),
@@ -396,7 +401,7 @@ impl KilnApp {
         }
         if let Some(p) = open_path {
             let p = normalize_path(p.canonicalize().unwrap_or(p));
-            if let Some(i) = app.workspaces.iter().position(|w| w.root == p) {
+            if let Some(i) = app.workspaces.get(app.active).filter(|w|w.root==p).map(|_|app.active).or_else(||app.workspaces.iter().position(|w| w.root == p)) {
                 app.active = i;
             } else {
                 app.add_workspace(p, ctx);
@@ -444,7 +449,7 @@ impl KilnApp {
                 active_page: wp.active_page,
                 sheet: wp.sheet.as_deref().map(tools::ToolKind::from_str),
                 last_inspector: restored_inspector(wp.last_inspector.as_deref(),wp.sheet.as_deref()),
-                tools: tools::WorkspaceTools::new(&wp.root, ctx, self.db.clone()),
+                tools: tools::WorkspaceTools::new(&wp.root, ctx, self.db.clone(), id),
                 renaming: None,
             };
             ws.tools.restore_drafts(&wp.drafts);
@@ -613,23 +618,33 @@ impl KilnApp {
 
     fn add_workspace(&mut self, root: PathBuf, ctx: &egui::Context) {
         let root = normalize_path(root.canonicalize().unwrap_or(root));
-        if let Some(index) = self.workspaces.iter().position(|ws| normalize_path(ws.tools.canonical_root().to_owned()) == root) {
+        if let Some(index) = self.workspaces.get(self.active).filter(|ws|normalize_path(ws.tools.canonical_root().to_owned())==root).map(|_|self.active).or_else(||self.workspaces.iter().position(|ws| normalize_path(ws.tools.canonical_root().to_owned()) == root)) {
             self.active = index;
             self.focus_terminal = true;
             self.reveal_work_surface(ctx);
             return;
         }
-        if !root.is_dir() {
-            self.toast(kiln_common::i18n::tr("폴더를 열 수 없습니다"), root.display().to_string(), ToastKind::Error, None);
-            return;
-        }
         let name = root.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| root.to_string_lossy().into_owned());
+        self.create_workspace(root, name, ctx);
+    }
+
+    fn create_workspace(&mut self, root: PathBuf, name: String, ctx: &egui::Context) -> bool {
+        let root=normalize_path(root.canonicalize().unwrap_or(root));
+        if !root.is_dir() || !workspace_dialog::valid_name(&name) {
+            self.toast(kiln_common::i18n::tr("워크스페이스를 만들 수 없습니다"), root.display().to_string(), ToastKind::Error, None);
+            return false;
+        }
+        let name=name.trim().to_owned();
+        if self.workspaces.iter().any(|w|w.name==name && w.tools.canonical_root()==root) {
+            self.toast(kiln_common::i18n::tr("이 폴더에 같은 이름의 워크스페이스가 있습니다."), name, ToastKind::Error, None);
+            return false;
+        }
         let pane = self.new_term_pane(Some(root.to_string_lossy().into_owned()));
         let (wid, pid) = (self.id(), self.id());
         self.workspaces.push(Workspace {
             id: wid,
             name,
-            tools: tools::WorkspaceTools::new(&root, ctx, self.db.clone()),
+            tools: tools::WorkspaceTools::new(&root, ctx, self.db.clone(), wid),
             root,
             pages: vec![Page::new(pid, pane)],
             active_page: 0,
@@ -639,6 +654,7 @@ impl KilnApp {
         });
         self.active = self.workspaces.len() - 1;
         self.focus_terminal = true;
+        true
     }
 
     fn ws(&mut self) -> &mut Workspace {
@@ -734,11 +750,16 @@ impl KilnApp {
             Action::OpenFolder => {
                 let root = self.workspaces[self.active].root.clone();
                 if let Some(path) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() {
-                    self.add_workspace(path,ctx);
+                    let canonical=path.canonicalize().unwrap_or(path);
+                    if self.workspaces.iter().filter(|ws|ws.tools.canonical_root()==canonical).count()>1 {self.open_workspace_dialog(canonical);}
+                    else {self.add_workspace(canonical,ctx);}
                 }
             }
             Action::NewWorkspace(Some(p)) => self.add_workspace(p, ctx),
-            Action::NewWorkspace(None) | Action::OpenProjects => {
+            Action::NewWorkspace(None) => self.open_workspace_dialog(self.workspaces[self.active].root.clone()),
+            Action::NewWorkspaceAt(root) => self.open_workspace_dialog(root),
+            Action::CreateWorkspace {root,name} => {self.create_workspace(root,name,ctx);self.reveal_work_surface(ctx);},
+            Action::OpenProjects => {
                 let root = self.workspaces[self.active].root.clone();
                 self.projects.open(&root);
             }
@@ -757,9 +778,9 @@ impl KilnApp {
                     let busy:Vec<String>=if self.settings.confirm_close_running{ws.all_panes().iter().filter_map(|p|self.pane_is_busy(*p)).collect()}else{vec![]};
                     if !dirty.is_empty() || !busy.is_empty() {
                         self.confirm = Some(Confirm { skip_running_confirmation: None,
-                            title: kiln_common::trf!("{} 작업 공간을 닫을까요?", ws.name),
-                            body: kiln_common::trf!("이 작업 공간의 터미널 세션이 종료됩니다.\n실행 중: {}\n저장하지 않은 변경:\n{}", if busy.is_empty(){kiln_common::i18n::tr("없음").into()}else{busy.join(", ")},if dirty.is_empty(){kiln_common::i18n::tr("없음").into()}else{dirty.join("\n")}),
-                            ok: if dirty.is_empty() { kiln_common::i18n::tr("실행 종료 후 작업 공간 닫기") } else { kiln_common::i18n::tr("변경 버리고 작업 공간 닫기") }.into(),
+                            title: kiln_common::trf!("{} 워크스페이스를 닫을까요?", ws.name),
+                            body: kiln_common::trf!("이 워크스페이스의 터미널 세션이 종료됩니다.\n실행 중: {}\n저장하지 않은 변경:\n{}", if busy.is_empty(){kiln_common::i18n::tr("없음").into()}else{busy.join(", ")},if dirty.is_empty(){kiln_common::i18n::tr("없음").into()}else{dirty.join("\n")}),
+                            ok: if dirty.is_empty() { kiln_common::i18n::tr("실행 종료 후 워크스페이스 닫기") } else { kiln_common::i18n::tr("변경 버리고 워크스페이스 닫기") }.into(),
                             action: Action::CloseWorkspaceConfirmed(i),
                         });
                     } else {
@@ -814,11 +835,13 @@ impl KilnApp {
                 }
             }
             Action::RenameWorkspace(i, name) => {
-                if let Some(w) = self.workspaces.get_mut(i) {
-                    if !name.trim().is_empty() {
-                        w.name = name.trim().to_string();
-                    }
-                }
+                let Some(workspace)=self.workspaces.get(i) else {return;};
+                let name=name.trim();
+                if !workspace_dialog::valid_name(name) {
+                    self.toast(kiln_common::i18n::tr("워크스페이스 이름을 1~100자로 입력하세요."), "", ToastKind::Error, None);
+                } else if self.workspaces.iter().enumerate().any(|(index,w)|index!=i && w.name==name && w.tools.canonical_root()==workspace.tools.canonical_root()) {
+                    self.toast(kiln_common::i18n::tr("이 폴더에 같은 이름의 워크스페이스가 있습니다."), name, ToastKind::Error, None);
+                } else { self.workspaces[i].name=name.to_owned(); }
             }
             Action::OpenAgentFolder(tool) => {
                 let root = self.ws().root.clone();
@@ -1245,7 +1268,7 @@ impl KilnApp {
             }
             Action::LaunchAgent {cwd, program, context, request} => {
                 if !cwd.is_dir() {
-                    self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), kiln_common::i18n::tr("작업 공간 폴더를 찾을 수 없습니다."), ToastKind::Error, None);
+                    self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), kiln_common::i18n::tr("워크스페이스 폴더를 찾을 수 없습니다."), ToastKind::Error, None);
                     return;
                 }
                 let prepared=match agent_launch::prepare(&program,&context,&request) {
@@ -1732,6 +1755,12 @@ impl KilnApp {
     #[doc(hidden)]
     pub fn debug_workspace_count(&self) -> usize { self.workspaces.len() }
     #[doc(hidden)]
+    pub fn debug_active_workspace_name(&self) -> &str { &self.workspaces[self.active].name }
+    #[doc(hidden)]
+    pub fn debug_workspace_prompts(&self) -> Vec<String> { self.workspaces.iter().map(|w|w.tools.drafts().agent_prompt).collect() }
+    #[doc(hidden)]
+    pub fn debug_workspace_panes(&self) -> Vec<Vec<PaneId>> { self.workspaces.iter().map(Workspace::all_panes).collect() }
+    #[doc(hidden)]
     pub fn debug_set_sidebar_width(&mut self, width:f32) { self.settings.sidebar_width=width; }
     #[doc(hidden)]
     pub fn debug_begin_project_rename(&mut self, name:&str) {self.workspaces[self.active].renaming=Some(name.into());}
@@ -1937,7 +1966,7 @@ impl eframe::App for KilnApp {
         }
         self.cancel_layout_escape(ctx);
         let quick_open = self.workspaces.get(self.active).is_some_and(|w| w.tools.quick_is_open());
-        if self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none() && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open() && !quick_open && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none()) {
+        if self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open() && !quick_open && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none()) {
             self.shortcuts(ctx);
         }
         let active = self.active;

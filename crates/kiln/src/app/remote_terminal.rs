@@ -31,7 +31,7 @@ pub fn ssh_with_options(alias: &str, config_path: Option<&Path>, options: &kiln_
 
 pub fn agent(tool: kiln_accounts::Tool, cwd: PathBuf) -> Result<SpawnSpec, String> {
     if !cwd.is_dir() {
-        return Err(kiln_common::i18n::tr("작업 공간 폴더를 찾을 수 없습니다.").to_owned());
+        return Err(kiln_common::i18n::tr("워크스페이스 폴더를 찾을 수 없습니다.").to_owned());
     }
     let program = match tool { kiln_accounts::Tool::Codex => "codex", kiln_accounts::Tool::Claude => "claude" };
     let binary = super::agent_launch::executable(program)

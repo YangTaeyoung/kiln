@@ -5,9 +5,13 @@ impl KilnApp {
         if self.confirm.is_some(){return;}
         if let Some(projects::ProjectAction::Open{path,name,command})=self.projects.ui(ctx) {
             let path=normalize_path(path.canonicalize().unwrap_or(path));
+            let name=name.trim().to_owned();
             if !path.is_dir() { self.toast(kiln_common::i18n::tr("폴더를 열 수 없습니다"),path.display().to_string(),ToastKind::Error,None); return; }
-            self.add_workspace(path.clone(),ctx);
-            self.workspaces[self.active].name=name.clone();
+            if let Some(index)=self.workspaces.iter().position(|w|w.tools.canonical_root()==path && w.name==name) {
+                self.active=index;
+            } else {
+                if !self.create_workspace(path.clone(),name.clone(),ctx) {return;}
+            }
             if let Some(command)=command { self.actions.push(Action::RunSavedCommand(launchers::SelectedCommand{name,command,cwd:Some(path)})); }
             self.focus_terminal=true;
             self.reveal_work_surface(ctx);
@@ -79,9 +83,9 @@ impl KilnApp {
                             if ui.button(kiln_common::i18n::tr("에이전트 요청 이어 쓰기")).clicked(){draft_target=Some((index,Action::NewAgentTask));close=true;}
                         }
                         if !drafts.repositories.is_empty() {
-                            count+=1;ui.separator();ui.label(kiln_common::trf!("{} · 작업 공간 초안",ws.name));
+                            count+=1;ui.separator();ui.label(kiln_common::trf!("{} · 워크스페이스 초안",ws.name));
                             for text in ws.tools.unsaved_drafts(){ui.add(egui::Label::new(text).wrap());}
-                            if ui.button(kiln_common::i18n::tr("작업 공간에서 이어 쓰기")).clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
+                            if ui.button(kiln_common::i18n::tr("워크스페이스에서 이어 쓰기")).clicked(){draft_target=Some((index,Action::OpenSheet(tools::ToolKind::Git)));close=true;}
                         }
                         if !drafts.commit_message.is_empty() {
                             count+=1; ui.separator(); ui.label(kiln_common::trf!("{} · 작성 중인 커밋 메시지",ws.name));

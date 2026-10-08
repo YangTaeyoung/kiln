@@ -143,3 +143,49 @@ checks the SSH event’s edited options against a fixture executable and real PT
 Unit tests separately check SFTP argv, conditional-config inheritance, legacy
 connections, source changes during discovery, late results and input validation.
 These checks do not establish real-host authentication or native installed UI behavior.
+
+## Object-storage providers and connection UI (2026-10-08)
+
+The provider picker follows the protocol-first connection flow in
+[Transmit's official server guide](https://help.panic.com/transmit/transmit5/servers/),
+whose Quick Connect screenshot was inspected directly. A compact provider
+selector replaces an expanding row of tabs. Only the chosen provider's fields
+are shown; saving a connection is separate from opening it.
+[Cyberduck and Mountain Duck connection profiles](https://docs.cyberduck.io/protocols/profiles/)
+and the [dedicated R2 profile](https://docs.cyberduck.io/protocols/s3/cloudflare/)
+informed provider defaults and keeping optional endpoint details under Advanced.
+These references informed interaction structure, not copied interface artwork.
+
+CLI identity and S3 interoperability keys are separate authentication sources.
+The UI retains the exact discovered authentication record, lists unavailable
+profiles with a reason, and allows an explicit manual-key or AWS-profile fallback.
+New OCI/GCS/R2 native-profile connections require a deliberate profile choice;
+discovery does not guess the active CLI account. Native and AWS discovery errors are independent. Refreshing
+profiles preserves identity, and explicitly edited region/account fields remain
+unchanged. Provider marks and their licenses are recorded in
+[REMOTE-MARKS.md](../../crates/kiln-common/assets/REMOTE-MARKS.md).
+
+Official authentication references:
+
+- [Google Cloud Storage authentication](https://docs.cloud.google.com/storage/docs/authentication)
+  distinguishes gcloud credentials from Application Default Credentials.
+- [Google CLI configurations](https://docs.cloud.google.com/sdk/docs/configurations)
+  describes named configurations.
+- [Cloudflare S3 authentication](https://developers.cloudflare.com/r2/get-started/s3/)
+  requires S3 Access Key ID and Secret Access Key; Wrangler login is not presented
+  as a source of S3 keys.
+
+`object_profile_ui` exercises production asynchronous discovery, explicit choice,
+save and re-edit for three providers using private config files, a fixture CLI
+path and an in-memory credential store. It executes no CLI or cloud operation,
+and does not modify HOME. Cloud form render fixtures cover both themes and
+compact/wide views at 130%; fixtures are review artifacts, not proof of installed
+macOS or real cloud-account operation. See the test run report for execution
+status. Existing AWS and SSH profile suites remain required.
+
+Native R2 uploads have a conservative 300,000,000-byte limit, shown at Upload and
+validated before queueing; S3-compatible credentials use the existing multipart
+backend. Native R2 rename downloads, uploads, then deletes and cannot guarantee
+atomicity against concurrent writers. Metadata-bearing objects are rejected
+rather than silently losing metadata. Use S3-compatible credentials when these
+native API constraints are unsuitable.

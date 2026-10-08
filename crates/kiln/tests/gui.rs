@@ -474,7 +474,7 @@ fn workspace_close_requires_explicit_discard_and_cancel_preserves_editor() {
     edit_file_without_saving(&mut h, proj.join("src/main.rs"));
     h.state_mut().debug_queue_action(kiln::app::Action::CloseWorkspace(0));
     h.run_steps(2);
-    assert!(h.query_by_label("변경 버리고 작업 공간 닫기").is_some());
+    assert!(h.query_by_label("변경 버리고 워크스페이스 닫기").is_some());
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
     assert_eq!(h.state().debug_workspace_count(), 1);
@@ -487,7 +487,7 @@ fn workspace_close_requires_explicit_discard_and_cancel_preserves_editor() {
     edit_file_without_saving(&mut h, proj.join("src/main.rs"));
     h.state_mut().debug_queue_action(kiln::app::Action::CloseWorkspace(0));
     h.run_steps(2);
-    h.get_by_label("변경 버리고 작업 공간 닫기").click();
+    h.get_by_label("변경 버리고 워크스페이스 닫기").click();
     h.run_steps(2);
     assert!(h.state().debug_unsaved_items().is_empty());
     assert!(!h.state().debug_active_tab_title().contains("main.rs"));
@@ -611,13 +611,13 @@ fn sidebar_toggle_changes_layout_at_720_points() {
     let (base, proj) = setup("sidebar-720");
     let mut h = Harness::builder().with_size([720.0, 520.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| !t.trim().is_empty())));
-    assert!(h.query_by_label("작업 공간").is_some());
+    assert!(h.query_by_label("워크스페이스").is_some());
     h.key_press_modifiers(cmd(), egui::Key::B);
     h.run_steps(3);
-    assert!(h.query_by_label("작업 공간").is_none(), "explicit sidebar toggle must collapse even at a narrow width");
+    assert!(h.query_by_label("워크스페이스").is_none(), "explicit sidebar toggle must collapse even at a narrow width");
     h.key_press_modifiers(cmd(), egui::Key::B);
     h.run_steps(3);
-    assert!(h.query_by_label("작업 공간").is_some(), "explicit toggle must restore workspace labels");
+    assert!(h.query_by_label("워크스페이스").is_some(), "explicit toggle must restore workspace labels");
     shutdown(&base);
 }
 
@@ -945,10 +945,10 @@ fn blank_project_name_enter_keeps_rename_open() {
     let mut h=Harness::builder().with_size([1000.0,720.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
     h.state_mut().debug_begin_project_rename("   ");h.run_steps(3);
     h.key_press(egui::Key::Enter);h.run_steps(3);
-    assert!(h.query_by_label("작업 공간 이름 바꾸기").is_some());
+    assert!(h.query_by_label("워크스페이스 이름 바꾸기").is_some());
     h.event(egui::Event::Text("Renamed project".into()));h.run_steps(2);
     h.key_press(egui::Key::Enter);h.run_steps(3);
-    assert!(h.query_by_label("작업 공간 이름 바꾸기").is_none());
+    assert!(h.query_by_label("워크스페이스 이름 바꾸기").is_none());
     shutdown(&base);
 }
 
@@ -1667,4 +1667,106 @@ fn unified_tools_menu_switches_all_panels_without_replacing_terminal() {
     h.state_mut().debug_queue_action(kiln::app::Action::CloseSheet); h.run_steps(2);
     h.key_press_modifiers(cmd_shift(), egui::Key::B); h.run_steps(3);
     h.get_by_label(i18n::tr("데이터베이스에 연결하세요"));
+}
+
+/// A folder is context, not a unique identity: names, PTYs, layouts and drafts
+/// survive independently when two workspaces point at exactly the same path.
+#[test]
+fn same_directory_named_workspaces_create_choose_restore_and_close_independently() {
+    use kiln::app::Action;
+    use egui_kittest::kittest::NodeT;
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let (base,proj)=setup("named-workspaces");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);}}
+    let _cleanup=Cleanup(base.clone());
+    unsafe {std::env::set_var("SHELL","/bin/sh");}
+    let mut h=Harness::builder().with_size([1100.,760.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    let original=h.state().debug_focused_session().unwrap();
+    h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("Review API contract independently".into()));h.run_steps(3);
+    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently"]);
+    h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
+    h.get_by_label("새 워크스페이스").click();h.run_steps(4);
+    let input=h.query_all_by_label("워크스페이스 이름").find(|n|n.accesskit_node().role()==egui::accesskit::Role::TextInput).expect("name input");
+    input.focus();h.run_steps(2);h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::A);h.run_steps(2);h.event(egui::Event::Text("Documentation review".into()));h.run_steps(3);
+    h.render().unwrap().save("/tmp/kiln015-new-workspace.png").unwrap();
+    assert!(h.ctx.content_rect().contains_rect(h.get_by_label("만들기").rect()));
+    h.get_by_label("만들기").click();
+    assert!(pump_until(&mut h,10,|h|h.state().debug_workspace_count()==2 && h.state().debug_focused_session().is_some_and(|s|s!=original)));
+    let second=h.state().debug_focused_session().unwrap();
+    assert_eq!(h.state().debug_active_workspace_name(),"Documentation review");
+    h.state_mut().debug_queue_action(Action::RenameWorkspace(1,"proj".into()));h.run_steps(3);
+    assert_eq!(h.state().debug_active_workspace_name(),"Documentation review","rename must not create a duplicate name within the folder");
+    h.state_mut().debug_queue_action(Action::RenameWorkspace(1,"bad\nname".into()));h.run_steps(3);
+    assert_eq!(h.state().debug_active_workspace_name(),"Documentation review");
+    assert_eq!(h.state().debug_active_workspace_root(),proj.canonicalize().unwrap());
+    h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("Write separate documentation".into()));h.run_steps(3);
+    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently","Write separate documentation"]);
+    h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
+    let ctx=h.ctx.clone();h.state_mut().debug_split(&ctx,true);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2 && h.state().debug_pane_sessions().len()==2));
+    let layouts=h.state().debug_workspace_panes();assert_eq!(layouts[0].len(),1);assert_eq!(layouts[1].len(),2);
+    assert!(layouts[0].iter().all(|id|!layouts[1].contains(id)));
+    // A normal folder-open must retain the currently active same-root workspace.
+    h.state_mut().debug_queue_action(Action::NewWorkspace(Some(proj.clone())));h.run_steps(3);
+    assert_eq!(h.state().debug_active_workspace_name(),"Documentation review");
+    // JSON checkpoint/restore is the exact app persistence path, retaining the
+    // active workspace, both prompts and all existing terminal identities.
+    h.state_mut().debug_checkpoint_restore(&ctx);h.run_steps(5);
+    assert_eq!(h.state().debug_workspace_count(),2);
+    assert_eq!(h.state().debug_active_workspace_name(),"Documentation review");
+    assert_eq!(h.state().debug_workspace_panes(),layouts);
+    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently","Write separate documentation"]);
+    h.state_mut().debug_queue_action(Action::NewWorkspace(None));h.run_steps(4);
+    // Choosing an existing workspace does not create another terminal.
+    h.query_all_by_label("proj").find(|n|n.accesskit_node().role()==egui::accesskit::Role::Button && n.rect().left()>300.).expect("existing workspace in dialog").click();h.run_steps(4);
+    assert_eq!(h.state().debug_active_workspace_name(),"proj");
+    assert_eq!(h.state().debug_focused_session(),Some(original));
+    h.state_mut().debug_queue_action(Action::NewWorkspace(None));h.run_steps(3);
+    h.get_by_label("취소").click();h.run_steps(3);assert_eq!(h.state().debug_workspace_count(),2);
+    h.state_mut().debug_queue_action(Action::CloseWorkspace(1));h.run_steps(3);
+    assert!(h.query_by_label("변경 버리고 워크스페이스 닫기").is_some(),"closing an independent workspace still protects its drafts");
+    h.get_by_label("취소").click();h.run_steps(3);assert_eq!(h.state().debug_workspace_count(),2);
+    h.state_mut().debug_queue_action(Action::CloseWorkspaceConfirmed(1));h.run_steps(4);
+    assert_eq!(h.state().debug_workspace_count(),1);assert_eq!(h.state().debug_focused_session(),Some(original));
+    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently"]);
+    let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    client.send(kiln_proto::ClientMsg::Input{session:original,data:b"printf 'original-workspace-%s\\n' alive\r".to_vec()});
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|t|t.contains("original-workspace-alive"))));
+    let sessions=match client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(2)).unwrap(){kiln_proto::ServerMsg::Sessions{sessions,..}=>sessions,r=>panic!("{r:?}")};
+    assert!(sessions.iter().find(|s|s.id==second).is_none_or(|s|s.exited.is_some()));
+}
+
+#[test]
+fn named_workspace_dialog_fits_long_names_in_four_languages_at_minimum_size() {
+    use kiln::app::Action;
+    use kiln_common::i18n::{self,Language,tr};
+    use egui_kittest::kittest::NodeT;
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let (base,proj)=setup("workspace-dialog-layout");
+    struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){shutdown(&self.0);i18n::set_language(Language::Korean);}}
+    let _cleanup=Cleanup(base.clone());
+    let mut h=Harness::builder().with_size([720.,440.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    let long_name="긴워크스페이스이름".repeat(10);
+    h.state_mut().debug_begin_project_rename(&long_name);h.run_steps(2);h.key_press(egui::Key::Enter);h.run_steps(3);
+    let ctx=h.ctx.clone();
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point=Some(1.);
+    h.ctx.set_zoom_factor(1.3);h.run_steps(3);h.set_size(egui::vec2(720./1.3,440./1.3));h.run_steps(4);
+    for language in [Language::Korean,Language::English,Language::Japanese,Language::ChineseSimplified] {
+        i18n::set_language(language);
+        for theme in ["kiln-dark","kiln-light"] {
+            h.state_mut().debug_set_theme(&ctx,theme);
+            h.state_mut().debug_queue_action(Action::NewWorkspace(None));h.run_steps(6);
+            let viewport=h.ctx.content_rect();
+            for label in [tr("만들기"),tr("취소")] {assert!(viewport.contains_rect(h.get_by_label(label).rect()),"{language:?} {theme} {label} outside viewport");}
+            for node in h.get_all_by_role(egui::accesskit::Role::TextInput){assert!(viewport.contains_rect(node.rect()));}
+            let long=h.query_all_by_label(&long_name).find(|n|n.accesskit_node().role()==egui::accesskit::Role::Button && n.rect().left()>80.).expect("long existing workspace button");
+            assert!(viewport.contains_rect(long.rect()),"long name must truncate inside dialog");
+            h.render().unwrap().save(format!("/tmp/kiln015-workspace-{language:?}-{theme}-minimum.png")).unwrap();
+            h.get_by_label(tr("취소")).click();h.run_steps(3);
+        }
+    }
 }

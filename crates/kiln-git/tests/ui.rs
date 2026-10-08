@@ -676,3 +676,27 @@ fn pr_creation_long_branches_fit_360_points() {
         assert!(h.ctx.content_rect().contains_rect(input.rect()),"input overflow {:?}",input.rect());
     }
 }
+
+#[test]
+fn same_repository_scoped_commit_inputs_keep_undo_and_drafts_separate() {
+    let r=Repo::new();r.write("README.md","# Fixture\n");r.commit_all("Initial fixture");
+    let head=r.git(&["rev-parse","HEAD"]);
+    struct Workspaces {panels:[GitPanel;2],active:usize}
+    let mut h=Harness::builder().with_size(vec2(440.,850.)).build_ui_state(|ui,s:&mut Workspaces|{
+        if !theme(ui){return;}
+        ui.horizontal(|ui|{if ui.button("First workspace").clicked(){s.active=0;}if ui.button("Second workspace").clicked(){s.active=1;}});
+        s.panels[s.active].ui(ui);
+    },Workspaces{panels:[GitPanel::new(r.path.clone()).with_id_salt(100),GitPanel::new(r.path.clone()).with_id_salt(200)],active:0});
+    settle(&mut h,|s|s.panels[s.active].is_busy());
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("API review draft".into()));h.run_steps(3);
+    h.get_by_label("Second workspace").click();settle(&mut h,|s|s.panels[s.active].is_busy());
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("Documentation draft".into()));h.run_steps(3);
+    h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::Z);h.run_steps(3);
+    assert_eq!(h.state().panels[0].commit_draft(),"API review draft");
+    assert!(!h.state().panels[1].commit_draft().contains("API review"));
+    h.get_by_label("First workspace").click();h.run_steps(3);
+    assert_eq!(h.state().panels[0].commit_draft(),"API review draft");
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::Z);h.run_steps(3);
+    assert!(!h.state().panels[0].commit_draft().contains("Documentation"));
+    assert_eq!(r.git(&["rev-parse","HEAD"]),head,"typing and undo must not submit commits");
+}

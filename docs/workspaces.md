@@ -1,5 +1,18 @@
 # Workspaces and agents
 
+## Several workspaces, one folder
+
+Use the sidebar **+** or `⌘N`, enter a name and choose a folder. The same directory
+can have multiple workspaces, for example **API review** and **Documentation**.
+The dialog also lists existing workspaces for the selected directory so you can
+open one without creating another. Cancelling does not start a terminal.
+
+Each workspace keeps its own tasks, terminal sessions, split layout and unsent
+requests. These are restored independently when Kiln reopens. Switching
+workspaces keeps running processes alive; closing a workspace ends only its own
+sessions and still asks before discarding drafts. Files and Git history belong
+to the directory and remain shared.
+
 ## One workspace, several repositories
 
 Open a parent folder such as `~/dev/projects` when frontend, backend and shared

@@ -276,7 +276,7 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
 
 fn behavior(ui: &mut egui::Ui, s: &mut Settings) {
     widgets::group(ui, kiln_common::i18n::tr("안전"), |ui| {
-        widgets::setting_toggle(ui, kiln_common::i18n::tr("실행 중인 프로세스를 종료하기 전 확인"), kiln_common::i18n::tr("패널·탭·작업 공간을 닫을 때 실행 중인 프로세스가 있으면 확인합니다"), &mut s.confirm_close_running);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("실행 중인 프로세스를 종료하기 전 확인"), kiln_common::i18n::tr("패널·탭·워크스페이스를 닫을 때 실행 중인 프로세스가 있으면 확인합니다"), &mut s.confirm_close_running);
     });
     #[cfg(target_os = "macos")]
     crate::local_network::settings(ui);
@@ -357,7 +357,7 @@ mod keybinding_layout_tests {
         h.run_steps(3);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("단축키 저장").rect()));
         let save=h.get_by_label("단축키 저장").rect();
-        let fourth=h.get_by_label("프로젝트 열기").rect();
+        let fourth=h.get_by_label("새 워크스페이스").rect();
         assert!(fourth.bottom()<save.top(),"four bindings must fit above the fixed footer");
         h.get_by_label("관리").click();h.run_steps(2);
         assert!(h.query_by_label("기본값 복원").is_some());

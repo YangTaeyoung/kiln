@@ -349,7 +349,7 @@ mod tests {
             WorkspaceTask{pane:11,title:"결제 API 인증 방식 확인".into(),qualifier:String::new(),phase:TaskPhase::Waiting,agent:None,updated:0,recorded:None},
             WorkspaceTask{pane:12,title:"프론트·백엔드 로그인 연결 구현".into(),qualifier:String::new(),phase:TaskPhase::Running,agent:None,updated:0,recorded:None},
             WorkspaceTask{pane:13,title:"캐시 무효화 문제 수정".into(),qualifier:String::new(),phase:TaskPhase::Done,agent:None,updated:0,recorded:None},
-            WorkspaceTask{pane:14,title:"아주 긴 최근 작업 제목이 좁은 작업 공간 목록을 밀어내면 안 됩니다".into(),qualifier:String::new(),phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None},
+            WorkspaceTask{pane:14,title:"아주 긴 최근 작업 제목이 좁은 워크스페이스 목록을 밀어내면 안 됩니다".into(),qualifier:String::new(),phase:TaskPhase::Unknown,agent:None,updated:0,recorded:None},
         ];
         for width in [180.0,280.0] {
             let tasks=tasks.clone(); let mut installed=false;
@@ -360,10 +360,10 @@ mod tests {
             },None);
             h.run_steps(3);
             assert!(h.query_by_label("캐시 무효화 문제 수정 · 완료").is_some());
-            assert!(h.query_by_label("아주 긴 최근 작업 제목이 좁은 작업 공간 목록을 밀어내면 안 됩니다 · 세션 열림").is_none());
+            assert!(h.query_by_label("아주 긴 최근 작업 제목이 좁은 워크스페이스 목록을 밀어내면 안 됩니다 · 세션 열림").is_none());
             h.get_by_label("결제 API 인증 방식 확인 · 입력 대기").click();h.run_steps(2);assert_eq!(*h.state(),Some(11));
             h.get_by_label("작업 4개 모두 보기").click();h.run_steps(2);
-            let last=h.get_by_label("아주 긴 최근 작업 제목이 좁은 작업 공간 목록을 밀어내면 안 됩니다 · 세션 열림");
+            let last=h.get_by_label("아주 긴 최근 작업 제목이 좁은 워크스페이스 목록을 밀어내면 안 됩니다 · 세션 열림");
             assert!(h.ctx.content_rect().contains_rect(last.rect()));last.click();h.run_steps(2);assert_eq!(*h.state(),Some(14));
             h.render().unwrap().save(format!("/tmp/kiln-workspace-tasks-{}.png",width as u32)).unwrap();
         }

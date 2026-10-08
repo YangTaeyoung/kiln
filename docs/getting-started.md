@@ -16,9 +16,13 @@ The app UI supports English, Korean, Japanese and Simplified Chinese. Documentat
 
 ## Open a workspace
 
-Choose a folder with the **+** button in the workspace sidebar. A workspace can
-be one repository or a parent directory containing multiple repositories.
-Open your development folder once; your agent can work across its repositories.
+Use the **+** button in the workspace sidebar (or `⌘N`) to create a named
+workspace. Choose its folder and name, or select an existing workspace for that
+folder in the same dialog. One folder can have several workspaces, each with
+its own terminals, tasks, splits and drafts.
+
+A folder can be one repository or a parent directory containing several
+repositories. Your agent can work across them from that shared working root.
 
 Use a terminal directly, or choose **New task**, enter a request, pick Codex or
 Claude, and start. The corresponding CLI must already be installed and signed in.
