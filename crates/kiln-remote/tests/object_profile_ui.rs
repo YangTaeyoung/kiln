@@ -13,14 +13,26 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-fn pump(h: &mut Harness<'_, RemotePanel>, ready: impl Fn(&Harness<'_, RemotePanel>) -> bool) {
+#[track_caller]
+fn pump(
+    h: &mut Harness<'_, RemotePanel>,
+    provider: ObjectProvider,
+    stage: &str,
+    ready: impl Fn(&Harness<'_, RemotePanel>) -> bool,
+) {
+    let caller = std::panic::Location::caller();
     let until = Instant::now() + Duration::from_secs(5);
     loop {
         h.step();
         if ready(h) {
             return;
         }
-        assert!(Instant::now() < until, "profile discovery timed out");
+        assert!(
+            Instant::now() < until,
+            "{provider:?} {stage} timed out at {caller}; popup_open={}; AX={:#?}",
+            egui::Popup::is_any_open(&h.ctx),
+            h.root()
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -107,10 +119,25 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
         h.run_steps(3);
         h.get_by_label(label).click();
         h.run_steps(3);
-        h.get_by_value("프로필 선택").click();
+        pump(&mut h, provider, "initial discovery", |h| {
+            h.query_by_label("프로필 읽는 중…").is_none()
+                && h.query_all_by_value("프로필 선택").any(|node| {
+                    node.accesskit_node().role() == Role::ComboBox
+                        && !node.accesskit_node().is_disabled()
+                })
+        });
+        // Let the centered modal settle after loading/metadata changes its height.
+        h.run_steps(3);
+        h.query_all_by_value("프로필 선택")
+            .find(|node| {
+                node.accesskit_node().role() == Role::ComboBox
+                    && !node.accesskit_node().is_disabled()
+            })
+            .expect("ready profile selector")
+            .click();
         // Discovery completes asynchronously. The save button's previous-frame
         // enabled state is not evidence that the provider's profiles have arrived.
-        pump(&mut h, |h| {
+        pump(&mut h, provider, "initial dropdown", |h| {
             h.query_all_by_label("studio").any(|node| {
                 node.accesskit_node().role() == Role::Button && !node.accesskit_node().is_disabled()
             })
@@ -133,8 +160,12 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
             h.run_steps(3);
         }
         h.get_by_label("연결 저장").click();
-        pump(&mut h, |_| manager.profiles().len() == 1);
-        pump(&mut h, |h| h.query_by_label("취소").is_none());
+        pump(&mut h, provider, "save persisted", |_| {
+            manager.profiles().len() == 1
+        });
+        pump(&mut h, provider, "save modal closed", |h| {
+            h.query_by_label("취소").is_none()
+        });
         let saved = manager.profiles()[0].clone();
         assert!(
             matches!(&saved.endpoint,RemoteEndpoint::ObjectStorage{provider:p,authentication:ObjectAuthentication::Cli{profile,config_path:Some(path)},..} if *p==provider && profile=="studio" && path==&config)
@@ -150,8 +181,23 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
         h.run_steps(3);
         h.get_by_label("연결 편집").click();
         h.run_steps(3);
-        h.get_by_value("studio").click();
-        pump(&mut h, |h| {
+        pump(&mut h, provider, "reedit discovery", |h| {
+            h.query_by_label("프로필 읽는 중…").is_none()
+                && h.query_all_by_value("studio").any(|node| {
+                    node.accesskit_node().role() == Role::ComboBox
+                        && !node.accesskit_node().is_disabled()
+                })
+        });
+        // Let the centered modal settle after loading/metadata changes its height.
+        h.run_steps(3);
+        h.query_all_by_value("studio")
+            .find(|node| {
+                node.accesskit_node().role() == Role::ComboBox
+                    && !node.accesskit_node().is_disabled()
+            })
+            .expect("ready profile selector")
+            .click();
+        pump(&mut h, provider, "reedit dropdown", |h| {
             h.query_all_by_label("studio").any(|node| {
                 node.accesskit_node().role() == Role::Button && !node.accesskit_node().is_disabled()
             })

@@ -183,41 +183,44 @@ impl CloudForm {
                 }
             });
         if self.mode == 0 {
-            ui.horizontal(|ui| {
-                let width = ui.available_width();
-                let selected = if self.selected.is_empty() {
-                    tr("프로필 선택")
-                } else {
-                    &self.selected
-                };
-                let mut choice = None;
-                egui::ComboBox::from_id_salt("object-cli-profile")
-                    .selected_text(selected)
-                    .width(width)
-                    .truncate()
-                    .show_ui(ui, |ui| {
-                        ui.set_max_width(360.0_f32.min(ui.ctx().content_rect().width() - 60.0));
-                        for profile in &self.profiles {
-                            let response = ui.add_enabled(
-                                profile.available,
-                                egui::Button::selectable(
-                                    self.selected == profile.name,
-                                    &profile.name,
-                                )
-                                .truncate(),
-                            );
-                            if response.clicked() {
-                                choice = Some(profile.clone());
+            ui.add_enabled_ui(!self.loading(), |ui| {
+                ui.horizontal(|ui| {
+                    let width = ui.available_width();
+                    let selected = if self.selected.is_empty() {
+                        tr("프로필 선택")
+                    } else {
+                        &self.selected
+                    };
+                    let mut choice = None;
+                    egui::ComboBox::from_id_salt("object-cli-profile")
+                        .selected_text(selected)
+                        .width(width)
+                        .truncate()
+                        .show_ui(ui, |ui| {
+                            ui.set_max_width(360.0_f32.min(ui.ctx().content_rect().width() - 60.0));
+                            for profile in &self.profiles {
+                                let response = ui.add_enabled(
+                                    profile.available,
+                                    egui::Button::selectable(
+                                        self.selected == profile.name,
+                                        &profile.name,
+                                    )
+                                    .truncate(),
+                                );
+                                if response.clicked() {
+                                    choice = Some(profile.clone());
+                                }
+                                if !profile.available {
+                                    response.on_disabled_hover_text(unavailable_reason(
+                                        provider, profile,
+                                    ));
+                                }
                             }
-                            if !profile.available {
-                                response
-                                    .on_disabled_hover_text(unavailable_reason(provider, profile));
-                            }
-                        }
-                    });
-                if let Some(profile) = choice {
-                    self.select(&profile);
-                }
+                        });
+                    if let Some(profile) = choice {
+                        self.select(&profile);
+                    }
+                });
             });
             if self.loading() {
                 ui.horizontal(|ui| {
@@ -257,42 +260,52 @@ impl CloudForm {
                 }
             }
         } else if self.mode == 2 {
-            let selected = if self.aws_profile.is_empty() {
-                tr("AWS 프로필을 선택하세요")
-            } else {
-                &self.aws_profile
-            };
-            egui::ComboBox::from_id_salt("object-aws-profile")
-                .selected_text(selected)
-                .width(ui.available_width())
-                .truncate()
-                .show_ui(ui, |ui| {
-                    for profile in &self.aws_profiles {
-                        let available = profile.authentication == Authentication::Static
-                            || profile.authentication == Authentication::External
-                                && self.cli_available;
-                        if ui
-                            .add_enabled(
-                                available,
-                                egui::Button::selectable(
-                                    self.aws_profile == profile.name,
-                                    &profile.name,
+            ui.add_enabled_ui(!self.loading(), |ui| {
+                let selected = if self.aws_profile.is_empty() {
+                    tr("AWS 프로필을 선택하세요")
+                } else {
+                    &self.aws_profile
+                };
+                egui::ComboBox::from_id_salt("object-aws-profile")
+                    .selected_text(selected)
+                    .width(ui.available_width())
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for profile in &self.aws_profiles {
+                            let available = profile.authentication == Authentication::Static
+                                || profile.authentication == Authentication::External
+                                    && self.cli_available;
+                            if ui
+                                .add_enabled(
+                                    available,
+                                    egui::Button::selectable(
+                                        self.aws_profile == profile.name,
+                                        &profile.name,
+                                    )
+                                    .truncate(),
                                 )
-                                .truncate(),
-                            )
-                            .on_disabled_hover_text(
-                                if profile.authentication == Authentication::Missing {
-                                    tr("이 AWS 프로필에 인증 정보가 없습니다")
-                                } else {
-                                    tr("이 AWS 프로필은 AWS CLI v2가 필요합니다")
-                                },
-                            )
-                            .clicked()
-                        {
-                            self.aws_profile = profile.name.clone();
+                                .on_disabled_hover_text(
+                                    if profile.authentication == Authentication::Missing {
+                                        tr("이 AWS 프로필에 인증 정보가 없습니다")
+                                    } else {
+                                        tr("이 AWS 프로필은 AWS CLI v2가 필요합니다")
+                                    },
+                                )
+                                .clicked()
+                            {
+                                self.aws_profile = profile.name.clone();
+                            }
                         }
-                    }
+                    });
+            });
+            if self.loading() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(tr("프로필 읽는 중…"));
                 });
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(40));
+            }
             if self.aws_profiles.is_empty() && !self.loading() && self.aws_error.is_none() {
                 ui.label(
                     egui::RichText::new(tr("저장된 AWS 프로필이 없습니다"))
