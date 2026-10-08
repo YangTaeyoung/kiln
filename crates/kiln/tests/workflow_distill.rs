@@ -82,7 +82,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  assert!(h.query_by_label_contains("app.ts").is_some(),"reopening inspection must return to changes");
  h.query_all_by_label("product").next().unwrap().click();h.run_steps(3);
  h.query_all_by_label("personal").next().unwrap().click_secondary();h.run_steps(3);
- h.query_all_by_label("도구").last().unwrap().click();h.run_steps(2);
+ h.query_all_by_label("도구").find(|node| node.rect().top() > 42.0).expect("workspace context tools, not titlebar tools").click();h.run_steps(2);
  h.get_by_label("소스 제어").click();h.run_steps(4);
  assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
  assert!(h.state().debug_sheet_open(),"explicit workspace menu must open, never toggle closed");

@@ -2,7 +2,7 @@
 
 use kiln_common::widgets::{self, ButtonKind};
 use super::*;
-use egui::{Align2, Color32, CornerRadius, CursorIcon, Frame, Margin, RichText, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
 use icons::Icon;
 use kiln_common::fonts;
 
@@ -12,7 +12,7 @@ const HEADER_H: f32 = 30.0;
 /// One complete tool list, shared by the titlebar and workspace context menu.
 fn tool_menu(ui: &mut egui::Ui, selected: Option<tools::ToolKind>) -> Option<tools::ToolKind> {
     let t = kiln_common::Theme::current();
-    ui.set_min_width(220.0);
+    ui.set_width(220.0);
     let mut chosen = None;
     for kind in tools::ToolKind::ALL {
         let active = selected == Some(kind);

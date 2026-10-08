@@ -1648,6 +1648,7 @@ fn unified_tools_menu_switches_all_panels_without_replacing_terminal() {
                 for label in ["파일", "검색", "소스 제어", "GitHub", "데이터베이스", "원격 연결", "문제"] {
                     let row = h.query_all_by_label(i18n::tr(label)).find(|node| (node.rect().height()-32.).abs()<0.1 && node.rect().width()>=220.).expect("complete tool row");
                     assert!(h.ctx.content_rect().contains_rect(row.rect()), "{label} outside viewport");
+                    assert!(row.rect().width() <= 221., "{label}: tool menu expanded beyond its compact width");
                 }
                 if target == "원격 연결" {
                     save_shot(&mut h, &format!("app_tools_menu_{theme}_{}_{}", width as u32, (scale*100.) as u32));
