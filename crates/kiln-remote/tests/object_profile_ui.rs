@@ -98,13 +98,15 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
             },
             panel,
         );
-        h.run();
+        // Spinner repaint requests are expected during real async discovery.
+        // Render bounded frames for interactions; pump actual readiness below.
+        h.run_steps(3);
         h.get_all_by_label("연결 추가").next().unwrap().click();
-        h.run();
+        h.run_steps(3);
         h.get_by_value("Amazon S3").click();
-        h.run();
+        h.run_steps(3);
         h.get_by_label(label).click();
-        h.run();
+        h.run_steps(3);
         h.get_by_value("프로필 선택").click();
         // Discovery completes asynchronously. The save button's previous-frame
         // enabled state is not evidence that the provider's profiles have arrived.
@@ -114,21 +116,21 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
             })
         });
         h.get_by_label("studio").click();
-        h.run();
+        h.run_steps(3);
         for (index, value) in [(0, "Fixture assets"), (1, "fixture-bucket")] {
             h.get_all_by_role(Role::TextInput)
                 .nth(index)
                 .unwrap()
                 .click();
-            h.run();
+            h.run_steps(3);
             h.event(egui::Event::Text(value.into()));
-            h.run();
+            h.run_steps(3);
         }
         if provider == ObjectProvider::Cloudflare {
             h.get_all_by_role(Role::TextInput).nth(2).unwrap().click();
-            h.run();
+            h.run_steps(3);
             h.event(egui::Event::Text("0123456789abcdef0123456789abcdef".into()));
-            h.run();
+            h.run_steps(3);
         }
         h.get_by_label("연결 저장").click();
         pump(&mut h, |_| manager.profiles().len() == 1);
@@ -145,9 +147,9 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
                 && secrets.session_token.is_none()
         );
         h.get_all_by_label("…").last().unwrap().click();
-        h.run();
+        h.run_steps(3);
         h.get_by_label("연결 편집").click();
-        h.run();
+        h.run_steps(3);
         h.get_by_value("studio").click();
         pump(&mut h, |h| {
             h.query_all_by_label("studio").any(|node| {
@@ -155,10 +157,10 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
             })
         });
         h.get_by_label("studio").click();
-        h.run();
+        h.run_steps(3);
         h.get_by_value("studio");
         h.get_by_label("취소").click();
-        h.run();
+        h.run_steps(3);
         assert_eq!(manager.get(&saved.id), Some(saved));
     }
     assert_eq!(
