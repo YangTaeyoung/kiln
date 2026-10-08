@@ -792,7 +792,15 @@ fn opening_existing_file_and_terminal_commands_reveal_targets_from_zoom() {
     use kiln::app::Action;
     let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
     let(base,proj)=setup("zoom-reveal-targets");
-    let mut h=Harness::builder().with_size([1200.0,800.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { shutdown(&self.0); } }
+    let _cleanup=Cleanup(base.clone());
+    let mut h=Harness::builder().with_size([1200.0,800.0]).build_eframe(|cc| {
+        let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));
+        app.debug_set_shell("/bin/sh".into());
+        app
+    });
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some() && h.state().debug_focused_text().is_some_and(|text|!text.trim().is_empty())), "initial shell must be ready before testing zoom navigation");
     let open=||Action::OpenLink(kiln::app::terminal::LinkTarget::File{path:proj.join("src/main.rs"),line:None,col:None});
     h.state_mut().debug_queue_action(open());h.run_steps(4);
     h.key_press_modifiers(primary() | egui::Modifiers::ALT,egui::Key::ArrowLeft);h.run_steps(3);
@@ -803,11 +811,15 @@ fn opening_existing_file_and_terminal_commands_reveal_targets_from_zoom() {
     assert!(h.state().debug_focused_is_visible(),"reused file must replace the old zoom target");
     h.state_mut().debug_queue_action(Action::NewTermAt(proj.clone()));h.run_steps(4);
     assert!(h.state().debug_focused_is_visible(),"new terminal must be visible from zoom");
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some() && h.state().debug_focused_text().is_some_and(|text|!text.trim().is_empty())), "new shell must be ready before zooming its command sibling");
     h.state_mut().debug_queue_action(Action::ToggleZoom(None));h.run_steps(3);
-    h.state_mut().debug_queue_action(Action::RunInTerminal("printf ZOOM-COMMAND-VISIBLE".into()));h.run_steps(4);
+    let executed=proj.join("zoom-command-executed");
+    // A real execution witness distinguishes command output from PTY input echo.
+    h.state_mut().debug_queue_action(Action::RunInTerminal("printf 'executed\\n' > zoom-command-executed; printf 'ZOOM-COMMAND-VISIBLE\\n'".into()));h.run_steps(4);
     assert!(h.state().debug_focused_is_visible(),"command terminal must be visible from zoom");
-    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("ZOOM-COMMAND-VISIBLE"))));
-    shutdown(&base);
+    let visible=pump_until(&mut h,10,|h|executed.exists() && h.state().debug_focused_text().is_some_and(|text|text.contains("ZOOM-COMMAND-VISIBLE")));
+    assert!(visible,"command execution/reveal failed: session={:?}, title={}, panes={:?}, executed={:?}, text={:?}", h.state().debug_focused_session(),h.state().debug_active_tab_title(),h.state().debug_pane_sessions(),std::fs::read_to_string(&executed),h.state().debug_focused_text());
+    assert_eq!(std::fs::read_to_string(executed).unwrap(),"executed\n");
 }
 
 
