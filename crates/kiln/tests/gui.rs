@@ -1621,3 +1621,49 @@ fn running_close_opt_out_persists_only_on_confirmation_and_keeps_unsaved_guards(
     h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(3);
     assert!(h.query_by_label("실행 중인 프로세스를 종료할까요?").is_some());
 }
+
+#[test]
+fn unified_tools_menu_switches_all_panels_without_replacing_terminal() {
+    use kiln_common::i18n;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("unified-tools");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { shutdown(&self.0); } }
+    let _cleanup = Cleanup(base.clone());
+    let mut h = Harness::builder().with_size([1100., 700.]).wgpu()
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    let session = h.state().debug_focused_session();
+    let panes = h.state().debug_pane_count();
+    for theme in ["kiln-dark", "kiln-light"] {
+        let ctx = h.ctx.clone(); h.state_mut().debug_set_theme(&ctx, theme);
+        for (width, scale) in [(1100., 1.), (720., 1.), (720., 1.3)] {
+            h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(1.0);
+            h.ctx.set_zoom_factor(scale); h.run_steps(2);
+            h.set_size(egui::vec2(width / scale, if width < 1000. {440. / scale} else {700. / scale})); h.run_steps(3);
+            for target in ["원격 연결", "데이터베이스", "파일", "검색", "소스 제어", "GitHub", "문제"] {
+                let entry = h.get_by_label(i18n::tr("도구"));
+                assert!(h.ctx.content_rect().contains_rect(entry.rect()));
+                entry.click(); h.run_steps(2);
+                for label in ["파일", "검색", "소스 제어", "GitHub", "데이터베이스", "원격 연결", "문제"] {
+                    let row = h.query_all_by_label(i18n::tr(label)).find(|node| (node.rect().height()-32.).abs()<0.1 && node.rect().width()>=220.).expect("complete tool row");
+                    assert!(h.ctx.content_rect().contains_rect(row.rect()), "{label} outside viewport");
+                }
+                if target == "원격 연결" {
+                    save_shot(&mut h, &format!("app_tools_menu_{theme}_{}_{}", width as u32, (scale*100.) as u32));
+                }
+                h.query_all_by_label(i18n::tr(target)).find(|node| (node.rect().height()-32.).abs()<0.1 && node.rect().width()>=220.).unwrap().click();
+                h.run_steps(3);
+                assert!(h.state().debug_sheet_open());
+                assert!(!egui::Popup::is_any_open(&h.ctx));
+                if target == "데이터베이스" { h.get_by_label(i18n::tr("데이터베이스에 연결하세요")); }
+                if target == "원격 연결" { h.get_by_label(i18n::tr("원격 연결")); }
+                assert_eq!(h.state().debug_focused_session(), session);
+                assert_eq!(h.state().debug_pane_count(), panes);
+            }
+        }
+    }
+    h.state_mut().debug_queue_action(kiln::app::Action::CloseSheet); h.run_steps(2);
+    h.key_press_modifiers(cmd_shift(), egui::Key::B); h.run_steps(3);
+    h.get_by_label(i18n::tr("데이터베이스에 연결하세요"));
+}

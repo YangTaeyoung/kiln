@@ -54,6 +54,22 @@ If sign-in fails, check the browser and network connection, then retry. A missin
 CLI is reported on the account card. Kiln does not implement a separate OAuth
 provider or bypass the provider's account policies.
 
+## Codex background-server settings
+
+Codex CLI can connect to its own shared background server. If startup reports
+**Background server has incompatible feature settings**, the session’s effective
+feature flags differ from those saved by that server. This is separate from
+Kiln’s terminal session daemon. Kiln does not override these Codex feature flags.
+
+**Run without daemon this time** starts this session without restarting the shared
+Codex server. The equivalent CLI option is `codex --no-daemon` (check your installed
+CLI’s `--help`). **Restart with these settings** changes shared settings and can
+interrupt other clients’ active or queued work. Review those clients before
+choosing a restart; Kiln does not perform it automatically.
+
+See [Codex startup regression tests](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/cli/tests/daemon_startup.rs)
+and [feature-setting commands](https://learn.chatgpt.com/docs/developer-commands).
+
 Official references:
 
 - [Claude Code authentication and account isolation](https://code.claude.com/docs/en/authentication#credential-management)

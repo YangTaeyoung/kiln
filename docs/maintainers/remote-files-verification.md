@@ -20,7 +20,7 @@ production daemon, SSH configuration, keychain or cloud account.
 Run:
 
 ```sh
-cargo test -p kiln-remote --lib --test transfers --test aws_profile_ui -- --test-threads=1
+cargo test -p kiln-remote --lib --test transfers --test aws_profile_ui --test ssh_profile_ui -- --test-threads=1
 KILN_REMOTE_FIXTURES=1 cargo test -p kiln-remote \
   --test transfers --test s3_pagination -- --ignored --test-threads=1
 ```
@@ -131,3 +131,15 @@ the accessible radio controls, verifies the actual selected form and cancels
 without creating a connection. The existing 192 form and 16 file-list captures
 were regenerated with the bundled marks. This is source/rendered-flow evidence;
 the installed central-tab path is verified separately by the release owner.
+
+## SSH Config dropdown and explicit edits
+
+`ssh_profile_ui` uses the production asynchronous form with a private config,
+an included host file, synthetic key paths and an in-memory store. It checks
+host selection, all prefilled fields, edited-port persistence, re-editing,
+direct-address connections and the SSH event payload. It does not launch SSH
+or SFTP; a `Match exec` marker must never be created. `direct_terminal_launch`
+checks the SSH event’s edited options against a fixture executable and real PTY.
+Unit tests separately check SFTP argv, conditional-config inheritance, legacy
+connections, source changes during discovery, late results and input validation.
+These checks do not establish real-host authentication or native installed UI behavior.

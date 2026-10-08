@@ -7,6 +7,7 @@
 //! FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md.
 mod browser;
 mod panel;
+mod ssh_form;
 pub use browser::{RemoteBrowser, RemoteDraft};
 pub use panel::{RemoteEvent, RemoteManager, RemotePanel};
 

@@ -24,6 +24,13 @@ Use a terminal directly, or choose **New task**, enter a request, pick Codex or
 Claude, and start. The corresponding CLI must already be installed and signed in.
 Kiln does not include a subscription to either agent.
 
+## Open a tool
+
+The titlebar **Tools** menu lists files, search, source control, GitHub, databases,
+remote connections and problems together. Choose a tool to open it alongside your
+current work. In compact windows, **Back to work** returns to the terminal.
+See [remote files and SSH](remote-files.md) and [databases](databases.md).
+
 ## Keep your place
 
 Use the sidebar to switch workspaces and tasks. Reported running, waiting,

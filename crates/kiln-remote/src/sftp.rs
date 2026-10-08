@@ -23,7 +23,7 @@ fn glob_quoted(path: &str) -> Result<String> {
 }
 fn command(profile: &ConnectionProfile) -> Result<Command> {
     let RemoteEndpoint::Sftp {
-        alias, config_path, ..
+        alias, config_path, options, ..
     } = &profile.endpoint
     else {
         unreachable!()
@@ -46,6 +46,7 @@ fn command(profile: &ConnectionProfile) -> Result<Command> {
     if let Some(config) = config_path {
         cmd.arg("-F").arg(config);
     }
+    cmd.args(options.arguments()?);
     cmd.arg("--").arg(alias);
     Ok(cmd)
 }
@@ -270,6 +271,22 @@ mod tests {
         assert!(quoted("a\n!rm").is_err());
     }
     #[test]
+    fn explicit_options_reach_sftp_as_separate_arguments() {
+        let p = ConnectionProfile {
+            id: "fixture".into(), name: "fixture".into(),
+            endpoint: RemoteEndpoint::Sftp {
+                alias: "studio".into(), config_path: Some("/fixture/ssh config".into()), root: ".".into(),
+                options: ssh_config::SshOptions {
+                    hostname: Some("192.0.2.10".into()), user: Some("deploy".into()), port: Some(2300),
+                    identity_file: Some("/fixture/키 with spaces".into()),
+                },
+            },
+        };
+        let c = command(&p).unwrap();
+        let args: Vec<_> = c.get_args().map(|v| v.to_str().unwrap()).collect();
+        assert!(args.ends_with(&["-F", "/fixture/ssh config", "-o", "HostName=192.0.2.10", "-o", "User=deploy", "-o", "Port=2300", "-i", "/fixture/키 with spaces", "--", "studio"]));
+    }
+    #[test]
     fn command_never_uses_shell_or_disables_host_check() {
         let p = ConnectionProfile {
             id: "a".into(),
@@ -278,6 +295,7 @@ mod tests {
                 alias: "fixture".into(),
                 config_path: None,
                 root: ".".into(),
+                options: Default::default(),
             },
         };
         let c = command(&p).unwrap();

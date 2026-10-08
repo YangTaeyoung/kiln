@@ -1015,6 +1015,7 @@ mod tests {
             alias: "fixture".into(),
             config_path: None,
             root: ".".into(),
+            options: Default::default(),
         });
         assert_eq!(parent_path(&sftp, "."), None);
         assert_eq!(parent_path(&sftp, "folder"), Some(".".into()));
@@ -1039,6 +1040,7 @@ mod tests {
             alias: "fixture".into(),
             config_path: None,
             root: ".".into(),
+            options: Default::default(),
         });
         let mut browser = RemoteBrowser::new(manager, profile, ".".into());
         let first = dir.path().join("first.txt");
@@ -1197,6 +1199,7 @@ mod visual_tests {
                 alias: "localhost".into(),
                 config_path: None,
                 root: ".".into(),
+                options: Default::default(),
             },
         };
         let mut browser = RemoteBrowser::new(manager, profile, ".".into());

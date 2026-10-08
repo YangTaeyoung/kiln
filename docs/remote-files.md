@@ -7,7 +7,9 @@ and addresses; passwords and S3 credentials use the account credential store
 
 ## Connect
 
-Open **Remote connections** in the tools sidebar, then add a named connection:
+Open **Tools → Remote connections** in the titlebar, then add a named connection.
+The same menu opens databases, files, search, source control, GitHub and problems
+without replacing your terminal task:
 
 - **S3:** bucket and region, then choose **Saved AWS profile**, **Default AWS
   credentials**, or **Enter keys manually**. Saved profiles come from
@@ -19,10 +21,21 @@ Open **Remote connections** in the tools sidebar, then add a named connection:
 - **FTP / FTPS:** host, port and username. FTPS uses explicit TLS and validates
   the server certificate. FTP transfers, including the password, are unencrypted;
   use it only when your server requires it.
-- **SFTP:** an SSH host alias. Import aliases from `~/.ssh/config` or choose a
-  configuration file. Includes and literal aliases are discovered without
-  executing SSH commands. OpenSSH resolves the full configuration when you
-  explicitly connect, including keys, agents and jump hosts.
+- **SFTP / SSH:** select a host from the **SSH Config hosts** dropdown. Kiln reads
+  `~/.ssh/config` and static Includes and fills the host, username, port and key
+  path. Choose another configuration file under **Advanced connection settings**.
+  Choose **Enter manually** to connect directly by hostname or IP address; a
+  pre-existing SSH alias is not required. Discovery is read-only and does not
+  execute SSH commands, `Match exec`, authentication or network connections.
+
+Selecting an SSH Config host preserves its alias, jump hosts and other OpenSSH
+settings. Untouched fields inherit the configuration at connection time; edited
+fields become explicit overrides shared by SFTP and **Open SSH terminal**.
+Clear an override to inherit the selected host's setting again. A key path is an
+additional OpenSSH identity, not a restriction to that key. Saved connections
+from earlier Kiln versions remain editable even when their alias is absent from
+the discovered list. Conditional SSH settings are resolved by OpenSSH only when
+you explicitly connect; the dropdown is a static preview.
 
 SFTP uses OpenSSH key/agent authentication and requires a known host key. For a
 new server, open its **SSH terminal**, inspect and accept the server fingerprint

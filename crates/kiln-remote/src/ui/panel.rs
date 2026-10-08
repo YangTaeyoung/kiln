@@ -128,6 +128,7 @@ pub enum RemoteEvent {
     Ssh {
         alias: String,
         config_path: Option<PathBuf>,
+        options: crate::ssh_config::SshOptions,
     },
 }
 #[derive(Default)]
@@ -144,12 +145,11 @@ struct Form {
     region: String,
     endpoint: String,
     path_style: bool,
-    alias: String,
+    ssh: super::ssh_form::SshForm,
     password: String,
     access_key: String,
     secret_key: String,
     session_token: String,
-    config_path: Option<PathBuf>,
     clear_secrets: bool,
     aws_mode: usize,
     aws_profile: String,
@@ -276,16 +276,7 @@ impl Form {
                     root: self.root.clone(),
                 }
             }
-            _ => {
-                if self.alias.trim().is_empty() {
-                    return Err(tr("SSH 호스트를 입력하세요").into());
-                }
-                RemoteEndpoint::Sftp {
-                    alias: self.alias.trim().into(),
-                    config_path: self.config_path.clone(),
-                    root: self.root.clone(),
-                }
-            }
+            _ => self.ssh.endpoint(&self.root)?,
         };
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = if self.id.is_empty() {
@@ -355,10 +346,10 @@ impl Form {
                 alias,
                 config_path,
                 root,
+                options,
             } => {
                 f.kind = 2;
-                f.alias = alias.clone();
-                f.config_path = config_path.clone();
+                f.ssh = super::ssh_form::SshForm::from_connection(alias, config_path, options);
                 f.root = root.clone()
             }
         }
@@ -367,11 +358,9 @@ impl Form {
 }
 pub struct RemotePanel {
     manager: RemoteManager,
+    ssh_config_path: Option<PathBuf>,
     form: Option<Form>,
     saving: Option<Task<Result<(), String>>>,
-    imports: Option<Task<Result<Vec<crate::ssh_config::SshHost>, String>>>,
-    hosts: Vec<crate::ssh_config::SshHost>,
-    show_hosts: bool,
     error: Option<String>,
     remove: Option<ConnectionProfile>,
 }
@@ -379,14 +368,25 @@ impl RemotePanel {
     pub fn new(manager: RemoteManager) -> Self {
         Self {
             manager,
+            ssh_config_path: None,
             form: None,
             saving: None,
-            imports: None,
-            hosts: Vec::new(),
-            show_hosts: false,
             error: None,
             remove: None,
         }
+    }
+    /// Use a chosen config as the discovery source for new connections.
+    /// Existing connections retain their own saved source and options.
+    pub fn with_ssh_config_path(mut self, path: PathBuf) -> Self {
+        self.ssh_config_path = Some(path);
+        self
+    }
+    fn new_form(&self) -> Form {
+        let mut form = Form::new();
+        if let Some(path) = &self.ssh_config_path {
+            form.ssh = super::ssh_form::SshForm::with_config(path.clone());
+        }
+        form
     }
     pub fn ui(&mut self, ui: &mut Ui) -> Vec<RemoteEvent> {
         let mut events = Vec::new();
@@ -404,34 +404,25 @@ impl RemotePanel {
                 }
             }
         }
-        if let Some(result) = self.imports.as_mut().and_then(Task::take) {
-            self.imports = None;
-            self.show_hosts = true;
-            match result {
-                Ok(hosts) => self.hosts = hosts,
-                Err(e) => self.error = Some(e),
-            }
-        }
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon(ui, Icon::Plus, tr("연결 추가")) {
-                    self.form = Some(Form::new())
+                    self.form = Some(self.new_form())
                 }
                 if icon(ui, Icon::Terminal, tr("SSH Config 가져오기")) {
-                    let path = std::env::var_os("HOME")
-                        .map(PathBuf::from)
-                        .unwrap_or_default()
-                        .join(".ssh/config");
-                    self.imports = Some(Task::spawn(ui.ctx(), move || {
-                        crate::ssh_config::discover_hosts(&path).map_err(|e| e.to_string())
-                    }));
+                    let mut f = self.new_form();
+                    f.kind = 2;
+                    f.root = ".".into();
+                    self.form = Some(f);
                 }
                 ui.menu_button("…", |ui| {
                     if ui.button(tr("SSH Config 파일 선택")).clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
-                            self.imports = Some(Task::spawn(ui.ctx(), move || {
-                                crate::ssh_config::discover_hosts(&path).map_err(|e| e.to_string())
-                            }));
+                            let mut f = Form::new();
+                            f.kind = 2;
+                            f.root = ".".into();
+                            f.ssh = super::ssh_form::SshForm::with_config(path);
+                            self.form = Some(f);
                         }
                         ui.close();
                     }
@@ -448,18 +439,12 @@ impl RemotePanel {
                 ui.label(e);
             });
         }
-        if self.imports.is_some() {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(tr("SSH 연결을 읽는 중…"));
-            });
-        }
         let profiles = self.manager.profiles();
         if profiles.is_empty() {
             ui.add_space(20.0);
             ui.label(tr("S3, FTP 또는 SSH 연결을 추가하세요"));
             if ui.button(tr("연결 추가")).clicked() {
-                self.form = Some(Form::new());
+                self.form = Some(self.new_form());
             }
         }
         egui::ScrollArea::vertical()
@@ -498,13 +483,14 @@ impl RemotePanel {
                             }
                             row.on_hover_text(format!("{} · {}", protocol(&p), p.name));
                             if let RemoteEndpoint::Sftp {
-                                alias, config_path, ..
+                                alias, config_path, options, ..
                             } = &p.endpoint
                             {
                                 if icon(ui, Icon::Terminal, tr("SSH 터미널 열기")) {
                                     events.push(RemoteEvent::Ssh {
                                         alias: alias.clone(),
                                         config_path: config_path.clone(),
+                                        options: options.clone(),
                                     })
                                 }
                             }
@@ -523,42 +509,6 @@ impl RemotePanel {
                     });
                 }
             });
-        if self.show_hosts {
-            egui::Window::new(tr("SSH Config 연결"))
-                .id(egui::Id::new("ssh-import"))
-                .collapsible(false)
-                .default_width(450.0)
-                .max_width((ui.ctx().content_rect().width() - 32.0).max(180.0))
-                .max_height((ui.ctx().content_rect().height() - 32.0).max(160.0))
-                .show(ui.ctx(), |ui| {
-                    if self.hosts.is_empty() {
-                        ui.label(tr("추가할 SSH 호스트가 없습니다"));
-                    }
-                    egui::ScrollArea::vertical()
-                        .max_height(360.0)
-                        .show(ui, |ui| {
-                            for host in &self.hosts {
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.strong(&host.alias);
-                                    ui.label(&host.hostname);
-                                    if ui.button(tr("추가")).clicked() {
-                                        let mut f = Form::new();
-                                        f.kind = 2;
-                                        f.name = host.alias.clone();
-                                        f.alias = host.alias.clone();
-                                        f.root = ".".into();
-                                        f.config_path = Some(host.config_path.clone());
-                                        self.form = Some(f);
-                                        self.show_hosts = false;
-                                    }
-                                });
-                            }
-                        });
-                    if ui.button(tr("닫기")).clicked() {
-                        self.show_hosts = false;
-                    }
-                });
-        }
         if let Some(p) = self.remove.clone() {
             egui::Modal::new(egui::Id::new("remote-remove")).show(ui.ctx(), |ui| {
                 ui.strong(tr("연결을 삭제할까요?"));
@@ -582,7 +532,7 @@ impl RemotePanel {
     }
     fn form_ui(&mut self, ctx: &egui::Context) {
         let Some(f) = &mut self.form else { return };
-        if !f.aws_scanned {
+        if f.kind == 0 && !f.aws_scanned {
             f.aws_scanned = true;
             if cfg!(test) {
                 if f.aws_profiles.is_empty() && f.aws_profile.is_empty() {
@@ -721,9 +671,8 @@ impl RemotePanel {
                                 if !f.id.is_empty() { ui.checkbox(&mut f.clear_secrets, tr("저장된 자격증명 제거")); }
                             }
                             _ => {
-                                field(ui, tr("SSH 호스트"), &mut f.alias, false);
-                                ui.label(RichText::new(tr("SSH Config와 SSH Agent의 인증을 사용합니다")).small().color(Theme::current().text_dim));
-                                egui::CollapsingHeader::new(tr("고급 연결 설정")).id_salt("remote-ssh-advanced").show(ui, |ui| { field(ui, tr("시작 경로"), &mut f.root, false); });
+                                f.ssh.ui(ui, &mut f.name);
+                                field(ui, tr("시작 경로"), &mut f.root, false);
                             }
                         }
                     });
@@ -737,7 +686,7 @@ impl RemotePanel {
                     if kiln_common::widgets::button(ui, tr("취소"), kiln_common::widgets::ButtonKind::Ghost).clicked() { cancel = true; }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_enabled_ui(!busy && f.aws_scan.is_none(), |ui| {
+                    ui.add_enabled_ui(!busy && (f.kind != 0 || f.aws_scan.is_none()), |ui| {
                         if kiln_common::widgets::button(ui, tr("연결 저장"), kiln_common::widgets::ButtonKind::Primary).clicked() { save = true; }
                     });
                     if busy { ui.spinner(); }
@@ -812,7 +761,7 @@ fn merge_secrets(new: Secrets, old: Secrets) -> Secrets {
         }),
     }
 }
-fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) -> egui::Response {
+pub(super) fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) -> egui::Response {
     ui.label(
         RichText::new(label)
             .small()
@@ -1188,7 +1137,8 @@ mod tests {
                         endpoint: RemoteEndpoint::Sftp {
                             alias: "localhost".into(),
                             config_path: None,
-                            root: "/".into()
+                            root: "/".into(),
+                            options: Default::default(),
                         }
                     },
                     Secrets::default()
@@ -1231,7 +1181,7 @@ mod visual_tests {
         let mut ssh = Form::new();
         ssh.kind = 2;
         ssh.name = "Remote workspace".into();
-        ssh.alias = "synthetic-host".into();
+        ssh.ssh = super::super::ssh_form::SshForm::from_connection("synthetic-host", &None, &Default::default());
         manager
             .save(ssh.profile().unwrap(), Secrets::default())
             .unwrap();

@@ -10058,5 +10058,60 @@
     "en": "Connection stalled",
     "ja": "接続停止",
     "zh-CN": "连接停滞"
+  },
+  "SSH Config 호스트": {
+    "en": "SSH Config host",
+    "ja": "SSH Config のホスト",
+    "zh-CN": "SSH Config 主机"
+  },
+  "직접 입력": {
+    "en": "Enter manually",
+    "ja": "手動入力",
+    "zh-CN": "手动输入"
+  },
+  "등록된 SSH 호스트가 없습니다": {
+    "en": "No SSH hosts found",
+    "ja": "登録済み SSH ホストがありません",
+    "zh-CN": "未找到 SSH 主机"
+  },
+  "SSH Config를 읽을 수 없습니다": {
+    "en": "Cannot read SSH Config",
+    "ja": "SSH Config を読み込めません",
+    "zh-CN": "无法读取 SSH Config"
+  },
+  "호스트 주소": {
+    "en": "Host address",
+    "ja": "ホストアドレス",
+    "zh-CN": "主机地址"
+  },
+  "호스트 주소를 입력하세요": {
+    "en": "Enter a host address",
+    "ja": "ホストアドレスを入力してください",
+    "zh-CN": "请输入主机地址"
+  },
+  "개인 키 (선택)": {
+    "en": "Private key (optional)",
+    "ja": "秘密鍵（任意）",
+    "zh-CN": "私钥（可选）"
+  },
+  "개인 키 선택": {
+    "en": "Choose private key",
+    "ja": "秘密鍵を選択",
+    "zh-CN": "选择私钥"
+  },
+  "유효한 SSH 사용자 이름을 입력하세요": {
+    "en": "Enter a valid SSH username",
+    "ja": "有効な SSH ユーザー名を入力してください",
+    "zh-CN": "请输入有效的 SSH 用户名"
+  },
+  "유효한 호스트 주소를 입력하세요": {
+    "en": "Enter a valid host address",
+    "ja": "有効なホストアドレスを入力してください",
+    "zh-CN": "请输入有效的主机地址"
+  },
+  "유효한 개인 키 경로를 입력하세요": {
+    "en": "Enter a valid private key path",
+    "ja": "有効な秘密鍵のパスを入力してください",
+    "zh-CN": "请输入有效的私钥路径"
   }
 }

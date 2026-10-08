@@ -154,6 +154,7 @@ pub enum Action {
     DirectAgent { tool: kiln_accounts::Tool, cwd: Option<PathBuf> },
     OpenAgentFolder(kiln_accounts::Tool),
     OpenSsh { alias: String, config_path: Option<PathBuf> },
+    OpenSshConnection { alias: String, config_path: Option<PathBuf>, options: kiln_remote::ssh_config::SshOptions },
     SelectPage(usize),
     ClosePage(usize, bool),
     NextPage(i32),
@@ -847,7 +848,10 @@ impl KilnApp {
                 self.launch_terminal_page(spec, ctx);
             }
             Action::OpenSsh { alias, config_path } => {
-                let mut spec = match remote_terminal::ssh(&alias, config_path.as_deref()) {
+                self.apply(Action::OpenSshConnection { alias, config_path, options: Default::default() }, ctx);
+            }
+            Action::OpenSshConnection { alias, config_path, options } => {
+                let mut spec = match remote_terminal::ssh_with_options(&alias, config_path.as_deref(), &options) {
                     Ok(spec) => spec,
                     Err(error) => { self.toast(kiln_common::i18n::tr("SSH 터미널을 열 수 없습니다"), error, ToastKind::Error, None); return; }
                 };

@@ -2,7 +2,12 @@
 use kiln_proto::SpawnSpec;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 pub fn ssh(alias: &str, config_path: Option<&Path>) -> Result<SpawnSpec, String> {
+    ssh_with_options(alias, config_path, &kiln_remote::ssh_config::SshOptions::default())
+}
+
+pub fn ssh_with_options(alias: &str, config_path: Option<&Path>, options: &kiln_remote::ssh_config::SshOptions) -> Result<SpawnSpec, String> {
     kiln_remote::ssh_config::validate_alias(alias).map_err(|error| error.to_string())?;
     let binary = super::agent_launch::executable("ssh")
         .ok_or_else(|| kiln_common::i18n::tr("SSH 클라이언트를 찾을 수 없습니다.").to_owned())?;
@@ -15,6 +20,7 @@ pub fn ssh(alias: &str, config_path: Option<&Path>) -> Result<SpawnSpec, String>
         let path = std::path::absolute(path).map_err(|error| error.to_string())?;
         args.extend(["-F".to_owned(), path.to_string_lossy().into_owned()]);
     }
+    args.extend(options.arguments().map_err(|error| error.to_string())?);
     // Alias validation plus the option terminator prevent option injection.
     args.extend(["--".to_owned(), alias.to_owned()]);
     Ok(SpawnSpec {

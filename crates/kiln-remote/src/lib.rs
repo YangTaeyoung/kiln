@@ -54,6 +54,8 @@ pub enum RemoteEndpoint {
         alias: String,
         config_path: Option<PathBuf>,
         root: String,
+        #[serde(default)]
+        options: ssh_config::SshOptions,
     },
 }
 impl RemoteEndpoint {
@@ -118,8 +120,9 @@ impl ConnectionProfile {
                     bail!("Host, port and username are required");
                 }
             }
-            RemoteEndpoint::Sftp { alias, root, .. } => {
+            RemoteEndpoint::Sftp { alias, root, options, .. } => {
                 ssh_config::validate_alias(alias)?;
+                options.validate()?;
                 safe_text(root)?;
             }
         }

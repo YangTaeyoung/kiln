@@ -183,6 +183,19 @@ read line
     let screen = h.state().debug_focused_text().unwrap();
     assert!(screen.contains("ARG=[--]"));
     assert!(screen.contains("ARG=[fixture]"));
+    let options = kiln_remote::ssh_config::SshOptions {
+        hostname: Some("192.0.2.8".into()), user: Some("deploy".into()), port: Some(2202),
+        identity_file: Some(base.join("key with ' spaces")),
+    };
+    h.state_mut().debug_apply_action(&ctx, Action::OpenSshConnection {
+        alias: "fixture".into(), config_path: Some(config.clone()), options: options.clone(),
+    });
+    pump(&mut h, "SSH_ARGV_DONE");
+    let mut expected = ssh.args[..ssh.args.len()-2].to_vec();
+    expected.extend(options.arguments().unwrap()); expected.extend(["--".into(), "fixture".into()]);
+    let ssh = h.state().debug_focused_launch_spec().unwrap();
+    assert_eq!(ssh.args, expected);
+    assert!(h.state().debug_focused_text().unwrap().contains("ARG=[Port=2202]"));
     h.state_mut().debug_checkpoint_restore(&ctx);
     h.run_steps(3);
     assert_eq!(h.state().debug_focused_launch_spec(), Some(ssh));

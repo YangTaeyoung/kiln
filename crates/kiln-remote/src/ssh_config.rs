@@ -3,6 +3,62 @@
 use anyhow::{Context, Result, bail};
 use std::{collections::BTreeSet, path::{Path, PathBuf}};
 
+/// Explicit user edits only. Discovered config values are display hints and
+/// must not override OpenSSH's conditional configuration merely by being shown.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SshOptions {
+    pub hostname: Option<String>,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub identity_file: Option<PathBuf>,
+}
+
+impl SshOptions {
+    pub fn validate(&self) -> Result<()> {
+        if let Some(host) = &self.hostname { validate_hostname(host)?; }
+        if let Some(user) = &self.user {
+            if user.is_empty() || user.len() > 255 || user.starts_with('-')
+                || !user.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) {
+                bail!("Invalid SSH username");
+            }
+        }
+        if self.port == Some(0) { bail!("Invalid SSH port"); }
+        if let Some(path) = &self.identity_file {
+            let text = path.to_str().context("Invalid SSH identity path")?;
+            crate::safe_text(text)?;
+            if text.is_empty() { bail!("Invalid SSH identity path"); }
+        }
+        Ok(())
+    }
+
+    /// Each option/value is its own argv element, never shell text.
+    pub fn arguments(&self) -> Result<Vec<String>> {
+        self.validate()?;
+        let mut args = Vec::new();
+        if let Some(host) = &self.hostname { args.extend(["-o".into(), format!("HostName={host}")]); }
+        if let Some(user) = &self.user { args.extend(["-o".into(), format!("User={user}")]); }
+        if let Some(port) = self.port { args.extend(["-o".into(), format!("Port={port}")]); }
+        if let Some(path) = &self.identity_file {
+            args.extend(["-i".into(), expand_home(path.to_str().unwrap()).to_string_lossy().into_owned()]);
+        }
+        Ok(args)
+    }
+}
+
+pub fn validate_hostname(host: &str) -> Result<()> {
+    if host.is_empty() || host.len() > 255 || host.starts_with('-')
+        || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '[' | ']')) {
+        bail!("Invalid SSH hostname");
+    }
+    Ok(())
+}
+
+pub fn manual_destination(host: &str) -> Result<String> {
+    validate_hostname(host)?;
+    if host.parse::<std::net::Ipv6Addr>().is_ok() { Ok(format!("[{host}]")) }
+    else { Ok(host.to_owned()) }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SshHost {
     pub alias: String,
@@ -156,6 +212,33 @@ fn wildcard(pattern: &[u8], text: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_options_are_safe_separate_arguments_and_ipv6_is_normalized() {
+        let options = SshOptions { hostname: Some("192.0.2.10".into()), user: Some("deploy-user".into()), port: Some(2202),
+            identity_file: Some(PathBuf::from("/fixture/키 with ' quotes")) };
+        assert_eq!(options.arguments().unwrap(), ["-o", "HostName=192.0.2.10", "-o", "User=deploy-user", "-o", "Port=2202", "-i", "/fixture/키 with ' quotes"]);
+        for user in ["-root", "x;touch", "$(touch)", "`touch`", "a b", "a\nx", "foo|bar", "foo&bar", "\"root\""] {
+            assert!(SshOptions { user: Some(user.into()), ..Default::default() }.validate().is_err());
+        }
+        assert!(SshOptions { port: Some(0), ..Default::default() }.validate().is_err());
+        assert_eq!(manual_destination("::1").unwrap(), "[::1]");
+        assert!(manual_destination("root@server").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn original_alias_keeps_match_and_jump_host_while_only_explicit_edits_override() {
+        let dir = tempfile::tempdir().unwrap(); let config = dir.path().join("config");
+        // This owned config deliberately contains no Match exec, network lookups
+        // or credential providers; -G here is test-only, never passive UI discovery.
+        std::fs::write(&config, "Host fixture\n HostName 192.0.2.10\n User from-config\n Port 2202\n ProxyJump gateway\nMatch originalhost fixture\n ServerAliveInterval 19\n").unwrap();
+        let options = SshOptions { user: Some("edited".into()), ..Default::default() };
+        let mut cmd = std::process::Command::new("/usr/bin/ssh");
+        let output = cmd.args(["-G", "-F"]).arg(&config).args(options.arguments().unwrap()).args(["--", "fixture"]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let text = String::from_utf8(output.stdout).unwrap();
+        for line in ["hostname 192.0.2.10", "user edited", "port 2202", "proxyjump gateway", "serveraliveinterval 19"] { assert!(text.lines().any(|l| l == line), "missing {line}"); }
+    }
     #[test]
     fn includes_quotes_first_value_defaults_and_negation() {
         let dir = tempfile::tempdir().unwrap();

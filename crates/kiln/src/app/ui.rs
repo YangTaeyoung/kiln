@@ -9,6 +9,25 @@ use kiln_common::fonts;
 pub const TOPBAR_H: f32 = 42.0;
 const HEADER_H: f32 = 30.0;
 
+/// One complete tool list, shared by the titlebar and workspace context menu.
+fn tool_menu(ui: &mut egui::Ui, selected: Option<tools::ToolKind>) -> Option<tools::ToolKind> {
+    let t = kiln_common::Theme::current();
+    ui.set_min_width(220.0);
+    let mut chosen = None;
+    for kind in tools::ToolKind::ALL {
+        let active = selected == Some(kind);
+        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, active, kind.label()));
+        widgets::paint_row(ui.painter(), rect, active, response.hovered());
+        icons::paint(ui.painter(), egui::Rect::from_center_size(pos2(rect.left()+16.0, rect.center().y), vec2(16.0,16.0)), kind.vicon(), if active {t.accent} else {t.text_dim});
+        ui.painter().text(pos2(rect.left()+32.0,rect.center().y), Align2::LEFT_CENTER, kind.label(), fonts::medium(12.5), t.text);
+        ui.painter().text(pos2(rect.right()-10.0,rect.center().y), Align2::RIGHT_CENTER, kind.shortcut(), fonts::medium(11.5), t.text_faint);
+        widgets::focus_ring(ui, &response, 5);
+        if response.clicked() { chosen=Some(kind); ui.close(); }
+    }
+    chosen
+}
+
 /// Repairs only the terminal transport, including when a CLI's internal hang
 /// cannot be inferred from its output. Never launches or restarts the process.
 fn terminal_recovery_menu_item(ui:&mut egui::Ui,conn:&mut conn::Conn,session:Option<SessionId>)->bool {
@@ -551,10 +570,9 @@ impl KilnApp {
             if widgets::icon_button(&mut lui, Icon::Sidebar, 30.0, self.sidebar_open, &kiln_common::trf!("작업 공간 사이드바 ({})",self.keymap.label("sidebar","⌘B"))).clicked() {
                 self.actions.push(Action::ToggleSidebar);
             }
-            let dirty=self.workspaces[self.active].tools.summary().map(|summary|summary.dirty);
-            let review_label=dirty.filter(|count|*count>0).map(|count|if count>999 {kiln_common::i18n::tr("변경 999+").into()}else{kiln_common::trf!("변경 {count}")}).unwrap_or_else(||kiln_common::i18n::tr("변경").into());
-            let review_width=ui.painter().layout_no_wrap(review_label.clone(),fonts::medium(12.5),t.text).size().x+40.0;
-            let tools_width = 12.0 + 4.0 * 30.0 + 4.0 * 4.0 + review_width;
+            let tool_label = kiln_common::i18n::tr("도구");
+            let tool_width = ui.painter().layout_no_wrap(tool_label.into(), fonts::medium(12.5), t.text).size().x + 40.0;
+            let tools_width = 12.0 + 3.0 * 30.0 + 3.0 * 4.0 + tool_width;
             let right = egui::Rect::from_min_max(pos2(bar.right() - tools_width, cy - 15.0), pos2(bar.right() - 12.0, cy + 15.0));
             let mut rui = ui.new_child(UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
             rui.spacing_mut().item_spacing.x = 4.0;
@@ -572,14 +590,12 @@ impl KilnApp {
             if widgets::icon_button(&mut rui, Icon::Search, 30.0, self.palette.is_open(), &kiln_common::trf!("검색 및 명령 실행 ({})",self.keymap.label("palette","⌘K"))).clicked() {
                 self.actions.push(Action::OpenPalette);
             }
-            let inspecting=matches!(self.workspaces[self.active].sheet,Some(tools::ToolKind::Explorer|tools::ToolKind::Search|tools::ToolKind::Git|tools::ToolKind::PullRequests)) && !self.workspaces[self.active].tools.is_agent_task_open();
-            if widgets::icon_button(&mut rui,Icon::Inspector,30.0,inspecting,kiln_common::i18n::tr("작업 공간 살펴보기")).clicked(){
-                self.actions.push(Action::ToggleInspector);
-            }
-            let reviewing=self.workspaces[self.active].sheet==Some(tools::ToolKind::Git) && !self.workspaces[self.active].tools.is_agent_task_open();
-            let review=widgets::button_with(&mut rui,Some(Icon::Branch),&review_label,if reviewing {ButtonKind::Secondary}else{ButtonKind::Ghost},true);
-            review.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::Button,true,reviewing,kiln_common::i18n::tr("변경 검토")));
-            if review.on_hover_text(kiln_common::i18n::tr("작업 공간 전체의 변경 검토")).clicked(){self.actions.push(Action::OpenSheet(tools::ToolKind::Git));}
+            let selected = self.workspaces[self.active].sheet.filter(|_| !self.workspaces[self.active].tools.is_agent_task_open());
+            let menu = widgets::button_with(&mut rui, Some(Icon::Inspector), tool_label, if selected.is_some() {ButtonKind::Secondary} else {ButtonKind::Ghost}, true);
+            menu.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected.is_some(), tool_label));
+            egui::Popup::menu(&menu).show(|ui| {
+                if let Some(kind) = tool_menu(ui, selected) { self.actions.push(Action::OpenSheet(kind)); }
+            });
             // One titlebar: project identity belongs to the sidebar; pages belong here.
             let lane = egui::Rect::from_min_max(pos2(left + 40.0, full.top() + 5.0), pos2(right.left() - 10.0, full.bottom() - 5.0));
             let mut pui = ui.new_child(UiBuilder::new().max_rect(lane).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -592,7 +608,6 @@ impl KilnApp {
                 ui.separator();
                 if widgets::button_with(ui,Some(Icon::Sparkle),kiln_common::i18n::tr("에이전트 요청"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::NewAgentTask);ui.close();}
                 if widgets::button_with(ui,Some(Icon::Terminal),kiln_common::i18n::tr("새 터미널"),ButtonKind::Ghost,true).on_hover_text(self.keymap.label("new_task","⌘T")).clicked(){self.actions.push(Action::NewPage);ui.close();}
-                if widgets::button_with(ui,Some(Icon::Plug),kiln_common::i18n::tr("SSH 연결"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenSheet(tools::ToolKind::Remote));ui.close();}
                 ui.separator();
                 ui.menu_button(kiln_common::i18n::tr("폴더에서 열기"), |ui| {
                     if widgets::button_with(ui,Some(Icon::Codex),"Codex",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Codex));ui.close();}
@@ -817,12 +832,10 @@ impl KilnApp {
                 ui.close();
             }
             ui.separator();
-            for kind in [tools::ToolKind::Explorer,tools::ToolKind::Git,tools::ToolKind::PullRequests] {
-                if ui.button(kind.label()).clicked(){self.actions.push(Action::SelectWorkspace(i));self.actions.push(Action::OpenSheet(kind));ui.close();}
-            }
             ui.menu_button(kiln_common::i18n::tr("도구"),|ui|{
-                for kind in [tools::ToolKind::Search,tools::ToolKind::Database,tools::ToolKind::Problems] {
-                    if ui.button(kind.label()).clicked(){self.actions.push(Action::SelectWorkspace(i));self.actions.push(Action::OpenSheet(kind));ui.close();}
+                if let Some(kind) = tool_menu(ui, self.workspaces[i].sheet) {
+                    self.actions.push(Action::SelectWorkspace(i));
+                    self.actions.push(Action::OpenSheet(kind));
                 }
                 ui.separator();
                 for (label,action) in [(kiln_common::i18n::tr("빠른 터미널"),Action::ToggleQuickTerminal),(kiln_common::i18n::tr("저장 명령"),Action::OpenLaunchers),(kiln_common::i18n::tr("작업 복구 센터"),Action::OpenRecovery),(kiln_common::i18n::tr("프로젝트 관리"),Action::OpenProjects)] {
@@ -1534,7 +1547,6 @@ impl KilnApp {
         add(Group::Commands, Icon::Plus, kiln_common::i18n::tr("새 터미널 탭").into(), "⌘T", Action::NewPage);
         add(Group::Commands, Icon::Codex, kiln_common::i18n::tr("Codex로 새 작업").into(), "", Action::DirectAgent {tool:kiln_accounts::Tool::Codex,cwd:None});
         add(Group::Commands, Icon::Claude, kiln_common::i18n::tr("Claude Code로 새 작업").into(), "", Action::DirectAgent {tool:kiln_accounts::Tool::Claude,cwd:None});
-        add(Group::Commands, Icon::Plug, kiln_common::i18n::tr("SSH 연결").into(), "", Action::OpenSheet(tools::ToolKind::Remote));
         add(Group::Commands, Icon::SplitRight, kiln_common::i18n::tr("오른쪽으로 나누기").into(), "⌘D", Action::Split(layout::Dir::Horizontal));
         add(Group::Commands, Icon::SplitDown, kiln_common::i18n::tr("아래로 나누기").into(), "⇧⌘D", Action::Split(layout::Dir::Vertical));
         add(Group::Commands, Icon::History, kiln_common::i18n::tr("Git 로그 (히스토리)").into(), "⇧⌘L", Action::OpenHistory);

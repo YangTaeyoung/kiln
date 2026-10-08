@@ -921,7 +921,7 @@ impl WorkspaceTools {
                 let panel = self.remote_panel.get_or_insert_with(|| kiln_remote::ui::RemotePanel::new(manager.clone()));
                 panel.ui(ui).into_iter().filter_map(|event| match event {
                     kiln_remote::ui::RemoteEvent::Open { connection, path } => manager.get(&connection).map(|profile| Action::OpenTab(remote_factory(manager.clone(), profile, path, None, true, false))),
-                    kiln_remote::ui::RemoteEvent::Ssh { alias, config_path } => Some(Action::OpenSsh { alias, config_path }),
+                    kiln_remote::ui::RemoteEvent::Ssh { alias, config_path, options } => Some(Action::OpenSshConnection { alias, config_path, options }),
                 }).collect()
             },
             ToolKind::Database => {

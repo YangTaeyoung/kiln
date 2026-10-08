@@ -36,7 +36,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  // The workspace sidebar only switches work. Inspection is a separate surface.
  assert!(h.query_by_label("작업 공간 메뉴").is_none());
  assert!(h.query_by_label("데이터베이스").is_none());
- h.get_by_label("작업 공간 살펴보기").click();h.run_steps(4);
+ h.get_by_label("도구").click();h.run_steps(2);h.get_by_label("파일").click();h.run_steps(4);
  for label in ["파일","변경","GitHub"] {h.get_by_label(label);}
  h.render().unwrap().save(output.join("inspector-files-1440.png")).unwrap();
  h.get_by_label("변경").click();h.run_steps(5);
@@ -77,16 +77,17 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  let dragged=egui::containers::panel::PanelState::load(&h.ctx,dock).unwrap().size().x;
  assert!(dragged<before_drag.width()-40.0,"drag must actually narrow the inspector: {} -> {dragged}",before_drag.width());
  for _ in 0..30 {h.step();let width=egui::containers::panel::PanelState::load(&h.ctx,dock).unwrap().size().x;assert!((width-dragged).abs()<0.5,"dragged width grew: {dragged} -> {width}");}
- h.get_by_label("작업 공간 살펴보기").click();h.run_steps(3);assert!(!h.state().debug_sheet_open());
- h.get_by_label("작업 공간 살펴보기").click();h.run_steps(4);
+ h.get_by_label("도구 닫기").click();h.run_steps(3);assert!(!h.state().debug_sheet_open());
+ h.get_by_label("도구").click();h.run_steps(2);h.get_by_label("소스 제어").click();h.run_steps(4);
  assert!(h.query_by_label_contains("app.ts").is_some(),"reopening inspection must return to changes");
  h.query_all_by_label("product").next().unwrap().click();h.run_steps(3);
  h.query_all_by_label("personal").next().unwrap().click_secondary();h.run_steps(3);
+ h.query_all_by_label("도구").last().unwrap().click();h.run_steps(2);
  h.get_by_label("소스 제어").click();h.run_steps(4);
  assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
  assert!(h.state().debug_sheet_open(),"explicit workspace menu must open, never toggle closed");
  assert!(h.query_by_label_contains("app.ts").is_some());
- h.get_by_label("작업 공간 살펴보기").click();h.run_steps(3);
+ h.get_by_label("도구 닫기").click();h.run_steps(3);
  // Identical shells stay distinguishable without numbering unrelated tabs.
  for _ in 0..2 {h.state_mut().debug_queue_action(Action::NewPage);h.run_steps(3);}
  pump(&mut h,|h|h.query_by_label("personal · 터미널 · 3").is_some());
@@ -101,18 +102,18 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
   h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point=Some(1.0);
   h.ctx.set_zoom_factor(scale);h.run_steps(3);h.set_size(egui::vec2(w/scale,height/scale));h.run_steps(4);
   let size=h.ctx.content_rect().size();assert!((size.x-w/scale).abs()<1.0 && (size.y-height/scale).abs()<1.0,"expected {}x{} got {size:?}",w/scale,height/scale);
-  for label in ["작업 공간 살펴보기","새 작업","설정 (⌘,)","알림 센터"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} outside viewport");}
+  for label in ["도구","새 작업","설정 (⌘,)","알림 센터"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} outside viewport");}
   assert!(h.query_by_label("작업 공간 메뉴").is_none());
   let img=h.render().unwrap();assert_eq!(img.dimensions(),(w as u32,height as u32));img.save(output.join(name)).unwrap();
   if scale>1.0 {
-    h.get_by_label("작업 공간 살펴보기").click();h.run_steps(4);
+    h.get_by_label("도구").click();h.run_steps(2);h.get_by_label("파일").click();h.run_steps(4);
     h.get_by_label("파일").click();h.run_steps(3);
     for label in ["파일","변경","GitHub","작업으로 돌아가기 (Esc)"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()));}
     h.render().unwrap().save(output.join("inspector-minimum-130.png")).unwrap();
     h.get_by_label("작업으로 돌아가기 (Esc)").click();h.run_steps(3);assert!(!h.state().debug_sheet_open());
     h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);h.get_by_label("작업 시작");let img=h.render().unwrap();assert_eq!(img.dimensions(),(w as u32,height as u32));img.save(output.join("agent-task-minimum-130.png")).unwrap();
     h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
-    h.state_mut().debug_queue_action(Action::ToggleSidebar);h.run_steps(4);for label in ["작업 공간 살펴보기","새 작업","알림 센터"]{assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()));}h.render().unwrap().save(output.join("workspace-collapsed-minimum-130.png")).unwrap();h.state_mut().debug_queue_action(Action::ToggleSidebar);h.run_steps(3);
+    h.state_mut().debug_queue_action(Action::ToggleSidebar);h.run_steps(4);for label in ["도구","새 작업","알림 센터"]{assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()));}h.render().unwrap().save(output.join("workspace-collapsed-minimum-130.png")).unwrap();h.state_mut().debug_queue_action(Action::ToggleSidebar);h.run_steps(3);
   }
  }
  let ctx=h.ctx.clone();h.state_mut().debug_set_theme(&ctx,"kiln-light");h.run_steps(4);

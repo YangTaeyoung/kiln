@@ -182,6 +182,7 @@ fn sftp_round_trip() {
                 alias: "kiln-remote-fixture".into(),
                 config_path: Some(PathBuf::from("/tmp/kiln-remote-fixture/ssh/config")),
                 root: "/files".into(),
+                options: Default::default(),
             },
         },
         Secrets::default(),
