@@ -22,6 +22,8 @@ pub(super) struct BucketPicker {
     credentials: Option<Task<Result<Secrets, String>>>,
     error: Option<String>,
     attempted: bool,
+    #[cfg(test)]
+    pub choice_bounds: Option<(egui::Rect, egui::Rect)>,
 }
 impl BucketPicker {
     pub fn selected(&self, bucket: &str) -> Option<&BucketChoice> {
@@ -102,7 +104,7 @@ impl BucketPicker {
             super::panel::field(ui, tr("버킷 이름"), bucket, false);
         } else {
             ui.add_enabled_ui(!loading, |ui| {
-                egui::ComboBox::from_id_salt("remote-bucket-choice")
+                let choice = egui::ComboBox::from_id_salt("remote-bucket-choice")
                     .selected_text(if bucket.is_empty() {
                         tr("버킷 선택")
                     } else {
@@ -117,6 +119,8 @@ impl BucketPicker {
                                 .on_hover_text(row.region.as_deref().unwrap_or(""));
                         }
                     });
+                #[cfg(test)] { self.choice_bounds = Some((choice.response.rect, ui.clip_rect())); }
+                #[cfg(not(test))] let _ = choice;
             });
         }
         if loading {

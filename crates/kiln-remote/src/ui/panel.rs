@@ -758,7 +758,7 @@ impl RemotePanel {
             });
             ui.add_space(10.0);
             egui::ScrollArea::vertical()
-                .max_height((ctx.content_rect().height() - 205.0).max(120.0))
+                .max_height((ctx.content_rect().height() - 173.0 - if f.error.is_some() { 52.0 } else { 0.0 }).max(80.0))
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     ui.add_enabled_ui(!busy, |ui| {
@@ -1508,6 +1508,9 @@ mod visual_tests {
                     assert!(h.query_by_value("studio").is_some());
                     assert!(h.query_by_label("Access Key ID").is_none(),"CLI auth must not ask for S3 keys");
                     for label in [tr("취소"),tr("연결 저장")] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} clipped at {width}");}
+                    let (choice, clip) = h.state().form.as_ref().unwrap().buckets.choice_bounds.expect("bucket selector rendered");
+                    assert!(clip.expand(0.5).contains_rect(choice), "bucket selector clipped for provider {kind}, width {width}: {choice:?} outside {clip:?}");
+                    assert!(choice.bottom() < h.get_by_label(tr("연결 저장")).rect().top(), "bucket must remain above the fixed footer");
                     h.render().unwrap().save(shots.join(format!("cloud-{kind}-{theme}-{width}.png"))).unwrap();
                     h.get_by_value(tr("CLI 프로필")).click();h.run();h.get_by_label(tr("직접 키 입력")).click();h.run();
                     h.get_by_label("Access Key ID").scroll_to_me();h.run();
