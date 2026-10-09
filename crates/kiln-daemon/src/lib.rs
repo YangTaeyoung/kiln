@@ -12,6 +12,7 @@ pub mod pty;
 pub mod ptyhost;
 pub mod server;
 pub mod shell;
+pub mod shell_completion;
 mod recovery;
 pub mod transport;
 

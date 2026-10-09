@@ -100,6 +100,7 @@ pub struct Daemon {
     cell_w: AtomicU32,
     cell_h: AtomicU32,
     palette: RwLock<TerminalPalette>,
+    completions: Mutex<HashMap<SessionId,(ShellCompletion,Instant)>>,
 }
 
 /// 업그레이드 상태 파일 v1(접두 없음).
@@ -200,9 +201,13 @@ impl Daemon {
             cell_w: AtomicU32::new(8),
             cell_h: AtomicU32::new(17),
             palette: RwLock::new(TerminalPalette::default()),
+            completions: Mutex::new(HashMap::new()),
         })
     }
 
+    fn completion_update(&self, session:SessionId,request:Option<ShellCompletion>){
+        for c in self.clients.lock().iter(){if c.attached.lock().contains_key(&session){let _=c.out.try_send(ServerMsg::ShellCompletion{session,request:request.clone()});}}
+    }
     fn broadcast(&self, msg: ServerMsg) {
         for c in self.clients.lock().iter() {
             let _ = c.out.try_send(msg.clone());
@@ -293,6 +298,7 @@ impl Daemon {
         let mut buf = vec![0u8; 64 * 1024];
         let mut osc = OscScanner::default();
         let mut osc_events = Vec::new();
+        let mut private_osc=crate::shell_completion::PrivateOscFilter::default();
         let mut img_scan = ImageScanner::default();
         let mut eof = false;
         let mut disconnected = false;
@@ -312,12 +318,13 @@ impl Daemon {
             }
             match reader.read_timeout(&mut buf, timeout_ms) {
                 Ok(ReadResult::Data(n)) => {
-                    let data = &buf[..n];
+                    osc.feed(&buf[..n], &mut osc_events);
+                    let filtered=private_osc.feed(&buf[..n]);
+                    let data=filtered.as_slice();
                     let cwd = sess.info.lock().cwd.clone();
                     let (cols, rows) = sess.emu.lock().size();
                     let changed = { let mut tracker = sess.telemetry.lock(); tracker.resize(cols, rows); tracker.feed(data, cwd.as_deref()) };
                     if changed { self.broadcast(ServerMsg::SessionTelemetry { session: sess.id, telemetry: sess.telemetry.lock().state.clone() }); }
-                    osc.feed(data, &mut osc_events);
                     let mut events = Vec::new();
                     for seg in img_scan.feed(data) {
                         match seg {
@@ -338,6 +345,10 @@ impl Daemon {
                 }
             }
         }
+        // Edit snapshots are ephemeral even when the shell cannot emit its ZLE
+        // finish hook (exit, lost transport, or daemon handover).
+        self.completions.lock().remove(&sess.id);
+        self.completion_update(sess.id,None);
         if !eof {
             drop(reader);
             { let _readers = self.reader_lifecycle.lock();
@@ -535,7 +546,16 @@ impl Daemon {
                     info.attention = matches!(activity, AgentActivity::Waiting | AgentActivity::Done | AgentActivity::Failed);
                     updated = true;
                 }
-                OscEvent::CommandText(_) | OscEvent::CommandStart | OscEvent::CommandEnd(_) | OscEvent::Prompt => {},
+                OscEvent::Completion(request) => {
+                    if sess.pty.fg_pid().and_then(procinfo::foreground_pid).and_then(procinfo::display_name).as_deref().is_some_and(|n|matches!(n,"zsh"|"-zsh")) {
+                        self.completions.lock().insert(sess.id,(request.clone(),Instant::now()));
+                        self.completion_update(sess.id,Some(request));
+                    }
+                }
+                OscEvent::CompletionCancelled | OscEvent::CommandText(_) | OscEvent::CommandStart | OscEvent::CommandEnd(_) | OscEvent::Prompt => {
+                    self.completions.lock().remove(&sess.id);
+                    self.completion_update(sess.id,None);
+                },
                 OscEvent::Cwd(p) => {
                     let mut i = sess.info.lock();
                     if i.cwd.as_deref() != Some(&p) {
@@ -684,7 +704,16 @@ impl Daemon {
             ClientMsg::Detach { session } => {
                 client.attached.lock().remove(&session);
             }
+            ClientMsg::ApplyShellCompletion{session,revision,buffer,cursor}=>{
+                if let (Some(s),Some((request,at)))=(self.session(session),self.completions.lock().remove(&session)) {
+                    if request.revision==revision && at.elapsed()<std::time::Duration::from_secs(60)
+                        && s.pty.fg_pid().and_then(procinfo::foreground_pid).and_then(procinfo::display_name).as_deref().is_some_and(|n|matches!(n,"zsh"|"-zsh"))
+                        && crate::shell_completion::stage(&request,&buffer,cursor).is_ok(){let _=s.input.send(b"\x1b[99;1~".to_vec());}
+                }
+                self.completion_update(session,None);
+            }
             ClientMsg::Input { session, data } => {
+                if self.completions.lock().remove(&session).is_some(){self.completion_update(session,None);}
                 if let Some(s) = self.session(session) {
                     {
                         let mut emu = s.emu.lock();

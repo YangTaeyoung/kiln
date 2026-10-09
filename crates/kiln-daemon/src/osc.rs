@@ -9,6 +9,8 @@ pub enum OscEvent {
     CommandStart,
     CommandEnd(Option<i32>),
     Prompt,
+    Completion(kiln_proto::ShellCompletion),
+    CompletionCancelled,
     Activity(kiln_proto::AgentActivity),
 }
 
@@ -108,7 +110,10 @@ impl OscScanner {
             "777" => {
                 let mut parts = rest.splitn(3, ';');
                 let kind = parts.next();
-                if kind == Some("kiln-command") {
+                if kind == Some("kiln-complete-cancel") {out.push(OscEvent::CompletionCancelled);
+                } else if kind == Some("kiln-complete") {
+                    if let Some(payload)=rest.strip_prefix("kiln-complete;").and_then(crate::shell_completion::parse){out.push(OscEvent::Completion(payload));}
+                } else if kind == Some("kiln-command") {
                     if let Some(hex) = parts.next() {
                         if hex.len() % 2 == 0 && hex.len() <= 8192 {
                             let bytes: Option<Vec<u8>> = (0..hex.len()).step_by(2).map(|i| hex.get(i..i+2).and_then(|s| u8::from_str_radix(s, 16).ok())).collect();

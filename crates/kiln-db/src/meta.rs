@@ -323,7 +323,7 @@ async fn pg_details(pool: &DbPool, schema: &str, table: &str) -> DbResult<TableD
 }
 
 /// 길이 제한이 없는 캐스트 타입. 길이 검사는 대입 시점에 컬럼 타입이 한다.
-fn pg_cast_type(base: &str) -> String {
+pub(crate) fn pg_cast_type(base: &str) -> String {
     match base {
         "character" => "bpchar".into(),
         "character[]" => "bpchar[]".into(),

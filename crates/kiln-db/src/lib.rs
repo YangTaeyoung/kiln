@@ -1,16 +1,17 @@
 //! Kiln 데이터베이스 클라이언트: 연결 관리, 탐색기 패널, 테이블/콘솔 탭.
 
-mod config;
 mod completion;
+mod config;
 mod driver;
 pub mod edit;
 pub mod export;
-mod manager;
 pub mod logo;
+mod manager;
 pub mod meta;
 mod panel;
-pub mod sql;
+pub mod result_edit;
 pub mod schema;
+pub mod sql;
 mod tab;
 mod ui;
 pub mod value;
@@ -21,5 +22,7 @@ pub use edit::{ChangeSet, RowInsert, RowUpdate, TableRef};
 pub use manager::{ConnStatus, ConsoleSession, DbManager, HistoryEntry, Job};
 pub use meta::{ColumnDef, ForeignKeyInfo, IndexInfo, TableDetails, TableInfo, TableKind};
 pub use panel::{DbEvent, DbPanel};
-pub use tab::{DbTab, TableDraft, ConsoleDocument, TableSection};
+pub use tab::{ConsoleDocument, ResultDraft, DbTab, TableDraft, TableSection};
 pub use value::{TypeClass, Value};
+
+pub use result_edit::{EditableOutcome, ResultEditCell, ResultEditPlan, ResultReadOnlyReason};

@@ -18,6 +18,7 @@ mod rotation;
 mod settings;
 mod state;
 pub mod terminal;
+mod terminal_completion;
 mod tools;
 mod workspace_repos;
 mod workspace_activity;
@@ -773,6 +774,7 @@ impl KilnApp {
                 }
             }
             Action::CloseWorkspace(i) => {
+                if let Some(panes)=self.workspaces.get(i).map(|ws|ws.all_panes()) {if self.block_submitted_database_write(&panes){return;}}
                 if let Some(ws) = self.workspaces.get(i) {
                     let dirty = self.unsaved_items(Some(i));
                     let busy:Vec<String>=if self.settings.confirm_close_running{ws.all_panes().iter().filter_map(|p|self.pane_is_busy(*p)).collect()}else{vec![]};
@@ -789,6 +791,7 @@ impl KilnApp {
                 }
             }
             Action::QuitPreservingDrafts => {
+                if self.block_submitted_database_write(&self.panes.keys().copied().collect::<Vec<_>>()){return;}
                 #[cfg(feature = "updater-test")]
                 crate::updater_fixture_event("quit-preserving-drafts");
                 self.save_if_changed(true);
@@ -796,6 +799,7 @@ impl KilnApp {
                 else { self.recovery_open=true; #[cfg(target_os="macos")] macos::reply_to_termination(false); }
             }
             Action::QuitConfirmed => {
+                if self.block_submitted_database_write(&self.panes.keys().copied().collect::<Vec<_>>()){return;}
                 #[cfg(feature = "updater-test")]
                 crate::updater_fixture_event("quit-discarding-drafts");
                 let launch_drafts = std::mem::take(&mut self.terminal_launch_drafts);
@@ -819,6 +823,7 @@ impl KilnApp {
                 }
             }
             Action::CloseWorkspaceConfirmed(i) => {
+                if let Some(panes)=self.workspaces.get(i).map(|ws|ws.all_panes()) {if self.block_submitted_database_write(&panes){return;}}
                 if i < self.workspaces.len() {
                     if self.block_disconnected_close(&self.workspaces[i].all_panes()) { return; }
                     let ws = self.workspaces.remove(i);
@@ -909,6 +914,7 @@ impl KilnApp {
             Action::ClosePage(i, force) => {
                 let Some(page) = self.workspaces[self.active].pages.get(i) else { return };
                 let panes = page.root.panes();
+                if self.block_submitted_database_write(&panes) {return;}
                 if self.block_disconnected_close(&panes) { return; }
                 if !force {
                     let busy: Vec<String> = if self.settings.confirm_close_running { panes.iter().filter_map(|p| self.pane_is_busy(*p)).collect() } else { vec![] };
@@ -962,6 +968,7 @@ impl KilnApp {
                 self.apply(Action::ClosePane(p, false), ctx);
             }
             Action::ClosePane(p, force) => {
+                if self.block_submitted_database_write(&[p]){return;}
                 if self.block_disconnected_close(&[p]) { return; }
                 if !force {
                     if self.terminal_launch_drafts.get(&p).is_some_and(|draft|draft.command.is_some()) {
@@ -1663,6 +1670,11 @@ impl KilnApp {
         items
     }
 
+    fn block_submitted_database_write(&mut self, panes:&[PaneId])->bool {
+        let reason=panes.iter().filter_map(|id|self.panes.get(id).and_then(|p|p.tool())).find_map(|tool|tool.close_block_reason());
+        if let Some(reason)=reason {self.toast(kiln_common::i18n::tr("DB 변경 반영 중"),reason,ToastKind::Info,None);true}else{false}
+    }
+
     fn guard_window_close(&mut self, ctx: &egui::Context) {
         #[cfg(target_os="macos")]
         let native_requested=macos::take_termination_request();
@@ -1670,6 +1682,11 @@ impl KilnApp {
         let native_requested=false;
         let requested = native_requested || ctx.input(|i| i.viewport().close_requested());
         if self.quit_confirmed || !requested { return; }
+        if self.block_submitted_database_write(&self.panes.keys().copied().collect::<Vec<_>>()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            #[cfg(target_os="macos")] macos::reply_to_termination(false);
+            return;
+        }
         if self.projects.is_busy() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             #[cfg(target_os="macos")] macos::reply_to_termination(false);
@@ -1712,6 +1729,21 @@ impl KilnApp {
 
     #[doc(hidden)]
     pub fn debug_queue_action(&mut self, action: Action) { self.actions.push(action); }
+    /// Isolated GUI guard fixture; never submits a database operation.
+    #[doc(hidden)]
+    pub fn debug_blocked_database_tool(&mut self, applying:std::sync::Arc<std::sync::atomic::AtomicBool>)->u64 {
+        struct Blocked(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl tools::ToolTab for Blocked {
+            fn title(&self)->String{"Guard fixture".into()}
+            fn key(&self)->String{"guard-fixture".into()}
+            fn ui(&mut self,_:&mut egui::Ui)->Vec<Action>{Vec::new()}
+            fn is_dirty(&self)->bool{true}
+            fn close_block_reason(&self)->Option<&'static str>{self.0.load(std::sync::atomic::Ordering::SeqCst).then_some("Fixture database write is pending")}
+        }
+        self.place_card(PaneKind::Tool(Box::new(Blocked(applying))));
+        self.ws().page().focused
+    }
+
 
     #[doc(hidden)]
     pub fn debug_apply_action(&mut self, ctx: &egui::Context, action: Action) { self.apply(action,ctx); }

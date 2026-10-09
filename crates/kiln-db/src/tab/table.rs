@@ -465,6 +465,8 @@ impl TableView {
         self.t.table.clone()
     }
 
+    pub fn is_applying(&self) -> bool { self.submit_job.is_some() || self.schema_is_applying() }
+    pub fn poll_background(&mut self,m:&DbManager) { self.poll(); self.poll_submit(m); self.poll_schema(m); }
     pub fn pending_changes(&self) -> usize {
         self.data.as_ref().map(|d| d.pending()).unwrap_or(0) + usize::from(self.pending_cell().is_some())
     }
@@ -1560,69 +1562,6 @@ pub(crate) fn copy_selection(
         })
         .collect();
     format_rows(fmt, driver, Some(table), &col_refs, &vals, header)
-}
-
-/// 콘솔 결과 등 편집 불가 결과 집합을 그리드로 보여주는 공급자.
-pub(crate) struct ReadOnlyGrid<'a> {
-    pub rs: &'a ResultSet,
-}
-
-impl GridSource for ReadOnlyGrid<'_> {
-    fn n_rows(&self) -> usize {
-        self.rs.rows.len()
-    }
-
-    fn n_cols(&self) -> usize {
-        self.rs.columns.len()
-    }
-
-    fn header(&self, c: usize) -> HeaderView<'_> {
-        let col = &self.rs.columns[c];
-        HeaderView {
-            name: &col.name,
-            type_name: &col.type_name,
-            pk: false,
-            fk: false,
-            sort: None,
-        }
-    }
-
-    fn cell(&self, r: usize, c: usize) -> CellView<'_> {
-        let v = &self.rs.rows[r][c];
-        CellView {
-            text: &self.rs.display[r][c],
-            kind: if v.is_null() {
-                CellKind::Null
-            } else {
-                CellKind::Value
-            },
-            edited: false,
-            numeric: self.rs.columns[c].class.is_numeric()
-                || matches!(v, Value::Int(_) | Value::UInt(_) | Value::Float(_)),
-        }
-    }
-
-    fn edit_text(&self, r: usize, c: usize) -> String {
-        self.rs.rows[r][c].to_text().unwrap_or_default()
-    }
-}
-
-/// 결과 집합 선택 영역을 지정 형식으로 만든다.
-pub(crate) fn copy_result_selection(
-    rs: &ResultSet,
-    grid: &GridState,
-    fmt: CopyFormat,
-    header: bool,
-    driver: Driver,
-) -> String {
-    let rows = grid.sel.rows(rs.rows.len());
-    let cols = grid.sel.cols(rs.columns.len());
-    let col_refs: Vec<&ColumnInfo> = cols.iter().map(|&c| &rs.columns[c]).collect();
-    let vals: Vec<Vec<&Value>> = rows
-        .iter()
-        .map(|&r| cols.iter().map(|&c| &rs.rows[r][c]).collect())
-        .collect();
-    format_rows(fmt, driver, None, &col_refs, &vals, header)
 }
 
 fn affected_rows(data:&TableData,pending:Option<usize>)->BTreeSet<usize>{

@@ -128,7 +128,7 @@ impl KilnApp {
             let pane=self.quick.pane.unwrap();
             let session=self.panes.get(&pane).and_then(Pane::session);
             if let Some(sid)=session {if self.quick.view.is_none(){self.quick.view=Some(TermView::new(sid));}}
-            let settings=terminal::TermSettings{font_size:self.settings.font_size,option_as_meta:self.settings.option_as_meta,line_height:self.settings.line_height,copy_on_select:self.settings.copy_on_select,cursor_blink:self.settings.cursor_blink,close_shortcut:None};
+            let settings=terminal::TermSettings{font_size:self.settings.font_size,option_as_meta:self.settings.option_as_meta,completion_preview:self.settings.terminal_completion_preview,line_height:self.settings.line_height,copy_on_select:self.settings.copy_on_select,cursor_blink:self.settings.cursor_blink,close_shortcut:None};
             let mut close=false;let mut attach=false;
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("quick-terminal"),egui::ViewportBuilder::default().with_title(kiln_common::i18n::tr("Kiln · 빠른 터미널")).with_inner_size([900.0,420.0]).with_min_inner_size([400.0,240.0]).with_always_on_top(),|ctx,_|{
                 if self.quick.focus_pending { ctx.ctx().send_viewport_cmd(egui::ViewportCommand::Focus); }

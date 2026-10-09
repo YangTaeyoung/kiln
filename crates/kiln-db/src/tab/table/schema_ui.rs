@@ -49,6 +49,7 @@ impl SchemaEditor {
 }
 
 impl TableView {
+    pub(super) fn schema_is_applying(&self)->bool {self.schema_editor.as_ref().is_some_and(|e|e.apply.is_some())}
     pub fn table_ref(&self) -> Option<&TableRef> {
         (!self.dropped).then_some(&self.t)
     }

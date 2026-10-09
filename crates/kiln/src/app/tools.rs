@@ -101,6 +101,7 @@ pub trait ToolTab {
     fn is_dirty(&self) -> bool {
         false
     }
+    fn close_block_reason(&self)->Option<&'static str>{None}
     fn persist(&self) -> Option<ToolP> {
         None
     }
@@ -530,6 +531,8 @@ impl ToolTab for DbTabW {
     fn is_dirty(&self) -> bool {
         self.tab.has_unsaved_changes()
     }
+    fn close_block_reason(&self)->Option<&'static str>{self.tab.close_block_reason()}
+    fn tick(&mut self){self.tab.poll_background();}
     fn paint_icon(&self, ui: &egui::Ui, rect: egui::Rect) -> bool {
         match self.tab.driver() {
             Some(d) => {

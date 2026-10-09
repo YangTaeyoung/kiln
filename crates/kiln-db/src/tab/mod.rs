@@ -7,8 +7,8 @@ mod viewer;
 use crate::{ConnId, DbManager, ResultSet};
 use egui::Ui;
 
+pub use console::{ConsoleDocument,ResultDraft};
 pub(crate) use console::ConsoleView;
-pub use console::ConsoleDocument;
 pub(crate) use table::TableView;
 pub use table::{TableDraft, TableSection};
 
@@ -88,17 +88,29 @@ impl DbTab {
                 if c.is_running() {
                     kiln_common::trf!("{name} 콘솔 …")
                 } else {
-                    format!("{}{}", c.document_name().unwrap_or_else(||kiln_common::trf!("{name} 콘솔")), if c.has_draft() { " •" } else { "" })
+                    format!(
+                        "{}{}",
+                        c.document_name()
+                            .unwrap_or_else(|| kiln_common::trf!("{name} 콘솔")),
+                        if c.has_draft() || c.result_changes_dirty() {
+                            " •"
+                        } else {
+                            ""
+                        }
+                    )
                 }
             }
         }
     }
 
+    pub fn is_applying(&self)->bool {match &self.kind {Kind::Table(t)=>t.is_applying(),Kind::Console(c)=>c.is_applying()}}
+    pub fn close_block_reason(&self)->Option<&'static str> {self.is_applying().then(||kiln_common::i18n::tr("DB 변경을 반영하는 중입니다. 완료 후 닫으세요."))}
+    pub fn poll_background(&mut self){match &mut self.kind {Kind::Table(t)=>t.poll_background(&self.manager),Kind::Console(c)=>c.poll_background(&self.manager)}}
     /// Closing requires confirmation for pending table edits and SQL drafts.
     pub fn has_unsaved_changes(&self) -> bool {
         match &self.kind {
             Kind::Table(t) => t.pending_changes() > 0 || t.schema_has_draft(),
-            Kind::Console(c) => c.has_draft(),
+            Kind::Console(c) => c.has_draft() || c.result_changes_dirty(),
         }
     }
 
@@ -106,7 +118,7 @@ impl DbTab {
     pub fn pending_changes(&self) -> usize {
         match &self.kind {
             Kind::Table(t) => t.pending_changes(),
-            Kind::Console(_) => 0,
+            Kind::Console(c) => c.pending_result_changes(),
         }
     }
 
@@ -118,31 +130,59 @@ impl DbTab {
     }
 
     pub fn table_draft(&self) -> Option<TableDraft> {
-        match &self.kind { Kind::Table(t) => t.recovery_draft(), _ => None }
+        match &self.kind {
+            Kind::Table(t) => t.recovery_draft(),
+            _ => None,
+        }
     }
     pub fn restore_table_draft(&mut self, draft: &TableDraft) {
-        if let Kind::Table(t) = &mut self.kind { t.restore_draft(draft); }
+        if let Kind::Table(t) = &mut self.kind {
+            t.restore_draft(draft);
+        }
     }
-    pub fn console_document(&self)->Option<ConsoleDocument>{match &self.kind{Kind::Console(c)=>Some(c.document()),_=>None}}
-    pub fn restore_console_document(&mut self,document:&ConsoleDocument){if let Kind::Console(c)=&mut self.kind{c.restore_document(document);}}
+    pub fn console_document(&self) -> Option<ConsoleDocument> {
+        match &self.kind {
+            Kind::Console(c) => Some(c.document()),
+            _ => None,
+        }
+    }
+    pub fn restore_console_document(&mut self, document: &ConsoleDocument) {
+        if let Kind::Console(c) = &mut self.kind {
+            c.restore_document(document);
+        }
+    }
     pub fn console_text(&self) -> Option<&str> {
-        match &self.kind { Kind::Console(c) => Some(c.text()), _ => None }
+        match &self.kind {
+            Kind::Console(c) => Some(c.text()),
+            _ => None,
+        }
     }
     pub fn table_ref(&self) -> Option<&crate::TableRef> {
-        match &self.kind { Kind::Table(t) => t.table_ref(), _ => None }
+        match &self.kind {
+            Kind::Table(t) => t.table_ref(),
+            _ => None,
+        }
     }
     pub fn show_table_section(&mut self, section: TableSection) {
-        if let Kind::Table(t) = &mut self.kind { t.show_section(section, &self.manager); }
+        if let Kind::Table(t) = &mut self.kind {
+            t.show_section(section, &self.manager);
+        }
     }
     pub fn request_schema_action(&mut self, action: crate::schema::SchemaAction) {
-        if let Kind::Table(t) = &mut self.kind { t.request_schema_action(action); }
+        if let Kind::Table(t) = &mut self.kind {
+            t.request_schema_action(action);
+        }
     }
     /// Open the structure editor without changing the data tab's selected section.
     pub fn request_table_editor(&mut self) {
-        if let Kind::Table(t) = &mut self.kind { t.request_table_editor(); }
+        if let Kind::Table(t) = &mut self.kind {
+            t.request_table_editor();
+        }
     }
     pub fn request_focus(&mut self) {
-        if let Kind::Console(c) = &mut self.kind { c.request_focus(); }
+        if let Kind::Console(c) = &mut self.kind {
+            c.request_focus();
+        }
     }
     pub fn ui(&mut self, ui: &mut Ui) {
         self.manager.set_ctx(ui.ctx());
@@ -152,7 +192,6 @@ impl DbTab {
         }
     }
 }
-
 
 #[cfg(test)]
 mod close_guard_tests {

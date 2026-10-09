@@ -10233,5 +10233,495 @@
     "en": "Install {} to use this profile.",
     "ja": "このプロファイルを使用するには {} をインストールしてください。",
     "zh-CN": "安装 {} 后即可使用此配置。"
+  },
+  "Cargo 도움말 열기": {
+    "en": "Open Cargo help",
+    "ja": "Cargoのヘルプを開く",
+    "zh-CN": "打开 Cargo 帮助"
+  },
+  "Compose 서비스 관리": {
+    "en": "Manage Compose services",
+    "ja": "Composeサービスを管理",
+    "zh-CN": "管理 Compose 服务"
+  },
+  "Ctrl+Space로 선택 · Tab은 셸 자동완성": {
+    "en": "Ctrl+Space to choose · Tab uses shell completion",
+    "ja": "Ctrl+Spaceで選択 · Tabはシェル補完",
+    "zh-CN": "Ctrl+Space 选择 · Tab 使用 Shell 补全"
+  },
+  "DB 변경 반영 중": {
+    "en": "Applying database changes",
+    "ja": "DB 変更を反映中",
+    "zh-CN": "正在应用数据库更改"
+  },
+  "DB 변경을 반영하는 중입니다. 완료 후 닫으세요.": {
+    "en": "Database changes are being applied. Close after they finish.",
+    "ja": "DB 変更を反映中です。完了後に閉じてください。",
+    "zh-CN": "正在应用数据库更改，请等待完成后再关闭。"
+  },
+  "Docker 도움말 열기": {
+    "en": "Open Docker help",
+    "ja": "Dockerのヘルプを開く",
+    "zh-CN": "打开 Docker 帮助"
+  },
+  "Git 도움말 열기": {
+    "en": "Open Git help",
+    "ja": "Gitのヘルプを開く",
+    "zh-CN": "打开 Git 帮助"
+  },
+  "NULL을 허용하지 않는 컬럼입니다": {
+    "en": "This column does not allow NULL",
+    "ja": "このカラムは NULL を許可していません",
+    "zh-CN": "此列不允许 NULL"
+  },
+  "Node 패키지 관리": {
+    "en": "Node package manager",
+    "ja": "Nodeパッケージ管理",
+    "zh-CN": "Node 软件包管理"
+  },
+  "Rust 패키지 관리": {
+    "en": "Rust packages",
+    "ja": "Rustパッケージ管理",
+    "zh-CN": "Rust 软件包管理"
+  },
+  "cd 경로와 자주 쓰는 명령은 입력 중 추천합니다. Ctrl+Space로 설치된 명령과 추천 항목을 선택하세요. ↑↓로 이동, Tab 또는 Enter로 삽입, Esc로 닫습니다. 다른 셸과 에이전트 채팅의 입력은 바뀌지 않습니다.": {
+    "en": "Suggestions appear while typing cd paths and common commands. Press Ctrl+Space to choose installed commands and suggestions. Use arrows to select, Tab or Enter to insert, and Esc to close. Other shells and agent chats keep their normal input.",
+    "ja": "cdのパスやよく使うコマンドを入力すると候補を表示します。Ctrl+Spaceでインストール済みコマンドや候補を選択できます。↑↓で移動、TabまたはEnterで挿入、Escで閉じます。他のシェルやエージェントチャットの入力は変わりません。",
+    "zh-CN": "输入 cd 路径和常用命令时会显示建议。按 Ctrl+Space 选择已安装的命令和建议。使用 ↑↓ 移动，Tab 或 Enter 插入，Esc 关闭。其他 Shell 和智能体聊天的输入保持不变。"
+  },
+  "npm 도움말 열기": {
+    "en": "Open npm help",
+    "ja": "npmのヘルプを開く",
+    "zh-CN": "打开 npm 帮助"
+  },
+  "zsh에서 경로와 명령어 후보를 표시합니다. ⌃Space로 후보를 선택할 수 있습니다.": {
+    "en": "Show path and command suggestions in zsh. Use ⌃Space to choose a suggestion.",
+    "ja": "zsh でパスとコマンドの候補を表示します。⌃Space で選択できます。",
+    "zh-CN": "在 zsh 中显示路径和命令建议，使用 ⌃Space 选择候选项。"
+  },
+  "{count}행 변경을 반영했습니다": {
+    "en": "Saved changes to {count} rows",
+    "ja": "{count} 行の変更を保存しました",
+    "zh-CN": "已保存 {count} 行的更改"
+  },
+  "{name} · {}행": {
+    "en": "{name} · row {}",
+    "ja": "{name} · {} 行",
+    "zh-CN": "{name} · 第 {} 行"
+  },
+  "↑↓ 선택 · Tab 삽입 · Esc 닫기": {
+    "en": "↑↓ Select · Tab Insert · Esc Close",
+    "ja": "↑↓ 選択 · Tab 挿入 · Esc 閉じる",
+    "zh-CN": "↑↓ 选择 · Tab 插入 · Esc 关闭"
+  },
+  "같은 결과 셀의 수정이 중복되었습니다": {
+    "en": "The same result cell has duplicate changes",
+    "ja": "同じ結果セルの変更が重複しています",
+    "zh-CN": "同一结果单元格存在重复更改"
+  },
+  "같은 이름의 인증 프로필이 있습니다.": {
+    "en": "An authentication profile with this name already exists.",
+    "ja": "同じ名前の認証プロファイルがあります。",
+    "zh-CN": "已存在同名身份验证配置。"
+  },
+  "결과": {
+    "en": "Result",
+    "ja": "結果",
+    "zh-CN": "结果"
+  },
+  "결과 컬럼의 원본을 확인할 수 없어 읽기 전용입니다": {
+    "en": "Read-only: the source columns could not be verified",
+    "ja": "元のカラムを確認できないため読み取り専用です",
+    "zh-CN": "无法验证源列，结果为只读"
+  },
+  "결과 행의 식별 키가 비어 있거나 중복되어 읽기 전용입니다": {
+    "en": "Read-only: result row keys are missing or duplicated",
+    "ja": "結果行のキーが空または重複しているため読み取り専用です",
+    "zh-CN": "结果行的键缺失或重复，结果为只读"
+  },
+  "결과의 변경을 반영하거나 되돌린 후 쿼리를 실행하세요.": {
+    "en": "Apply or revert result changes before running a query.",
+    "ja": "結果の変更を反映または元に戻してから、クエリを実行してください。",
+    "zh-CN": "请应用或还原结果中的更改后再运行查询。"
+  },
+  "단일 테이블의 직접 컬럼 조회 결과만 수정할 수 있습니다": {
+    "en": "Only direct columns from one table can be edited",
+    "ja": "単一テーブルの直接カラムの結果のみ編集できます",
+    "zh-CN": "只能编辑来自单个表的直接列"
+  },
+  "디렉터리": {
+    "en": "Directory",
+    "ja": "ディレクトリ",
+    "zh-CN": "目录"
+  },
+  "디렉터리 만들기": {
+    "en": "Create directory",
+    "ja": "ディレクトリを作成",
+    "zh-CN": "创建目录"
+  },
+  "디렉터리 이동": {
+    "en": "Change directory",
+    "ja": "ディレクトリを移動",
+    "zh-CN": "切换目录"
+  },
+  "명령 자동완성": {
+    "en": "Command completion",
+    "ja": "コマンド補完",
+    "zh-CN": "命令补全"
+  },
+  "명령 자동완성: Zsh에서 Ctrl+Space를 누르세요. 다른 셸의 기본 Tab 자동완성은 그대로 유지됩니다.": {
+    "en": "Command completion: press Ctrl+Space in Zsh. Native Tab completion is unchanged in other shells.",
+    "ja": "コマンド補完：ZshでCtrl+Spaceを押してください。他のシェルの標準Tab補完はそのまま使えます。",
+    "zh-CN": "命令补全：在 Zsh 中按 Ctrl+Space。其他 Shell 的原生 Tab 补全保持不变。"
+  },
+  "명령어 입력 힌트": {
+    "en": "Command suggestions",
+    "ja": "コマンド入力候補",
+    "zh-CN": "命令输入提示"
+  },
+  "버전 관리": {
+    "en": "Version control",
+    "ja": "バージョン管理",
+    "zh-CN": "版本管理"
+  },
+  "버킷 목록을 불러오지 못했습니다. 직접 입력하거나 다시 시도하세요.": {
+    "en": "Could not load buckets. Enter a bucket name or try again.",
+    "ja": "バケットを読み込めませんでした。名前を入力するか、再試行してください。",
+    "zh-CN": "无法加载存储桶。请手动输入名称或重试。"
+  },
+  "버킷 불러오는 중…": {
+    "en": "Loading buckets…",
+    "ja": "バケットを読み込み中…",
+    "zh-CN": "正在加载存储桶…"
+  },
+  "버킷 새로고침": {
+    "en": "Refresh buckets",
+    "ja": "バケットを更新",
+    "zh-CN": "刷新存储桶"
+  },
+  "버킷 선택": {
+    "en": "Select bucket",
+    "ja": "バケットを選択",
+    "zh-CN": "选择存储桶"
+  },
+  "버킷 이름": {
+    "en": "Bucket name",
+    "ja": "バケット名",
+    "zh-CN": "存储桶名称"
+  },
+  "변경 {pending}개 반영": {
+    "en": "Apply {pending} changes",
+    "ja": "{pending} 件の変更を反映",
+    "zh-CN": "应用 {pending} 项更改"
+  },
+  "변경 반영": {
+    "en": "Apply changes",
+    "ja": "変更を反映",
+    "zh-CN": "应用更改"
+  },
+  "변경 사항 비교": {
+    "en": "Compare changes",
+    "ja": "変更を比較",
+    "zh-CN": "比较更改"
+  },
+  "변경은 저장되었지만 결과를 다시 가져오지 못했습니다: {error}": {
+    "en": "Changes were saved, but results could not be refreshed: {error}",
+    "ja": "変更は保存されましたが、結果を更新できませんでした: {error}",
+    "zh-CN": "更改已保存，但无法刷新结果：{error}"
+  },
+  "변경을 반영하는 중…": {
+    "en": "Applying changes…",
+    "ja": "変更を反映中…",
+    "zh-CN": "正在应用更改…"
+  },
+  "복원된 결과 변경 · 검토 전용": {
+    "en": "Recovered result changes · review only",
+    "ja": "復元された結果変更 · 確認専用",
+    "zh-CN": "已恢复结果更改 · 仅供审阅"
+  },
+  "뷰·임시 테이블·비트랜잭션 테이블은 결과를 수정할 수 없습니다": {
+    "en": "Views, temporary and nontransactional tables are read-only",
+    "ja": "ビュー・一時テーブル・非トランザクションテーブルは編集できません",
+    "zh-CN": "视图、临时表和非事务表的结果为只读"
+  },
+  "빌드 후 실행": {
+    "en": "Build and run",
+    "ja": "ビルドして実行",
+    "zh-CN": "构建并运行"
+  },
+  "상위 디렉터리": {
+    "en": "Parent directory",
+    "ja": "親ディレクトリ",
+    "zh-CN": "上级目录"
+  },
+  "설치된 명령": {
+    "en": "Installed command",
+    "ja": "インストール済みコマンド",
+    "zh-CN": "已安装的命令"
+  },
+  "수정할 결과 셀을 확인할 수 없습니다": {
+    "en": "The result cell cannot be edited",
+    "ja": "編集する結果セルを確認できません",
+    "zh-CN": "无法编辑此结果单元格"
+  },
+  "숨김 항목 포함": {
+    "en": "Include hidden entries",
+    "ja": "隠し項目を含める",
+    "zh-CN": "包括隐藏项"
+  },
+  "스테이징한 변경 사항 커밋": {
+    "en": "Record staged changes",
+    "ja": "ステージした変更をコミット",
+    "zh-CN": "提交已暂存的更改"
+  },
+  "실행 파일 생성 없이 검사": {
+    "en": "Check without producing a binary",
+    "ja": "実行ファイルを生成せずにチェック",
+    "zh-CN": "检查而不生成可执行文件"
+  },
+  "연결 옵션": {
+    "en": "Connection options",
+    "ja": "接続オプション",
+    "zh-CN": "连接选项"
+  },
+  "오브젝트 스토리지 인증만 프로필로 저장할 수 있습니다.": {
+    "en": "Only object storage authentication can be saved as a profile.",
+    "ja": "オブジェクトストレージの認証のみプロファイルとして保存できます。",
+    "zh-CN": "只有对象存储身份验证可以保存为配置。"
+  },
+  "원본 메타데이터를 확인하지 못해 읽기 전용입니다": {
+    "en": "Read-only: source metadata could not be verified",
+    "ja": "元のメタデータを確認できないため読み取り専用です",
+    "zh-CN": "无法验证源元数据，结果为只读"
+  },
+  "원본 테이블이 변경되어 결과를 다시 실행해야 합니다": {
+    "en": "The source table changed. Run the query again.",
+    "ja": "元のテーブルが変更されました。クエリを再実行してください。",
+    "zh-CN": "源表已更改，请重新运行查询。"
+  },
+  "의존성 설치": {
+    "en": "Install dependencies",
+    "ja": "依存関係をインストール",
+    "zh-CN": "安装依赖项"
+  },
+  "이미지 목록 보기": {
+    "en": "List images",
+    "ja": "イメージ一覧を表示",
+    "zh-CN": "列出镜像"
+  },
+  "이미지 빌드": {
+    "en": "Build an image",
+    "ja": "イメージをビルド",
+    "zh-CN": "构建镜像"
+  },
+  "이전 디렉터리": {
+    "en": "Previous directory",
+    "ja": "前のディレクトリ",
+    "zh-CN": "上一个目录"
+  },
+  "인증 설정": {
+    "en": "Authentication settings",
+    "ja": "認証設定",
+    "zh-CN": "认证设置"
+  },
+  "인증 프로필": {
+    "en": "Authentication profile",
+    "ja": "認証プロファイル",
+    "zh-CN": "身份验证配置"
+  },
+  "인증 프로필 삭제": {
+    "en": "Delete authentication profile",
+    "ja": "認証プロファイルを削除",
+    "zh-CN": "删除身份验证配置"
+  },
+  "인증 프로필 이름을 입력하세요.": {
+    "en": "Enter an authentication profile name.",
+    "ja": "認証プロファイル名を入力してください。",
+    "zh-CN": "请输入身份验证配置名称。"
+  },
+  "인증 프로필 편집": {
+    "en": "Edit authentication profile",
+    "ja": "認証プロファイルを編集",
+    "zh-CN": "编辑认证配置"
+  },
+  "인증 프로필로 저장": {
+    "en": "Save as authentication profile",
+    "ja": "認証プロファイルとして保存",
+    "zh-CN": "保存为身份验证配置"
+  },
+  "읽기 쉬운 크기 표시": {
+    "en": "Show human-readable sizes",
+    "ja": "読みやすいサイズを表示",
+    "zh-CN": "显示易读的大小"
+  },
+  "읽기 전용": {
+    "en": "Read-only",
+    "ja": "読み取り専用",
+    "zh-CN": "只读"
+  },
+  "자세한 목록 형식 사용": {
+    "en": "Use long listing format",
+    "ja": "詳細な一覧形式を使用",
+    "zh-CN": "使用详细列表格式"
+  },
+  "작업 트리 변경 사항 보기": {
+    "en": "Show working tree changes",
+    "ja": "作業ツリーの変更を表示",
+    "zh-CN": "显示工作区更改"
+  },
+  "제출 중 종료된 변경입니다. DB 반영 여부를 먼저 확인하세요.": {
+    "en": "Kiln closed while submitting these changes. Check the database before applying them again.",
+    "ja": "変更の送信中に終了しました。再適用する前に DB を確認してください。",
+    "zh-CN": "应用更改期间 Kiln 已关闭，请先检查数据库是否已应用更改。"
+  },
+  "조회 범위에 버킷이 없습니다": {
+    "en": "No buckets in this scope",
+    "ja": "この範囲にバケットはありません",
+    "zh-CN": "此范围内没有存储桶"
+  },
+  "조회 범위에 버킷이 없습니다.": {
+    "en": "No buckets in this scope.",
+    "ja": "この範囲にバケットはありません。",
+    "zh-CN": "此范围内没有存储桶。"
+  },
+  "조회 세션이 변경되어 결과를 다시 실행해야 합니다": {
+    "en": "The query session changed. Run the query again.",
+    "ja": "クエリセッションが変更されました。再実行してください。",
+    "zh-CN": "查询会话已更改，请重新运行查询。"
+  },
+  "중복되거나 모호한 원본 컬럼이 있어 읽기 전용입니다": {
+    "en": "Read-only: source columns are duplicated or ambiguous",
+    "ja": "元のカラムが重複または曖昧なため読み取り専用です",
+    "zh-CN": "源列重复或不明确，结果为只读"
+  },
+  "초안 내보내기": {
+    "en": "Export draft",
+    "ja": "下書きをエクスポート",
+    "zh-CN": "导出草稿"
+  },
+  "초안 삭제": {
+    "en": "Delete draft",
+    "ja": "下書きを削除",
+    "zh-CN": "删除草稿"
+  },
+  "초안 삭제 확인": {
+    "en": "Confirm draft deletion",
+    "ja": "下書きの削除を確認",
+    "zh-CN": "确认删除草稿"
+  },
+  "최신 결과를 다시 조회해 비교하세요. 복원된 변경은 자동 제출되지 않습니다.": {
+    "en": "Run the query again and compare the latest results. Recovered changes are never submitted automatically.",
+    "ja": "クエリを再実行し、最新の結果と比較してください。復元された変更は自動送信されません。",
+    "zh-CN": "请重新查询并比较最新结果。恢复的更改不会自动提交。"
+  },
+  "추천 항목을 찾는 중…": {
+    "en": "Finding suggestions…",
+    "ja": "候補を検索中…",
+    "zh-CN": "正在查找建议…"
+  },
+  "추천 항목이 없습니다. Esc로 닫거나 Tab으로 셸 자동완성을 사용하세요.": {
+    "en": "No suggestions. Esc closes; Tab uses shell completion.",
+    "ja": "候補がありません。Escで閉じるか、Tabでシェルの補完を使えます。",
+    "zh-CN": "没有建议。按 Esc 关闭，或按 Tab 使用 Shell 补全。"
+  },
+  "커밋 기록 보기": {
+    "en": "Show commit history",
+    "ja": "コミット履歴を表示",
+    "zh-CN": "显示提交记录"
+  },
+  "컨테이너 관리": {
+    "en": "Containers",
+    "ja": "コンテナを管理",
+    "zh-CN": "管理容器"
+  },
+  "컨테이너 목록 보기": {
+    "en": "List containers",
+    "ja": "コンテナ一覧を表示",
+    "zh-CN": "列出容器"
+  },
+  "컨테이너 실행": {
+    "en": "Run a container",
+    "ja": "コンテナを実行",
+    "zh-CN": "运行容器"
+  },
+  "컴파트먼트 OCID": {
+    "en": "Compartment OCID",
+    "ja": "コンパートメント OCID",
+    "zh-CN": "区间 OCID"
+  },
+  "쿼리 복사": {
+    "en": "Copy query",
+    "ja": "クエリをコピー",
+    "zh-CN": "复制查询"
+  },
+  "테스트 스크립트 실행": {
+    "en": "Run the test script",
+    "ja": "テストスクリプトを実行",
+    "zh-CN": "运行测试脚本"
+  },
+  "파일 목록 보기": {
+    "en": "List files",
+    "ja": "ファイル一覧を表示",
+    "zh-CN": "列出文件"
+  },
+  "파일 변경 사항 스테이징": {
+    "en": "Stage file changes",
+    "ja": "ファイルの変更をステージ",
+    "zh-CN": "暂存文件更改"
+  },
+  "패키지 빌드": {
+    "en": "Build the package",
+    "ja": "パッケージをビルド",
+    "zh-CN": "构建软件包"
+  },
+  "패키지 스크립트 실행": {
+    "en": "Run a package script",
+    "ja": "パッケージスクリプトを実行",
+    "zh-CN": "运行软件包脚本"
+  },
+  "패키지 테스트 실행": {
+    "en": "Run package tests",
+    "ja": "パッケージのテストを実行",
+    "zh-CN": "运行软件包测试"
+  },
+  "프로젝트 ID": {
+    "en": "Project ID",
+    "ja": "プロジェクト ID",
+    "zh-CN": "项目 ID"
+  },
+  "프로필 삭제 확인": {
+    "en": "Confirm profile deletion",
+    "ja": "プロファイルの削除を確認",
+    "zh-CN": "确认删除配置"
+  },
+  "프로필 이름": {
+    "en": "Profile name",
+    "ja": "プロファイル名",
+    "zh-CN": "配置名称"
+  },
+  "프로필 저장": {
+    "en": "Save profile",
+    "ja": "プロファイルを保存",
+    "zh-CN": "保存配置"
+  },
+  "행 식별 키의 모든 컬럼을 조회해야 수정할 수 있습니다": {
+    "en": "Include every column of the row key to enable editing",
+    "ja": "編集するには行のキーの全カラムを取得してください",
+    "zh-CN": "需查询行标识键的所有列才能编辑"
+  },
+  "행을 식별할 기본 키 또는 고유 키가 없어 읽기 전용입니다": {
+    "en": "Read-only: no primary or unique key identifies the row",
+    "ja": "行を識別する主キーまたは一意キーがないため読み取り専用です",
+    "zh-CN": "没有可标识行的主键或唯一键，结果为只读"
+  },
+  "현재 경로 출력": {
+    "en": "Print working directory",
+    "ja": "現在のパスを表示",
+    "zh-CN": "显示当前路径"
+  },
+  "현재 인증 설정": {
+    "en": "Current authentication",
+    "ja": "現在の認証設定",
+    "zh-CN": "当前身份验证设置"
   }
 }

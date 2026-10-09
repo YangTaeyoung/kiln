@@ -7,6 +7,8 @@
 //! FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md.
 mod browser;
 mod cloud_form;
+mod bucket_picker;
+pub use bucket_picker::BucketLoader;
 mod panel;
 mod ssh_form;
 pub use browser::{RemoteBrowser, RemoteDraft};

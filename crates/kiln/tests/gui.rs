@@ -1782,3 +1782,26 @@ fn named_workspace_dialog_fits_long_names_in_four_languages_at_minimum_size() {
         }
     }
 }
+
+#[test]
+fn submitted_database_write_blocks_forced_close_and_quit_until_complete() {
+    use kiln::app::Action;
+    use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let(base,proj)=setup("db-write-close-guard");
+    struct Cleanup(PathBuf);impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);}}
+    let _cleanup=Cleanup(base);
+    let mut h=Harness::builder().with_size([1100.0,760.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj)));
+    let applying=Arc::new(AtomicBool::new(true));
+    let pane=h.state_mut().debug_blocked_database_tool(applying.clone());h.run_steps(3);
+    for action in [Action::ClosePane(pane,true),Action::ClosePage(0,true),Action::CloseWorkspaceConfirmed(0),Action::QuitPreservingDrafts,Action::QuitConfirmed] {
+        h.state_mut().debug_queue_action(action);h.run_steps(3);
+        assert!(h.state().debug_tool_keys().contains(&"guard-fixture".into()),"a forced close must preserve the pending write tool");
+        assert!(!has_viewport_command(&h,egui::ViewportCommand::Close),"quit must not discard an in-flight submitted write");
+    }
+    request_native_close(&mut h);assert!(has_viewport_command(&h,egui::ViewportCommand::CancelClose));
+    h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().events.clear();
+    applying.store(false,Ordering::SeqCst);
+    h.state_mut().debug_queue_action(Action::ClosePane(pane,true));h.run_steps(3);
+    assert!(!h.state().debug_tool_keys().contains(&"guard-fixture".into()),"completed writes release the close guard");
+}

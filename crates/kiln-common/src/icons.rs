@@ -22,6 +22,8 @@ pub enum Icon {
     Server,
     Database,
     Gear,
+    /// Wrench for the unified tools launcher.
+    Tools,
     Command,
     SplitRight,
     SplitDown,
@@ -146,6 +148,16 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             };
             p.add(Shape::line(arc(0.0), st));
             p.add(Shape::line(arc(5.5), st));
+        }
+        Icon::Tools => {
+            p.add(Shape::closed_line(vec![
+                at(-7.0, 4.5), at(-7.0, 6.0), at(-5.5, 7.5),
+                at(-4.0, 7.5), at(1.5, 2.0), at(4.0, 2.0),
+                at(7.0, -1.0), at(8.0, -4.0), at(7.5, -6.5),
+                at(4.5, -3.5), at(2.5, -5.5), at(5.5, -8.0),
+                at(2.5, -8.0), at(-0.5, -6.5), at(-2.0, -3.5),
+                at(-2.0, -0.5),
+            ], st));
         }
         Icon::Gear => {
             p.circle_stroke(c, 3.0 * s, st);

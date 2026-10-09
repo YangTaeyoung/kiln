@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[track_caller]
 fn pump(h: &mut Harness<'_, RemotePanel>, ready: impl Fn(&Harness<'_, RemotePanel>) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -23,7 +24,7 @@ fn pump(h: &mut Harness<'_, RemotePanel>, ready: impl Fn(&Harness<'_, RemotePane
         }
         assert!(
             Instant::now() < deadline,
-            "production async UI did not complete"
+            "production async UI did not complete at {}: {:#?}", std::panic::Location::caller(), h.root()
         );
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -32,10 +33,10 @@ fn pump(h: &mut Harness<'_, RemotePanel>, ready: impl Fn(&Harness<'_, RemotePane
 fn replace(h: &mut Harness<'_, RemotePanel>, value: &str, next: &str) {
     h.get_by(|node| node.role() == Role::TextInput && node.value().as_deref() == Some(value))
         .click();
-    h.run();
+    h.run_steps(3);
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
     h.event(egui::Event::Text(next.into()));
-    h.run();
+    h.run_steps(3);
 }
 
 #[test]
@@ -56,7 +57,13 @@ fn production_profile_discovery_selection_save_and_reedit() {
     let store = Arc::new(kiln_accounts::MemoryStore::new());
     let path = dir.path().join("connections.json");
     let manager = RemoteManager::with_store(path.clone(), store.clone());
-    let panel = RemotePanel::new(manager.clone());
+    let panel = RemotePanel::new(manager.clone()).with_bucket_loader(Arc::new(|_, _, _| {
+        Ok(vec![kiln_remote::bucket_discovery::BucketChoice {
+            name: "kiln-fixture".into(),
+            region: None,
+            namespace: None,
+        }])
+    }));
     let mut h = Harness::builder().with_size([980.0, 800.0]).build_ui_state(
         |ui, panel: &mut RemotePanel| {
             let font_id = egui::Id::new("aws-integration-fonts");
@@ -76,41 +83,40 @@ fn production_profile_discovery_selection_save_and_reedit() {
         },
         panel,
     );
-    h.run();
+    h.run_steps(3);
     h.get_all_by_label("연결 추가").next().unwrap().click();
     pump(&mut h, |h| h.query_by_value("default").is_some());
+    h.run_steps(5);
     let inputs: Vec<_> = h.get_all_by_role(Role::TextInput).collect();
     assert_eq!(
         inputs.len(),
-        3,
-        "profile mode shows name, bucket, region only"
+        2,
+        "profile mode shows name and region; buckets are selected from the catalog"
     );
     inputs[0].click();
-    h.run();
+    h.run_steps(3);
     h.event(egui::Event::Text("Fixture assets".into()));
-    h.run();
-    h.get_all_by_role(Role::TextInput).nth(1).unwrap().click();
-    h.run();
-    h.event(egui::Event::Text("kiln-fixture".into()));
-    h.run();
+    h.run_steps(3);
     h.get_by_value("default").click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("studio").click();
-    h.run();
+    h.run_steps(3);
     assert!(h.query_all_by_value("ap-northeast-2").next().is_some());
     replace(&mut h, "ap-northeast-2", "us-west-2");
     h.get_by_value("studio").click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("default").click();
-    h.run();
+    h.run_steps(3);
     assert!(
         h.query_all_by_value("us-west-2").next().is_some(),
         "profile changes preserve edited region"
     );
     h.get_by_value("default").click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("studio").click();
-    h.run();
+    h.run_steps(3);
+    pump(&mut h, |h| h.query_by_value("kiln-fixture").is_some());
+    h.run_steps(5);
     h.get_by_label("연결 저장").click();
     pump(&mut h, |_| manager.profiles().len() == 1);
     pump(&mut h, |h| h.query_by_label("취소").is_none());
@@ -130,35 +136,40 @@ fn production_profile_discovery_selection_save_and_reedit() {
         Some(saved.clone())
     );
     h.get_all_by_label("…").last().unwrap().click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("연결 편집").click();
     pump(&mut h, |h| h.query_by_value("studio").is_some());
+    h.run_steps(5);
     assert!(h.query_all_by_value("us-west-2").next().is_some());
     h.get_by_value("저장된 AWS 프로필").click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("직접 키 입력").click();
-    h.run();
+    h.run_steps(3);
     assert!(h.query_by_label("Access Key ID").is_some());
     h.get_by_value("직접 키 입력").click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("기본 AWS 인증").click();
-    h.run();
+    h.run_steps(3);
     assert!(h.query_by_label("Access Key ID").is_none());
     h.get_by_label("취소").click();
-    h.run();
+    h.run_steps(3);
     assert_eq!(
         manager.get(&saved.id),
         Some(saved.clone()),
         "cancel must preserve the saved profile"
     );
     h.get_all_by_label("…").last().unwrap().click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("연결 편집").click();
     pump(&mut h, |h| h.query_by_value("studio").is_some());
+    h.run_steps(5);
     h.get_by_value("저장된 AWS 프로필").click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("기본 AWS 인증").click();
-    h.run();
+    h.run_steps(3);
+    // A changed authentication identity requires a fresh catalog selection.
+    pump(&mut h, |h| h.query_by_value("kiln-fixture").is_some());
+    h.run_steps(5);
     h.get_by_label("연결 저장").click();
     pump(&mut h, |_| {
         matches!(
@@ -172,7 +183,7 @@ fn production_profile_discovery_selection_save_and_reedit() {
     });
     pump(&mut h, |h| h.query_by_label("취소").is_none());
     h.get_all_by_label("…").last().unwrap().click();
-    h.run();
+    h.run_steps(3);
     h.get_by_label("연결 편집").click();
     // Save is disabled until the production discovery task is consumed. Waiting
     // for its enabled state prevents an assertion before the late recommendation.
@@ -185,7 +196,7 @@ fn production_profile_discovery_selection_save_and_reedit() {
     assert!(h.query_by_value("studio").is_none());
     assert!(h.query_all_by_value("us-west-2").next().is_some());
     h.get_by_label("취소").click();
-    h.run();
+    h.run_steps(3);
     let stored = std::fs::read_to_string(&path).unwrap();
     assert!(
         !stored.contains("fixture-default")

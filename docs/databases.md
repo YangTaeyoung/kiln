@@ -5,6 +5,9 @@ or SQL console. PostgreSQL, MySQL, MariaDB and SQLite use their own identifier
 quoting and metadata queries. Opening database tools does not change the workspace
 root or move an agent into another repository.
 
+See [query execution and result editing](query-results.md) for cursor/selection
+execution and safe editing of a SELECT result.
+
 ## SQL completion
 
 Suggestions appear as you type an identifier or an alias followed by a dot. You

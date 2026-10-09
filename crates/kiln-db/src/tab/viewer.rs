@@ -69,6 +69,11 @@ fn render_text(v: Option<&Value>) -> String {
 }
 
 impl ValueViewer {
+    pub fn has_draft(&self) -> bool { self.dirty }
+    pub fn draft(&self)->Option<(usize,usize,String)> {self.dirty.then(||self.key.map(|(row,col,_)|(row,col,self.text.clone()))).flatten()}
+    pub fn preserve_draft(&mut self) { self.dirty = true; }
+    pub fn discard_draft(&mut self) { self.dirty = false; self.key = None; }
+
     /// 뷰어를 그린다. 사용자가 적용을 누르면 새 텍스트를 돌려준다.
     pub fn ui(&mut self, ui: &mut Ui, cell: Option<ViewerCell<'_>>) -> Option<String> {
         let theme = Theme::current();
@@ -131,7 +136,8 @@ impl ValueViewer {
             });
             ui.add_space(8.0);
         }
-        let editing = ui.memory(|m| m.has_focus(egui::Id::new("value-viewer-text")));
+        let text_id=ui.make_persistent_id("value-viewer-text");
+        let editing = ui.memory(|m| m.has_focus(text_id));
         widgets::input_frame(editing, false)
             .inner_margin(egui::Margin::same(2))
             .show(ui, |ui| {
@@ -157,7 +163,7 @@ impl ValueViewer {
                 if can_edit {
                     let r = ui.add(
                         egui::TextEdit::multiline(&mut self.text)
-                            .id(egui::Id::new("value-viewer-text"))
+                            .id(text_id)
                             .font(font)
                             .code_editor()
                             .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(10, 8)))

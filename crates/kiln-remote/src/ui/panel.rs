@@ -20,6 +20,7 @@ struct Inner {
     path: PathBuf,
     pub store: Arc<dyn CredentialStore>,
     load_error: Option<String>,
+    auth: crate::auth_profiles::AuthenticationProfiles,
 }
 impl RemoteManager {
     pub fn load() -> Self {
@@ -48,12 +49,14 @@ impl RemoteManager {
         Self {
             inner: Arc::new(Inner {
                 profiles: Mutex::new(profiles),
+                auth: crate::auth_profiles::AuthenticationProfiles::with_store(path.with_extension("authentication.json"),store.clone()),
                 path,
                 store,
                 load_error,
             }),
         }
     }
+    pub fn authentication_profiles(&self) -> crate::auth_profiles::AuthenticationProfiles { self.inner.auth.clone() }
     pub fn profiles(&self) -> Vec<ConnectionProfile> {
         self.inner.profiles.lock().unwrap().clone()
     }
@@ -171,6 +174,15 @@ struct Form {
     region_touched: bool,
     legacy_auth: bool,
     cloud: super::cloud_form::CloudForm,
+    buckets: super::bucket_picker::BucketPicker,
+    project: String,
+    project_default: Option<(String,String)>,
+    compartment_id: String,
+    auth_id: String,
+    auth_name: String,
+    auth_save: Option<Task<Result<String,String>>>,
+    auth_remove_confirm: bool,
+    close_auth_save: bool,
 
     error: Option<String>,
 }
@@ -254,7 +266,7 @@ impl Form {
                 }
                 RemoteEndpoint::S3 {
                     bucket: self.bucket.trim().into(),
-                    region: self.region.trim().into(),
+                    region: self.buckets.selected(&self.bucket).and_then(|row|row.region.clone()).unwrap_or_else(||self.region.trim().into()),
                     endpoint: (!self.endpoint.trim().is_empty())
                         .then(|| self.endpoint.trim().into()),
                     path_style: self.path_style,
@@ -372,10 +384,118 @@ impl Form {
         f
     }
 }
+impl Form {
+    fn storage_endpoint(&mut self)->Result<RemoteEndpoint,String> {
+        // Authentication is valid independently of a connection name or bucket.
+        let name=std::mem::replace(&mut self.name,"authentication".into());
+        let bucket=std::mem::replace(&mut self.bucket,"validation-bucket".into());
+        let result=self.profile().map(|p|p.endpoint);
+        self.name=name;self.bucket=bucket;result
+    }
+    fn authentication_picker(&mut self,ui:&mut Ui,manager:&RemoteManager){
+        let auth=manager.authentication_profiles();
+        if let Some(error)=auth.error(){ui.colored_label(Theme::current().yellow,error);}
+        let rows=auth.profiles().into_iter().filter(|p|match &p.identity {
+            crate::auth_profiles::StorageIdentity::S3{..}=>self.kind==0,
+            crate::auth_profiles::StorageIdentity::Object{provider,..}=>self.kind>=3 && *provider==cloud_provider(self.kind),
+        }).collect::<Vec<_>>();
+        if rows.is_empty(){return;}
+        ui.label(egui::RichText::new(tr("인증 프로필")).small().color(Theme::current().text_dim));
+        let selected=rows.iter().find(|p|p.id==self.auth_id).map(|p|p.name.as_str()).unwrap_or(tr("현재 인증 설정"));
+        let mut picked=None;
+        ui.horizontal(|ui| {
+            let has_profile = !self.auth_id.is_empty();
+            let width = ui.available_width() - if has_profile { 28.0 + ui.spacing().item_spacing.x } else { 0.0 };
+            egui::ComboBox::from_id_salt("kiln-authentication-profile").selected_text(selected).width(width.max(80.0)).truncate().show_ui(ui,|ui|{
+                if ui.selectable_label(self.auth_id.is_empty(),tr("현재 인증 설정")).clicked(){self.auth_id.clear();}
+                for p in &rows {if ui.selectable_label(self.auth_id==p.id,&p.name).clicked(){picked=Some(p.clone());}}
+            });
+            if has_profile && super::icon(ui,Icon::Trash,tr("인증 프로필 삭제")) { self.auth_remove_confirm = !self.auth_remove_confirm; }
+        });
+        if !self.auth_id.is_empty() && self.auth_remove_confirm {
+            ui.horizontal(|ui| {
+                if ui.button(tr("프로필 삭제 확인")).clicked() {let profiles=auth.clone();let id=self.auth_id.clone();self.auth_save=Some(Task::spawn(ui.ctx(),move||{profiles.remove(&id).map_err(|e|e.to_string())?;Ok(String::new())}));}
+                if ui.button(tr("취소")).clicked(){self.auth_remove_confirm=false;}
+            });
+        }
+        if let Some(p)=picked {
+            let profile=ConnectionProfile{id:self.id.clone(),name:self.name.clone(),endpoint:p.identity.endpoint(String::new(),self.root.clone())};
+            let mut replacement=Self::from_profile(&profile);
+            replacement.aws_profiles=self.aws_profiles.clone();replacement.aws_cli_available=self.aws_cli_available;
+            replacement.aws_scanned=self.aws_scanned;replacement.auth_touched=true;
+            replacement.cloud.files=self.cloud.files.clone();
+            replacement.auth_id=p.id;replacement.auth_name=p.name;replacement.project=p.project;replacement.compartment_id=p.compartment_id;
+            *self=replacement;
+        }
+    }
+    fn authentication_save_ui(&mut self, ui: &mut Ui, manager: &RemoteManager) {
+        use crate::auth_profiles::{StorageIdentity, AuthenticationProfile};
+        let identity = self.storage_endpoint().ok().and_then(|e| StorageIdentity::from_endpoint(&e).ok());
+        let scope = crate::bucket_discovery::BucketScope { project: self.project.trim().into(), compartment_id: self.compartment_id.trim().into() };
+        let close_saved = std::mem::take(&mut self.close_auth_save);
+        let disclosure=egui::CollapsingHeader::new(tr(if self.auth_id.is_empty() {"인증 프로필로 저장"} else {"인증 프로필 편집"})).id_salt("save-reusable-authentication").open(close_saved.then_some(false)).show(ui,|ui|{
+            field(ui,tr("프로필 이름"),&mut self.auth_name,false);
+            if ui.add_enabled(identity.is_some()&&!self.auth_name.trim().is_empty()&&self.auth_save.is_none(),egui::Button::new(tr("프로필 저장"))).clicked(){
+                let identity=identity.clone().unwrap();
+                let auth=manager.authentication_profiles();let mgr=manager.clone();let conn=self.id.clone();let source=self.auth_id.clone();
+                let new=Secrets {access_key:(!self.access_key.is_empty()).then(||self.access_key.clone()),secret_key:(!self.secret_key.is_empty()).then(||self.secret_key.clone()),session_token:(!self.session_token.is_empty()).then(||self.session_token.clone()),..Default::default()};
+                let id=if self.auth_id.is_empty(){format!("{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos())}else{self.auth_id.clone()};
+                let profile=AuthenticationProfile{id,name:self.auth_name.trim().into(),identity:identity.clone(),project:scope.project,compartment_id:scope.compartment_id};
+                self.auth_save=Some(Task::spawn(ui.ctx(),move||{let secrets=storage_secrets(&mgr,&conn,&source,Some(&identity),new)?;let id=profile.id.clone();auth.save(profile,secrets).map_err(|e|e.to_string())?;Ok(id)}));
+            }
+        });
+        if disclosure.header_response.clicked() && let Some(body)=disclosure.body_response {ui.scroll_to_rect(body.rect,Some(egui::Align::Max));}
+    }
+    fn storage_controls(&mut self,ui:&mut Ui,manager:&RemoteManager,loader:Option<super::BucketLoader>){
+        use crate::auth_profiles::StorageIdentity;
+        ui.add_space(4.0);
+        if self.kind==3 && self.cloud.mode==0 {
+            let detected=self.cloud.profiles.iter().find(|p|p.name==self.cloud.selected).and_then(|p|p.project.clone()).unwrap_or_default();
+            if self.project_default.as_ref().is_none_or(|(selected,_)|selected!=&self.cloud.selected) {
+                if self.project.is_empty() || self.project_default.as_ref().is_some_and(|(_,old)|old==&self.project) {self.project=detected.clone();}
+                self.project_default=Some((self.cloud.selected.clone(),detected));
+            }
+        }
+        self.authentication_save_ui(ui, manager);
+        ui.add_space(6.0);
+        if self.kind==3 && self.cloud.mode==0 { field(ui,tr("프로젝트 ID"),&mut self.project,false); }
+        if self.kind==4 && self.cloud.mode==0 {field(ui,tr("컴파트먼트 OCID"),&mut self.compartment_id,false);}
+        let endpoint=self.storage_endpoint().ok();
+        let identity=endpoint.as_ref().and_then(|e|StorageIdentity::from_endpoint(e).ok());
+        let scope=crate::bucket_discovery::BucketScope{project:self.project.trim().into(),compartment_id:self.compartment_id.trim().into()};
+        // Secrets contribute only an in-memory hash to invalidate a pending catalog.
+        use std::hash::{Hash,Hasher};
+        let mut hash=std::collections::hash_map::DefaultHasher::new();
+        (&self.access_key,&self.secret_key,&self.session_token,&self.auth_id).hash(&mut hash);
+        let key=identity.as_ref().and_then(|id|serde_json::to_string(&(id,&scope,hash.finish())).ok());
+        self.buckets.prepare(key,&mut self.bucket);
+        let mgr=manager.clone();let conn=self.id.clone();let auth=self.auth_id.clone();let id=identity.clone();
+        let new=Secrets {access_key:(!self.access_key.is_empty()).then(||self.access_key.clone()),secret_key:(!self.secret_key.is_empty()).then(||self.secret_key.clone()),session_token:(!self.session_token.is_empty()).then(||self.session_token.clone()),..Default::default()};
+        let ready=identity.as_ref().is_some_and(|id|!id.manual() || !auth.is_empty() || !conn.is_empty() || new.access_key.is_some()&&new.secret_key.is_some());
+        let scoped=!(self.kind==3&&self.cloud.mode==0&&scope.project.is_empty() || self.kind==4&&self.cloud.mode==0&&scope.compartment_id.is_empty());
+        let choice=self.buckets.ui(ui,&mut self.bucket,endpoint.filter(|_|ready&&scoped),scope.clone(),move||storage_secrets(&mgr,&conn,&auth,id.as_ref(),new),loader);
+        if let Some(choice)=choice {
+            let _=choice; // Selection metadata is applied when constructing the connection.
+        }
+
+    }
+}
+fn storage_secrets(manager:&RemoteManager,connection:&str,authentication:&str,identity:Option<&crate::auth_profiles::StorageIdentity>,new:Secrets)->Result<Secrets,String>{
+    let Some(identity)=identity else{return Err(tr("프로필을 선택하세요").into());};
+    if !identity.manual(){return Ok(Secrets::default());}
+    let old=if !authentication.is_empty(){manager.authentication_profiles().secrets(authentication).map_err(|e|e.to_string())?}
+    else if manager.get(connection).is_some_and(|p|crate::auth_profiles::StorageIdentity::from_endpoint(&p.endpoint).as_ref().ok()==Some(identity)){crate::load_secrets(manager.store().as_ref(),connection).map_err(|e|e.to_string())?}
+    else{Secrets::default()};
+    if new.access_key.is_some()!=new.secret_key.is_some(){return Err(tr("Access Key ID 및 Secret Access Key를 함께 입력하세요").into());}
+    let merged=merge_secrets(new,old);
+    if merged.access_key.is_none()||merged.secret_key.is_none(){return Err(tr("Access Key ID 및 Secret Access Key를 함께 입력하세요").into());}Ok(merged)
+}
+
 pub struct RemotePanel {
     manager: RemoteManager,
     ssh_config_path: Option<PathBuf>,
     object_sources: Vec<(crate::ObjectProvider,crate::object_profiles::ProfileFiles)>,
+    bucket_loader: Option<super::BucketLoader>,
     form: Option<Form>,
     saving: Option<Task<Result<(), String>>>,
     error: Option<String>,
@@ -387,6 +507,7 @@ impl RemotePanel {
             manager,
             ssh_config_path: None,
             object_sources: Vec::new(),
+            bucket_loader: None,
             form: None,
             saving: None,
             error: None,
@@ -404,6 +525,8 @@ impl RemotePanel {
         self.object_sources.retain(|(p,_)|*p!=provider);
         self.object_sources.push((provider,files));self
     }
+    /// Supply a catalog worker, for isolated integrations or a managed discovery service.
+    pub fn with_bucket_loader(mut self, loader:super::BucketLoader)->Self {self.bucket_loader=Some(loader);self}
     fn new_form(&self) -> Form {
         let mut form = Form::new();
         if let Some(path) = &self.ssh_config_path {
@@ -427,31 +550,24 @@ impl RemotePanel {
                 }
             }
         }
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon(ui, Icon::Plus, tr("연결 추가")) {
-                    self.form = Some(self.new_form())
+        let profiles = self.manager.profiles();
+        if !profiles.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button(tr("연결 추가")).clicked() { self.form = Some(self.new_form()); }
+                if ui.button(tr("SSH Config 가져오기")).clicked() {
+                    let mut f = self.new_form(); f.kind = 2; f.root = ".".into(); self.form = Some(f);
                 }
-                if icon(ui, Icon::Terminal, tr("SSH Config 가져오기")) {
-                    let mut f = self.new_form();
-                    f.kind = 2;
-                    f.root = ".".into();
-                    self.form = Some(f);
-                }
-                ui.menu_button("…", |ui| {
+                ui.menu_button(tr("연결 옵션"), |ui| {
                     if ui.button(tr("SSH Config 파일 선택")).clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
-                            let mut f = Form::new();
-                            f.kind = 2;
-                            f.root = ".".into();
-                            f.ssh = super::ssh_form::SshForm::with_config(path);
-                            self.form = Some(f);
+                            let mut f = self.new_form(); f.kind = 2; f.root = ".".into();
+                            f.ssh = super::ssh_form::SshForm::with_config(path); self.form = Some(f);
                         }
                         ui.close();
                     }
                 });
             });
-        });
+        }
         if let Some(e) = self.manager.load_error() {
             ui.colored_label(theme.red, tr("연결 목록을 읽을 수 없습니다"));
             ui.label(e);
@@ -462,13 +578,32 @@ impl RemotePanel {
                 ui.label(e);
             });
         }
-        let profiles = self.manager.profiles();
         if profiles.is_empty() {
-            ui.add_space(20.0);
-            ui.label(tr("클라우드 저장소 또는 서버를 연결하세요"));
-            if ui.button(tr("연결 추가")).clicked() {
-                self.form = Some(self.new_form());
-            }
+            let offset = (ui.available_height() * 0.28).clamp(20.0, 150.0);
+            ui.add_space(offset);
+            ui.vertical_centered(|ui| {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+                kiln_common::icons::paint(ui.painter(), rect.shrink(4.0), Icon::Server, theme.text_dim);
+                ui.add_space(8.0);
+                ui.heading(tr("원격 연결"));
+                ui.add_space(12.0);
+                if kiln_common::widgets::button(ui,tr("연결 추가"),kiln_common::widgets::ButtonKind::Primary).clicked() {
+                    self.form = Some(self.new_form());
+                }
+                ui.add_space(4.0);
+                if kiln_common::widgets::button(ui,tr("SSH Config 가져오기"),kiln_common::widgets::ButtonKind::Ghost).clicked() {
+                    let mut f = self.new_form(); f.kind = 2; f.root = ".".into(); self.form = Some(f);
+                }
+                ui.menu_button(tr("연결 옵션"), |ui| {
+                    if ui.button(tr("SSH Config 파일 선택")).clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            let mut f = self.new_form(); f.kind = 2; f.root = ".".into();
+                            f.ssh = super::ssh_form::SshForm::with_config(path); self.form = Some(f);
+                        }
+                        ui.close();
+                    }
+                });
+            });
         }
         egui::ScrollArea::vertical()
             .id_salt("remote-connections")
@@ -555,6 +690,8 @@ impl RemotePanel {
     }
     fn form_ui(&mut self, ctx: &egui::Context) {
         let object_sources=self.object_sources.clone();
+        let bucket_loader=self.bucket_loader.clone();
+        let manager=self.manager.clone();
         let Some(f) = &mut self.form else { return };
         if f.kind == 0 && !f.aws_scanned {
             f.aws_scanned = true;
@@ -586,14 +723,20 @@ impl RemotePanel {
                 Err(error) => f.aws_error = Some(error),
             }
         }
+        if f.kind >= 3 {
+            if f.cloud.files.is_none() { f.cloud.files = object_sources.iter().find(|(provider, _)| *provider == cloud_provider(f.kind)).map(|(_, files)| files.clone()); }
+            f.cloud.poll(ctx, cloud_provider(f.kind));
+        }
         if f.aws_scan.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(40));
         }
-        let busy = self.saving.is_some();
+        if let Some(result)=f.auth_save.as_mut().and_then(Task::take) { f.auth_save=None; match result {Ok(id)=>{f.close_auth_save=!id.is_empty();f.auth_id=id;f.auth_remove_confirm=false;},Err(error)=>f.error=Some(error)} }
+        let busy = self.saving.is_some() || f.auth_save.is_some();
         let mut cancel = false;
         let mut save = false;
         egui::Modal::new(egui::Id::new("remote-connect-form")).show(ctx, |ui| {
-            ui.set_width((ctx.content_rect().width() - 60.0).clamp(240.0, 450.0));
+            ui.set_width((ctx.content_rect().width() - 60.0).clamp(240.0, 420.0));
+            ui.spacing_mut().item_spacing.y = 4.0;
             ui.heading(if f.id.is_empty() { tr("연결 추가") } else { tr("연결 편집") });
             ui.add_space(8.0);
             ui.add_enabled_ui(!busy, |ui| {
@@ -607,7 +750,7 @@ impl RemotePanel {
                             ui.horizontal(|ui| {
                                 let (rect,_)=ui.allocate_exact_size(egui::vec2(18.0,24.0),egui::Sense::hover());
                                 kiln_common::icons::paint(ui.painter(),rect.shrink2(egui::vec2(0.0,3.0)),mark,Theme::current().text);
-                                if ui.selectable_value(&mut f.kind,kind,label).changed() {f.root.clear();f.error=None;f.cloud=Default::default();f.access_key.clear();f.secret_key.clear();f.session_token.clear();}
+                                if ui.selectable_value(&mut f.kind,kind,label).changed() {f.root.clear();f.error=None;f.cloud=Default::default();f.access_key.clear();f.secret_key.clear();f.session_token.clear();f.auth_id.clear();f.auth_name.clear();f.buckets.reset();f.bucket.clear();f.project.clear();f.compartment_id.clear();}
                             });
                         }
                     });
@@ -621,16 +764,16 @@ impl RemotePanel {
                     ui.add_enabled_ui(!busy, |ui| {
                         field(ui, tr("연결 이름"), &mut f.name, false);
                         ui.add_space(8.0);
+                        if f.kind==0 || f.kind>=3 {f.authentication_picker(ui,&manager);}
+                        let saved_authentication = !f.auth_id.is_empty();
+                        let mut authentication_ui = |ui: &mut Ui| {
                         match f.kind {
                             0 => {
-                                field(ui, tr("버킷"), &mut f.bucket, false);
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(tr("리전")).small().color(Theme::current().text_dim));
                                     f.region_touched |= ui.add(egui::TextEdit::singleline(&mut f.region).desired_width((ui.available_width()).min(210.0))).changed();
                                 });
-                                ui.add_space(8.0);
-                                ui.separator();
-                                ui.add_space(6.0);
+                                ui.add_space(4.0);
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(tr("인증 방식")).color(Theme::current().text_dim).small());
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
@@ -714,8 +857,7 @@ impl RemotePanel {
                                 field(ui, tr("시작 경로"), &mut f.root, false);
                             }
                             _ => {
-                                field(ui,tr("버킷"),&mut f.bucket,false);
-                                ui.add_space(8.0);
+
                                 if f.cloud.files.is_none() {f.cloud.files=object_sources.iter().find(|(provider,_)|*provider==cloud_provider(f.kind)).map(|(_,files)|files.clone());}
                                 f.cloud.ui(ui,cloud_provider(f.kind));
                                 if f.cloud.mode==1 {
@@ -734,6 +876,11 @@ impl RemotePanel {
                                 });
                             }
                         }
+                        };
+                        if saved_authentication {
+                            egui::CollapsingHeader::new(tr("인증 설정")).id_salt("saved-authentication-details").show(ui, authentication_ui);
+                        } else { authentication_ui(ui); }
+                        if f.kind==0 || f.kind>=3 {f.storage_controls(ui,&manager,bucket_loader.clone());}
                     });
                 });
             if let Some(e) = &f.error {
@@ -772,6 +919,8 @@ impl RemotePanel {
                     } else {
                         new
                     };
+                    let reusable=f.auth_id.clone();
+                    let form_identity=f.storage_endpoint().ok().and_then(|endpoint|crate::auth_profiles::StorageIdentity::from_endpoint(&endpoint).ok());
                     self.saving = Some(Task::spawn(ctx, move || {
                         let previous = mgr.get(&profile.id);
                         let same_kind = previous.as_ref().is_some_and(|p| {
@@ -780,7 +929,11 @@ impl RemotePanel {
                                 _=>std::mem::discriminant(&p.endpoint)==std::mem::discriminant(&profile.endpoint),
                             }
                         });
-                        let old = if clear || !same_kind {
+                        let identity=form_identity;
+                        let reusable_profile=mgr.authentication_profiles().profiles().into_iter().find(|p|p.id==reusable && p.identity.manual() && identity.as_ref().is_some_and(|id|id.manual()));
+                        let old = if let Some(p)=reusable_profile.filter(|_|manual) {
+                            mgr.authentication_profiles().secrets(&p.id).map_err(|e|e.to_string())?
+                        } else if clear || !same_kind {
                             Secrets::default()
                         } else {
                             crate::load_secrets(mgr.store().as_ref(), &profile.id)
@@ -823,7 +976,7 @@ fn merge_secrets(new: Secrets, old: Secrets) -> Secrets {
     }
 }
 pub(super) fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) -> egui::Response {
-    ui.label(
+    let caption=ui.label(
         RichText::new(label)
             .small()
             .color(Theme::current().text_dim),
@@ -832,7 +985,7 @@ pub(super) fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool
         egui::TextEdit::singleline(value)
             .password(password)
             .desired_width(f32::INFINITY),
-    )
+    ).labelled_by(caption.id)
 }
 
 #[cfg(test)]
@@ -901,7 +1054,7 @@ mod tests {
             dir.path().join("connections.json"),
             Arc::new(kiln_accounts::MemoryStore::new()),
         );
-        let mut panel = RemotePanel::new(manager);
+        let mut panel = RemotePanel::new(manager).with_bucket_loader(Arc::new(|_,_,_|Ok(vec![crate::bucket_discovery::BucketChoice{name:"fixture".into(),region:None,namespace:None}])));
         let mut form = Form::new();
         form.name = "Fixture".into();
         form.bucket = "fixture".into();
@@ -916,17 +1069,26 @@ mod tests {
             },
             panel,
         );
-        h.run();
+        h.run_steps(3);
         assert!(h.query_by_value("development").is_some());
         assert!(h.query_by_label("Access Key ID").is_none());
         h.state_mut().form.as_mut().unwrap().region = "us-west-2".into();
         h.state_mut().form.as_mut().unwrap().region_touched = true;
         h.get_by_value("development").click();
-        h.run();
+        h.run_steps(3);
         h.get_by_label("production").click();
-        h.run();
+        h.run_steps(3);
         assert_eq!(h.state().form.as_ref().unwrap().aws_profile, "production");
         assert_eq!(h.state().form.as_ref().unwrap().region, "us-west-2");
+        for _ in 0..300 {
+            h.step();
+            if h.state().form.as_ref().is_some_and(|f| f.bucket == "fixture") { break; }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(h.state().form.as_ref().unwrap().bucket, "fixture");
+        // The worker result is consumed after this frame's spinner/layout was drawn.
+        // Settle the modal's new height before targeting its footer by AX geometry.
+        h.run_steps(5);
         h.get_by_label(tr("연결 저장")).click();
         for _ in 0..200 {
             h.step();
@@ -935,7 +1097,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        assert!(h.state().form.is_none());
+        assert!(h.state().form.is_none(), "save did not finish: error={:?}, saving={}, AX={:#?}", h.state().form.as_ref().and_then(|f|f.error.as_ref()), h.state().saving.is_some(), h.root());
         let profile = h.state().manager.profiles()[0].clone();
         assert!(
             matches!(&profile.endpoint, RemoteEndpoint::S3 {aws_profile:Some(p),region,..} if p == "production" && region == "us-west-2")
@@ -944,34 +1106,34 @@ mod tests {
         form.aws_scanned = true;
         form.apply_scan(aws_fixture(), true, false);
         h.state_mut().form = Some(form);
-        h.run();
+        h.run_steps(3);
         assert!(h.query_by_value("production").is_some());
         h.get_by_label(tr("취소")).click();
-        h.run();
-        assert!(h.state().form.is_none());
+        h.run_steps(3);
+        assert!(h.state().form.is_none(), "save did not finish: error={:?}, saving={}, AX={:#?}", h.state().form.as_ref().and_then(|f|f.error.as_ref()), h.state().saving.is_some(), h.root());
         assert_eq!(h.state().manager.get(&profile.id).unwrap(), profile);
         let mut form = Form::from_profile(&profile);
         form.aws_scanned = true;
         form.apply_scan(aws_fixture(), true, false);
         h.state_mut().form = Some(form);
-        h.run();
+        h.run_steps(3);
         h.get_by_value(tr("저장된 AWS 프로필")).click();
-        h.run();
+        h.run_steps(3);
         h.get_by_label(tr("직접 키 입력")).click();
-        h.run();
+        h.run_steps(3);
         assert_eq!(h.state().form.as_ref().unwrap().aws_mode, 2);
         assert!(h.query_by_label("Access Key ID").is_some());
         h.get_by_value(tr("직접 키 입력")).click();
-        h.run();
+        h.run_steps(3);
         h.get_by_label(tr("기본 AWS 인증")).click();
-        h.run();
+        h.run_steps(3);
         assert_eq!(h.state().form.as_ref().unwrap().aws_mode, 1);
         assert!(h.query_by_label("Access Key ID").is_none());
         h.get_by_label(tr("고급 연결 설정")).click();
-        h.run();
+        h.run_steps(3);
         assert!(h.query_by_label(tr("엔드포인트 (선택)")).is_some());
         h.get_by_label(tr("고급 연결 설정")).click();
-        h.run();
+        h.run_steps(3);
         assert!(h.query_by_label(tr("엔드포인트 (선택)")).is_none());
     }
     #[test]
@@ -1002,7 +1164,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut panel = RemotePanel::new(manager.clone());
+        let mut panel = RemotePanel::new(manager.clone()).with_bucket_loader(Arc::new(|_,_,_|Ok(vec![crate::bucket_discovery::BucketChoice{name:"fixture".into(),region:None,namespace:None}])));
         let mut form = Form::from_profile(&profile);
         form.aws_scanned = true;
         form.apply_scan(aws_fixture(), true, true);
@@ -1016,7 +1178,16 @@ mod tests {
             },
             panel,
         );
-        h.run();
+        h.run_steps(3);
+        for _ in 0..300 {
+            h.step();
+            if h.state().form.as_ref().is_some_and(|f| f.bucket == "fixture") { break; }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(h.state().form.as_ref().unwrap().bucket, "fixture");
+        // The worker result is consumed after this frame's spinner/layout was drawn.
+        // Settle the modal's new height before targeting its footer by AX geometry.
+        h.run_steps(5);
         h.get_by_label(tr("연결 저장")).click();
         for _ in 0..200 {
             h.step();
@@ -1033,11 +1204,20 @@ mod tests {
                 .as_deref(),
             Some("old-access")
         );
-        h.run();
+        h.run_steps(3);
         h.get_by_value(tr("직접 키 입력")).click();
-        h.run();
+        h.run_steps(3);
         h.get_by_label(tr("기본 AWS 인증")).click();
-        h.run();
+        h.run_steps(3);
+        for _ in 0..300 {
+            h.step();
+            if h.state().form.as_ref().is_some_and(|f| f.bucket == "fixture") { break; }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(h.state().form.as_ref().unwrap().bucket, "fixture");
+        // The worker result is consumed after this frame's spinner/layout was drawn.
+        // Settle the modal's new height before targeting its footer by AX geometry.
+        h.run_steps(5);
         h.get_by_label(tr("연결 저장")).click();
         for _ in 0..200 {
             h.step();
@@ -1046,7 +1226,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        assert!(h.state().form.is_none());
+        assert!(h.state().form.is_none(), "save did not finish: error={:?}, saving={}, AX={:#?}", h.state().form.as_ref().and_then(|f|f.error.as_ref()), h.state().saving.is_some(), h.root());
         assert!(
             crate::load_secrets(store.as_ref(), "manual")
                 .unwrap()
@@ -1466,5 +1646,68 @@ mod visual_tests {
         }
         kiln_common::i18n::set_language(kiln_common::i18n::Language::Korean);
         Theme::set_current("kiln-dark");
+    }
+}
+
+#[cfg(test)]
+mod storage_workflow_tests {
+    use super::*;
+    use egui_kittest::{Harness,kittest::Queryable};
+    fn pump(h:&mut Harness<'_,RemotePanel>,ready:impl Fn(&Harness<'_,RemotePanel>)->bool){let end=std::time::Instant::now()+std::time::Duration::from_secs(5);loop {h.step();if ready(h){break;}assert!(std::time::Instant::now()<end,"storage UI timed out: {:#?}",h.root());std::thread::sleep(std::time::Duration::from_millis(10));}}
+    #[test]
+    fn empty_remote_panel_has_named_connection_and_ssh_actions() {
+        kiln_common::i18n::set_language(kiln_common::i18n::Language::Korean);
+        for theme in ["kiln-dark", "kiln-light"] { Theme::set_current(theme); for width in [420.0, 980.0] {
+            let dir = tempfile::tempdir().unwrap();
+            let ssh_config = dir.path().join("ssh_config");
+            std::fs::write(&ssh_config, "Host fixture-server\n  HostName 127.0.0.1\n  User fixture\n").unwrap();
+            let panel = RemotePanel::new(RemoteManager::with_store(dir.path().join("connections.json"), Arc::new(kiln_accounts::MemoryStore::new())))
+                .with_ssh_config_path(ssh_config)
+                .with_bucket_loader(Arc::new(|_, _, _| Ok(Vec::new())));
+            let mut h = Harness::builder().with_size([width, 640.0]).wgpu().build_ui_state(|ui, panel: &mut RemotePanel| {
+                Theme::current().apply(ui.ctx()); if super::super::test_fonts(ui.ctx()) { assert!(panel.ui(ui).is_empty()); }
+            }, panel);
+            h.run_steps(5);
+            assert!(h.query_by_label("SSH Config 가져오기").is_some());
+            assert!(h.query_by_label("클라우드 저장소 또는 서버를 연결하세요").is_none());
+            let shots = PathBuf::from("/tmp/kiln-remote-captures"); std::fs::create_dir_all(&shots).unwrap();
+            h.render().unwrap().save(shots.join(format!("empty-{theme}-{width}.png"))).unwrap();
+            h.get_by_label("연결 추가").click(); h.run_steps(5);
+            assert_eq!(h.state().form.as_ref().unwrap().kind, 0);
+            h.get_by_label("취소").click(); h.run_steps(5);
+            h.get_by_label("SSH Config 가져오기").click(); h.run_steps(5);
+            assert_eq!(h.state().form.as_ref().unwrap().kind, 2);
+        }} Theme::set_current("kiln-dark");
+    }
+    #[test]
+    fn reusable_authentication_saves_without_bucket_then_selects_catalog_and_reopens(){
+      kiln_common::i18n::set_language(kiln_common::i18n::Language::Korean);
+      for theme in ["kiln-dark","kiln-light"] {Theme::set_current(theme);for width in [420.0,980.0] {
+        let dir=tempfile::tempdir().unwrap();let store=Arc::new(kiln_accounts::MemoryStore::new());let path=dir.path().join("connections.json");let manager=RemoteManager::with_store(path.clone(),store.clone());
+        let mut panel=RemotePanel::new(manager.clone()).with_bucket_loader(Arc::new(|_,_,_|Ok(vec![crate::bucket_discovery::BucketChoice{name:"release-assets".into(),region:None,namespace:None}])));
+        let mut form=Form::new();form.name="Release assets".into();form.aws_mode=2;form.aws_scanned=true;form.auth_touched=true;form.access_key="fixture-key".into();form.secret_key="fixture-secret".into();form.auth_name="Production".into();panel.form=Some(form);
+        let mut h=Harness::builder().with_size([width,900.0]).wgpu().build_ui_state(|ui,panel:&mut RemotePanel|{Theme::current().apply(ui.ctx());if super::super::test_fonts(ui.ctx()){assert!(panel.ui(ui).is_empty());}},panel);
+        h.run_steps(5);
+        h.get_by_label("인증 프로필로 저장").click();h.run_steps(3);
+        h.get_by_label("프로필 저장").click();
+        pump(&mut h,|_|manager.authentication_profiles().profiles().len()==1);
+        pump(&mut h,|h|h.state().form.as_ref().is_some_and(|f|!f.auth_id.is_empty()));
+        assert!(manager.profiles().is_empty(),"authentication save must not create a bucket connection");
+        pump(&mut h,|h|h.query_by_value("release-assets").is_some());h.run_steps(8);
+        assert!(h.query_by_label("프로필 저장").is_none(), "successful authentication save must collapse the secondary editor");
+        assert!(h.query_by_label("인증 프로필 편집").is_some());
+        let shots=PathBuf::from("/tmp/kiln-remote-captures");std::fs::create_dir_all(&shots).unwrap();h.render().unwrap().save(shots.join(format!("bucket-profile-{theme}-{width}.png"))).unwrap();
+        h.get_by_label("연결 저장").click();pump(&mut h,|_|manager.profiles().len()==1);pump(&mut h,|h|h.state().form.is_none());
+        let connection=manager.profiles()[0].clone();let auth=manager.authentication_profiles().profiles()[0].clone();
+        let saved=std::fs::read_to_string(path.with_extension("authentication.json")).unwrap();assert!(!saved.contains("fixture-secret"));assert!(!saved.contains("release-assets"));
+        h.get_by_label("연결 추가").click();h.run_steps(3);
+        h.get_by_value("현재 인증 설정").click();h.run_steps(3);h.get_by_label("Production").click();h.run_steps(3);
+        pump(&mut h,|h|h.query_by_value("release-assets").is_some());
+        assert!(h.state().form.as_ref().unwrap().access_key.is_empty(),"stored keys must not be copied into visible input fields");
+        assert_eq!(storage_secrets(&manager,"",&auth.id,Some(&auth.identity),Secrets::default()).unwrap().secret_key.as_deref(),Some("fixture-secret"));
+        manager.authentication_profiles().remove(&auth.id).unwrap();
+        assert_eq!(crate::load_secrets(store.as_ref(),&connection.id).unwrap().secret_key.as_deref(),Some("fixture-secret"),"existing connection is independent from reusable profile deletion");
+        let reopened=RemoteManager::with_store(path,store);assert!(reopened.authentication_profiles().profiles().is_empty());assert_eq!(reopened.profiles(),vec![connection]);
+      }}Theme::set_current("kiln-dark");
     }
 }

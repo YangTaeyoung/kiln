@@ -15,6 +15,20 @@ git diff --check
 
 GUI tests use egui_kittest. Daemon tests start real PTYs in isolated configurations.
 Use targeted suites for the files you change, then relevant integration tests.
+When the daemon protocol changes, verify the real previous published executable,
+not only a same-binary restart or synthetic restore format:
+
+```sh
+# Supply an owned extraction/copy of the previous release's kiln executable.
+KILN_TEST_OLD_EXE=/tmp/previous-release/Kiln.app/Contents/MacOS/kiln \
+  cargo test --locked -p kiln --test published_upgrade -- --test-threads=1 --nocapture
+```
+
+This opt-in gate creates private daemon sockets/configuration and checks protocol
+5 to 6 handover in both native and hosted modes, preserving shell PID, screen and
+real input/output. If the variable is absent, the tests explicitly skip verification;
+that run does not establish published-version compatibility or a Sparkle GUI update.
+
 SQL completion is tested against real SQLite metadata with keyboard, mouse,
 undo/redo, connection replacement, IME event replay, four languages and bounded
 light/dark popup renders. Run it serially because UI language/theme are global:
@@ -25,6 +39,21 @@ cargo test --locked -p kiln-db --test sql_completion -- --test-threads=1
 # Starts and removes isolated PostgreSQL/MySQL containers:
 bash crates/kiln-db/tests/run_docker_tests.sh
 ```
+
+SELECT-result editing has separate proof/rollback and real-grid execution tests:
+
+```sh
+cargo test --locked -p kiln-db --test result_edit
+cargo test --locked -p kiln-db --test query_execution -- --test-threads=1
+```
+
+The CI `database-servers` job runs `result_edit_servers` against owned PostgreSQL,
+MySQL and MariaDB containers. For a local equivalent, supply isolated test URLs in
+`KILN_TEST_PG_URL`, `KILN_TEST_MYSQL_URL` and `KILN_TEST_MARIA_URL`; absent URLs
+explicitly skip that engine and do not establish server coverage.
+
+Zsh completion's daemon tests use a real owned PTY; application unit tests render
+short/narrow suggestion menus and verify native-input and dismissal behavior.
 
 Database server tests require their documented local containers; do not point tests
 at a user's real databases or repositories.

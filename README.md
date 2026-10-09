@@ -63,7 +63,7 @@ install and authenticate the ones you use. The app UI supports Korean, English, 
 [Workspaces & agents](docs/workspaces.md) · [Git workflows](docs/git.md) ·
 [File editor](docs/editor.md) · [Database tools](docs/databases.md) ·
 [Remote files & SSH](docs/remote-files.md) · [Agent accounts](docs/accounts.md) ·
-[Terminal integration](docs/terminal-integration.md) · [Architecture](docs/architecture.md)
+[Terminal integration](docs/terminal-integration.md) · [Shell completion](docs/shell-completion.md) · [Architecture](docs/architecture.md)
 
 ### Build and contribute
 

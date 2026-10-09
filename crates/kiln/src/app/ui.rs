@@ -591,7 +591,7 @@ impl KilnApp {
                 self.actions.push(Action::OpenPalette);
             }
             let selected = self.workspaces[self.active].sheet.filter(|_| !self.workspaces[self.active].tools.is_agent_task_open());
-            let menu = widgets::button_with(&mut rui, Some(Icon::Inspector), tool_label, if selected.is_some() {ButtonKind::Secondary} else {ButtonKind::Ghost}, true);
+            let menu = widgets::button_with(&mut rui, Some(Icon::Tools), tool_label, if selected.is_some() {ButtonKind::Secondary} else {ButtonKind::Ghost}, true);
             menu.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected.is_some(), tool_label));
             egui::Popup::menu(&menu).show(|ui| {
                 if let Some(kind) = tool_menu(ui, selected) { self.actions.push(Action::OpenSheet(kind)); }
@@ -971,7 +971,7 @@ impl KilnApp {
             let focus_req = self.focus_terminal && ui.memory(|m| m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && self.workspace_dialog.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none());
             let mut focus_consumed = false;
             let mut new_focus = None;
-            let settings = terminal::TermSettings { font_size: self.settings.font_size, option_as_meta: self.settings.option_as_meta, line_height: self.settings.line_height, copy_on_select: self.settings.copy_on_select, cursor_blink: self.settings.cursor_blink, close_shortcut: Some(self.keymap.resolve("close_panel", KeyboardShortcut::new(if is_mac() { Modifiers::MAC_CMD } else { Modifiers::CTRL | Modifiers::SHIFT }, Key::W))) };
+            let settings = terminal::TermSettings { font_size: self.settings.font_size, option_as_meta: self.settings.option_as_meta, completion_preview: self.settings.terminal_completion_preview, line_height: self.settings.line_height, copy_on_select: self.settings.copy_on_select, cursor_blink: self.settings.cursor_blink, close_shortcut: Some(self.keymap.resolve("close_panel", KeyboardShortcut::new(if is_mac() { Modifiers::MAC_CMD } else { Modifiers::CTRL | Modifiers::SHIFT }, Key::W))) };
             for (pid, rect) in &rects {
                 let is_focused = *pid == focused;
                 let info = self.card_info(*pid);

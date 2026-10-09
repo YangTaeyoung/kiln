@@ -1,6 +1,8 @@
 //! Remote files without storing credentials in the application configuration.
 //! Every operation runs on its own worker; dropping a job cancels it.
 pub mod aws_profiles;
+pub mod bucket_discovery;
+pub mod auth_profiles;
 pub mod object_profiles;
 mod object_backend;
 mod object_oci;

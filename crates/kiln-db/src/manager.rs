@@ -431,7 +431,7 @@ impl DbManager {
         self.inner.live.lock().get(&id).and_then(|l| l.pool.clone())
     }
 
-    pub(crate) fn schema_changed(&self,id:ConnId) {
+    pub(crate) fn schema_changed(&self, id: ConnId) {
         *self.inner.connection_epochs.lock().entry(id).or_default() += 1;
         self.bump();
     }
@@ -535,16 +535,24 @@ impl DbManager {
         Ok(rs)
     }
 
-    pub(crate) async fn fetch_original_rows(&self,id:ConnId,t:&TableRef,columns:&[ColumnDef],keys:&[Vec<(usize,crate::Value)>])->DbResult<ResultSet>{
-        let driver=self.driver_or_err(id)?;let pool=self.pool(id).await?;
-        let mut all=ResultSet::default();
-        let empty=vec![Vec::new()];
-        for key in if keys.is_empty(){&empty[..]}else{keys}{
-            let statement=crate::edit::select_key(driver,t,columns,key);
-            let result=pool.query_bound(&statement.sql,&statement.args).await?;
-            all.columns=result.columns;all.rows.extend(result.rows);
+    pub(crate) async fn fetch_original_rows(
+        &self,
+        id: ConnId,
+        t: &TableRef,
+        columns: &[ColumnDef],
+        keys: &[Vec<(usize, crate::Value)>],
+    ) -> DbResult<ResultSet> {
+        let driver = self.driver_or_err(id)?;
+        let pool = self.pool(id).await?;
+        let mut all = ResultSet::default();
+        let empty = vec![Vec::new()];
+        for key in if keys.is_empty() { &empty[..] } else { keys } {
+            let statement = crate::edit::select_key(driver, t, columns, key);
+            let result = pool.query_bound(&statement.sql, &statement.args).await?;
+            all.columns = result.columns;
+            all.rows.extend(result.rows);
         }
-        Ok(ResultSet::new(all.columns,all.rows))
+        Ok(ResultSet::new(all.columns, all.rows))
     }
 
     /// 필터가 적용된 전체 행 수.
@@ -553,7 +561,9 @@ impl DbManager {
         let rs = self.query(id, &count_sql(d, t, filter), None).await?.result;
         rs.scalar_string()
             .and_then(|s| s.parse().ok())
-            .ok_or_else(|| DbError::msg(kiln_common::i18n::tr("COUNT(*)가 값을 반환하지 않았습니다")))
+            .ok_or_else(|| {
+                DbError::msg(kiln_common::i18n::tr("COUNT(*)가 값을 반환하지 않았습니다"))
+            })
     }
 
     /// 변경 묶음을 한 트랜잭션으로 제출한다. 반환값은 영향받은 행 수.
@@ -626,6 +636,8 @@ impl DbManager {
             backend: Arc::new(Mutex::new(backend)),
             pool,
             driver: self.driver_or_err(id)?,
+            identity: NEXT_CONSOLE_ID.fetch_add(1, Ordering::Relaxed),
+            generation: Arc::new(AtomicU64::new(1)),
         })
     }
 
@@ -664,12 +676,16 @@ impl DbManager {
 }
 
 /// 콘솔 탭 하나가 쓰는 전용 연결. 세션 상태(SET, BEGIN 등)가 유지된다.
+static NEXT_CONSOLE_ID: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Clone)]
 pub struct ConsoleSession {
     conn: Arc<tokio::sync::Mutex<Option<SessionConn>>>,
     backend: Arc<Mutex<Option<i64>>>,
     pool: Arc<DbPool>,
     driver: Driver,
+    identity: u64,
+    generation: Arc<AtomicU64>,
 }
 
 impl ConsoleSession {
@@ -680,6 +696,7 @@ impl ConsoleSession {
             Some(c) => c,
             None => {
                 let mut c = self.pool.detach_session().await?;
+                self.generation.fetch_add(1, Ordering::Relaxed);
                 *self.backend.lock() = c.backend_id().await;
                 c
             }
@@ -687,6 +704,110 @@ impl ConsoleSession {
         let r = conn.run_sql(sql, max_rows).await;
         *guard = Some(conn);
         r
+    }
+
+    /// Executes normally, then builds a bounded read-only provenance proof on
+    /// this exact session. Failed proof never changes the SELECT result.
+    pub async fn run_editable(
+        &self,
+        sql: &str,
+        max_rows: Option<usize>,
+    ) -> DbResult<crate::result_edit::EditableOutcome> {
+        let mut guard = self.conn.lock().await;
+        let mut conn = match guard.take() {
+            Some(c) => c,
+            None => {
+                let mut c = self.pool.detach_session().await?;
+                self.generation.fetch_add(1, Ordering::Relaxed);
+                *self.backend.lock() = c.backend_id().await;
+                c
+            }
+        };
+        let before = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            crate::result_edit::capture(&mut conn, self.driver, sql),
+        )
+        .await
+        .unwrap_or(Err(
+            crate::result_edit::ResultReadOnlyReason::MetadataUnavailable,
+        ));
+        let result = conn.run_sql_with_origins(sql, max_rows).await;
+        let result = match result {
+            Ok((outcome, origins)) => {
+                let editing = if outcome.has_rows {
+                    match before {
+                        Err(reason) => Err(reason),
+                        Ok(before) => tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            crate::result_edit::prepare(
+                                &mut conn,
+                                self.driver,
+                                sql,
+                                &outcome.result,
+                                self.identity,
+                                self.generation.load(Ordering::Relaxed),
+                                &before,
+                                &origins,
+                            ),
+                        )
+                        .await
+                        .unwrap_or(Err(
+                            crate::result_edit::ResultReadOnlyReason::MetadataUnavailable,
+                        )),
+                    }
+                } else {
+                    Err(crate::result_edit::ResultReadOnlyReason::UnsupportedQuery)
+                };
+                Ok(crate::result_edit::EditableOutcome { outcome, editing })
+            }
+            Err(error) => Err(error),
+        };
+        *guard = Some(conn);
+        result
+    }
+
+    /// Commits only the verified permanent-table changes in an independent
+    /// pooled transaction. Never commits the console's explicit BEGIN.
+    pub async fn submit_result_edits(
+        &self,
+        plan: &crate::result_edit::ResultEditPlan,
+        cells: &[crate::result_edit::ResultEditCell],
+    ) -> Result<u64, ChangeError> {
+        let invalid = || ChangeError {
+            index: 0,
+            error: DbError::msg(kiln_common::i18n::tr(
+                "조회 세션이 변경되어 결과를 다시 실행해야 합니다",
+            )),
+        };
+        let guard = self.conn.lock().await;
+        if guard.is_none()
+            || plan.session != self.identity
+            || plan.generation != self.generation.load(Ordering::Relaxed)
+        {
+            return Err(invalid());
+        }
+        let statements = plan
+            .changes(cells)
+            .map_err(|error| ChangeError { index: 0, error })?;
+        plan.submit(&self.pool, &statements).await
+    }
+
+    /// Refresh is separate from Submit: an error here means the preceding
+    /// successful write remains committed. The caller must invalidate its old
+    /// plan before refreshing, and report a refresh failure without resubmitting.
+    pub async fn refresh_result_edit(
+        &self,
+        plan: &crate::result_edit::ResultEditPlan,
+        max_rows: Option<usize>,
+    ) -> DbResult<crate::result_edit::EditableOutcome> {
+        if plan.session != self.identity
+            || plan.generation != self.generation.load(Ordering::Relaxed)
+        {
+            return Err(DbError::msg(kiln_common::i18n::tr(
+                "조회 세션이 변경되어 결과를 다시 실행해야 합니다",
+            )));
+        }
+        self.run_editable(&plan.sql, max_rows).await
     }
 
     /// 세션 연결이 살아 있는지.
@@ -722,15 +843,41 @@ mod recovery_query_tests {
     use super::*;
     #[test]
     fn row_recovery_query_binds_keys_and_does_not_read_unrelated_rows() {
-        let dir=tempfile::tempdir().unwrap();let file=dir.path().join("fixture.db");std::fs::write(&file,[]).unwrap();
-        let manager=DbManager::in_memory();let id=manager.add(ConnConfig{driver:Driver::Sqlite,file:file.to_string_lossy().into_owned(),..Default::default()},None);
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("fixture.db");
+        std::fs::write(&file, []).unwrap();
+        let manager = DbManager::in_memory();
+        let id = manager.add(
+            ConnConfig {
+                driver: Driver::Sqlite,
+                file: file.to_string_lossy().into_owned(),
+                ..Default::default()
+            },
+            None,
+        );
         manager.block_on(manager.query(id,"CREATE TABLE items (id TEXT PRIMARY KEY, value TEXT); INSERT INTO items VALUES ('one','a'),('two','b');",None)).unwrap();
-        let table=TableRef::new(None,"items");let details=manager.block_on(manager.table_details(id,&table)).unwrap();
-        let keys=vec![vec![(0,crate::Value::Text("two".into()))]];
-        let result=manager.block_on(manager.fetch_original_rows(id,&table,&details.columns,&keys)).unwrap();
-        assert_eq!(result.rows.len(),1);assert_eq!(result.rows[0][0],crate::Value::Text("two".into()));
-        let malicious=vec![vec![(0,crate::Value::Text("' OR 1=1; DROP TABLE items; --".into()))]];
-        let result=manager.block_on(manager.fetch_original_rows(id,&table,&details.columns,&malicious)).unwrap();assert!(result.rows.is_empty());assert_eq!(result.columns.len(),2);
-        assert_eq!(manager.block_on(manager.count_rows(id,&table,"")).unwrap(),2);
+        let table = TableRef::new(None, "items");
+        let details = manager.block_on(manager.table_details(id, &table)).unwrap();
+        let keys = vec![vec![(0, crate::Value::Text("two".into()))]];
+        let result = manager
+            .block_on(manager.fetch_original_rows(id, &table, &details.columns, &keys))
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0][0], crate::Value::Text("two".into()));
+        let malicious = vec![vec![(
+            0,
+            crate::Value::Text("' OR 1=1; DROP TABLE items; --".into()),
+        )]];
+        let result = manager
+            .block_on(manager.fetch_original_rows(id, &table, &details.columns, &malicious))
+            .unwrap();
+        assert!(result.rows.is_empty());
+        assert_eq!(result.columns.len(), 2);
+        assert_eq!(
+            manager
+                .block_on(manager.count_rows(id, &table, ""))
+                .unwrap(),
+            2
+        );
     }
 }

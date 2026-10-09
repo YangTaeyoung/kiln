@@ -8,7 +8,7 @@ permissions:
 jobs:
   macos:
     runs-on: macos-14
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Install stable Rust
@@ -31,12 +31,13 @@ jobs:
           cargo test --locked -p kiln-daemon --test macos_responsibility -- --test-threads=1
       - name: Application unit tests
         run: |
-          cargo test --locked -p kiln --lib
+          cargo test --locked -p kiln --lib -- --test-threads=1
           cargo test --locked -p kiln-accounts --lib
       - name: Remote files and direct agent launches
         run: |
           cargo test --locked -p kiln-remote --lib --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1
           cargo test --locked -p kiln --test direct_terminal_launch -- --test-threads=1
+          cargo test --locked -p kiln --test shell_completion -- --test-threads=1
           cargo test --locked -p kiln --test terminal_recovery -- --test-threads=1
           KILN_PTY_HOST=0 cargo test --locked -p kiln --test daemon -- --test-threads=1
           cargo test --locked -p kiln --test hosted --test hosted_failures -- --test-threads=1
@@ -44,8 +45,8 @@ jobs:
       - name: SQL completion and SQLite regressions
         run: |
           cargo test --locked -p kiln-db --lib
-          cargo test --locked -p kiln-db --test sqlite_backend --test config_store --test splitter --test schema_changes
-          cargo test --locked -p kiln-db --test sql_completion -- --test-threads=1
+          cargo test --locked -p kiln-db --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit
+          cargo test --locked -p kiln-db --test sql_completion --test query_execution -- --test-threads=1
       - name: Schema UI and editor regressions
         run: |
           cargo test --locked -p kiln-db --test schema_ui_flow -- --test-threads=1
@@ -64,3 +65,46 @@ jobs:
           bash -n scripts/bundle-macos.sh scripts/release-macos.sh
           python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py scripts/configure-network-privacy.py scripts/prepare-updater-test.py
           python3 scripts/test-network-privacy.py
+
+  database-servers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: 2
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: kiln_fixture_only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: kiln_fixture_only
+          MYSQL_ROOT_HOST: '%'
+        ports: [3306:3306]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pkiln_fixture_only"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: kiln_fixture_only
+          MARIADB_ROOT_HOST: '%'
+        ports: [3307:3306]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: SELECT editing on disposable PostgreSQL, MySQL and MariaDB
+        env:
+          KILN_TEST_PG_URL: postgres://postgres:kiln_fixture_only@127.0.0.1:5432/postgres
+          KILN_TEST_MYSQL_URL: mysql://root:kiln_fixture_only@127.0.0.1:3306/mysql
+          KILN_TEST_MARIA_URL: mariadb://root:kiln_fixture_only@127.0.0.1:3307/mysql
+        run: cargo test --locked -p kiln-db --test result_edit_servers -- --test-threads=1 --nocapture

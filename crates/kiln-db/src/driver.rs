@@ -124,6 +124,8 @@ pub fn value_string(v: &Value) -> Option<String> {
 pub(crate) type RowSink<'a> =
     dyn FnMut(&[ColumnInfo], Vec<Value>) -> Result<(), String> + Send + 'a;
 
+pub(crate) type NativeOrigins = Vec<(String, Option<(String, String)>)>;
+
 /// 한 문장 실행 결과.
 #[derive(Clone, Debug, Default)]
 pub struct StmtOutcome {
@@ -186,7 +188,9 @@ impl From<sqlx::Error> for DbError {
                     position,
                 }
             }
-            sqlx::Error::PoolTimedOut => DbError::msg(kiln_common::i18n::tr("연결 시간이 초과되었습니다")),
+            sqlx::Error::PoolTimedOut => {
+                DbError::msg(kiln_common::i18n::tr("연결 시간이 초과되었습니다"))
+            }
             other => DbError::msg(other.to_string()),
         }
     }
@@ -380,14 +384,16 @@ macro_rules! driver_ops {
             }
 
             /// 문장 하나를 텍스트 프로토콜로 실행하고 결과를 모은다.
-            pub async fn run_sql(
-                conn: &mut $Conn,
-                sql: &str,
-                max_rows: Option<usize>,
-            ) -> DbResult<StmtOutcome> {
+            pub async fn run_sql(conn: &mut $Conn, sql: &str, max_rows: Option<usize>) -> DbResult<StmtOutcome> {
+                Ok(run_sql_with_origins(conn,sql,max_rows).await?.0)
+            }
+            pub async fn run_sql_with_origins(
+                conn: &mut $Conn, sql: &str, max_rows: Option<usize>,
+            ) -> DbResult<(StmtOutcome, NativeOrigins)> {
                 refresh_schema(conn).await?;
                 let mut out = StmtOutcome::default();
                 let mut cols: Option<Vec<ColumnInfo>> = None;
+                let mut origins = Vec::new();
                 let mut rows = Vec::new();
                 {
                     let mut stream =
@@ -398,6 +404,7 @@ macro_rules! driver_ops {
                                 out.affected += <$DB as DbKind>::rows_affected(&r);
                             }
                             sqlx::Either::Right(row) => {
+                                if cols.is_none() { origins = origins_of(row.columns()); }
                                 let c = cols.get_or_insert_with(|| columns_of(&row));
                                 if max_rows.is_some_and(|m| rows.len() >= m) {
                                     out.truncated = true;
@@ -426,6 +433,7 @@ macro_rules! driver_ops {
                             .map(|c| ColumnInfo::new(c.name(), c.type_info().name()))
                             .collect();
                         if !c.is_empty() {
+                            origins = origins_of(d.columns());
                             cols = Some(c);
                         }
                     }
@@ -435,7 +443,11 @@ macro_rules! driver_ops {
                     out.affected = rows.len() as u64;
                 }
                 out.result = ResultSet::new(cols.unwrap_or_default(), rows);
-                Ok(out)
+                Ok((out,origins))
+            }
+
+            fn origins_of(columns: &[<$DB as sqlx::Database>::Column]) -> NativeOrigins {
+                columns.iter().map(|c| (c.name().to_owned(), c.origin().table_column().map(|o|(o.table.to_string(),o.name.to_string())))).collect()
             }
 
             pub async fn query_bound(conn:&mut $Conn,sql:&str,values:&[Value])->DbResult<ResultSet>{
@@ -449,6 +461,16 @@ macro_rules! driver_ops {
                     description.columns().iter().map(|c|ColumnInfo::new(c.name(),c.type_info().name())).collect()
                 };
                 let values=rows.iter().map(|row|decode_row(row,&cols)).collect();Ok(ResultSet::new(cols,values))
+            }
+
+            pub async fn describe_origins(conn: &mut $Conn, sql: &str) -> DbResult<Vec<(String, Option<(String, String)>)>> {
+                use sqlx::{Executor as _, Statement as _};
+                refresh_schema(conn).await?;
+                let statement = (&mut *conn).prepare(sqlx::SqlSafeStr::into_sql_str(sqlx::AssertSqlSafe(sql.to_owned()))).await?;
+                Ok(statement.columns().iter().map(|c| {
+                    let origin = c.origin().table_column().map(|o| (o.table.to_string(), o.name.to_string()));
+                    (c.name().to_owned(), origin)
+                }).collect())
             }
 
             /// 결과를 행 단위로 콜백에 흘려 보낸다. 콜백 오류는 중단 사유가 된다.
@@ -469,6 +491,21 @@ macro_rules! driver_ops {
                     n += 1;
                 }
                 Ok(n)
+            }
+
+            /// Caller owns the transaction and connection; cancellation drops
+            /// that connection instead of returning an open transaction to a pool.
+            pub async fn execute_result_changes(conn: &mut $Conn, stmts: &[ChangeStmt]) -> Result<u64,ChangeError> {
+                let mut total=0;
+                for (index,st) in stmts.iter().enumerate() {
+                    let mut args=<$DB as sqlx::Database>::Arguments::default();
+                    for value in &st.args { <$DB as DbKind>::add_arg(&mut args,value).map_err(|error|ChangeError{index,error:DbError::msg(error.to_string())})?; }
+                    let result=sqlx::query_with(sqlx::AssertSqlSafe(st.sql.clone()),args).persistent(false).execute(&mut *conn).await.map_err(|error|ChangeError{index,error:error.into()})?;
+                    let n=<$DB as DbKind>::rows_affected(&result);
+                    if st.expect_one && n!=1 { return Err(ChangeError{index,error:DbError::msg(kiln_common::trf!("영향받은 행이 1개여야 하지만 {n}개입니다 (다른 곳에서 행이 변경되거나 삭제되었을 수 있음)"))}); }
+                    total+=n;
+                }
+                Ok(total)
             }
 
             /// 변경 문장들을 한 트랜잭션에서 실행한다. 하나라도 실패하면 롤백한다.
@@ -539,11 +576,13 @@ pub(crate) enum SessionConn {
 }
 
 impl DbPool {
-    pub(crate) async fn query_bound(&self,sql:&str,args:&[Value])->DbResult<ResultSet>{match self{
-        DbPool::Pg(p)=>pg::query_bound(&mut *p.acquire().await?,sql,args).await,
-        DbPool::My(p)=>my::query_bound(&mut *p.acquire().await?,sql,args).await,
-        DbPool::Lite(p)=>lite::query_bound(&mut *p.acquire().await?,sql,args).await,
-    }}
+    pub(crate) async fn query_bound(&self, sql: &str, args: &[Value]) -> DbResult<ResultSet> {
+        match self {
+            DbPool::Pg(p) => pg::query_bound(&mut *p.acquire().await?, sql, args).await,
+            DbPool::My(p) => my::query_bound(&mut *p.acquire().await?, sql, args).await,
+            DbPool::Lite(p) => lite::query_bound(&mut *p.acquire().await?, sql, args).await,
+        }
+    }
     pub(crate) async fn run_sql(
         &self,
         sql: &str,
@@ -601,6 +640,28 @@ impl DbPool {
 }
 
 impl SessionConn {
+    pub(crate) async fn run_sql_with_origins(
+        &mut self,
+        sql: &str,
+        max_rows: Option<usize>,
+    ) -> DbResult<(StmtOutcome, NativeOrigins)> {
+        match self {
+            Self::Pg(c) => pg::run_sql_with_origins(c, sql, max_rows).await,
+            Self::My(c) => my::run_sql_with_origins(c, sql, max_rows).await,
+            Self::Lite(c) => lite::run_sql_with_origins(c, sql, max_rows).await,
+        }
+    }
+    pub(crate) async fn execute_result_changes(
+        &mut self,
+        stmts: &[ChangeStmt],
+    ) -> Result<u64, ChangeError> {
+        match self {
+            Self::Pg(c) => pg::execute_result_changes(c, stmts).await,
+            Self::My(c) => my::execute_result_changes(c, stmts).await,
+            Self::Lite(c) => lite::execute_result_changes(c, stmts).await,
+        }
+    }
+
     pub(crate) async fn run_sql(
         &mut self,
         sql: &str,
@@ -610,6 +671,17 @@ impl SessionConn {
             SessionConn::Pg(c) => pg::run_sql(c, sql, max_rows).await,
             SessionConn::My(c) => my::run_sql(c, sql, max_rows).await,
             SessionConn::Lite(c) => lite::run_sql(c, sql, max_rows).await,
+        }
+    }
+
+    pub(crate) async fn describe_origins(
+        &mut self,
+        sql: &str,
+    ) -> DbResult<Vec<(String, Option<(String, String)>)>> {
+        match self {
+            Self::Pg(c) => pg::describe_origins(c, sql).await,
+            Self::My(c) => my::describe_origins(c, sql).await,
+            Self::Lite(c) => lite::describe_origins(c, sql).await,
         }
     }
 
@@ -646,7 +718,9 @@ pub(crate) async fn connect_pool(cfg: &ConnConfig, password: Option<&str>) -> Db
             ),
             Driver::Sqlite => {
                 if cfg.file.trim().is_empty() {
-                    return Err(DbError::msg(kiln_common::i18n::tr("SQLite 파일 경로가 비어 있습니다")));
+                    return Err(DbError::msg(kiln_common::i18n::tr(
+                        "SQLite 파일 경로가 비어 있습니다",
+                    )));
                 }
                 DbPool::Lite(
                     PoolOptions::<Sqlite>::new()

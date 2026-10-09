@@ -92,6 +92,13 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
                 executable: Some(executable.clone()),
             },
         );
+        let panel = panel.with_bucket_loader(Arc::new(|_, _, _| {
+            Ok(vec![kiln_remote::bucket_discovery::BucketChoice {
+                name: "fixture-bucket".into(),
+                region: None,
+                namespace: None,
+            }])
+        }));
         let mut h = Harness::builder().with_size([900., 780.]).build_ui_state(
             |ui, panel: &mut RemotePanel| {
                 let fonts = egui::Id::new("object-profile-fonts");
@@ -144,21 +151,25 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
         });
         h.get_by_label("studio").click();
         h.run_steps(3);
-        for (index, value) in [(0, "Fixture assets"), (1, "fixture-bucket")] {
-            h.get_all_by_role(Role::TextInput)
-                .nth(index)
-                .unwrap()
-                .click();
-            h.run_steps(3);
-            h.event(egui::Event::Text(value.into()));
-            h.run_steps(3);
-        }
+        h.get_all_by_role(Role::TextInput).next().unwrap().click();
+        h.run_steps(3);
+        h.event(egui::Event::Text("Fixture assets".into()));
+        h.run_steps(3);
         if provider == ObjectProvider::Cloudflare {
-            h.get_all_by_role(Role::TextInput).nth(2).unwrap().click();
+            h.get_by_label("Account ID").click();
             h.run_steps(3);
             h.event(egui::Event::Text("0123456789abcdef0123456789abcdef".into()));
             h.run_steps(3);
         }
+        if provider == ObjectProvider::Oracle {
+            h.get_by_label("컴파트먼트 OCID").click();
+            h.run_steps(3);
+            h.event(egui::Event::Text("ocid1.compartment.oc1..fixture".into()));
+            h.run_steps(3);
+        }
+        pump(&mut h, provider, "bucket catalog", |h| {
+            h.query_by_value("fixture-bucket").is_some()
+        });
         h.get_by_label("연결 저장").click();
         pump(&mut h, provider, "save persisted", |_| {
             manager.profiles().len() == 1

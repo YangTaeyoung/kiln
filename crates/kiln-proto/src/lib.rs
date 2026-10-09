@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-pub const PROTO_VERSION: u32 = 5;
+pub const PROTO_VERSION: u32 = 6;
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
 
 pub type SessionId = u64;
@@ -95,6 +95,7 @@ pub enum ClientMsg {
     TerminalHealth { req: u32, session: SessionId },
     /// Repair this terminal's transport/screen without restarting its child.
     RecoverTerminal { session: SessionId },
+    ApplyShellCompletion { session: SessionId, revision: u64, buffer: String, cursor: usize },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -126,7 +127,13 @@ pub enum ServerMsg {
     SessionTelemetry { session: SessionId, telemetry: SessionTelemetry },
     CommandOutput { req: u32, session: SessionId, command: u64, text: String, truncated: bool },
     TerminalHealth { req: u32, session: SessionId, health: TerminalHealth },
+    ShellCompletion { session: SessionId, request: Option<ShellCompletion> },
 }
+
+/// Ephemeral Zsh edit snapshot for passive previews or explicit menu requests.
+/// Never part of session persistence.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ShellCompletion { pub explicit:bool, pub revision:u64, pub buffer:String, pub cursor:usize, pub cwd:String, pub request_file:String, pub commands:Vec<String> }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TerminalState { #[default] Healthy, Recovering, Stalled }

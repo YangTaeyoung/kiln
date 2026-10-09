@@ -59,6 +59,16 @@ pub(crate) trait GridSource {
     fn editable(&self) -> bool {
         false
     }
+    fn editable_column(&self, _column: usize) -> bool {
+        self.editable()
+    }
+    /// Query results can change values without offering table row operations.
+    fn row_operations(&self) -> bool {
+        self.editable()
+    }
+    fn default_values(&self) -> bool {
+        self.editable()
+    }
     /// 인라인 편집 시작 텍스트.
     fn edit_text(&self, r: usize, c: usize) -> String;
 }
@@ -262,7 +272,7 @@ impl GridState {
     }
 
     pub fn begin_edit(&mut self, src: &dyn GridSource, r: usize, c: usize) {
-        if !src.editable() || r >= src.n_rows() || c >= src.n_cols() {
+        if r >= src.n_rows() || c >= src.n_cols() || !src.editable_column(c) {
             return;
         }
         if src.row_state(r) == RowState::Deleted {
@@ -349,7 +359,11 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
             let (rect, _) = ui.allocate_exact_size(vec2(content_w, content_h), Sense::hover());
             let resp = ui.interact(rect, body_id, Sense::click_and_drag());
             resp.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, kiln_common::i18n::tr("데이터 그리드"))
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Other,
+                    true,
+                    kiln_common::i18n::tr("데이터 그리드"),
+                )
             });
             let origin = rect.min;
             let painter = ui.painter_at(ui.clip_rect());
@@ -382,10 +396,18 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                 painter.rect_filled(row_rect, 0.0, base);
                 match rs {
                     RowState::Inserted => {
-                        painter.rect_filled(row_rect, 0.0, tint(theme.green, if theme.dark { 0.10 } else { 0.08 }));
+                        painter.rect_filled(
+                            row_rect,
+                            0.0,
+                            tint(theme.green, if theme.dark { 0.10 } else { 0.08 }),
+                        );
                     }
                     RowState::Deleted => {
-                        painter.rect_filled(row_rect, 0.0, tint(theme.red, if theme.dark { 0.10 } else { 0.07 }));
+                        painter.rect_filled(
+                            row_rect,
+                            0.0,
+                            tint(theme.red, if theme.dark { 0.10 } else { 0.07 }),
+                        );
                     }
                     RowState::Normal => {}
                 }
@@ -393,16 +415,27 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                     let cr = cell_rect(r, c);
                     let cell = src.cell(r, c);
                     if cell.edited && rs != RowState::Deleted {
-                        painter.rect_filled(cr, 0.0, tint(theme.yellow, if theme.dark { 0.16 } else { 0.14 }));
                         painter.rect_filled(
-                            Rect::from_min_size(cr.min + vec2(0.0, 3.0), vec2(2.0, cr.height() - 6.0)),
+                            cr,
+                            0.0,
+                            tint(theme.yellow, if theme.dark { 0.16 } else { 0.14 }),
+                        );
+                        painter.rect_filled(
+                            Rect::from_min_size(
+                                cr.min + vec2(0.0, 3.0),
+                                vec2(2.0, cr.height() - 6.0),
+                            ),
                             1.0,
                             theme.yellow,
                         );
                     }
                     if st.sel.contains(r, c) {
                         let a = if has_focus { 1.0 } else { 0.6 };
-                        painter.rect_filled(cr, 0.0, theme.accent_soft(((if theme.dark { 38.0 } else { 30.0 }) * a) as u8));
+                        painter.rect_filled(
+                            cr,
+                            0.0,
+                            theme.accent_soft(((if theme.dark { 38.0 } else { 30.0 }) * a) as u8),
+                        );
                     }
                     let (color, italics) = match cell.kind {
                         CellKind::Value => (
@@ -439,7 +472,11 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                         );
                     }
                 }
-                painter.hline(screen_vp.x_range(), y + ROW_H - 0.5, Stroke::new(1.0, grid_line));
+                painter.hline(
+                    screen_vp.x_range(),
+                    y + ROW_H - 0.5,
+                    Stroke::new(1.0, grid_line),
+                );
             }
             // 열 구분선.
             for x in &xs[c_first..=c_last.min(n_cols)] {
@@ -456,7 +493,14 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                 painter.rect_stroke(
                     cell_rect(r, c).shrink(1.0),
                     3.0,
-                    Stroke::new(1.5, if has_focus { theme.accent } else { tint(theme.accent, 0.45) }),
+                    Stroke::new(
+                        1.5,
+                        if has_focus {
+                            theme.accent
+                        } else {
+                            tint(theme.accent, 0.45)
+                        },
+                    ),
                     StrokeKind::Inside,
                 );
             }
@@ -574,10 +618,18 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                     let te = egui::TextEdit::singleline(&mut ed.text)
                         .id(te_id)
                         .font(mono.clone())
-                        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(PAD_X as i8 - 1, 5)))
+                        .frame(
+                            egui::Frame::NONE
+                                .inner_margin(egui::Margin::symmetric(PAD_X as i8 - 1, 5)),
+                        )
                         .desired_width(cr.width());
                     let r = ui.put(cr, te);
-                    painter.rect_stroke(cr, 3.0, Stroke::new(1.5, theme.accent), StrokeKind::Inside);
+                    painter.rect_stroke(
+                        cr,
+                        3.0,
+                        Stroke::new(1.5, theme.accent),
+                        StrokeKind::Inside,
+                    );
                     if !ed.focus_requested {
                         r.request_focus();
                         ed.focus_requested = true;
@@ -625,7 +677,11 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                 let rs = src.row_state(r);
                 let touched = st.sel.row_touched(r);
                 if touched {
-                    painter.rect_filled(rr, 0.0, theme.accent_soft(if theme.dark { 24 } else { 18 }));
+                    painter.rect_filled(
+                        rr,
+                        0.0,
+                        theme.accent_soft(if theme.dark { 24 } else { 18 }),
+                    );
                 }
                 let (label, color) = match rs {
                     RowState::Inserted => ("+".to_string(), theme.green),
@@ -647,7 +703,11 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                     color,
                 );
             }
-            painter.vline(g_rect.max.x - 0.5, g_rect.y_range(), Stroke::new(1.0, theme.border));
+            painter.vline(
+                g_rect.max.x - 0.5,
+                g_rect.y_range(),
+                Stroke::new(1.0, theme.border),
+            );
             let g_resp = ui.interact(g_rect, st.id.with("gutter"), Sense::click_and_drag());
             if (g_resp.clicked() || g_resp.drag_started() || g_resp.dragged())
                 && let Some(p) = ptr
@@ -735,10 +795,22 @@ pub(crate) fn grid_ui(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource) -> 
                     );
                 }
                 if let Some(desc) = h.sort {
-                    let ar = Rect::from_center_size(pos2(hr.max.x - 11.0, hr.center().y), vec2(12.0, 12.0));
-                    kiln_common::icons::paint(&hp, ar, if desc { Icon::ArrowDown } else { Icon::ArrowUp }, theme.accent);
+                    let ar = Rect::from_center_size(
+                        pos2(hr.max.x - 11.0, hr.center().y),
+                        vec2(12.0, 12.0),
+                    );
+                    kiln_common::icons::paint(
+                        &hp,
+                        ar,
+                        if desc { Icon::ArrowDown } else { Icon::ArrowUp },
+                        theme.accent,
+                    );
                 }
-                hp.vline(hr.max.x - 0.5, hr.y_range().shrink(8.0), Stroke::new(1.0, theme.border_strong));
+                hp.vline(
+                    hr.max.x - 0.5,
+                    hr.y_range().shrink(8.0),
+                    Stroke::new(1.0, theme.border_strong),
+                );
                 if hresp.clicked() {
                     events.push(GridEvent::SortBy(c));
                 }
@@ -925,13 +997,13 @@ fn handle_keys(ui: &mut Ui, st: &mut GridState, src: &dyn GridSource, events: &m
         events.push(GridEvent::SelectionChanged);
     }
     if src.editable() {
-        if del_rows {
+        if del_rows && src.row_operations() {
             events.push(GridEvent::DeleteRows);
         }
         if null_key {
             events.push(GridEvent::SetNull);
         }
-        if dup {
+        if dup && src.row_operations() {
             events.push(GridEvent::DuplicateRow);
         }
     }
@@ -949,7 +1021,7 @@ fn context_menu(
     if editable {
         if ui
             .add_enabled(
-                st.sel.cursor.is_some(),
+                st.sel.cursor.is_some_and(|(_, c)| src.editable_column(c)),
                 egui::Button::new(kiln_common::i18n::tr("셀 편집")).shortcut_text("Enter"),
             )
             .clicked()
@@ -959,46 +1031,58 @@ fn context_menu(
             ui.close();
         }
         if ui
-            .add_enabled(has_sel, egui::Button::new(kiln_common::i18n::tr("NULL로 설정")).shortcut_text("Del"))
+            .add_enabled(
+                has_sel,
+                egui::Button::new(kiln_common::i18n::tr("NULL로 설정")).shortcut_text("Del"),
+            )
             .clicked()
         {
             events.push(GridEvent::SetNull);
             ui.close();
         }
-        if ui
-            .add_enabled(has_sel, egui::Button::new(kiln_common::i18n::tr("DEFAULT로 설정")))
-            .clicked()
+        if src.default_values()
+            && ui
+                .add_enabled(
+                    has_sel,
+                    egui::Button::new(kiln_common::i18n::tr("DEFAULT로 설정")),
+                )
+                .clicked()
         {
             events.push(GridEvent::SetDefault);
             ui.close();
         }
-        ui.separator();
-        if ui.button(kiln_common::i18n::tr("행 추가")).clicked() {
-            events.push(GridEvent::AddRow);
-            ui.close();
+        if src.row_operations() {
+            ui.separator();
+            if ui.button(kiln_common::i18n::tr("행 추가")).clicked() {
+                events.push(GridEvent::AddRow);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    has_sel,
+                    egui::Button::new(kiln_common::i18n::tr("행 복제")).shortcut_text("⌘D"),
+                )
+                .clicked()
+            {
+                events.push(GridEvent::DuplicateRow);
+                ui.close();
+            }
+            if ui
+                .add_enabled(
+                    has_sel,
+                    egui::Button::new(kiln_common::i18n::tr("행 삭제")).shortcut_text("⌘⌫"),
+                )
+                .clicked()
+            {
+                events.push(GridEvent::DeleteRows);
+                ui.close();
+            }
         }
         if ui
             .add_enabled(
                 has_sel,
-                egui::Button::new(kiln_common::i18n::tr("행 복제")).shortcut_text("⌘D"),
+                egui::Button::new(kiln_common::i18n::tr("선택 항목 되돌리기")),
             )
-            .clicked()
-        {
-            events.push(GridEvent::DuplicateRow);
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                has_sel,
-                egui::Button::new(kiln_common::i18n::tr("행 삭제")).shortcut_text("⌘⌫"),
-            )
-            .clicked()
-        {
-            events.push(GridEvent::DeleteRows);
-            ui.close();
-        }
-        if ui
-            .add_enabled(has_sel, egui::Button::new(kiln_common::i18n::tr("선택 항목 되돌리기")))
             .clicked()
         {
             events.push(GridEvent::RevertSelection);
@@ -1015,21 +1099,30 @@ fn context_menu(
         }
         ui.separator();
         for f in [CopyFormat::Tsv, CopyFormat::Csv] {
-            if ui.button(kiln_common::trf!("{} (헤더 포함)", f.label())).clicked() {
+            if ui
+                .button(kiln_common::trf!("{} (헤더 포함)", f.label()))
+                .clicked()
+            {
                 events.push(GridEvent::Copy(f, true));
                 ui.close();
             }
         }
     });
     if ui
-        .add_enabled(has_sel, egui::Button::new(kiln_common::i18n::tr("복사")).shortcut_text("⌘C"))
+        .add_enabled(
+            has_sel,
+            egui::Button::new(kiln_common::i18n::tr("복사")).shortcut_text("⌘C"),
+        )
         .clicked()
     {
         events.push(GridEvent::Copy(CopyFormat::Tsv, false));
         ui.close();
     }
     if ui
-        .add_enabled(st.sel.cursor.is_some(), egui::Button::new(kiln_common::i18n::tr("값 보기")))
+        .add_enabled(
+            st.sel.cursor.is_some(),
+            egui::Button::new(kiln_common::i18n::tr("값 보기")),
+        )
         .clicked()
     {
         events.push(GridEvent::ViewValue);

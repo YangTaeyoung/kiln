@@ -70,6 +70,7 @@ pub struct Conn {
     pub screens: HashMap<SessionId, Screen>,
     pub infos: HashMap<SessionId, SessionInfo>,
     pub telemetry: HashMap<SessionId, SessionTelemetry>,
+    pub shell_completions: HashMap<SessionId, ShellCompletion>,
     pub terminal_health: HashMap<SessionId, TerminalHealth>,
     observed_agents: HashMap<SessionId, kiln_accounts::Tool>,
     pub command_outputs: HashMap<(SessionId, u64), (String, bool)>,
@@ -106,6 +107,7 @@ impl Conn {
             screens: HashMap::new(),
             infos: HashMap::new(),
             telemetry: HashMap::new(),
+            shell_completions: HashMap::new(),
             terminal_health: HashMap::new(),
             observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
@@ -142,6 +144,7 @@ impl Conn {
             screens: HashMap::new(),
             infos: HashMap::new(),
             telemetry: HashMap::new(),
+            shell_completions: HashMap::new(),
             terminal_health: HashMap::new(),
             observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
@@ -177,6 +180,7 @@ impl Conn {
         let notify: kiln_daemon::client::Notify = Arc::new(move || ctx.request_repaint());
         match Client::connect_or_spawn(&self.socket, &self.exe, Some(notify)) {
             Ok(c) => {
+                self.shell_completions.clear();
                 if self.daemon_pid != 0 && self.daemon_pid != c.server_pid { self.closing_sessions.clear(); }
                 self.daemon_pid = c.server_pid;
                 self.daemon_build = c.server_build.clone();
@@ -246,11 +250,7 @@ impl Conn {
             }
             self.ctx.request_repaint_after(Duration::from_secs(1));
         }
-        if disconnected {
-            self.client = None;
-            self.reported_terminal_focus = None;
-            self.state = State::Disconnected { since: Instant::now(), last_error: "connection lost".into() };
-        }
+        if disconnected {self.connection_lost();}
         if self.client.is_none() {
             let due = self.last_attempt.is_none_or(|t| t.elapsed() > Duration::from_millis(150));
             if due {
@@ -258,6 +258,13 @@ impl Conn {
             }
             self.ctx.request_repaint_after(Duration::from_millis(200));
         }
+    }
+
+    fn connection_lost(&mut self){
+        self.client=None;
+        self.reported_terminal_focus=None;
+        self.shell_completions.clear();
+        self.state=State::Disconnected{since:Instant::now(),last_error:"connection lost".into()};
     }
 
     fn handle(&mut self, m: ServerMsg) {
@@ -270,6 +277,7 @@ impl Conn {
                 let live: std::collections::HashSet<_> = sessions.iter().map(|s|s.id).collect();
                 for info in sessions.into_iter().filter(|s|!self.closing_sessions.contains(&s.id)).collect::<Vec<_>>() { self.update_info(info); }
                 self.infos.retain(|id,_|live.contains(id));
+                self.shell_completions.retain(|id,_|self.infos.contains_key(id));
                 self.observed_agents.retain(|id,_|self.infos.contains_key(id));
                 self.terminal_health.retain(|id,_|self.infos.contains_key(id));
                 self.sessions_listed = true;
@@ -280,6 +288,7 @@ impl Conn {
             }
             ServerMsg::SessionExited { session, code } => {
                 if self.closing_sessions.contains(&session) { return; }
+                self.shell_completions.remove(&session);
                 self.observed_agents.remove(&session);
                 self.terminal_health.remove(&session);
                 if let Some(i) = self.infos.get_mut(&session) {
@@ -310,6 +319,7 @@ impl Conn {
                     self.events.push(ConnEvent::SessionText { session, text });
                 }
             }
+            ServerMsg::ShellCompletion {session,request}=>{if !self.is_connected()||self.closing_sessions.contains(&session)||!self.is_alive(session){return;}if let Some(r)=request{self.shell_completions.insert(session,r);}else{self.shell_completions.remove(&session);}},
             ServerMsg::SessionTelemetry { session, telemetry } => {
                 if self.closing_sessions.contains(&session) { return; }
                 let old = self.telemetry.get(&session).map(|s|s.activity).unwrap_or_default();
@@ -495,6 +505,7 @@ impl Conn {
     }
 
     pub fn kill(&mut self, sid: SessionId) -> bool {
+        self.shell_completions.remove(&sid);
         if !self.is_connected() { return false; }
         self.closing_sessions.insert(sid);
         self.detach(sid);
@@ -721,4 +732,16 @@ mod terminal_focus_tests {
 fn palette_for_theme(theme: &kiln_common::Theme) -> TerminalPalette {
     let rgb = |color: egui::Color32| [color.r(), color.g(), color.b()];
     TerminalPalette { fg: rgb(theme.text), bg: rgb(theme.bg), cursor: rgb(theme.accent), ansi: theme.ansi.map(rgb) }
+}
+
+#[cfg(test)]mod shell_completion_lifecycle_tests{
+use super::*;
+#[test]fn completion_cannot_survive_lost_connection_removed_session_or_close(){
+let mut conn=Conn::offline(egui::Context::default());conn.state=State::Connected;conn.infos.insert(71,SessionInfo{id:71,..Default::default()});
+let message=ServerMsg::ShellCompletion{session:71,request:Some(ShellCompletion{explicit:true,revision:1,buffer:"fixture only".into(),cursor:12,cwd:"/fixture".into(),request_file:String::new(),commands:vec![]})};
+conn.handle(message.clone());assert!(conn.shell_completions.contains_key(&71));conn.connection_lost();assert!(conn.shell_completions.is_empty());conn.handle(message.clone());assert!(conn.shell_completions.is_empty(),"late disconnected messages cannot restore a private edit");
+conn.state=State::Connected;conn.handle(message.clone());assert!(conn.shell_completions.contains_key(&71));conn.handle(ServerMsg::Sessions{req:1,sessions:vec![]});assert!(conn.shell_completions.is_empty());conn.handle(message.clone());assert!(conn.shell_completions.is_empty(),"absent sessions reject stale edits");
+conn.infos.insert(71,SessionInfo{id:71,..Default::default()});conn.handle(message.clone());conn.handle(ServerMsg::SessionExited{session:71,code:Some(0)});conn.handle(message.clone());assert!(conn.shell_completions.is_empty(),"exited shells reject late edits");
+conn.infos.insert(71,SessionInfo{id:71,..Default::default()});conn.handle(message.clone());assert!(conn.kill(71));conn.handle(message);assert!(conn.shell_completions.is_empty(),"explicit close must not be undone by late metadata");
+}
 }

@@ -135,12 +135,12 @@ impl CloudForm {
         }
         files
     }
-    pub fn ui(&mut self, ui: &mut egui::Ui, provider: ObjectProvider) {
+    pub fn poll(&mut self, ctx: &egui::Context, provider: ObjectProvider) {
         if !self.scanned {
             self.scanned = true;
             if !cfg!(test) {
                 let files = self.discovery_files(provider);
-                self.scan = Some(Task::spawn(ui.ctx(), move || {
+                self.scan = Some(Task::spawn(ctx, move || {
                     let profiles =
                         object_profiles::discover(provider, &files).map_err(|e| e.to_string());
                     let aws = aws_profiles::discover(&aws_profiles::AwsFiles::current())
@@ -153,6 +153,10 @@ impl CloudForm {
             self.scan = None;
             self.consume_scan(result);
         }
+        if self.scan.is_some() { ctx.request_repaint_after(std::time::Duration::from_millis(40)); }
+    }
+    pub fn ui(&mut self, ui: &mut egui::Ui, provider: ObjectProvider) {
+        self.poll(ui.ctx(), provider);
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(tr("인증 방식"))
@@ -247,17 +251,9 @@ impl CloudForm {
                         unavailable_reason(provider, profile),
                     );
                 }
-                if let Some(project) = &profile.project {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(project)
-                                .small()
-                                .color(Theme::current().text_dim),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_text(project);
-                }
+                // Project scope is editable once in the target section below.
+                // Repeating it here both obscures the bucket and can show stale scope.
+
             }
         } else if self.mode == 2 {
             ui.add_enabled_ui(!self.loading(), |ui| {

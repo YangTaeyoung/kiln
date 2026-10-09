@@ -275,12 +275,28 @@ fn push_trimmed(sql: &str, toks: &[Token], start: usize, end: usize, out: &mut V
     out.push(start + lead..end - trail);
 }
 
-/// 커서(바이트 오프셋)가 속한 문장. 문장 사이 공백이면 바로 앞 문장을 고른다.
+/// Statement at a byte cursor. Leading indentation belongs to the following
+/// statement on that line; a delimiter belongs to the preceding statement.
 pub fn statement_at(sql: &str, driver: Driver, cursor: usize) -> Option<Range<usize>> {
+    let cursor = cursor.min(sql.len());
     let stmts = split_statements(sql, driver);
+    if let Some(r) = stmts.iter().find(|r| cursor >= r.start && cursor < r.end) {
+        return Some(r.clone());
+    }
     if let Some(r) = stmts
         .iter()
-        .find(|r| cursor >= r.start && cursor <= r.end + 1)
+        .find(|r| cursor == r.end && sql.as_bytes().get(cursor) == Some(&b';'))
+    {
+        return Some(r.clone());
+    }
+    // Do not let an earlier delimiter capture the first character of the next query.
+    let line_end = sql.as_bytes()[cursor..]
+        .iter()
+        .position(|b| *b == b'\n')
+        .map_or(sql.len(), |n| cursor + n);
+    if let Some(r) = stmts
+        .iter()
+        .find(|r| r.start >= cursor && r.start <= line_end)
     {
         return Some(r.clone());
     }
@@ -290,6 +306,24 @@ pub fn statement_at(sql: &str, driver: Driver, cursor: usize) -> Option<Range<us
         .find(|r| r.end <= cursor)
         .or_else(|| stmts.first())
         .cloned()
+}
+
+#[cfg(test)]
+mod caret_execution_tests {
+    use super::*;
+    #[test]
+    fn adjacent_statements_and_indentation_belong_to_the_current_query() {
+        for driver in [Driver::Sqlite, Driver::Postgres, Driver::MySql] {
+            let sql = "SELECT 1;SELECT 2;\n    SELECT '한글';";
+            assert_eq!(&sql[statement_at(sql, driver, 8).unwrap()], "SELECT 1");
+            assert_eq!(&sql[statement_at(sql, driver, 9).unwrap()], "SELECT 2");
+            let indent = sql.find("    ").unwrap();
+            assert_eq!(
+                &sql[statement_at(sql, driver, indent).unwrap()],
+                "SELECT '한글'"
+            );
+        }
+    }
 }
 
 /// 주석을 건너뛴 첫 키워드(대문자).

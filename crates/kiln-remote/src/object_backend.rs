@@ -7,7 +7,7 @@ use tokio::io::AsyncWriteExt;
 
 const R2_MAX_UPLOAD: u64 = R2_API_MAX_UPLOAD_BYTES;
 const JSON_LIMIT: usize = 16 * 1024 * 1024;
-enum Auth {
+pub(super) enum Auth {
     Bearer(String),
     CloudflareKey { key: String, email: String },
 }
@@ -43,7 +43,11 @@ fn checked_token(value: &str) -> Result<String> {
         .map_err(|_| anyhow::anyhow!("Invalid provider access token"))?;
     Ok(s.into())
 }
-fn token(provider: ObjectProvider, auth: &ObjectAuthentication, c: &Control) -> Result<Auth> {
+pub(super) fn token(
+    provider: ObjectProvider,
+    auth: &ObjectAuthentication,
+    c: &Control,
+) -> Result<Auth> {
     match (provider, auth) {
         (
             ObjectProvider::Google,
@@ -909,6 +913,9 @@ mod tests {
                         );
                         match listener.accept() {
                             Ok((mut stream, _)) => {
+                                // BSD/macOS accepted sockets inherit the listener's
+                                // nonblocking flag; read_exact needs bounded blocking I/O.
+                                stream.set_nonblocking(false).unwrap();
                                 assert!(workers.len() < 64, "Too many fixture connections");
                                 let ready = ready_tx.clone();
                                 workers.push(std::thread::spawn(move || {
@@ -951,7 +958,9 @@ mod tests {
                     stream
                         .set_write_timeout(Some(Duration::from_secs(3)))
                         .unwrap();
-                    let _ = stream.write_all(&response);
+                    stream
+                        .write_all(&response)
+                        .expect("owned response write failed");
                 }
                 for worker in workers {
                     worker.join().unwrap();
@@ -993,6 +1002,37 @@ mod tests {
                 .build()
                 .unwrap(),
         }
+    }
+    #[test]
+    fn fixture_reads_fragmented_headers_and_body_without_truncation() {
+        let f = Fixture::new(vec![response(200, "{}")]);
+        let address = url::Url::parse(&f.base)
+            .unwrap()
+            .socket_addrs(|| None)
+            .unwrap()[0];
+        let mut socket = std::net::TcpStream::connect(address).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        socket
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        socket.write_all(b"P").unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        socket
+            .write_all(
+                b"UT /objects/file HTTP/1.1\r\nHost: fixture\r\nContent-Length: 6\r\n\r\nabc",
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        socket.write_all(b"def").unwrap();
+        let mut response = Vec::new();
+        socket.read_to_end(&mut response).unwrap();
+        assert!(response.ends_with(b"{}"));
+        let requests = f.requests(1);
+        assert_eq!(requests[0].method, "PUT");
+        assert_eq!(requests[0].target, "/objects/file");
+        assert_eq!(requests[0].body, b"abcdef");
     }
     #[tokio::test]
     async fn idle_connection_cannot_block_a_real_request_or_consume_its_response() {

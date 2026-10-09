@@ -22,7 +22,7 @@ fn require_object(path: &str) -> Result<&str> {
     };
     Ok(p)
 }
-fn bucket(
+pub(super) fn bucket(
     profile: &ConnectionProfile,
     secrets: &Secrets,
     control: &Control,

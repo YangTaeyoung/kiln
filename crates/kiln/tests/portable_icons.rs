@@ -10,7 +10,7 @@ use kiln_common::icons::{self, Icon};
 const ICON_SIZE: f32 = 20.0;
 const SPACING: f32 = 40.0;
 const MARGIN: f32 = 20.0;
-const ICONS: [Icon; 18] = [
+const ICONS: [Icon; 19] = [
     Icon::Codex,
     Icon::Claude,
     Icon::GitHub,
@@ -29,6 +29,7 @@ const ICONS: [Icon; 18] = [
     Icon::Stop,
     Icon::S3,
     Icon::Server,
+    Icon::Tools,
 ];
 
 fn crop(image: &RgbaImage, index: usize, row: usize, dpi: f32) -> RgbaImage {
@@ -190,4 +191,76 @@ fn shipped_icons_remain_visible_and_distinct_without_system_fonts_at_all_dpis() 
         "Synthetic portable icon review captures: {}",
         captures.display()
     );
+}
+
+#[test]
+fn tools_wrench_actual_button_and_small_marks_remain_distinct() {
+    use kiln_common::widgets::{self, ButtonKind};
+    for theme in [Theme::KILN_DARK, Theme::KILN_LIGHT] {
+        Theme::set_current(theme.name);
+        let mut initialized = false;
+        let mut h = Harness::builder()
+            .with_size([320.0, 110.0])
+            .wgpu()
+            .build_ui(|ui| {
+                if !initialized {
+                    ui.ctx().set_fonts(kiln_common::fonts::definitions(false));
+                    initialized = true;
+                    return;
+                }
+                theme.apply(ui.ctx());
+                ui.painter().rect_filled(ui.max_rect(), 0.0, theme.bg);
+                ui.horizontal(|ui| {
+                    widgets::button_with(ui, Some(Icon::Tools), "Tools", ButtonKind::Ghost, true);
+                    widgets::button_with(ui, Some(Icon::Gear), "Settings", ButtonKind::Ghost, true);
+                });
+                for (row, size) in [14.0, 16.0].into_iter().enumerate() {
+                    for (column, icon) in [Icon::Tools, Icon::Gear, Icon::Inspector]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        icons::paint(
+                            ui.painter(),
+                            Rect::from_min_size(
+                                pos2(20.0 + column as f32 * 40.0, 50.0 + row as f32 * 30.0),
+                                vec2(size, size),
+                            ),
+                            icon,
+                            theme.text,
+                        );
+                    }
+                }
+            });
+        h.run_steps(3);
+        let image = h.render().unwrap();
+        for (row, size) in [14u32, 16].into_iter().enumerate() {
+            let masks: Vec<_> = (0..3)
+                .map(|column| {
+                    let crop = image::imageops::crop_imm(
+                        &image,
+                        20 + column * 40,
+                        50 + row as u32 * 30,
+                        size,
+                        size,
+                    )
+                    .to_image();
+                    visible_mask(&crop, image.get_pixel(12, 45).to_owned())
+                })
+                .collect();
+            for other in [1, 2] {
+                assert!(
+                    masks[0]
+                        .iter()
+                        .zip(&masks[other])
+                        .filter(|(a, b)| a != b)
+                        .count()
+                        >= 8,
+                    "wrench differs from settings and inspector at{size}pt"
+                );
+            }
+        }
+        image
+            .save(format!("/tmp/kiln-tools-button-small-{}.png", theme.name))
+            .unwrap();
+    }
 }
