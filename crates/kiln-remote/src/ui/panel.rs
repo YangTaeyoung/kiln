@@ -1400,6 +1400,8 @@ mod visual_tests {
     #[test]
     fn provider_connections_and_selector_are_identifiable() {
         let dir = tempfile::tempdir().unwrap();
+        let ssh_config = dir.path().join("ssh_config");
+        std::fs::write(&ssh_config, "Host fixture\n  HostName 127.0.0.1\n").unwrap();
         let manager = RemoteManager::with_store(
             dir.path().join("connections.json"),
             Arc::new(kiln_accounts::MemoryStore::new()),
@@ -1433,7 +1435,7 @@ mod visual_tests {
             for theme in ["kiln-dark", "kiln-light"] {
                 Theme::set_current(theme);
                 for width in [420.0, 980.0] {
-                    let panel = RemotePanel::new(manager.clone());
+                    let panel = RemotePanel::new(manager.clone()).with_ssh_config_path(ssh_config.clone());
                     let mut h = Harness::builder()
                         .with_size([width, 660.0])
                         .with_pixels_per_point(1.3)
@@ -1447,7 +1449,7 @@ mod visual_tests {
                             },
                             panel,
                         );
-                    h.run();
+                    h.run_steps(5);
                     for name in ["Production assets", "Build server", "Remote workspace"] {
                         assert!(h.query_all_by_label(name).next().is_some());
                     }
@@ -1460,22 +1462,37 @@ mod visual_tests {
                         )))
                         .unwrap();
                     h.get_by_label(tr("연결 추가")).click();
-                    h.run();
+                    h.run_steps(5);
                     for (current,next,kind) in [("Amazon S3","FTP / FTPS",1),("FTP / FTPS","SFTP",2),("SFTP","Amazon S3",0)] {
+                        // Modal height changes when switching provider forms. Repaint
+                        // quiescence alone does not guarantee that its centered AX rect
+                        // has caught up to the new layout. Click once, after stable geometry.
+                        let mut previous = None;
+                        let mut stable_frames = 0;
+                        for _ in 0..16 {
+                            h.step();
+                            let rect = h.query_all_by_value(current)
+                                .find(|node| node.accesskit_node().role() == egui::accesskit::Role::ComboBox)
+                                .expect("provider selector").rect();
+                            if previous == Some(rect) { stable_frames += 1; } else { stable_frames = 0; }
+                            previous = Some(rect);
+                            if stable_frames >= 3 { break; }
+                        }
+                        assert!(stable_frames >= 3, "unstable provider selector: {} {theme} {width} {current} → {next}", language.code());
                         h.query_all_by_value(current)
                             .find(|node| node.accesskit_node().role() == egui::accesskit::Role::ComboBox)
                             .expect("provider selector")
                             .click();
-                        h.run();
+                        h.run_steps(4);
                         h.query_all_by_label(next)
                             .find(|node| node.accesskit_node().role() == egui::accesskit::Role::Button)
-                            .expect("provider choice button")
+                            .unwrap_or_else(|| panic!("provider choice missing: {} {theme} {width} {current} → {next}; AX={:#?}", language.code(), h.root()))
                             .click();
-                        h.run();
+                        h.run_steps(5);
                         assert_eq!(h.state().form.as_ref().unwrap().kind,kind);
                     }
                     h.get_by_label(tr("취소")).click();
-                    h.run();
+                    h.run_steps(5);
                     assert!(h.state().form.is_none());
                 }
             }
