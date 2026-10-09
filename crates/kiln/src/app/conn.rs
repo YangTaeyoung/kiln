@@ -353,6 +353,17 @@ impl Conn {
             && previous.pid==info.pid && previous.created_unix==info.created_unix {
                 info.exited=previous.exited;
         }
+        // A completion capability belongs to one live shell process. The OSC
+        // reader can deliver a fresh request before the periodic foreground
+        // monitor reports a return to Zsh, so only invalidate the outgoing edge.
+        let left_shell_or_replaced = self.infos.get(&info.id).is_some_and(|previous| {
+            previous.pid != info.pid || previous.created_unix != info.created_unix
+                || (matches!(previous.fg_process.as_deref(), Some("zsh" | "-zsh"))
+                    && !matches!(info.fg_process.as_deref(), Some("zsh" | "-zsh")))
+        });
+        if info.exited.is_some() || left_shell_or_replaced {
+            self.shell_completions.remove(&info.id);
+        }
         if info.exited.is_some() {self.terminal_health.remove(&info.id);}
         let agent = if info.exited.is_some() { None } else {
             super::ui::session_agent(&info).or_else(|| {
@@ -744,4 +755,66 @@ conn.state=State::Connected;conn.handle(message.clone());assert!(conn.shell_comp
 conn.infos.insert(71,SessionInfo{id:71,..Default::default()});conn.handle(message.clone());conn.handle(ServerMsg::SessionExited{session:71,code:Some(0)});conn.handle(message.clone());assert!(conn.shell_completions.is_empty(),"exited shells reject late edits");
 conn.infos.insert(71,SessionInfo{id:71,..Default::default()});conn.handle(message.clone());assert!(conn.kill(71));conn.handle(message);assert!(conn.shell_completions.is_empty(),"explicit close must not be undone by late metadata");
 }
+}
+
+#[cfg(test)]
+mod completion_snapshot_transition_tests {
+    use super::*;
+
+    fn request() -> ServerMsg {
+        ServerMsg::ShellCompletion {
+            session: 71,
+            request: Some(ShellCompletion {
+                explicit: true, revision: 42, buffer: "git st".into(), cursor: 6,
+                cwd: "/fixture".into(), request_file: String::new(), commands: vec![],
+            }),
+        }
+    }
+    fn update(conn: &mut Conn, info: SessionInfo, snapshot: bool) {
+        conn.handle(if snapshot {
+            ServerMsg::Sessions { req: 7, sessions: vec![info] }
+        } else { ServerMsg::SessionUpdated(info) });
+    }
+    #[test]
+    fn completion_follows_live_shell_identity_in_updates_and_snapshots() {
+        for snapshot in [false, true] {
+            let live = SessionInfo {
+                id: 71, pid: 123, created_unix: 456, fg_process: Some("zsh".into()),
+                ..Default::default()
+            };
+            let changes = [
+                SessionInfo { exited: Some(0), ..live.clone() },
+                SessionInfo { pid: 124, ..live.clone() },
+                SessionInfo { created_unix: 457, ..live.clone() },
+                SessionInfo { fg_process: Some("vim".into()), ..live.clone() },
+                SessionInfo { fg_process: None, ..live.clone() },
+            ];
+            for changed in changes {
+                let mut conn = Conn::offline(egui::Context::default());
+                conn.state = State::Connected;
+                update(&mut conn, live.clone(), snapshot);
+                conn.handle(request());
+                assert!(conn.shell_completions.contains_key(&71));
+                update(&mut conn, changed.clone(), snapshot);
+                assert!(conn.shell_completions.is_empty(), "snapshot={snapshot}, info={changed:?}");
+                // No intervening terminal paint: returning to Zsh must not revive
+                // the old private buffer, including stale live snapshots after exit.
+                update(&mut conn, live.clone(), snapshot);
+                assert!(conn.shell_completions.is_empty());
+            }
+            let mut conn = Conn::offline(egui::Context::default());
+            conn.state = State::Connected;
+            update(&mut conn, live.clone(), snapshot);
+            conn.handle(request());
+            update(&mut conn, SessionInfo { title: "new title".into(), cwd: Some("/other".into()), ..live.clone() }, snapshot);
+            assert!(conn.shell_completions.contains_key(&71), "ordinary metadata must preserve the current request");
+            for previous in [None, Some("vim".into())] {
+                update(&mut conn, SessionInfo { fg_process: previous, ..live.clone() }, snapshot);
+                conn.handle(request()); // OSC reader sees live Zsh before the monitor.
+                update(&mut conn, live.clone(), snapshot);
+                assert_eq!(conn.shell_completions.get(&71).unwrap().revision, 42,
+                    "a delayed return-to-Zsh status must not discard a fresh request");
+            }
+        }
+    }
 }

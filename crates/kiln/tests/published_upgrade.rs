@@ -8,6 +8,7 @@ mod unix {
         os::unix::net::UnixStream,
         path::{Path, PathBuf},
         process::{Child, Command, Stdio},
+        sync::{Arc, Mutex},
         time::{Duration, Instant},
     };
 
@@ -73,7 +74,7 @@ mod unix {
     }
     struct Owner {
         root: tempfile::TempDir,
-        child: Child,
+        child: Arc<Mutex<Child>>,
         session: Option<u64>,
         host_endpoints: Vec<String>,
     }
@@ -102,7 +103,7 @@ mod unix {
                 .expect("explicit old daemon executable must start");
             Self {
                 root,
-                child,
+                child: Arc::new(Mutex::new(child)),
                 session: None,
                 host_endpoints: Vec::new(),
             }
@@ -114,7 +115,7 @@ mod unix {
                     return c;
                 }
                 assert!(
-                    self.child.try_wait().unwrap().is_none(),
+                    self.child.lock().unwrap().try_wait().unwrap().is_none(),
                     "old daemon exited: {}",
                     self.log()
                 );
@@ -178,14 +179,23 @@ mod unix {
             }
             let deadline = Instant::now() + Duration::from_secs(3);
             while Instant::now() < deadline {
-                if self.child.try_wait().ok().flatten().is_some() {
+                if self
+                    .child
+                    .lock()
+                    .unwrap()
+                    .try_wait()
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
             // Child::kill targets only the direct process this fixture spawned.
-            let _ = self.child.kill();
-            let _ = self.child.wait();
+            let mut child = self.child.lock().unwrap();
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
     fn sessions(c: &Client) -> Vec<SessionInfo> {
@@ -281,8 +291,40 @@ mod unix {
         assert!(old_info.exited.is_none());
         // This exact public Client path detects protocol mismatch and asks the
         // old owner to upgrade; no manual Upgrade shortcut or synthetic restore.
-        let current = Client::connect_or_spawn(owner.socket().to_str().unwrap(), &new, None)
+        // The fixture parents the old daemon. Reap it during hosted handover so
+        // the successor's --wait-pid does not keep observing a zombie process.
+        let reaper = hosted.then(|| {
+            let child = owner.child.clone();
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(15);
+                loop {
+                    if let Some(status) = child.lock().unwrap().try_wait().unwrap() {
+                        return status;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "owned old hosted daemon did not exit"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })
+        });
+        // Exercise the public Client API, with an external test deadline in case
+        // a protocol regression leaves it waiting on an owned local socket.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let socket = owner.socket();
+        let connector = std::thread::spawn(move || {
+            let result = Client::connect_or_spawn(socket.to_str().unwrap(), &new, None);
+            let _ = tx.send(result);
+        });
+        let current = rx
+            .recv_timeout(Duration::from_secs(20))
+            .unwrap_or_else(|error| panic!("published handover deadline: {error}; {}", owner.log()))
             .unwrap_or_else(|error| panic!("published handover failed: {error}; {}", owner.log()));
+        connector.join().unwrap();
+        if let Some(reaper) = reaper {
+            assert!(reaper.join().unwrap().success());
+        }
         assert_eq!(kiln_proto::PROTO_VERSION, 6);
         if hosted {
             assert_ne!(current.server_pid, old_daemon);

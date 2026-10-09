@@ -10723,5 +10723,10 @@
     "en": "Current authentication",
     "ja": "現在の認証設定",
     "zh-CN": "当前身份验证设置"
+  },
+  "저장된 연결이 없습니다": {
+    "en": "No saved connections",
+    "ja": "保存済みの接続はありません",
+    "zh-CN": "没有已保存的连接"
   }
 }

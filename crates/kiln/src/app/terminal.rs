@@ -451,7 +451,7 @@ impl TermView {
         let transport_ready=conn.terminal_health.get(&self.session).is_none_or(|h|h.state==kiln_proto::TerminalState::Healthy);
         let accepts_input=transport_ready && resp.has_focus() && ui.memory(|m|m.allows_interaction(ui.layer_id()))
             && !resp.context_menu_opened() && !self.inspector && self.search.as_ref().is_none_or(|s|!s.focus);
-        let completion_allowed=conn.is_connected() && accepts_input && self.preedit.is_empty() && term_mode & mode::ALT_SCREEN==0 && conn.infos.get(&self.session).and_then(|i|i.fg_process.as_deref()).is_some_and(|n|matches!(n,"zsh"|"-zsh"));
+        let completion_allowed=conn.is_connected() && conn.is_alive(self.session) && accepts_input && self.preedit.is_empty() && term_mode & mode::ALT_SCREEN==0 && conn.infos.get(&self.session).and_then(|i|i.fg_process.as_deref()).is_some_and(|n|matches!(n,"zsh"|"-zsh"));
         let completion_anchor=conn.screens.get(&self.session).and_then(|s|s.cursor).map(|c|egui::pos2(inner.left()+c.col as f32*cell.x,inner.top()+(c.row as f32+1.0)*cell.y)).unwrap_or(rect.left_bottom());
         self.completion.ui(ui,conn,self.session,completion_allowed,settings.completion_preview,rect,completion_anchor);
         if accepts_input {

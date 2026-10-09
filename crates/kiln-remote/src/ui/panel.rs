@@ -585,7 +585,7 @@ impl RemotePanel {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
                 kiln_common::icons::paint(ui.painter(), rect.shrink(4.0), Icon::Server, theme.text_dim);
                 ui.add_space(8.0);
-                ui.heading(tr("원격 연결"));
+                ui.heading(tr("저장된 연결이 없습니다"));
                 ui.add_space(12.0);
                 if kiln_common::widgets::button(ui,tr("연결 추가"),kiln_common::widgets::ButtonKind::Primary).clicked() {
                     self.form = Some(self.new_form());
