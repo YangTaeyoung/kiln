@@ -20,7 +20,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Development](development.md) | Build and test from source |
 | [Architecture](architecture.md) | Crate map and process ownership |
 | [Releases](maintainers/releases.md) | Build, notarize, sign updates, and publish |
-| [Latest release verification](maintainers/0.1.15-status.md) | Research, independent review, source CI and exact 0.1.15 distribution evidence |
+| [Latest release verification](maintainers/0.1.17-status.md) | Inspector navigation, independent review, source CI and exact 0.1.17 distribution evidence |
 | [Signing setup](maintainers/signing.md) | Maintainer prerequisites and credentials |
 
 See [third-party notices](../THIRD_PARTY_NOTICES.md) for bundled assets and dependencies.

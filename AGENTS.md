@@ -27,6 +27,7 @@ the user's shells, agents, builds, or servers.
 - [0.1.9 release verification](docs/maintainers/0.1.9-status.md) — schema editing, file-language assistance and distribution evidence.
 - [0.1.11 release verification](docs/maintainers/0.1.11-status.md) — pane layout, remote files, browser sign-in, table dialog and terminal recovery.
 - [0.1.16 release verification](docs/maintainers/0.1.16-status.md) — object-storage profile/bucket catalogs, safe SELECT editing, shell suggestions, remote UI review and public artifact evidence.
+- [0.1.17 release verification](docs/maintainers/0.1.17-status.md) — inspector navigation, independent file editors, transfer/recovery guards, source CI and exact public artifact evidence.
 - [0.1.15 release verification](docs/maintainers/0.1.15-status.md) — named workspaces, unified tools, native object profiles, researched connection UI and public distribution evidence.
 - [0.1.14 release verification](docs/maintainers/0.1.14-status.md) — bounded terminal connection repair, redraw/resize regressions and exact public artifact evidence.
 - [0.1.13 release verification](docs/maintainers/0.1.13-status.md) — macOS hosted terminal ownership, mixed-session migration and failure recovery.
