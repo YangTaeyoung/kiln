@@ -138,7 +138,9 @@ while os.read(0, 1): query()
     std::fs::write(base.join("cfg/state.json"), serde_json::json!({"settings": {"theme": "kiln-light", "shell": shell}}).to_string()).unwrap();
     let mut h = Harness::builder().with_size([1100.0, 700.0]).wgpu()
         .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
-    assert!(pump_until(&mut h, 10, |_| result.exists()), "cold child did not finish its color probe");
+    // The child can finish its probe before the GUI consumes the Created event.
+    assert!(pump_until(&mut h, 10, |h| result.exists() && h.state().debug_focused_session().is_some()),
+        "cold color probe or GUI session was not ready: result={}, session={:?}", result.exists(), h.state().debug_focused_session());
     let client = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None).unwrap();
     let sid = h.state().debug_focused_session().unwrap();
     let ctx = h.ctx.clone();
