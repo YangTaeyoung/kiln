@@ -1,4 +1,4 @@
-use super::{icon, protocol, root_path};
+use super::{icon, root_path, RemoteBrowser};
 use crate::{
     ConnectionProfile, RemoteEndpoint, Secrets,
     aws_profiles::{self, Authentication, AwsProfile},
@@ -124,9 +124,10 @@ impl RemoteManager {
 }
 #[derive(Debug)]
 pub enum RemoteEvent {
-    Open {
-        connection: String,
-        path: String,
+    OpenFile {
+        profile: ConnectionProfile,
+        directory: String,
+        entry: crate::RemoteEntry,
     },
     Ssh {
         alias: String,
@@ -491,6 +492,14 @@ fn storage_secrets(manager:&RemoteManager,connection:&str,authentication:&str,id
     if merged.access_key.is_none()||merged.secret_key.is_none(){return Err(tr("Access Key ID 및 Secret Access Key를 함께 입력하세요").into());}Ok(merged)
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RemoteNavigation {
+    pub profile: ConnectionProfile,
+    pub path: String,
+    pub expanded: bool,
+    pub pending_operation: Option<String>,
+}
+
 pub struct RemotePanel {
     manager: RemoteManager,
     ssh_config_path: Option<PathBuf>,
@@ -500,6 +509,8 @@ pub struct RemotePanel {
     saving: Option<Task<Result<(), String>>>,
     error: Option<String>,
     remove: Option<ConnectionProfile>,
+    browsers: std::collections::BTreeMap<String, RemoteBrowser>,
+    expanded: Option<String>,
 }
 impl RemotePanel {
     pub fn new(manager: RemoteManager) -> Self {
@@ -512,6 +523,8 @@ impl RemotePanel {
             saving: None,
             error: None,
             remove: None,
+            browsers: Default::default(),
+            expanded: None,
         }
     }
     /// Use a chosen config as the discovery source for new connections.
@@ -534,7 +547,48 @@ impl RemotePanel {
         }
         form
     }
+    pub fn tick(&mut self, ctx: &egui::Context) {
+        for browser in self.browsers.values_mut() { browser.tick(ctx); }
+        // Removed connections cannot remain usable via cached credentials.
+        self.browsers.retain(|id, b| self.manager.get(id).is_some() || b.pending_operation().is_some());
+        for browser in self.browsers.values_mut() {
+            if let Some(profile) = self.manager.get(browser.connection()) {
+                browser.update_name(&profile.name);
+                if !browser.busy() && browser.profile().endpoint != profile.endpoint {
+                    *browser = RemoteBrowser::new(self.manager.clone(), profile.clone(), root_path(&profile)).navigation();
+                }
+            }
+        }
+        if self.expanded.as_ref().is_some_and(|id| !self.browsers.contains_key(id)) { self.expanded = None; }
+    }
+    pub fn pending_operations(&self) -> Vec<String> {
+        self.browsers.values().filter_map(|b| b.pending_operation().map(|op| format!("{} — {op}", b.profile().name))).collect()
+    }
+    pub fn navigation(&self) -> Vec<RemoteNavigation> {
+        self.browsers.values().map(|b| RemoteNavigation {
+            profile: b.profile().clone(), path: b.path().into(),
+            expanded: self.expanded.as_deref() == Some(b.connection()), pending_operation: b.recovery_pending_operation(),
+        }).collect()
+    }
+    pub fn restore_navigation(&mut self, navigation: &RemoteNavigation) {
+        let id = navigation.profile.id.clone();
+        let mut browser = RemoteBrowser::new(self.manager.clone(), navigation.profile.clone(), navigation.path.clone()).navigation();
+        if navigation.pending_operation.is_some() { browser.restore_pending_notice(); }
+        self.browsers.entry(id.clone()).or_insert(browser);
+        if navigation.expanded { self.expanded = Some(id); }
+    }
+    fn expand(&mut self, profile: &ConnectionProfile, ctx: &egui::Context) {
+        if self.expanded.as_deref() == Some(&profile.id) { self.expanded = None; return; }
+        if self.browsers.get(&profile.id).is_some_and(|b| !b.busy() && b.profile().endpoint != profile.endpoint) {
+            self.browsers.remove(&profile.id);
+        }
+        let browser = self.browsers.entry(profile.id.clone()).or_insert_with(||
+            RemoteBrowser::new(self.manager.clone(), profile.clone(), root_path(profile)).navigation());
+        if !browser.connected() && !browser.busy() { browser.connect(ctx); }
+        self.expanded = Some(profile.id.clone());
+    }
     pub fn ui(&mut self, ui: &mut Ui) -> Vec<RemoteEvent> {
+        self.tick(ui.ctx());
         let mut events = Vec::new();
         let theme = Theme::current();
         if let Some(result) = self.saving.as_mut().and_then(Task::take) {
@@ -607,10 +661,15 @@ impl RemotePanel {
         }
         egui::ScrollArea::vertical()
             .id_salt("remote-connections")
+            .max_height(if self.expanded.is_some() { 160.0 } else { ui.available_height() })
             .show(ui, |ui| {
                 for p in profiles {
                     ui.push_id(&p.id, |ui| {
                         ui.horizontal(|ui| {
+                            let expanded = self.expanded.as_deref() == Some(&p.id);
+                            if icon(ui, if expanded { Icon::ChevronDown } else { Icon::ChevronRight }, if expanded { tr("접기") } else { tr("펼치기") }) {
+                                self.expand(&p, ui.ctx());
+                            }
                             let entry = crate::RemoteEntry {
                                 name: p.name.clone(),
                                 path: p.id.clone(),
@@ -627,19 +686,17 @@ impl RemotePanel {
                                         super::row_with_icon(
                                             ui,
                                             &entry,
-                                            false,
+                                            self.expanded.as_deref() == Some(&p.id),
                                             super::provider_icon(&p),
                                         )
                                     },
                                 )
                                 .inner;
                             if row.clicked() {
-                                events.push(RemoteEvent::Open {
-                                    connection: p.id.clone(),
-                                    path: root_path(&p),
-                                })
+                                self.expand(&p, ui.ctx());
                             }
-                            row.on_hover_text(format!("{} · {}", protocol(&p), p.name));
+                            row.on_hover_text(super::location(&p, &root_path(&p)));
+                            if self.browsers.get(&p.id).is_some_and(|b| b.busy()) { ui.spinner(); }
                             if let RemoteEndpoint::Sftp {
                                 alias, config_path, options, ..
                             } = &p.endpoint
@@ -653,20 +710,30 @@ impl RemotePanel {
                                 }
                             }
                             ui.menu_button("…", |ui| {
-                                if ui.button(tr("연결 편집")).clicked() {
+                                let idle = !self.browsers.get(&p.id).is_some_and(|b| b.busy());
+                                if ui.add_enabled(idle, egui::Button::new(tr("연결 편집"))).clicked() {
                                     self.form = Some(Form::from_profile(&p));
                                     ui.close()
                                 }
-                                if ui.button(tr("연결 삭제")).clicked() {
+                                if ui.add_enabled(idle, egui::Button::new(tr("연결 삭제"))).clicked() {
                                     self.remove = Some(p.clone());
                                     ui.close()
                                 }
                             });
                         });
-                        ui.label(RichText::new(protocol(&p)).small().color(theme.text_dim));
+                        let path = self.browsers.get(&p.id).map(|b| b.path().to_owned()).unwrap_or_else(|| root_path(&p));
+                        let location = super::location(&p, &path);
+                        ui.add(egui::Label::new(RichText::new(&location).small().color(theme.text_dim)).truncate()).on_hover_text(location);
                     });
                 }
             });
+        if let Some(id) = self.expanded.clone() && let Some(browser) = self.browsers.get_mut(&id) {
+            ui.separator();
+            ui.push_id(("remote-navigation", &id), |ui| browser.ui(ui));
+            for entry in browser.take_open_requests() {
+                events.push(RemoteEvent::OpenFile { profile: browser.profile().clone(), directory: browser.path().into(), entry });
+            }
+        }
         if let Some(p) = self.remove.clone() {
             egui::Modal::new(egui::Id::new("remote-remove")).show(ui.ctx(), |ui| {
                 ui.strong(tr("연결을 삭제할까요?"));
@@ -1729,5 +1796,25 @@ mod storage_workflow_tests {
         assert_eq!(crate::load_secrets(store.as_ref(),&connection.id).unwrap().secret_key.as_deref(),Some("fixture-secret"),"existing connection is independent from reusable profile deletion");
         let reopened=RemoteManager::with_store(path,store);assert!(reopened.authentication_profiles().profiles().is_empty());assert_eq!(reopened.profiles(),vec![connection]);
       }}Theme::set_current("kiln-dark");
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    #[test]
+    fn deleted_connections_leave_no_cached_navigation_and_names_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = RemoteManager::with_store(dir.path().join("remote.json"), Arc::new(kiln_accounts::MemoryStore::new()));
+        let profile = |id: &str| ConnectionProfile { id: id.into(), name: id.into(), endpoint: RemoteEndpoint::Sftp {alias: id.into(), config_path: None, root: ".".into(), options: Default::default()} };
+        let a = profile("a"); let b = profile("b");
+        manager.save(a.clone(), Secrets::default()).unwrap(); manager.save(b.clone(), Secrets::default()).unwrap();
+        let mut panel = RemotePanel::new(manager.clone());
+        for profile in [a.clone(), b.clone()] { panel.restore_navigation(&RemoteNavigation {profile, path: "docs".into(), expanded: true, pending_operation: None}); }
+        panel.expanded = Some(a.id.clone());
+        manager.remove(&a.id).unwrap(); let mut renamed = b; renamed.name = "Renamed".into(); manager.save(renamed, Secrets::default()).unwrap();
+        panel.tick(&egui::Context::default());
+        assert!(panel.expanded.is_none()); assert!(!panel.browsers.contains_key(&a.id));
+        let state = panel.navigation(); assert_eq!(state.len(), 1); assert_eq!(state[0].profile.name, "Renamed");
     }
 }

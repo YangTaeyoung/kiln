@@ -189,3 +189,19 @@ backend. Native R2 rename downloads, uploads, then deletes and cannot guarantee
 atomicity against concurrent writers. Metadata-bearing objects are rejected
 rather than silently losing metadata. Use S3-compatible credentials when these
 native API constraints are unsuitable.
+
+## Inspector/editor routing regression
+
+`cargo test -p kiln --test remote_inspector -- --test-threads=1` starts the real
+application with isolated configuration, accounts and daemon paths and an owned
+loopback S3 HTTP fixture. It exercises sidebar connection/folder navigation,
+file-specific tabs, draft checkpoint/credential restoration, text editing and
+check-before-save requests to the exact object. It also verifies hidden-inspector
+transfer polling, workspace/quit protection and unrelated-panel closure.
+The fixture stores only synthetic data and inspects the write count and target.
+Dark/light captures remain in `/tmp/kiln-remote-navigation/`, outside the repository.
+
+Remote library/application tests also cover legacy directory-tab migration,
+unsaved file-draft restoration, path/connection tab identity, removed navigation
+cleanup and endpoint changes before queued file operations. These checks do not
+establish live account permissions or native installation behavior.

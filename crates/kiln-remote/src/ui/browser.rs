@@ -66,6 +66,11 @@ pub struct RemoteBrowser {
     editing: Option<Editing>,
     connected: bool,
     filter: String,
+    navigation_only: bool,
+    file: Option<RemoteEntry>,
+    open_requests: Vec<RemoteEntry>,
+    modal_id: egui::Id,
+    interrupted: bool,
 }
 impl RemoteBrowser {
     pub fn new(manager: RemoteManager, profile: ConnectionProfile, path: String) -> Self {
@@ -88,10 +93,27 @@ impl RemoteBrowser {
             editing: None,
             connected: false,
             filter: String::new(),
+            navigation_only: false,
+            file: None,
+            open_requests: Vec::new(),
+            modal_id: egui::Id::new("remote-file-action"),
+            interrupted: false,
         }
     }
     pub fn title(&self) -> String {
-        self.profile.name.clone()
+        self.file.as_ref().map(|e| e.name.clone()).unwrap_or_else(|| self.profile.name.clone())
+    }
+    pub fn navigation(mut self) -> Self { self.navigation_only = true; self }
+    pub fn file_entry(&self) -> Option<&RemoteEntry> { self.file.as_ref() }
+    pub fn open_file(mut self, entry: RemoteEntry) -> Self { self.file = Some(entry); self }
+    pub fn take_open_requests(&mut self) -> Vec<RemoteEntry> { std::mem::take(&mut self.open_requests) }
+    fn activate_file(&mut self, entry: RemoteEntry) {
+        if self.navigation_only { self.open_requests.push(entry); } else { self.edit(entry); }
+    }
+    pub fn connected(&self) -> bool { self.connected }
+    pub fn update_name(&mut self, name: &str) { self.profile.name = name.into(); }
+    fn endpoint_valid(&self) -> bool {
+        self.manager.get(&self.profile.id).is_some_and(|p| p.endpoint == self.profile.endpoint)
     }
     pub fn connection(&self) -> &str {
         &self.profile.id
@@ -112,7 +134,11 @@ impl RemoteBrowser {
             })
             .or_else(|| (!self.uploads.is_empty()).then(|| tr("업로드 중…").into()))
     }
+    pub fn recovery_pending_operation(&self) -> Option<String> {
+        self.pending_operation().or_else(|| self.interrupted.then(|| tr("이전 원격 전송의 결과를 새로고침해 확인하세요. 작업을 자동으로 재실행하지 않았습니다.").into()))
+    }
     pub fn restore_pending_notice(&mut self) {
+        self.interrupted = true;
         self.notice=Some(tr("이전 원격 전송의 결과를 새로고침해 확인하세요. 작업을 자동으로 재실행하지 않았습니다.").into());
     }
     pub fn path(&self) -> &str {
@@ -154,11 +180,20 @@ impl RemoteBrowser {
         if self.loading_secrets.is_some() || self.active.is_some() {
             return;
         }
+        // A recovered editor must never write to an endpoint changed under the same ID.
+        if self.file.is_some() && !self.endpoint_valid() {
+            self.error = Some(tr("연결 정보가 변경되었습니다. 연결을 다시 선택하세요.").into());
+            return;
+        }
         let store = self.manager.store();
         let id = self.profile.id.clone();
         self.loading_secrets = Some(Task::spawn(ctx, move || {
             crate::load_secrets(store.as_ref(), &id).map_err(|e| e.to_string())
         }));
+        if let Some(entry) = self.file.clone() {
+            if self.editing.is_none() { self.edit(entry); }
+            return;
+        }
         self.queue(
             Operation::List {
                 path: self.path_input.clone(),
@@ -236,8 +271,10 @@ impl RemoteBrowser {
                             self.path = path;
                             self.path_input = self.path.clone();
                             self.connected = true;
+                            if self.interrupted { self.interrupted = false; self.notice = None; }
                         }
                         (Purpose::Edit { entry, local }, RemoteResult::Done) => {
+                            self.interrupted = false; self.notice = None;
                             if std::fs::metadata(&local)
                                 .map(|m| m.len() > 8 * 1024 * 1024)
                                 .unwrap_or(true)
@@ -286,6 +323,7 @@ impl RemoteBrowser {
                             }
                         }
                         (Purpose::Save { text }, RemoteResult::Done) => {
+                            self.interrupted = false;
                             if let Some(e) = &mut self.editing {
                                 e.baseline = text;
                                 e.original = std::fs::read(&e.local).unwrap_or_default();
@@ -316,12 +354,16 @@ impl RemoteBrowser {
             && let Some(secrets) = &self.secrets
             && let Some((op, purpose, label)) = self.pending.pop_front()
         {
-            self.active = Some(Active {
+            if self.file.is_some() && !self.endpoint_valid() {
+                cleanup_purpose(&purpose);
+                for (_, purpose, _) in self.pending.drain(..) { cleanup_purpose(&purpose); }
+                self.error = Some(tr("연결 정보가 변경되었습니다. 연결을 다시 선택하세요.").into());
+            } else { self.active = Some(Active {
                 job: crate::spawn(self.profile.clone(), secrets.clone(), op),
                 purpose,
                 label,
                 cancelling: false,
-            });
+            }); }
         }
         if self.active.is_some()
             || self.loading_secrets.is_some()
@@ -331,6 +373,7 @@ impl RemoteBrowser {
         }
     }
     fn refresh(&mut self) {
+        if self.file.is_some() { return; }
         if !self
             .pending
             .iter()
@@ -362,7 +405,7 @@ impl RemoteBrowser {
             tr("파일 목록을 읽는 중…"),
         );
     }
-    fn busy(&self) -> bool {
+    pub fn busy(&self) -> bool {
         self.active.is_some()
             || self.loading_secrets.is_some()
             || !self.pending.is_empty()
@@ -426,8 +469,9 @@ impl RemoteBrowser {
     }
     pub fn ui(&mut self, ui: &mut Ui) {
         self.tick(ui.ctx());
+        self.modal_id = ui.id().with("remote-file-action");
         let theme = Theme::current();
-        ui.horizontal(|ui| {
+        if !self.navigation_only { ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
             kiln_common::icons::paint(
                 ui.painter(),
@@ -455,8 +499,8 @@ impl RemoteBrowser {
                     ui.close();
                 }
             });
-        });
-        ui.horizontal(|ui| {
+        }); }
+        if self.file.is_none() { ui.horizontal(|ui| {
             ui.add_enabled_ui(
                 self.connected
                     && !self.busy()
@@ -494,7 +538,10 @@ impl RemoteBrowser {
                     }
                 }
             });
-        });
+        }); }
+        if self.file.is_some() && !self.endpoint_valid() {
+            ui.colored_label(theme.red, tr("연결 정보가 변경되었습니다. 연결을 다시 선택하세요."));
+        }
         if let Some(e) = &self.error {
             ui.colored_label(theme.red, tr("원격 작업에 실패했습니다"));
             ui.collapsing(tr("오류 상세"), |ui| {
@@ -535,7 +582,7 @@ impl RemoteBrowser {
             self.dialog_ui(ui.ctx());
             return;
         }
-        if !self.connected && !self.busy() {
+        if (self.file.is_some() || !self.connected) && !self.busy() {
             if ui.button(tr("연결")).clicked() {
                 self.connect(ui.ctx())
             }
@@ -562,7 +609,7 @@ impl RemoteBrowser {
                     .cloned()
                 {
                     if !entry.is_dir && icon(ui, Icon::Pencil, tr("원격 파일 편집")) {
-                        self.edit(entry.clone())
+                        self.activate_file(entry.clone())
                     }
                     if !entry.is_dir && icon(ui, Icon::Download, tr("다운로드")) {
                         if let Some(local) = rfd::FileDialog::new()
@@ -584,12 +631,12 @@ impl RemoteBrowser {
                     }
                 }
             });
-            ui.add(
-                egui::TextEdit::singleline(&mut self.filter)
-                    .desired_width(160.0)
-                    .hint_text(tr("파일 필터")),
-            );
         });
+        ui.add(
+            egui::TextEdit::singleline(&mut self.filter)
+                .desired_width(ui.available_width())
+                .hint_text(tr("파일 필터")),
+        );
         ui.separator();
         let mut activate = None;
         let busy = self.busy();
@@ -625,7 +672,7 @@ impl RemoteBrowser {
                             if row.clicked() {
                                 self.selected = Some(entry.path.clone())
                             }
-                            if row.double_clicked() {
+                            if row.double_clicked() || (self.navigation_only && !entry.is_dir && row.clicked()) {
                                 activate = Some(entry.clone())
                             }
                             row.clone().on_hover_text(format!(
@@ -634,6 +681,10 @@ impl RemoteBrowser {
                                 entry.modified.as_deref().unwrap_or("")
                             ));
                             row.context_menu(|ui| {
+                                if entry.is_dir && ui.button(tr("폴더 열기")).clicked() {
+                                    activate = Some(entry.clone());
+                                    ui.close();
+                                }
                                 if !entry.is_dir && ui.button(tr("원격 파일 편집")).clicked()
                                 {
                                     activate = Some(entry.clone());
@@ -693,7 +744,7 @@ impl RemoteBrowser {
             if entry.is_dir {
                 self.navigate(entry.path)
             } else {
-                self.edit(entry)
+                self.activate_file(entry)
             }
         }
         if ui.rect_contains_pointer(ui.max_rect()) && !self.busy() {
@@ -718,7 +769,7 @@ impl RemoteBrowser {
         let mut close = false;
         let mut rescue = false;
         ui.horizontal_wrapped(|ui| {
-            if icon(ui, Icon::ArrowUp, tr("파일 목록으로 돌아가기")) {
+            if self.file.is_none() && icon(ui, Icon::ArrowUp, tr("파일 목록으로 돌아가기")) {
                 if dirty {
                     self.error =
                         Some(tr("작성 중인 파일을 먼저 원격 저장하거나 로컬에 보관하세요").into())
@@ -731,7 +782,7 @@ impl RemoteBrowser {
             }
             if ui
                 .add_enabled(
-                    dirty && !busy && self.secrets.is_some(),
+                    dirty && !busy && self.secrets.is_some() && (self.file.is_none() || self.endpoint_valid()),
                     egui::Button::new(tr("원격 저장")),
                 )
                 .clicked()
@@ -751,7 +802,7 @@ impl RemoteBrowser {
             match e.editor.save_copy(&path) {
                 Ok(()) => {
                     self.notice = Some(tr("편집 내용을 로컬에 보관했습니다").into());
-                    close = true
+                    close = self.file.is_none();
                 }
                 Err(error) => self.error = Some(error.to_string()),
             }
@@ -792,7 +843,7 @@ impl RemoteBrowser {
         };
         let mut cancel = false;
         let mut accept = false;
-        egui::Modal::new(egui::Id::new("remote-file-action")).show(ctx, |ui| {
+        egui::Modal::new(self.modal_id).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 60.0).clamp(220.0, 420.0));
             match &mut dialog {
                 Dialog::Delete(entry) => {
@@ -1004,6 +1055,27 @@ mod tests {
             name: "Fixture".into(),
             endpoint,
         }
+    }
+    #[test]
+    fn file_connect_downloads_exact_target_and_changed_endpoint_blocks_dispatch() {
+        let dir = tempfile::tempdir().unwrap(); let ctx = egui::Context::default();
+        let manager = RemoteManager::with_store(dir.path().join("remote.json"), std::sync::Arc::new(kiln_accounts::MemoryStore::new()));
+        let profile = fixture(RemoteEndpoint::Sftp { alias: "fixture".into(), config_path: None, root: ".".into(), options: Default::default() });
+        manager.save(profile.clone(), Secrets::default()).unwrap();
+        let entry = RemoteEntry { name: "notes.txt".into(), path: "docs/notes.txt".into(), is_dir: false, size: 0, modified: None };
+        let mut browser = RemoteBrowser::new(manager.clone(), profile.clone(), "docs".into()).open_file(entry);
+        browser.connect(&ctx);
+        assert_eq!(browser.pending.len(), 1);
+        assert!(matches!(&browser.pending[0].0, Operation::Download {path,..} if path == "docs/notes.txt"));
+        let mut changed = profile.clone(); if let RemoteEndpoint::Sftp {alias,..} = &mut changed.endpoint { *alias = "different".into(); }
+        manager.save(changed, Secrets::default()).unwrap();
+        browser.secrets = Some(Secrets::default()); browser.loading_secrets = None;
+        browser.tick(&ctx);
+        assert!(browser.active.is_none()); assert!(browser.pending.is_empty()); assert!(browser.error.is_some());
+        // A saved draft is still available locally after the connection is removed.
+        let draft = RemoteDraft {remote_path: "docs/notes.txt".into(), local_path: dir.path().join("notes.txt"), text: "pending".into(), baseline: "original".into(), original: b"original".to_vec()};
+        browser.restore(&draft); manager.remove(&profile.id).unwrap(); browser.connect(&ctx);
+        assert_eq!(browser.draft(), Some(draft)); assert!(browser.pending.is_empty());
     }
     #[test]
     fn configured_roots_do_not_offer_escape_or_unsupported_folder_rename() {

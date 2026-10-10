@@ -458,6 +458,11 @@ impl KilnApp {
                 let mut root = pg.root.clone();
                 let mut alive = true;
                 for pp in &pg.panes {
+                    if pp.tool.as_ref().is_some_and(|t| ws.tools.migrate_remote_directory(t)) {
+                        ws.sheet = Some(tools::ToolKind::Remote);
+                        if !root.remove(pp.id) { alive = false; }
+                        continue;
+                    }
                     let kind = match &pp.tool {
                         Some(t) => match ws.tools.restore_tool(t, ctx) {
                             Some(tab) => PaneKind::Tool(tab),
@@ -491,6 +496,12 @@ impl KilnApp {
                 ws.pages.push(Page::new(pid, pane));
             }
             ws.active_page = ws.active_page.min(ws.pages.len() - 1);
+            for navigation in ws.tools.drafts().remote {
+                if navigation.pending_operation.is_some() {
+                    self.recovery_messages.push(format!("{} — {}", navigation.profile.name, kiln_common::i18n::tr("이전 원격 전송의 결과를 새로고침해 확인하세요. 작업을 자동으로 재실행하지 않았습니다.")));
+                    self.recovery_open = true;
+                }
+            }
             self.workspaces.push(ws);
         }
         self.active = p.active.min(self.workspaces.len().saturating_sub(1));
@@ -774,6 +785,7 @@ impl KilnApp {
                 }
             }
             Action::CloseWorkspace(i) => {
+                if self.block_remote_operations(Some(i)) { return; }
                 if let Some(panes)=self.workspaces.get(i).map(|ws|ws.all_panes()) {if self.block_submitted_database_write(&panes){return;}}
                 if let Some(ws) = self.workspaces.get(i) {
                     let dirty = self.unsaved_items(Some(i));
@@ -791,6 +803,7 @@ impl KilnApp {
                 }
             }
             Action::QuitPreservingDrafts => {
+                if self.block_remote_operations(None) { return; }
                 if self.block_submitted_database_write(&self.panes.keys().copied().collect::<Vec<_>>()){return;}
                 #[cfg(feature = "updater-test")]
                 crate::updater_fixture_event("quit-preserving-drafts");
@@ -799,6 +812,7 @@ impl KilnApp {
                 else { self.recovery_open=true; #[cfg(target_os="macos")] macos::reply_to_termination(false); }
             }
             Action::QuitConfirmed => {
+                if self.block_remote_operations(None) { return; }
                 if self.block_submitted_database_write(&self.panes.keys().copied().collect::<Vec<_>>()){return;}
                 #[cfg(feature = "updater-test")]
                 crate::updater_fixture_event("quit-discarding-drafts");
@@ -823,6 +837,7 @@ impl KilnApp {
                 }
             }
             Action::CloseWorkspaceConfirmed(i) => {
+                if self.block_remote_operations(Some(i)) { return; }
                 if let Some(panes)=self.workspaces.get(i).map(|ws|ws.all_panes()) {if self.block_submitted_database_write(&panes){return;}}
                 if i < self.workspaces.len() {
                     if self.block_disconnected_close(&self.workspaces[i].all_panes()) { return; }
@@ -1670,9 +1685,17 @@ impl KilnApp {
         items
     }
 
+    fn block_remote_operations(&mut self, workspace: Option<usize>) -> bool {
+        let operations = self.workspaces.iter().enumerate().filter(|(i,_)| workspace.is_none_or(|wanted| *i == wanted))
+            .flat_map(|(_,ws)| ws.tools.remote_pending_operations()).collect::<Vec<_>>();
+        if operations.is_empty() { return false; }
+        self.toast(kiln_common::i18n::tr("원격 작업 진행 중"), &operations.join("\n"), ToastKind::Info, None);
+        true
+    }
+
     fn block_submitted_database_write(&mut self, panes:&[PaneId])->bool {
-        let reason=panes.iter().filter_map(|id|self.panes.get(id).and_then(|p|p.tool())).find_map(|tool|tool.close_block_reason());
-        if let Some(reason)=reason {self.toast(kiln_common::i18n::tr("DB 변경 반영 중"),reason,ToastKind::Info,None);true}else{false}
+        let reason=panes.iter().filter_map(|id|self.panes.get(id).and_then(|p|p.tool())).find_map(|tool|tool.close_block_reason().map(|reason| (reason, tool.key().starts_with("remote-file:"))));
+        if let Some((reason, remote))=reason {self.toast(kiln_common::i18n::tr(if remote {"원격 작업 진행 중"} else {"DB 변경 반영 중"}),reason,ToastKind::Info,None);true}else{false}
     }
 
     fn guard_window_close(&mut self, ctx: &egui::Context) {
@@ -1682,7 +1705,7 @@ impl KilnApp {
         let native_requested=false;
         let requested = native_requested || ctx.input(|i| i.viewport().close_requested());
         if self.quit_confirmed || !requested { return; }
-        if self.block_submitted_database_write(&self.panes.keys().copied().collect::<Vec<_>>()) {
+        if self.block_remote_operations(None) || self.block_submitted_database_write(&self.panes.keys().copied().collect::<Vec<_>>()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             #[cfg(target_os="macos")] macos::reply_to_termination(false);
             return;

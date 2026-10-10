@@ -1,10 +1,5 @@
-//! Remote connections extend Kiln's existing graphite Operate surface.
-//! THESIS: choose a named connection, then manipulate its files in a central tab.
-//! OWN-WORLD: shared semantic themes, vector icons, quiet rows and compact controls.
-//! STORY: connect, navigate, transfer or edit, and see the actual operation result.
-//! FIRST VIEWPORT: connection list at left; path, actions and file rows in the tab.
-//! FORM: established file-browser extension, no new visual identity.
-//! FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md.
+//! Remote folders and transfers live in the workspace inspector.
+//! Opening a file creates an independent editor in the main workspace.
 mod browser;
 mod cloud_form;
 mod bucket_picker;
@@ -12,7 +7,7 @@ pub use bucket_picker::BucketLoader;
 mod panel;
 mod ssh_form;
 pub use browser::{RemoteBrowser, RemoteDraft};
-pub use panel::{RemoteEvent, RemoteManager, RemotePanel};
+pub use panel::{RemoteEvent, RemoteManager, RemotePanel, RemoteNavigation};
 
 use crate::{ConnectionProfile, RemoteEndpoint};
 pub fn protocol(profile: &ConnectionProfile) -> &'static str {
@@ -48,6 +43,14 @@ pub fn root_path(profile: &ConnectionProfile) -> String {
                 root.clone()
             }
         }
+    }
+}
+pub fn location(profile: &ConnectionProfile, path: &str) -> String {
+    match &profile.endpoint {
+        RemoteEndpoint::S3 { bucket, .. } => format!("s3://{bucket}/{}", path.trim_start_matches('/')),
+        RemoteEndpoint::ObjectStorage { provider, bucket, .. } => format!("{} · {bucket}/{}", provider.label(), path.trim_start_matches('/')),
+        RemoteEndpoint::Ftp { host, port, tls, .. } => format!("{}://{host}:{port}/{path}", if *tls { "ftps" } else { "ftp" }),
+        RemoteEndpoint::Sftp { alias, .. } => format!("{alias}:{path}"),
     }
 }
 pub fn icon(ui: &mut egui::Ui, kind: kiln_common::icons::Icon, label: &str) -> bool {
@@ -128,7 +131,7 @@ fn row_with_icon(
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     text.set_clip_rect(text_rect.intersect(ui.clip_rect()));
-    text.add(egui::Label::new(&entry.name).truncate());
+    text.add(egui::Label::new(&entry.name).selectable(false).truncate());
     if !entry.is_dir {
         ui.painter().text(
             egui::pos2(rect.right() - 8.0, rect.center().y),

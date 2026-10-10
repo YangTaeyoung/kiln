@@ -673,10 +673,15 @@ impl WorkspaceTools {
             agent_prompt:self.repositories.prompt().to_owned(),
             commit_message: self.git.as_ref().map(|g| g.commit_draft().to_owned()).unwrap_or_default(),
             github: self.hub.as_ref().map(GithubHub::recovery_drafts).unwrap_or_default(),
+            remote: self.remote_panel.as_ref().map(|p| p.navigation()).unwrap_or_default(),
         }
     }
 
     pub fn restore_drafts(&mut self, drafts: &WorkspaceDrafts) {
+        if !drafts.remote.is_empty() {
+            let panel = self.remote_panel.get_or_insert_with(|| kiln_remote::ui::RemotePanel::new(self.remote.clone()));
+            for navigation in &drafts.remote { panel.restore_navigation(navigation); }
+        }
         self.repositories.restore(&drafts.repositories);
         self.repositories.restore_prompt(&drafts.agent_prompt);
         if !drafts.commit_message.is_empty() { *self.git().commit_message_mut() = drafts.commit_message.clone(); }
@@ -687,6 +692,7 @@ impl WorkspaceTools {
 
     pub fn unsaved_drafts(&self) -> Vec<String> {
         let mut items = self.repositories.unsaved();
+        items.extend(self.remote_pending_operations());
         if self.git.as_ref().is_some_and(|g| !g.commit_draft().is_empty()) { items.push(kiln_common::i18n::tr("Git — 작성 중인 커밋 메시지").into()); }
         if let Some(hub) = &self.hub {
             for (repo, drafts) in hub.recovery_drafts().repositories {
@@ -697,6 +703,17 @@ impl WorkspaceTools {
         items
     }
 
+    pub fn remote_pending_operations(&self) -> Vec<String> {
+        self.remote_panel.as_ref().map(|p| p.pending_operations()).unwrap_or_default()
+    }
+    /// Old directory cards become inspector navigation, never a file download.
+    pub fn migrate_remote_directory(&mut self, tool: &ToolP) -> bool {
+        let ToolP::Remote { connection, path, file: None, draft: None, profile, pending_operation } = tool else { return false; };
+        let Some(profile) = profile.clone().or_else(|| self.remote.get(connection)) else { return false; };
+        let panel = self.remote_panel.get_or_insert_with(|| kiln_remote::ui::RemotePanel::new(self.remote.clone()));
+        panel.restore_navigation(&kiln_remote::ui::RemoteNavigation { profile, path: path.clone(), expanded: true, pending_operation: pending_operation.clone() });
+        true
+    }
     pub fn discard_recovery(&mut self, suppressed: bool) { self.suppress_recovery = suppressed; }
 
     pub fn worktree_identity(&self) -> Option<&kiln_git::worktrees::WorktreeIdentity> {
@@ -714,6 +731,7 @@ impl WorkspaceTools {
 
     /// 매 프레임: 저장소 요약 갱신, 파일 트리 git 색상 반영.
     pub fn tick(&mut self, active: bool) {
+        if let Some(panel) = &mut self.remote_panel { panel.tick(&self.ctx); }
         self.repositories.tick();
         if let Some(task) = &mut self.worktree_identity_task
             && let Some(identity) = task.take() {
@@ -833,9 +851,10 @@ impl WorkspaceTools {
                 self.console_seq += 1;
                 db_console_factory(self.db.clone(), ConnId(*conn), self.console_seq)
             }
-            ToolP::Remote { connection, path, draft, profile, pending_operation } => {
-                let profile = self.remote.get(connection).or_else(||profile.clone())?;
-                remote_factory(self.remote.clone(), profile, path.clone(), draft.clone(), false, pending_operation.is_some())
+            ToolP::Remote { connection, path, file, draft, profile, pending_operation } => {
+                let profile = profile.clone().or_else(||self.remote.get(connection))?;
+                let entry = file.clone().or_else(|| draft.as_ref().map(|d| kiln_remote::RemoteEntry { name: d.remote_path.rsplit('/').next().unwrap_or(&d.remote_path).into(), path: d.remote_path.clone(), is_dir: false, size: d.original.len() as u64, modified: None }))?;
+                remote_factory(self.remote.clone(), profile, path.clone(), entry, draft.clone(), false, pending_operation.is_some())
             },
             ToolP::History => history_factory(self.root.clone()),
             ToolP::RepositoryHistory {root} => history_factory(root.clone()),
@@ -925,7 +944,7 @@ impl WorkspaceTools {
                 let manager = self.remote.clone();
                 let panel = self.remote_panel.get_or_insert_with(|| kiln_remote::ui::RemotePanel::new(manager.clone()));
                 panel.ui(ui).into_iter().filter_map(|event| match event {
-                    kiln_remote::ui::RemoteEvent::Open { connection, path } => manager.get(&connection).map(|profile| Action::OpenTab(remote_factory(manager.clone(), profile, path, None, true, false))),
+                    kiln_remote::ui::RemoteEvent::OpenFile { profile, directory, entry } => Some(Action::OpenTab(remote_factory(manager.clone(), profile, directory, entry, None, true, false))),
                     kiln_remote::ui::RemoteEvent::Ssh { alias, config_path, options } => Some(Action::OpenSshConnection { alias, config_path, options }),
                 }).collect()
             },
@@ -1002,6 +1021,35 @@ pub struct RepoLine {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
+    fn remote_fixture(id: &str) -> kiln_remote::ConnectionProfile {
+        kiln_remote::ConnectionProfile { id: id.into(), name: "Assets".into(), endpoint: kiln_remote::RemoteEndpoint::Sftp { alias: "fixture".into(), config_path: None, root: ".".into(), options: Default::default() } }
+    }
+    #[test]
+    fn remote_file_identity_and_legacy_navigation_restore_preserve_drafts() {
+        let dir = tempfile::tempdir().unwrap(); let ctx = egui::Context::default();
+        let manager = kiln_remote::ui::RemoteManager::with_store(dir.path().join("remote.json"), std::sync::Arc::new(kiln_accounts::MemoryStore::new()));
+        let entry = |path: &str| kiln_remote::RemoteEntry { name: path.rsplit('/').next().unwrap().into(), path: path.into(), is_dir: false, size: 0, modified: None };
+        let a = remote_factory(manager.clone(), remote_fixture("a"), ".".into(), entry("one/file.txt"), None, false, false);
+        let b = remote_factory(manager.clone(), remote_fixture("a"), ".".into(), entry("two/file.txt"), None, false, false);
+        let c = remote_factory(manager, remote_fixture("b"), ".".into(), entry("one/file.txt"), None, false, false);
+        assert_ne!(a.key, b.key); assert_ne!(a.key, c.key);
+        let mut changed = remote_fixture("a"); if let kiln_remote::RemoteEndpoint::Sftp {alias,..} = &mut changed.endpoint { *alias = "new-host".into(); }
+        let d = remote_factory(kiln_remote::ui::RemoteManager::with_store(dir.path().join("other.json"), std::sync::Arc::new(kiln_accounts::MemoryStore::new())), changed, ".".into(), entry("one/file.txt"), None, false, false);
+        assert_ne!(a.key, d.key, "reselecting a changed endpoint must not reuse the old editor");
+        let mut tools = WorkspaceTools::new(dir.path(), &ctx, DbManager::in_memory(), 1);
+        let legacy: ToolP = serde_json::from_value(serde_json::json!({"Remote":{"connection":"a", "path":"docs", "profile":remote_fixture("a"), "pending_operation":"Upload"}})).unwrap();
+        assert!(tools.migrate_remote_directory(&legacy));
+        assert_eq!(tools.drafts().remote[0].path, "docs");
+        assert!(tools.drafts().remote[0].pending_operation.is_some(), "interrupted-transfer notice survives subsequent checkpoints");
+        assert!(tools.unsaved_drafts().is_empty());
+        let draft = kiln_remote::ui::RemoteDraft { remote_path: "docs/file.txt".into(), local_path: dir.path().join("file.txt"), text: "edited".into(), baseline: "original".into(), original: b"original".to_vec() };
+        let old_edit = ToolP::Remote { connection: "a".into(), path: "docs".into(), file: None, profile: Some(remote_fixture("a")), draft: Some(draft.clone()), pending_operation: None };
+        assert!(!tools.migrate_remote_directory(&old_edit));
+        let tab = tools.restore_tool(&old_edit, &ctx).unwrap();
+        assert!(tab.own_page()); assert!(tab.is_dirty()); assert_eq!(tab.title(), "file.txt");
+        let ToolP::Remote { file, draft: saved, profile, .. } = tab.persist().unwrap() else { panic!() };
+        assert_eq!(file.unwrap().path, "docs/file.txt"); assert_eq!(saved, Some(draft)); assert_eq!(profile, Some(remote_fixture("a")));
+    }
     #[test]
     fn github_comment_and_workspace_drafts_roundtrip_and_reversible_discard() {
         let dir = tempfile::tempdir().unwrap();
@@ -1224,10 +1272,10 @@ mod language_title_tests {
     }
 }
 
-fn remote_factory(manager: kiln_remote::ui::RemoteManager, profile: kiln_remote::ConnectionProfile, path: String, draft: Option<kiln_remote::ui::RemoteDraft>, connect: bool, interrupted: bool) -> TabFactory {
-    let key = format!("remote:{}",profile.id);
+fn remote_factory(manager: kiln_remote::ui::RemoteManager, profile: kiln_remote::ConnectionProfile, path: String, entry: kiln_remote::RemoteEntry, draft: Option<kiln_remote::ui::RemoteDraft>, connect: bool, interrupted: bool) -> TabFactory {
+    let key = format!("remote-file:{}", serde_json::to_string(&(&profile.id, &profile.endpoint, &entry.path)).unwrap());
     TabFactory { key:key.clone(), make: Box::new(move |ctx,_| {
-        let mut browser=kiln_remote::ui::RemoteBrowser::new(manager,profile,path);
+        let mut browser=kiln_remote::ui::RemoteBrowser::new(manager,profile,path).open_file(entry);
         if let Some(draft)=draft {browser.restore(&draft);}
         if interrupted {browser.restore_pending_notice();}
         if connect {browser.connect(ctx);}
@@ -1236,12 +1284,18 @@ fn remote_factory(manager: kiln_remote::ui::RemoteManager, profile: kiln_remote:
 }
 struct RemoteTab { browser:kiln_remote::ui::RemoteBrowser,key:String,suppress_recovery:bool,ctx:egui::Context }
 impl ToolTab for RemoteTab {
+    fn own_page(&self)->bool{true}
     fn title(&self)->String{self.browser.title()}
     fn key(&self)->String{self.key.clone()}
     fn ui(&mut self,ui:&mut egui::Ui)->Vec<Action>{self.browser.ui(ui);Vec::new()}
     fn is_dirty(&self)->bool{self.browser.is_dirty()||self.browser.pending_operation().is_some()}
-    fn persist(&self)->Option<ToolP>{Some(ToolP::Remote {connection:self.browser.connection().into(),path:self.browser.path().into(),draft:if self.suppress_recovery{None}else{self.browser.draft()},profile:Some(self.browser.profile().clone()),pending_operation:self.browser.pending_operation()})}
-    fn recovery_notice(&self)->Option<String>{if self.browser.pending_operation().is_some(){Some(kiln_common::trf!("{} — 진행 중인 원격 전송",self.browser.title()))}else{self.is_dirty().then(||kiln_common::trf!("{} — 저장하지 않은 원격 편집",self.browser.title()))}}
+    fn close_block_reason(&self)->Option<&'static str>{self.browser.pending_operation().is_some().then(||kiln_common::i18n::tr("원격 작업이 완료되거나 중단된 후 닫으세요."))}
+    fn persist(&self)->Option<ToolP>{Some(ToolP::Remote {connection:self.browser.connection().into(),path:self.browser.path().into(),file:self.browser.file_entry().cloned(),draft:if self.suppress_recovery{None}else{self.browser.draft()},profile:Some(self.browser.profile().clone()),pending_operation:self.browser.recovery_pending_operation()})}
+    fn recovery_notice(&self)->Option<String>{
+        if self.browser.pending_operation().is_some() { Some(kiln_common::trf!("{} — 진행 중인 원격 전송",self.browser.title())) }
+        else if self.browser.recovery_pending_operation().is_some() { Some(format!("{} — {}", self.browser.title(), kiln_common::i18n::tr("이전 원격 전송의 결과를 새로고침해 확인하세요. 작업을 자동으로 재실행하지 않았습니다."))) }
+        else {self.is_dirty().then(||kiln_common::trf!("{} — 저장하지 않은 원격 편집",self.browser.title()))}
+    }
     fn discard_recovery(&mut self,suppress:bool){self.suppress_recovery=suppress;}
     fn tick(&mut self){self.browser.tick(&self.ctx);}
     fn paint_icon(&self,ui:&egui::Ui,rect:egui::Rect)->bool{kiln_common::icons::paint(ui.painter(),rect,kiln_remote::ui::provider_icon(self.browser.profile()),kiln_common::Theme::current().text);true}

@@ -114,7 +114,7 @@ pub struct PaneP {
 /// 카드에 담긴 도구(터미널이 아닌 카드).
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum ToolP {
-    Remote { connection: String, path: String, #[serde(default)] draft: Option<kiln_remote::ui::RemoteDraft>, #[serde(default)] profile:Option<kiln_remote::ConnectionProfile>, #[serde(default)] pending_operation:Option<String> },
+    Remote { connection: String, path: String, #[serde(default)] file: Option<kiln_remote::RemoteEntry>, #[serde(default)] draft: Option<kiln_remote::ui::RemoteDraft>, #[serde(default)] profile:Option<kiln_remote::ConnectionProfile>, #[serde(default)] pending_operation:Option<String> },
     Editor { path: PathBuf, #[serde(default)] language_override: Option<String> },
     DbTable { conn: u64, schema: Option<String>, table: String },
     DbConsole { conn: u64 },
@@ -140,6 +140,7 @@ pub struct WorkspaceDrafts {
     pub repositories: std::collections::BTreeMap<PathBuf, LocalRepositoryDrafts>,
     pub commit_message: String,
     pub github: kiln_git::GithubDrafts,
+    pub remote: Vec<kiln_remote::ui::RemoteNavigation>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default)]

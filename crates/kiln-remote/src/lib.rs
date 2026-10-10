@@ -222,7 +222,7 @@ pub fn load_secrets(store: &dyn CredentialStore, id: &str) -> Result<Secrets> {
 pub fn delete_secrets(store: &dyn CredentialStore, id: &str) -> Result<bool> {
     store.delete("dev.kiln.remote", id)
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteEntry {
     pub name: String,
     pub path: String,

@@ -56,6 +56,7 @@ jobs:
       - name: GUI and session integration
         run: |
           cargo test --locked -p kiln --test gui
+          cargo test --locked -p kiln --test remote_inspector -- --test-threads=1
           cargo test --locked -p kiln --test workflow_distill -- --test-threads=1
           cargo test --locked -p kiln --test pane_layout -- --test-threads=1
           cargo test --locked -p kiln --test portable_icons
