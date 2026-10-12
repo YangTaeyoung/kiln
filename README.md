@@ -36,6 +36,8 @@ libraries—and keep the whole task in view.
   terminals, so closing and reopening the GUI does not close their shells.
 - **Keep agent conversations through CLI updates.** Track each panel's conversation,
   check CLI versions, and opt into updates with immediate restart in the same account.
+- **Keep account usage current.** Refresh saved Codex and Claude Code accounts
+  automatically, and sign in again without deleting profiles.
 - **Review without leaving the workspace.** Inspect diffs and pull requests,
   drag-select commits to squash, cherry-pick from another branch, or drop a commit.
 - **Use the tools around your terminal.** File editing and LSP, project search,
