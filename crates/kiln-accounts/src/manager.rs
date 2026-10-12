@@ -158,6 +158,8 @@ pub(crate) struct State {
     settings: Settings,
     usage: HashMap<(Tool, String), Usage>,
     limited_at: HashMap<(Tool, String), i64>,
+    login_required: std::collections::HashSet<(Tool, String)>,
+    login_checked_at: Option<std::time::Instant>,
     pub(crate) refreshing: [bool; 2],
     pub(crate) busy: [Option<String>; 2],
     pub(crate) error: [Option<String>; 2],
@@ -296,6 +298,53 @@ impl AccountManager {
         control
     }
 
+    pub fn login_profile(&self, tool: Tool) -> Option<Profile> {
+        let id = self.inner.login.lock()[idx(tool)].as_ref()?.profile_id.clone()?;
+        self.profiles(tool).into_iter().find(|p| p.id == id)
+    }
+
+    pub fn login_required(&self, tool: Tool, id: &str) -> bool {
+        self.with_state(|s| s.login_required.contains(&(tool, id.to_string())))
+    }
+
+    /// Local credential presence, not a remote login guarantee. Never run a
+    /// provider request or Keychain operation on the render thread.
+    pub fn refresh_login_status(&self) {
+        let started = self.with_state(|s| {
+            if s.login_checked_at.is_some_and(|at| at.elapsed().as_secs() < 15) { return false; }
+            s.login_checked_at = Some(std::time::Instant::now());
+            true
+        });
+        if !started { return; }
+        let m = self.clone();
+        std::thread::spawn(move || { m.check_profile_credentials(); m.repaint(); });
+    }
+
+    fn check_profile_credentials(&self) {
+        let _op = self.inner.op.lock();
+        for tool in Tool::ALL {
+            for p in self.profiles(tool) {
+                // An unapplied successful login is ready for Apply, not logged out.
+                let secret = if self.pending_login(tool, &p.id) {
+                    self.inner.env.store.get(&profile_service(tool), &p.id)
+                } else if self.runtime_dir(tool, &p.id).join("initialized").exists() {
+                    self.runtime_secret(tool, &p.id)
+                } else { self.inner.env.store.get(&profile_service(tool), &p.id) };
+                if let Ok(secret) = secret {
+                    let missing = secret.as_deref().is_none_or(|secret| match tool {
+                        Tool::Claude => claude::access_token(secret).is_err(),
+                        Tool::Codex => !codex::has_chatgpt_tokens(secret) || codex::auth_email(secret).is_none(),
+                    });
+                    self.with_state(|s| {
+                        let key = (tool, p.id.clone());
+                        if missing { s.login_required.insert(key); } else { s.login_required.remove(&key); }
+                    });
+                }
+                // An inaccessible Keychain or network error is not proof of logout.
+            }
+        }
+    }
+
     pub fn cancel_login(&self, tool: Tool) {
         if let Some(job) = &self.inner.login.lock()[idx(tool)] {
             job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -338,7 +387,40 @@ impl AccountManager {
     }
 
     fn start_login_with_binary(&self, tool: Tool, label: String, binary: PathBuf, timeout: std::time::Duration) {
-        let control = Arc::new(crate::login::LoginControl::default());
+        self.start_login_job(tool, label, None, binary, timeout);
+    }
+
+    pub fn start_relogin(&self, tool: Tool, id: &str) {
+        if self.login_status(tool).is_some() || self.with_state(|s| s.busy[idx(tool)].is_some()) { return; }
+        let Some(profile) = self.profiles(tool).into_iter().find(|p| p.id == id) else { return; };
+        let Some(binary) = crate::login::find_cli(&self.inner.env.home, tool) else {
+            self.with_state(|s| s.error[idx(tool)] = Some(kiln_common::trf!("{}가 설치되어 있지 않습니다. 설치 후 다시 시도하세요", tool.display_name())));
+            return;
+        };
+        self.start_login_job(tool, profile.label, Some(id.to_string()), binary, std::time::Duration::from_secs(300));
+    }
+
+    fn save_relogin_locked(&self, tool: Tool, id: &str, credentials: crate::login::LoginCredentials) -> Result<Profile> {
+        let profile = self.profiles(tool).into_iter().find(|p| p.id == id)
+            .ok_or_else(|| anyhow!(kiln_common::i18n::tr("다시 로그인할 프로필을 찾을 수 없습니다")))?;
+        let matches = profile.email.as_ref().zip(credentials.email.as_ref())
+            .is_some_and(|(old, new)| old.eq_ignore_ascii_case(new));
+        if !matches { bail!("{}", kiln_common::i18n::tr("선택한 프로필과 다른 계정입니다. 기존 계정으로 다시 로그인하세요")); }
+        let matching_ids = self.profiles(tool).into_iter()
+            .filter(|p| p.email.as_ref().zip(credentials.email.as_ref()).is_some_and(|(old, new)| old.eq_ignore_ascii_case(new)))
+            .map(|p| p.id).collect::<Vec<_>>();
+        if matching_ids != [id.to_string()] { bail!("{}", kiln_common::i18n::tr("다시 로그인할 프로필을 찾을 수 없습니다")); }
+        // Pin the original profile before mutating credentials. Same-account
+        // browser sign-in is staged until the user's explicit Apply action.
+        let saved = self.save_credentials_locked(tool, &profile.label, credentials.secret, None, credentials.email, credentials.oauth, false)?;
+        self.with_state(|s| s.login_required.remove(&(tool, id.to_string())));
+        Ok(saved)
+    }
+
+    fn start_login_job(&self, tool: Tool, label: String, profile_id: Option<String>, binary: PathBuf, timeout: std::time::Duration) {
+        let mut control = crate::login::LoginControl::default();
+        control.profile_id = profile_id.clone();
+        let control = Arc::new(control);
         {
             let mut jobs = self.inner.login.lock();
             if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { return; }
@@ -362,8 +444,13 @@ impl AccountManager {
                     if control.cancel.load(std::sync::atomic::Ordering::Relaxed) { bail!(kiln_common::i18n::tr("로그인을 취소했습니다")); }
                     // Saving a second account must not silently replace the account
                     // used by existing agent sessions or revoke its refresh token.
-                    let profile = m.save_credentials_locked(tool, &label, credentials.secret, None, credentials.email, credentials.oauth, false)?;
-                    Ok(kiln_common::trf!("‘{}’ 계정을 저장했습니다", profile.label))
+                    if let Some(id) = profile_id {
+                        let profile = m.save_relogin_locked(tool, &id, credentials)?;
+                        Ok(kiln_common::trf!("‘{}’ 로그인 완료. ‘적용’을 누르면 갱신됩니다", profile.label))
+                    } else {
+                        let profile = m.save_credentials_locked(tool, &label, credentials.secret, None, credentials.email, credentials.oauth, false)?;
+                        Ok(kiln_common::trf!("‘{}’ 계정을 저장했습니다", profile.label))
+                    }
                 });
             m.inner.login.lock()[idx(tool)] = None;
             m.with_state(|s| {
@@ -446,6 +533,7 @@ impl AccountManager {
             for t in Tool::ALL {
                 m.check_live_identity(t);
             }
+            m.check_profile_credentials();
             m.repaint();
         });
     }
@@ -553,6 +641,7 @@ impl AccountManager {
         let env = &self.inner.env;
         let credential = self.runtime_secret(tool, &id)?;
         if credential.is_none() {
+            if self.pending_login(tool, &id) { bail!("{}", kiln_common::i18n::tr("로그인 갱신을 적용한 후 새 세션을 여세요")); }
             // An initialized directory with missing credentials means logout, not a
             // request to restore an old refresh token from a historical snapshot.
             if dir.join("initialized").exists() { bail!("{}", kiln_common::i18n::tr("이 계정은 다시 로그인해야 합니다.")); }
@@ -738,6 +827,7 @@ impl AccountManager {
             ts.active_since = now_unix();
             if let Some(profile) = ts.profiles.iter_mut().find(|profile| profile.profile.id == id) { profile.pending_login = false; }
             s.live_email[idx(tool)] = Some(email);
+            s.login_required.remove(&(tool, id.to_string()));
             s.events.push(AccountsEvent::Switched { tool, id: id.to_string() });
         });
         if let Err(error)=self.persist() {
@@ -764,6 +854,7 @@ impl AccountManager {
             s.settings.tool_mut(tool).profiles.retain(|p| p.profile.id != id);
             s.usage.remove(&(tool, id.to_string()));
             s.limited_at.remove(&(tool, id.to_string()));
+            s.login_required.remove(&(tool, id.to_string()));
         });
         self.persist()
     }
@@ -855,6 +946,7 @@ impl AccountManager {
         let m = self.clone();
         std::thread::spawn(move || {
             m.check_live_identity(tool);
+            m.check_profile_credentials();
             match tool {
                 Tool::Claude => m.refresh_claude(),
                 Tool::Codex => m.refresh_codex(),
@@ -1173,6 +1265,145 @@ mod tests {
         assert!(!events.iter().any(|event| matches!(event, AccountsEvent::RunLogin(_))));
         let settings = std::fs::read_to_string(&env.settings_path).unwrap();
         assert!(!settings.contains("access-new") && !settings.contains("refresh-new"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn targeted_browser_relogin_keeps_profile_and_requires_apply_for_both_tools() {
+        use std::os::unix::fs::PermissionsExt;
+        for tool in Tool::ALL {
+            let d = tempfile::tempdir().unwrap();
+            let (env, store) = Env::sandbox(d.path(), false);
+            let m = AccountManager::with_env(env.clone());
+            let old = if tool == Tool::Codex { fake_auth("same@example.test", "old") } else { claude_cred("old") };
+            m.write_live(tool, &old).unwrap();
+            if tool == Tool::Claude { set_claude_identity(&env, "same@example.test"); }
+            let original = m.save_current(tool, "Work").unwrap();
+            m.launch_environment(tool).unwrap();
+            // Keep another profile active while repairing the original.
+            let other = m.save_credentials_locked(tool, "Personal", old.clone(), None, Some("other@example.test".into()), None, true).unwrap();
+            m.drain_events();
+            let fresh = if tool == Tool::Codex { fake_auth("same@example.test", "fresh") } else { claude_cred("fresh") };
+            let script = d.path().join("login-fixture");
+            let body = if tool == Tool::Codex {
+                format!("printf '%s' '{}' > \"$CODEX_HOME/auth.json\"", fresh)
+            } else {
+                format!("printf '%s' '{}' > \"$CLAUDE_CONFIG_DIR/.credentials.json\"\nprintf '%s' '{{\"oauthAccount\":{{\"emailAddress\":\"same@example.test\"}}}}' > \"$CLAUDE_CONFIG_DIR/.claude.json\"", fresh)
+            };
+            std::fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+            m.start_login_job(tool, original.label.clone(), Some(original.id.clone()), script, std::time::Duration::from_secs(3));
+            let start = std::time::Instant::now();
+            while m.with_state(|s| s.busy[idx(tool)].is_some()) {
+                assert!(start.elapsed() < std::time::Duration::from_secs(4));
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(m.with_state(|s| s.error[idx(tool)].is_none()), "{:?}", m.with_state(|s| s.error[idx(tool)].clone()));
+            assert_eq!(m.profiles(tool), vec![original.clone(), other.clone()]);
+            assert_eq!(m.active(tool), Some(other.id));
+            assert_eq!(m.runtime_secret(tool, &original.id).unwrap(), Some(old));
+            assert_eq!(store.get(&profile_service(tool), &original.id).unwrap(), Some(fresh.clone()));
+            assert!(m.pending_login(tool, &original.id));
+            m.switch_to(tool, &original.id).unwrap();
+            assert_eq!(m.runtime_secret(tool, &original.id).unwrap(), Some(fresh));
+            assert!(!m.pending_login(tool, &original.id));
+            let reloaded = AccountManager::with_env(env);
+            assert_eq!(reloaded.profiles(tool), m.profiles(tool));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn cancelling_targeted_browser_login_leaves_profile_runtime_and_snapshot_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(d.path(), false);
+        let m = AccountManager::with_env(env.clone());
+        login_codex(&env, "same@example.test", "old");
+        let original = m.save_current(Tool::Codex, "Work").unwrap();
+        m.launch_environment(Tool::Codex).unwrap();
+        m.drain_events();
+        let before = std::fs::read(&env.settings_path).unwrap();
+        let script = d.path().join("cancel-login-fixture");
+        std::fs::write(&script, "#!/bin/sh\nexec sleep 20\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        m.start_login_job(Tool::Codex, original.label.clone(), Some(original.id.clone()), script, std::time::Duration::from_secs(3));
+        assert_eq!(m.login_profile(Tool::Codex), Some(original.clone()));
+        m.cancel_login(Tool::Codex);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+        while m.with_state(|s| s.busy[idx(Tool::Codex)].is_some()) {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(m.login_status(Tool::Codex).is_none());
+        assert_eq!(m.profiles(Tool::Codex), vec![original.clone()]);
+        assert_eq!(store.get(&profile_service(Tool::Codex), &original.id).unwrap(), Some(fake_auth("same@example.test", "old")));
+        assert_eq!(m.runtime_secret(Tool::Codex, &original.id).unwrap(), Some(fake_auth("same@example.test", "old")));
+        assert_eq!(std::fs::read(&env.settings_path).unwrap(), before);
+        assert!(m.drain_events().is_empty());
+    }
+
+    #[test]
+    fn staged_relogin_cannot_bootstrap_runtime_before_apply() {
+        let d = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(d.path(), false);
+        let m = AccountManager::with_env(env.clone());
+        login_codex(&env, "same@example.test", "old");
+        let original = m.save_current(Tool::Codex, "Work").unwrap();
+        m.save_relogin_locked(Tool::Codex, &original.id, crate::login::LoginCredentials {
+            secret: fake_auth("same@example.test", "new"), email: original.email.clone(), oauth: None,
+        }).unwrap();
+        assert!(m.launch_environment(Tool::Codex).is_err());
+        assert!(!m.runtime_dir(Tool::Codex, &original.id).exists());
+        m.switch_to(Tool::Codex, &original.id).unwrap();
+        assert!(m.launch_environment(Tool::Codex).is_ok());
+    }
+
+    #[test]
+    fn targeted_relogin_rejects_another_account_and_missing_identity_without_mutation() {
+        for tool in Tool::ALL {
+            let d = tempfile::tempdir().unwrap();
+            let (env, store) = Env::sandbox(d.path(), false);
+            let m = AccountManager::with_env(env.clone());
+            let old = if tool == Tool::Codex { fake_auth("same@example.test", "old") } else { claude_cred("old") };
+            m.write_live(tool, &old).unwrap();
+            if tool == Tool::Claude { set_claude_identity(&env, "same@example.test"); }
+            let original = m.save_current(tool, "Work").unwrap();
+            m.launch_environment(tool).unwrap();
+            m.drain_events();
+            let settings = std::fs::read(&env.settings_path).unwrap();
+            for email in [Some("wrong@example.test".to_string()), None] {
+                assert!(m.save_relogin_locked(tool, &original.id, crate::login::LoginCredentials { secret: "fresh".into(), email, oauth: None }).is_err());
+                assert_eq!(m.profiles(tool), vec![original.clone()]);
+                assert_eq!(store.get(&profile_service(tool), &original.id).unwrap(), Some(old.clone()));
+                assert_eq!(m.runtime_secret(tool, &original.id).unwrap(), Some(old.clone()));
+                assert_eq!(std::fs::read(&env.settings_path).unwrap(), settings);
+                assert!(m.drain_events().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn removed_runtime_credentials_require_signin_but_expiry_and_probe_errors_do_not() {
+        for tool in Tool::ALL {
+            let d = tempfile::tempdir().unwrap();
+            let (env, _) = Env::sandbox(d.path(), false);
+            let m = AccountManager::with_env(env.clone());
+            let old = if tool == Tool::Codex { fake_auth("same@example.test", "old") } else { claude_cred("expired-but-refreshable") };
+            m.write_live(tool, &old).unwrap();
+            if tool == Tool::Claude { set_claude_identity(&env, "same@example.test"); }
+            let original = m.save_current(tool, "Work").unwrap();
+            m.launch_environment(tool).unwrap();
+            m.set_usage(tool, &original.id, Usage::unavailable("network timeout"));
+            m.check_profile_credentials();
+            assert!(!m.login_required(tool, &original.id));
+            std::fs::remove_file(m.runtime_dir(tool, &original.id).join(if tool == Tool::Claude { ".credentials.json" } else { "auth.json" })).unwrap();
+            m.check_profile_credentials();
+            assert!(m.login_required(tool, &original.id));
+            m.save_relogin_locked(tool, &original.id, crate::login::LoginCredentials { secret: old, email: original.email.clone(), oauth: None }).unwrap();
+            m.check_profile_credentials();
+            assert!(!m.login_required(tool, &original.id), "staged credentials must expose Apply rather than ask for another login");
+        }
     }
 
     #[test]

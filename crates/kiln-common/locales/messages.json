@@ -10868,5 +10868,40 @@
     "en": "The previous request may already have been sent. Without a conversation ID, Kiln will not resend it automatically. Review the request and start a new task.",
     "ja": "前のリクエストは送信済みの可能性があります。会話IDがないため自動再送しません。新しいタスクで内容を確認し、再開してください。",
     "zh-CN": "之前的请求可能已发送。没有会话 ID 时，Kiln 不会自动重发。请确认请求后启动新任务。"
+  },
+  "‘{}’ 다시 로그인 · {}": {
+    "en": "Sign in again to “{}” · {}",
+    "ja": "「{}」に再ログイン · {}",
+    "zh-CN": "重新登录“{}” · {}"
+  },
+  "‘{}’ 로그인 완료. ‘적용’을 누르면 갱신됩니다": {
+    "en": "Signed in to “{}”. Choose Apply to update the login.",
+    "ja": "「{}」へのログインが完了しました。「適用」でログインを更新できます",
+    "zh-CN": "“{}”登录成功。点击“应用”更新登录信息"
+  },
+  "기존 계정으로 로그인하세요. 프로필과 대화 기록은 유지됩니다": {
+    "en": "Sign in with the original account. Your profile and conversation history are kept.",
+    "ja": "元のアカウントでログインしてください。プロファイルと会話履歴は保持されます",
+    "zh-CN": "请使用原账户登录。配置和对话记录将保留"
+  },
+  "다시 로그인": {
+    "en": "Sign in again",
+    "ja": "再ログイン",
+    "zh-CN": "重新登录"
+  },
+  "다시 로그인할 프로필을 찾을 수 없습니다": {
+    "en": "The profile to reauthenticate was not found",
+    "ja": "再ログインするプロファイルが見つかりません",
+    "zh-CN": "找不到需要重新登录的配置"
+  },
+  "선택한 프로필과 다른 계정입니다. 기존 계정으로 다시 로그인하세요": {
+    "en": "This account does not match the selected profile. Sign in with the original account.",
+    "ja": "選択したプロファイルと異なるアカウントです。元のアカウントでログインしてください",
+    "zh-CN": "此账户与所选配置不符。请使用原账户重新登录"
+  },
+  "로그인 갱신을 적용한 후 새 세션을 여세요": {
+    "en": "Apply the updated login before opening a new session",
+    "ja": "更新したログインを適用してから新しいセッションを開いてください",
+    "zh-CN": "请先应用更新的登录信息，再打开新会话"
   }
 }

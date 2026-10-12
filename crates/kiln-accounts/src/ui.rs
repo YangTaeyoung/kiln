@@ -24,12 +24,14 @@ pub(crate) struct UiState {
     confirm_delete: Option<(Tool, String)>,
     adding: Option<(Tool, String)>,
     adding_focus: bool,
+    relogin: Option<(Tool, String)>,
     login_code: [String; 2],
 }
 
 /// 도구별 카드를 그리고, 이번 프레임까지 쌓인 이벤트를 돌려준다.
 pub fn accounts_settings_ui(ui: &mut Ui, mgr: &AccountManager) -> Vec<AccountsEvent> {
     mgr.set_repaint_context(ui.ctx());
+    mgr.refresh_login_status();
     for tool in Tool::ALL {
         ui.push_id(("kiln-accounts", tool.key()), |ui| tool_card(ui, mgr, tool));
     }
@@ -130,7 +132,8 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
 
         // 동작 버튼과 상태 줄.
         let adding = mgr.ui_state().adding.as_ref().is_some_and(|(current, _)| *current == tool);
-        if !adding && mgr.login_status(tool).is_none() { ui.horizontal_wrapped(|ui| {
+        let relogin = mgr.ui_state().relogin.as_ref().is_some_and(|(current, _)| *current == tool);
+        if !adding && !relogin && mgr.login_status(tool).is_none() { ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             ui.add_enabled_ui(busy.is_none(), |ui| {
                 if widgets::button_with(ui, Some(Icon::Save), kiln_common::i18n::tr("현재 로그인한 계정 저장"), ButtonKind::Secondary, true).clicked() {
@@ -206,6 +209,9 @@ fn login_form(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
     let index = if tool == Tool::Claude { 0 } else { 1 };
     let status = mgr.login_status(tool);
     if let Some(status) = status {
+        if let Some(profile) = mgr.login_profile(tool) {
+            info_banner(ui, &kiln_common::trf!("‘{}’ 다시 로그인 · {}", profile.label, profile.email.as_deref().unwrap_or("")));
+        }
         let cancelling = mgr.login_is_cancelling(tool);
         ui.add_enabled_ui(!cancelling, |ui| { ui.horizontal_wrapped(|ui| {
             if let Some(url) = status.browser_url {
@@ -233,6 +239,21 @@ fn login_form(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
     }
     // Clear ephemeral authorization codes once their job has ended.
     mgr.ui_state().login_code[index].clear();
+    let relogin = mgr.ui_state().relogin.clone().filter(|(current, _)| *current == tool);
+    if let Some((_, id)) = relogin {
+        if let Some(profile) = mgr.profiles(tool).into_iter().find(|p| p.id == id) {
+            info_banner(ui, &kiln_common::trf!("‘{}’ 다시 로그인 · {}", profile.label, profile.email.as_deref().unwrap_or("")));
+            ui.add(egui::Label::new(kiln_common::i18n::tr("기존 계정으로 로그인하세요. 프로필과 대화 기록은 유지됩니다")).wrap());
+            ui.horizontal_wrapped(|ui| {
+                if widgets::button(ui, kiln_common::i18n::tr("브라우저에서 로그인"), ButtonKind::Primary).clicked() {
+                    mgr.ui_state().relogin = None;
+                    mgr.start_relogin(tool, &id);
+                }
+                if widgets::button(ui, kiln_common::i18n::tr("취소"), ButtonKind::Secondary).clicked() { mgr.ui_state().relogin = None; }
+            });
+        } else { mgr.ui_state().relogin = None; }
+        return;
+    }
     let adding = mgr.ui_state().adding.clone().filter(|(current, _)| *current == tool);
     if let Some((_, mut name)) = adding {
         ui.add_space(6.0);
@@ -352,6 +373,9 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64) {
 fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, usage: Option<Usage>, now: i64, busy: bool) {
     let t = Theme::current();
     let tool = p.tool;
+    let login_required = mgr.login_required(tool, &p.id);
+    let compact = ui.available_width() < 600.0;
+    let identity_width = (ui.available_width() - 166.0 - if compact || login_required { 0.0 } else { 252.0 }).max(64.0);
     let exhausted = usage.as_ref().is_some_and(|u| u.exhausted_at(now));
     let renaming = mgr.ui_state().renaming.as_ref().filter(|(rt, id, _)| *rt == tool && *id == p.id).map(|r| r.2.clone());
     let confirming = mgr.ui_state().confirm_delete.as_ref().is_some_and(|(ct, id)| *ct == tool && *id == p.id);
@@ -362,7 +386,8 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
         let (ar, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
         widgets::avatar(ui, ar, &p.label, is_active);
 
-        ui.vertical(|ui| {
+        ui.allocate_ui_with_layout(vec2(identity_width, 36.0), Layout::top_down(Align::Min), |ui| {
+            ui.set_width(identity_width);
             ui.spacing_mut().item_spacing.y = 2.0;
             ui.add_space(2.0);
             if let Some(mut buf) = renaming.clone() {
@@ -390,9 +415,9 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     r.2 = buf;
                 }
             } else {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(RichText::new(&p.label).font(fonts::semibold(13.5)).color(t.text));
+                    ui.add(egui::Label::new(RichText::new(&p.label).font(fonts::semibold(13.5)).color(t.text)).truncate());
                     if is_active {
                         widgets::pill(ui, kiln_common::i18n::tr("사용 중"), t.green);
                     }
@@ -402,7 +427,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 });
             }
             let email = p.email.as_deref().unwrap_or(kiln_common::i18n::tr("이메일 알 수 없음"));
-            ui.label(RichText::new(email).font(fonts::regular(12.0)).color(t.text_faint));
+            ui.add(egui::Label::new(RichText::new(email).font(fonts::regular(12.0)).color(t.text_faint)).truncate()).on_hover_text(email);
         });
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -430,7 +455,12 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     mgr.ui_state().renaming = Some((tool, p.id.clone(), p.label.clone()));
                     ui.close();
                 }
-                let can_delete = !is_active;
+                if ui.add_enabled_ui(!busy, |ui| menu_item(ui, Icon::Refresh, kiln_common::i18n::tr("다시 로그인"), t.text)).inner {
+                    mgr.ui_state().adding = None;
+                    mgr.ui_state().relogin = Some((tool, p.id.clone()));
+                    ui.close();
+                }
+                let can_delete = !is_active && !busy;
                 let resp = ui.add_enabled_ui(can_delete, |ui| menu_item(ui, Icon::Trash, kiln_common::i18n::tr("삭제"), t.red)).inner;
                 if resp {
                     mgr.ui_state().confirm_delete = Some((tool, p.id.clone()));
@@ -455,9 +485,19 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 }
             });
             ui.add_space(8.0);
-            usage_block(ui, usage.as_ref(), now);
+            if !login_required && !compact { usage_block(ui, usage.as_ref(), now); }
         });
     });
+    if compact && !login_required { usage_block(ui, usage.as_ref(), now); }
+    if login_required {
+        ui.horizontal_wrapped(|ui| {
+            widgets::pill(ui, kiln_common::i18n::tr("로그인 필요"), t.orange);
+            if ui.add_enabled_ui(!busy, |ui| widgets::button_with(ui, Some(Icon::Refresh), kiln_common::i18n::tr("다시 로그인"), ButtonKind::Secondary, true)).inner.clicked() {
+                mgr.ui_state().adding = None;
+                mgr.ui_state().relogin = Some((tool, p.id.clone()));
+            }
+        });
+    }
 }
 
 /// 아이콘 + 글자 메뉴 항목. 눌리면 true.
@@ -560,6 +600,79 @@ mod tests {
                             }
                         }
                     }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn missing_login_row_opens_reauthentication_and_cancel_keeps_account() {
+        use egui_kittest::kittest::Queryable;
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                let root = tempfile::tempdir().unwrap();
+                let (env, _) = crate::Env::sandbox(root.path(), false);
+                std::fs::create_dir_all(&env.codex_home).unwrap();
+                std::fs::write(env.codex_home.join("auth.json"), crate::codex::tests::fake_auth("work@example.test", "old")).unwrap();
+                let manager = AccountManager::with_env(env);
+                let profile = manager.save_current(Tool::Codex, "Work").unwrap();
+                let variables = manager.launch_environment(Tool::Codex).unwrap();
+                let home = variables.iter().find(|(key,_)|key=="CODEX_HOME").unwrap().1.clone();
+                std::fs::remove_file(std::path::Path::new(&home).join("auth.json")).unwrap();
+                manager.refresh_login_status();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                while !manager.login_required(Tool::Codex, &profile.id) {
+                    assert!(std::time::Instant::now() < deadline);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                let mut harness = egui_kittest::Harness::builder().with_size(vec2(420.0, 760.0)).wgpu()
+                    .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Codex); } }, manager.clone());
+                harness.ctx.set_zoom_factor(1.3);
+                for _ in 0..4 { harness.step(); }
+                for label in ["로그인 필요", "다시 로그인"] {
+                    assert!(harness.ctx.content_rect().contains_rect(harness.get_by_label(kiln_common::i18n::tr(label)).rect()), "{language:?}: {label} clipped in full card");
+                }
+                harness.render().unwrap().save(format!("/tmp/kiln019-reauth-row-{language:?}.png")).unwrap();
+                harness.get_by_label(kiln_common::i18n::tr("다시 로그인")).click();
+                for _ in 0..4 { harness.step(); }
+                let button = harness.get_by_label(kiln_common::i18n::tr("브라우저에서 로그인"));
+                assert!(harness.ctx.content_rect().contains_rect(button.rect()));
+                harness.render().unwrap().save(format!("/tmp/kiln019-reauth-form-{language:?}.png")).unwrap();
+                assert_eq!(manager.ui_state().relogin, Some((Tool::Codex, profile.id.clone())));
+                harness.get_by_label(kiln_common::i18n::tr("취소")).click();
+                for _ in 0..4 { harness.step(); }
+                assert!(manager.ui_state().relogin.is_none());
+                assert_eq!(manager.profiles(Tool::Codex), vec![profile]);
+            });
+        }
+    }
+
+    #[test]
+    fn reauthentication_form_keeps_profile_and_fits_all_languages() {
+        use egui_kittest::kittest::Queryable;
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                for width in [420.0, 720.0] {
+                    let root = tempfile::tempdir().unwrap();
+                    let (env, _) = crate::Env::sandbox(root.path(), false);
+                    std::fs::create_dir_all(&env.codex_home).unwrap();
+                    std::fs::write(env.codex_home.join("auth.json"), crate::codex::tests::fake_auth("work@example.test", "old")).unwrap();
+                    let manager = AccountManager::with_env(env);
+                    let profile = manager.save_current(Tool::Codex, "Work").unwrap();
+                    manager.ui_state().relogin = Some((Tool::Codex, profile.id.clone()));
+                    let mut harness = egui_kittest::Harness::builder().with_size(vec2(width, 400.0))
+                        .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { login_form(ui, manager, Tool::Codex); } }, manager.clone());
+                    harness.ctx.set_zoom_factor(1.3);
+                    for _ in 0..4 { harness.step(); }
+                    for label in ["브라우저에서 로그인", "취소"] {
+                        assert!(harness.ctx.content_rect().contains_rect(harness.get_by_label(kiln_common::i18n::tr(label)).rect()), "{language:?}: {label} at {width}");
+                    }
+                    assert_eq!(harness.query_all_by_label(kiln_common::i18n::tr("계정 이름")).count(), 0);
+                    harness.get_by_label(kiln_common::i18n::tr("취소")).click();
+                    for _ in 0..4 { harness.step(); }
+                    assert!(manager.ui_state().relogin.is_none());
+                    assert_eq!(manager.profiles(Tool::Codex), vec![profile]);
+                    assert!(manager.login_status(Tool::Codex).is_none());
                 }
             });
         }

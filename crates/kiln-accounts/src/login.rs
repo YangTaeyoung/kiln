@@ -22,6 +22,7 @@ pub struct LoginStatus {
 #[derive(Default)]
 pub(crate) struct LoginControl {
     pub cancel: AtomicBool,
+    pub profile_id: Option<String>,
     pub status: Mutex<LoginStatus>,
     input: Mutex<Option<ChildStdin>>,
     stop_readers: AtomicBool,

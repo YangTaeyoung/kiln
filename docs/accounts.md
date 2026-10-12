@@ -31,6 +31,29 @@ the new one.
 **Save current signed-in account** imports an account you already authenticated
 with the official CLI. Profile names can be changed through each row's menu.
 
+## Sign in again without deleting a profile
+
+Open the account row's menu and choose **Sign in again**. Check the displayed
+account name and email, then choose **Sign in with browser**. Sign in with that
+same account and choose **Apply** after completion. Kiln keeps the profile ID,
+name, list order and conversation history; it does not create a replacement
+profile or restart a running terminal. Choosing another account in the browser
+is rejected without changing the original credentials. Cancelling and failed
+attempts leave the original profile intact.
+
+If local credentials have been removed or are incomplete, the row shows
+**Sign-in required** and a direct **Sign in again** button. Local status is
+checked in the background while account settings are open and on refresh. This
+is a local credential check, not an online account-validity guarantee. Network
+failures and an expired access token alone are not treated as logout: the
+installed CLI owns automatic token refresh. If a provider rejects a login while
+local credentials remain, use the same row menu to reauthenticate.
+
+New credentials are staged until **Apply** so browser sign-in cannot silently
+replace the login used by existing sessions. A running CLI that has cached its
+previous login may need to be resumed after applying the repaired login; Kiln
+does not interrupt it automatically.
+
 ## Storage and troubleshooting
 
 The official CLI owns the browser flow and the local callback. Each attempt uses
