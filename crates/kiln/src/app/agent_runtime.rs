@@ -22,6 +22,8 @@ pub struct Record {
     pub generation: String,
     #[serde(default)]
     pub confirmed: bool,
+    #[serde(default)]
+    pub request_started: bool,
 }
 fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
@@ -111,6 +113,7 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
         conversation: None,
         generation,
         confirmed: false,
+        request_started: false,
     };
     private_write(&path, &serde_json::to_vec(&record)?)?;
     attach(&mut spec, &path, &record)?;
@@ -244,6 +247,19 @@ fn launch_spec(
     ));
     Ok(spec)
 }
+fn request_mode(record: &Record, has_request: bool, resumed: bool) -> Result<bool> {
+    if has_request && (record.request_started || record.conversation.is_some()) {
+        ensure!(
+            record.conversation.as_deref().is_some_and(valid_id),
+            "{}",
+            kiln_common::i18n::tr(
+                "이전 요청이 이미 전송되었을 수 있습니다. 대화 ID가 없어 자동 재전송하지 않습니다. 새 작업에서 요청을 확인해 다시 시작하세요."
+            )
+        );
+        return Ok(true);
+    }
+    Ok(resumed)
+}
 pub fn run_request(
     path: &Path,
     generation: &str,
@@ -263,14 +279,8 @@ pub fn run_request(
     let version = probe(Path::new(
         record.spec.program.as_ref().context("missing CLI binary")?,
     ))?;
-    {
-        let _lock = lock_record(path)?;
-        record = read(path)?;
-        ensure!(record.generation == generation, "stale CLI launch");
-        record.version = version;
-        private_write(path, &serde_json::to_vec(&record)?)?;
-    }
-    let payload = if let Some(request) = request {
+    let initial_mode = request_mode(&record, request.is_some(), resumed)?;
+    let payload = if !initial_mode && let Some(request) = request {
         ensure!(
             request
                 .parent()
@@ -291,6 +301,21 @@ pub fn run_request(
     } else {
         None
     };
+    let resumed = {
+        let _lock = lock_record(path)?;
+        record = read(path)?;
+        ensure!(record.generation == generation, "stale CLI launch");
+        let resumed = request_mode(&record, request.is_some(), resumed)?;
+        record.version = version;
+        if request.is_some() && !resumed {
+            record.request_started = true;
+        }
+        if resumed {
+            record.confirmed = false;
+        }
+        private_write(path, &serde_json::to_vec(&record)?)?;
+        resumed
+    };
     let mut spec = if resumed {
         resume(path)?
     } else {
@@ -301,7 +326,7 @@ pub fn run_request(
     }
     let mut cmd = Command::new(spec.program.context("missing CLI executable")?);
     cmd.args(&spec.args).envs(spec.env);
-    if let Some(payload) = payload {
+    if !resumed && let Some(payload) = payload {
         cmd.arg(payload);
     }
     #[cfg(unix)]
@@ -727,6 +752,7 @@ mod tests {
                 generation: name.into(),
                 conversation: None,
                 confirmed: false,
+                request_started: false,
             };
             private_write(&path, &serde_json::to_vec(&record).unwrap()).unwrap();
             path
@@ -764,6 +790,7 @@ mod tests {
             generation: "f".into(),
             conversation: Some("12345678-1234-1234-1234-123456789abc".into()),
             confirmed: true,
+            request_started: false,
         };
         private_write(&p, &serde_json::to_vec(&record).unwrap()).unwrap();
         assert!(resume(&p).is_err());
@@ -778,6 +805,7 @@ mod tests {
             generation: "old".into(),
             conversation: None,
             confirmed: false,
+            request_started: false,
         };
         let mut next = base.clone();
         next.generation = "new".into();
@@ -860,6 +888,25 @@ mod tests {
         assert!(restored.cli_auto_update && restored.cli_restart_after_update);
     }
     #[test]
+    fn restored_task_never_replays_a_previous_request() {
+        let mut record = Record {
+            tool: Tool::Codex,
+            spec: SpawnSpec::default(),
+            version: String::new(),
+            conversation: None,
+            generation: "fixture".into(),
+            confirmed: false,
+            request_started: false,
+        };
+        assert!(!request_mode(&record, true, false).unwrap());
+        record.request_started = true;
+        assert!(request_mode(&record, true, false).is_err());
+        record.conversation = Some("12345678-1234-1234-1234-123456789abc".into());
+        assert!(request_mode(&record, true, false).unwrap());
+        record.request_started = false;
+        assert!(request_mode(&record, true, false).unwrap());
+    }
+    #[test]
     fn version_parses_real_formats() {
         assert_eq!(parse_version(b"codex-cli 0.162.1\n").unwrap(), "0.162.1");
         assert_eq!(
@@ -896,6 +943,7 @@ mod tests {
                 version: "1.2.3".into(),
                 generation: "fixture".into(),
                 confirmed: true,
+                request_started: false,
             };
             private_write(&path, &serde_json::to_vec(&record).unwrap()).unwrap();
             let spec = resume(&path).unwrap();
@@ -916,6 +964,7 @@ mod tests {
             version: "1.0.0".into(),
             generation: "f".into(),
             confirmed: false,
+            request_started: false,
         };
         private_write(&p, &serde_json::to_vec(&record).unwrap()).unwrap();
         assert!(resume(&p).is_err());

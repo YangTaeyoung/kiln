@@ -10863,5 +10863,10 @@
     "en": "{}: This panel keeps its original account. Select another account in account settings, then open a new panel.",
     "ja": "{}: このパネルは元のアカウントを維持します。アカウント設定で別のアカウントを選択し、新しいパネルを開いてください。",
     "zh-CN": "{}: 此面板保留原账户。请在账户设置中选择其他账户，然后打开新面板。"
+  },
+  "이전 요청이 이미 전송되었을 수 있습니다. 대화 ID가 없어 자동 재전송하지 않습니다. 새 작업에서 요청을 확인해 다시 시작하세요.": {
+    "en": "The previous request may already have been sent. Without a conversation ID, Kiln will not resend it automatically. Review the request and start a new task.",
+    "ja": "前のリクエストは送信済みの可能性があります。会話IDがないため自動再送しません。新しいタスクで内容を確認し、再開してください。",
+    "zh-CN": "之前的请求可能已发送。没有会话 ID 时，Kiln 不会自动重发。请确认请求后启动新任务。"
   }
 }

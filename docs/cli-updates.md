@@ -49,6 +49,8 @@ The callback command stays the same across panels and restarts. Kiln does not
 bypass hook trust or enable hooks forbidden by administrator policy. When hooks
 are disabled or unavailable, automatic restart is unavailable.
 
+If a Start task terminal disappears, Kiln resumes its recorded conversation instead of resending the original request. A request that may already have been sent but has no conversation ID requires an explicit new task.
+
 Pre-existing panels and CLIs typed manually into an ordinary shell are not
 retroactively instrumented. Use a new Kiln agent panel to enable tracking. The
 tracking record contains identifiers, executable path and environment paths;

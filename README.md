@@ -34,6 +34,8 @@ libraries—and keep the whole task in view.
   completed, and failed states. Jump directly to the relevant split or session.
 - **Keep sessions independent of the window.** A separate local daemon owns your
   terminals, so closing and reopening the GUI does not close their shells.
+- **Keep agent conversations through CLI updates.** Track each panel's conversation,
+  check CLI versions, and opt into updates with immediate restart in the same account.
 - **Review without leaving the workspace.** Inspect diffs and pull requests,
   drag-select commits to squash, cherry-pick from another branch, or drop a commit.
 - **Use the tools around your terminal.** File editing and LSP, project search,
@@ -63,6 +65,7 @@ install and authenticate the ones you use. The app UI supports Korean, English, 
 [Workspaces & agents](docs/workspaces.md) · [Git workflows](docs/git.md) ·
 [File editor](docs/editor.md) · [Database tools](docs/databases.md) ·
 [Remote files & SSH](docs/remote-files.md) · [Agent accounts](docs/accounts.md) ·
+[CLI updates](docs/cli-updates.md) ·
 [Terminal integration](docs/terminal-integration.md) · [Shell completion](docs/shell-completion.md) · [Architecture](docs/architecture.md)
 
 ### Build and contribute

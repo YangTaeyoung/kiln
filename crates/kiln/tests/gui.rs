@@ -1836,6 +1836,7 @@ if args==['--version']:
  print(version.read_text());sys.exit(0)
 if args==['update']:
  version.write_text('2.1.2');sys.exit(0)
+with Path(__file__).resolve().with_name('argv.jsonl').open('a') as log: log.write(json.dumps(args)+'\n')
 if '--resume' in args: cid=args[args.index('--resume')+1]
 elif 'resume' in args: cid=args[args.index('resume')+1]
 else:
@@ -1870,9 +1871,16 @@ while True:
         }
         manager.save_current(tool,"").unwrap();
     };
-    sign_in("fixture-a@example.invalid");h.state_mut().debug_queue_action(Action::DirectAgent{tool,cwd:Some(proj.clone())});
+    sign_in("fixture-a@example.invalid");h.state_mut().debug_queue_action(Action::LaunchAgent{program:tool.key().into(),cwd:proj.clone(),context:"fixture context".into(),request:"fixture task request".into()});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
     let sid_a=h.state().debug_focused_session().unwrap();let pane_a=h.state().debug_focused_pane_id().unwrap();let spec_a=h.state().debug_focused_launch_spec().unwrap();let path_a=agent_runtime::record_path(&spec_a).unwrap();let a=agent_runtime::read(&path_a).unwrap();assert!(a.confirmed);
+    assert!(a.request_started);
+    let output=std::process::Command::new(spec_a.program.as_ref().unwrap()).args(&spec_a.args).envs(spec_a.env.clone()).current_dir(&proj).output().unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    let starts=std::fs::read_to_string(cli.with_file_name("argv.jsonl")).unwrap();
+    let starts=starts.lines().map(|s|serde_json::from_str::<Vec<String>>(s).unwrap()).collect::<Vec<_>>();
+    assert_eq!(starts.len(),2);assert!(starts[0].iter().any(|s|s.contains("fixture task request")));
+    assert!(!starts[1].iter().any(|s|s.contains("fixture task request")));assert!(starts[1].contains(a.conversation.as_ref().unwrap()));
     sign_in("fixture-b@example.invalid");h.state_mut().debug_queue_action(Action::DirectAgent{tool,cwd:Some(proj.clone())});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
     let sid_b=h.state().debug_focused_session().unwrap();let pane_b=h.state().debug_focused_pane_id().unwrap();let spec_b=h.state().debug_focused_launch_spec().unwrap();let path_b=agent_runtime::record_path(&spec_b).unwrap();let b=agent_runtime::read(&path_b).unwrap();assert!(b.confirmed);assert_ne!(a.conversation,b.conversation);assert_ne!(a.spec.env,b.spec.env);
