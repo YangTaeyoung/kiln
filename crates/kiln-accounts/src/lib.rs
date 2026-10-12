@@ -9,6 +9,7 @@ pub mod codex;
 mod limit;
 mod manager;
 mod login;
+mod usage_http;
 pub mod store;
 mod ui;
 

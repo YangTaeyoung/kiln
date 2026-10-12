@@ -3,17 +3,10 @@
 use crate::Usage;
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 /// Claude Code 가 쓰는 키체인 service 이름.
 pub const CLAUDE_SERVICE: &str = "Claude Code-credentials";
-
-/// 사용량 헤더(anthropic-ratelimit-unified-*)를 받는 최소 inference 요청 주소.
-pub const PROBE_URL: &str = "https://api.anthropic.com/v1/messages";
-/// 프로브 요청 본문(haiku 1토큰 출력).
-pub const PROBE_BODY: &str = r#"{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#;
 
 /// Linux/Windows 의 Claude Code 자격증명 파일. `CLAUDE_CONFIG_DIR` 가 있으면 그 아래를 쓴다.
 pub fn credentials_path(home: &Path, claude_config_dir: Option<&Path>) -> PathBuf {
@@ -99,38 +92,39 @@ pub fn parse_header_dump(dump: &str) -> (u16, Vec<(String, String)>) {
     (code, headers)
 }
 
-/// accessToken 으로 프로브 요청을 보내 사용량 헤더를 읽는다.
-/// 토큰은 curl 인자에 넣지 않고 표준입력(`-H @-`)으로 넘긴다.
+/// The installed official CLI uses this read-only OAuth endpoint for /usage.
 pub fn probe_usage(access_token: &str) -> Result<Usage> {
-    let mut child = Command::new("curl")
-        .args(["-sS", "-o", if cfg!(windows) { "NUL" } else { "/dev/null" }, "-D", "-", "--max-time", "15", "-X", "POST", PROBE_URL, "-H", "@-", "--data-binary", PROBE_BODY])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to run curl")?;
-    {
-        let mut stdin = child.stdin.take().context("curl stdin unavailable")?;
-        write!(
-            stdin,
-            "Authorization: Bearer {access_token}\nanthropic-beta: oauth-2025-04-20\nanthropic-version: 2023-06-01\nContent-Type: application/json\n"
-        )?;
-    }
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        bail!("request failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let (code, headers) = parse_header_dump(&String::from_utf8_lossy(&out.stdout));
-    if code == 401 || code == 403 {
-        bail!("authentication failed (HTTP {code}) — token may be expired");
-    }
-    let get = |k: &str| headers.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v.clone());
-    usage_from_headers(get).with_context(|| format!("no rate-limit headers (HTTP {code})"))
+    let token = crate::usage_http::header_value(access_token)?;
+    let body = crate::usage_http::get("https://api.anthropic.com/api/oauth/usage", &format!(
+        "Authorization: Bearer {token}\nanthropic-beta: oauth-2025-04-20\nContent-Type: application/json\nUser-Agent: kiln-usage\n"))?;
+    usage_from_json(&body).context("usage windows unavailable")
+}
+
+pub fn usage_from_json(body: &Value) -> Option<Usage> {
+    let window = |key: &str| {
+        let value = body.get(key)?;
+        let percent = value.get("utilization")?.as_f64()?;
+        if !percent.is_finite() || percent < 0.0 { return None; }
+        let reset = value.get("resets_at").and_then(Value::as_str).and_then(|date| chrono::DateTime::parse_from_rfc3339(date).ok().map(|date| date.timestamp()));
+        Some(((percent / 100.0).min(1.0) as f32, reset))
+    };
+    let five_hour = window("five_hour");
+    let seven_day = window("seven_day");
+    (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day, status: "allowed".into() })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_json_preserves_exhaustion_and_ignores_missing_windows() {
+        let usage = usage_from_json(&serde_json::json!({"five_hour":{"utilization":101.0,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":{"utilization":10.0,"resets_at":null}})).unwrap();
+        assert_eq!(usage.five_hour.unwrap().0, 1.0);
+        assert_eq!(usage.seven_day.unwrap().0, 0.1);
+        assert!(usage.exhausted_at(crate::now_unix()));
+        assert!(usage_from_json(&serde_json::json!({"five_hour":null,"seven_day":{"utilization":null}})).is_none());
+    }
 
     #[test]
     fn access_token_top_level_and_nested() {

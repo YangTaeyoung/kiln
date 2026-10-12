@@ -100,7 +100,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                 } else {
                     let tip = match tool {
                         Tool::Claude => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
-                        Tool::Codex => kiln_common::i18n::tr("사용량 새로 고침 (최근 Codex 세션 기록)"),
+                        Tool::Codex => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
                     };
                     if widgets::icon_button(ui, Icon::Refresh, 26.0, false, tip).clicked() {
                         mgr.refresh_usage(tool);
@@ -108,6 +108,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                 }
             });
         });
+        ui.label(RichText::new(kiln_common::i18n::tr("자동 갱신 · 5분마다")).font(fonts::regular(11.0)).color(t.text_faint));
         ui.add_space(8.0);
 
         // 저장되지 않은 현재 로그인 안내.
@@ -311,10 +312,12 @@ fn usage_color(u: f32) -> Color32 {
 fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64) {
     let t = Theme::current();
     let w = Usage::effective(w, now);
-    let (rect, _) = ui.allocate_exact_size(vec2(236.0, 16.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(236.0, 16.0), Sense::hover());
     let p = ui.painter();
-    p.text(pos2(rect.left(), rect.center().y), Align2::LEFT_CENTER, label, fonts::medium(11.0), t.text_faint);
-    let bar = Rect::from_min_size(pos2(rect.left() + 34.0, rect.center().y - 2.5), vec2(96.0, 5.0));
+    let label = p.layout_no_wrap(label.to_string(), fonts::medium(11.0), t.text_faint);
+    let bar_offset = (label.size().x + 8.0).max(34.0);
+    p.galley(pos2(rect.left(), rect.center().y - label.size().y / 2.0), label, t.text_faint);
+    let bar = Rect::from_min_size(pos2(rect.left() + bar_offset, rect.center().y - 2.5), vec2((108.0 - bar_offset).max(12.0), 5.0));
     p.rect_filled(bar, CornerRadius::same(3), t.bg_hover);
     match w {
         Some((u, reset)) => {
@@ -323,9 +326,17 @@ fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64)
                 let fill = Rect::from_min_size(bar.min, vec2((bar.width() * f).max(3.0), bar.height()));
                 p.rect_filled(fill, CornerRadius::same(3), usage_color(u));
             }
-            p.text(pos2(bar.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, format!("{:.0}%", u * 100.0), fonts::medium(11.0), t.text_dim);
+            let percent = p.layout_no_wrap(format!("{:.0}%", u * 100.0), fonts::medium(11.0), t.text_dim);
+            let reset_left = bar.right() + 8.0 + percent.size().x + 8.0;
+            p.galley(pos2(bar.right() + 8.0, rect.center().y - percent.size().y / 2.0), percent, t.text_dim);
             if let Some(r) = reset {
-                p.text(pos2(rect.right(), rect.center().y), Align2::RIGHT_CENTER, fmt_reset(r, now), fonts::regular(11.0), t.text_faint);
+                let text = fmt_reset(r, now);
+                let mut job = egui::text::LayoutJob::simple(text.clone(), fonts::regular(10.0), t.text_faint, (rect.right() - reset_left).max(0.0));
+                job.wrap.max_rows = 1;
+                job.wrap.break_anywhere = true;
+                let galley = p.layout_job(job);
+                p.galley(pos2(rect.right() - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_faint);
+                response.on_hover_text(text);
             }
         }
         None => {
@@ -335,7 +346,7 @@ fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64)
 }
 
 /// 사용량 열(폭 236, 높이 36 고정).
-fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64) {
+fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<i64>) {
     let t = Theme::current();
     ui.allocate_ui_with_layout(vec2(236.0, 36.0), Layout::top_down(Align::Min), |ui| {
         ui.set_min_size(vec2(236.0, 36.0));
@@ -355,6 +366,10 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64) {
             Some(u) if u.five_hour.is_some() || u.seven_day.is_some() => {
                 usage_line(ui, kiln_common::i18n::tr("5시간"), u.five_hour, now);
                 usage_line(ui, kiln_common::i18n::tr("7일"), u.seven_day, now);
+                if let Some(at) = fetched_at {
+                    let age = now.saturating_sub(at).max(0) / 60;
+                    ui.label(RichText::new(if age == 0 { kiln_common::i18n::tr("방금 확인").to_string() } else { kiln_common::trf!("{}분 전 확인", age) }).font(fonts::regular(10.5)).color(t.text_faint));
+                }
                 if u.is_unavailable() {
                     ui.label(RichText::new(kiln_common::i18n::tr("갱신 실패 · 마지막으로 확인한 사용량")).font(fonts::regular(10.5)).color(t.text_faint)).on_hover_text(&u.status);
                 }
@@ -485,10 +500,10 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 }
             });
             ui.add_space(8.0);
-            if !login_required && !compact { usage_block(ui, usage.as_ref(), now); }
+            if !login_required && !compact { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id)); }
         });
     });
-    if compact && !login_required { usage_block(ui, usage.as_ref(), now); }
+    if compact && !login_required { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id)); }
     if login_required {
         ui.horizontal_wrapped(|ui| {
             widgets::pill(ui, kiln_common::i18n::tr("로그인 필요"), t.orange);
@@ -606,6 +621,31 @@ mod tests {
     }
 
     #[test]
+    fn automatic_usage_card_fits_four_languages_at_narrow_scaled_width() {
+        use egui_kittest::kittest::Queryable;
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                let root = tempfile::tempdir().unwrap();
+                let (mut env, _) = crate::Env::sandbox(root.path(), false);
+                env.codex_probe = Some(std::sync::Arc::new(|_| Ok(Usage { five_hour: Some((0.25, Some(4_200_000_000))), seven_day:Some((0.7,Some(4_200_000_000))), status:"allowed".into() })));
+                std::fs::create_dir_all(&env.codex_home).unwrap();
+                std::fs::write(env.codex_home.join("auth.json"), crate::codex::tests::fake_auth("work@example.test", "fixture")).unwrap();
+                let manager = AccountManager::with_env(env);
+                manager.save_current(Tool::Codex, "Work").unwrap();
+                manager.refresh_usage_blocking(Tool::Codex);
+                let mut harness = egui_kittest::Harness::builder().with_size(vec2(420.0, 760.0)).wgpu()
+                    .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Codex); } }, manager);
+                harness.ctx.set_zoom_factor(1.3);
+                for _ in 0..4 { harness.step(); }
+                for label in ["자동 갱신 · 5분마다", "방금 확인"] {
+                    assert!(harness.ctx.content_rect().contains_rect(harness.get_by_label(kiln_common::i18n::tr(label)).rect()), "{language:?}: {label} clipped");
+                }
+                harness.render().unwrap().save(format!("/tmp/kiln020-usage-card-{language:?}.png")).unwrap();
+            });
+        }
+    }
+
+    #[test]
     fn missing_login_row_opens_reauthentication_and_cancel_keeps_account() {
         use egui_kittest::kittest::Queryable;
         for language in kiln_common::i18n::Language::ALL {
@@ -696,7 +736,7 @@ mod tests {
                             let subtitle_rect = harness.get_by_label(subtitle(tool)).rect();
                             let refresh_label = match tool {
                                 Tool::Claude => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
-                                Tool::Codex => kiln_common::i18n::tr("사용량 새로 고침 (최근 Codex 세션 기록)"),
+                                Tool::Codex => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
                             };
                             let refresh_rect = harness.get_by_label(refresh_label).rect();
                             assert!(harness.ctx.content_rect().contains_rect(refresh_rect), "{language:?}/{tool:?}: refresh overflow at {width}px / {scale}");

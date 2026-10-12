@@ -54,6 +54,34 @@ replace the login used by existing sessions. A running CLI that has cached its
 previous login may need to be resumed after applying the repaired login; Kiln
 does not interrupt it automatically.
 
+## Automatic usage updates
+
+Kiln checks every saved Claude Code and Codex subscription account in the
+background when the app starts, then every five minutes. Keep Kiln open; the
+account settings do not need to remain visible. This includes inactive profiles.
+The account card shows the last successful check time and retains the last known
+bars when a request fails. The refresh button requests another check, subject
+to provider backoff. New accounts are picked up by the next cycle.
+
+These are read-only usage requests: Kiln does not send a model prompt, consume
+reset credits or refresh OAuth tokens. Each account uses its latest persistent
+CLI credentials; a completed browser login must first be **Applied**. Provider
+rate limiting delays subsequent checks, including manual checks, according to
+Retry-After (bounded to one minute through one day), or five minutes when absent.
+A 401 pauses that credential for an hour. A newly refreshed CLI token can be
+checked again without waiting for the previous token's backoff. Other request
+failures retry on the next scheduled cycle and can be retried manually.
+
+An expired or revoked token can prevent a usage check while a running CLI still
+works. The CLI owns token refresh. If the failure persists, use **Sign in again**
+in that profile's menu. Network failures alone do not establish logout. Usage
+endpoints can change independently of Kiln; an unsupported response is shown as
+unavailable instead of inventing quota values. Codex windows are labeled only
+when their reported duration matches five hours or seven days.
+
+For implementation references and validation boundaries, see
+[automatic usage maintenance](maintainers/account-usage.md).
+
 ## Storage and troubleshooting
 
 The official CLI owns the browser flow and the local callback. Each attempt uses

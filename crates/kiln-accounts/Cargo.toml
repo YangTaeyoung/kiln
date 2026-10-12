@@ -15,6 +15,7 @@ parking_lot.workspace = true
 base64 = "0.22"
 tempfile.workspace = true
 sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

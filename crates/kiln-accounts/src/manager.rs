@@ -25,6 +25,8 @@ pub struct Env {
     pub store: Arc<dyn CredentialStore>,
     pub settings_path: PathBuf,
     pub probe: UsageProbe,
+    /// None keeps the offline rollout reader available in isolated fixtures.
+    pub codex_probe: Option<UsageProbe>,
     /// 키체인 account 속성을 모를 때 쓰는 사용자 이름.
     pub username: String,
 }
@@ -53,6 +55,7 @@ impl Env {
             store,
             settings_path: kiln_common::paths::config_file("accounts.json"),
             probe: Arc::new(|token: &str| claude::probe_usage(token)),
+            codex_probe: Some(Arc::new(codex::probe_usage)),
             username: std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default(),
         }
     }
@@ -69,6 +72,7 @@ impl Env {
             store: store.clone(),
             settings_path: root.join("config/accounts.json"),
             probe: Arc::new(|_: &str| Err(anyhow!("probe disabled"))),
+            codex_probe: None,
             username: "tester".into(),
         };
         (env, store)
@@ -101,6 +105,8 @@ struct StoredProfile {
     oauth_account: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_usage: Option<Usage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_usage_at: Option<i64>,
     /// An isolated browser login is saved but not installed in the live CLI yet.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pending_login: bool,
@@ -155,6 +161,7 @@ fn idx(t: Tool) -> usize {
 
 #[derive(Default)]
 pub(crate) struct State {
+    usage_poll: HashMap<(Tool, String), UsagePoll>,
     settings: Settings,
     usage: HashMap<(Tool, String), Usage>,
     limited_at: HashMap<(Tool, String), i64>,
@@ -169,6 +176,13 @@ pub(crate) struct State {
     pub(crate) events: Vec<AccountsEvent>,
 }
 
+#[derive(Clone, Default)]
+struct UsagePoll {
+    fingerprint: Vec<u8>,
+    next_at: i64,
+    blocked_until: i64,
+}
+
 struct Inner {
     env: Env,
     state: Mutex<State>,
@@ -178,6 +192,7 @@ struct Inner {
     pub(crate) ui: Mutex<UiState>,
     login: Mutex<[Option<Arc<crate::login::LoginControl>>; 2]>,
     shutting_down: std::sync::atomic::AtomicBool,
+    usage_worker_started: std::sync::atomic::AtomicBool,
 }
 
 /// 계정 관리자. 복제해도 같은 상태를 공유한다.
@@ -194,6 +209,7 @@ impl AccountManager {
     pub fn load() -> Self {
         let m = Self::with_env(Env::real());
         m.check_live_identity_async();
+        m.start_usage_updates();
         m
     }
 
@@ -217,6 +233,7 @@ impl AccountManager {
                 ui: Mutex::new(UiState::default()),
                 login: Mutex::new([None, None]),
                 shutting_down: std::sync::atomic::AtomicBool::new(false),
+                usage_worker_started: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
@@ -605,7 +622,7 @@ impl AccountManager {
                     kiln_common::trf!("계정 {n}")
                 };
                 let p = Profile { id: id.clone(), tool, label, email: email.clone(), added_unix: now as u64 };
-                ts.profiles.push(StoredProfile { profile: p.clone(), oauth_account: oauth.clone(), last_usage: None, pending_login: !activate });
+                ts.profiles.push(StoredProfile { profile: p.clone(), oauth_account: oauth.clone(), last_usage: None, last_usage_at: None, pending_login: !activate });
                 p
             };
             if activate { s.live_email[idx(tool)] = Some(email.clone()); }
@@ -853,6 +870,7 @@ impl AccountManager {
         self.with_state(|s| {
             s.settings.tool_mut(tool).profiles.retain(|p| p.profile.id != id);
             s.usage.remove(&(tool, id.to_string()));
+            s.usage_poll.remove(&(tool, id.to_string()));
             s.limited_at.remove(&(tool, id.to_string()));
             s.login_required.remove(&(tool, id.to_string()));
         });
@@ -919,14 +937,16 @@ impl AccountManager {
 
     fn set_usage(&self, tool: Tool, id: &str, u: Usage) {
         self.with_state(|s| {
+            if !s.settings.tool(tool).profiles.iter().any(|p| p.profile.id == id) { return; }
             let key = (tool, id.to_string());
             if !u.is_unavailable() {
                 s.limited_at.remove(&key);
                 if let Some(p) = s.settings.tool_mut(tool).profiles.iter_mut().find(|p| p.profile.id == id) {
                     p.last_usage = Some(u.clone());
+                    p.last_usage_at = Some(now_unix());
                 }
             } else if let Some(prev) = s.usage.get(&key)
-                && !prev.is_unavailable()
+                && (prev.five_hour.is_some() || prev.seven_day.is_some())
             {
                 let mut kept = prev.clone();
                 kept.status = u.status.clone();
@@ -937,74 +957,148 @@ impl AccountManager {
         });
     }
 
-    /// 사용량을 백그라운드에서 다시 읽는다. 이미 도는 중이면 아무것도 하지 않는다.
-    pub fn refresh_usage(&self, tool: Tool) {
+    /// Starts one lifecycle-bound background worker. The settings pane need not be open.
+    fn start_usage_updates(&self) {
+        self.start_usage_updates_with_interval(std::time::Duration::from_secs(300));
+    }
+
+    fn start_usage_updates_with_interval(&self, interval: std::time::Duration) {
+        use std::sync::atomic::Ordering;
+        if self.inner.usage_worker_started.swap(true, Ordering::Relaxed) { return; }
+        let weak = Arc::downgrade(&self.inner);
+        std::thread::spawn(move || {
+            let mut next = std::time::Instant::now();
+            loop {
+                let Some(inner) = weak.upgrade() else { break };
+                if inner.shutting_down.load(Ordering::Relaxed) { break; }
+                if std::time::Instant::now() >= next {
+                    let manager = AccountManager { inner };
+                    for tool in Tool::ALL { manager.refresh_usage_impl(tool, false); }
+                    next = std::time::Instant::now() + interval;
+                } else { drop(inner); }
+                std::thread::sleep(interval.min(std::time::Duration::from_secs(1)));
+            }
+        });
+    }
+
+    pub fn usage_fetched_at(&self, tool: Tool, id: &str) -> Option<i64> {
+        self.with_state(|s| s.settings.tool(tool).profiles.iter().find(|p| p.profile.id == id).and_then(|p| p.last_usage_at))
+    }
+
+    /// Refresh all saved accounts; concurrent requests and provider backoff are respected.
+    pub fn refresh_usage(&self, tool: Tool) { self.refresh_usage_impl(tool, true); }
+
+    fn refresh_usage_impl(&self, tool: Tool, manual: bool) {
+        use std::sync::atomic::Ordering;
+        if self.inner.shutting_down.load(Ordering::Relaxed) || self.profiles(tool).is_empty() { return; }
         let started = self.with_state(|s| !std::mem::replace(&mut s.refreshing[idx(tool)], true));
-        if !started {
-            return;
-        }
+        if !started { return; }
         let m = self.clone();
         std::thread::spawn(move || {
-            m.check_live_identity(tool);
             m.check_profile_credentials();
-            match tool {
-                Tool::Claude => m.refresh_claude(),
-                Tool::Codex => m.refresh_codex(),
-            }
+            if tool == Tool::Codex && m.inner.env.codex_probe.is_none() {
+                m.refresh_codex_logs();
+            } else { m.refresh_profiles(tool, manual); }
             m.with_state(|s| s.refreshing[idx(tool)] = false);
             m.persist_logged();
             m.repaint();
         });
     }
 
-    /// 사용량 새로 고침이 끝날 때까지 기다린다(테스트용).
+    /// Test-only synchronous boundary; never used by rendering.
     pub fn refresh_usage_blocking(&self, tool: Tool) {
         self.refresh_usage(tool);
-        while self.is_refreshing(tool) {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        while self.is_refreshing(tool) { std::thread::sleep(std::time::Duration::from_millis(5)); }
     }
 
-    fn refresh_claude(&self) {
-        let credentials = {
-            let _op = self.inner.op.lock();
-            let active = self.active(Tool::Claude);
-            self.profiles(Tool::Claude).into_iter().map(|p| {
-                let cred = if self.runtime_dir(Tool::Claude, &p.id).is_dir() {
-                    self.runtime_secret(Tool::Claude, &p.id)
-                } else if active.as_deref() == Some(p.id.as_str()) {
-                    self.read_live(Tool::Claude).map(|o|o.map(|x|x.0))
-                } else { self.inner.env.store.get(&profile_service(Tool::Claude), &p.id) };
-                (p,cred)
-            }).collect::<Vec<_>>()
-        };
-        for (p, cred) in credentials {
-            let u = match cred {
-                Ok(Some(c)) => match claude::access_token(&c).and_then(|t| (self.inner.env.probe)(&t)) {
-                    Ok(u) => u,
-                    Err(e) => Usage::unavailable(e),
-                },
-                Ok(None) => Usage::unavailable("no credentials"),
-                Err(e) => Usage::unavailable(e),
+    fn usage_secret(&self, tool: Tool, id: &str) -> Result<Option<String>> {
+        let stored = self.with_state(|state| state.settings.tool(tool).profiles.iter().find(|profile| profile.profile.id == id).cloned()).context("account profile missing")?;
+        let expected = stored.profile.email.as_deref().context("account identity unavailable")?;
+        let matches = |email: Option<String>| email.is_some_and(|email| email.eq_ignore_ascii_case(expected));
+        if self.runtime_dir(tool, id).is_dir() {
+            let Some(secret) = self.runtime_secret(tool, id)? else { return Ok(None); };
+            let email = match tool {
+                Tool::Claude => self.runtime_oauth(tool, id)?.as_ref().and_then(claude::oauth_email),
+                Tool::Codex => codex::auth_email(&secret),
             };
-            self.set_usage(Tool::Claude, &p.id, u);
+            if !matches(email) { bail!("account credentials do not match saved profile"); }
+            return Ok(Some(secret));
+        }
+        if self.active(tool).as_deref() == Some(id)
+            && let Some((secret, _)) = self.read_live(tool)?
+            && matches(self.live_identity(tool, Some(&secret)).0)
+        { return Ok(Some(secret)); }
+        let secret = self.inner.env.store.get(&profile_service(tool), id)?;
+        let email = match tool {
+            Tool::Claude => stored.oauth_account.as_ref().and_then(claude::oauth_email),
+            Tool::Codex => secret.as_deref().and_then(codex::auth_email),
+        };
+        if secret.is_some() && !matches(email) { bail!("account credentials do not match saved profile"); }
+        Ok(secret)
+    }
+
+    fn refresh_profiles(&self, tool: Tool, manual: bool) {
+        use sha2::{Digest, Sha256};
+        for profile in self.profiles(tool) {
+            if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
+            let secret = {
+                let _op = self.inner.op.lock();
+                if self.pending_login(tool, &profile.id) { continue; }
+                self.usage_secret(tool, &profile.id)
+            };
+            let secret = match secret {
+                Ok(Some(secret)) => secret,
+                _ => { self.set_usage(tool, &profile.id, Usage::unavailable("no credentials")); continue; }
+            };
+            // The digest stays in memory; a CLI token refresh makes a previously blocked account eligible.
+            // Backoff belongs to the bearer/account, not changing CLI bookkeeping fields.
+            let identity = match tool {
+                Tool::Claude => claude::access_token(&secret).unwrap_or_default(),
+                Tool::Codex => serde_json::from_str::<Value>(&secret).ok().map(|doc| format!("{}\0{}",
+                    doc.pointer("/tokens/access_token").and_then(Value::as_str).unwrap_or_default(),
+                    doc.pointer("/tokens/account_id").and_then(Value::as_str).unwrap_or_default())).unwrap_or_default(),
+            };
+            let fingerprint = Sha256::digest(identity.as_bytes()).to_vec();
+            let now = now_unix();
+            let due = self.with_state(|s| {
+                let poll = s.usage_poll.entry((tool, profile.id.clone())).or_default();
+                if poll.fingerprint != fingerprint { *poll = UsagePoll { fingerprint: fingerprint.clone(), ..Default::default() }; }
+                now >= poll.blocked_until && (manual || now >= poll.next_at)
+            });
+            if !due { continue; }
+            let result = match tool {
+                Tool::Claude => claude::access_token(&secret).and_then(|token| (self.inner.env.probe)(&token)),
+                Tool::Codex => (self.inner.env.codex_probe.as_ref().expect("online probe"))(&secret),
+            };
+            let _op = self.inner.op.lock();
+            // A response belongs to the exact profile credentials it was requested with.
+            if self.pending_login(tool, &profile.id) || self.usage_secret(tool, &profile.id).ok().flatten().as_deref() != Some(&secret) { continue; }
+            let exists = self.profiles(tool).iter().any(|p| p.id == profile.id);
+            if !exists { continue; }
+            let (usage, delay) = match result {
+                Ok(usage) => (usage, 0),
+                Err(error) => {
+                    let delay = error.downcast_ref::<crate::usage_http::RetryLater>().map_or(0, |retry| retry.0);
+                    (Usage::unavailable(error), delay)
+                }
+            };
+            self.with_state(|s| {
+                s.usage_poll.insert((tool, profile.id.clone()), UsagePoll { fingerprint, next_at: now + 300, blocked_until: now + delay });
+            });
+            self.set_usage(tool, &profile.id, usage);
             self.repaint();
         }
     }
 
-    fn refresh_codex(&self) {
+    fn refresh_codex_logs(&self) {
         let (active, since) = self.with_state(|s| (s.settings.codex.active.clone(), s.settings.codex.active_since));
         let Some(active) = active else { return };
-        let now = now_unix();
-        let runtime=self.runtime_dir(Tool::Codex,&active);
-        let home=if runtime.is_dir() {&runtime}else{&self.inner.env.codex_home};
-        match codex::latest_observed(home, now) {
-            Some(o) if o.at_unix >= since => self.set_usage(Tool::Codex, &active, o.usage),
-            _ => {
-                if self.usage(Tool::Codex, &active).is_none() {
-                    self.set_usage(Tool::Codex, &active, Usage::unavailable(kiln_common::i18n::tr("최근 세션 기록 없음")));
-                }
-            }
+        let runtime = self.runtime_dir(Tool::Codex, &active);
+        let home = if runtime.is_dir() { &runtime } else { &self.inner.env.codex_home };
+        match codex::latest_observed(home, now_unix()) {
+            Some(observed) if observed.at_unix >= since => self.set_usage(Tool::Codex, &active, observed.usage),
+            _ if self.usage(Tool::Codex, &active).is_none() => self.set_usage(Tool::Codex, &active, Usage::unavailable(kiln_common::i18n::tr("최근 세션 기록 없음"))),
+            _ => {},
         }
     }
 
@@ -1053,6 +1147,153 @@ fn new_id(tool: Tool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_never_attributes_external_or_runtime_login_to_another_profile() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for tool in Tool::ALL {
+            for runtime_changed in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let (mut env, store) = Env::sandbox(dir.path(), true);
+                let calls = Arc::new(AtomicUsize::new(0));
+                let count = calls.clone();
+                env.probe = Arc::new(move |token| {
+                    count.fetch_add(1, Ordering::Relaxed);
+                    assert_eq!(token, "at-a");
+                    Ok(Usage {five_hour:Some((0.25,None)),status:"allowed".into(),..Default::default()})
+                });
+                let count = calls.clone();
+                env.codex_probe = Some(Arc::new(move |auth| {
+                    count.fetch_add(1, Ordering::Relaxed);
+                    assert_eq!(serde_json::from_str::<Value>(auth).unwrap()["tokens"]["account_id"], "a");
+                    Ok(Usage {five_hour:Some((0.25,None)),status:"allowed".into(),..Default::default()})
+                }));
+                let login = |email, marker| match tool {
+                    Tool::Claude => login_claude(&env, &store, email, marker),
+                    Tool::Codex => login_codex(&env, email, marker),
+                };
+                login("a@example.test", "a");
+                let manager = AccountManager::with_env(env.clone());
+                let profile = manager.save_current(tool, "A").unwrap();
+                if runtime_changed {
+                    manager.launch_environment(tool).unwrap();
+                    let other = match tool { Tool::Claude => claude_cred("b"), Tool::Codex => fake_auth("b@example.test", "b") };
+                    manager.restore_runtime(tool, &profile.id, Some(&other), Some(&serde_json::json!({"emailAddress":"b@example.test"}))).unwrap();
+                } else { login("b@example.test", "b"); }
+                manager.refresh_usage_blocking(tool);
+                assert_eq!(manager.active(tool).as_deref(), Some(profile.id.as_str()));
+                assert_eq!(calls.load(Ordering::Relaxed), if runtime_changed { 0 } else { 1 });
+                if runtime_changed { assert!(manager.usage(tool, &profile.id).unwrap().is_unavailable()); }
+                else { assert_eq!(manager.usage(tool, &profile.id).unwrap().five_hour.unwrap().0, 0.25); }
+            }
+        }
+    }
+
+    #[test]
+    fn background_usage_updates_all_accounts_without_settings_and_stops_on_exit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(dir.path(), true);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        env.probe = Arc::new(move |token| {
+            count.fetch_add(1, Ordering::Relaxed);
+            Ok(Usage { five_hour: Some((if token == "at-a" {0.2} else {0.8}, None)), status:"allowed".into(), ..Default::default() })
+        });
+        let count = calls.clone();
+        env.codex_probe = Some(Arc::new(move |auth| {
+            count.fetch_add(1, Ordering::Relaxed);
+            let value: Value = serde_json::from_str(auth).unwrap();
+            Ok(Usage { five_hour: Some((if value["tokens"]["account_id"] == "c" {0.3} else {0.9}, None)), status:"allowed".into(), ..Default::default() })
+        }));
+        let manager = AccountManager::with_env(env.clone());
+        let mut profiles = Vec::new();
+        for marker in ["a", "b"] {
+            login_claude(&env, &store, &format!("{marker}@example.test"), marker);
+            profiles.push(manager.save_current(Tool::Claude, marker).unwrap());
+        }
+        for marker in ["c", "d"] {
+            login_codex(&env, &format!("{marker}@example.test"), marker);
+            profiles.push(manager.save_current(Tool::Codex, marker).unwrap());
+        }
+        let interval = std::time::Duration::from_millis(10);
+        manager.start_usage_updates_with_interval(interval);
+        manager.start_usage_updates_with_interval(interval); // Idempotent, including the background lifecycle.
+        let wait_for = |wanted| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while calls.load(Ordering::Relaxed) < wanted || Tool::ALL.iter().any(|&tool| manager.is_refreshing(tool)) {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(interval);
+            }
+        };
+        wait_for(4);
+        for (profile, expected) in profiles.iter().zip([0.2,0.8,0.3,0.9]) {
+            assert_eq!(manager.usage(profile.tool, &profile.id).unwrap().five_hour.unwrap().0, expected);
+            assert!(manager.usage_fetched_at(profile.tool, &profile.id).is_some());
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 4);
+        manager.with_state(|state| for poll in state.usage_poll.values_mut() { poll.next_at = 0; });
+        wait_for(8); // A later background cycle, with no settings UI or manual refresh.
+        manager.shutdown_logins();
+        wait_for(8);
+        let stopped = calls.load(Ordering::Relaxed);
+        std::thread::sleep(interval * 3);
+        assert_eq!(calls.load(Ordering::Relaxed), stopped);
+        let reloaded = AccountManager::with_env(env);
+        assert!(reloaded.usage_fetched_at(Tool::Claude, &profiles[0].id).is_some());
+    }
+
+    #[test]
+    fn refresh_backoff_is_per_account_and_retains_last_good_values_on_repeated_failures() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(dir.path(), true);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        env.probe = Arc::new(move |_| {
+            if count.fetch_add(1, Ordering::Relaxed) == 0 { Ok(Usage { five_hour:Some((0.4,None)), status:"allowed".into(), ..Default::default() }) }
+            else { Err(crate::usage_http::RetryLater(900).into()) }
+        });
+        let manager = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "a@example.test", "a");
+        let profile = manager.save_current(Tool::Claude, "a").unwrap();
+        manager.refresh_usage_blocking(Tool::Claude);
+        let fetched = manager.usage_fetched_at(Tool::Claude, &profile.id);
+        manager.refresh_usage_blocking(Tool::Claude);
+        manager.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(calls.load(Ordering::Relaxed), 2, "manual refresh also honors Retry-After");
+        manager.with_state(|state| state.usage_poll.values_mut().for_each(|poll| poll.blocked_until = 0));
+        manager.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(manager.usage(Tool::Claude, &profile.id).unwrap().five_hour.unwrap().0, 0.4);
+        assert_eq!(manager.usage_fetched_at(Tool::Claude, &profile.id), fetched);
+        login_claude(&env, &store, "a@example.test", "new-token");
+        manager.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(calls.load(Ordering::Relaxed), 4, "new CLI credentials clear the old credential backoff");
+    }
+
+    #[test]
+    fn deleted_profile_cannot_be_resurrected_by_a_slow_usage_response() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(dir.path(), true);
+        let (started, begin) = std::sync::mpsc::channel();
+        let (finish, done) = std::sync::mpsc::channel();
+        let done = Mutex::new(done);
+        env.probe = Arc::new(move |token| {
+            if token == "at-a" { started.send(()).unwrap(); done.lock().recv().unwrap(); }
+            Ok(Usage {five_hour:Some((0.4,None)),status:"allowed".into(),..Default::default()})
+        });
+        let manager = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "a@example.test", "a");
+        let profile = manager.save_current(Tool::Claude, "a").unwrap();
+        login_claude(&env, &store, "b@example.test", "b");
+        manager.save_current(Tool::Claude, "b").unwrap();
+        manager.refresh_usage(Tool::Claude);
+        begin.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        manager.remove(Tool::Claude, &profile.id).unwrap();
+        finish.send(()).unwrap();
+        while manager.is_refreshing(Tool::Claude) { std::thread::sleep(std::time::Duration::from_millis(5)); }
+        assert!(manager.usage(Tool::Claude, &profile.id).is_none());
+    }
     use crate::codex::tests::fake_auth;
     use crate::store::CredentialStore;
 

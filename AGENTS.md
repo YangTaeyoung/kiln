@@ -11,6 +11,8 @@ the user's shells, agents, builds, or servers.
 - [Development and meaningful verification](docs/development.md)
 - [Pane layout](docs/pane-layout.md) — accepted movement, boundary scope and snapping behavior.
 - [Remote files and verification](docs/maintainers/remote-files-verification.md) — isolated provider fixtures and explicit coverage boundaries.
+- [Automatic account usage](docs/maintainers/account-usage.md) — background cadence, provider contracts, bounded requests and isolated verification.
+- [0.1.20 release verification](docs/maintainers/0.1.20-status.md) — automatic per-account usage and sign-in recovery.
 - [Agent accounts](docs/accounts.md) — official CLI browser sign-in and profile isolation.
 - [Localization and native menus](docs/localization.md) — catalog, font caches, and isolated session-control tests.
 - [Shell completion](docs/shell-completion.md) — Zsh buffer bridge, bounded local suggestions, private metadata and native-input boundaries.

@@ -180,9 +180,47 @@ pub fn latest_observed(codex_home: &Path, now_unix: i64) -> Option<Observed> {
         .max_by_key(|o| o.at_unix)
 }
 
+/// Passive usage reader; no reset credit consumption or token refresh.
+pub fn probe_usage(auth: &str) -> anyhow::Result<Usage> {
+    let doc: Value = serde_json::from_str(auth).map_err(|_| anyhow::anyhow!("invalid account credentials"))?;
+    let token = doc.pointer("/tokens/access_token").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("no subscription access token"))?;
+    let account = doc.pointer("/tokens/account_id").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("no subscription account id"))?;
+    let token = crate::usage_http::header_value(token)?;
+    let account = crate::usage_http::header_value(account)?;
+    let body = crate::usage_http::get("https://chatgpt.com/backend-api/wham/usage", &format!(
+        "Authorization: Bearer {token}\nChatGPT-Account-Id: {account}\nUser-Agent: codex-cli\nAccept: application/json\n"))?;
+    usage_from_json(&body).ok_or_else(|| anyhow::anyhow!("usage windows unavailable"))
+}
+
+pub fn usage_from_json(body: &Value) -> Option<Usage> {
+    let limits = body.get("rate_limit")?;
+    let window = |seconds: i64| {
+        let value = ["primary_window", "secondary_window"].into_iter().filter_map(|key| limits.get(key)).find(|value| value.get("limit_window_seconds").and_then(Value::as_i64) == Some(seconds))?;
+        let percent = value.get("used_percent")?.as_f64()?;
+        if !percent.is_finite() || percent < 0.0 { return None; }
+        Some(((percent / 100.0).min(1.0) as f32, value.get("reset_at").and_then(Value::as_i64)))
+    };
+    let five_hour = window(18_000);
+    let seven_day = window(604_800);
+    (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day,
+        status: if limits.get("limit_reached").and_then(Value::as_bool) == Some(true) { "rejected" } else { "allowed" }.into() })
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn usage_json_maps_actual_durations_and_preserves_exhaustion() {
+        let usage = usage_from_json(&serde_json::json!({"rate_limit":{
+            "primary_window":{"used_percent":10,"limit_window_seconds":604800,"reset_at":4200000000i64},
+            "secondary_window":{"used_percent":101,"limit_window_seconds":18000,"reset_at":4200000000i64}
+        }})).unwrap();
+        assert_eq!(usage.five_hour.unwrap().0, 1.0);
+        assert_eq!(usage.seven_day.unwrap().0, 0.1);
+        assert!(usage.exhausted_at(crate::now_unix()));
+        assert!(usage_from_json(&serde_json::json!({"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":3600}}})).is_none());
+    }
 
     pub fn fake_jwt(claims: &Value) -> String {
         let e = base64::engine::general_purpose::URL_SAFE_NO_PAD;

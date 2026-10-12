@@ -10903,5 +10903,20 @@
     "en": "Apply the updated login before opening a new session",
     "ja": "更新したログインを適用してから新しいセッションを開いてください",
     "zh-CN": "请先应用更新的登录信息，再打开新会话"
+  },
+  "자동 갱신 · 5분마다": {
+    "en": "Auto refresh · every 5 minutes",
+    "ja": "自動更新 · 5分ごと",
+    "zh-CN": "自动刷新 · 每 5 分钟"
+  },
+  "방금 확인": {
+    "en": "Just checked",
+    "ja": "確認したばかり",
+    "zh-CN": "刚刚检查"
+  },
+  "{}분 전 확인": {
+    "en": "Checked {} min ago",
+    "ja": "{}分前に確認",
+    "zh-CN": "{} 分钟前检查"
   }
 }
