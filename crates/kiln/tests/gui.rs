@@ -1807,3 +1807,80 @@ fn submitted_database_write_blocks_forced_close_and_quit_until_complete() {
     h.state_mut().debug_queue_action(Action::ClosePane(pane,true));h.run_steps(3);
     assert!(!h.state().debug_tool_keys().contains(&"guard-fixture".into()),"completed writes release the close guard");
 }
+
+/// Owned fake CLI: exercises the real GUI -> PTY -> hook -> updater -> exact resume path.
+#[test]
+fn cli_update_restarts_each_exact_conversation_and_account() {
+    for tool in kiln_accounts::Tool::ALL {cli_update_fixture(tool);}
+}
+fn cli_update_fixture(tool: kiln_accounts::Tool) {
+    use kiln::app::{Action,agent_runtime};
+    use kiln_accounts::Tool;
+    use std::os::unix::fs::PermissionsExt;
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let(base,proj)=setup("cli-update-resume");
+    struct Cleanup(PathBuf,Option<std::ffi::OsString>);
+    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);unsafe {if let Some(path)=&self.1 {std::env::set_var("PATH",path);}else {std::env::remove_var("PATH");}}}}
+    let _cleanup=Cleanup(base.clone(),std::env::var_os("PATH"));
+    let bin=base.join("bin");std::fs::create_dir_all(&bin).unwrap();
+    let cli=if tool==Tool::Codex {let dir=base.join("lib/node_modules/@openai/codex/bin");std::fs::create_dir_all(&dir).unwrap();let cli=dir.join("codex");std::os::unix::fs::symlink(&cli,bin.join("codex")).unwrap();cli} else {bin.join("claude")};
+    if tool==Tool::Codex {
+        let npm=bin.join("npm");std::fs::write(&npm,format!("#!/bin/sh\ncase \"$1\" in root) printf '%s\\n' '{}' ;; install) printf '%s' 2.1.2 > '{}' ;; *) exit 2 ;; esac\n",base.join("lib/node_modules").display(),cli.with_file_name("version").display())).unwrap();std::fs::set_permissions(npm,std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    std::fs::write(&cli,r#"#!/usr/bin/python3
+import sys,os,json,signal,subprocess
+from pathlib import Path
+version=Path(__file__).resolve().with_name('version')
+args=sys.argv[1:]
+if args==['--version']:
+ print(version.read_text());sys.exit(0)
+if args==['update']:
+ version.write_text('2.1.2');sys.exit(0)
+if '--resume' in args: cid=args[args.index('--resume')+1]
+elif 'resume' in args: cid=args[args.index('resume')+1]
+else:
+ count=Path(__file__).resolve().with_name('count');n=int(count.read_text())+1 if count.exists() else 1;count.write_text(str(n));cid=f'{n:08x}-1234-1234-1234-123456789abc'
+if '--settings' in args: groups=json.loads(args[args.index('--settings')+1])['hooks']['SessionStart']
+else:
+ import re
+ inline=next(a for a in args if a.startswith('hooks.SessionStart='))
+ command=json.loads(re.search(r'command=("(?:\\.|[^"])*")',inline)[1])
+ groups=[{'hooks':[{'command':command}]}]
+for group in groups:
+ for hook in group['hooks']:
+  result=subprocess.run(hook['command'],shell=True,input=json.dumps({'hook_event_name':'SessionStart','session_id':cid,'cwd':os.getcwd()}).encode())
+  if result.returncode: sys.exit(4)
+signal.signal(signal.SIGINT,lambda *a:sys.exit(0))
+print('READY '+cid+' '+version.read_text(),flush=True)
+while True:
+ line=sys.stdin.readline()
+ if not line: break
+"#).unwrap();std::fs::set_permissions(&cli,std::fs::Permissions::from_mode(0o700)).unwrap();std::fs::write(cli.with_file_name("version"),"2.1.1").unwrap();
+    unsafe {std::env::set_var("PATH",format!("{}:{}",bin.display(),std::env::var("PATH").unwrap_or_default()));}
+    let mut h=Harness::builder().with_size([1100.,720.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    let manager=h.state().debug_accounts();let home=base.join("accounts/home");std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let sign_in=|email:&str| {
+        std::fs::write(home.join(".claude/.credentials.json"),r#"{"claudeAiOauth":{"accessToken":"fixture-only","refreshToken":"fixture-only"}}"#).unwrap();
+        std::fs::write(home.join(".claude.json"),serde_json::json!({"oauthAccount":{"emailAddress":email}}).to_string()).unwrap();if tool==Tool::Codex {
+            use base64::Engine;
+            let claims=base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::json!({"email":email}).to_string());
+            std::fs::create_dir_all(home.join(".codex")).unwrap();
+            std::fs::write(home.join(".codex/auth.json"),serde_json::json!({"tokens":{"id_token":format!("x.{claims}.x"),"access_token":"fixture-only","refresh_token":"fixture-only"}}).to_string()).unwrap();
+        }
+        manager.save_current(tool,"").unwrap();
+    };
+    sign_in("fixture-a@example.invalid");h.state_mut().debug_queue_action(Action::DirectAgent{tool,cwd:Some(proj.clone())});
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
+    let sid_a=h.state().debug_focused_session().unwrap();let pane_a=h.state().debug_focused_pane_id().unwrap();let spec_a=h.state().debug_focused_launch_spec().unwrap();let path_a=agent_runtime::record_path(&spec_a).unwrap();let a=agent_runtime::read(&path_a).unwrap();assert!(a.confirmed);
+    sign_in("fixture-b@example.invalid");h.state_mut().debug_queue_action(Action::DirectAgent{tool,cwd:Some(proj.clone())});
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
+    let sid_b=h.state().debug_focused_session().unwrap();let pane_b=h.state().debug_focused_pane_id().unwrap();let spec_b=h.state().debug_focused_launch_spec().unwrap();let path_b=agent_runtime::record_path(&spec_b).unwrap();let b=agent_runtime::read(&path_b).unwrap();assert!(b.confirmed);assert_ne!(a.conversation,b.conversation);assert_ne!(a.spec.env,b.spec.env);
+    h.state_mut().debug_cli_fixture_update(tool,bin.join(tool.key()));
+    assert!(pump_until(&mut h,15,|_|agent_runtime::read(&path_a).is_ok_and(|r|r.confirmed&&r.version=="2.1.2")&&agent_runtime::read(&path_b).is_ok_and(|r|r.confirmed&&r.version=="2.1.2")));
+    assert_eq!(agent_runtime::read(&path_a).unwrap().conversation,a.conversation);assert_eq!(agent_runtime::read(&path_b).unwrap().conversation,b.conversation);
+    assert_eq!(agent_runtime::read(&path_a).unwrap().spec.env,a.spec.env);assert_eq!(agent_runtime::read(&path_b).unwrap().spec.env,b.spec.env);
+    h.state_mut().debug_queue_action(Action::RevealPane(pane_a));h.run_steps(4);let new_a=h.state().debug_focused_session().unwrap();assert_ne!(new_a,sid_a);
+    h.state_mut().debug_queue_action(Action::RevealPane(pane_b));h.run_steps(4);assert_ne!(h.state().debug_focused_session().unwrap(),sid_b);
+
+}

@@ -28,3 +28,5 @@ See [third-party notices](../THIRD_PARTY_NOTICES.md) for bundled assets and depe
 - [Object storage profiles and buckets](object-storage.md)
 - [Query execution and result editing](query-results.md)
 - [Shell completion](shell-completion.md)
+
+- [CLI versions and exact conversation restart](cli-updates.md)

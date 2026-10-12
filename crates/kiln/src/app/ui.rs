@@ -1171,6 +1171,14 @@ impl KilnApp {
             if ui.button(kiln_common::i18n::tr("명령 기록")).clicked(){view.open_history();ui.close();}
             if ui.button(kiln_common::i18n::tr("셸·에이전트 연동")).clicked(){view.open_integration_help();ui.close();}
         }
+        if let Some(path)=self.launch_specs.get(&pid).and_then(super::agent_runtime::record_path) {
+            if let Ok(record)=super::agent_runtime::read(&path) {
+                ui.label(format!("{} · {}",record.tool.display_name(),record.version));
+                if let Some(id)=record.conversation {ui.small(format!("{}: {id}",kiln_common::i18n::tr("대화 ID")));}
+                else {ui.small(kiln_common::i18n::tr("대화 ID 확인 대기"));}
+                if ui.button(kiln_common::i18n::tr("같은 대화로 재시작")).clicked() {self.actions.push(Action::RestartAgent(pid));ui.close();}
+            }
+        }
         let session=self.panes.get(&pid).and_then(Pane::session);
         if terminal_recovery_menu_item(ui,&mut self.conn,session) {self.actions.push(Action::FocusPane(pid));}
         if session.is_some() {ui.separator();}
@@ -1306,7 +1314,7 @@ impl KilnApp {
 
         if self.settings_ui.open {
             let info = settings::AboutInfo { daemon_pid: self.conn.daemon_pid, daemon_build: self.conn.daemon_build.clone(), connected: self.conn.is_connected() };
-            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr, &mut self.keymap);
+            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr, &mut self.keymap, &mut self.cli_updates);
             self.actions.extend(acts);
             if !self.settings_ui.open {
                 self.focus_terminal = true;

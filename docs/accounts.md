@@ -54,12 +54,37 @@ If sign-in fails, check the browser and network connection, then retry. A missin
 CLI is reported on the account card. Kiln does not implement a separate OAuth
 provider or bypass the provider's account policies.
 
+## Keep multiple accounts signed in
+
+New agent panels opened through Kiln use a persistent configuration directory for
+each saved account. Claude Code receives `CLAUDE_CONFIG_DIR`; Codex receives
+`CODEX_HOME`. Managed Codex account panels explicitly use the private configuration's `auth.json` (mode 0600) so a global keyring preference cannot select another account. The real macOS home directory remains unchanged so Keychain access
+continues to work. The CLI owns token refresh in that directory. Kiln bootstraps
+it once and does not reinstall an old snapshot on every launch or account switch.
+
+Signing in again replaces that account's runtime credentials only when **Apply**
+is chosen. If credentials have been removed from an initialized runtime, Kiln
+asks for sign-in instead of restoring an old refresh token. Provider revocation,
+organization policies and expired sign-in still require authentication. Claude's
+keyless Console sign-in is not isolated by `CLAUDE_CONFIG_DIR`, as described in
+[its official multi-account guide](https://code.claude.com/docs/en/authentication#log-in-with-multiple-accounts).
+
+Existing terminal processes retain their original environment. Open a new agent
+panel after switching accounts to use the isolated configuration. A CLI typed
+into an ordinary existing shell continues to use that shell's configuration;
+Kiln does not replace its credentials or restart it silently.
+
+See [CLI versions and exact conversation restart](cli-updates.md) for update
+options and panel identity tracking.
+
 ## Codex background-server settings
 
 Codex CLI can connect to its own shared background server. If startup reports
 **Background server has incompatible feature settings**, the session’s effective
 feature flags differ from those saved by that server. This is separate from
-Kiln’s terminal session daemon. Kiln does not override these Codex feature flags.
+Kiln’s terminal session daemon. New managed Codex panels use `--no-daemon` to
+keep their lifecycle independent of shared clients; Kiln does not change the
+CLI's feature flags.
 
 **Run without daemon this time** starts this session without restarting the shared
 Codex server. The equivalent CLI option is `codex --no-daemon` (check your installed

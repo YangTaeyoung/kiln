@@ -22,11 +22,13 @@ the user's shells, agents, builds, or servers.
   notarization, Sparkle updates, GitHub Release publication, and recovery.
 - [Signing setup](docs/maintainers/signing.md) — public identifiers and Keychain
   setup, never passwords or private keys.
+- [CLI updates and exact conversation restart](docs/cli-updates.md) — persistent account namespaces, hook trust and isolated restart checks.
 - [Native updater validation](docs/maintainers/updater-validation.md) — isolated
   old/new fixtures, cancellation, relaunch and session survival checks.
 - [0.1.9 release verification](docs/maintainers/0.1.9-status.md) — schema editing, file-language assistance and distribution evidence.
 - [0.1.11 release verification](docs/maintainers/0.1.11-status.md) — pane layout, remote files, browser sign-in, table dialog and terminal recovery.
 - [0.1.16 release verification](docs/maintainers/0.1.16-status.md) — object-storage profile/bucket catalogs, safe SELECT editing, shell suggestions, remote UI review and public artifact evidence.
+- [0.1.18 release verification](docs/maintainers/0.1.18-status.md) — CLI update/restart fixtures, persistent account credentials and distribution evidence.
 - [0.1.17 release verification](docs/maintainers/0.1.17-status.md) — inspector navigation, independent file editors, transfer/recovery guards, source CI and exact public artifact evidence.
 - [0.1.15 release verification](docs/maintainers/0.1.15-status.md) — named workspaces, unified tools, native object profiles, researched connection UI and public distribution evidence.
 - [0.1.14 release verification](docs/maintainers/0.1.14-status.md) — bounded terminal connection repair, redraw/resize regressions and exact public artifact evidence.

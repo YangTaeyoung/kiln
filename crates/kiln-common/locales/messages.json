@@ -10753,5 +10753,115 @@
     "en": "Expand",
     "ja": "展開",
     "zh-CN": "展开"
+  },
+  "CLI 업데이트": {
+    "en": "CLI updates",
+    "ja": "CLI 更新",
+    "zh-CN": "CLI 更新"
+  },
+  "Codex·Claude Code 자동 업데이트": {
+    "en": "Automatically update Codex and Claude Code",
+    "ja": "Codex・Claude Code を自動更新",
+    "zh-CN": "自动更新 Codex 和 Claude Code"
+  },
+  "업데이트 직후 같은 대화로 세션 재시작": {
+    "en": "Restart sessions in the same conversation immediately after updates",
+    "ja": "更新直後に同じ会話でセッションを再起動",
+    "zh-CN": "更新后立即在同一对话中重启会话"
+  },
+  "재시작하면 진행 중인 응답이 중단됩니다. 대화 ID를 확인한 패널에만 적용됩니다.": {
+    "en": "Restarting interrupts the current response. Only panels with a confirmed conversation ID are restarted.",
+    "ja": "再起動すると進行中の応答が中断されます。会話 ID を確認できたパネルのみ再起動します。",
+    "zh-CN": "重启会中断当前响应。仅重启已确认对话 ID 的面板。"
+  },
+  "Codex에서 추적이 대기 중이면 /hooks에서 Kiln 훅을 신뢰한 뒤 대화를 시작하세요.": {
+    "en": "If Codex tracking is pending, trust the Kiln hooks in /hooks, then start a conversation.",
+    "ja": "Codex の追跡が待機中の場合、/hooks で Kiln フックを信頼してから会話を開始してください。",
+    "zh-CN": "如果 Codex 跟踪处于等待状态，请在 /hooks 中信任 Kiln 钩子，然后开始对话。"
+  },
+  "버전 확인": {
+    "en": "Check versions",
+    "ja": "バージョンを確認",
+    "zh-CN": "检查版本"
+  },
+  "최신": {
+    "en": "Latest",
+    "ja": "最新",
+    "zh-CN": "最新"
+  },
+  "확인 중": {
+    "en": "Checking",
+    "ja": "確認中",
+    "zh-CN": "检查中"
+  },
+  "CLI 업데이트 실패. 설치 프로그램 또는 패키지 관리자를 확인하세요.": {
+    "en": "CLI update failed. Check its installer or package manager.",
+    "ja": "CLI の更新に失敗しました。インストーラーまたはパッケージマネージャーを確認してください。",
+    "zh-CN": "CLI 更新失败。请检查安装程序或包管理器。"
+  },
+  "대화 ID": {
+    "en": "Conversation ID",
+    "ja": "会話 ID",
+    "zh-CN": "对话 ID"
+  },
+  "대화 ID 확인 대기": {
+    "en": "Waiting for conversation ID",
+    "ja": "会話 ID の確認待ち",
+    "zh-CN": "等待确认对话 ID"
+  },
+  "같은 대화로 재시작": {
+    "en": "Restart in the same conversation",
+    "ja": "同じ会話で再起動",
+    "zh-CN": "在同一对话中重启"
+  },
+  "세션을 재시작할 수 없습니다": {
+    "en": "Unable to restart session",
+    "ja": "セッションを再起動できません",
+    "zh-CN": "无法重启会话"
+  },
+  "원래 계정 또는 대화 ID가 확인되지 않았습니다. CLI에서 /resume으로 대화를 선택하세요.": {
+    "en": "The original account or conversation ID is unconfirmed. Select the conversation using /resume in the CLI.",
+    "ja": "元のアカウントまたは会話 ID を確認できません。CLI の /resume で会話を選択してください。",
+    "zh-CN": "原账户或对话 ID 尚未确认。请在 CLI 中使用 /resume 选择对话。"
+  },
+  "CLI 실행 경로와 대화 ID를 확인하세요.": {
+    "en": "Check the CLI executable and conversation ID.",
+    "ja": "CLI の実行パスと会話 ID を確認してください。",
+    "zh-CN": "请检查 CLI 执行路径和对话 ID。"
+  },
+  "세션 재시작 대기": {
+    "en": "Session restart pending",
+    "ja": "セッション再起動待ち",
+    "zh-CN": "等待会话重启"
+  },
+  "CLI가 종료되지 않았습니다. 실행을 종료한 뒤 패널 메뉴에서 같은 대화로 재시작하세요.": {
+    "en": "The CLI has not exited. Stop it, then restart the same conversation from the panel menu.",
+    "ja": "CLI が終了していません。実行を終了してからパネルメニューで同じ会話を再起動してください。",
+    "zh-CN": "CLI 尚未退出。请停止运行，然后从面板菜单中重启同一对话。"
+  },
+  "이 계정은 다시 로그인해야 합니다.": {
+    "en": "Sign in to this account again.",
+    "ja": "このアカウントに再度ログインしてください。",
+    "zh-CN": "请重新登录此账户。"
+  },
+  "세션 재시작 확인 필요": {
+    "en": "Session restart needs checking",
+    "ja": "セッション再起動の確認が必要",
+    "zh-CN": "需要确认会话重启"
+  },
+  "새 CLI에서 원래 대화가 확인되지 않았습니다. 패널 출력을 확인한 뒤 다시 시도하세요.": {
+    "en": "The new CLI has not confirmed the original conversation. Check the panel output before retrying.",
+    "ja": "新しい CLI で元の会話を確認できません。パネルの出力を確認してから再試行してください。",
+    "zh-CN": "新 CLI 尚未确认原对话。请检查面板输出后重试。"
+  },
+  "이 패널은 원래 계정을 유지합니다. 계정 설정에서 다른 계정을 선택한 뒤 새 패널을 여세요.": {
+    "en": "This panel keeps its original account. Select another account in account settings, then open a new panel.",
+    "ja": "このパネルは元のアカウントを維持します。アカウント設定で別のアカウントを選択し、新しいパネルを開いてください。",
+    "zh-CN": "此面板保留原账户。请在账户设置中选择其他账户，然后打开新面板。"
+  },
+  "{}: 이 패널은 원래 계정을 유지합니다. 계정 설정에서 다른 계정을 선택한 뒤 새 패널을 여세요.": {
+    "en": "{}: This panel keeps its original account. Select another account in account settings, then open a new panel.",
+    "ja": "{}: このパネルは元のアカウントを維持します。アカウント設定で別のアカウントを選択し、新しいパネルを開いてください。",
+    "zh-CN": "{}: 此面板保留原账户。请在账户设置中选择其他账户，然后打开新面板。"
   }
 }

@@ -3,7 +3,7 @@
 use super::conn::Conn;
 use kiln_accounts::{AccountManager, Tool, detect_limit, resume_command};
 use kiln_proto::SessionId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 pub enum RotationEvent {
     /// 한도에 걸렸고 자동 전환이 꺼져 있다(사용자가 전환할지 고른다).
     LimitReached { session: SessionId, tool: Tool, reset_hint: Option<String> },
+    ManagedLimitReached { session: SessionId, tool: Tool },
     Switched { session: SessionId, tool: Tool, label: String },
     NoAccount { tool: Tool },
     Failed { tool: Tool, error: String },
@@ -37,6 +38,7 @@ pub struct Rotator {
     /// 같은 한도 메시지로 반복 처리하지 않게 세션별 마지막 처리 시각.
     handled: HashMap<SessionId, Instant>,
     jobs: Vec<Job>,
+    managed: HashSet<SessionId>,
     tx: Sender<(SessionId, Tool, Result<Option<String>, String>)>,
     rx: Receiver<(SessionId, Tool, Result<Option<String>, String>)>,
 }
@@ -56,7 +58,11 @@ fn is_shell(p: &str) -> bool {
 impl Rotator {
     pub fn new(mgr: AccountManager) -> Self {
         let (tx, rx) = channel();
-        Rotator { mgr, last_poll: Instant::now(), handled: HashMap::new(), jobs: Vec::new(), tx, rx }
+        Rotator { mgr, last_poll: Instant::now(), handled: HashMap::new(), jobs: Vec::new(), managed: HashSet::new(), tx, rx }
+    }
+
+    pub fn set_managed(&mut self, sessions: impl IntoIterator<Item=SessionId>) {
+        self.managed=sessions.into_iter().collect();
     }
 
     pub fn busy(&self) -> bool {
@@ -90,7 +96,9 @@ impl Rotator {
             return;
         }
         self.handled.insert(session, Instant::now());
-        if self.mgr.auto_rotate(tool) {
+        if self.managed.contains(&session) {
+            out.push(RotationEvent::ManagedLimitReached{session,tool});
+        } else if self.mgr.auto_rotate(tool) {
             self.start(session, tool);
         } else {
             out.push(RotationEvent::LimitReached { session, tool, reset_hint: hit.reset_hint });
@@ -99,7 +107,7 @@ impl Rotator {
 
     /// 다음 계정으로 바꾸고 세션을 이어가는 작업을 시작한다.
     pub fn start(&mut self, session: SessionId, tool: Tool) {
-        if self.jobs.iter().any(|j| j.session == session) {
+        if self.managed.contains(&session) || self.jobs.iter().any(|j| j.session == session) {
             return;
         }
         self.handled.insert(session, Instant::now());
@@ -162,6 +170,14 @@ impl Rotator {
 mod tests {
     use super::tool_for;
 
+    #[test]
+    fn managed_panels_never_start_legacy_rotation() {
+        let d=tempfile::tempdir().unwrap();
+        let (env,_)=kiln_accounts::Env::sandbox(d.path(),true);
+        let mut r=super::Rotator::new(kiln_accounts::AccountManager::with_env(env));
+        r.set_managed([42]);r.start(42,kiln_accounts::Tool::Codex);
+        assert!(!r.busy());assert!(r.handled.is_empty());
+    }
     #[test]
     fn only_agent_processes_are_watched() {
         assert!(tool_for("claude").is_some());

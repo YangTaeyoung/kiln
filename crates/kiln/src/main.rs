@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 use kiln_daemon::client::Client;
 use kiln_proto::{ClientMsg, ServerMsg, SpawnSpec};
@@ -26,6 +27,10 @@ impl ActivityState {
 
 #[derive(Subcommand)]
 enum Cmd {
+    #[command(hide = true)]
+    AgentHook,
+    #[command(hide = true)]
+    AgentRun { #[arg(long)] record: std::path::PathBuf, #[arg(long)] generation: String, #[arg(long)] request: Option<std::path::PathBuf>, #[arg(long)] resume: bool },
     #[cfg(feature = "updater-test")]
     #[command(hide = true)]
     UpdaterTestRoot,
@@ -118,6 +123,12 @@ fn main() -> anyhow::Result<()> {
         _ => {}
     }
     match cli.cmd {
+        Some(Cmd::AgentHook) => {
+            let record=std::env::var_os("KILN_AGENT_RECORD").context("missing session record")?;
+            let generation=std::env::var("KILN_AGENT_GENERATION").context("missing session generation")?;
+            app::agent_runtime::hook(std::path::Path::new(&record), &generation, std::io::stdin().lock())
+        },
+        Some(Cmd::AgentRun { record, generation, request, resume }) => app::agent_runtime::run_request(&record,&generation,request.as_deref(),resume),
         #[cfg(feature = "updater-test")]
         Some(Cmd::UpdaterTestRoot) => {
             println!("{}", std::path::Path::new(option_env!("KILN_UPDATER_TEST_ROOT").unwrap()).canonicalize()?.display());

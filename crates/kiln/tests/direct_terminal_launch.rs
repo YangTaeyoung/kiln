@@ -54,6 +54,7 @@ fn direct_agents_and_ssh_open_without_shell_commands_and_survive_gui_restore() {
         (
             "codex",
             format!(r#"#!/bin/sh
+if [ "$1" = --version ]; then printf '1.2.3\n'; exit 0; fi
 /bin/pwd -P > {}
 printf 'CODEX_READY\n'
 read line
@@ -64,6 +65,7 @@ read hold
         (
             "claude",
             format!(r#"#!/bin/sh
+if [ "$1" = --version ]; then printf '1.2.3\n'; exit 0; fi
 /bin/pwd -P > {}
 printf 'CLAUDE_READY\n'
 read line
@@ -119,8 +121,10 @@ read line
         "real Codex fixture must start in the workspace root"
     );
     let agent = h.state().debug_focused_launch_spec().unwrap();
-    assert_eq!(agent.program.as_deref(), bin.join("codex").to_str());
-    assert!(agent.args.is_empty());
+    let record=kiln::app::agent_runtime::read(&kiln::app::agent_runtime::record_path(&agent).unwrap()).unwrap();
+    assert_eq!(record.spec.program.as_deref(),bin.join("codex").to_str());
+    assert_eq!(record.version,"1.2.3");
+    assert_eq!(agent.args.first().map(String::as_str),Some("agent-run"));
     assert_eq!(
         agent.cwd.as_deref(),
         workspace.canonicalize().unwrap().to_str()
@@ -151,13 +155,10 @@ read line
         workspace.canonicalize().unwrap().to_str().unwrap(),
         "real Claude fixture must start in the workspace root"
     );
-    assert!(
-        h.state()
-            .debug_focused_launch_spec()
-            .unwrap()
-            .args
-            .is_empty()
-    );
+    let claude=h.state().debug_focused_launch_spec().unwrap();
+    let record=kiln::app::agent_runtime::read(&kiln::app::agent_runtime::record_path(&claude).unwrap()).unwrap();
+    assert_eq!(record.spec.program.as_deref(),bin.join("claude").to_str());
+    assert_eq!(record.version,"1.2.3");
     h.state_mut().debug_apply_action(
         &ctx,
         Action::OpenSsh {
