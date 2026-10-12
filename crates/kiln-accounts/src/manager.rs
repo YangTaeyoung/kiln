@@ -971,14 +971,29 @@ impl AccountManager {
             loop {
                 let Some(inner) = weak.upgrade() else { break };
                 if inner.shutting_down.load(Ordering::Relaxed) { break; }
-                if std::time::Instant::now() >= next {
-                    let manager = AccountManager { inner };
-                    for tool in Tool::ALL { manager.refresh_usage_impl(tool, false); }
+                let manager = AccountManager { inner };
+                let periodic = std::time::Instant::now() >= next;
+                for tool in Tool::ALL {
+                    if periodic || manager.usage_due(tool, now_unix()) {
+                        manager.refresh_usage_impl(tool, false);
+                    }
+                }
+                if periodic {
                     next = std::time::Instant::now() + interval;
-                } else { drop(inner); }
+                }
+                drop(manager);
                 std::thread::sleep(interval.min(std::time::Duration::from_secs(1)));
             }
         });
+    }
+
+    /// A later account can become due between periodic credential checks.
+    fn usage_due(&self, tool: Tool, now: i64) -> bool {
+        self.with_state(|s| !s.refreshing[idx(tool)] && s.settings.tool(tool).profiles.iter().any(|profile| {
+            !profile.pending_login && s.usage_poll.get(&(tool, profile.profile.id.clone())).is_some_and(|poll| {
+                poll.next_at > 0 && now >= poll.next_at.max(poll.blocked_until)
+            })
+        }))
     }
 
     pub fn usage_fetched_at(&self, tool: Tool, id: &str) -> Option<i64> {
@@ -1038,6 +1053,10 @@ impl AccountManager {
     }
 
     fn refresh_profiles(&self, tool: Tool, manual: bool) {
+        self.refresh_profiles_with_clock(tool, manual, &now_unix);
+    }
+
+    fn refresh_profiles_with_clock(&self, tool: Tool, manual: bool, clock: &dyn Fn() -> i64) {
         use sha2::{Digest, Sha256};
         for profile in self.profiles(tool) {
             if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
@@ -1048,7 +1067,15 @@ impl AccountManager {
             };
             let secret = match secret {
                 Ok(Some(secret)) => secret,
-                _ => { self.set_usage(tool, &profile.id, Usage::unavailable("no credentials")); continue; }
+                _ => {
+                    self.with_state(|s| {
+                        if s.settings.tool(tool).profiles.iter().any(|p| p.profile.id == profile.id) {
+                            s.usage_poll.entry((tool, profile.id.clone())).or_default().next_at = clock() + 300;
+                        }
+                    });
+                    self.set_usage(tool, &profile.id, Usage::unavailable("no credentials"));
+                    continue;
+                }
             };
             // The digest stays in memory; a CLI token refresh makes a previously blocked account eligible.
             // Backoff belongs to the bearer/account, not changing CLI bookkeeping fields.
@@ -1059,7 +1086,7 @@ impl AccountManager {
                     doc.pointer("/tokens/account_id").and_then(Value::as_str).unwrap_or_default())).unwrap_or_default(),
             };
             let fingerprint = Sha256::digest(identity.as_bytes()).to_vec();
-            let now = now_unix();
+            let now = clock();
             let due = self.with_state(|s| {
                 let poll = s.usage_poll.entry((tool, profile.id.clone())).or_default();
                 if poll.fingerprint != fingerprint { *poll = UsagePoll { fingerprint: fingerprint.clone(), ..Default::default() }; }
@@ -1187,6 +1214,54 @@ mod tests {
                 else { assert_eq!(manager.usage(tool, &profile.id).unwrap().five_hour.unwrap().0, 0.25); }
             }
         }
+    }
+
+    #[test]
+    fn slower_previous_batch_does_not_delay_a_later_account_until_next_batch() {
+        use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(dir.path(), true);
+        let time = Arc::new(AtomicI64::new(1_000));
+        let first = Arc::new(AtomicUsize::new(0));
+        let later = Arc::new(AtomicUsize::new(0));
+        let (probe_time, probe_first, probe_later) = (time.clone(), first.clone(), later.clone());
+        env.probe = Arc::new(move |token| {
+            if token == "at-a" {
+                let call = probe_first.fetch_add(1, Ordering::Relaxed);
+                probe_time.fetch_add(if call == 0 { 15 } else { 1 }, Ordering::Relaxed);
+            } else { probe_later.fetch_add(1, Ordering::Relaxed); }
+            Ok(Usage { five_hour: Some((0.2, None)), status: "allowed".into(), ..Default::default() })
+        });
+        let manager = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "a@example.test", "a");
+        manager.save_current(Tool::Claude, "a").unwrap();
+        login_claude(&env, &store, "b@example.test", "b");
+        let b = manager.save_current(Tool::Claude, "b").unwrap();
+        let clock = || time.load(Ordering::Relaxed);
+        manager.refresh_profiles_with_clock(Tool::Claude, false, &clock);
+        time.store(1_300, Ordering::Relaxed);
+        manager.refresh_profiles_with_clock(Tool::Claude, false, &clock);
+        assert_eq!(clock(), 1_301);
+        assert_eq!(later.load(Ordering::Relaxed), 1);
+        assert!(!manager.usage_due(Tool::Claude, 1_314));
+        assert!(manager.usage_due(Tool::Claude, 1_315), "wake at the later account's deadline, not the next 1,600 batch");
+        time.store(1_315, Ordering::Relaxed);
+        manager.refresh_profiles_with_clock(Tool::Claude, false, &clock);
+        assert_eq!(first.load(Ordering::Relaxed), 2);
+        assert_eq!(later.load(Ordering::Relaxed), 2);
+        assert!(!manager.usage_due(Tool::Claude, 1_599));
+        manager.with_state(|s| s.usage_poll.get_mut(&(Tool::Claude, b.id.clone())).unwrap().blocked_until = 2_000);
+        manager.with_state(|s| s.settings.claude.profiles[0].pending_login = true);
+        assert!(!manager.usage_due(Tool::Claude, 1_900), "staged logins and provider delays do not cause busy polling");
+        manager.with_state(|s| s.settings.claude.profiles[0].pending_login = false);
+        manager.refresh_profiles_with_clock(Tool::Claude, true, &clock);
+        store.delete(&profile_service(Tool::Claude), &b.id).unwrap();
+        manager.with_state(|s| s.usage_poll.get_mut(&(Tool::Claude, b.id.clone())).unwrap().blocked_until = 0);
+        time.store(2_000, Ordering::Relaxed);
+        // Remove the active global credentials too; no CLI/network request should spin.
+        store.delete(claude::CLAUDE_SERVICE, "claude-code-user").unwrap();
+        manager.refresh_profiles_with_clock(Tool::Claude, false, &clock);
+        assert!(!manager.usage_due(Tool::Claude, 2_001));
     }
 
     #[test]

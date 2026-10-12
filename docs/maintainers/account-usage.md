@@ -7,6 +7,13 @@ new checks; it never sends input to, restarts or stops agent panels. Providers
 are queried independently; profile mutations use the existing credential lock,
 and results from deleted, staged or changed credentials are discarded.
 
+A one-second scheduler tick dispatches a tool only when a saved, unstaged
+profile reaches its own next deadline and provider backoff has elapsed. This
+avoids skipping a later account when earlier requests finish faster than the
+previous batch. The five-minute periodic pass still checks changed credentials
+and newly saved accounts. Missing credentials postpone that profile's next
+deadline by five minutes instead of causing repeated per-second checks.
+
 Latest per-profile runtime credentials take precedence over imported snapshots.
 Backoff is held per profile and credential fingerprint in memory. Successful
 values and check timestamps are persisted without secrets. Failure preserves

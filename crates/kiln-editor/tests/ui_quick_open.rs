@@ -105,7 +105,10 @@ fn arrow_keys_move_selection_and_escape_closes() {
     h.run();
     assert_eq!(h.state().picked.as_deref(), Some(root.join(&results[1]).as_path()));
     h.state_mut().qo.open(&root);
-    h.run();
+    assert!(common::wait_until(&mut h, 15.0, |h| {
+        h.state().qo.is_open() && !h.state().qo.is_indexing()
+            && h.state().qo.result_paths().len() == 16
+    }));
     h.key_press(Key::Escape);
     h.run();
     assert!(!h.state().qo.is_open());
