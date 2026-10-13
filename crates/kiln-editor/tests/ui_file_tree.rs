@@ -93,6 +93,35 @@ fn clicking_expands_dirs_and_opens_files() {
 }
 
 #[test]
+fn ignored_environment_configs_are_visible_and_open_from_the_default_explorer() {
+    let d = fixture();
+    let root = d.path().to_path_buf();
+    std::fs::write(root.join(".gitignore"), "/target\n*.log\n.env\n.env.*\n.envrc\n").unwrap();
+    for name in [".env", ".env.prod", ".env.local", ".envrc"] {
+        std::fs::write(root.join(name), "FIXTURE_ONLY=1\n").unwrap();
+    }
+    std::fs::write(root.join("src/.env.prod"), "FIXTURE_ONLY=2\n").unwrap();
+    let mut h = harness(&root);
+    h.run();
+    assert!(!h.state().tree.show_ignored());
+    assert!(h.query_by_label("target").is_none());
+    assert!(h.query_by_label("build.log").is_none());
+    for name in [".env", ".env.prod", ".env.local", ".envrc"] {
+        h.get_by_label(name).click();
+        h.run();
+        assert_eq!(take_events(&mut h), vec![EditorEvent::OpenFile(root.join(name))]);
+    }
+    h.get_by_label("src").click();
+    h.run();
+    // Keep the native selection path explicit when the same basename exists twice.
+    h.state_mut().tree.reveal(&root.join("src/.env.prod"));
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(take_events(&mut h), vec![EditorEvent::OpenFile(root.join("src/.env.prod"))]);
+}
+
+#[test]
 fn keyboard_navigation() {
     let d = fixture();
     let root = d.path().to_path_buf();

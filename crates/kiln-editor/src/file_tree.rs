@@ -32,7 +32,7 @@ pub struct DirEntry {
     pub path: PathBuf,
     pub name: String,
     pub is_dir: bool,
-    /// .gitignore 등으로 숨겨지는 항목(표시 옵션이 켜졌을 때만 목록에 나온다).
+    /// Git/ignore status, independent of visibility for environment config files.
     pub ignored: bool,
 }
 
@@ -74,7 +74,8 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
-/// 폴더 하나를 읽는다. 폴더 먼저, 이름 순. `show_ignored` 가 거짓이면 무시 대상은 뺀다.
+/// List one folder, directories first. Environment configuration files remain
+/// visible even when ignored; `show_ignored` controls other ignored entries.
 pub fn list_dir(dir: &Path, show_ignored: bool) -> std::io::Result<Vec<DirEntry>> {
     let mut visible: HashSet<OsString> = HashSet::new();
     let walker = ignore::WalkBuilder::new(dir)
@@ -99,15 +100,17 @@ pub fn list_dir(dir: &Path, show_ignored: bool) -> std::io::Result<Vec<DirEntry>
         let name_os = de.file_name();
         let name = name_os.to_string_lossy().into_owned();
         let ignored = name == ".git" || name == ".DS_Store" || !visible.contains(&name_os);
-        if ignored && !show_ignored {
-            continue;
-        }
         let path = de.path();
         let is_dir = match de.file_type() {
             Ok(ft) if ft.is_symlink() => path.is_dir(),
             Ok(ft) => ft.is_dir(),
             Err(_) => false,
         };
+        let environment_file = !is_dir
+            && (name == ".env" || name.starts_with(".env.") || name == ".envrc");
+        if ignored && !show_ignored && !environment_file {
+            continue;
+        }
         out.push(DirEntry { path, name, is_dir, ignored });
     }
     out.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| natural_cmp(&a.name, &b.name)));
@@ -1346,6 +1349,35 @@ mod tests {
         let v = list_dir(d.path(), true).unwrap();
         let ignored: Vec<_> = v.iter().filter(|e| e.ignored).map(|e| e.name.as_str()).collect();
         assert_eq!(ignored, ["target", "app.log"]);
+    }
+
+    #[test]
+    fn ignored_environment_files_stay_visible_without_unhiding_generated_directories() {
+        let d = tree_fixture();
+        let root = d.path();
+        std::fs::write(root.join(".gitignore"), "/target\n*.log\n.env\n.env.*\n.envrc\n").unwrap();
+        for dir in [root.to_path_buf(), root.join("src")] {
+            for name in [".env", ".env.prod", ".env.local", ".env.production.local", ".env.example", ".envrc"] {
+                std::fs::write(dir.join(name), "FIXTURE_ONLY=1\n").unwrap();
+            }
+            // A similarly named directory is not a configuration file.
+            std::fs::create_dir(dir.join(".env.cache")).unwrap();
+            let entries = list_dir(&dir, false).unwrap();
+            for name in [".env", ".env.prod", ".env.local", ".env.production.local", ".env.example", ".envrc"] {
+                let entry = entries.iter().find(|entry| entry.name == name).unwrap();
+                assert!(entry.ignored && !entry.is_dir);
+            }
+            assert!(!entries.iter().any(|entry| entry.name == ".env.cache"));
+        }
+        let mut tree = FileTree::new(root.to_path_buf());
+        tree.set_expanded(&root.join("src"), true);
+        assert!(tree.visible_paths().contains(&root.join("src/.env.prod")));
+        assert!(!tree.visible_paths().contains(&root.join("target")));
+        tree.set_show_ignored(true);
+        assert!(tree.visible_paths().contains(&root.join("target")));
+        tree.set_show_ignored(false);
+        assert!(tree.visible_paths().contains(&root.join(".env.prod")));
+        assert!(!tree.visible_paths().contains(&root.join("target")));
     }
 
     #[test]

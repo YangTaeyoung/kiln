@@ -11,6 +11,17 @@ files across application restarts. Changes to a script's shebang and
 external reloads update detection. Language selection controls highlighting,
 comment commands and the language identity sent to a configured language server.
 
+## File explorer
+
+Environment files (`.env`, `.env.*` and `.envrc`) remain visible in the default
+file list, even when Git ignores them. Click or use keyboard navigation to open
+them normally. Their ignored decoration remains; visibility does not change
+Git tracking or repository rules. Other ignored entries still use **Show ignored
+files**, including generated directories and similarly named `.env.*` folders.
+
+The reference behavior distinguishes file visibility from Git tracking:
+[VS Code Explorer](https://code.visualstudio.com/docs/editing/getting-started/userinterface#_explorer).
+
 ## Completion
 
 Type an identifier prefix, use **Control+Space** / **Option+Escape**, or click
