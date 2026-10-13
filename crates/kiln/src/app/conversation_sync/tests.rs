@@ -1172,3 +1172,48 @@ fn verify_discovered_workspace_cli_continuations() {
     .unwrap();
     assert_eq!(again.published, 0);
 }
+
+#[test]
+fn failed_native_registration_is_not_reported_as_synchronized_and_retries_same_copy() {
+    let f = Fixture::new(Tool::Claude);
+    let scope = workspace_scope(&f);
+    let failed = scan_with_index(
+        &f.config,
+        &f.pair,
+        &f.gate,
+        &mut Cache::new(),
+        Some(&scope),
+        |_| anyhow::bail!("fixture index unavailable"),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(failed.published, 0);
+    assert_eq!(failed.rows.values().next().unwrap().phase, Phase::Failed);
+    let plans: Vec<_> = fs::read_dir(f.config.join("conversation-sync"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("pending-"))
+        .collect();
+    assert_eq!(plans.len(), 1);
+    let plan: serde_json::Value =
+        serde_json::from_slice(&fs::read(plans[0].path()).unwrap()).unwrap();
+    let target: Source = serde_json::from_value(plan["source"].clone()).unwrap();
+    let original = fs::read(&target.path).unwrap();
+    let complete = scan_with_index(
+        &f.config,
+        &f.pair,
+        &f.gate,
+        &mut Cache::new(),
+        Some(&scope),
+        |source| {
+            assert_eq!(source.path, target.path);
+            assert_eq!(fs::read(&source.path).unwrap(), original);
+            Ok(())
+        },
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(complete.published, 1);
+    assert_eq!(complete.rows.values().next().unwrap().phase, Phase::Synced);
+    assert!(!plans[0].path().exists());
+}

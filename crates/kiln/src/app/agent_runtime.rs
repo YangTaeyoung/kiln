@@ -533,7 +533,7 @@ fn parse_version(bytes: &[u8]) -> Result<String> {
     let re = regex::Regex::new(r"\b([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.]+)?)\b")?;
     Ok(re.captures(text).context("CLI version not reported")?[1].into())
 }
-fn probe(binary: &Path) -> Result<String> {
+pub(super) fn probe(binary: &Path) -> Result<String> {
     let mut cmd = Command::new(binary);
     cmd.arg("--version");
     parse_version(&bounded(cmd, Duration::from_secs(5))?)

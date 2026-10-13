@@ -77,7 +77,11 @@ files are copied by the synchronizer. Private files, bounded stable reads,
 symlink rejection, a process lock, atomic no-clobber publication and a persisted
 retry plan protect original transcripts. Imported fingerprints suppress loops across both destination namespaces. A durable
 import baseline and per-destination publication plans make partial failures retryable
-without replacing an existing conversation.
+without replacing an existing conversation. Codex copies are also registered with
+its native metadata index through `codex --no-daemon app-server` and `thread/read`
+(without turns); this prevents an existing `/resume` database from hiding a newly
+written file. This metadata read does not start a model turn. Registration has a
+bounded deadline, and failure remains visible until a successful retry.
 
 Tests cover full-text round trips, native visible Codex items, bidirectional
 continuations, parallel branches, restart idempotence, unsupported content,
@@ -92,3 +96,5 @@ References: [Codex app-server](https://learn.chatgpt.com/docs/app-server),
 [Codex 0.162.1 native protocol](https://github.com/openai/codex/tree/rust-v0.162.1/codex-rs/protocol/src),
 [Claude sessions](https://code.claude.com/docs/en/agent-sdk/sessions), and
 [Claude lifecycle hooks](https://code.claude.com/docs/en/hooks).
+
+Native indexing reference: [Codex thread/read and list regression](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/tests/suite/v2/thread_read.rs#L107).

@@ -1,4 +1,5 @@
 //! Opt-in native continuations discovered within open workspace folders.
+mod codex_index;
 mod discovery;
 mod format;
 #[cfg(test)]
@@ -476,12 +477,24 @@ fn scan(
 ) -> Result<Status> {
     scan_scoped(config, pair, gate, cache, None, notify)
 }
+#[cfg(test)]
 fn scan_scoped(
     config: &Path,
     pair: &Pair,
     gate: &Gate,
     cache: &mut Cache,
     scope: Option<&discovery::Scope>,
+    notify: impl Fn(&Status),
+) -> Result<Status> {
+    scan_with_index(config, pair, gate, cache, scope, |_| Ok(()), notify)
+}
+fn scan_with_index(
+    config: &Path,
+    pair: &Pair,
+    gate: &Gate,
+    cache: &mut Cache,
+    scope: Option<&discovery::Scope>,
+    mut index: impl FnMut(&Source) -> Result<()>,
     notify: impl Fn(&Status),
 ) -> Result<Status> {
     let dir = config.join("conversation-sync");
@@ -727,6 +740,7 @@ fn scan_scoped(
                 if !plan.source.path.exists() {
                     publish(&plan.source.path, &bytes)?;
                 }
+                index(&plan.source)?;
                 status.published += 1;
                 state
                     .entries
@@ -914,12 +928,14 @@ impl Manager {
             let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
             let result = discovery::Scope::new(&pair, workspaces)
                 .and_then(|scope| {
-                    scan_scoped(
+                    let mut registry = codex_index::Registry::default();
+                    scan_with_index(
                         &kiln_common::paths::config_dir(),
                         &pair,
                         &gate,
                         &mut cache.lock().unwrap(),
                         Some(&scope),
+                        |source| registry.ensure(source, &gate),
                         |status| {
                             if last_progress.get().elapsed() >= Duration::from_millis(100) {
                                 last_progress.set(Instant::now());
