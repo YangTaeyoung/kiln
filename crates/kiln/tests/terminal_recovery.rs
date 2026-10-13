@@ -162,7 +162,7 @@ while True:time.sleep(.1)
     }
     drop(initial);
     let relay=HostRelay::install(&owned.0.endpoint);
-    kiln_daemon::ptyhost::save_registry(&socket,&[HostRecord{session:77,endpoint:owned.0.endpoint.clone(),name:Some("backlog fixture".into()),workspace:None,cwd:spec.cwd.clone(),created_unix:0}]);
+    kiln_daemon::ptyhost::save_registry(&socket,&[HostRecord{session:77,endpoint:owned.0.endpoint.clone(),name:Some("backlog fixture".into()),workspace:None,cwd:spec.cwd.clone(),created_unix:0,terminal_replies:Vec::new(),terminal_dump:None}]);
     let (fixture,client)=Fixture::start_in(dir,true);
     wait_text(&client,77,"HOST_READY");
     let other=spawn(&client,"stty -echo; printf 'OTHER_READY\\r\\n'; read line; printf 'OTHER_ECHO=%s\\r\\n' \"$line\"; read hold");
