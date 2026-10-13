@@ -219,7 +219,10 @@ impl Job {
         now: Instant,
     ) -> bool {
         if self.turn != failure.turn {
-            if input_at > self.failed_at && Some(input_at) != self.automatic_input {
+            if input_at != observed_since
+                && input_at > self.failed_at
+                && Some(input_at) != self.automatic_input
+            {
                 self.attempts = 0;
             }
             self.turn = failure.turn.clone();
@@ -551,6 +554,49 @@ mod tests {
         ));
         assert!(j.paused);
         assert!(j.due.is_none());
+    }
+    #[test]
+    fn restoring_an_exited_failure_keeps_the_five_retry_budget() {
+        let observed = UNIX_EPOCH + Duration::from_secs(1000);
+        let now = Instant::now();
+        let mut job = Job::new();
+        for attempt in 0..=DELAYS.len() {
+            let failure = Failure {
+                turn: format!("turn-{attempt}"),
+                at: if attempt == 0 {
+                    observed - Duration::from_secs(30)
+                } else {
+                    observed + Duration::from_secs(attempt as u64 * 300)
+                },
+                checkpoint: None,
+            };
+            let tick = now + Duration::from_secs(attempt as u64 * 300);
+            assert!(!job.observe(&failure, observed, true, observed, tick));
+            assert_eq!(job.attempts, attempt);
+            if let Some(delay) = DELAYS.get(attempt) {
+                assert!(job.observe(
+                    &failure,
+                    observed,
+                    true,
+                    observed,
+                    tick + Duration::from_secs(*delay)
+                ));
+                job.attempts += 1;
+                job.due = None;
+            } else {
+                assert!(job.paused);
+                assert!(job.due.is_none());
+            }
+        }
+        let manual = observed + Duration::from_secs(2000);
+        let next = Failure {
+            turn: "manual-new-task".into(),
+            at: manual + Duration::from_secs(1),
+            checkpoint: None,
+        };
+        assert!(!job.observe(&next, manual, false, observed, now));
+        assert_eq!(job.attempts, 0);
+        assert!(job.due.is_some());
     }
     #[test]
     fn tracked_identity_and_account_scope_are_required() {
