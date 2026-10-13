@@ -117,6 +117,10 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
     };
     let mut messages = Vec::new();
     for row in &chain[..=last] {
+        ensure!(
+            row["isCompactSummary"] != true && row["subtype"] != "compact_boundary",
+            "Claude compacted history requires a complete original conversation; this conversation was not synchronized"
+        );
         if row["isMeta"] == true || row["isSidechain"] == true {
             continue;
         }

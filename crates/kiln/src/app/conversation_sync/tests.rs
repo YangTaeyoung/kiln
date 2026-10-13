@@ -556,3 +556,24 @@ fn recovery_reuses_publication_plan_and_never_clobbers_a_collision() {
         }
     }
 }
+
+#[test]
+fn claude_project_encoding_matches_utf16_and_compaction_is_explicit() {
+    let f = Fixture::new(Tool::Codex);
+    let mut source = f.source.clone();
+    source.cwd = "/tmp/🦒한글/a_b.c".into();
+    let target = destination(&f.pair, &source, &stable_id("unicode"), chrono::Utc::now()).unwrap();
+    assert_eq!(
+        target.path.parent().unwrap().file_name().unwrap(),
+        "-tmp------a-b-c"
+    );
+    let f = Fixture::new(Tool::Claude);
+    let mut data = rows(&fs::read(&f.source.path).unwrap());
+    data[0]["isCompactSummary"] = json!(true);
+    assert!(
+        format::parse(Tool::Claude, &data)
+            .unwrap_err()
+            .to_string()
+            .contains("compacted history")
+    );
+}

@@ -25,7 +25,7 @@ hidden from the list to avoid displaying both sides of the same transfer.
 
 Waiting means no completed response is available yet. A failed item includes its
 reason and is retried on subsequent checks. Pausing keeps the last result visible
-and stops new publication; existing copies remain available in `/resume`.
+and stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
 The check refers to **completed responses**, not an answer still being generated.
 
 ## Compatibility and boundaries
@@ -47,7 +47,7 @@ The check refers to **completed responses**, not an answer still being generated
   CLI's SessionStart or UserPromptSubmit hook; disabled/untrusted hooks prevent
   discovery. Existing panels may need to be reopened through Kiln after updating.
 - A complete local transcript is required. Codex inherited-history references,
-  subagent conversations, broken Claude parent chains, and Claude project path
+  subagent conversations, compacted or broken Claude parent chains, and Claude project path
   encodings over 200 characters are rejected. Claude `/clear` starts a separate
   conversation. The adapter does not promise session continuity across Desktop,
   cloud sessions, context compaction boundaries, or future CLI formats.

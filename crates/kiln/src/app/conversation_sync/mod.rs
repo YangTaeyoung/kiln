@@ -409,8 +409,15 @@ fn destination(
     let path = if tool == Tool::Claude {
         let encoded = source
             .cwd
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            // Claude's /[^a-zA-Z0-9]/g operates on UTF-16 code units.
+            .encode_utf16()
+            .map(|c| {
+                if c <= 127 && (c as u8).is_ascii_alphanumeric() {
+                    c as u8 as char
+                } else {
+                    '-'
+                }
+            })
             .collect::<String>();
         ensure!(
             encoded.len() <= 200,
