@@ -20,7 +20,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Development](development.md) | Build and test from source |
 | [Architecture](architecture.md) | Crate map and process ownership |
 | [Releases](maintainers/releases.md) | Build, notarize, sign updates, and publish |
-| [Latest release verification](maintainers/0.1.23-status.md) | Native conversation sync, progress indicators and distribution evidence |
+| [Latest release verification](maintainers/0.1.26-status.md) | Codex capacity recovery, native CLI proof and verified live update |
 | [Signing setup](maintainers/signing.md) | Maintainer prerequisites and credentials |
 
 See [third-party notices](../THIRD_PARTY_NOTICES.md) for bundled assets and dependencies.
@@ -35,3 +35,5 @@ See [third-party notices](../THIRD_PARTY_NOTICES.md) for bundled assets and depe
 - [0.1.24 release verification](maintainers/0.1.24-status.md)
 
 - [Codex capacity recovery](codex-capacity-recovery.md)
+
+- [0.1.25 conversation-sync verification](maintainers/0.1.25-status.md)

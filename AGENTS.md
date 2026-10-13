@@ -12,6 +12,8 @@ the user's shells, agents, builds, or servers.
 - [Pane layout](docs/pane-layout.md) — accepted movement, boundary scope and snapping behavior.
 - [Remote files and verification](docs/maintainers/remote-files-verification.md) — isolated provider fixtures and explicit coverage boundaries.
 - [Automatic account usage](docs/maintainers/account-usage.md) — background cadence, provider contracts, bounded requests and isolated verification.
+- [0.1.26 release verification](docs/maintainers/0.1.26-status.md) — Codex capacity recovery, native CLI proof and session-preserving update.
+- [0.1.25 release verification](docs/maintainers/0.1.25-status.md) — image-preserving conversation sync, stable status UI and native resume validation.
 - [0.1.24 release verification](docs/maintainers/0.1.24-status.md) — workspace-based existing-session discovery and initial 20-conversation synchronization.
 - [0.1.23 release verification](docs/maintainers/0.1.23-status.md) — native conversation continuity, progress indicators and verified distribution.
 - [0.1.22 release verification](docs/maintainers/0.1.22-status.md) — credential selection, account-specific sign-in and responsive CLI updates.
