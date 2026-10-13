@@ -750,6 +750,11 @@ impl Manager {
                 }
             }
         }
+        // Connecting or finishing a cancelled scan must still deliver its result when
+        // the settings panel has closed and there are no terminal repaint events.
+        if self.busy {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         let enabled =
             settings.conversation_sync_enabled && settings.conversation_sync_pair.is_some();
         self.gate.store(enabled, Ordering::Release);
