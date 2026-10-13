@@ -617,6 +617,11 @@ fn scan_with_index(
         discovered_paths.extend(found.iter().map(|s| s.path.clone()));
         for source in found {
             let key = source.path.to_string_lossy().into_owned();
+            if let Some(entry) = state.entries.get_mut(&key) {
+                if !entry.imported && discovery::imported(config, &source)?.is_some() {
+                    entry.imported = true;
+                }
+            }
             if !state.entries.contains_key(&key) {
                 // Migration/recovery also recognizes copies created by earlier connections.
                 let imported = discovery::imported(config, &source)?;

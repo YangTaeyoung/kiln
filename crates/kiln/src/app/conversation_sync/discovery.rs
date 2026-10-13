@@ -107,6 +107,63 @@ pub(super) fn imported(config: &Path, source: &Source) -> Result<Option<String>>
     Ok(Some(imported.fingerprint))
 }
 
+fn external_import_baselines(
+    config: &Path,
+    root: &Path,
+    scope: &Scope,
+) -> Result<HashMap<String, String>> {
+    let path = root.join("external_agent_session_imports.json");
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    safe_path(root, &path)?;
+    #[derive(Deserialize)]
+    struct Record {
+        source_path: PathBuf,
+        imported_thread_id: String,
+    }
+    #[derive(Deserialize)]
+    struct Ledger {
+        records: Vec<Record>,
+    }
+    let ledger: Ledger = serde_json::from_slice(&bounded(&path, 8 * 1024 * 1024)?)?;
+    let mut baselines = HashMap::new();
+    for record in ledger.records {
+        let path = config.join("conversation-sync/imports").join(format!(
+            "{}.json",
+            digest(record.source_path.to_string_lossy().as_bytes())
+        ));
+        if !path.exists() {
+            continue;
+        }
+        let origin: Import = serde_json::from_slice(&bounded(&path, 32 * 1024)?)?;
+        if origin.source.tool == Tool::Claude
+            && origin.source.path == record.source_path
+            && scope.contains(&origin.source)
+        {
+            baselines.insert(record.imported_thread_id, origin.fingerprint);
+        }
+    }
+    Ok(baselines)
+}
+
+fn meaningful_prompt(content: &serde_json::Value) -> bool {
+    if let Some(text) = content.as_str() {
+        let text = text.trim_start();
+        return !text.is_empty()
+            && !text.starts_with("<local-command-")
+            && !text.starts_with("<command-name>");
+    }
+    content.as_array().is_some_and(|blocks| {
+        blocks.iter().any(|b| {
+            matches!(
+                b["type"].as_str(),
+                Some("image" | "input_image" | "local_image")
+            ) || meaningful_prompt(&b["text"])
+        })
+    })
+}
+
 /// Keep directory traversal bounded and do not follow links or recurse into subagent folders.
 fn files(
     root: &Path,
@@ -153,24 +210,38 @@ fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
         let mut input = BufReader::new(fs::File::open(path)?.take(2 * 1024 * 1024));
         let mut line = Vec::new();
         let mut has_prompt = false;
+        let mut saw_user = false;
         for index in 0..64 {
             line.clear();
             if input.read_until(b'\n', &mut line)? == 0 {
                 break;
             }
             if let Ok(row) = serde_json::from_slice::<serde_json::Value>(&line) {
-                has_prompt = tool == Tool::Claude
-                    && row["type"] == "user"
-                    && row["isMeta"] != true
-                    && !row["message"]["content"].as_str().is_some_and(|s| {
-                        s.starts_with("<local-command-") || s.starts_with("<command-name>")
-                    })
-                    || row["type"] == "response_item"
-                        && row["payload"]["type"] == "message"
+                let content =
+                    if tool == Tool::Claude && row["type"] == "user" && row["isMeta"] != true {
+                        Some(&row["message"]["content"])
+                    } else if tool == Tool::Codex
+                        && row["type"] == "response_item"
                         && row["payload"]["role"] == "user"
-                    || row["type"] == "event_msg"
-                        && (row["payload"]["type"] == "user_message"
-                            || row["payload"]["item"]["type"] == "UserMessage");
+                    {
+                        Some(&row["payload"]["content"])
+                    } else if tool == Tool::Codex
+                        && row["type"] == "event_msg"
+                        && row["payload"]["type"] == "user_message"
+                    {
+                        Some(&row["payload"]["message"])
+                    } else if tool == Tool::Codex
+                        && row["type"] == "event_msg"
+                        && row["payload"]["item"]["type"] == "UserMessage"
+                    {
+                        Some(&row["payload"]["item"]["content"])
+                    } else {
+                        None
+                    };
+                saw_user |= content.is_some();
+                has_prompt = content.is_some_and(meaningful_prompt)
+                    || (saw_user
+                        && (row["type"] == "assistant" || row["payload"]["role"] == "assistant"));
             }
             if has_prompt || index == 63 {
                 has_prompt = true;
@@ -259,7 +330,7 @@ pub(super) fn find(
     #[derive(Serialize, Deserialize)]
     struct WorkspaceSeed {
         #[serde(default)]
-        conversations_only: bool,
+        selection_revision: u8,
         started: SystemTime,
         paths: Vec<PathBuf>,
     }
@@ -270,7 +341,7 @@ pub(super) fn find(
         BTreeMap::new()
     };
     // Upgrade the old selection once: it could contain metadata-only sessions.
-    seeds.retain(|_, seed| seed.conversations_only);
+    seeds.retain(|_, seed| seed.selection_revision == 3);
     let scan_started = SystemTime::now();
     let keys: BTreeMap<_, _> = scope
         .workspaces
@@ -287,6 +358,11 @@ pub(super) fn find(
     let mut candidates: BTreeMap<PathBuf, Vec<(SystemTime, Source)>> = BTreeMap::new();
     let mut budget = 100_000;
     for (tool, root) in &scope.roots {
+        let external = if *tool == Tool::Codex {
+            external_import_baselines(config, root, scope)?
+        } else {
+            HashMap::new()
+        };
         let mut paths = Vec::new();
         files(
             root,
@@ -322,6 +398,9 @@ pub(super) fn find(
             let Some(workspace) = scope.workspace(&source.cwd) else {
                 continue;
             };
+            if let Some(baseline) = external.get(&source.id) {
+                remember_import(config, &source, baseline)?;
+            }
             let is_import = imported(config, &source)?.is_some();
             if is_import {
                 selected.insert(path.clone(), source);
@@ -355,7 +434,7 @@ pub(super) fn find(
         seeds.insert(
             key,
             WorkspaceSeed {
-                conversations_only: true,
+                selection_revision: 3,
                 started: scan_started,
                 paths,
             },

@@ -40,6 +40,9 @@ shows the number of transcript records checked and new copies created. The list
 shows each source conversation's first prompt, project, direction, status, and a
 button to copy its continuation ID. Copies that have not been continued are
 hidden from the list to avoid displaying both sides of the same transfer.
+Codex native import provenance is also checked: importing an unchanged Kiln copy
+through Codex Desktop does not start another transfer loop or consume an initial
+conversation slot. A genuinely continued imported copy remains eligible.
 
 The status dialog distinguishes discovery, no conversations found in the open folders, and
 waiting for a completed response. A discovered unsupported transcript stays visible

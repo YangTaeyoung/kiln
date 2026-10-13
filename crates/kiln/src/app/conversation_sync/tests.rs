@@ -1023,6 +1023,119 @@ fn existing_sessions_are_discovered_without_hooks_and_without_echo() {
         assert_eq!(read_messages(&copy.source).unwrap(), messages());
     }
 }
+
+#[test]
+fn native_import_of_a_kiln_copy_does_not_echo_but_new_turns_sync() {
+    let f = Fixture::new(Tool::Codex);
+    let scope = workspace_scope(&f);
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+    let state = workspace_state(&f);
+    let copied = &state.entries.values().find(|e| e.imported).unwrap().source;
+    assert!(has_current_native_projection(copied).unwrap());
+    let external = destination(
+        &f.pair,
+        copied,
+        &stable_id("native-import"),
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    let bytes = format::render(
+        Tool::Codex,
+        &external.id,
+        &external.cwd,
+        "2026-10-13T00:00:00Z",
+        &messages(),
+    )
+    .unwrap();
+    publish(&external.path, &bytes).unwrap();
+    // Reproduce an older Kiln already tracking this as a separate conversation.
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+    fs::write(
+        f.pair
+            .codex
+            .root
+            .join("external_agent_session_imports.json"),
+        serde_json::to_vec(
+            &json!({"records":[{"source_path":copied.path,"imported_thread_id":external.id}]}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let again = workspace_scan(&f, &scope);
+    assert_eq!(again.published, 0);
+    assert_eq!(again.rows.len(), 1);
+    assert_eq!(fs::read(&external.path).unwrap(), bytes);
+    let mut continued = messages();
+    continued.push(Message {
+        role: "user".into(),
+        text: "New native turn".into(),
+        images: vec![],
+    });
+    continued.push(Message {
+        role: "assistant".into(),
+        text: "Native answer".into(),
+        images: vec![],
+    });
+    fs::write(
+        &external.path,
+        format::render(
+            Tool::Codex,
+            &external.id,
+            &external.cwd,
+            "2026-10-13T00:00:00Z",
+            &continued,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let changed = workspace_scan(&f, &scope);
+    assert_eq!(changed.published, 1);
+    assert!(changed.errors.is_empty());
+    assert_eq!(changed.rows.len(), 2);
+}
+
+#[test]
+fn codex_imported_local_commands_do_not_consume_initial_conversation_slots() {
+    let f = Fixture::new(Tool::Codex);
+    let scope = workspace_scope(&f);
+    let mut ms = vec![Message {
+        role: "user".into(),
+        text: "<command-name>/mcp</command-name>".into(),
+        images: vec![],
+    }];
+    fs::write(
+        &f.source.path,
+        format::render(
+            Tool::Codex,
+            &f.source.id,
+            &f.source.cwd,
+            "2026-10-13T00:00:00Z",
+            &ms,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(workspace_scan(&f, &scope).rows.is_empty());
+    // A literal command-looking prompt with an actual answer is conversation.
+    ms.push(Message {
+        role: "assistant".into(),
+        text: "An actual reply".into(),
+        images: vec![],
+    });
+    fs::write(
+        &f.source.path,
+        format::render(
+            Tool::Codex,
+            &f.source.id,
+            &f.source.cwd,
+            "2026-10-13T00:00:00Z",
+            &ms,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+}
 #[test]
 fn default_and_connected_namespaces_receive_copies_and_continued_copies_sync_back() {
     let f = Fixture::new(Tool::Claude);
