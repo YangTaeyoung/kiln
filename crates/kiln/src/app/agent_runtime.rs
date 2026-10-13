@@ -481,7 +481,12 @@ fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Resu
     }
     record.confirmed = true;
     record.conversation = Some(id.to_owned());
-    private_write(path, &serde_json::to_vec(&record)?)
+    private_write(path, &serde_json::to_vec(&record)?)?;
+    if let (Some(config), Some(transcript)) = (root.parent(), event["transcript_path"].as_str()) {
+        // Missing/not-yet-created transcript metadata must not break native CLI hooks.
+        let _ = super::conversation_sync::track(config, &record, transcript);
+    }
+    Ok(())
 }
 fn bounded(mut cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
     cmd.stdin(Stdio::null())

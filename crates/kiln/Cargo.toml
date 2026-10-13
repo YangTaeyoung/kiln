@@ -40,6 +40,10 @@ base64 = "0.22"
 postcard.workspace = true
 arboard = "3"
 regex = "1"
+sha2 = "0.10"
+directories.workspace = true
+tempfile.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 unicode-width = "0.2.2"
 open = "5"
 rfd = "0.17"
@@ -52,7 +56,6 @@ libc = "0.2"
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
-tempfile.workspace = true
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

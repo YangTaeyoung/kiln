@@ -10963,5 +10963,120 @@
     "en": "Excluded by Git/ignore rules",
     "ja": "Git/ignore ルールの対象外です",
     "zh-CN": "已被 Git/ignore 规则排除"
+  },
+  "대화 이어가기 · 실험 기능": {
+    "en": "Conversation continuity · Experimental",
+    "ja": "会話の引き継ぎ · 実験機能",
+    "zh-CN": "对话接续 · 实验功能"
+  },
+  "Kiln이 열려 있는 동안 완료된 대화를 상대 CLI의 /resume에 복사합니다. 원문 대화와 텍스트 도구 기록을 전달합니다.": {
+    "en": "While Kiln is open, copy completed conversations to the other CLI’s /resume. Includes original messages and textual tool records.",
+    "ja": "Kilnを開いている間、完了した会話を相手のCLIの/resumeにコピーします。元の会話とテキストのツール記録を引き継ぎます。",
+    "zh-CN": "Kiln 打开时，将已完成的对话复制到另一 CLI 的 /resume。包含原始消息和文本工具记录。"
+  },
+  "자동으로 대화 동기화": {
+    "en": "Sync conversations automatically",
+    "ja": "会話を自動同期",
+    "zh-CN": "自动同步对话"
+  },
+  "현재 두 계정 연결": {
+    "en": "Connect current accounts",
+    "ja": "現在の2つのアカウントを接続",
+    "zh-CN": "连接当前两个账户"
+  },
+  "Kiln에서 연 CLI 대화가 대상입니다. 계정을 바꿔도 연결은 유지됩니다. 같은 프로젝트에서 /resume으로 최신 사본을 선택하세요.": {
+    "en": "For CLI conversations opened in Kiln. Switching accounts does not change this connection. Use /resume in the same project to choose the latest copy.",
+    "ja": "Kilnで開いたCLI会話が対象です。アカウントを切り替えても接続は維持されます。同じプロジェクトの/resumeで最新のコピーを選択してください。",
+    "zh-CN": "仅同步在 Kiln 中打开的 CLI 对话。切换账户不会改变此连接。在同一项目中使用 /resume 选择最新副本。"
+  },
+  "응답마다 새 사본이 생깁니다. 열린 세션은 자동으로 바뀌지 않습니다. 이미지·첨부 파일은 지원하지 않습니다. Codex 0.162.1 · Claude Code 2.1.296 지원.": {
+    "en": "Each response creates a new copy. Open sessions do not switch automatically. Images and attachments are unsupported. Supports Codex 0.162.1 · Claude Code 2.1.296.",
+    "ja": "応答ごとに新しいコピーを作成します。開いているセッションは自動で切り替わりません。画像・添付ファイルは未対応です。Codex 0.162.1 · Claude Code 2.1.296対応。",
+    "zh-CN": "每次回复都会创建新副本。已打开的会话不会自动切换。不支持图片和附件。支持 Codex 0.162.1 · Claude Code 2.1.296。"
+  },
+  "동기화할 대화를 기다리는 중": {
+    "en": "Waiting for a conversation to sync",
+    "ja": "同期する会話を待機中",
+    "zh-CN": "等待可同步的对话"
+  },
+  "최근 이어갈 대화": {
+    "en": "Recent continuations",
+    "ja": "最近の引き継ぎ先",
+    "zh-CN": "最近的接续对话"
+  },
+  "대화 ID 복사": {
+    "en": "Copy conversation ID",
+    "ja": "会話IDをコピー",
+    "zh-CN": "复制对话 ID"
+  },
+  "동기화 일시 중지": {
+    "en": "Sync paused",
+    "ja": "同期を一時停止",
+    "zh-CN": "同步已暂停"
+  },
+  "확인이 필요한 대화가 있습니다": {
+    "en": "Some conversations need attention",
+    "ja": "確認が必要な会話があります",
+    "zh-CN": "部分对话需要处理"
+  },
+  "대화 동기화 중": {
+    "en": "Syncing conversations",
+    "ja": "会話を同期中",
+    "zh-CN": "正在同步对话"
+  },
+  "연결됨 · 대화를 기다리는 중": {
+    "en": "Connected · Waiting for conversations",
+    "ja": "接続済み · 会話を待機中",
+    "zh-CN": "已连接 · 等待对话"
+  },
+  "응답 완료를 기다리는 중": {
+    "en": "Waiting for responses to finish",
+    "ja": "応答の完了を待機中",
+    "zh-CN": "等待回复完成"
+  },
+  "완료된 대화 모두 동기화됨": {
+    "en": "All completed conversations synced",
+    "ja": "完了した会話はすべて同期済み",
+    "zh-CN": "已完成的对话均已同步"
+  },
+  "기록 확인 {}/{} · 새 사본 {}개": {
+    "en": "Checking records {}/{} · {} new copies",
+    "ja": "記録を確認 {}/{} · 新規コピー {}件",
+    "zh-CN": "检查记录 {}/{} · {} 个新副本"
+  },
+  "아래는 마지막 동기화 결과입니다.": {
+    "en": "Last sync results are shown below.",
+    "ja": "最後の同期結果を表示しています。",
+    "zh-CN": "以下为上次同步结果。"
+  },
+  "응답 완료 대기": {
+    "en": "Waiting for response",
+    "ja": "応答の完了待ち",
+    "zh-CN": "等待回复完成"
+  },
+  "대화 확인 중": {
+    "en": "Checking conversation",
+    "ja": "会話を確認中",
+    "zh-CN": "正在检查对话"
+  },
+  "동기화 중": {
+    "en": "Syncing",
+    "ja": "同期中",
+    "zh-CN": "正在同步"
+  },
+  "동기화 완료": {
+    "en": "Synced",
+    "ja": "同期済み",
+    "zh-CN": "已同步"
+  },
+  "동기화 실패": {
+    "en": "Sync failed",
+    "ja": "同期に失敗",
+    "zh-CN": "同步失败"
+  },
+  "이어갈 대화 ID 복사": {
+    "en": "Copy continuation ID",
+    "ja": "引き継ぎ先の会話IDをコピー",
+    "zh-CN": "复制接续对话 ID"
   }
 }

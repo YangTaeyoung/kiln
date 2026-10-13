@@ -29,7 +29,7 @@ const SECTIONS: [(&str, Icon); 6] = [
 ];
 
 impl SettingsUi {
-    pub fn ui(&mut self, ctx: &egui::Context, s: &mut Settings, about: &AboutInfo, accounts: &kiln_accounts::AccountManager, keymap: &mut super::keymap::Keymap, cli: &mut super::agent_runtime::Updates) -> Vec<Action> {
+    pub fn ui(&mut self, ctx: &egui::Context, s: &mut Settings, about: &AboutInfo, accounts: &kiln_accounts::AccountManager, keymap: &mut super::keymap::Keymap, cli: &mut super::agent_runtime::Updates, sync: &mut super::conversation_sync::Manager) -> Vec<Action> {
         let t = Theme::current();
         let mut acts = Vec::new();
         let screen = ctx.content_rect();
@@ -114,7 +114,7 @@ impl SettingsUi {
                         0 => appearance(ui, s, &mut acts),
                         1 => terminal(ui, s),
                         2 => behavior(ui, s),
-                        3 => {accounts_page(ui, accounts, &mut acts, &mut close); cli.ui(ui, s);},
+                        3 => {accounts_page(ui, accounts, &mut acts, &mut close); cli.ui(ui, s); sync.ui(ui,s,accounts);},
                         _ => about_page(ui, about, &mut acts),
                     }
                 });
@@ -354,7 +354,7 @@ mod keybinding_layout_tests {
         let mut initialized=false;
         let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).build_ui_state(|ui,state:&mut (SettingsUi,Settings,super::super::keymap::Keymap)|{
             if !initialized {fonts::install(ui.ctx());Theme::current().apply(ui.ctx());initialized=true;return;}
-            state.0.ui(ui.ctx(),&mut state.1,&AboutInfo{daemon_pid:0,daemon_build:String::new(),connected:false},&accounts,&mut state.2,&mut super::super::agent_runtime::Updates::default());
+            state.0.ui(ui.ctx(),&mut state.1,&AboutInfo{daemon_pid:0,daemon_build:String::new(),connected:false},&accounts,&mut state.2,&mut super::super::agent_runtime::Updates::default(), &mut super::super::conversation_sync::Manager::default());
         },(SettingsUi{open:true,section:4},Settings::default(),super::super::keymap::Keymap::default()));
         h.run_steps(3);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("단축키 저장").rect()));
@@ -429,7 +429,7 @@ mod language_layout_tests {
                             ui.ctx().set_fonts(fonts::definitions_for_language(false, language));
                             Theme::current().apply(ui.ctx()); initialized = true; return;
                         }
-                        state.0.ui(ui.ctx(), &mut state.1, &AboutInfo { daemon_pid: 0, daemon_build: String::new(), connected: false }, &accounts, &mut state.2, &mut super::super::agent_runtime::Updates::default());
+                        state.0.ui(ui.ctx(), &mut state.1, &AboutInfo { daemon_pid: 0, daemon_build: String::new(), connected: false }, &accounts, &mut state.2, &mut super::super::agent_runtime::Updates::default(), &mut super::super::conversation_sync::Manager::default());
                     }, (SettingsUi { open: true, section: 0 }, Settings::default(), super::super::keymap::Keymap::default()));
                     h.run_steps(3);
                     for (source, _) in SECTIONS {

@@ -3015,13 +3015,15 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kiln"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "arboard",
  "base64 0.22.1",
+ "chrono",
  "clap",
  "crossbeam-channel",
+ "directories",
  "eframe",
  "egui",
  "egui_kittest",
@@ -3048,6 +3050,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "unicode-width",
  "winit",
@@ -3055,7 +3058,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-accounts"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3075,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-common"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "directories",
@@ -3088,7 +3091,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-daemon"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -3113,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-db"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3138,7 +3141,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-editor"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "egui",
@@ -3165,7 +3168,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-git"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "egui",
@@ -3180,7 +3183,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-i18n-macros"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3190,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-proto"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "libc",
@@ -3200,7 +3203,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-remote"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "anyhow",
  "chrono",

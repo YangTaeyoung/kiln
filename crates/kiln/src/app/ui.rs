@@ -1314,7 +1314,7 @@ impl KilnApp {
 
         if self.settings_ui.open {
             let info = settings::AboutInfo { daemon_pid: self.conn.daemon_pid, daemon_build: self.conn.daemon_build.clone(), connected: self.conn.is_connected() };
-            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr, &mut self.keymap, &mut self.cli_updates);
+            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr, &mut self.keymap, &mut self.cli_updates, &mut self.conversation_sync);
             self.actions.extend(acts);
             if !self.settings_ui.open {
                 self.focus_terminal = true;
