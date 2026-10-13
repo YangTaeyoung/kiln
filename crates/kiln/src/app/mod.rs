@@ -24,6 +24,7 @@ mod workspace_repos;
 mod workspace_activity;
 mod workspace_dialog;
 mod agent_launch;
+mod capacity_recovery;
 pub mod agent_runtime;
 pub mod conversation_sync;
 mod remote_terminal;
@@ -264,6 +265,7 @@ pub struct KilnApp {
     panes: HashMap<PaneId, Pane>,
     pending_creates: HashMap<u32, PaneId>,
     launch_specs: HashMap<PaneId, SpawnSpec>,
+    capacity_recovery: capacity_recovery::Recovery,
     cli_updates: agent_runtime::Updates,
     conversation_sync: conversation_sync::Manager,
     cli_restarts: HashMap<PaneId, (SessionId, Instant, SpawnSpec, u8)>,
@@ -357,6 +359,7 @@ impl KilnApp {
             panes: HashMap::new(),
             pending_creates: HashMap::new(),
             launch_specs: HashMap::new(),
+            capacity_recovery: Default::default(),
             cli_updates: Default::default(),
             conversation_sync: Default::default(),
             cli_restarts: HashMap::new(),
@@ -2234,6 +2237,7 @@ impl eframe::App for KilnApp {
         }
         self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
         self.tick_cli_updates(ctx);
+        self.tick_capacity_recovery(ctx);
         self.conversation_sync.tick(&mut self.settings, self.workspaces.iter().filter(|w| w.conversation_sync).map(|w| w.tools.canonical_root().to_path_buf()).collect(), ctx);
         self.rotator.poll(&mut self.conn);
         let mut out = Vec::new();

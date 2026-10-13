@@ -11253,5 +11253,20 @@
     "en": "{} synced · {} need attention · {} waiting",
     "ja": "完了 {}件 · 要確認 {}件 · 待機 {}件",
     "zh-CN": "已完成 {} 个 · 待确认 {} 个 · 等待 {} 个"
+  },
+  "혼잡 자동 재시도 중지됨": {
+    "en": "Capacity auto-retry paused",
+    "ja": "混雑時の自動再試行を停止中",
+    "zh-CN": "容量自动重试已暂停"
+  },
+  "모델 혼잡 · {seconds}초 후 재시도 ({attempt}/5)": {
+    "en": "Model at capacity · Retry in {seconds}s ({attempt}/5)",
+    "ja": "モデルが混雑 · {seconds}秒後に再試行 ({attempt}/5)",
+    "zh-CN": "模型繁忙 · {seconds}秒后重试 ({attempt}/5)"
+  },
+  "자동 재시도 취소": {
+    "en": "Cancel auto-retry",
+    "ja": "自動再試行をキャンセル",
+    "zh-CN": "取消自动重试"
   }
 }
