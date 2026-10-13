@@ -481,6 +481,25 @@ pub fn render(
                 rows.push(json!({"type":m.role,"uuid":mid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296","message":payload}));
                 parent = Some(mid);
             }
+            // Native pickers inspect bounded head/tail windows. A long initial
+            // message can fill the head before a complete prompt is available.
+            let title = messages
+                .iter()
+                .find(|m| m.role == "user" && !m.text.trim().is_empty())
+                .map(|m| {
+                    m.text
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .take(96)
+                        .collect::<String>()
+                })
+                .unwrap_or_else(|| "Linked conversation".into());
+            rows.push(
+                json!({"type":"custom-title","sessionId":id,"customTitle":title,
+                "uuid":super::stable_id(&format!("{id}:title")),"timestamp":timestamp}),
+            );
         }
         Tool::Codex => {
             rows.push(json!({"timestamp":timestamp,"ordinal":0,"type":"session_meta","payload":{"id":id,"session_id":id,"timestamp":timestamp,"cwd":cwd,"originator":"kiln","cli_version":"0.162.1","source":"cli","model_provider":"openai","history_mode":"paginated"}}));

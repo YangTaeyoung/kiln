@@ -27,6 +27,27 @@ const LIMIT: u64 = 64 * 1024 * 1024;
 const PORTABLE_LIMIT: u64 = 512 * 1024 * 1024;
 const COPY_LIMIT: u64 = 1024 * 1024 * 1024;
 const MAX_SOURCES: usize = 4096;
+const PROJECTION_REVISION: u8 = 3;
+
+fn has_current_native_projection(source: &Source) -> Result<bool> {
+    if source.tool == Tool::Codex {
+        return Ok(true);
+    }
+    // Revision 3 ends new Claude copies with native picker metadata. Its presence
+    // also distinguishes repaired text-block content from the older projection.
+    use std::io::{Seek, SeekFrom};
+    let mut file = fs::File::open(&source.path)?;
+    let len = file.metadata()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(4096)))?;
+    let mut tail = Vec::new();
+    file.take(4096).read_to_end(&mut tail)?;
+    let expected = stable_id(&format!("{}:title", source.id));
+    Ok(tail.split(|b| *b == b'\n').any(|line| {
+        serde_json::from_slice::<serde_json::Value>(line).is_ok_and(|r| {
+            r["type"] == "custom-title" && r["sessionId"] == source.id && r["uuid"] == expected
+        })
+    }))
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Endpoint {
@@ -695,7 +716,8 @@ fn scan_with_index(
                 || scope.is_none()
                 || destinations.iter().all(|p| {
                     entry.copies.iter().any(|c| {
-                        c.root == p.endpoint(opposite(entry.source.tool)).root && c.revision == 2
+                        c.root == p.endpoint(opposite(entry.source.tool)).root
+                            && c.revision == PROJECTION_REVISION
                     })
                 });
             if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
@@ -752,18 +774,12 @@ fn scan_with_index(
                             .values()
                             .find(|e| e.source.id == copy.id && e.source.root == copy.root)
                         {
-                            let reserved_text = target.source.tool == Tool::Claude
-                                && messages.iter().any(|m| {
-                                    m.role == "user"
-                                        && (m.text.starts_with("<local-command-")
-                                            || m.text.starts_with("<command-name>"))
-                                });
-                            if !reserved_text
+                            if has_current_native_projection(&target.source)?
                                 && read_messages(&target.source).is_ok_and(|m| m == messages)
                             {
                                 index(&target.source)?;
                                 let mut copy = copy.clone();
-                                copy.revision = 2;
+                                copy.revision = PROJECTION_REVISION;
                                 verified.push(copy);
                             }
                         }
@@ -822,7 +838,7 @@ fn scan_with_index(
                 // must see a continuation even when the other CLI was opened outside Kiln.
                 let identity = if scope.is_some() {
                     format!(
-                        "{}:v2:{key}:{fingerprint}:{}",
+                        "{}:v3:{key}:{fingerprint}:{}",
                         state_path.display(),
                         destination_pair
                             .endpoint(opposite(entry.source.tool))
@@ -917,7 +933,7 @@ fn scan_with_index(
                     id,
                     cwd: entry.source.cwd.clone(),
                     root: plan.source.root.clone(),
-                    revision: 2,
+                    revision: PROJECTION_REVISION,
                 };
                 state.recent.insert(0, continuation.clone());
                 state.recent.truncate(8);

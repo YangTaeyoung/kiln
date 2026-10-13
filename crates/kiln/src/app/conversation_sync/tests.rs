@@ -563,7 +563,9 @@ fn bidirectional_changes_are_native_and_do_not_echo() {
 fn partial_writes_attachments_versions_and_disable_are_safe() {
     let f = Fixture::new(Tool::Claude);
     let original = fs::read(&f.source.path).unwrap();
-    fs::write(&f.source.path, &original[..original.len() - 1]).unwrap();
+    let native = rows(&original);
+    let partial = format!("{}\n{}", native[0], native[1]);
+    fs::write(&f.source.path, partial).unwrap();
     assert_eq!(f.scan().published, 0);
     assert_eq!(f.scan().rows.values().next().unwrap().phase, Phase::Waiting);
     let mut unsupported = rows(&original);
@@ -926,7 +928,19 @@ fn recovery_reuses_publication_plan_and_never_clobbers_a_collision() {
         let bytes = if collision {
             b"unrelated conversation\n".to_vec()
         } else {
-            format::render(target.tool, &id, &target.cwd, &timestamp, &ms).unwrap()
+            // A native continuation appends after existing picker metadata; it
+            // does not re-render or move the original immutable prefix.
+            let mut bytes =
+                format::render(target.tool, &id, &target.cwd, &timestamp, &messages()).unwrap();
+            let extended = format::render(target.tool, &id, &target.cwd, &timestamp, &ms).unwrap();
+            for row in rows(&extended)
+                .iter()
+                .skip(messages().len())
+                .filter(|r| r["type"] != "custom-title")
+            {
+                bytes.extend_from_slice(format!("{row}\n").as_bytes());
+            }
+            bytes
         };
         publish(&target.path, &bytes).unwrap();
         let status = f.scan();
