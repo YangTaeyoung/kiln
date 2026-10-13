@@ -126,7 +126,9 @@ into an ordinary existing shell continues to use that shell's configuration;
 Kiln does not replace its credentials or restart it silently.
 
 See [CLI versions and exact conversation restart](cli-updates.md) for update
-options and panel identity tracking.
+options and panel identity tracking. To continue a text conversation in the other
+provider, enable [conversation synchronization](conversation-sync.md) for an
+explicitly connected account pair.
 
 ## Codex background-server settings
 

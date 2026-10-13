@@ -25,6 +25,7 @@ mod workspace_activity;
 mod workspace_dialog;
 mod agent_launch;
 pub mod agent_runtime;
+pub mod conversation_sync;
 mod remote_terminal;
 mod pane_layout;
 mod agent_request;
@@ -261,6 +262,7 @@ pub struct KilnApp {
     pending_creates: HashMap<u32, PaneId>,
     launch_specs: HashMap<PaneId, SpawnSpec>,
     cli_updates: agent_runtime::Updates,
+    conversation_sync: conversation_sync::Manager,
     cli_restarts: HashMap<PaneId, (SessionId, Instant, SpawnSpec, u8)>,
     cli_confirmations: HashMap<PaneId, Instant>,
     pane_layout: pane_layout::PaneLayout,
@@ -353,6 +355,7 @@ impl KilnApp {
             pending_creates: HashMap::new(),
             launch_specs: HashMap::new(),
             cli_updates: Default::default(),
+            conversation_sync: Default::default(),
             cli_restarts: HashMap::new(),
             cli_confirmations: HashMap::new(),
             pane_layout: Default::default(),
@@ -2203,6 +2206,7 @@ impl eframe::App for KilnApp {
         }
         self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
         self.tick_cli_updates(ctx);
+        self.conversation_sync.tick(&mut self.settings, ctx);
         self.rotator.poll(&mut self.conn);
         let mut out = Vec::new();
         self.rotator.tick(&mut self.conn, &mut out);

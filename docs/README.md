@@ -30,3 +30,4 @@ See [third-party notices](../THIRD_PARTY_NOTICES.md) for bundled assets and depe
 - [Shell completion](shell-completion.md)
 
 - [CLI versions and exact conversation restart](cli-updates.md)
+- [Claude Code ↔ Codex conversation synchronization](conversation-sync.md)
