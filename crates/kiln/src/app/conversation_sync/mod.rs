@@ -807,11 +807,12 @@ fn scan_with_index(
 }
 
 enum Event {
-    Progress(Status),
+    Progress(Gate, Status),
     Connected(Result<Pair, String>),
-    Scanned(Result<Status, String>),
+    Scanned(Gate, Result<Status, String>),
 }
 pub struct Manager {
+    pub(super) detail: Option<PathBuf>,
     tx: mpsc::SyncSender<Event>,
     rx: mpsc::Receiver<Event>,
     busy: bool,
@@ -828,6 +829,7 @@ impl Default for Manager {
     fn default() -> Self {
         let (tx, rx) = mpsc::sync_channel(8);
         Self {
+            detail: None,
             tx,
             rx,
             busy: false,
@@ -857,7 +859,8 @@ impl Manager {
         // Poll quickly only while working; all filesystem/account operations stay off the UI thread.
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                Event::Progress(mut status) => {
+                Event::Progress(gate, mut status) => {
+                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) { continue; }
                     if status.discovering {
                         status.rows = self.status.rows.clone();
                         status.watched = self.status.watched;
@@ -877,8 +880,9 @@ impl Manager {
                         Err(e) => self.error = Some(e),
                     }
                 }
-                Event::Scanned(result) => {
+                Event::Scanned(gate, result) => {
                     self.busy = false;
+                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) { continue; }
                     match result {
                         Ok(status) => {
                             self.status = status;
@@ -895,12 +899,13 @@ impl Manager {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         let enabled =
-            settings.conversation_sync_enabled && settings.conversation_sync_pair.is_some();
-        self.gate.store(enabled, Ordering::Release);
+            settings.conversation_sync_enabled && settings.conversation_sync_pair.is_some() && !workspaces.is_empty();
         if !enabled {
+            self.cancel_scan();
+            self.workspaces = workspaces;
             return;
         }
-        if self.configured != settings.conversation_sync_pair || self.workspaces != workspaces {
+        if self.configured != settings.conversation_sync_pair || self.workspaces != workspaces || !self.gate.load(Ordering::Acquire) {
             self.gate.store(false, Ordering::Release);
             self.gate = Arc::new(AtomicBool::new(true));
             self.workspaces = workspaces;
@@ -939,87 +944,132 @@ impl Manager {
                         |status| {
                             if last_progress.get().elapsed() >= Duration::from_millis(100) {
                                 last_progress.set(Instant::now());
-                                let _ = tx.try_send(Event::Progress(status.clone()));
+                                let _ = tx.try_send(Event::Progress(gate.clone(), status.clone()));
                             }
                         },
                     )
                 })
                 .map_err(|e| e.to_string());
-            let _ = tx.send(Event::Scanned(result));
+            let _ = tx.send(Event::Scanned(gate, result));
         });
     }
-    pub fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        s: &mut super::state::Settings,
-        accounts: &AccountManager,
-    ) {
+    pub(super) fn accounts_ready(accounts: &AccountManager) -> bool {
+        [Tool::Claude, Tool::Codex].into_iter().all(|tool| {
+            accounts.active(tool).is_some_and(|id| !accounts.pending_login(tool, &id) && !accounts.login_required(tool, &id)
+                && accounts.profiles(tool).iter().any(|p| p.id == id))
+        })
+    }
+    pub(super) fn cancel_scan(&mut self) {
+        self.gate.store(false, Ordering::Release);
+        self.next = Instant::now();
+    }
+    pub(super) fn enable(&mut self, settings: &mut super::state::Settings, accounts: &AccountManager) {
+        if settings.conversation_sync_pair.is_some() {
+            settings.conversation_sync_enabled = true;
+            return;
+        }
+        if self.connecting || self.busy { return; }
+        self.busy = true;
+        self.connecting = true;
+        self.error = None;
+        let accounts = accounts.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = if Self::accounts_ready(&accounts) {
+                Pair::connect(&accounts).map_err(|e| e.to_string())
+            } else { Err(kiln_common::i18n::tr("설정에서 Claude Code와 Codex 계정을 먼저 연결하세요.").to_owned()) };
+            let _ = tx.send(Event::Connected(result));
+        });
+    }
+    fn workspace_status(&self, root: &Path) -> Status {
+        let rows: BTreeMap<_, _> = self.status.rows.iter().filter(|(_, row)| {
+            let cwd = Path::new(&row.source.cwd);
+            cwd.starts_with(root) && !self.workspaces.iter().any(|other| other != root && other.starts_with(root) && cwd.starts_with(other))
+        }).map(|(key, row)| (key.clone(), row.clone())).collect();
+        Status {
+            watched: rows.len(),
+            checked: rows.values().filter(|r| matches!(r.phase, Phase::Synced | Phase::Failed | Phase::Waiting)).count(),
+            published: rows.values().filter(|r| r.phase == Phase::Synced).map(|r| r.copies.len().max(usize::from(r.target.is_some()))).sum(),
+            rows,
+            workspaces: 1,
+            discovering: self.status.discovering || self.connecting,
+            ..Status::default()
+        }
+    }
+    pub(super) fn badge(&self, root: &Path) -> (kiln_common::icons::Icon, egui::Color32, String) {
+        use kiln_common::{Theme, icons::Icon, i18n::tr};
+        let theme = Theme::current();
+        let status = self.workspace_status(root);
+        if self.error.is_some() || status.rows.values().any(|r| r.phase == Phase::Failed) {
+            (Icon::Warning, theme.orange, tr("대화 연동 · 확인 필요").into())
+        } else if self.connecting || status.discovering || status.rows.values().any(|r| matches!(r.phase, Phase::Queued | Phase::Reading | Phase::Copying)) || (self.busy && status.rows.is_empty()) {
+            (Icon::Refresh, theme.blue, kiln_common::trf!("대화 연동 중 · {}/{}", status.checked, status.watched))
+        } else if status.rows.is_empty() {
+            (Icon::Plug, theme.text_dim, tr("대화 연동됨 · 대화 대기").into())
+        } else if status.rows.values().any(|r| r.phase == Phase::Waiting) {
+            (Icon::History, theme.blue, tr("대화 연동 · 응답 완료 대기").into())
+        } else {
+            (Icon::Check, theme.green, kiln_common::trf!("대화 연동 완료 · {}개", status.rows.len()))
+        }
+    }
+    pub(super) fn dialog(&mut self, ctx: &egui::Context, name: &str, root: &Path, enabled: bool, settings: &mut super::state::Settings, accounts: &AccountManager) {
         use kiln_common::{Theme, fonts, i18n::tr};
         let theme = Theme::current();
-        ui.add_space(16.0);
-        kiln_common::widgets::divider(ui);
-        ui.add_space(12.0);
-        ui.label(egui::RichText::new(tr("대화 이어가기 · 실험 기능")).font(fonts::semibold(16.0)));
-        ui.add(egui::Label::new(tr("열린 워크스페이스의 Claude Code · Codex 대화를 자동으로 찾고, 완료된 원문을 상대 CLI의 /resume에 연결합니다.")).wrap());
-        if let Some(pair) = &s.conversation_sync_pair {
-            ui.label(format!(
-                "Claude Code: {} ↔ Codex: {}",
-                pair.claude.label, pair.codex.label
-            ));
-            if ui
-                .checkbox(&mut s.conversation_sync_enabled, tr("자동으로 대화 동기화"))
-                .changed()
-            {
-                self.gate
-                    .store(s.conversation_sync_enabled, Ordering::Release);
-            }
-        }
-        if ui
-            .add_enabled(!self.busy, egui::Button::new(tr("워크스페이스 대화 연결")))
-            .clicked()
-        {
-            self.gate.store(false, Ordering::Release);
-            s.conversation_sync_enabled = false;
-            self.busy = true;
-            self.connecting = true;
-            let accounts = accounts.clone();
-            let tx = self.tx.clone();
-            std::thread::spawn(move || {
-                let _ = tx.send(Event::Connected(
-                    Pair::connect(&accounts).map_err(|e| e.to_string()),
-                ));
+        let mut close = false;
+        let status = self.workspace_status(root);
+        let modal = egui::Modal::new(egui::Id::new("workspace-conversation-sync"))
+            .frame(egui::Frame::new().fill(theme.bg_panel).stroke(egui::Stroke::new(1.0, theme.border)).corner_radius(14).inner_margin(20))
+            .show(ctx, |ui| {
+                ui.set_width(600.0_f32.min((ctx.content_rect().width() - 64.0).max(200.0)));
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tr("대화 연동")).font(fonts::semibold(18.0)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        close = kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, tr("닫기 (Esc)")).clicked();
+                    });
+                });
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-150.0).max(180.0)).show(ui, |ui| {
+                    ui.label(egui::RichText::new(name).font(fonts::semibold(14.0)));
+                    ui.add(egui::Label::new(root.display().to_string()).wrap());
+                    if let Some(pair) = &settings.conversation_sync_pair {
+                        ui.label(format!("Claude Code: {} ↔ Codex: {}", pair.claude.label, pair.codex.label));
+                    }
+                    ui.add_space(8.0);
+                    ui.add(egui::Label::new(tr("이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다.")).wrap());
+                    ui.add(egui::Label::new(egui::RichText::new(tr("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.")).color(theme.text_dim)).wrap());
+                    self.progress_status_ui(ui, enabled, &status);
+                    if enabled && settings.conversation_sync_pair.is_none() && !self.connecting && Self::accounts_ready(accounts)
+                        && ui.button(tr("계정 연결 다시 시도")).clicked() { self.enable(settings, accounts); }
+                    ui.add_space(8.0);
+                    ui.collapsing(tr("연동 범위와 지원 형식"), |ui| {
+                        ui.add(egui::Label::new(tr("기존에 열어 둔 세션도 포함합니다. 워크스페이스와 하위 폴더의 기본 CLI · 연결 계정 기록을 찾고, 두 저장 위치에 동기화합니다.")).wrap());
+                        ui.add(egui::Label::new(tr("응답마다 새 사본이 생깁니다. 열린 세션은 자동으로 바뀌지 않습니다. 이미지·첨부 파일은 지원하지 않습니다. Codex 0.162.1 · Claude Code 2.1.296 지원.")).wrap());
+                    });
+                });
             });
-        }
-        if self.busy {
-            ui.spinner();
-            ui.ctx().request_repaint_after(Duration::from_millis(100));
-        }
-        ui.add(egui::Label::new(egui::RichText::new(tr("기존에 열어 둔 세션도 포함합니다. 워크스페이스와 하위 폴더의 기본 CLI · 연결 계정 기록을 찾고, 두 저장 위치에 동기화합니다.")).color(theme.text_dim)).wrap());
-        ui.add(egui::Label::new(egui::RichText::new(tr("응답마다 새 사본이 생깁니다. 열린 세션은 자동으로 바뀌지 않습니다. 이미지·첨부 파일은 지원하지 않습니다. Codex 0.162.1 · Claude Code 2.1.296 지원.")).color(theme.text_dim)).wrap());
-        ui.add(egui::Label::new(egui::RichText::new(tr("처음에는 워크스페이스별 최근 대화 20개를 연결하고, 이후 새 대화와 변경된 대화를 자동 동기화합니다.")).color(theme.text_dim)).wrap());
-        self.progress_ui(ui, s.conversation_sync_enabled);
+        if close || modal.should_close() { self.detail = None; }
     }
+    #[cfg(test)]
     fn progress_ui(&self, ui: &mut egui::Ui, enabled: bool) {
+        self.progress_status_ui(ui, enabled, &self.status);
+    }
+    fn progress_status_ui(&self, ui: &mut egui::Ui, enabled: bool, status: &Status) {
         use kiln_common::{
             Theme, fonts,
             i18n::tr,
             icons::{self, Icon},
         };
         let theme = Theme::current();
-        let failed = self
-            .status
+        let failed = status
             .rows
             .values()
             .filter(|r| r.phase == Phase::Failed)
             .count();
-        let waiting = self
-            .status
+        let waiting = status
             .rows
             .values()
             .filter(|r| matches!(r.phase, Phase::Waiting | Phase::Queued))
             .count();
-        let copying = self
-            .status
+        let copying = status
             .rows
             .values()
             .any(|r| matches!(r.phase, Phase::Reading | Phase::Copying));
@@ -1031,11 +1081,11 @@ impl Manager {
                 theme.orange,
                 tr("확인이 필요한 대화가 있습니다"),
             )
-        } else if self.status.discovering {
+        } else if status.discovering {
             (Icon::Refresh, theme.blue, tr("워크스페이스 대화 찾는 중"))
         } else if copying {
             (Icon::Refresh, theme.blue, tr("대화 동기화 중"))
-        } else if self.status.rows.is_empty() {
+        } else if status.rows.is_empty() {
             (
                 Icon::Plug,
                 theme.text_dim,
@@ -1064,21 +1114,21 @@ impl Manager {
                             .font(fonts::semibold(13.0)),
                     );
                 });
-                if self.status.workspaces > 0 {
-                    ui.label(kiln_common::trf!("워크스페이스 {}개 · 대화 {}개", self.status.workspaces, self.status.rows.len()));
+                if status.workspaces > 0 {
+                    ui.label(kiln_common::trf!("워크스페이스 {}개 · 대화 {}개", status.workspaces, status.rows.len()));
                 } else if enabled && !self.busy {
                     ui.label(tr("동기화할 워크스페이스 폴더를 여세요."));
                 }
-                if enabled && self.status.rows.is_empty() && !self.busy && self.status.workspaces > 0 {
+                if enabled && status.rows.is_empty() && !self.busy && status.workspaces > 0 {
                     ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code 또는 Codex 대화를 시작하면 자동으로 연결됩니다.")).wrap());
                 }
-                if enabled && self.busy && self.status.watched > 0 {
-                    let fraction = self.status.checked as f32 / self.status.watched as f32;
+                if enabled && self.busy && status.watched > 0 {
+                    let fraction = status.checked as f32 / status.watched as f32;
                     ui.add(egui::ProgressBar::new(fraction).text(kiln_common::trf!(
-                        "기록 확인 {}/{} · 새 사본 {}개",
-                        self.status.checked,
-                        self.status.watched,
-                        self.status.published
+                        "기록 확인 {}/{} · 연결된 사본 {}개",
+                        status.checked,
+                        status.watched,
+                        status.published
                     )));
                 }
                 if let Some(error) = &self.error {
@@ -1094,7 +1144,7 @@ impl Manager {
                     .id_salt("conversation-sync-progress")
                     .max_height(280.0)
                     .show(ui, |ui| {
-                        for (key, row) in &self.status.rows {
+                        for (key, row) in &status.rows {
                             ui.push_id(key, |ui| {
                                 ui.add_space(8.0);
                                 kiln_common::widgets::divider(ui);

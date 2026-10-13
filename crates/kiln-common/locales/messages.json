@@ -11128,5 +11128,80 @@
     "en": "Initially connects the 20 most recent conversations per workspace, then automatically synchronizes new and changed conversations.",
     "ja": "最初はワークスペースごとに直近 20 件の会話を接続し、その後は新規・更新された会話を自動同期します。",
     "zh-CN": "首次连接每个工作区最近的 20 个对话，之后自动同步新增或有更新的对话。"
+  },
+  "계정 설정 열기": {
+    "en": "Open account settings",
+    "ja": "アカウント設定を開く",
+    "zh-CN": "打开账户设置"
+  },
+  "계정 연결 다시 시도": {
+    "en": "Retry account connection",
+    "ja": "アカウントの接続を再試行",
+    "zh-CN": "重试账户连接"
+  },
+  "대화 연동": {
+    "en": "Link conversations",
+    "ja": "会話を連携",
+    "zh-CN": "关联对话"
+  },
+  "대화 연동 · 응답 완료 대기": {
+    "en": "Conversation sync · Waiting for a completed response",
+    "ja": "会話の連携 · 応答の完了待ち",
+    "zh-CN": "对话关联 · 等待回复完成"
+  },
+  "대화 연동 · 확인 필요": {
+    "en": "Conversation sync · Needs attention",
+    "ja": "会話の連携 · 確認が必要",
+    "zh-CN": "对话关联 · 需要检查"
+  },
+  "대화 연동 상태 보기": {
+    "en": "View conversation sync status",
+    "ja": "会話の同期状況を表示",
+    "zh-CN": "查看对话同步状态"
+  },
+  "대화 연동 완료 · {}개": {
+    "en": "Conversations synced · {}",
+    "ja": "会話の同期完了 · {}件",
+    "zh-CN": "对话同步完成 · {} 个"
+  },
+  "대화 연동 중 · {}/{}": {
+    "en": "Syncing conversations · {}/{}",
+    "ja": "会話を同期中 · {}/{}",
+    "zh-CN": "正在同步对话 · {}/{}"
+  },
+  "대화 연동 해제": {
+    "en": "Unlink conversations",
+    "ja": "会話の連携を解除",
+    "zh-CN": "取消对话关联"
+  },
+  "대화 연동됨 · 대화 대기": {
+    "en": "Conversations linked · Waiting for conversations",
+    "ja": "会話連携済み · 会話を待機中",
+    "zh-CN": "对话已关联 · 等待对话"
+  },
+  "상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.": {
+    "en": "Open the same folder in the other CLI and continue with /resume. Open sessions do not change automatically.",
+    "ja": "相手の CLI で同じフォルダーを開き、/resume で続けてください。開いているセッションは自動では切り替わりません。",
+    "zh-CN": "在另一个 CLI 中打开同一文件夹并使用 /resume 继续。已打开的会话不会自动切换。"
+  },
+  "설정에서 Claude Code와 Codex 계정을 먼저 연결하세요.": {
+    "en": "Connect your Claude Code and Codex accounts in Settings first.",
+    "ja": "まず設定で Claude Code と Codex のアカウントを接続してください。",
+    "zh-CN": "请先在设置中连接 Claude Code 和 Codex 账户。"
+  },
+  "연동 범위와 지원 형식": {
+    "en": "Sync scope and supported formats",
+    "ja": "連携の範囲と対応形式",
+    "zh-CN": "关联范围与支持的格式"
+  },
+  "이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다.": {
+    "en": "Start with the 20 most recent conversations in this workspace and its subfolders. New and changed conversations sync automatically afterward.",
+    "ja": "このワークスペースとサブフォルダーの最新20件の会話から連携します。その後は新規・更新された会話を自動同期します。",
+    "zh-CN": "先关联此工作区及子文件夹中最近的 20 个对话，之后自动同步新增和更新的对话。"
+  },
+  "기록 확인 {}/{} · 연결된 사본 {}개": {
+    "en": "Records checked {}/{} · {} linked copies",
+    "ja": "記録の確認 {}/{} · 連携済みコピー {}件",
+    "zh-CN": "已检查记录 {}/{} · 已关联副本 {} 个"
   }
 }

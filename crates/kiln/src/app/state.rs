@@ -77,6 +77,7 @@ impl Default for Settings {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(default)]
 pub struct WorkspaceP {
+    pub conversation_sync: bool,
     pub name: String,
     pub root: PathBuf,
     pub pages: Vec<PageP>,

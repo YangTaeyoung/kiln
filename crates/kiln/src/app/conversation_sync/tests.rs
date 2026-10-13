@@ -1217,3 +1217,57 @@ fn failed_native_registration_is_not_reported_as_synchronized_and_retries_same_c
     assert_eq!(complete.rows.values().next().unwrap().phase, Phase::Synced);
     assert!(!plans[0].path().exists());
 }
+
+#[test]
+fn workspace_opt_in_defaults_off_and_round_trips_without_global_migration() {
+    let old: super::super::state::Persist = serde_json::from_value(serde_json::json!({
+        "settings": {"conversation_sync_enabled": true},
+        "workspaces": [{"name":"A","root":"/example/a"}, {"name":"B","root":"/example/b"}]
+    })).unwrap();
+    assert!(old.settings.conversation_sync_enabled);
+    assert!(old.workspaces.iter().all(|w| !w.conversation_sync));
+    let mut selected = old;
+    selected.workspaces[0].conversation_sync = true;
+    let restored: super::super::state::Persist = serde_json::from_slice(&serde_json::to_vec(&selected).unwrap()).unwrap();
+    assert!(restored.workspaces[0].conversation_sync);
+    assert!(!restored.workspaces[1].conversation_sync);
+}
+
+#[test]
+fn no_opted_in_workspaces_cancel_inflight_and_ignore_stale_results() {
+    let f = Fixture::new(Tool::Claude);
+    let mut manager = Manager::default();
+    manager.gate.store(true, Ordering::Release);
+    let old_gate = manager.gate.clone();
+    manager.busy = true;
+    let mut settings = super::super::state::Settings::default();
+    settings.conversation_sync_enabled = true;
+    settings.conversation_sync_pair = Some(f.pair.clone());
+    manager.tick(&mut settings, vec![], &egui::Context::default());
+    assert!(!old_gate.load(Ordering::Acquire));
+    assert!(manager.workspaces.is_empty());
+    manager.tx.send(Event::Progress(old_gate.clone(), f.scan())).unwrap();
+    manager.tx.send(Event::Scanned(old_gate, Err("stale cancelled scan".into()))).unwrap();
+    manager.tick(&mut settings, vec![], &egui::Context::default());
+    assert!(!manager.busy);
+    assert!(manager.status.rows.is_empty());
+    assert!(manager.error.is_none());
+}
+
+#[test]
+fn workspace_status_and_badges_do_not_mix_other_folders() {
+    let f = Fixture::new(Tool::Claude);
+    let mut manager = Manager::default();
+    manager.status = f.scan();
+    let original = manager.status.rows.values().next().unwrap().clone();
+    manager.workspaces = vec!["/example/a".into(), "/example/b".into(), "/example/a/child".into()];
+    manager.status.rows.clear();
+    for (path, phase) in [("/example/a", Phase::Synced), ("/example/b", Phase::Failed), ("/example/a/child", Phase::Copying)] {
+        let mut row = original.clone(); row.source.cwd = path.into(); row.phase = phase;
+        manager.status.rows.insert(path.into(), row);
+    }
+    assert_eq!(manager.workspace_status(Path::new("/example/a")).rows.len(), 1);
+    assert_eq!(manager.badge(Path::new("/example/a")).0, kiln_common::icons::Icon::Check);
+    assert_eq!(manager.badge(Path::new("/example/b")).0, kiln_common::icons::Icon::Warning);
+    assert_eq!(manager.badge(Path::new("/example/a/child")).0, kiln_common::icons::Icon::Refresh);
+}

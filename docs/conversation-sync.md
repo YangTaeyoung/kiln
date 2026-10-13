@@ -1,25 +1,29 @@
 # Claude Code ↔ Codex conversations
 
-In **Settings → Accounts → Conversation continuity**, choose **Connect workspace
-conversations**. While the Kiln window is open, synchronization discovers native
-Claude Code and Codex transcripts whose working directory is inside an open
-workspace, including its subfolders. Existing sessions and sessions opened outside
-Kiln are included; reopening a panel or receiving a lifecycle hook is not required.
+Connect both CLI accounts in **Settings → Accounts**, then right-click a workspace
+in the sidebar and choose **Link conversations**. Only explicitly linked workspace
+folders synchronize while Kiln is open. Existing enabled connections do not opt
+any workspace in automatically. Choose **Unlink conversations** in the same menu
+to stop future synchronization; existing CLI copies remain available.
+
+Synchronization discovers Claude Code and Codex transcripts within each selected
+folder, including subfolders. Existing sessions and sessions opened outside Kiln
+are included; reopening a panel or receiving a lifecycle hook is not required.
 
 The initial synchronization selects the **20 most recently modified conversations
 per workspace**, across both tools and their default/connected namespaces. The
 selection is persisted so restarting Kiln continues the same initial batch. New
 and modified conversations are discovered afterward, including an older session
-that saves another update. Closing a workspace pauses its synchronization; opening
+that saves another update. Closing a workspace pauses its synchronization; linking
 a different workspace starts that folder's own initial batch. Overlapping folders
-are assigned to the nearest open workspace, and duplicate workspace paths count once.
+are assigned to the nearest linked workspace, and duplicate workspace paths count once.
 
 Discovery checks both the ordinary CLI directories (`~/.claude`, `~/.codex`, or
 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and the two connected account directories.
 Completed transcripts are made available in both opposite-tool locations, so an
 ordinary terminal and a Kiln account panel can each use `/resume`. Equal directories
 are deduplicated. Switching the active account does not redirect the pinned
-connection; connect again to change the account destinations. Sync remains opt-in.
+connection. The status dialog identifies the pinned account pair. Sync remains opt-in.
 
 In the other CLI, open the same project and use **`/resume`** to select the newest
 conversation copy. Original user and assistant messages appear in the CLI's normal
@@ -29,18 +33,18 @@ the same folder remain separate; workspace discovery does not merge their histor
 
 ## Read synchronization status
 
-The connection card shows waiting, working, attention-needed, paused, or a green
+Click a workspace's sync icon or choose **View conversation sync status** from its
+context menu. The workspace icon and its status dialog show waiting, working, attention-needed, paused, or a green
 check when all completed conversations have been synchronized. During work it
 shows the number of transcript records checked and new copies created. The list
 shows each source conversation's first prompt, project, direction, status, and a
 button to copy its continuation ID. Copies that have not been continued are
 hidden from the list to avoid displaying both sides of the same transfer.
 
-The card distinguishes discovery, no conversations found in the open folders, and
+The status dialog distinguishes discovery, no conversations found in the open folders, and
 waiting for a completed response. A discovered unsupported transcript stays visible
 with its failure reason; it is not reported as successfully synchronized. A failed item includes its
-reason and is retried on subsequent checks. Pausing keeps the last result visible
-and stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
+reason and is retried on subsequent checks. Unlinking stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
 The check refers to **completed responses**, not an answer still being generated.
 
 ## Compatibility and boundaries

@@ -755,6 +755,9 @@ impl KilnApp {
         let note = infos.iter().filter(|x| x.attention).find_map(|x| x.last_notification.clone());
         let name = ws.name.clone();
         let root_path = ws.root.clone();
+        let sync_enabled = ws.conversation_sync;
+        let sync_root = ws.tools.canonical_root().to_path_buf();
+        let sync_badge = sync_enabled.then(|| self.conversation_sync.badge(&sync_root));
         let task_context = self.projects.task_context(&root_path);
         let h = if wide { if tasks.len()>3 {70.0}else{52.0} } else { 44.0 };
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
@@ -780,7 +783,7 @@ impl KilnApp {
         }
         if wide {
             let mut text_rect = rect.shrink2(vec2(10.0, 6.0));
-            if attention>0 || !running.is_empty() {text_rect.max.x-=12.0;}
+            if attention>0 || !running.is_empty() || sync_enabled {text_rect.max.x-=22.0;}
             let mut row = ui.new_child(UiBuilder::new().max_rect(text_rect));
             row.set_clip_rect(text_rect.intersect(ui.clip_rect()));
             row.spacing_mut().item_spacing.y = 2.0;
@@ -809,12 +812,22 @@ impl KilnApp {
             }
 
         }
+        if let Some((icon, color, ref label)) = sync_badge {
+            let badge = egui::Rect::from_center_size(
+                if wide { pos2(rect.right()-14.0, rect.bottom()-14.0) } else { pos2(av.right()-1.0, av.bottom()-1.0) }, vec2(18.0,18.0));
+            ui.painter().rect_filled(badge.expand(1.0), 4, t.bg_elevated);
+            icons::paint(ui.painter(), badge.shrink(1.0), icon, color);
+            let response = ui.interact(badge, ui.id().with("conversation-sync-status"), Sense::click());
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+            if response.on_hover_text(label).clicked() { self.actions.push(Action::ShowWorkspaceConversationSync(i)); }
+        }
         if active && scroll_active {resp.scroll_to_me_animation(Some(egui::Align::Center),egui::style::ScrollAnimation::none());}
         let mut tooltip=format!("{}\n{}", name, short_path(&root_path));
         if !running.is_empty(){tooltip.push_str(&kiln_common::trf!("\n실행 중: {}",running.join(", ")));}
         if let Some(identity)=ws.tools.worktree_identity(){tooltip.push_str(&kiln_common::trf!("\n메인 저장소: {}",identity.main_root.display()));}
         if let Some(note)=note {tooltip.push_str(&format!("\n{note}"));}
         if let Some((_,memo,status))=task_context { if !memo.is_empty(){tooltip.push_str(&format!("\n{status} · {memo}"));} }
+        if let Some((_, _, label)) = sync_badge { tooltip.push_str(&format!("\n{label}")); }
         let resp = resp.on_hover_text(tooltip);
         if resp.clicked() {
             self.actions.push(Action::SelectWorkspace(i));
@@ -833,6 +846,18 @@ impl KilnApp {
             if ui.button(kiln_common::i18n::tr("Finder 에서 열기")).clicked() {
                 let _ = open::that_detached(&root_path);
                 ui.close();
+            }
+            ui.separator();
+            let accounts_ready = super::conversation_sync::Manager::accounts_ready(&self.rotator.mgr);
+            if ui.add_enabled(sync_enabled || accounts_ready, egui::Button::new(kiln_common::i18n::tr(if sync_enabled {"대화 연동 해제"} else {"대화 연동"})))
+                .on_disabled_hover_text(kiln_common::i18n::tr("설정에서 Claude Code와 Codex 계정을 먼저 연결하세요.")).clicked() {
+                self.actions.push(Action::ToggleWorkspaceConversationSync(i)); ui.close();
+            }
+            if sync_enabled && ui.button(kiln_common::i18n::tr("대화 연동 상태 보기")).clicked() {
+                self.actions.push(Action::ShowWorkspaceConversationSync(i)); ui.close();
+            }
+            if !accounts_ready && ui.button(kiln_common::i18n::tr("계정 설정 열기")).clicked() {
+                self.settings_ui.section = 3; self.settings_ui.open = true; ui.close();
             }
             ui.separator();
             ui.menu_button(kiln_common::i18n::tr("도구"),|ui|{
@@ -1312,9 +1337,14 @@ impl KilnApp {
             if !self.launchers.is_open() { self.focus_terminal = true; }
         }
 
+        if let Some(root) = self.conversation_sync.detail.clone() {
+            if let Some(workspace) = self.workspaces.iter().find(|w| w.tools.canonical_root() == root) {
+                self.conversation_sync.dialog(ctx, &workspace.name, &root, workspace.conversation_sync, &mut self.settings, &self.rotator.mgr);
+            } else { self.conversation_sync.detail = None; }
+        }
         if self.settings_ui.open {
             let info = settings::AboutInfo { daemon_pid: self.conn.daemon_pid, daemon_build: self.conn.daemon_build.clone(), connected: self.conn.is_connected() };
-            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr, &mut self.keymap, &mut self.cli_updates, &mut self.conversation_sync);
+            let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr, &mut self.keymap, &mut self.cli_updates);
             self.actions.extend(acts);
             if !self.settings_ui.open {
                 self.focus_terminal = true;
