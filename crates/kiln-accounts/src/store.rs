@@ -70,12 +70,31 @@ fn security(args: &[&str]) -> Result<Option<String>> {
     if cfg!(test) && std::env::var(REAL_KEYCHAIN_OPT_IN).as_deref() != Ok("1") {
         bail!("real keychain access is disabled in tests (set {REAL_KEYCHAIN_OPT_IN}=1)");
     }
-    let out = std::process::Command::new("/usr/bin/security")
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .context("failed to run /usr/bin/security")?;
+    let out = bounded_output(std::process::Command::new("/usr/bin/security").args(args), std::time::Duration::from_secs(3))?;
     security_result(args.first().copied().unwrap_or_default(), out.status.success(), out.status.code(), &out.stdout, &out.stderr)
+}
+
+fn bounded_output(command: &mut std::process::Command, timeout: std::time::Duration) -> Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().context("credential store could not start")?;
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let read = |stream: Box<dyn Read + Send>| std::thread::spawn(move || { let mut bytes = Vec::new(); let result = stream.take(262_145).read_to_end(&mut bytes); (result, bytes) });
+    let out = read(Box::new(stdout));
+    let err = read(Box::new(stderr));
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? { break status; }
+        if started.elapsed() >= timeout { let _ = child.kill(); let _ = child.wait(); bail!("credential store timed out"); }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let (result, stdout) = out.join().map_err(|_| anyhow::anyhow!("credential store read failed"))?;
+    result.context("credential store read failed")?;
+    let (result, stderr) = err.join().map_err(|_| anyhow::anyhow!("credential store read failed"))?;
+    result.context("credential store read failed")?;
+    if stdout.len() > 262_144 || stderr.len() > 262_144 { bail!("credential store response too large"); }
+    Ok(std::process::Output { status, stdout, stderr })
 }
 
 fn security_result(operation: &str, success: bool, code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<Option<String>> {
@@ -253,6 +272,15 @@ fn set_mode(_path: &Path, _mode: u32) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn slow_credential_process_is_bounded_and_reaped() {
+        let start = std::time::Instant::now();
+        let error = bounded_output(std::process::Command::new("/bin/sleep").arg("2"), std::time::Duration::from_millis(30)).unwrap_err();
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        assert_eq!(error.to_string(), "credential store timed out");
+    }
 
     #[test]
     fn only_missing_items_are_optional_and_failed_writes_never_succeed() {

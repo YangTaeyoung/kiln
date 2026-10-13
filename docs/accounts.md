@@ -41,7 +41,7 @@ profile or restart a running terminal. Choosing another account in the browser
 is rejected without changing the original credentials. Cancelling and failed
 attempts leave the original profile intact.
 
-If local credentials have been removed or are incomplete, the row shows
+When a supported local credential store confirms credentials are absent, the row shows
 **Sign-in required** and a direct **Sign in again** button. Local status is
 checked in the background while account settings are open and on refresh. This
 is a local credential check, not an online account-validity guarantee. Network
@@ -152,3 +152,8 @@ Official references:
 - [Claude Code authentication commands](https://code.claude.com/docs/en/cli-reference#cli-commands)
 - [Codex authentication](https://developers.openai.com/codex/auth)
 - [Codex CLI browser-login implementation](https://github.com/openai/codex/blob/main/codex-rs/cli/src/login.rs)
+
+Sign-in progress, browser controls, fallback codes and results stay directly
+below the account being reauthenticated. New-account sign-in stays with the
+add-account controls. Missing email metadata or an unsupported credential store
+is not reported as a logout; usage cannot be assigned without matching identity.

@@ -42,8 +42,8 @@ fn get_impl(url: &str, headers: &str, protocol: &str) -> Result<serde_json::Valu
     dump.reopen()?.take(32_769).read_to_string(&mut header_dump)?;
     if header_dump.len() > 32_768 { bail!("usage response headers too large"); }
     let (code, headers) = crate::claude::parse_header_dump(&header_dump);
-    if code == 429 || code == 403 { return Err(RetryLater(retry_delay(&headers, crate::now_unix())).into()); }
-    if code == 401 { return Err(RetryLater(3600).into()); }
+    if code == 429 || code == 403 { return Err(anyhow::Error::new(RetryLater(retry_delay(&headers, crate::now_unix()))).context(format!("usage request rejected (HTTP {code})"))); }
+    if code == 401 { return Err(anyhow::Error::new(RetryLater(3600)).context("usage authorization rejected (HTTP 401)")); }
     if code != 200 { bail!("usage request failed (HTTP {code})"); }
     // Do not expose parsing errors with excerpts of the response.
     serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid usage response"))

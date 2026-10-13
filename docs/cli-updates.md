@@ -2,7 +2,9 @@
 
 Open **Settings → Accounts → CLI updates** to see the installed executable,
 installed version and latest published package version. Version checks run in
-background workers. Enable **Automatically update Codex and Claude Code** for
+background workers. The installed version appears as soon as its single local
+probe completes; the latest-package lookup has its own visible pending/error
+state and never withholds the installed version. Enable **Automatically update Codex and Claude Code** for
 six-hour checks while Kiln is open, or update either CLI explicitly. Both automatic updating and
 immediate session restart are off by default.
 
@@ -75,4 +77,6 @@ References:
 - [Claude update channels](https://code.claude.com/docs/en/setup#auto-updates)
 - [Claude account isolation](https://code.claude.com/docs/en/authentication#log-in-with-multiple-accounts)
 
-Managed panels keep their original account. Legacy account rotation is disabled for these panels; when a usage limit is reached, choose another account in Settings and open a new panel. Kiln does not transfer private conversation history between accounts. Package-manager updates verify the selected executable belongs to the active npm global root or Homebrew prefix before installing. Version probes run in the PTY launch helper or a background worker, never on the UI thread.
+Managed panels keep their original account. Legacy account rotation is disabled for these panels; when a usage limit is reached, choose another account in Settings and open a new panel. Kiln does not transfer private conversation history between accounts. Verified legacy Codex Keyring namespaces retain that store during new launches
+and conversation resume rather than being forced into an empty `auth.json`.
+Package-manager updates verify the selected executable belongs to the active npm global root or Homebrew prefix before installing. Version probes run in the PTY launch helper or a background worker, never on the UI thread.

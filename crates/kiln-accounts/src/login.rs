@@ -165,14 +165,7 @@ impl IsolatedLogin {
                 (secret, None, email)
             }
             Tool::Claude => {
-                let service = claude_service(self.env.claude_config_dir.as_deref());
-                // Official CLI falls back to a private file when Keychain writes
-                // fail. Read only this job's isolated file before asking Keychain.
-                let secret = match read_secret(&claude::credentials_path(&self.env.home, self.env.claude_config_dir.as_deref()))? {
-                    Some(secret) => Some(secret),
-                    None if self.env.claude_live_in_store => self.env.store.get_by_service(&service)?.map(|(secret, _)| secret),
-                    None => None,
-                }
+                let secret = self.env.claude_secret(self.env.claude_config_dir.as_deref())?.map(|x| x.0)
                     .ok_or_else(|| anyhow::anyhow!(kiln_common::i18n::tr("로그인은 완료됐지만 계정 정보를 읽지 못했습니다. 다시 시도하세요")))?;
                 claude::access_token(&secret)?;
                 let config = self.env.claude_config_dir.as_ref().unwrap();
@@ -371,24 +364,16 @@ mod tests {
     }
 
     #[test]
-    fn claude_file_fallback_does_not_read_keychain_or_live_account_metadata() {
-        struct BrokenStore;
-        impl crate::CredentialStore for BrokenStore {
-            fn get(&self, _: &str, _: &str) -> Result<Option<String>> { panic!("must use isolated file") }
-            fn get_by_service(&self, _: &str) -> Result<Option<(String, String)>> { panic!("must use isolated file") }
-            fn set(&self, _: &str, _: &str, _: &str) -> Result<()> { panic!("no writes") }
-            fn delete(&self, _: &str, _: &str) -> Result<bool> { panic!("no deletes") }
-        }
+    fn claude_file_fallback_requires_absent_namespaced_keychain_and_uses_own_metadata() {
         let root = tempfile::tempdir().unwrap();
         let (mut env, _) = Env::sandbox(root.path(), true);
-        env.store = Arc::new(BrokenStore);
+        env.store = Arc::new(crate::MemoryStore::new());
         claude::write_oauth_account(&env.home.join(".claude.json"), Some(&serde_json::json!({"emailAddress":"existing@example.test"}))).unwrap();
         let mut login = IsolatedLogin::new(&env).unwrap();
         crate::store::write_secret_atomic(&claude::credentials_path(&login.env.home, login.env.claude_config_dir.as_deref()), br#"{"claudeAiOauth":{"accessToken":"isolated-fixture"}}"#).unwrap();
         let credential = login.credentials(Tool::Claude).unwrap();
         assert_eq!(claude::access_token(&credential.secret).unwrap(), "isolated-fixture");
         assert_eq!(credential.email, None);
-        // This fixture intentionally cannot access a credential store, including Drop.
         login.env.claude_live_in_store = false;
     }
 

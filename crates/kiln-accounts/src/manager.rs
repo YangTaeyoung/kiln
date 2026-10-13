@@ -89,6 +89,15 @@ impl Env {
             self.claude_config_dir.as_ref().map(|dir| dir.join(".claude.json")).unwrap_or_else(|| claude::claude_json_path(&self.home))
         }
     }
+
+    /// Match the CLI's Keychain primary / private-file fallback. An inaccessible
+    /// primary is not evidence that a historical file token is current.
+    pub(crate) fn claude_secret(&self, config: Option<&Path>) -> Result<Option<(String, Option<String>)>> {
+        if self.claude_live_in_store
+            && let Some((secret, account)) = self.store.get_by_service(&crate::login::claude_service(config))?
+        { return Ok(Some((secret, Some(account)))); }
+        Ok(read_secret(&claude::credentials_path(&self.home, config))?.map(|secret| (secret, None)))
+    }
 }
 
 /// 프로필 스냅샷을 담는 키체인 service 이름.
@@ -308,7 +317,15 @@ impl AccountManager {
 
     #[cfg(test)]
     pub(crate) fn login_fixture(&self, tool: Tool, status: crate::LoginStatus) -> Arc<crate::login::LoginControl> {
-        let control = Arc::new(crate::login::LoginControl::default());
+        self.login_fixture_for_profile(tool, status, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn login_fixture_for_profile(&self, tool: Tool, status: crate::LoginStatus, profile_id: Option<String>) -> Arc<crate::login::LoginControl> {
+        self.ui_state().feedback_profile[idx(tool)] = profile_id.clone();
+        let mut control = crate::login::LoginControl::default();
+        control.profile_id = profile_id;
+        let control = Arc::new(control);
         *control.status.lock() = status;
         self.inner.login.lock()[idx(tool)] = Some(control.clone());
         self.with_state(|s| s.busy[idx(tool)] = Some(kiln_common::i18n::tr("브라우저에서 로그인을 완료하세요").into()));
@@ -350,7 +367,8 @@ impl AccountManager {
                 if let Ok(secret) = secret {
                     let missing = secret.as_deref().is_none_or(|secret| match tool {
                         Tool::Claude => claude::access_token(secret).is_err(),
-                        Tool::Codex => !codex::has_chatgpt_tokens(secret) || codex::auth_email(secret).is_none(),
+                        // Missing identity and unsupported auth methods are not logout.
+                        Tool::Codex => codex::credentials_missing(secret),
                     });
                     self.with_state(|s| {
                         let key = (tool, p.id.clone());
@@ -410,6 +428,7 @@ impl AccountManager {
     pub fn start_relogin(&self, tool: Tool, id: &str) {
         if self.login_status(tool).is_some() || self.with_state(|s| s.busy[idx(tool)].is_some()) { return; }
         let Some(profile) = self.profiles(tool).into_iter().find(|p| p.id == id) else { return; };
+        self.ui_state().feedback_profile[idx(tool)] = Some(id.to_string());
         let Some(binary) = crate::login::find_cli(&self.inner.env.home, tool) else {
             self.with_state(|s| s.error[idx(tool)] = Some(kiln_common::trf!("{}가 설치되어 있지 않습니다. 설치 후 다시 시도하세요", tool.display_name())));
             return;
@@ -450,6 +469,7 @@ impl AccountManager {
                 true
             });
             if !reserved { return; }
+            self.ui_state().feedback_profile[idx(tool)] = profile_id.clone();
             jobs[idx(tool)] = Some(control.clone());
         }
         let m = self.clone();
@@ -508,9 +528,8 @@ impl AccountManager {
     fn read_live(&self, tool: Tool) -> Result<Option<(String, Option<String>)>> {
         let env = &self.inner.env;
         match tool {
-            Tool::Claude if env.claude_live_in_store => Ok(env.store.get_by_service(&crate::login::claude_service(env.claude_config_dir.as_deref()))?.map(|(v, a)| (v, Some(a)))),
-            Tool::Claude => Ok(read_secret(&env.claude_credentials_path())?.map(|v| (v, None))),
-            Tool::Codex => Ok(read_secret(&codex::auth_path(&env.codex_home))?.map(|v| (v, None))),
+            Tool::Claude => env.claude_secret(env.claude_config_dir.as_deref()),
+            Tool::Codex => Ok(codex::read_credentials(&env.codex_home, env.store.as_ref())?.map(|v| (v, None))),
         }
     }
 
@@ -671,13 +690,20 @@ impl AccountManager {
             }
             if tool == Tool::Claude {
                 let oauth = self.with_state(|s|s.settings.claude.profiles.iter().find(|p|p.profile.id==id).and_then(|p|p.oauth_account.clone()));
-                claude::write_oauth_account(&dir.join(".claude.json"), oauth.as_ref())?;
+                claude::write_oauth_account(&claude::config_path(&dir), oauth.as_ref())?;
                 if env.claude_live_in_store { env.store.set(&crate::login::claude_service(Some(&dir)), &env.username, &secret)?; }
                 else { write_secret_atomic(&dir.join(".credentials.json"), secret.as_bytes())?; }
             } else { write_secret_atomic(&dir.join("auth.json"), secret.as_bytes())?; }
             write_secret_atomic(&dir.join("initialized"), b"1")?;
         }
-        Ok(vec![(match tool { Tool::Claude=>"CLAUDE_CONFIG_DIR",Tool::Codex=>"CODEX_HOME" }.into(), dir.to_string_lossy().into_owned()), ("KILN_AGENT_PROFILE".into(), id)])
+        let mut variables = vec![(match tool { Tool::Claude=>"CLAUDE_CONFIG_DIR",Tool::Codex=>"CODEX_HOME" }.into(), dir.to_string_lossy().into_owned()), ("KILN_AGENT_PROFILE".into(), id.clone())];
+        if tool == Tool::Codex && !dir.join("auth.json").exists() {
+            // A legacy/manual CLI may have migrated this namespace to Keyring.
+            // Preserve its current store; never seed a second refresh-token copy.
+            self.usage_secret(tool, &id)?.context("account identity unavailable")?;
+            variables.push(("KILN_CODEX_AUTH_STORE".into(), "keyring".into()));
+        }
+        Ok(variables)
     }
 
     /// Validate the original saved account before interrupting a running panel.
@@ -697,7 +723,7 @@ impl AccountManager {
 
     fn runtime_oauth(&self,tool:Tool,id:&str)->Result<Option<Value>> {
         if tool!=Tool::Claude {return Ok(None);}
-        let path=self.runtime_dir(tool,id).join(".claude.json");
+        let path=claude::config_path(&self.runtime_dir(tool,id));
         match std::fs::metadata(&path) {
             Ok(_)=>claude::read_oauth_account(&path),
             Err(e) if e.kind()==std::io::ErrorKind::NotFound=>Ok(None),
@@ -707,7 +733,7 @@ impl AccountManager {
 
     fn restore_runtime(&self, tool: Tool, id: &str, secret: Option<&str>, oauth: Option<&Value>) -> Result<()> {
         let dir=self.runtime_dir(tool,id);
-        if tool==Tool::Claude {claude::write_oauth_account(&dir.join(".claude.json"),oauth)?;}
+        if tool==Tool::Claude {claude::write_oauth_account(&claude::config_path(&dir),oauth)?;}
         if tool==Tool::Claude && self.inner.env.claude_live_in_store {
             let service=crate::login::claude_service(Some(&dir));
             if let Some(secret)=secret {self.inner.env.store.set(&service,&self.inner.env.username,secret)?;}
@@ -742,12 +768,13 @@ impl AccountManager {
         let dir = self.runtime_dir(tool, id);
         if !dir.is_dir() { return Ok(None); }
         match tool {
-            Tool::Claude if self.inner.env.claude_live_in_store => {
-                if let Some(secret)=read_secret(&dir.join(".credentials.json"))? {return Ok(Some(secret));}
-                Ok(self.inner.env.store.get_by_service(&crate::login::claude_service(Some(&dir)))?.map(|x|x.0))
+            Tool::Claude => Ok(self.inner.env.claude_secret(Some(&dir))?.map(|x| x.0)),
+            Tool::Codex => {
+                // Managed panels pin file storage; prefer that file, then inspect
+                // CLI-owned Keyring configuration for legacy/manual sessions.
+                if let Some(secret) = read_secret(&dir.join("auth.json"))? { return Ok(Some(secret)); }
+                codex::read_credentials(&dir, self.inner.env.store.as_ref())
             },
-            Tool::Claude => read_secret(&dir.join(".credentials.json")),
-            Tool::Codex => read_secret(&dir.join("auth.json")),
         }
     }
 
@@ -1176,6 +1203,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn two_claude_accounts_use_fresh_keychain_tokens_and_cli_config_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = Arc::new(|token| Ok(Usage { five_hour: Some((match token { "at-a-fresh" => 0.2, "at-b-fresh" => 0.7, _ => panic!("stale or wrong-account token selected") }, None)), status: "allowed".into(), ..Default::default() }));
+        let m = AccountManager::with_env(env.clone());
+        let mut saved = Vec::new();
+        for (email, marker) in [("a@example.test", "a"), ("b@example.test", "b")] {
+            login_claude(&env, &store, email, marker);
+            let p = m.save_current(Tool::Claude, marker).unwrap();
+            m.launch_environment(Tool::Claude).unwrap();
+            let dir = m.runtime_dir(Tool::Claude, &p.id);
+            write_secret_atomic(&dir.join(".credentials.json"), claude_cred("stale-file").as_bytes()).unwrap();
+            store.set(&crate::login::claude_service(Some(&dir)), &env.username, &claude_cred(&format!("{marker}-fresh"))).unwrap();
+            claude::write_oauth_account(&dir.join(".config.json"), Some(&serde_json::json!({"emailAddress":email}))).unwrap();
+            // The newer CLI config is authoritative even when an old file remains.
+            claude::write_oauth_account(&dir.join(".claude.json"), Some(&serde_json::json!({"emailAddress":"stale@example.test"}))).unwrap();
+            saved.push(p);
+        }
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(m.usage(Tool::Claude, &saved[0].id).unwrap().five_hour.unwrap().0, 0.2);
+        assert_eq!(m.usage(Tool::Claude, &saved[1].id).unwrap().five_hour.unwrap().0, 0.7);
+        m.check_profile_credentials();
+        assert!(saved.iter().all(|p| !m.login_required(Tool::Claude, &p.id)));
+    }
+
+    #[test]
+    fn codex_optional_identity_and_legacy_keyring_do_not_report_logout() {
+        let root = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(root.path(), false);
+        let m = AccountManager::with_env(env.clone());
+        login_codex(&env, "work@example.test", "old");
+        let p = m.save_current(Tool::Codex, "Work").unwrap();
+        m.launch_environment(Tool::Codex).unwrap();
+        let dir = m.runtime_dir(Tool::Codex, &p.id);
+        let cases = [serde_json::json!({"tokens":{"access_token":"fixture", "id_token":"no-email"}}), serde_json::json!({"agent_identity":{"agent_runtime_id":"fixture","agent_private_key":"fixture","email":null}}), serde_json::json!({"auth_mode":"future","new_credential":"fixture"})];
+        for doc in cases {
+            write_secret_atomic(&dir.join("auth.json"), serde_json::to_string(&doc).unwrap().as_bytes()).unwrap();
+            m.check_profile_credentials();
+            assert!(!m.login_required(Tool::Codex, &p.id));
+            assert!(m.usage_secret(Tool::Codex, &p.id).is_err(), "unknown identity must never attribute quota to the saved account");
+        }
+        std::fs::remove_file(dir.join("auth.json")).unwrap();
+        std::fs::write(dir.join("config.toml"), "cli_auth_credentials_store = 'keyring'\n").unwrap();
+        store.set("Codex Auth", &codex::keyring_account(&dir), &fake_auth("work@example.test", "fresh")).unwrap();
+        m.check_profile_credentials();
+        assert!(!m.login_required(Tool::Codex, &p.id));
+        assert!(m.usage_secret(Tool::Codex, &p.id).unwrap().is_some());
+        assert!(m.launch_environment(Tool::Codex).unwrap().iter().any(|(key,value)|key=="KILN_CODEX_AUTH_STORE" && value=="keyring"));
+        assert!(!dir.join("auth.json").exists(), "launch must not duplicate a Keyring refresh token into a file");
+        store.delete("Codex Auth", &codex::keyring_account(&dir)).unwrap();
+        m.check_profile_credentials();
+        assert!(m.login_required(Tool::Codex, &p.id));
+    }
+
+    #[test]
     fn usage_never_attributes_external_or_runtime_login_to_another_profile() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         for tool in Tool::ALL {
@@ -1426,9 +1508,10 @@ mod tests {
         assert_ne!(a.id,b.id);
     }
     #[test]
-    fn claude_private_file_refresh_is_authoritative() {
+    fn claude_private_file_refresh_is_fallback_when_keychain_is_absent() {
         let d=tempfile::tempdir().unwrap();let(env,store)=Env::sandbox(d.path(),true);let m=AccountManager::with_env(env.clone());
         login_claude(&env,&store,"a@x.com","keychain-old");let a=m.save_current(Tool::Claude,"").unwrap();m.launch_environment(Tool::Claude).unwrap();
+        store.delete(&crate::login::claude_service(Some(&m.runtime_dir(Tool::Claude,&a.id))), &env.username).unwrap();
         let path=m.runtime_dir(Tool::Claude,&a.id).join(".credentials.json");write_secret_atomic(&path,claude_cred("file-refreshed").as_bytes()).unwrap();
         assert_eq!(m.runtime_secret(Tool::Claude,&a.id).unwrap(),Some(claude_cred("file-refreshed")));
         m.sync_back(Tool::Claude).unwrap();assert_eq!(store.get(&profile_service(Tool::Claude),&a.id).unwrap(),Some(claude_cred("file-refreshed")));
@@ -1503,7 +1586,7 @@ mod tests {
         let mut children = Vec::new();
         for name in ["claude", "codex"] {
             let home_file = d.path().join(format!("{name}.home"));
-            while std::fs::read_to_string(&home_file).ok().is_none_or(|s| s.trim().is_empty()) {
+            while ["home", "config", "pid"].iter().any(|suffix| std::fs::read_to_string(d.path().join(format!("{name}.{suffix}"))).ok().is_none_or(|s| s.trim().is_empty())) {
                 assert!(std::time::Instant::now() < deadline, "fixture login did not start");
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }

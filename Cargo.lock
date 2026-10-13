@@ -3015,7 +3015,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kiln"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3055,7 +3055,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-accounts"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3070,11 +3070,12 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "toml",
 ]
 
 [[package]]
 name = "kiln-common"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "directories",
@@ -3087,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-daemon"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -3112,7 +3113,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-db"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3137,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-editor"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "egui",
@@ -3164,7 +3165,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-git"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "egui",
@@ -3179,7 +3180,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-i18n-macros"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3189,7 +3190,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-proto"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "libc",
@@ -3199,7 +3200,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-remote"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5995,10 +5996,12 @@ version = "1.1.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "920602543f0911ab71da12c50d59701da54c196d1a2bf5cb4b75667f137a406a"
 dependencies = [
+ "indexmap",
  "serde_core",
  "serde_spanned",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -6031,6 +6034,12 @@ checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tower"

@@ -15,6 +15,36 @@ pub fn auth_path(codex_home: &Path) -> PathBuf {
     codex_home.join("auth.json")
 }
 
+/// Direct Keyring key used by the official CLI (0.162.1 storage.rs).
+pub(crate) fn keyring_account(home: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let hash = format!("{:x}", Sha256::digest(canonical.to_string_lossy().as_bytes()));
+    format!("cli|{}", &hash[..16])
+}
+
+pub(crate) fn read_credentials(home: &Path, store: &dyn crate::CredentialStore) -> anyhow::Result<Option<String>> {
+    let config = crate::store::read_secret(&home.join("config.toml"))?;
+    let config = config.as_deref().map(toml::from_str::<toml::Value>).transpose()?;
+    let mode = config.as_ref().and_then(|doc| doc.get("cli_auth_credentials_store")).and_then(toml::Value::as_str).unwrap_or("file");
+    match mode {
+        "file" => crate::store::read_secret(&auth_path(home)),
+        "keyring" | "auto" => {
+            let secret_storage = config.as_ref().and_then(|doc| doc.get("features")).and_then(|features| features.get("secret_auth_storage")).and_then(toml::Value::as_bool).unwrap_or(cfg!(windows));
+            // New secrets and ephemeral backends cannot be inferred from absence
+            // of auth.json. Report an unknown local state, never a logout.
+            anyhow::ensure!(!secret_storage, "credential storage requires CLI status verification");
+            match store.get("Codex Auth", &keyring_account(home)) {
+                Ok(Some(secret)) => Ok(Some(secret)),
+                Ok(None) if mode == "auto" => crate::store::read_secret(&auth_path(home)),
+                Err(_) if mode == "auto" => crate::store::read_secret(&auth_path(home)),
+                result => result,
+            }
+        }
+        _ => anyhow::bail!("credential storage requires CLI status verification"),
+    }
+}
+
 /// JWT 의 payload 를 서명 검증 없이 JSON 으로 디코드한다.
 pub fn jwt_claims(jwt: &str) -> Option<Value> {
     let payload = jwt.split('.').nth(1)?;
@@ -44,6 +74,21 @@ pub fn has_chatgpt_tokens(auth_json: &str) -> bool {
         .ok()
         .and_then(|d| d.get("tokens").cloned())
         .is_some_and(|t| t.is_object())
+}
+
+/// Local absence only. Email is optional in the official authentication schema.
+/// Keep unknown/new authentication material distinct from an empty credential.
+pub(crate) fn credentials_missing(auth_json: &str) -> bool {
+    let Ok(doc) = serde_json::from_str::<Value>(auth_json) else { return false; };
+    if !doc.is_object() { return false; }
+    if let Some(tokens) = doc.get("tokens").and_then(Value::as_object)
+        && tokens.values().any(|value| value.as_str().is_some_and(|s| !s.is_empty()))
+    { return false; }
+    if doc.get("agent_identity").is_some_and(|value| !value.is_null())
+        || ["OPENAI_API_KEY", "personal_access_token", "bedrock_api_key", "bedrock_access_keys"].iter().any(|key| doc.get(*key).is_some_and(|value| !value.is_null()))
+    { return false; }
+    // Future non-null fields require checking; don't invent a logout verdict.
+    !doc.as_object().is_some_and(|fields| fields.iter().any(|(key, value)| !matches!(key.as_str(), "tokens" | "auth_mode" | "last_refresh" | "OPENAI_API_KEY") && !value.is_null()))
 }
 
 /// 세션 기록에서 찾은 사용량과 기록 시각(unix 초).

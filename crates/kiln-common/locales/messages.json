@@ -10918,5 +10918,40 @@
     "en": "Checked {} min ago",
     "ja": "{}分前に確認",
     "zh-CN": "{} 分钟前检查"
+  },
+  "최신 버전 확인 중…": {
+    "en": "Checking latest version…",
+    "ja": "最新バージョンを確認中…",
+    "zh-CN": "正在检查最新版本…"
+  },
+  "최신 버전 확인 실패": {
+    "en": "Could not check latest version",
+    "ja": "最新バージョンを確認できません",
+    "zh-CN": "无法检查最新版本"
+  },
+  "버전 정보 없음": {
+    "en": "No version information",
+    "ja": "バージョン情報なし",
+    "zh-CN": "无版本信息"
+  },
+  "사용량 조회 제한 · 자동 재시도 대기": {
+    "en": "Usage rate limited · waiting to retry",
+    "ja": "使用量の取得制限・自動再試行を待機中",
+    "zh-CN": "用量查询受限 · 等待自动重试"
+  },
+  "사용량 조회 권한 확인 필요": {
+    "en": "Usage access needs checking",
+    "ja": "使用量のアクセス権を確認してください",
+    "zh-CN": "需要检查用量访问权限"
+  },
+  "사용량 인증 확인 필요": {
+    "en": "Usage authentication needs checking",
+    "ja": "使用量の認証を確認してください",
+    "zh-CN": "需要检查用量认证"
+  },
+  "업데이트 중…": {
+    "en": "Updating…",
+    "ja": "更新中…",
+    "zh-CN": "正在更新…"
   }
 }

@@ -26,6 +26,7 @@ pub(crate) struct UiState {
     adding_focus: bool,
     relogin: Option<(Tool, String)>,
     login_code: [String; 2],
+    pub(crate) feedback_profile: [Option<String>; 2],
 }
 
 /// 도구별 카드를 그리고, 이번 프레임까지 쌓인 이벤트를 돌려준다.
@@ -76,6 +77,9 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
     let profiles = mgr.profiles(tool);
     let active = mgr.active(tool);
     let refreshing = mgr.is_refreshing(tool);
+    let index = if tool == Tool::Claude { 0 } else { 1 };
+    let login_target = mgr.login_profile(tool).map(|p| p.id).or_else(|| mgr.ui_state().relogin.clone().filter(|(current, _)| *current == tool).map(|(_, id)| id));
+    let feedback_target = mgr.ui_state().feedback_profile[index].clone().filter(|id| profiles.iter().any(|p| p.id == *id));
     let (busy, error, notice, live) = mgr.with_state(|s| {
         let i = if tool == Tool::Claude { 0 } else { 1 };
         (s.busy[i].clone(), s.error[i].clone(), s.notice[i].clone(), s.live_email[i].clone())
@@ -127,6 +131,15 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                     widgets::divider(ui);
                 }
                 account_row(ui, mgr, p, active.as_deref() == Some(p.id.as_str()), mgr.usage(tool, &p.id), now, busy.is_some());
+                if login_target.as_deref() == Some(&p.id) {
+                    ui.add_space(8.0);
+                    egui::Frame::new().fill(t.bg_hover).corner_radius(8).inner_margin(12).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        login_form(ui, mgr, tool);
+                    });
+                }
+                if feedback_target.as_deref() == Some(&p.id) { login_feedback(ui, busy.as_deref(), error.as_deref(), notice.as_deref()); }
             }
         }
         ui.add_space(6.0);
@@ -138,29 +151,21 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
             ui.spacing_mut().item_spacing.x = 8.0;
             ui.add_enabled_ui(busy.is_none(), |ui| {
                 if widgets::button_with(ui, Some(Icon::Save), kiln_common::i18n::tr("현재 로그인한 계정 저장"), ButtonKind::Secondary, true).clicked() {
+                    mgr.ui_state().feedback_profile[index] = None;
                     mgr.run_async(tool, kiln_common::i18n::tr("저장 중…"), move |m| {
                         let p = m.save_current(tool, "")?;
                         Ok(kiln_common::trf!("‘{}’ 계정을 저장했습니다", p.label))
                     });
                 }
                 if widgets::button_with(ui, Some(Icon::Plus), kiln_common::i18n::tr("새 계정 추가"), ButtonKind::Primary, true).clicked() {
+                    mgr.ui_state().feedback_profile[index] = None;
                     mgr.ui_state().adding = Some((tool, String::new()));
                     mgr.ui_state().adding_focus = true;
                 }
             });
         }); }
-        login_form(ui, mgr, tool);
-        if let Some(b) = &busy {
-            ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().size(12.0).color(t.text_dim));
-                ui.label(RichText::new(b).font(fonts::regular(12.0)).color(t.text_dim));
-            });
-        }
-        if let Some(e) = &error {
-            ui.add(egui::Label::new(RichText::new(e).font(fonts::regular(12.0)).color(t.red)).wrap());
-        } else if busy.is_none() && let Some(n) = &notice {
-            ui.add(egui::Label::new(RichText::new(n).font(fonts::regular(12.0)).color(t.green)).wrap());
-        }
+        if login_target.is_none() { login_form(ui, mgr, tool); }
+        if feedback_target.is_none() { login_feedback(ui, busy.as_deref(), error.as_deref(), notice.as_deref()); }
         ui.add_space(6.0);
         widgets::divider(ui);
 
@@ -171,6 +176,21 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
             }
         });
     });
+}
+
+fn login_feedback(ui: &mut Ui, busy: Option<&str>, error: Option<&str>, notice: Option<&str>) {
+    let t = Theme::current();
+    if let Some(text) = busy {
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(12.0).color(t.text_dim));
+            ui.add(egui::Label::new(RichText::new(text).font(fonts::regular(12.0)).color(t.text_dim)).wrap());
+        });
+    }
+    if let Some(text) = error {
+        ui.add(egui::Label::new(RichText::new(text).font(fonts::regular(12.0)).color(t.red)).wrap());
+    } else if busy.is_none() && let Some(text) = notice {
+        ui.add(egui::Label::new(RichText::new(text).font(fonts::regular(12.0)).color(t.green)).wrap());
+    }
 }
 
 fn info_banner(ui: &mut Ui, text: &str) {
@@ -226,9 +246,13 @@ fn login_form(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
             ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("브라우저에서 로그인 코드를 제공한 경우 여기에 붙여넣으세요")).font(fonts::regular(12.0)).color(t.text_dim)).wrap());
             let mut code = mgr.ui_state().login_code[index].clone();
             ui.horizontal(|ui| {
-                let field = ui.add(egui::TextEdit::singleline(&mut code).password(true).hint_text(kiln_common::i18n::tr("로그인 코드")).desired_width((ui.available_width() - 82.0).clamp(80.0, 220.0)));
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let width = (ui.available_width() - 86.0).clamp(64.0, 220.0);
+                let field_id = ui.id().with("login-code");
+                let field = widgets::input_frame(ui.memory(|memory| memory.has_focus(field_id)), false).inner_margin(egui::Margin::symmetric(9, 6))
+                    .show(ui, |ui| ui.add(egui::TextEdit::singleline(&mut code).id(field_id).frame(egui::Frame::NONE).font(fonts::regular(12.0)).password(true).hint_text(kiln_common::i18n::tr("로그인 코드")).desired_width((width - 18.0).max(40.0)))).inner;
                 field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), kiln_common::i18n::tr("로그인 코드")));
-                if ui.add_enabled(!code.trim().is_empty(), egui::Button::new(kiln_common::i18n::tr("확인"))).clicked() {
+                if ui.add_enabled_ui(!code.trim().is_empty(), |ui| widgets::button(ui, kiln_common::i18n::tr("확인"), ButtonKind::Secondary)).inner.clicked() {
                     if let Err(error) = mgr.submit_login_code(tool, &code) {
                         mgr.with_state(|s| s.error[index] = Some(error.to_string()));
                     } else { code.clear(); }
@@ -309,9 +333,10 @@ fn usage_color(u: f32) -> Color32 {
 }
 
 /// "5시간 ▓▓░ 43% 2시간 후" 한 줄.
-fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64) {
+fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64, stale: bool) {
     let t = Theme::current();
-    let w = Usage::effective(w, now);
+    // A failed request cannot prove the new window is at zero.
+    let w = if stale { w } else { Usage::effective(w, now) };
     let (rect, response) = ui.allocate_exact_size(vec2(236.0, 16.0), Sense::hover());
     let p = ui.painter();
     let label = p.layout_no_wrap(label.to_string(), fonts::medium(11.0), t.text_faint);
@@ -346,6 +371,14 @@ fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64)
 }
 
 /// 사용량 열(폭 236, 높이 36 고정).
+fn usage_failure_label(usage: &Usage) -> &'static str {
+    let reason = &usage.status;
+    kiln_common::i18n::tr(if reason.contains("HTTP 429") { "사용량 조회 제한 · 자동 재시도 대기" }
+        else if reason.contains("HTTP 403") { "사용량 조회 권한 확인 필요" }
+        else if reason.contains("HTTP 401") { "사용량 인증 확인 필요" }
+        else { "사용량 확인 불가" })
+}
+
 fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<i64>) {
     let t = Theme::current();
     ui.allocate_ui_with_layout(vec2(236.0, 36.0), Layout::top_down(Align::Min), |ui| {
@@ -357,26 +390,26 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<
                 ui.spacing_mut().item_spacing.x = 5.0;
                 let (r, resp) = ui.allocate_exact_size(vec2(13.0, 16.0), Sense::hover());
                 icons::paint(ui.painter(), r, icon, color);
-                let l = ui.label(RichText::new(text).font(fonts::regular(11.5)).color(color));
+                let l = ui.add(egui::Label::new(RichText::new(text).font(fonts::regular(11.5)).color(color)).truncate()).on_hover_text(text);
                 resp | l
             })
             .inner
         };
         match usage {
             Some(u) if u.five_hour.is_some() || u.seven_day.is_some() => {
-                usage_line(ui, kiln_common::i18n::tr("5시간"), u.five_hour, now);
-                usage_line(ui, kiln_common::i18n::tr("7일"), u.seven_day, now);
+                usage_line(ui, kiln_common::i18n::tr("5시간"), u.five_hour, now, u.is_unavailable());
+                usage_line(ui, kiln_common::i18n::tr("7일"), u.seven_day, now, u.is_unavailable());
                 if let Some(at) = fetched_at {
                     let age = now.saturating_sub(at).max(0) / 60;
                     ui.label(RichText::new(if age == 0 { kiln_common::i18n::tr("방금 확인").to_string() } else { kiln_common::trf!("{}분 전 확인", age) }).font(fonts::regular(10.5)).color(t.text_faint));
                 }
                 if u.is_unavailable() {
-                    ui.label(RichText::new(kiln_common::i18n::tr("갱신 실패 · 마지막으로 확인한 사용량")).font(fonts::regular(10.5)).color(t.text_faint)).on_hover_text(&u.status);
+                    ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("갱신 실패 · 마지막으로 확인한 사용량")).font(fonts::regular(10.5)).color(t.text_faint)).wrap()).on_hover_text(usage_failure_label(u));
                 }
             }
             Some(u) if u.is_unavailable() => {
                 let reason = u.status.trim_start_matches("unavailable:").trim().to_string();
-                note(ui, Icon::Warning, kiln_common::i18n::tr("사용량 확인 불가"), t.text_faint).on_hover_text(reason);
+                note(ui, Icon::Warning, usage_failure_label(u), t.text_faint).on_hover_text(reason);
             }
             _ => {
                 note(ui, Icon::Info, kiln_common::i18n::tr("사용량 정보 없음"), t.text_faint);
@@ -449,6 +482,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
             ui.spacing_mut().item_spacing.x = 6.0;
             if confirming {
                 if widgets::button_with(ui, None, kiln_common::i18n::tr("삭제"), ButtonKind::Danger, true).clicked() {
+                    mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
                     mgr.ui_state().confirm_delete = None;
                     let id = p.id.clone();
                     let label = p.label.clone();
@@ -471,6 +505,8 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     ui.close();
                 }
                 if ui.add_enabled_ui(!busy, |ui| menu_item(ui, Icon::Refresh, kiln_common::i18n::tr("다시 로그인"), t.text)).inner {
+                    mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
+                    mgr.with_state(|s| { s.error[if tool == Tool::Claude { 0 } else { 1 }] = None; s.notice[if tool == Tool::Claude { 0 } else { 1 }] = None; });
                     mgr.ui_state().adding = None;
                     mgr.ui_state().relogin = Some((tool, p.id.clone()));
                     ui.close();
@@ -489,6 +525,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     ui.add_enabled_ui(!busy, |ui| {
                         let label = if mgr.pending_login(tool, &p.id) { kiln_common::i18n::tr("적용") } else { kiln_common::i18n::tr("전환") };
                         if widgets::button_with(ui, None, label, ButtonKind::Secondary, true).clicked() {
+                            mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
                             let id = p.id.clone();
                             let name = p.label.clone();
                             mgr.run_async(tool, kiln_common::i18n::tr("전환 중…"), move |m| {
@@ -505,14 +542,19 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
     });
     if compact && !login_required { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id)); }
     if login_required {
-        ui.horizontal_wrapped(|ui| {
+        ui.add_space(8.0);
+        ui.indent(("login-recovery", &p.id), |ui| { ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
             widgets::pill(ui, kiln_common::i18n::tr("로그인 필요"), t.orange);
             if ui.add_enabled_ui(!busy, |ui| widgets::button_with(ui, Some(Icon::Refresh), kiln_common::i18n::tr("다시 로그인"), ButtonKind::Secondary, true)).inner.clicked() {
+                mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
+                mgr.with_state(|s| { s.error[if tool == Tool::Claude { 0 } else { 1 }] = None; s.notice[if tool == Tool::Claude { 0 } else { 1 }] = None; });
                 mgr.ui_state().adding = None;
                 mgr.ui_state().relogin = Some((tool, p.id.clone()));
             }
-        });
+        }); });
     }
+    ui.add_space(8.0);
 }
 
 /// 아이콘 + 글자 메뉴 항목. 눌리면 true.
@@ -533,6 +575,7 @@ fn menu_item(ui: &mut Ui, icon: Icon, label: &str, color: Color32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CredentialStore;
 
     fn test_fonts(ui: &mut Ui) -> bool {
         let id = egui::Id::new("accounts-login-test-fonts");
@@ -540,6 +583,44 @@ mod tests {
         ui.ctx().data_mut(|data| data.insert_temp(id, true));
         ui.ctx().set_fonts(kiln_common::fonts::definitions(false));
         false
+    }
+
+    #[test]
+    fn reauthentication_controls_stay_between_target_account_and_next_row() {
+        use egui_kittest::kittest::Queryable;
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                for target in [0, 1] {
+                    for waiting in [false, true] {
+                        let root = tempfile::tempdir().unwrap();
+                        let (env, store) = crate::Env::sandbox(root.path(), true);
+                        let manager = AccountManager::with_env(env.clone());
+                        let mut profiles = vec![];
+                        for (label, email) in [("Personal", "personal@example.test"), ("Work", "work@example.test")] {
+                            store.set(crate::claude::CLAUDE_SERVICE, "tester", r#"{"claudeAiOauth":{"accessToken":"fixture"}}"#).unwrap();
+                            crate::claude::write_oauth_account(&env.home.join(".claude.json"), Some(&serde_json::json!({"emailAddress":email}))).unwrap();
+                            profiles.push(manager.save_current(Tool::Claude, label).unwrap());
+                        }
+                        if waiting {
+                            manager.login_fixture_for_profile(Tool::Claude, crate::LoginStatus { browser_url: Some("https://claude.ai/oauth/authorize?state=fixture".into()), accepts_code: true }, Some(profiles[target].id.clone()));
+                        } else { manager.ui_state().relogin = Some((Tool::Claude, profiles[target].id.clone())); }
+                        let mut h = egui_kittest::Harness::builder().with_size(vec2(420.0, 1050.0)).wgpu()
+                            .build_ui_state(|ui, mgr: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, mgr, Tool::Claude); } }, manager);
+                        h.ctx.set_zoom_factor(1.3);
+                        for _ in 0..4 { h.step(); }
+                        let labels: &[&str] = if waiting { &["로그인 페이지 다시 열기", "로그인 코드", "로그인 취소", "확인"] } else { &["브라우저에서 로그인", "취소"] };
+                        let account_rect = h.get_by_label(&profiles[target].label).rect();
+                        for label in labels {
+                            let rect = h.get_by_label(kiln_common::i18n::tr(label)).rect();
+                            assert!(h.ctx.content_rect().contains_rect(rect), "{language:?}: {label} clipped");
+                            assert!(rect.top() > account_rect.bottom());
+                            if target == 0 { assert!(rect.bottom() < h.get_by_label("Work").rect().top(), "{label} rendered under the wrong account"); }
+                        }
+                        if waiting { h.render().unwrap().save(format!("/tmp/kiln022-reauth-{language:?}-{target}.png")).unwrap(); }
+                    }
+                }
+            });
+        }
     }
 
     #[test]

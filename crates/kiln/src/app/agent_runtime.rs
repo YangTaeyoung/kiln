@@ -63,6 +63,19 @@ fn private_write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     Ok(())
 }
+
+fn codex_store_override(spec: &SpawnSpec) -> String {
+    let mode = if spec
+        .env
+        .iter()
+        .any(|(key, value)| key == "KILN_CODEX_AUTH_STORE" && value == "keyring")
+    {
+        "keyring"
+    } else {
+        "file"
+    };
+    format!("cli_auth_credentials_store=\"{mode}\"")
+}
 fn lock_record(path: &Path) -> Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true).write(true).create(true);
@@ -96,8 +109,8 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
     if tool == Tool::Codex {
         spec.args.push("--no-daemon".into());
         if spec.env.iter().any(|(k, _)| k == "KILN_AGENT_PROFILE") {
-            spec.args
-                .extend(["-c".into(), "cli_auth_credentials_store=\"file\"".into()]);
+            let store = codex_store_override(&spec);
+            spec.args.extend(["-c".into(), store]);
         }
     }
     let stamp = std::time::SystemTime::now()
@@ -188,7 +201,7 @@ pub fn resume(path: &Path) -> Result<SpawnSpec> {
             id.into(),
             "--no-daemon".into(),
             "-c".into(),
-            "cli_auth_credentials_store=\"file\"".into(),
+            codex_store_override(&spec),
         ],
         Tool::Claude => vec!["--resume".into(), id.into()],
     };
@@ -527,11 +540,15 @@ pub struct Version {
     pub binary: Option<PathBuf>,
     pub busy: bool,
     pub error: Option<String>,
+    pub installing: bool,
+    pub checking_latest: bool,
+    pub latest_error: bool,
 }
 struct Reply {
     tool: Tool,
     result: Result<Version, String>,
     updated: bool,
+    complete: bool,
 }
 pub struct Updates {
     pub versions: [Version; 2],
@@ -539,6 +556,7 @@ pub struct Updates {
     rx: Receiver<Reply>,
     last: Instant,
     automatic: bool,
+    observed: [String; 2],
 }
 fn index(t: Tool) -> usize {
     match t {
@@ -555,6 +573,7 @@ impl Default for Updates {
             rx,
             last: Instant::now() - Duration::from_secs(24 * 3600),
             automatic: false,
+            observed: Default::default(),
         }
     }
 }
@@ -566,6 +585,7 @@ impl Updates {
         }
         status.busy = true;
         status.error = None;
+        status.installing = install;
         self.request_binary(tool, install, None);
     }
     fn request_binary(&mut self, tool: Tool, install: bool, fixture: Option<PathBuf>) {
@@ -576,43 +596,7 @@ impl Updates {
                 let binary = fixture
                     .or_else(|| agent_launch::executable(tool.key()))
                     .context("CLI is not installed")?;
-                let before = probe(&binary)?;
-                if install {
-                    bounded(update_command(tool, &binary)?, Duration::from_secs(300))?;
-                }
-                let installed = probe(&binary)?;
-                let package = match tool {
-                    Tool::Codex => "@openai/codex",
-                    Tool::Claude => "@anthropic-ai/claude-code",
-                };
-                let mut cmd = Command::new("curl");
-                cmd.args([
-                    "--fail",
-                    "--silent",
-                    "--max-time",
-                    "15",
-                    &format!("https://registry.npmjs.org/{package}/latest"),
-                ]);
-                let latest = if offline {
-                    String::new()
-                } else {
-                    bounded(cmd, Duration::from_secs(20))
-                        .ok()
-                        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-                        .and_then(|v| v["version"].as_str().map(str::to_owned))
-                        .unwrap_or_default()
-                };
-                let changed = installed != before;
-                Ok((
-                    Version {
-                        installed,
-                        latest,
-                        binary: Some(binary),
-                        busy: false,
-                        error: None,
-                    },
-                    changed,
-                ))
+                version_request(tool, install, binary, &tx, || latest_version(tool, offline))
             })();
             let (updated, result) = match result {
                 Ok((v, u)) => (u, Ok(v)),
@@ -622,6 +606,7 @@ impl Updates {
                 tool,
                 result,
                 updated,
+                complete: true,
             });
         });
     }
@@ -635,16 +620,23 @@ impl Updates {
         let mut changed = vec![];
         while let Ok(reply) = self.rx.try_recv() {
             let slot = &mut self.versions[index(reply.tool)];
-            slot.busy = false;
             match reply.result {
                 Ok(v) => {
-                    let external = slot.installed != v.installed;
+                    let external = self.observed[index(reply.tool)] != v.installed;
+                    if reply.complete {
+                        self.observed[index(reply.tool)] = v.installed.clone();
+                    }
                     *slot = v;
-                    if reply.updated || external {
+                    if reply.complete && (reply.updated || external) {
                         changed.push(reply.tool);
                     }
                 }
-                Err(e) => slot.error = Some(e),
+                Err(e) => {
+                    slot.busy = false;
+                    slot.installing = false;
+                    slot.checking_latest = false;
+                    slot.error = Some(e);
+                }
             }
         }
         if std::env::var_os("KILN_ACCOUNTS_SANDBOX").is_some() {
@@ -662,8 +654,22 @@ impl Updates {
     }
     pub fn ui(&mut self, ui: &mut egui::Ui, s: &mut super::state::Settings) {
         use kiln_common::i18n::tr;
-        ui.separator();
-        ui.heading(tr("CLI 업데이트"));
+        use kiln_common::{
+            Theme, fonts,
+            icons::{self, Icon},
+            widgets::{self, ButtonKind},
+        };
+        let theme = Theme::current();
+        ui.add_space(12.0);
+        widgets::divider(ui);
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new(tr("CLI 업데이트"))
+                .font(fonts::semibold(16.0))
+                .color(theme.text),
+        );
+        ui.add_space(8.0);
+        ui.spacing_mut().item_spacing.y = 8.0;
         ui.checkbox(
             &mut s.cli_auto_update,
             tr("Codex·Claude Code 자동 업데이트"),
@@ -672,60 +678,301 @@ impl Updates {
             &mut s.cli_restart_after_update,
             tr("업데이트 직후 같은 대화로 세션 재시작"),
         );
-        ui.label(tr(
-            "재시작하면 진행 중인 응답이 중단됩니다. 대화 ID를 확인한 패널에만 적용됩니다.",
-        ));
-        ui.small(tr(
-            "Codex에서 추적이 대기 중이면 /hooks에서 Kiln 훅을 신뢰한 뒤 대화를 시작하세요.",
-        ));
+        if s.cli_restart_after_update {
+            ui.add(egui::Label::new(egui::RichText::new(tr("재시작하면 진행 중인 응답이 중단됩니다. 대화 ID를 확인한 패널에만 적용됩니다.")).font(fonts::regular(12.0)).color(theme.text_dim)).wrap());
+        }
+        ui.add_space(6.0);
         for tool in Tool::ALL {
             let v = self.versions[index(tool)].clone();
-            ui.horizontal(|ui| {
-                ui.label(format!(
-                    "{} · {}",
-                    tool.display_name(),
-                    if v.installed.is_empty() {
-                        tr("확인 중")
-                    } else {
-                        &v.installed
-                    }
-                ));
-                if !v.latest.is_empty() {
-                    ui.label(format!("{} {}", tr("최신"), v.latest));
+            egui::Frame::new().fill(theme.bg_elevated).stroke(egui::Stroke::new(1.0, theme.border))
+                .corner_radius(10).inner_margin(14).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
+                ui.horizontal_wrapped(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
+                    icons::paint(ui.painter(), rect.shrink(2.0), if tool == Tool::Claude { Icon::Claude } else { Icon::Codex }, if tool == Tool::Claude { theme.orange } else { theme.text });
+                    ui.label(egui::RichText::new(tool.display_name()).font(fonts::semibold(14.0)).color(theme.text));
+                    if !v.installed.is_empty() { widgets::pill(ui, &v.installed, theme.text_dim); }
+                });
+                if let Some(path) = &v.binary {
+                    ui.add(egui::Label::new(egui::RichText::new(path.display().to_string()).font(fonts::regular(11.5)).color(theme.text_faint)).truncate()).on_hover_text(path.display().to_string());
+                }
+                ui.horizontal_wrapped(|ui| {
+                    if v.busy { ui.add(egui::Spinner::new().size(13.0)); }
+                    let text = if v.installing { tr("업데이트 중…").to_string() }
+                        else if v.checking_latest { tr("최신 버전 확인 중…").to_string() }
+                        else if v.latest_error { tr("최신 버전 확인 실패").to_string() }
+                        else if !v.latest.is_empty() { format!("{}  {}", tr("최신"), v.latest) }
+                        else if v.busy { tr("확인 중…").to_string() }
+                        else if v.installed.is_empty() { tr("버전 정보 없음").to_string() }
+                        else { String::new() };
+                    if !text.is_empty() { ui.label(egui::RichText::new(text).font(fonts::regular(12.0)).color(theme.text_dim)); }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_enabled_ui(!v.busy, |ui| {
+                        if widgets::button_with(ui, Some(Icon::Refresh), tr("버전 확인"), ButtonKind::Secondary, true).clicked() { self.request(tool, false); }
+                        if widgets::button_with(ui, Some(Icon::Download), tr("CLI 업데이트"), ButtonKind::Secondary, true).clicked() { self.request(tool, true); }
+                    });
+                });
+                if v.error.is_some() {
+                    ui.add(egui::Label::new(egui::RichText::new(tr("CLI 업데이트 실패. 설치 프로그램 또는 패키지 관리자를 확인하세요.")).font(fonts::regular(12.0)).color(theme.red)).wrap());
                 }
             });
-            if let Some(path) = v.binary {
-                ui.small(path.display().to_string());
-            }
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(!v.busy, egui::Button::new(tr("버전 확인")))
-                    .clicked()
-                {
-                    self.request(tool, false);
-                }
-                if ui
-                    .add_enabled(!v.busy, egui::Button::new(tr("CLI 업데이트")))
-                    .clicked()
-                {
-                    self.request(tool, true);
-                }
-                if v.busy {
-                    ui.spinner();
-                }
-            });
-            if v.error.is_some() {
-                ui.colored_label(
-                    kiln_common::Theme::current().text,
-                    tr("CLI 업데이트 실패. 설치 프로그램 또는 패키지 관리자를 확인하세요."),
-                );
-            }
+            ui.add_space(4.0);
         }
     }
 }
+fn version_request(
+    tool: Tool,
+    install: bool,
+    binary: PathBuf,
+    tx: &Sender<Reply>,
+    latest: impl FnOnce() -> Option<String>,
+) -> Result<(Version, bool)> {
+    let before = probe(&binary)?;
+    let mut version = Version {
+        installed: before.clone(),
+        binary: Some(binary.clone()),
+        busy: true,
+        installing: install,
+        checking_latest: !install,
+        ..Default::default()
+    };
+    let _ = tx.send(Reply {
+        tool,
+        result: Ok(version.clone()),
+        updated: false,
+        complete: false,
+    });
+    if install {
+        bounded(update_command(tool, &binary)?, Duration::from_secs(300))?;
+        version.installed = probe(&binary)?;
+        version.installing = false;
+        version.checking_latest = true;
+        let _ = tx.send(Reply {
+            tool,
+            result: Ok(version.clone()),
+            updated: false,
+            complete: false,
+        });
+    }
+    let latest = latest();
+    let changed = version.installed != before;
+    version.latest_error = latest.is_none();
+    version.latest = latest.unwrap_or_default();
+    version.checking_latest = false;
+    version.busy = false;
+    Ok((version, changed))
+}
+fn latest_version(tool: Tool, offline: bool) -> Option<String> {
+    let package = match tool {
+        Tool::Codex => "@openai/codex",
+        Tool::Claude => "@anthropic-ai/claude-code",
+    };
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "-q",
+        "--fail",
+        "--silent",
+        "--connect-timeout",
+        "3",
+        "--max-time",
+        "8",
+        &format!("https://registry.npmjs.org/{package}/latest"),
+    ]);
+    if offline {
+        Some(String::new())
+    } else {
+        bounded(cmd, Duration::from_secs(10))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|v| v["version"].as_str().map(str::to_owned))
+            .filter(|version| !version.is_empty())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_version_replies_never_trigger_restart_and_completion_triggers_once() {
+        let mut updates = Updates {
+            last: Instant::now(),
+            ..Default::default()
+        };
+        updates.observed[0] = "1.2.2".into();
+        let version = Version {
+            installed: "1.2.3".into(),
+            busy: true,
+            checking_latest: true,
+            ..Default::default()
+        };
+        updates
+            .tx
+            .send(Reply {
+                tool: Tool::Claude,
+                result: Ok(version.clone()),
+                updated: false,
+                complete: false,
+            })
+            .unwrap();
+        assert!(updates.tick(false).is_empty());
+        assert_eq!(updates.versions[0].installed, "1.2.3");
+        assert!(updates.versions[0].busy);
+        updates
+            .tx
+            .send(Reply {
+                tool: Tool::Claude,
+                result: Ok(Version {
+                    busy: false,
+                    checking_latest: false,
+                    ..version
+                }),
+                updated: false,
+                complete: true,
+            })
+            .unwrap();
+        assert_eq!(updates.tick(false), vec![Tool::Claude]);
+        assert!(updates.tick(false).is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resume_preserves_a_verified_keyring_namespace_in_effective_cli_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("initialized"), b"1").unwrap();
+        let binary = root.path().join("fixture-codex");
+        fs::write(&binary, "#!/bin/sh\nfor arg do [ \"$arg\" = 'cli_auth_credentials_store=\"keyring\"' ] && exit 0; done\nexit 7\n").unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.path().join("record.json");
+        let record = Record {
+            tool: Tool::Codex,
+            spec: SpawnSpec {
+                program: Some(binary.display().to_string()),
+                env: vec![
+                    ("CODEX_HOME".into(), root.path().display().to_string()),
+                    ("KILN_AGENT_PROFILE".into(), "fixture-profile".into()),
+                    ("KILN_CODEX_AUTH_STORE".into(), "keyring".into()),
+                ],
+                ..Default::default()
+            },
+            version: "1.2.3".into(),
+            conversation: Some("12345678-1234-1234-1234-123456789abc".into()),
+            generation: "fixture".into(),
+            confirmed: true,
+            request_started: false,
+        };
+        private_write(&path, &serde_json::to_vec(&record).unwrap()).unwrap();
+        let spec = resume(&path).unwrap();
+        assert!(!root.path().join("auth.json").exists());
+        assert_eq!(
+            codex_store_override(&spec),
+            "cli_auth_credentials_store=\"keyring\""
+        );
+        let mut command = Command::new(&binary);
+        command.args(&spec.args);
+        bounded(command, Duration::from_secs(2)).unwrap();
+        let mut legacy = record.spec;
+        legacy.env.retain(|(key, _)| key != "KILN_CODEX_AUTH_STORE");
+        assert_eq!(
+            codex_store_override(&legacy),
+            "cli_auth_credentials_store=\"file\""
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn installed_version_arrives_before_catalog_and_is_probed_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let binary = root.path().join("fixture-cli");
+        fs::write(
+            &binary,
+            "#!/bin/sh\nprintf x >> \"$0.calls\"\nprintf 'fixture 1.2.3\\n'\n",
+        )
+        .unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        let (tx, rx) = channel();
+        let (release, held) = channel();
+        let path = binary.clone();
+        let worker = std::thread::spawn(move || {
+            version_request(Tool::Claude, false, path, &tx, || {
+                held.recv_timeout(Duration::from_secs(3)).unwrap();
+                None // A failed catalog must preserve the known installed version.
+            })
+            .unwrap()
+        });
+        let interim = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(!interim.complete && !interim.updated);
+        let version = interim.result.unwrap();
+        assert_eq!(version.installed, "1.2.3");
+        assert!(version.busy && version.checking_latest);
+        assert!(!worker.is_finished());
+        release.send(()).unwrap();
+        let (version, changed) = worker.join().unwrap();
+        assert_eq!(version.installed, "1.2.3");
+        assert!(!changed && !version.busy && version.latest_error);
+        assert_eq!(fs::read(binary.with_extension("calls")).unwrap(), b"x");
+    }
+
+    #[test]
+    fn cli_cards_fit_all_languages_and_keep_version_labels_separate() {
+        use egui_kittest::{
+            Harness,
+            kittest::{NodeT, Queryable},
+        };
+        use kiln_common::i18n::{Language, tr, with_language};
+        for language in Language::ALL {
+            with_language(language, || {
+                let mut updates = Updates::default();
+                updates.versions = std::array::from_fn(|_| Version {
+                    installed: "1.2.3".into(),
+                    latest: "1.2.4".into(),
+                    binary: Some(PathBuf::from("/fixture/very/long/path/to/agent/bin/agent")),
+                    ..Default::default()
+                });
+                let mut h = Harness::builder()
+                    .with_size([420., 900.])
+                    .wgpu()
+                    .build_ui_state(
+                        |ui, state: &mut (Updates, super::super::state::Settings)| {
+                            let id = egui::Id::new("cli-card-test-fonts");
+                            if !ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false) {
+                                ui.ctx().data_mut(|d| d.insert_temp(id, true));
+                                ui.ctx().set_fonts(kiln_common::fonts::definitions(false));
+                                return;
+                            }
+                            kiln_common::Theme::current().apply(ui.ctx());
+                            state.0.ui(ui, &mut state.1);
+                        },
+                        (updates, super::super::state::Settings::default()),
+                    );
+                h.ctx.set_zoom_factor(1.3);
+                h.run_steps(4);
+                for label in [tr("버전 확인"), tr("CLI 업데이트")] {
+                    let buttons = h
+                        .query_all_by_label(label)
+                        .filter(|node| {
+                            node.accesskit_node().role() == egui::accesskit::Role::Button
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(buttons.len(), 2);
+                    assert!(
+                        buttons
+                            .iter()
+                            .all(|node| h.ctx.content_rect().contains_rect(node.rect())),
+                        "{language:?}: {label} clipped"
+                    );
+                }
+                h.render()
+                    .unwrap()
+                    .save(format!("/tmp/kiln022-cli-cards-{language:?}.png"))
+                    .unwrap();
+            });
+        }
+    }
     #[test]
     fn uuid_validation_rejects_options_and_shell_input() {
         assert!(valid_id("12345678-1234-1234-1234-123456789abc"));
@@ -871,7 +1118,15 @@ mod tests {
         use egui_kittest::{Harness, kittest::Queryable};
         use kiln_common::i18n::tr;
         let mut h = Harness::builder().with_size([680., 480.]).build_ui_state(
-            |ui, state: &mut (Updates, super::super::state::Settings)| state.0.ui(ui, &mut state.1),
+            |ui, state: &mut (Updates, super::super::state::Settings)| {
+                let id = egui::Id::new("cli-option-test-fonts");
+                if !ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false) {
+                    ui.ctx().data_mut(|d| d.insert_temp(id, true));
+                    ui.ctx().set_fonts(kiln_common::fonts::definitions(false));
+                    return;
+                }
+                state.0.ui(ui, &mut state.1)
+            },
             (Updates::default(), super::super::state::Settings::default()),
         );
         h.run_steps(2);

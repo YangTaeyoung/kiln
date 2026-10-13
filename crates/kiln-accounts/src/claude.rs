@@ -21,6 +21,12 @@ pub fn claude_json_path(home: &Path) -> PathBuf {
     home.join(".claude.json")
 }
 
+/// The official CLI preserves a legacy .config.json when present.
+pub(crate) fn config_path(config: &Path) -> PathBuf {
+    let legacy = config.join(".config.json");
+    if legacy.exists() { legacy } else { config.join(".claude.json") }
+}
+
 fn load_doc(path: &Path) -> Result<Map<String, Value>> {
     let data = std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     serde_json::from_slice(&data).with_context(|| format!("failed to parse {}", path.display()))

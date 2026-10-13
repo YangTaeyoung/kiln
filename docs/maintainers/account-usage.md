@@ -15,11 +15,23 @@ and newly saved accounts. Missing credentials postpone that profile's next
 deadline by five minutes instead of causing repeated per-second checks.
 
 Latest per-profile runtime credentials take precedence over imported snapshots.
+Claude follows the official CLI’s Keychain-first selection and private-file
+fallback. A namespaced legacy `.config.json` is authoritative when it exists;
+`.claude.json` remains the default. A locked or inaccessible Keychain is an
+unknown local state, not proof that the account logged out.
 Backoff is held per profile and credential fingerprint in memory. Successful
 values and check timestamps are persisted without secrets. Failure preserves
 previous bars and their original successful timestamp. The refresh action cannot
 bypass provider backoff. The scheduler exists only in the GUI, not the daemon.
 Test environments never start real provider polling automatically.
+
+Codex local presence checks do not require an email claim and do not mistake
+unsupported authentication methods for logout. Quota attribution still requires
+the saved account’s matching identity. Legacy direct Keyring namespaces are read
+using the official canonical-path key and retained during new launches/resume;
+Kiln does not duplicate their refresh tokens into a second file. Ephemeral and
+encrypted secrets backends require CLI status verification and are not inferred
+from a missing `auth.json`. Managed file-backed namespaces retain their file pin.
 
 ## Observed provider contracts
 
@@ -44,7 +56,11 @@ passed to curl through stdin, never process arguments. Curl configuration files
 are disabled; response bodies are bounded while streaming, including older curl
 versions and chunked responses. Private temporary headers are removed on return.
 Provider response bodies and curl diagnostics are never displayed or logged.
-HTTP 429/403 observe bounded Retry-After; 401 pauses one hour. Token refresh
+HTTP 429/403 observe bounded Retry-After; 401 pauses one hour. Safe HTTP status
+labels distinguish authorization, access and rate-limit errors without showing
+provider bodies. Stale bars retain their fetched percentages; a passed reset
+time after a failed fetch does not establish a fresh 0% reading. Keychain
+subprocesses have a three-second bound and owned children are reaped. Token refresh
 remains the responsibility of each official CLI.
 
 ## Verification boundaries
@@ -58,3 +74,8 @@ at 420px and 130% scale. Do not query real accounts to make a test pass.
 
 Real provider responses and expired-token refresh must be observed by the owner
 without exposing credentials. Fixture success is not live-provider validity.
+
+The 0.1.22 regression includes two simultaneous Claude runtime accounts with
+fresh Keychain tokens and stale files, legacy metadata precedence, Codex optional
+identity/Keyring presence, account-anchored reauthentication at 130% scale in all
+four languages, and version results before a deliberately held catalog lookup.
