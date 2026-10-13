@@ -1584,7 +1584,7 @@ impl KilnApp {
         if workspace.sheet.is_some() && ctx.content_rect().width()-rail<700.0 { return false; }
         self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none()
             && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open()
-            && !workspace.tools.quick_is_open() && !self.settings_ui.open && !self.notifications.open
+            && !workspace.tools.quick_is_open() && !self.settings_ui.open && self.conversation_sync.detail.is_none() && !self.notifications.open
             && self.workspaces.iter().all(|workspace|workspace.renaming.is_none())
     }
 
@@ -2246,7 +2246,7 @@ impl eframe::App for KilnApp {
         }
         self.cancel_layout_escape(ctx);
         let quick_open = self.workspaces.get(self.active).is_some_and(|w| w.tools.quick_is_open());
-        if self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open() && !quick_open && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none()) {
+        if self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open() && !quick_open && !self.settings_ui.open && self.conversation_sync.detail.is_none() && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none()) {
             self.shortcuts(ctx);
         }
         let active = self.active;

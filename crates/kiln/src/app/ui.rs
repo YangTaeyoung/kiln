@@ -955,7 +955,7 @@ impl KilnApp {
                 ui.painter().text(banner.left_center()+vec2(12.0,0.0),Align2::LEFT_CENTER,kiln_common::i18n::tr("세션에 다시 연결하는 중…"),fonts::regular(12.0),t.orange);
                 area.min.y+=28.0;
             }
-            let layout_enabled=ui.memory(|m|m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && self.workspace_dialog.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces[self.active].page().zoomed.is_none();
+            let layout_enabled=ui.memory(|m|m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && self.workspace_dialog.is_none() && !self.palette.is_open() && !self.settings_ui.open && self.conversation_sync.detail.is_none() && !self.notifications.open && self.workspaces[self.active].page().zoomed.is_none();
             self.prepare_pane_layout(ui,area,layout_enabled);
             let ws_idx = self.active;
             let (root_node, focused, zoomed) = {
@@ -993,7 +993,7 @@ impl KilnApp {
                 rects.push((focused, area));
             }
             let multi = rects.len() > 1;
-            let focus_req = self.focus_terminal && ui.memory(|m| m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && self.workspace_dialog.is_none() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none());
+            let focus_req = self.focus_terminal && ui.memory(|m| m.allows_interaction(ui.layer_id())) && self.confirm.is_none() && self.workspace_dialog.is_none() && !self.palette.is_open() && !self.settings_ui.open && self.conversation_sync.detail.is_none() && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none());
             let mut focus_consumed = false;
             let mut new_focus = None;
             let settings = terminal::TermSettings { font_size: self.settings.font_size, option_as_meta: self.settings.option_as_meta, completion_preview: self.settings.terminal_completion_preview, line_height: self.settings.line_height, copy_on_select: self.settings.copy_on_select, cursor_blink: self.settings.cursor_blink, close_shortcut: Some(self.keymap.resolve("close_panel", KeyboardShortcut::new(if is_mac() { Modifiers::MAC_CMD } else { Modifiers::CTRL | Modifiers::SHIFT }, Key::W))) };
@@ -1300,7 +1300,7 @@ impl KilnApp {
                 child.set_clip_rect(body);
                 acts.extend(self.workspaces[ws_idx].tools.panel_ui(&mut child, kind));
             });
-        if exclusive && self.confirm.is_none() && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.launchers.is_open() && !self.palette.is_open() && !self.settings_ui.open && !self.notifications.open
+        if exclusive && self.confirm.is_none() && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.launchers.is_open() && !self.palette.is_open() && !self.settings_ui.open && self.conversation_sync.detail.is_none() && !self.notifications.open
             && !egui::Popup::is_any_open(root.ctx())
             && root.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             acts.push(Action::CloseSheet);
@@ -1340,6 +1340,7 @@ impl KilnApp {
         if let Some(root) = self.conversation_sync.detail.clone() {
             if let Some(workspace) = self.workspaces.iter().find(|w| w.tools.canonical_root() == root) {
                 self.conversation_sync.dialog(ctx, &workspace.name, &root, workspace.conversation_sync, &mut self.settings, &self.rotator.mgr);
+                if self.conversation_sync.detail.is_none() { self.focus_terminal = true; }
             } else { self.conversation_sync.detail = None; }
         }
         if self.settings_ui.open {
@@ -1450,7 +1451,7 @@ impl KilnApp {
         }
 
         self.ui_agent_request(ctx);
-        if !self.notifications.open && !self.palette.is_open() && !self.settings_ui.open && self.confirm.is_none() && self.agent_request_view.is_none() {
+        if !self.notifications.open && !self.palette.is_open() && !self.settings_ui.open && self.conversation_sync.detail.is_none() && self.confirm.is_none() && self.agent_request_view.is_none() {
             self.ui_toasts(ctx);
         }
     }

@@ -1939,6 +1939,9 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     assert!(h.query_by_label("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.").is_some());
     assert!(pump_until(&mut h, 10, |h| h.query_by_label("연결됨 · 해당 폴더에서 대화를 찾지 못함").is_some()));
     assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
+    let panes_before = h.state().debug_pane_count();
+    h.key_press_modifiers(primary(), egui::Key::D); h.run_steps(3);
+    assert_eq!(h.state().debug_pane_count(), panes_before, "status dialog must block underlying workspace shortcuts");
     h.render().unwrap().save("/tmp/kiln-workspace-link-dialog.png").unwrap();
     h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);
     let other = base.join("other"); std::fs::create_dir_all(&other).unwrap();
