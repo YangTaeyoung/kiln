@@ -12,7 +12,7 @@ are included; reopening a panel or receiving a lifecycle hook is not required.
 
 The initial synchronization selects the **20 most recently modified conversations
 per workspace**, across both tools and their default/connected namespaces. The
-selection is persisted so restarting Kiln continues the same initial batch. New
+selection is persisted so restarting Kiln continues the same initial batch. Metadata-only CLI sessions and local-command-only sessions do not consume a slot. On upgrading from 0.1.24, the initial selection is refreshed once to exclude those empty sessions. New
 and modified conversations are discovered afterward, including an older session
 that saves another update. Closing a workspace pauses its synchronization; linking
 a different workspace starts that folder's own initial batch. Overlapping folders
@@ -40,34 +40,53 @@ shows the number of transcript records checked and new copies created. The list
 shows each source conversation's first prompt, project, direction, status, and a
 button to copy its continuation ID. Copies that have not been continued are
 hidden from the list to avoid displaying both sides of the same transfer.
+Codex native import provenance is also checked: importing an unchanged Kiln copy
+through Codex Desktop does not start another transfer loop or consume an initial
+conversation slot. A genuinely continued imported copy remains eligible.
 
 The status dialog distinguishes discovery, no conversations found in the open folders, and
 waiting for a completed response. A discovered unsupported transcript stays visible
 with its failure reason; it is not reported as successfully synchronized. A failed item includes its
-reason and is retried on subsequent checks. Unlinking stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
+reason above its title. Expand **Conversation details** for the original diagnostic or copy it for troubleshooting. A single scrollable list keeps the summary and controls visible. Unchanged background checks retain the last result, row positions, and progress bar; they do not reset completed or failed rows to queued. Unchanged failed/waiting files are checked again after a 30-second backoff; changed files are checked immediately. **Check again** starts a fresh check. Unlinking stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
 The check refers to **completed responses**, not an answer still being generated.
 
 ## Compatibility and boundaries
 
-- This experimental adapter supports **Codex CLI 0.162.1** and **Claude Code
-  2.1.296** transcript formats. Unknown transcript versions fail visibly instead
-  of being silently converted. A CLI auto-update may require an adapter update.
+- New continuations target **Codex CLI 0.162.1** and **Claude Code 2.1.296**.
+  Verified input versions include Codex 0.154.0, 0.155.0-alpha.9.2, 0.155.1,
+  0.160.0, 0.160.1, 0.161.0, 0.162.0-alpha.17.2 and 0.162.1; Claude Code
+  2.1.272, 2.1.281, 2.1.289, 2.1.291, 2.1.292, 2.1.295 and 2.1.296.
+  Identity and content validation still apply to every transcript. Changing
+  working directories within the same Claude session does not invalidate it.
+  Unknown versions fail visibly; an auto-update may require an adapter update.
 - Text messages retain their wording, line breaks, and code blocks. Textual tool
   calls and results are represented as labeled assistant messages; historical
   tools are not executed. Provider instructions, model-specific thinking and
-  signed reasoning are not transferred. Images, audio, files and unrecognized
-  content types fail visibly. They are not silently dropped.
+  signed reasoning and encrypted provider-private collaboration records are not
+  transferred. Images embedded in user messages or tool output retain their bytes
+  (PNG, JPEG, GIF and WebP); HTTP(S) image references retain their URL. Native image
+  blocks are created in both destinations. Image references without their original
+  payload, provider-specific file IDs, documents, audio and unknown content fail
+  visibly. A conversation is **not marked complete** by dropping an attachment.
+  When a Codex visible answer has no corresponding Responses message, its original
+  native `AgentMessage` text is retained without duplicating both projections.
 - Each changed, completed transcript creates a **new native session**. An already
   open CLI keeps its current history until you select the latest copy. Kiln never
   edits an existing conversation or merges parallel branches. Continuing an older
   copy creates a separate branch. Earlier copies remain in the resume picker.
 - A complete local transcript is required. Codex inherited-history references,
-  subagent conversations, compacted or broken Claude parent chains, and Claude project path
-  encodings over 200 characters are rejected. Claude `/clear` starts a separate
+  subagent conversations, broken Claude parent chains, and Claude project path
+  encodings over 200 characters are rejected. Claude compaction can be traversed
+  when original messages and a complete pre-boundary branch remain locally;
+  the synthetic summary is excluded, while original messages are retained. Claude `/clear` starts a separate
   conversation. The adapter does not promise session continuity across Desktop,
   cloud sessions, context compaction boundaries, or future CLI formats.
-- Sources and converted copies are limited to 64 MiB each and 4096 tracked
-  records per connected pair. Full copies consume disk space; Kiln does not
+- The reader streams source files up to 1 GiB, with a 64 MiB per-record bound and
+  a 512 MiB retained-conversation bound. Provider instructions and reasoning do
+  not count toward the retained bound. While a CLI appends records, the reader
+  verifies that the captured prefix is unchanged and transfers only complete
+  records from that checkpoint. Rewrites and replacements retry. Converted copies are limited to 1 GiB;
+  the tracked-record limit is 4096. Full copies consume disk space; Kiln does not
   automatically delete CLI history. Context-window limits and provider-side
   compaction still apply when a CLI resumes a long conversation.
 
@@ -75,7 +94,8 @@ The check refers to **completed responses**, not an answer still being generated
 
 `app/conversation_sync/discovery.rs` performs bounded metadata discovery with a
 file-change cache and persisted initial selections. `format.rs` holds the native
-adapters, and `mod.rs` owns the worker and Accounts UI. Managed lifecycle hooks
+adapters, `reader.rs` bounds streamed records, and `mod.rs` owns the worker and
+workspace status UI. Managed lifecycle hooks
 remain an additional source of transcript references. Account paths are pinned; no authentication
 files are copied by the synchronizer. Private files, bounded stable reads,
 symlink rejection, a process lock, atomic no-clobber publication and a persisted
@@ -95,6 +115,9 @@ native `/resume`, visible user/assistant history, exact original messages in the
 next request, and parsing/re-exporting native appended responses were checked.
 This does not claim live paid-provider inference or the owner's personal history
 has been exercised. Local review captures and fixture credentials are not shipped.
+
+Image references: [Claude vision blocks](https://platform.claude.com/docs/en/build-with-claude/vision)
+and [Codex native content types](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/protocol/src/models.rs).
 
 References: [Codex app-server](https://learn.chatgpt.com/docs/app-server),
 [Codex 0.162.1 native protocol](https://github.com/openai/codex/tree/rust-v0.162.1/codex-rs/protocol/src),
