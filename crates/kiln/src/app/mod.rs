@@ -2206,7 +2206,7 @@ impl eframe::App for KilnApp {
         }
         self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
         self.tick_cli_updates(ctx);
-        self.conversation_sync.tick(&mut self.settings, ctx);
+        self.conversation_sync.tick(&mut self.settings, self.workspaces.iter().map(|w| w.root.clone()).collect(), ctx);
         self.rotator.poll(&mut self.conn);
         let mut out = Vec::new();
         self.rotator.tick(&mut self.conn, &mut out);

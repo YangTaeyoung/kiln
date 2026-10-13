@@ -577,3 +577,598 @@ fn claude_project_encoding_matches_utf16_and_compaction_is_explicit() {
             .contains("compacted history")
     );
 }
+
+fn workspace_scope(f: &Fixture) -> discovery::Scope {
+    discovery::Scope {
+        workspaces: vec![PathBuf::from(&f.source.cwd)],
+        roots: Tool::ALL
+            .into_iter()
+            .map(|t| (t, f.pair.endpoint(t).root.clone()))
+            .collect(),
+    }
+}
+fn workspace_scan(f: &Fixture, scope: &discovery::Scope) -> Status {
+    scan_scoped(
+        &f.config,
+        &f.pair,
+        &f.gate,
+        &mut Cache::new(),
+        Some(scope),
+        |_| {},
+    )
+    .unwrap()
+}
+fn workspace_state(f: &Fixture) -> State {
+    serde_json::from_slice(
+        &fs::read(f.config.join("conversation-sync/workspace-state.json")).unwrap(),
+    )
+    .unwrap()
+}
+#[test]
+fn existing_sessions_are_discovered_without_hooks_and_without_echo() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+        let original = fs::read(&f.source.path).unwrap();
+        let scope = workspace_scope(&f);
+        let first = workspace_scan(&f, &scope);
+        assert_eq!(first.published, 1);
+        assert_eq!(first.rows.len(), 1);
+        assert!(first.errors.is_empty());
+        let again = workspace_scan(&f, &scope);
+        assert_eq!(again.published, 0);
+        assert_eq!(again.rows.len(), 1);
+        assert_eq!(fs::read(&f.source.path).unwrap(), original);
+        let state = workspace_state(&f);
+        let copy = state.entries.values().find(|e| e.imported).unwrap();
+        assert_eq!(read_messages(&copy.source).unwrap(), messages());
+    }
+}
+#[test]
+fn default_and_connected_namespaces_receive_copies_and_continued_copies_sync_back() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let mut scope = workspace_scope(&f);
+    let defaults = f._temp.path().join("defaults");
+    let mut default_pair = f.pair.clone();
+    default_pair.claude.root = defaults.join("claude");
+    default_pair.codex.root = defaults.join("codex");
+    for tool in Tool::ALL {
+        private_dir(&default_pair.endpoint(tool).root).unwrap();
+        scope
+            .roots
+            .push((tool, default_pair.endpoint(tool).root.clone()));
+    }
+    let default_source = destination(
+        &default_pair,
+        &Source {
+            tool: Tool::Codex,
+            ..f.source.clone()
+        },
+        &stable_id("external-existing"),
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    publish(
+        &default_source.path,
+        &fs::read(&f.source.path)
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    // The native session identity, rather than its filename alone, is authoritative.
+    fs::write(
+        &default_source.path,
+        format::render(
+            Tool::Claude,
+            &default_source.id,
+            &default_source.cwd,
+            "2026-10-13T00:00:00Z",
+            &messages(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(&f.source.path).unwrap();
+    let first = workspace_scan(&f, &scope);
+    assert_eq!(first.published, 2);
+    assert_eq!(first.rows.len(), 1);
+    assert_eq!(first.rows.values().next().unwrap().copies.len(), 2);
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+    let state = workspace_state(&f);
+    let copy = state
+        .entries
+        .values()
+        .find(|e| e.imported && e.source.root == default_pair.codex.root)
+        .unwrap();
+    let mut continued = messages();
+    continued.extend([
+        Message {
+            role: "user".into(),
+            text: "Continue in the already-open default CLI".into(),
+        },
+        Message {
+            role: "assistant".into(),
+            text: "Continued exact history".into(),
+        },
+    ]);
+    fs::write(
+        &copy.source.path,
+        format::render(
+            Tool::Codex,
+            &copy.source.id,
+            &copy.source.cwd,
+            "2026-10-13T00:00:00Z",
+            &continued,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(workspace_scan(&f, &scope).published, 2);
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+    let state = workspace_state(&f);
+    for root in [&f.pair.claude.root, &default_pair.claude.root] {
+        assert!(state.entries.values().any(|e| e.imported
+            && &e.source.root == root
+            && read_messages(&e.source).unwrap() == continued));
+    }
+}
+#[test]
+fn workspace_filter_includes_children_excludes_neighbors_and_pauses_closed_folders() {
+    let f = Fixture::new(Tool::Codex);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let project = f._temp.path().join("project");
+    let child = project.join("child");
+    let neighbor = f._temp.path().join("project-other");
+    for path in [&project, &child, &neighbor] {
+        fs::create_dir_all(path).unwrap();
+    }
+    let mut scope = workspace_scope(&f);
+    scope.workspaces = vec![project.canonicalize().unwrap()];
+    for (index, cwd) in [&project, &child, &neighbor].into_iter().enumerate() {
+        let seed = Source {
+            tool: Tool::Claude,
+            cwd: cwd.to_string_lossy().into_owned(),
+            ..f.source.clone()
+        };
+        let source = destination(
+            &f.pair,
+            &seed,
+            &stable_id(&format!("folder-{index}")),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        publish(
+            &source.path,
+            &format::render(
+                Tool::Codex,
+                &source.id,
+                &source.cwd,
+                "2026-10-13T00:00:00Z",
+                &messages(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    assert_eq!(workspace_scan(&f, &scope).published, 2);
+    scope.workspaces.clear();
+    let closed = workspace_scan(&f, &scope);
+    assert_eq!(closed.published, 0);
+    assert_eq!(closed.watched, 0);
+}
+#[test]
+fn initial_sync_is_latest_twenty_per_workspace_then_only_new_or_changed_sessions() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    fs::remove_file(&f.source.path).unwrap();
+    let scope = workspace_scope(&f);
+    let mut sources = Vec::new();
+    for index in 0..27 {
+        let tool = if index % 2 == 0 {
+            Tool::Claude
+        } else {
+            Tool::Codex
+        };
+        let source = destination(
+            &f.pair,
+            &Source {
+                tool: opposite(tool),
+                ..f.source.clone()
+            },
+            &stable_id(&format!("history-{index}")),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        publish(
+            &source.path,
+            &format::render(
+                tool,
+                &source.id,
+                &source.cwd,
+                "2026-10-13T00:00:00Z",
+                &messages(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        fs::File::open(&source.path)
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(100 + index)),
+            )
+            .unwrap();
+        sources.push(source);
+    }
+    let first = workspace_scan(&f, &scope);
+    assert_eq!(first.published, 20);
+    assert_eq!(first.rows.len(), 20);
+    assert!(sources[..7].iter().all(|s| {
+        !first
+            .rows
+            .contains_key(&s.path.to_string_lossy().into_owned())
+    }));
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+    // Deletion cannot make the initial backfill drift further into older history.
+    fs::remove_file(&sources[26].path).unwrap();
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+    // An older already-open session is picked up as soon as it saves another update.
+    fs::File::open(&sources[0].path)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(SystemTime::now()))
+        .unwrap();
+    let changed = workspace_scan(&f, &scope);
+    assert_eq!(changed.published, 1);
+    assert_eq!(changed.rows.len(), 21);
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+    // A newly opened child workspace has its own initial limit, even though its
+    // files are newer than the existing parent's first discovery boundary.
+    let child = PathBuf::from(&f.source.cwd).join("new-workspace");
+    fs::create_dir(&child).unwrap();
+    for index in 0..25 {
+        let seed = Source {
+            tool: Tool::Codex,
+            cwd: child.to_string_lossy().into_owned(),
+            ..f.source.clone()
+        };
+        let source = destination(
+            &f.pair,
+            &seed,
+            &stable_id(&format!("new-folder-{index}")),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        publish(
+            &source.path,
+            &format::render(
+                Tool::Claude,
+                &source.id,
+                &source.cwd,
+                "2026-10-13T00:00:00Z",
+                &messages(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let mut scope = scope;
+    scope.workspaces.push(child);
+    assert_eq!(workspace_scan(&f, &scope).published, 20);
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+}
+
+#[test]
+#[ignore]
+fn inspect_existing_workspace_metadata_read_only() {
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            std::env::var_os("KILN_SYNC_INSPECT_MANIFEST").expect("explicit metadata manifest"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let config = tempfile::tempdir().unwrap();
+    private_dir(&config.path().join("conversation-sync")).unwrap();
+    let scope = discovery::Scope {
+        workspaces: serde_json::from_value(manifest["workspaces"].clone()).unwrap(),
+        roots: serde_json::from_value(manifest["roots"].clone()).unwrap(),
+    };
+    let start = Instant::now();
+    let sources = discovery::find(
+        config.path(),
+        &scope,
+        &Arc::new(AtomicBool::new(true)),
+        &mut discovery::MetadataCache::new(),
+    )
+    .unwrap();
+    eprintln!(
+        "Discovery: {} sources in {:?}",
+        sources.len(),
+        start.elapsed()
+    );
+    for source in sources {
+        // No prompts, content, session IDs or account identities enter diagnostics.
+        match read_messages(&source) {
+            Ok(messages) => eprintln!(
+                "{}: {} portable messages",
+                source.tool.key(),
+                messages.len()
+            ),
+            Err(error) => eprintln!("{}: {}", source.tool.key(), error),
+        }
+    }
+}
+
+#[test]
+fn multiple_destination_retry_retains_the_successful_publication_plan() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let mut scope = workspace_scope(&f);
+    let unavailable = PathBuf::from(&f.source.cwd).join("not-created-yet");
+    scope.roots.push((Tool::Codex, unavailable.clone()));
+    let first = workspace_scan(&f, &scope);
+    assert_eq!(first.published, 1);
+    assert_eq!(first.rows.values().next().unwrap().phase, Phase::Failed);
+    let plans: Vec<_> = fs::read_dir(f.config.join("conversation-sync"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("pending-"))
+        .collect();
+    assert_eq!(plans.len(), 1);
+    let state = workspace_state(&f);
+    let successful = state
+        .entries
+        .values()
+        .find(|e| e.imported)
+        .unwrap()
+        .source
+        .clone();
+    let bytes = fs::read(&successful.path).unwrap();
+    private_dir(&unavailable).unwrap();
+    let recovered = workspace_scan(&f, &scope);
+    assert!(recovered.errors.is_empty());
+    assert_eq!(recovered.rows.values().next().unwrap().copies.len(), 2);
+    assert_eq!(fs::read(&successful.path).unwrap(), bytes);
+    assert!(!plans[0].path().exists());
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+    assert_eq!(
+        workspace_state(&f)
+            .entries
+            .values()
+            .filter(|e| e.imported)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn workspace_discovery_skips_symlinks_and_subagents_and_surfaces_bad_versions() {
+    use std::os::unix::fs::symlink;
+    let f = Fixture::new(Tool::Codex);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let scope = workspace_scope(&f);
+    let original = fs::read(&f.source.path).unwrap();
+    let linked = f
+        .source
+        .path
+        .parent()
+        .unwrap()
+        .join(format!("rollout-link-{}.jsonl", f.source.id));
+    symlink(&f.source.path, &linked).unwrap();
+    let subagent = destination(
+        &f.pair,
+        &Source {
+            tool: Tool::Claude,
+            ..f.source.clone()
+        },
+        &stable_id("subagent"),
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    let mut sub_rows = rows(
+        &format::render(
+            Tool::Codex,
+            &subagent.id,
+            &subagent.cwd,
+            "2026-10-13T00:00:00Z",
+            &messages(),
+        )
+        .unwrap(),
+    );
+    sub_rows[0]["payload"]["parent_thread_id"] = json!(f.source.id);
+    let bytes = sub_rows
+        .iter()
+        .map(|r| serde_json::to_string(r).unwrap() + "\n")
+        .collect::<String>();
+    publish(&subagent.path, bytes.as_bytes()).unwrap();
+    assert_eq!(workspace_scan(&f, &scope).rows.len(), 1);
+    fs::write(
+        &f.source.path,
+        String::from_utf8(original)
+            .unwrap()
+            .replace("0.162.1", "99.0.0"),
+    )
+    .unwrap();
+    let failed = workspace_scan(&f, &scope);
+    assert_eq!(failed.rows.len(), 1);
+    assert_eq!(failed.rows.values().next().unwrap().phase, Phase::Failed);
+    assert!(
+        failed
+            .rows
+            .values()
+            .next()
+            .unwrap()
+            .detail
+            .contains("Unsupported Codex transcript version")
+    );
+}
+
+#[test]
+#[ignore]
+fn export_discovered_workspace_fixtures() {
+    export_native_cli_fixtures();
+    let dir = PathBuf::from(std::env::var_os("KILN_SYNC_FIXTURE_DIR").unwrap())
+        .canonicalize()
+        .unwrap();
+    let pair = Pair {
+        claude: Endpoint {
+            root: dir.join("claude"),
+            label: "fixture".into(),
+        },
+        codex: Endpoint {
+            root: dir.join("codex"),
+            label: "fixture".into(),
+        },
+    };
+    let scope = discovery::Scope {
+        workspaces: vec![dir.clone()],
+        roots: Tool::ALL
+            .into_iter()
+            .map(|t| (t, pair.endpoint(t).root.clone()))
+            .collect(),
+    };
+    let config = dir.join("workspace-sync");
+    let result = scan_scoped(
+        &config,
+        &pair,
+        &Arc::new(AtomicBool::new(true)),
+        &mut Cache::new(),
+        Some(&scope),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(result.published, 2);
+    assert!(result.errors.is_empty());
+    assert!(!config.join("conversation-sync/tracked").exists());
+    let state: State = serde_json::from_slice(
+        &fs::read(config.join("conversation-sync/workspace-state.json")).unwrap(),
+    )
+    .unwrap();
+    let copies: Vec<_> = state
+        .entries
+        .values()
+        .filter(|e| e.imported)
+        .map(|e| e.source.clone())
+        .collect();
+    fs::write(
+        dir.join("continuations.json"),
+        serde_json::to_vec_pretty(&copies).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn workspace_progress_distinguishes_discovery_empty_and_completed_batches() {
+    use egui_kittest::{Harness, kittest::Queryable};
+    let f = Fixture::new(Tool::Claude);
+    let scope = workspace_scope(&f);
+    let status = workspace_scan(&f, &scope);
+    let mut manager = Manager::default();
+    manager.configured = Some(f.pair.clone());
+    manager.status = status;
+    let mut initialized = false;
+    let mut h = Harness::builder().with_size([580.0, 490.0]).build_ui_state(
+        |ui, manager: &mut Manager| {
+            if !initialized {
+                kiln_common::fonts::install(ui.ctx());
+                kiln_common::Theme::current().apply(ui.ctx());
+                initialized = true;
+                return;
+            }
+            manager.progress_ui(ui, true);
+        },
+        manager,
+    );
+    h.run_steps(3);
+    assert!(h.query_by_label("워크스페이스 1개 · 대화 1개").is_some());
+    assert!(h.query_by_label("완료된 대화 모두 동기화됨").is_some());
+    h.render()
+        .unwrap()
+        .save("/tmp/kiln-workspace-sync-complete.png")
+        .unwrap();
+    h.state_mut().status.discovering = true;
+    h.run_steps(2);
+    assert!(h.query_by_label("워크스페이스 대화 찾는 중").is_some());
+    assert!(
+        h.query_by_label("동기화 완료").is_some(),
+        "discovery retains previous rows"
+    );
+    h.state_mut().status = Status {
+        workspaces: 1,
+        ..Default::default()
+    };
+    h.run_steps(2);
+    assert!(
+        h.query_by_label("연결됨 · 해당 폴더에서 대화를 찾지 못함")
+            .is_some()
+    );
+    h.render()
+        .unwrap()
+        .save("/tmp/kiln-workspace-sync-empty.png")
+        .unwrap();
+}
+
+#[test]
+#[ignore]
+fn verify_discovered_workspace_cli_continuations() {
+    let dir = PathBuf::from(
+        std::env::var_os("KILN_SYNC_FIXTURE_DIR").expect("explicit fixture directory"),
+    )
+    .canonicalize()
+    .unwrap();
+    assert!(dir.join("owned-fixture").is_file());
+    let sources: Vec<Source> =
+        serde_json::from_slice(&fs::read(dir.join("continuations.json")).unwrap()).unwrap();
+    for source in &sources {
+        let parsed = read_messages(source).unwrap();
+        assert_eq!(&parsed[..2], &messages());
+        assert!(
+            parsed
+                .iter()
+                .any(|m| m.text == "Mock continuation: kiln-orchid-731.")
+        );
+    }
+    let pair = Pair {
+        claude: Endpoint {
+            root: dir.join("claude"),
+            label: "fixture".into(),
+        },
+        codex: Endpoint {
+            root: dir.join("codex"),
+            label: "fixture".into(),
+        },
+    };
+    let scope = discovery::Scope {
+        workspaces: vec![dir.clone()],
+        roots: Tool::ALL
+            .into_iter()
+            .map(|t| (t, pair.endpoint(t).root.clone()))
+            .collect(),
+    };
+    let gate = Arc::new(AtomicBool::new(true));
+    let config = dir.join("workspace-sync");
+    let result = scan_scoped(
+        &config,
+        &pair,
+        &gate,
+        &mut Cache::new(),
+        Some(&scope),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(result.published, 2);
+    assert!(result.errors.is_empty());
+    let again = scan_scoped(
+        &config,
+        &pair,
+        &gate,
+        &mut Cache::new(),
+        Some(&scope),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(again.published, 0);
+}
