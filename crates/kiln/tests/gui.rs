@@ -1962,3 +1962,100 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     assert!(h.query_by_label("대화 연동 해제").is_none());
     assert!(h.query_by_label("대화 연동").is_some());
 }
+
+/// No provider calls: a native PTY child emits a structured capacity failure and exits.
+#[test]
+fn capacity_failure_resumes_exact_session_once_and_cancel_stops_the_countdown() {
+    capacity_recovery_fixture(false);
+    capacity_recovery_fixture(true);
+}
+fn capacity_recovery_fixture(idle: bool) {
+    use kiln::app::{Action,agent_runtime};
+    use kiln_accounts::Tool;
+    use std::os::unix::fs::PermissionsExt;
+    use base64::Engine;
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let(base,proj)=setup("capacity-recovery");
+    struct Cleanup(PathBuf,Option<std::ffi::OsString>,Option<std::ffi::OsString>);
+    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);unsafe {if let Some(p)=&self.1 {std::env::set_var("PATH",p);}else{std::env::remove_var("PATH");} if let Some(p)=&self.2 {std::env::set_var("CAPACITY_FIXTURE_BIN",p);}else{std::env::remove_var("CAPACITY_FIXTURE_BIN");}}}}
+    let _cleanup=Cleanup(base.clone(),std::env::var_os("PATH"),std::env::var_os("CAPACITY_FIXTURE_BIN"));
+    let bin=base.join("bin");std::fs::create_dir_all(&bin).unwrap();let cli=bin.join("codex");
+    std::fs::write(&cli,r#"#!/usr/bin/python3
+import json,os,sys,subprocess,datetime
+from pathlib import Path
+if sys.argv[1:]==['--version']: print('codex-cli 0.162.1');sys.exit(0)
+args=sys.argv[1:];root=Path(os.environ['CODEX_HOME']).resolve();resumed='resume' in args
+if resumed: cid=args[args.index('resume')+1]
+else:
+ count=root/'fixture-count';n=int(count.read_text())+1 if count.exists() else 1;count.write_text(str(n));cid=f'{n:08x}-1234-1234-1234-123456789abc'
+path=root/'sessions'/f'rollout-{cid}.jsonl';path.parent.mkdir(parents=True,exist_ok=True)
+def event(kind,**kw):
+ with path.open('a') as f: f.write(json.dumps({'timestamp':datetime.datetime.now(datetime.timezone.utc).isoformat(),'type':'event_msg','payload':{'type':kind,'turn_id':'fixture-turn-'+cid,**kw}})+'\n')
+if not resumed: path.write_text(json.dumps({'type':'session_meta','payload':{'id':cid,'cwd':os.getcwd()}})+'\n')
+hook={'hook_event_name':'SessionStart','session_id':cid,'transcript_path':str(path),'cwd':os.getcwd()}
+subprocess.run([os.environ['KILN_EXE'],'agent-hook'],input=json.dumps(hook).encode(),check=True)
+if not resumed:
+ event('task_complete',error={'message':'Selected model is at capacity. Please try a different model.','codex_error_info':'server_overloaded'})
+ print('CAPACITY_FIXTURE_FAILED',flush=True);sys.exit(78)
+(root/'resumed.json').write_text(json.dumps({'args':args,'id':cid,'cwd':os.getcwd(),'root':str(root)}))
+event('task_started');event('task_complete',last_agent_message='Recovered fixture')
+print('CAPACITY_FIXTURE_RECOVERED',flush=True)
+for line in sys.stdin: pass
+"#).unwrap();std::fs::set_permissions(&cli,std::fs::Permissions::from_mode(0o700)).unwrap();
+    if idle {
+        let script=bin.join("fixture.py");std::fs::rename(&cli,&script).unwrap();
+        let c=bin.join("fixture.c");
+        std::fs::write(&c,r#"#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+int main(int argc,char **argv) {
+ char **args=calloc(argc+2,sizeof(char*));args[0]="/usr/bin/python3";
+ char script[4096];snprintf(script,sizeof(script),"%s/fixture.py",getenv("CAPACITY_FIXTURE_BIN"));args[1]=script;
+ for(int i=1;i<argc;i++)args[i+1]=argv[i];
+ int status;pid_t p=fork();if(p==0){execv(args[0],args);_exit(2);}waitpid(p,&status,0);
+ if(!WIFEXITED(status)||WEXITSTATUS(status)!=78)return 0;
+ char line[4096];if(fgets(line,sizeof(line),stdin)){
+ FILE *f=fopen("capacity-input.txt","w");fputs(line,f);fclose(f);
+ printf("CAPACITY_FIXTURE_RECOVERED\n");fflush(stdout);
+ }
+ while(1)pause();
+}
+"#).unwrap();
+        assert!(std::process::Command::new("/usr/bin/clang").args(["-o"]).arg(&cli).arg(&c).status().unwrap().success());
+        // Inherited only by this owned fixture; restore in its cleanup below.
+        unsafe {std::env::set_var("CAPACITY_FIXTURE_BIN",&bin);}
+    }
+    unsafe {std::env::set_var("PATH",format!("{}:{}",bin.display(),std::env::var("PATH").unwrap_or_default()));}
+    let mut h=Harness::builder().with_size([1100.,720.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    let home=base.join("accounts/home/.codex");std::fs::create_dir_all(&home).unwrap();
+    let claims=base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"email":"capacity@example.invalid"}"#);
+    std::fs::write(home.join("auth.json"),serde_json::json!({"tokens":{"id_token":format!("x.{claims}.x"),"access_token":"fixture-only","refresh_token":"fixture-only"}}).to_string()).unwrap();
+    h.state().debug_accounts().save_current(Tool::Codex,"Capacity fixture").unwrap();
+    h.state_mut().debug_queue_action(Action::DirectAgent{tool:Tool::Codex,cwd:Some(proj.clone())});
+    assert!(pump_until(&mut h,12,|h|h.query_by_label("자동 재시도 취소").is_some()));
+    let original=h.state().debug_focused_session().unwrap();
+    let spec=h.state().debug_focused_launch_spec().unwrap();let record=agent_runtime::read(&agent_runtime::record_path(&spec).unwrap()).unwrap();
+    let root=PathBuf::from(&record.spec.env.iter().find(|(k,_)|k=="CODEX_HOME").unwrap().1);
+    h.render().unwrap().save("/tmp/kiln-capacity-countdown.png").unwrap();
+    assert!(pump_until(&mut h,30,|h|h.state().debug_focused_text().is_some_and(|s|s.contains("CAPACITY_FIXTURE_RECOVERED"))));
+    if idle {
+        assert_eq!(h.state().debug_focused_session().unwrap(),original);
+        assert!(std::fs::read_to_string(proj.join("capacity-input.txt")).unwrap().contains("Continue the interrupted task"));
+    } else {
+    assert_ne!(h.state().debug_focused_session().unwrap(),original);
+    let observed:serde_json::Value=serde_json::from_slice(&std::fs::read(root.join("resumed.json")).unwrap()).unwrap();
+    assert_eq!(observed["id"].as_str(),record.conversation.as_deref());assert_eq!(observed["cwd"].as_str(),proj.canonicalize().unwrap().to_str());
+    assert_eq!(observed["root"].as_str(),root.canonicalize().unwrap().to_str());
+    assert!(observed["args"].as_array().unwrap().iter().any(|v|v.as_str().is_some_and(|s|s.starts_with("Continue the interrupted task"))));
+    assert!(!observed["args"].as_array().unwrap().iter().any(|v|v=="--last"));
+    }
+    h.state_mut().debug_queue_action(Action::DirectAgent{tool:Tool::Codex,cwd:Some(proj)});
+    assert!(pump_until(&mut h,12,|h|h.query_by_label("자동 재시도 취소").is_some()));
+    let cancelled=h.state().debug_focused_session();h.get_by_label("자동 재시도 취소").click();h.run_steps(3);
+    assert!(h.query_by_label("혼잡 자동 재시도 중지됨").is_some());
+    let end=Instant::now()+Duration::from_secs(17);while Instant::now()<end {h.step();std::thread::sleep(Duration::from_millis(50));}
+    assert_eq!(h.state().debug_focused_session(),cancelled);
+    assert_eq!(std::fs::read_to_string(root.join("fixture-count")).unwrap(),"2");
+}

@@ -470,7 +470,7 @@ impl KilnApp {
                         _=>(t.text_faint,false,""),
                     };
                     let name = meaningful_title(&i.title, &proc_name, i.cwd.as_deref()).unwrap_or(proc_name);
-                    let detail = status.into();
+                    let detail = self.capacity_recovery.label(pid).unwrap_or_else(|| status.into());
                     let right = i.cwd.as_deref().map(|c| short_path(Path::new(c))).unwrap_or_default();
                     let running = activity == kiln_proto::AgentActivity::Running && i.exited.is_none() && !i.attention;
                     let icon = agent_icon(session.and_then(|sid| self.conn.session_agent(sid)));
@@ -1024,6 +1024,15 @@ impl KilnApp {
                     self.actions.push(Action::ToggleZoom(Some(*pid)));
                 }
                 let launch_error=self.terminal_launch_error(*pid).map(str::to_owned);
+                let body = if let Some(label) = self.capacity_recovery.label(*pid) {
+                    let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 34.0));
+                    let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("capacity", *pid)));
+                    bar.horizontal(|ui| {
+                        ui.label(egui::RichText::new(label).color(t.orange));
+                        if ui.button(kiln_common::i18n::tr("자동 재시도 취소")).clicked() { self.capacity_recovery.cancel(*pid); }
+                    });
+                    egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
+                } else { body };
                 let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("card", *pid)));
                 child.set_clip_rect(body);
                 match self.panes.get_mut(pid).map(|p| &mut p.kind) {

@@ -337,8 +337,15 @@ pub fn run_request(
     if !resumed {
         attach(&mut spec, path, &record)?;
     }
+    let retry = std::env::var("KILN_CAPACITY_RETRY_TURN").ok();
+    if let Some(turn) = &retry {
+        ensure!(resumed && record.tool == Tool::Codex, "invalid capacity retry");
+        let failure = super::capacity_recovery::failure(&record)?.context("capacity error no longer current")?;
+        ensure!(&failure.turn == turn, "capacity retry superseded by another turn");
+        spec.args.push(super::capacity_recovery::CONTINUE.into());
+    }
     let mut cmd = Command::new(spec.program.context("missing CLI executable")?);
-    cmd.args(&spec.args).envs(spec.env);
+    cmd.args(&spec.args).envs(spec.env).env_remove("KILN_CAPACITY_RETRY_TURN");
     if !resumed && let Some(payload) = payload {
         cmd.arg(payload);
     }

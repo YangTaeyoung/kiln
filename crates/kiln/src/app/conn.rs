@@ -65,6 +65,8 @@ pub enum State {
 }
 
 pub struct Conn {
+    pub input_times: std::cell::RefCell<HashMap<SessionId, std::time::SystemTime>>,
+    pub observed_since: std::time::SystemTime,
     client: Option<Client>,
     pub state: State,
     pub screens: HashMap<SessionId, Screen>,
@@ -102,6 +104,8 @@ pub struct Conn {
 impl Conn {
     pub fn new(ctx: egui::Context) -> Self {
         let mut c = Conn {
+            input_times: Default::default(),
+            observed_since: std::time::SystemTime::now(),
             client: None,
             state: State::Disconnected { since: Instant::now(), last_error: String::new() },
             screens: HashMap::new(),
@@ -139,6 +143,8 @@ impl Conn {
     #[doc(hidden)]
     pub fn offline(ctx: egui::Context) -> Self {
         Conn {
+            input_times: Default::default(),
+            observed_since: std::time::SystemTime::now(),
             client: None,
             state: State::Disconnected { since: Instant::now(), last_error: String::new() },
             screens: HashMap::new(),
@@ -438,6 +444,7 @@ impl Conn {
 
     pub fn input(&self, sid: SessionId, data: Vec<u8>) {
         if !data.is_empty() && self.terminal_health.get(&sid).is_none_or(|h|h.state==TerminalState::Healthy) {
+            self.input_times.borrow_mut().insert(sid, std::time::SystemTime::now());
             self.send(ClientMsg::Input { session: sid, data });
         }
     }

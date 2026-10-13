@@ -67,6 +67,7 @@ impl SessionImages {
 
 struct Client {
     id: u64,
+    hello_sent: AtomicBool,
     out: Sender<ServerMsg>,
     wake: Sender<()>,
     attached: Mutex<HashMap<SessionId, AttachState>>,
@@ -235,7 +236,9 @@ impl Daemon {
     }
     fn broadcast(&self, msg: ServerMsg) {
         for c in self.clients.lock().iter() {
-            let _ = c.out.try_send(msg.clone());
+            if c.hello_sent.load(Ordering::Acquire) {
+                let _ = c.out.try_send(msg.clone());
+            }
         }
     }
 
@@ -649,6 +652,7 @@ impl Daemon {
         let (wake_tx, wake_rx) = bounded::<()>(1);
         let client = Arc::new(Client {
             id: self.next_client.fetch_add(1, Ordering::SeqCst),
+            hello_sent: AtomicBool::new(false),
             out: out_tx,
             wake: wake_tx,
             attached: Mutex::new(HashMap::new()),
@@ -694,12 +698,17 @@ impl Daemon {
             let _ = client.out.send(m);
         };
         match msg {
-            ClientMsg::Hello { .. } => reply(ServerMsg::Hello {
-                proto: PROTO_VERSION,
-                build: build_id().to_string(),
-                pid: std::process::id(),
-                can_upgrade: true,
-            }),
+            ClientMsg::Hello { .. } => {
+                reply(ServerMsg::Hello {
+                    proto: PROTO_VERSION,
+                    build: build_id().to_string(),
+                    pid: std::process::id(),
+                    can_upgrade: true,
+                });
+                // Publish readiness only after Hello is queued. Concurrent session
+                // notifications must never become a new connection's first reply.
+                client.hello_sent.store(true, Ordering::Release);
+            },
             ClientMsg::Ping { req } => reply(ServerMsg::Pong { req }),
             ClientMsg::TerminalHealth { req, session } => {
                 if let Some(s) = self.session(session) {
@@ -1478,6 +1487,29 @@ mod palette_tests {
     use super::*;
     use std::os::fd::AsRawFd;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn session_notifications_cannot_precede_hello() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = Daemon::new(dir.path().join("owned.sock").to_string_lossy().into_owned());
+        let (out, received) = bounded(16);
+        let (wake, _) = bounded(1);
+        let client = Arc::new(Client {
+            id: 1,
+            hello_sent: AtomicBool::new(false),
+            out,
+            wake,
+            attached: Mutex::new(HashMap::new()),
+        });
+        daemon.clients.lock().push(client.clone());
+        daemon.broadcast(ServerMsg::SessionExited { session: 2, code: None });
+        assert!(received.try_recv().is_err());
+        daemon.clone().handle_msg(&client, ClientMsg::Hello { proto: PROTO_VERSION, build: "fixture".into(), client: "fixture".into() });
+        daemon.broadcast(ServerMsg::SessionExited { session: 2, code: None });
+        assert!(matches!(received.try_recv().unwrap(), ServerMsg::Hello { .. }));
+        assert!(matches!(received.try_recv().unwrap(), ServerMsg::SessionExited { session: 2, code: None }));
+        assert!(received.try_recv().is_err());
+    }
 
     #[test]
     fn terminal_query_reply_survives_checkpoint_restore_and_cancel_exactly_once() {

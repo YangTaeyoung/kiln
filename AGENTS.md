@@ -27,6 +27,7 @@ the user's shells, agents, builds, or servers.
   notarization, Sparkle updates, GitHub Release publication, and recovery.
 - [Signing setup](docs/maintainers/signing.md) — public identifiers and Keychain
   setup, never passwords or private keys.
+- [Codex capacity recovery](docs/codex-capacity-recovery.md) — bounded retries, exact-session resume and cancellation.
 - [CLI updates and exact conversation restart](docs/cli-updates.md) — persistent account namespaces, hook trust and isolated restart checks.
 - [Native updater validation](docs/maintainers/updater-validation.md) — isolated
   old/new fixtures, cancellation, relaunch and session survival checks.
