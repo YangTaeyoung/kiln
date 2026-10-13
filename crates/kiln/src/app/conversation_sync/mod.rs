@@ -1,4 +1,6 @@
-//! Opt-in native continuations. Only lifecycle-confirmed transcripts are watched.
+//! Opt-in native continuations discovered within open workspace folders.
+mod codex_index;
+mod discovery;
 mod format;
 #[cfg(test)]
 mod tests;
@@ -305,12 +307,16 @@ struct Entry {
     title: String,
     #[serde(default)]
     copied_to: Option<Continuation>,
+    #[serde(default)]
+    copies: Vec<Continuation>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Continuation {
     tool: Tool,
     id: String,
     cwd: String,
+    #[serde(default)]
+    root: PathBuf,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Phase {
@@ -323,15 +329,18 @@ enum Phase {
 }
 #[derive(Clone)]
 struct Conversation {
+    workspace: Option<PathBuf>,
     source: Source,
     title: String,
     phase: Phase,
     detail: String,
     target: Option<Continuation>,
+    copies: Vec<Continuation>,
 }
 impl Conversation {
-    fn from_entry(entry: &Entry) -> Self {
+    fn from_entry(entry: &Entry, scope: Option<&discovery::Scope>) -> Self {
         Self {
+            workspace: scope.and_then(|s| s.workspace(&entry.source.cwd)).cloned(),
             source: entry.source.clone(),
             title: entry.title.clone(),
             phase: if entry.copied_to.is_some() {
@@ -341,6 +350,7 @@ impl Conversation {
             },
             detail: String::new(),
             target: entry.copied_to.clone(),
+            copies: entry.copies.clone(),
         }
     }
 }
@@ -352,6 +362,9 @@ struct Status {
     recent: Vec<Continuation>,
     checked: usize,
     rows: BTreeMap<String, Conversation>,
+    workspaces: usize,
+    discovered: usize,
+    discovering: bool,
 }
 
 fn read_messages(source: &Source) -> Result<Vec<format::Message>> {
@@ -446,12 +459,44 @@ fn destination(
 
 /// Cancellation never blocks the UI on filesystem IO. An in-progress atomic publish may finish.
 type Gate = Arc<AtomicBool>;
-type Cache = HashMap<PathBuf, (u64, SystemTime, String)>;
+#[derive(Default)]
+struct Cache {
+    messages: HashMap<PathBuf, (u64, SystemTime, String)>,
+    metadata: discovery::MetadataCache,
+}
+impl Cache {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+#[cfg(test)]
 fn scan(
     config: &Path,
     pair: &Pair,
     gate: &Gate,
     cache: &mut Cache,
+    notify: impl Fn(&Status),
+) -> Result<Status> {
+    scan_scoped(config, pair, gate, cache, None, notify)
+}
+#[cfg(test)]
+fn scan_scoped(
+    config: &Path,
+    pair: &Pair,
+    gate: &Gate,
+    cache: &mut Cache,
+    scope: Option<&discovery::Scope>,
+    notify: impl Fn(&Status),
+) -> Result<Status> {
+    scan_with_index(config, pair, gate, cache, scope, |_| Ok(()), notify)
+}
+fn scan_with_index(
+    config: &Path,
+    pair: &Pair,
+    gate: &Gate,
+    cache: &mut Cache,
+    scope: Option<&discovery::Scope>,
+    mut index: impl FnMut(&Source) -> Result<()>,
     notify: impl Fn(&Status),
 ) -> Result<Status> {
     let dir = config.join("conversation-sync");
@@ -464,14 +509,26 @@ fn scan(
         .open(lock_path)?;
     lock.try_lock()
         .context("Another Kiln window is synchronizing")?;
-    let state_path = dir.join(format!("{}.json", digest(&serde_json::to_vec(pair)?)));
+    let state_path = dir.join(if scope.is_some() {
+        "workspace-state.json".into()
+    } else {
+        format!("{}.json", digest(&serde_json::to_vec(pair)?))
+    });
+    let legacy_path = dir.join(format!("{}.json", digest(&serde_json::to_vec(pair)?)));
     let mut state: State = if state_path.exists() {
         serde_json::from_slice(&bounded(&state_path, 8 * 1024 * 1024)?)?
     } else {
-        State::default()
+        if scope.is_some() && legacy_path.exists() {
+            serde_json::from_slice(&bounded(&legacy_path, 8 * 1024 * 1024)?)?
+        } else {
+            State::default()
+        }
     };
+    for entry in state.entries.values().filter(|e| e.imported) {
+        discovery::remember_import(config, &entry.source, &entry.seen)?;
+    }
     let tracked = dir.join("tracked");
-    if tracked.exists() {
+    if scope.is_none() && tracked.exists() {
         for (index, entry) in fs::read_dir(tracked)?.enumerate() {
             ensure!(
                 index < MAX_SOURCES,
@@ -482,7 +539,9 @@ fn scan(
                 continue;
             }
             let source: Source = serde_json::from_slice(&bounded(&path, 16 * 1024)?)?;
-            if source.root != pair.endpoint(source.tool).root {
+            if source.root != pair.endpoint(source.tool).root
+                || scope.is_some_and(|s| !s.contains(&source))
+            {
                 continue;
             }
             state
@@ -494,26 +553,62 @@ fn scan(
                     imported: false,
                     title: String::new(),
                     copied_to: None,
+                    copies: Vec::new(),
                 });
         }
     }
+    let mut discovery_status = Status::default();
+    if let Some(scope) = scope {
+        discovery_status.workspaces = scope.workspaces.len();
+        discovery_status.discovering = true;
+        notify(&discovery_status);
+        let found = discovery::find(config, scope, gate, &mut cache.metadata)?;
+        discovery_status.discovered = found.len();
+        for source in found {
+            let key = source.path.to_string_lossy().into_owned();
+            if !state.entries.contains_key(&key) {
+                // Migration/recovery also recognizes copies created by earlier connections.
+                let imported = discovery::imported(config, &source)?;
+                state.entries.insert(
+                    key,
+                    Entry {
+                        source,
+                        seen: imported.clone().unwrap_or_default(),
+                        imported: imported.is_some(),
+                        title: String::new(),
+                        copied_to: None,
+                        copies: Vec::new(),
+                    },
+                );
+            }
+        }
+        // Persist discoveries even before an incomplete or incompatible response can be copied.
+        replace(&state_path, &serde_json::to_vec(&state)?)?;
+    }
+    let active: BTreeMap<_, _> = state
+        .entries
+        .iter()
+        .filter(|(_, e)| scope.is_none_or(|s| s.contains(&e.source)))
+        .map(|(k, e)| (k.clone(), e.clone()))
+        .collect();
     ensure!(
-        state.entries.len() <= MAX_SOURCES,
+        active.len() <= MAX_SOURCES,
         "Sync source limit reached (4096); reconnect with a fresh namespace"
     );
     let mut status = Status {
-        watched: state.entries.len(),
+        watched: active.len(),
+        workspaces: discovery_status.workspaces,
+        discovered: discovery_status.discovered,
         recent: state.recent.clone(),
-        rows: state
-            .entries
+        rows: active
             .iter()
             .filter(|(_, e)| !e.imported || e.copied_to.is_some())
-            .map(|(k, e)| (k.clone(), Conversation::from_entry(e)))
+            .map(|(k, e)| (k.clone(), Conversation::from_entry(e, scope)))
             .collect(),
         ..Default::default()
     };
     notify(&status);
-    for (key, entry) in state.entries.clone() {
+    for (key, entry) in active {
         if !gate.load(Ordering::Acquire) {
             break;
         }
@@ -529,7 +624,18 @@ fn scan(
             safe_path(&entry.source.root, &entry.source.path)?;
             let meta = fs::metadata(&entry.source.path)?;
             let stamp = (meta.len(), meta.modified()?, entry.seen.clone());
-            if cache.get(&entry.source.path) == Some(&stamp) {
+            let destinations = scope
+                .map(|s| s.destinations(pair, entry.source.tool))
+                .unwrap_or_else(|| vec![pair.clone()]);
+            let routes_unchanged = entry.imported && entry.copied_to.is_none()
+                || scope.is_none()
+                || destinations.iter().all(|p| {
+                    entry
+                        .copies
+                        .iter()
+                        .any(|c| c.root == p.endpoint(opposite(entry.source.tool)).root)
+                });
+            if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
                 return Ok(());
             }
             if let Some(row) = status.rows.get_mut(&key) {
@@ -544,11 +650,11 @@ fn scan(
                 return Ok(());
             }
             let fingerprint = digest(&serde_json::to_vec(&messages)?);
-            if fingerprint == entry.seen {
+            if fingerprint == entry.seen && routes_unchanged {
                 if let Some(row) = status.rows.get_mut(&key) {
                     row.phase = Phase::Synced;
                 }
-                cache.insert(entry.source.path.clone(), stamp);
+                cache.messages.insert(entry.source.path.clone(), stamp);
                 return Ok(());
             }
             let title = messages
@@ -567,99 +673,123 @@ fn scan(
             let row = status
                 .rows
                 .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry));
+                .or_insert_with(|| Conversation::from_entry(&entry, scope));
             row.title = title.clone();
             row.phase = Phase::Copying;
             notify(&status);
-            // Reuse this exact plan after a crash, even across a UTC date boundary.
-            let id = stable_id(&format!("{}:{key}:{fingerprint}", state_path.display()));
-            let plan_path = dir.join(format!("pending-{id}.json"));
-            #[derive(Serialize, Deserialize)]
-            struct Plan {
-                source: Source,
-                timestamp: String,
-            }
-            let plan: Plan = if plan_path.exists() {
-                serde_json::from_slice(&bounded(&plan_path, 16 * 1024)?)?
-            } else {
-                let now = chrono::Utc::now();
-                let plan = Plan {
-                    source: destination(pair, &entry.source, &id, now)?,
-                    timestamp: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            let mut copies = Vec::new();
+            let mut pending_plans = Vec::new();
+            for destination_pair in destinations {
+                // Include the namespace in workspace mode; both default and connected CLIs
+                // must see a continuation even when the other CLI was opened outside Kiln.
+                let identity = if scope.is_some() {
+                    format!(
+                        "{}:{key}:{fingerprint}:{}",
+                        state_path.display(),
+                        destination_pair
+                            .endpoint(opposite(entry.source.tool))
+                            .root
+                            .display()
+                    )
+                } else {
+                    format!("{}:{key}:{fingerprint}", state_path.display())
                 };
-                publish(&plan_path, &serde_json::to_vec(&plan)?)?;
-                plan
-            };
-            ensure!(
-                plan.source.root == pair.endpoint(plan.source.tool).root,
-                "Destination namespace changed"
-            );
-            safe_path(&plan.source.root, &plan.source.path)?;
-            let bytes = format::render(
-                plan.source.tool,
-                &id,
-                &entry.source.cwd,
-                &plan.timestamp,
-                &messages,
-            )?;
-            ensure!(
-                bytes.len() as u64 <= LIMIT,
-                "Converted conversation exceeds the 64 MiB sync limit"
-            );
-            if !gate.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            if plan.source.path.exists() {
-                // A CLI may already have resumed a successfully published copy before a crash.
+                let id = stable_id(&identity);
+                let plan_path = dir.join(format!("pending-{id}.json"));
+                #[derive(Serialize, Deserialize)]
+                struct Plan {
+                    source: Source,
+                    timestamp: String,
+                }
+                let plan: Plan = if plan_path.exists() {
+                    serde_json::from_slice(&bounded(&plan_path, 16 * 1024)?)?
+                } else {
+                    let now = chrono::Utc::now();
+                    let plan = Plan {
+                        source: destination(&destination_pair, &entry.source, &id, now)?,
+                        timestamp: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                    };
+                    publish(&plan_path, &serde_json::to_vec(&plan)?)?;
+                    plan
+                };
                 ensure!(
-                    bounded(&plan.source.path, LIMIT)?.starts_with(&bytes),
-                    "Continuation collision; existing conversation was preserved"
+                    plan.source.root == destination_pair.endpoint(plan.source.tool).root,
+                    "Destination namespace changed"
                 );
-            } else {
-                publish(&plan.source.path, &bytes)?;
-            }
-            state.entries.insert(
-                plan.source.path.to_string_lossy().into_owned(),
-                Entry {
-                    source: plan.source.clone(),
-                    seen: fingerprint.clone(),
-                    imported: true,
-                    title: title.clone(),
-                    copied_to: None,
-                },
-            );
-            let continuation = Continuation {
-                tool: plan.source.tool,
-                id: id.clone(),
-                cwd: entry.source.cwd.clone(),
-            };
-            let saved = state.entries.get_mut(&key).unwrap();
-            saved.seen = fingerprint.clone();
-            saved.title = title;
-            saved.copied_to = Some(continuation.clone());
-            state.recent.insert(
-                0,
-                Continuation {
+                safe_path(&plan.source.root, &plan.source.path)?;
+                let bytes = format::render(
+                    plan.source.tool,
+                    &id,
+                    &entry.source.cwd,
+                    &plan.timestamp,
+                    &messages,
+                )?;
+                ensure!(
+                    bytes.len() as u64 <= LIMIT,
+                    "Converted conversation exceeds the 64 MiB sync limit"
+                );
+                if !gate.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                if plan.source.path.exists() {
+                    ensure!(
+                        bounded(&plan.source.path, LIMIT)?.starts_with(&bytes),
+                        "Continuation collision; existing conversation was preserved"
+                    );
+                }
+                // Record the baseline before publication so a crash cannot make discovery echo it.
+                discovery::remember_import(config, &plan.source, &fingerprint)?;
+                if !plan.source.path.exists() {
+                    publish(&plan.source.path, &bytes)?;
+                }
+                index(&plan.source)?;
+                status.published += 1;
+                state
+                    .entries
+                    .entry(plan.source.path.to_string_lossy().into_owned())
+                    .or_insert(Entry {
+                        source: plan.source.clone(),
+                        seen: fingerprint.clone(),
+                        imported: true,
+                        title: title.clone(),
+                        copied_to: None,
+                        copies: Vec::new(),
+                    });
+                let continuation = Continuation {
                     tool: plan.source.tool,
                     id,
                     cwd: entry.source.cwd.clone(),
-                },
-            );
-            state.recent.truncate(8);
+                    root: plan.source.root.clone(),
+                };
+                state.recent.insert(0, continuation.clone());
+                state.recent.truncate(8);
+                copies.push(continuation);
+                replace(&state_path, &serde_json::to_vec(&state)?)?;
+                pending_plans.push(plan_path);
+            }
+            let saved = state.entries.get_mut(&key).unwrap();
+            saved.seen = fingerprint.clone();
+            saved.title = title;
+            saved.copied_to = copies.first().cloned();
+            saved.copies = copies.clone();
             replace(&state_path, &serde_json::to_vec(&state)?)?;
-            cache.insert(entry.source.path.clone(), (stamp.0, stamp.1, fingerprint));
+            for path in pending_plans {
+                let _ = fs::remove_file(path);
+            }
+            cache
+                .messages
+                .insert(entry.source.path.clone(), (stamp.0, stamp.1, fingerprint));
             let row = status.rows.get_mut(&key).unwrap();
             row.phase = Phase::Synced;
-            row.target = Some(continuation);
-            status.published += 1;
-            let _ = fs::remove_file(plan_path);
+            row.target = copies.first().cloned();
+            row.copies = copies;
             Ok(())
         })();
         if let Err(error) = result {
             let row = status
                 .rows
                 .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry));
+                .or_insert_with(|| Conversation::from_entry(&entry, scope));
             row.phase = if error.to_string().contains("retrying") {
                 Phase::Waiting
             } else {
@@ -679,11 +809,12 @@ fn scan(
 }
 
 enum Event {
-    Progress(Status),
+    Progress(Gate, Status),
     Connected(Result<Pair, String>),
-    Scanned(Result<Status, String>),
+    Scanned(Gate, Result<Status, String>),
 }
 pub struct Manager {
+    pub(super) detail: Option<PathBuf>,
     tx: mpsc::SyncSender<Event>,
     rx: mpsc::Receiver<Event>,
     busy: bool,
@@ -693,12 +824,14 @@ pub struct Manager {
     status: Status,
     error: Option<String>,
     configured: Option<Pair>,
+    workspaces: Vec<PathBuf>,
     cache: Arc<Mutex<Cache>>,
 }
 impl Default for Manager {
     fn default() -> Self {
         let (tx, rx) = mpsc::sync_channel(8);
         Self {
+            detail: None,
             tx,
             rx,
             busy: false,
@@ -708,6 +841,7 @@ impl Default for Manager {
             status: Status::default(),
             error: None,
             configured: None,
+            workspaces: Vec::new(),
             cache: Arc::new(Mutex::new(Cache::new())),
         }
     }
@@ -718,11 +852,21 @@ impl Drop for Manager {
     }
 }
 impl Manager {
-    pub fn tick(&mut self, settings: &mut super::state::Settings, ctx: &egui::Context) {
+    pub fn tick(
+        &mut self,
+        settings: &mut super::state::Settings,
+        workspaces: Vec<PathBuf>,
+        ctx: &egui::Context,
+    ) {
         // Poll quickly only while working; all filesystem/account operations stay off the UI thread.
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                Event::Progress(status) => {
+                Event::Progress(gate, mut status) => {
+                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) { continue; }
+                    if status.discovering {
+                        status.rows = self.status.rows.clone();
+                        status.watched = self.status.watched;
+                    }
                     self.status = status;
                 }
                 Event::Connected(result) => {
@@ -738,8 +882,9 @@ impl Manager {
                         Err(e) => self.error = Some(e),
                     }
                 }
-                Event::Scanned(result) => {
+                Event::Scanned(gate, result) => {
                     self.busy = false;
+                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) { continue; }
                     match result {
                         Ok(status) => {
                             self.status = status;
@@ -756,12 +901,16 @@ impl Manager {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         let enabled =
-            settings.conversation_sync_enabled && settings.conversation_sync_pair.is_some();
-        self.gate.store(enabled, Ordering::Release);
+            settings.conversation_sync_enabled && settings.conversation_sync_pair.is_some() && !workspaces.is_empty();
         if !enabled {
+            self.cancel_scan();
+            self.workspaces = workspaces;
             return;
         }
-        if self.configured != settings.conversation_sync_pair {
+        if self.configured != settings.conversation_sync_pair || self.workspaces != workspaces || !self.gate.load(Ordering::Acquire) {
+            self.gate.store(false, Ordering::Release);
+            self.gate = Arc::new(AtomicBool::new(true));
+            self.workspaces = workspaces;
             self.status = Status::default();
             self.configured = settings.conversation_sync_pair.clone();
             self.cache = Arc::new(Mutex::new(Cache::new()));
@@ -778,98 +927,152 @@ impl Manager {
         self.busy = true;
         self.next = Instant::now() + Duration::from_secs(3);
         let pair = settings.conversation_sync_pair.clone().unwrap();
+        let workspaces = self.workspaces.clone();
         let gate = self.gate.clone();
         let tx = self.tx.clone();
         let cache = self.cache.clone();
         std::thread::spawn(move || {
             let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
-            let result = scan(
-                &kiln_common::paths::config_dir(),
-                &pair,
-                &gate,
-                &mut cache.lock().unwrap(),
-                |status| {
-                    if last_progress.get().elapsed() >= Duration::from_millis(100) {
-                        last_progress.set(Instant::now());
-                        let _ = tx.try_send(Event::Progress(status.clone()));
-                    }
-                },
-            )
-            .map_err(|e| e.to_string());
-            let _ = tx.send(Event::Scanned(result));
+            let result = discovery::Scope::new(&pair, workspaces)
+                .and_then(|scope| {
+                    let mut registry = codex_index::Registry::default();
+                    scan_with_index(
+                        &kiln_common::paths::config_dir(),
+                        &pair,
+                        &gate,
+                        &mut cache.lock().unwrap(),
+                        Some(&scope),
+                        |source| registry.ensure(source, &gate),
+                        |status| {
+                            if last_progress.get().elapsed() >= Duration::from_millis(100) {
+                                last_progress.set(Instant::now());
+                                let _ = tx.try_send(Event::Progress(gate.clone(), status.clone()));
+                            }
+                        },
+                    )
+                })
+                .map_err(|e| e.to_string());
+            let _ = tx.send(Event::Scanned(gate, result));
         });
     }
-    pub fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        s: &mut super::state::Settings,
-        accounts: &AccountManager,
-    ) {
+    pub(super) fn accounts_ready(accounts: &AccountManager) -> bool {
+        [Tool::Claude, Tool::Codex].into_iter().all(|tool| {
+            accounts.active(tool).is_some_and(|id| !accounts.pending_login(tool, &id) && !accounts.login_required(tool, &id)
+                && accounts.profiles(tool).iter().any(|p| p.id == id))
+        })
+    }
+    pub(super) fn cancel_scan(&mut self) {
+        self.gate.store(false, Ordering::Release);
+        self.next = Instant::now();
+    }
+    pub(super) fn enable(&mut self, settings: &mut super::state::Settings, accounts: &AccountManager) {
+        if settings.conversation_sync_pair.is_some() {
+            settings.conversation_sync_enabled = true;
+            return;
+        }
+        if self.connecting || self.busy { return; }
+        self.busy = true;
+        self.connecting = true;
+        self.error = None;
+        let accounts = accounts.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = if Self::accounts_ready(&accounts) {
+                Pair::connect(&accounts).map_err(|e| e.to_string())
+            } else { Err(kiln_common::i18n::tr("설정에서 Claude Code와 Codex 계정을 먼저 연결하세요.").to_owned()) };
+            let _ = tx.send(Event::Connected(result));
+        });
+    }
+    fn workspace_status(&self, root: &Path) -> Status {
+        let rows: BTreeMap<_, _> = self.status.rows.iter().filter(|(_, row)| {
+            if let Some(workspace) = &row.workspace { return workspace == root; }
+            let cwd = Path::new(&row.source.cwd);
+            cwd.starts_with(root) && !self.workspaces.iter().any(|other| other != root && other.starts_with(root) && cwd.starts_with(other))
+        }).map(|(key, row)| (key.clone(), row.clone())).collect();
+        Status {
+            watched: rows.len(),
+            checked: rows.values().filter(|r| matches!(r.phase, Phase::Synced | Phase::Failed | Phase::Waiting)).count(),
+            published: rows.values().filter(|r| r.phase == Phase::Synced).map(|r| r.copies.len().max(usize::from(r.target.is_some()))).sum(),
+            rows,
+            workspaces: 1,
+            discovering: self.status.discovering || self.connecting,
+            ..Status::default()
+        }
+    }
+    pub(super) fn badge(&self, root: &Path) -> (kiln_common::icons::Icon, egui::Color32, String) {
+        use kiln_common::{Theme, icons::Icon, i18n::tr};
+        let theme = Theme::current();
+        let status = self.workspace_status(root);
+        if self.error.is_some() || status.rows.values().any(|r| r.phase == Phase::Failed) {
+            (Icon::Warning, theme.orange, tr("대화 연동 · 확인 필요").into())
+        } else if self.connecting || status.discovering || status.rows.values().any(|r| matches!(r.phase, Phase::Queued | Phase::Reading | Phase::Copying)) || (self.busy && status.rows.is_empty()) {
+            (Icon::Refresh, theme.blue, kiln_common::trf!("대화 연동 중 · {}/{}", status.checked, status.watched))
+        } else if status.rows.is_empty() {
+            (Icon::Plug, theme.text_dim, tr("대화 연동됨 · 대화 대기").into())
+        } else if status.rows.values().any(|r| r.phase == Phase::Waiting) {
+            (Icon::History, theme.blue, tr("대화 연동 · 응답 완료 대기").into())
+        } else {
+            (Icon::Check, theme.green, kiln_common::trf!("대화 연동 완료 · {}개", status.rows.len()))
+        }
+    }
+    pub(super) fn dialog(&mut self, ctx: &egui::Context, name: &str, root: &Path, enabled: bool, settings: &mut super::state::Settings, accounts: &AccountManager) {
         use kiln_common::{Theme, fonts, i18n::tr};
         let theme = Theme::current();
-        ui.add_space(16.0);
-        kiln_common::widgets::divider(ui);
-        ui.add_space(12.0);
-        ui.label(egui::RichText::new(tr("대화 이어가기 · 실험 기능")).font(fonts::semibold(16.0)));
-        ui.add(egui::Label::new(tr("Kiln이 열려 있는 동안 완료된 대화를 상대 CLI의 /resume에 복사합니다. 원문 대화와 텍스트 도구 기록을 전달합니다.")).wrap());
-        if let Some(pair) = &s.conversation_sync_pair {
-            ui.label(format!(
-                "Claude Code: {} ↔ Codex: {}",
-                pair.claude.label, pair.codex.label
-            ));
-            if ui
-                .checkbox(&mut s.conversation_sync_enabled, tr("자동으로 대화 동기화"))
-                .changed()
-            {
-                self.gate
-                    .store(s.conversation_sync_enabled, Ordering::Release);
-            }
-        }
-        if ui
-            .add_enabled(!self.busy, egui::Button::new(tr("현재 두 계정 연결")))
-            .clicked()
-        {
-            self.gate.store(false, Ordering::Release);
-            s.conversation_sync_enabled = false;
-            self.busy = true;
-            self.connecting = true;
-            let accounts = accounts.clone();
-            let tx = self.tx.clone();
-            std::thread::spawn(move || {
-                let _ = tx.send(Event::Connected(
-                    Pair::connect(&accounts).map_err(|e| e.to_string()),
-                ));
+        let mut close = false;
+        let status = self.workspace_status(root);
+        let modal = egui::Modal::new(egui::Id::new("workspace-conversation-sync"))
+            .frame(egui::Frame::new().fill(theme.bg_panel).stroke(egui::Stroke::new(1.0, theme.border)).corner_radius(14).inner_margin(20))
+            .show(ctx, |ui| {
+                ui.set_width(600.0_f32.min((ctx.content_rect().width() - 64.0).max(200.0)));
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(tr("대화 연동")).font(fonts::semibold(18.0)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        close = kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, tr("닫기 (Esc)")).clicked();
+                    });
+                });
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-150.0).max(180.0)).show(ui, |ui| {
+                    ui.label(egui::RichText::new(name).font(fonts::semibold(14.0)));
+                    ui.add(egui::Label::new(root.display().to_string()).wrap());
+                    if let Some(pair) = &settings.conversation_sync_pair {
+                        ui.label(format!("Claude Code: {} ↔ Codex: {}", pair.claude.label, pair.codex.label));
+                    }
+                    ui.add_space(8.0);
+                    ui.add(egui::Label::new(tr("이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다.")).wrap());
+                    ui.add(egui::Label::new(egui::RichText::new(tr("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.")).color(theme.text_dim)).wrap());
+                    self.progress_status_ui(ui, enabled, &status);
+                    if enabled && settings.conversation_sync_pair.is_none() && !self.connecting && Self::accounts_ready(accounts)
+                        && ui.button(tr("계정 연결 다시 시도")).clicked() { self.enable(settings, accounts); }
+                    ui.add_space(8.0);
+                    ui.collapsing(tr("연동 범위와 지원 형식"), |ui| {
+                        ui.add(egui::Label::new(tr("기존에 열어 둔 세션도 포함합니다. 워크스페이스와 하위 폴더의 기본 CLI · 연결 계정 기록을 찾고, 두 저장 위치에 동기화합니다.")).wrap());
+                        ui.add(egui::Label::new(tr("응답마다 새 사본이 생깁니다. 열린 세션은 자동으로 바뀌지 않습니다. 이미지·첨부 파일은 지원하지 않습니다. Codex 0.162.1 · Claude Code 2.1.296 지원.")).wrap());
+                    });
+                });
             });
-        }
-        if self.busy {
-            ui.spinner();
-            ui.ctx().request_repaint_after(Duration::from_millis(100));
-        }
-        ui.add(egui::Label::new(egui::RichText::new(tr("Kiln에서 연 CLI 대화가 대상입니다. 계정을 바꿔도 연결은 유지됩니다. 같은 프로젝트에서 /resume으로 최신 사본을 선택하세요.")).color(theme.text_dim)).wrap());
-        ui.add(egui::Label::new(egui::RichText::new(tr("응답마다 새 사본이 생깁니다. 열린 세션은 자동으로 바뀌지 않습니다. 이미지·첨부 파일은 지원하지 않습니다. Codex 0.162.1 · Claude Code 2.1.296 지원.")).color(theme.text_dim)).wrap());
-        self.progress_ui(ui, s.conversation_sync_enabled);
+        if close || modal.should_close() { self.detail = None; }
     }
+    #[cfg(test)]
     fn progress_ui(&self, ui: &mut egui::Ui, enabled: bool) {
+        self.progress_status_ui(ui, enabled, &self.status);
+    }
+    fn progress_status_ui(&self, ui: &mut egui::Ui, enabled: bool, status: &Status) {
         use kiln_common::{
             Theme, fonts,
             i18n::tr,
             icons::{self, Icon},
         };
         let theme = Theme::current();
-        let failed = self
-            .status
+        let failed = status
             .rows
             .values()
             .filter(|r| r.phase == Phase::Failed)
             .count();
-        let waiting = self
-            .status
+        let waiting = status
             .rows
             .values()
             .filter(|r| matches!(r.phase, Phase::Waiting | Phase::Queued))
             .count();
-        let copying = self
-            .status
+        let copying = status
             .rows
             .values()
             .any(|r| matches!(r.phase, Phase::Reading | Phase::Copying));
@@ -881,13 +1084,15 @@ impl Manager {
                 theme.orange,
                 tr("확인이 필요한 대화가 있습니다"),
             )
+        } else if status.discovering {
+            (Icon::Refresh, theme.blue, tr("워크스페이스 대화 찾는 중"))
         } else if copying {
             (Icon::Refresh, theme.blue, tr("대화 동기화 중"))
-        } else if self.status.rows.is_empty() {
+        } else if status.rows.is_empty() {
             (
                 Icon::Plug,
                 theme.text_dim,
-                tr("연결됨 · 대화를 기다리는 중"),
+                tr("연결됨 · 해당 폴더에서 대화를 찾지 못함"),
             )
         } else if waiting > 0 {
             (Icon::History, theme.blue, tr("응답 완료를 기다리는 중"))
@@ -912,13 +1117,21 @@ impl Manager {
                             .font(fonts::semibold(13.0)),
                     );
                 });
-                if enabled && self.busy && self.status.watched > 0 {
-                    let fraction = self.status.checked as f32 / self.status.watched as f32;
+                if status.workspaces > 0 {
+                    ui.label(kiln_common::trf!("워크스페이스 {}개 · 대화 {}개", status.workspaces, status.rows.len()));
+                } else if enabled && !self.busy {
+                    ui.label(tr("동기화할 워크스페이스 폴더를 여세요."));
+                }
+                if enabled && status.rows.is_empty() && !self.busy && status.workspaces > 0 {
+                    ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code 또는 Codex 대화를 시작하면 자동으로 연결됩니다.")).wrap());
+                }
+                if enabled && self.busy && status.watched > 0 {
+                    let fraction = status.checked as f32 / status.watched as f32;
                     ui.add(egui::ProgressBar::new(fraction).text(kiln_common::trf!(
-                        "기록 확인 {}/{} · 새 사본 {}개",
-                        self.status.checked,
-                        self.status.watched,
-                        self.status.published
+                        "기록 확인 {}/{} · 연결된 사본 {}개",
+                        status.checked,
+                        status.watched,
+                        status.published
                     )));
                 }
                 if let Some(error) = &self.error {
@@ -934,7 +1147,7 @@ impl Manager {
                     .id_salt("conversation-sync-progress")
                     .max_height(280.0)
                     .show(ui, |ui| {
-                        for (key, row) in &self.status.rows {
+                        for (key, row) in &status.rows {
                             ui.push_id(key, |ui| {
                                 ui.add_space(8.0);
                                 kiln_common::widgets::divider(ui);
@@ -1008,14 +1221,27 @@ impl Manager {
                                         .wrap(),
                                     );
                                 }
-                                if let Some(target) = &row.target {
+                                let targets = if row.copies.is_empty() {
+                                    row.target.iter().collect::<Vec<_>>()
+                                } else { row.copies.iter().collect::<Vec<_>>() };
+                                for target in targets {
+                                    ui.push_id(&target.id, |ui| {
                                     if ui
                                         .small_button(tr("이어갈 대화 ID 복사"))
-                                        .on_hover_text(&target.id)
+                                        .on_hover_text(format!("{}\n{}", target.id, target.root.display()))
                                         .clicked()
                                     {
                                         ui.ctx().copy_text(target.id.clone());
                                     }
+                                    if row.copies.len() > 1 {
+                                        let label = self.configured.as_ref()
+                                            .filter(|p| p.endpoint(target.tool).root == target.root)
+                                            .map(|p| p.endpoint(target.tool).label.clone())
+                                            .unwrap_or_else(|| tr("기본 CLI").to_owned());
+                                        ui.label(egui::RichText::new(label).color(theme.text_dim))
+                                            .on_hover_text(target.root.display().to_string());
+                                    }
+                                    });
                                 }
                             });
                         }

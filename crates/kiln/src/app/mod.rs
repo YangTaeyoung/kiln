@@ -118,6 +118,7 @@ impl Page {
 }
 
 pub struct Workspace {
+    pub conversation_sync: bool,
     pub id: u64,
     pub name: String,
     pub root: PathBuf,
@@ -149,6 +150,8 @@ pub enum Action {
     CreateWorkspace { root: PathBuf, name: String },
     NewWorkspaceAt(PathBuf),
     SelectWorkspace(usize),
+    ToggleWorkspaceConversationSync(usize),
+    ShowWorkspaceConversationSync(usize),
     CloseWorkspace(usize),
     CloseWorkspaceConfirmed(usize),
     QuitConfirmed,
@@ -454,6 +457,7 @@ impl KilnApp {
         for wp in &p.workspaces {
             let id = self.id();
             let mut ws = Workspace {
+                conversation_sync: wp.conversation_sync,
                 id,
                 name: wp.name.clone(),
                 root: wp.root.clone(),
@@ -529,6 +533,7 @@ impl KilnApp {
             .workspaces
             .iter()
             .map(|w| WorkspaceP {
+                conversation_sync: w.conversation_sync,
                 name: w.name.clone(),
                 root: w.root.clone(),
                 active_page: w.active_page,
@@ -824,7 +829,9 @@ impl KilnApp {
         }
         let pane = self.new_term_pane(Some(root.to_string_lossy().into_owned()));
         let (wid, pid) = (self.id(), self.id());
+        let conversation_sync = self.workspaces.iter().any(|w| w.conversation_sync && w.tools.canonical_root() == root);
         self.workspaces.push(Workspace {
+            conversation_sync,
             id: wid,
             name,
             tools: tools::WorkspaceTools::new(&root, ctx, self.db.clone(), wid),
@@ -942,6 +949,27 @@ impl KilnApp {
             Action::NewWorkspace(Some(p)) => self.add_workspace(p, ctx),
             Action::NewWorkspace(None) => self.open_workspace_dialog(self.workspaces[self.active].root.clone()),
             Action::NewWorkspaceAt(root) => self.open_workspace_dialog(root),
+            Action::ToggleWorkspaceConversationSync(index) => {
+                if let Some(workspace) = self.workspaces.get(index) {
+                    let enabled = !workspace.conversation_sync;
+                    let root = workspace.tools.canonical_root().to_path_buf();
+                    if !enabled || conversation_sync::Manager::accounts_ready(&self.rotator.mgr) {
+                        for workspace in &mut self.workspaces {
+                            if workspace.tools.canonical_root() == root { workspace.conversation_sync = enabled; }
+                        }
+                        self.conversation_sync.cancel_scan();
+                        if enabled {
+                            self.conversation_sync.enable(&mut self.settings, &self.rotator.mgr);
+                            self.conversation_sync.detail = Some(root);
+                        }
+                    }
+                }
+            },
+            Action::ShowWorkspaceConversationSync(index) => {
+                if let Some(workspace) = self.workspaces.get(index) {
+                    self.conversation_sync.detail = Some(workspace.tools.canonical_root().to_path_buf());
+                }
+            },
             Action::CreateWorkspace {root,name} => {self.create_workspace(root,name,ctx);self.reveal_work_surface(ctx);},
             Action::OpenProjects => {
                 let root = self.workspaces[self.active].root.clone();
@@ -1556,7 +1584,7 @@ impl KilnApp {
         if workspace.sheet.is_some() && ctx.content_rect().width()-rail<700.0 { return false; }
         self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none()
             && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open()
-            && !workspace.tools.quick_is_open() && !self.settings_ui.open && !self.notifications.open
+            && !workspace.tools.quick_is_open() && !self.settings_ui.open && self.conversation_sync.detail.is_none() && !self.notifications.open
             && self.workspaces.iter().all(|workspace|workspace.renaming.is_none())
     }
 
@@ -2206,7 +2234,7 @@ impl eframe::App for KilnApp {
         }
         self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
         self.tick_cli_updates(ctx);
-        self.conversation_sync.tick(&mut self.settings, ctx);
+        self.conversation_sync.tick(&mut self.settings, self.workspaces.iter().filter(|w| w.conversation_sync).map(|w| w.tools.canonical_root().to_path_buf()).collect(), ctx);
         self.rotator.poll(&mut self.conn);
         let mut out = Vec::new();
         self.rotator.tick(&mut self.conn, &mut out);
@@ -2218,7 +2246,7 @@ impl eframe::App for KilnApp {
         }
         self.cancel_layout_escape(ctx);
         let quick_open = self.workspaces.get(self.active).is_some_and(|w| w.tools.quick_is_open());
-        if self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open() && !quick_open && !self.settings_ui.open && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none()) {
+        if self.confirm.is_none() && self.rename_page.is_none() && !self.recovery_open && self.agent_request_view.is_none() && self.workspace_dialog.is_none() && !self.projects.is_open() && !self.launchers.is_open() && !self.palette.is_open() && !quick_open && !self.settings_ui.open && self.conversation_sync.detail.is_none() && !self.notifications.open && self.workspaces.iter().all(|w| w.renaming.is_none()) {
             self.shortcuts(ctx);
         }
         let active = self.active;

@@ -1892,3 +1892,73 @@ while True:
     h.state_mut().debug_queue_action(Action::RevealPane(pane_b));h.run_steps(4);assert_ne!(h.state().debug_focused_session().unwrap(),sid_b);
 
 }
+
+#[test]
+fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dialog() {
+    use kiln::app::Action;
+    use kiln_accounts::Tool;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("workspace-conversation-menu");
+    struct Homes(Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl Drop for Homes { fn drop(&mut self) { for (key, old) in &self.0 { unsafe { if let Some(value) = old { std::env::set_var(key, value); } else { std::env::remove_var(key); } } } } }
+    let _homes = Homes(["CLAUDE_CONFIG_DIR", "CODEX_HOME"].into_iter().map(|key| {
+        let old = std::env::var_os(key);
+        let root = base.join(key); std::fs::create_dir_all(&root).unwrap();
+        unsafe { std::env::set_var(key, root); }
+        (key, old)
+    }).collect());
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup { fn drop(&mut self) { shutdown(&self.0); } }
+    let _cleanup = Cleanup(base.clone());
+    let mut h = Harness::builder().with_size([1100.0, 760.0]).wgpu().build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    h.state_mut().debug_set_sidebar_width(240.0);
+    h.state_mut().debug_begin_project_rename("Sync workspace"); h.run_steps(2);
+    h.key_press(egui::Key::Enter); h.run_steps(2);
+    h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
+    assert!(h.query_by_label("대화 연동").is_some());
+    assert!(h.query_by_label("계정 설정 열기").is_some());
+    h.state_mut().debug_queue_action(Action::ToggleWorkspaceConversationSync(0)); h.run_steps(2);
+    assert!(h.query_by_label("대화 연동 해제").is_none());
+    h.key_press(egui::Key::Escape); h.run_steps(2);
+    // Synthetic saved accounts; no provider login, model turn or real namespace access.
+    let manager = h.state().debug_accounts();
+    let home = base.join("accounts/home");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(home.join(".claude/.credentials.json"), r#"{"claudeAiOauth":{"accessToken":"fixture-only","refreshToken":"fixture-only"}}"#).unwrap();
+    std::fs::write(home.join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"fixture@example.invalid"}}"#).unwrap();
+    manager.save_current(Tool::Claude, "Fixture Claude").unwrap();
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    use base64::Engine;
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.invalid"}"#);
+    std::fs::write(home.join(".codex/auth.json"), serde_json::json!({"tokens":{"id_token":format!("x.{claims}.x"),"access_token":"fixture-only","refresh_token":"fixture-only"}}).to_string()).unwrap();
+    manager.save_current(Tool::Codex, "Fixture Codex").unwrap();
+    // The saved pair points only at the fixture. The empty workspace has no transcripts.
+    h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
+    h.get_by_label("대화 연동").click(); h.run_steps(3);
+    assert!(h.query_by_label("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.").is_some());
+    assert!(pump_until(&mut h, 10, |h| h.query_by_label("연결됨 · 해당 폴더에서 대화를 찾지 못함").is_some()));
+    assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
+    let panes_before = h.state().debug_pane_count();
+    h.key_press_modifiers(primary(), egui::Key::D); h.run_steps(3);
+    assert_eq!(h.state().debug_pane_count(), panes_before, "status dialog must block underlying workspace shortcuts");
+    h.render().unwrap().save("/tmp/kiln-workspace-link-dialog.png").unwrap();
+    h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);
+    let other = base.join("other"); std::fs::create_dir_all(&other).unwrap();
+    h.state_mut().debug_queue_action(Action::CreateWorkspace { root: other, name: "Unlinked workspace".into() }); h.run_steps(3);
+    let ctx = h.ctx.clone(); h.state_mut().debug_checkpoint_restore(&ctx); h.run_steps(3);
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Unlinked workspace").click_secondary(); h.run_steps(2);
+    assert!(h.query_by_label("대화 연동 해제").is_none());
+    assert!(h.query_by_label("대화 연동").is_some());
+    h.key_press(egui::Key::Escape); h.run_steps(2);
+    h.get_by_label("대화 연동됨 · 대화 대기").click(); h.run_steps(2);
+    assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
+    h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);
+    h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
+    assert!(h.query_by_label("대화 연동 해제").is_some());
+    h.render().unwrap().save("/tmp/kiln-workspace-link-menu.png").unwrap();
+    h.get_by_label("대화 연동 해제").click(); h.run_steps(2);
+    h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
+    assert!(h.query_by_label("대화 연동 해제").is_none());
+    assert!(h.query_by_label("대화 연동").is_some());
+}

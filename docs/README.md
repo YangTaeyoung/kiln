@@ -31,3 +31,5 @@ See [third-party notices](../THIRD_PARTY_NOTICES.md) for bundled assets and depe
 
 - [CLI versions and exact conversation restart](cli-updates.md)
 - [Claude Code ↔ Codex conversation synchronization](conversation-sync.md)
+
+- [0.1.24 release verification](maintainers/0.1.24-status.md)
