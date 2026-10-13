@@ -1,6 +1,5 @@
 //! 데몬 서버: 세션(PTY + 에뮬레이터) 소유, 클라이언트 연결 처리, 화면 프레임 전송.
 
-#[cfg(unix)]
 use crate::emu::Dump;
 use crate::emu::Emu;
 use crate::images::{Decoded, ImageScanner, ImageState, Segment};
@@ -10,7 +9,7 @@ use crate::ptyhost::{AnyPty, AnyReader, HostPty, HostRecord};
 use crate::transport::{Conn, Listener};
 use crate::{build_id, procinfo};
 use alacritty_terminal::event::Event;
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use kiln_proto::*;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
@@ -25,7 +24,7 @@ pub struct Session {
     pub id: SessionId,
     pty: AnyPty,
     emu: Mutex<Emu>,
-    input: Sender<Vec<u8>>,
+    input: crate::input_queue::InputQueue,
     info: Mutex<SessionInfo>,
     generation: AtomicU64,
     reader_active: AtomicBool,
@@ -143,6 +142,32 @@ const STATE_MAGIC_V2: &[u8] = b"KILNUP2\n";
 
 /// 호스트 방식 업그레이드 상태 파일 접두.
 const STATE_MAGIC_HOSTED: &[u8] = b"KILNHS1\n";
+
+// Optional trailer leaves the published restore structures unchanged. Readers
+// without a trailer remain valid; new readers replay deferred terminal replies
+// before starting output consumers, so response order is retained.
+const INPUT_TRAILER: &[u8] = b"KILNIN1\n";
+type PendingReplies = HashMap<SessionId, Vec<Vec<u8>>>;
+
+fn append_replies(bytes: &mut Vec<u8>, sessions: &[Arc<Session>]) -> anyhow::Result<()> {
+    let pending: PendingReplies = sessions.iter().filter_map(|s| {
+        let replies = s.input.pending_replies();
+        (!replies.is_empty()).then_some((s.id, replies))
+    }).collect();
+    if !pending.is_empty() {
+        bytes.extend_from_slice(INPUT_TRAILER);
+        bytes.extend(postcard::to_stdvec(&pending)?);
+    }
+    Ok(())
+}
+
+fn decode_replies(trailer: &[u8]) -> anyhow::Result<PendingReplies> {
+    if trailer.is_empty() { return Ok(HashMap::new()); }
+    let Some(bytes) = trailer.strip_prefix(INPUT_TRAILER) else { anyhow::bail!("unknown input restore trailer"); };
+    let (pending, remaining) = postcard::take_from_bytes(bytes)?;
+    anyhow::ensure!(remaining.is_empty(), "unexpected input restore trailer data");
+    Ok(pending)
+}
 
 #[derive(Serialize, Deserialize)]
 struct SavedHosted {
@@ -271,19 +296,15 @@ impl Daemon {
     }
 
     fn install(self: &Arc<Self>, id: SessionId, pty: AnyPty, emu: Emu, info: SessionInfo) -> std::io::Result<()> {
-        let (tx, rx) = unbounded::<Vec<u8>>();
-        let mut writer = pty.writer()?;
+        self.install_with_replies(id, pty, emu, info, Vec::new())
+    }
+
+    fn install_with_replies(self: &Arc<Self>, id: SessionId, pty: AnyPty, emu: Emu, info: SessionInfo, replies: Vec<Vec<u8>>) -> std::io::Result<()> {
         let reader = pty.reader()?;
-        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input: tx, info: Mutex::new(info), generation: AtomicU64::new(1), reader_active: AtomicBool::new(false), cancelled: AtomicBool::new(false), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()), recovery: Mutex::new(Default::default()), control: Mutex::new(()) });
+        let input = crate::input_queue::InputQueue::new(pty.writer()?, id)?;
+        for reply in replies { input.respond(reply)?; }
+        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input, info: Mutex::new(info), generation: AtomicU64::new(1), reader_active: AtomicBool::new(false), cancelled: AtomicBool::new(false), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()), recovery: Mutex::new(Default::default()), control: Mutex::new(()) });
         self.sessions.write().insert(id, sess.clone());
-        std::thread::Builder::new().name(format!("pty-w-{id}")).spawn(move || {
-            while let Ok(data) = rx.recv() {
-                if writer.write_all(&data).is_err() {
-                    break;
-                }
-                let _ = writer.flush();
-            }
-        })?;
         if sess.info.lock().exited.is_none() {
             let d = self.clone();
             sess.reader_active.store(true, Ordering::SeqCst);
@@ -415,7 +436,7 @@ impl Daemon {
                 if i.exited.is_some() {
                     return None;
                 }
-                Some(HostRecord { session: s.id, endpoint: h.endpoint.clone(), name: i.name.clone(), workspace: i.workspace.clone(), cwd: i.cwd.clone(), created_unix: i.created_unix })
+                Some(HostRecord { session: s.id, endpoint: h.endpoint.clone(), name: i.name.clone(), workspace: i.workspace.clone(), cwd: i.cwd.clone(), created_unix: i.created_unix, terminal_replies: Vec::new(), terminal_dump: None })
             })
             .collect();
         records.extend(self.unreachable_hosts.lock().iter().cloned());
@@ -427,30 +448,43 @@ impl Daemon {
         let mut max_id = 0;
         for r in crate::ptyhost::load_registry(&self.socket) {
             max_id = max_id.max(r.session);
-            let h = match HostPty::attach(&r.endpoint, true) {
+            let emu = match r.terminal_dump.as_deref() {
+                Some(bytes) => match postcard::from_bytes::<Dump>(bytes) {
+                    Ok(dump) => Emu::restore(dump),
+                    Err(_) => { self.unreachable_hosts.lock().push(r); continue; }
+                },
+                None if r.terminal_replies.is_empty() => Emu::new(120, 32),
+                None => { self.unreachable_hosts.lock().push(r); continue; }
+            };
+            // A checkpoint already consumed historical queries. Replaying their
+            // bytes would generate a second response on top of the saved one.
+            let h = match HostPty::attach(&r.endpoint, r.terminal_dump.is_none()) {
                 Ok(h) => h,
                 Err(_) => { self.unreachable_hosts.lock().push(r); continue; }
             };
+            let (cols, rows) = emu.size();
             let info = SessionInfo {
                 id: r.session,
                 pid: h.pid(),
-                name: r.name,
+                name: r.name.clone(),
                 title: String::new(),
-                cwd: r.cwd,
+                cwd: r.cwd.clone(),
                 fg_process: None,
-                workspace: r.workspace,
-                cols: 120,
-                rows: 32,
+                workspace: r.workspace.clone(),
+                cols,
+                rows,
                 exited: None,
                 created_unix: r.created_unix,
                 attention: false,
                 last_notification: None,
             };
             // 크기를 한 번 바꿨다 되돌려 전체 화면 앱이 다시 그리게 한다(SIGWINCH).
-            let _ = h.resize(119, 32);
-            let _ = h.resize(120, 32);
+            let _ = h.resize(cols.saturating_sub(1).max(1), rows);
+            let _ = h.resize(cols, rows);
             log::info!("adopted session {} from {}", r.session, r.endpoint);
-            let _ = self.install(r.session, AnyPty::Host(h), Emu::new(120, 32), info);
+            if self.install_with_replies(r.session, AnyPty::Host(h), emu, info, r.terminal_replies.clone()).is_err() {
+                self.unreachable_hosts.lock().push(r);
+            }
         }
         if max_id > 0 {
             self.next_session.fetch_max(max_id + 1, Ordering::SeqCst);
@@ -476,11 +510,11 @@ impl Daemon {
             Action::None => {}
             Action::Show(d) => show(d),
             Action::Reply(r) => {
-                let _ = sess.input.send(r);
+                let _ = sess.input.respond(r);
             }
             Action::ShowAndReply(d, r) => {
                 show(d);
-                let _ = sess.input.send(r);
+                let _ = sess.input.respond(r);
             }
             Action::DeleteAll => {
                 let mut im = sess.images.lock();
@@ -495,7 +529,7 @@ impl Daemon {
         for e in events {
             match e {
                 Event::PtyWrite(s) => {
-                    let _ = sess.input.send(s.into_bytes());
+                    let _ = sess.input.respond(s.into_bytes());
                 }
                 Event::Title(t) => {
                     sess.info.lock().title = t;
@@ -519,13 +553,13 @@ impl Daemon {
                     let (cols, rows) = sess.emu.lock().size();
                     let (cw, ch) = (self.cell_w.load(Ordering::Relaxed) as u16, self.cell_h.load(Ordering::Relaxed) as u16);
                     let ws = alacritty_terminal::event::WindowSize { num_lines: rows, num_cols: cols, cell_width: cw, cell_height: ch };
-                    let _ = sess.input.send(f(ws).into_bytes());
+                    let _ = sess.input.respond(f(ws).into_bytes());
                 }
                 Event::ColorRequest(idx, f) => {
                     let [r,g,b] = sess.emu.lock().color_override(idx)
                         .or_else(|| self.palette.read().color(idx)).unwrap_or([0x80;3]);
                     let rgb = alacritty_terminal::vte::ansi::Rgb { r, g, b };
-                    let _ = sess.input.send(f(rgb).into_bytes());
+                    let _ = sess.input.respond(f(rgb).into_bytes());
                 }
                 _ => {}
             }
@@ -722,7 +756,10 @@ impl Daemon {
                             s.generation.fetch_add(1, Ordering::SeqCst);
                         }
                     }
-                    let _ = s.input.send(data);
+                    if s.input.send(data).is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock) {
+                        reply(ServerMsg::Upgrading);
+                        return false;
+                    }
                     self.wake_attached(session);
                 }
             }
@@ -975,6 +1012,7 @@ impl Daemon {
             crate::pty::set_cloexec(listener_fd, false)?;
             let state = UpgradeStateV3 { base: UpgradeState { next_session: self.next_session.load(Ordering::SeqCst), listener_fd, sessions: saved }, hosted, images };
             let mut bytes = STATE_MAGIC_V3.to_vec(); bytes.extend(postcard::to_stdvec(&state)?);
+            append_replies(&mut bytes, &sessions)?;
             std::fs::write(&path, bytes)?;
             self.clients.lock().clear();
             log::info!("exec upgrade preserving {} sessions", sessions.len());
@@ -988,6 +1026,19 @@ impl Daemon {
     }
 
     fn pause_readers(&self, sessions: &[Arc<Session>]) -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        // A queued Input may still be held by the worker. Deliver all accepted
+        // bytes before pausing HostWriter or replacing this process's memory.
+        let mut delivered = Vec::new();
+        for s in sessions {
+            if s.info.lock().exited.is_none() {
+                delivered.push((s.id, s.input.pause()?));
+            }
+        }
+        for (id, reply) in delivered {
+            reply.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .map_err(|error| anyhow::anyhow!("session {id}: input delivery incomplete ({error}); upgrade cancelled, sessions retained"))?;
+        }
         for s in sessions {
             if let Some(host) = s.pty.host() && s.info.lock().exited.is_none() {
                 host.pause_input();
@@ -997,7 +1048,6 @@ impl Daemon {
                 std::thread::spawn(move || s.pty.host().unwrap().detach());
             }
         }
-        let deadline = Instant::now() + Duration::from_secs(3);
         while self.readers_running.load(Ordering::SeqCst) > 0 {
             anyhow::ensure!(Instant::now() < deadline, "terminal host did not pause; upgrade cancelled, sessions retained");
             std::thread::sleep(Duration::from_millis(10));
@@ -1008,6 +1058,7 @@ impl Daemon {
     fn resume_after_failed_upgrade(self: &Arc<Self>, sessions: &[Arc<Session>]) {
         { let _readers = self.reader_lifecycle.lock(); self.upgrading.store(false, Ordering::SeqCst); }
         for s in sessions {
+            s.input.resume();
             #[cfg(unix)]
             if let Some(native) = s.pty.native() { let _ = crate::pty::set_cloexec(native.raw_fd(), true); }
             self.resume_reader(s);
@@ -1118,6 +1169,7 @@ impl Daemon {
         std::fs::write(&marker, std::process::id().to_string())?;
         let mut bytes = STATE_MAGIC_HOSTED.to_vec();
         bytes.extend(postcard::to_stdvec(&state)?);
+        append_replies(&mut bytes, &sessions)?;
         std::fs::write(&path, bytes)?;
         let mut cmd = std::process::Command::new(&exe_run);
         cmd.args(["daemon", "--socket", &self.socket, "--restore", &path.to_string_lossy(), "--wait-pid", &std::process::id().to_string()]);
@@ -1277,7 +1329,7 @@ fn retain_unrestored_records(daemon: &Arc<Daemon>, restored: &[SessionId]) {
     }
 }
 
-fn restore_host_session(daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut Vec<SavedImages>) -> anyhow::Result<()> {
+fn restore_host_session(daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut Vec<SavedImages>, replies: &mut PendingReplies) -> anyhow::Result<()> {
     let id = s.info.id;
     let host = if let Some(code) = s.info.exited {
         HostPty::finished(s.endpoint.clone(), s.info.pid, code)
@@ -1288,14 +1340,17 @@ fn restore_host_session(daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut V
                 // A vanished optional host must never destroy inherited native
                 // masters or discard another running host's recovery record.
                 log::warn!("session {id}: host {} unreachable: {e}; retaining recovery record", s.endpoint);
+                let pending = replies.remove(&id).unwrap_or_default();
+                let terminal_dump = if pending.is_empty() { None } else { Some(postcard::to_stdvec(&s.dump)?) };
                 daemon.unreachable_hosts.lock().push(HostRecord { session: id, endpoint: s.endpoint,
                     name: s.info.name, workspace: s.info.workspace, cwd: s.info.cwd,
-                    created_unix: s.info.created_unix });
+                    created_unix: s.info.created_unix, terminal_replies: pending, terminal_dump });
                 return Ok(());
             }
         }
     };
-    daemon.install(id, AnyPty::Host(host), Emu::restore(s.dump), s.info)?;
+    daemon.install_with_replies(id, AnyPty::Host(host), Emu::restore(s.dump), s.info, replies.get(&id).cloned().unwrap_or_default())?;
+    replies.remove(&id);
     if let (Some(sess), Some(pos)) = (daemon.session(id), images.iter().position(|i| i.session == id)) {
         sess.images.lock().load(images.swap_remove(pos));
     }
@@ -1303,12 +1358,13 @@ fn restore_host_session(daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut V
 }
 
 fn restore_hosted(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<()> {
-    let state: HostedState = postcard::from_bytes(bytes)?;
+    let (state, trailer): (HostedState, _) = postcard::take_from_bytes(bytes)?;
+    let mut replies = decode_replies(trailer)?;
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
     let mut images = state.images;
     let restored: Vec<_> = state.sessions.iter().map(|s| s.info.id).collect();
     retain_unrestored_records(daemon, &restored);
-    for s in state.sessions { restore_host_session(daemon, s, &mut images)?; }
+    for s in state.sessions { restore_host_session(daemon, s, &mut images, &mut replies)?; }
     daemon.save_registry();
     Ok(())
 }
@@ -1388,13 +1444,14 @@ pub fn run(opts: RunOptions) -> anyhow::Result<()> {
 #[cfg(unix)]
 fn restore(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<Listener> {
     use std::os::fd::FromRawFd;
-    let (state, mut images, hosted) = if let Some(rest) = bytes.strip_prefix(STATE_MAGIC_V3) {
-        let v3: UpgradeStateV3 = postcard::from_bytes(rest)?;
-        (v3.base, v3.images, v3.hosted)
+    let (state, mut images, hosted, trailer) = if let Some(rest) = bytes.strip_prefix(STATE_MAGIC_V3) {
+        let (v3, trailer): (UpgradeStateV3, _) = postcard::take_from_bytes(rest)?;
+        (v3.base, v3.images, v3.hosted, trailer)
     } else if let Some(rest) = bytes.strip_prefix(STATE_MAGIC_V2) {
-        let v2: UpgradeStateV2 = postcard::from_bytes(rest)?;
-        (v2.base, v2.images, Vec::new())
-    } else { (postcard::from_bytes::<UpgradeState>(bytes)?, Vec::new(), Vec::new()) };
+        let (v2, trailer): (UpgradeStateV2, _) = postcard::take_from_bytes(rest)?;
+        (v2.base, v2.images, Vec::new(), trailer)
+    } else { let (base, trailer) = postcard::take_from_bytes::<UpgradeState>(bytes)?; (base, Vec::new(), Vec::new(), trailer) };
+    let mut replies = decode_replies(trailer)?;
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
     let restored: Vec<_> = state.sessions.iter().map(|s| s.info.id).chain(hosted.iter().map(|s| s.info.id)).collect();
     retain_unrestored_records(daemon, &restored);
@@ -1402,12 +1459,13 @@ fn restore(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<Listener> {
         let pty = AnyPty::Native(Pty::from_raw(s.fd, s.pid)?);
         let emu = Emu::restore(s.dump);
         let id = s.info.id;
-        daemon.install(id, pty, emu, s.info)?;
+        daemon.install_with_replies(id, pty, emu, s.info, replies.get(&id).cloned().unwrap_or_default())?;
+        replies.remove(&id);
         if let (Some(sess), Some(pos)) = (daemon.session(id), images.iter().position(|i| i.session == id)) {
             sess.images.lock().load(images.swap_remove(pos));
         }
     }
-    for s in hosted { restore_host_session(daemon, s, &mut images)?; }
+    for s in hosted { restore_host_session(daemon, s, &mut images, &mut replies)?; }
     daemon.save_registry();
     crate::pty::set_cloexec(state.listener_fd, true)?;
     // SAFETY: 이전 프로세스에서 상속한 리스닝 소켓 fd.
@@ -1418,7 +1476,145 @@ fn restore(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<Listener> {
 #[cfg(all(test, unix))]
 mod palette_tests {
     use super::*;
+    use std::os::fd::AsRawFd;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn terminal_query_reply_survives_checkpoint_restore_and_cancel_exactly_once() {
+        assert!(!crate::ptyhost::host_mode());
+        for restore_success in [false, true] {
+            let dir = tempfile::Builder::new().prefix("kiln-reply-").tempdir_in("/tmp").unwrap();
+            let socket = dir.path().join("d.sock").to_string_lossy().into_owned();
+            let daemon = Daemon::new(socket.clone());
+            let script = r#"import os,sys,tty,select,time,json
+os.chdir(sys.argv[1]); tty.setraw(0)
+open('ready','w').close()
+deadline=time.monotonic()+10
+while not os.path.exists('query'):
+    if time.monotonic()>deadline: raise RuntimeError('fixture query not triggered')
+    time.sleep(.005)
+os.write(1,b'\x1b]10;?\x07')
+def read_until(end):
+    data=b''; deadline=time.monotonic()+10
+    while not data.endswith(end):
+        remaining=deadline-time.monotonic()
+        if remaining<=0 or not select.select([0],[],[],remaining)[0]: raise RuntimeError(repr(data))
+        data+=os.read(0,1)
+    return data.decode()
+reply=read_until(b'\x07'); next_line=read_until(b'\n')
+with open('result.json','w') as f: json.dump([reply,next_line],f)
+"#;
+            let id = daemon.create(SpawnSpec { program: Some("python3".into()), args: vec!["-c".into(), script.into(), dir.path().to_string_lossy().into_owned()], cols: 80, rows: 24, ..Default::default() }).unwrap();
+            let session = daemon.session(id).unwrap();
+            struct Cleanup(Arc<Session>);
+            impl Drop for Cleanup { fn drop(&mut self) { if self.0.info.lock().exited.is_none() { self.0.pty.kill(); } } }
+            let _cleanup = Cleanup(session.clone());
+            let wait_for = |predicate: &dyn Fn() -> bool| {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !predicate() { assert!(Instant::now() < deadline, "owned terminal reply fixture deadline exceeded"); std::thread::sleep(Duration::from_millis(5)); }
+            };
+            wait_for(&|| dir.path().join("ready").exists());
+            session.input.pause().unwrap().recv_timeout(Duration::from_secs(1)).unwrap();
+            std::fs::write(dir.path().join("query"), b"owned fixture").unwrap();
+            wait_for(&|| !session.input.pending_replies().is_empty());
+            let replies = session.input.pending_replies();
+            assert_eq!(replies.len(), 1, "OSC query must produce one deferred reply");
+            let listener = Listener::bind(&socket).unwrap();
+            let restored;
+            let active = if restore_success {
+                daemon.upgrading.store(true, Ordering::SeqCst);
+                daemon.pause_readers(std::slice::from_ref(&session)).unwrap();
+                let native = session.pty.native().unwrap();
+                // Duplicate only this fixture's inherited descriptors. Restore
+                // exercises the actual decoder/install path with the same child.
+                let child_fd = unsafe { libc::dup(native.raw_fd()) };
+                let listener_fd = unsafe { libc::dup(listener.0.as_raw_fd()) };
+                assert!(child_fd >= 0 && listener_fd >= 0);
+                let state = UpgradeStateV3 { base: UpgradeState { next_session: id + 1, listener_fd, sessions: vec![SavedSession { info: session.info.lock().clone(), fd: child_fd, pid: native.pid() as i32, dump: session.emu.lock().dump() }] }, hosted: Vec::new(), images: Vec::new() };
+                let mut bytes = STATE_MAGIC_V3.to_vec();
+                bytes.extend(postcard::to_stdvec(&state).unwrap());
+                append_replies(&mut bytes, std::slice::from_ref(&session)).unwrap();
+                // An immutable legacy reader can still decode its original body.
+                let old: UpgradeStateV3 = postcard::from_bytes(&bytes[STATE_MAGIC_V3.len()..]).unwrap();
+                assert_eq!(old.base.sessions[0].info.pid, native.pid());
+                restored = Daemon::new(socket.clone());
+                let _restored_listener = restore(&restored, &bytes).unwrap();
+                restored.session(id).unwrap()
+            } else {
+                daemon.resume_after_failed_upgrade(std::slice::from_ref(&session));
+                session.clone()
+            };
+            active.input.send(b"AFTER\n".to_vec()).unwrap();
+            wait_for(&|| std::fs::read(dir.path().join("result.json")).ok().and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok()).is_some());
+            let result: Vec<String> = serde_json::from_slice(&std::fs::read(dir.path().join("result.json")).unwrap()).unwrap();
+            assert_eq!(result, vec![String::from_utf8(replies[0].clone()).unwrap(), "AFTER\n".into()]);
+            wait_for(&|| active.info.lock().exited.is_some());
+            let exited = active.info.lock().exited;
+            session.info.lock().exited = exited;
+        }
+    }
+
+    #[test]
+    fn missing_optional_host_retains_deferred_reply_in_recovery_registry() {
+        let dir = tempfile::Builder::new().prefix("kiln-missing-reply-").tempdir_in("/tmp").unwrap();
+        let socket = dir.path().join("d.sock").to_string_lossy().into_owned();
+        let daemon = Daemon::new(socket.clone());
+        let pending = vec![b"\x1b[1;1R".to_vec()];
+        let mut replies = HashMap::from([(777, pending.clone())]);
+        restore_host_session(&daemon, SavedHosted { info: SessionInfo { id: 777, ..Default::default() }, endpoint: dir.path().join("absent.sock").to_string_lossy().into_owned(), dump: Emu::new(80,24).dump() }, &mut Vec::new(), &mut replies).unwrap();
+        daemon.save_registry();
+        let records = crate::ptyhost::load_registry(&socket);
+        assert_eq!(records[0].terminal_replies, pending);
+        assert!(records[0].terminal_dump.is_some());
+        assert!(replies.is_empty());
+        let restored = Daemon::new(socket);
+        restored.adopt_orphans();
+        assert_eq!(restored.unreachable_hosts.lock()[0].terminal_replies, pending);
+    }
+
+    #[test]
+    fn recovered_host_does_not_answer_historical_query_twice() {
+        use crate::ptyhost::{ToHost, FromHost, HOST_PROTO};
+        let dir = tempfile::Builder::new().prefix("kiln-adopt-reply-").tempdir_in("/tmp").unwrap();
+        let socket = dir.path().join("d.sock").to_string_lossy().into_owned();
+        let endpoint = dir.path().join("owned-host.sock").to_string_lossy().into_owned();
+        let listener = Listener::bind(&endpoint).unwrap();
+        let (capture, received) = bounded(1);
+        let (queried, answered) = bounded(1);
+        let worker = std::thread::spawn(move || {
+            let Conn { mut reader, mut writer } = listener.accept().unwrap();
+            let Some(ToHost::Attach { replay }) = read_msg(&mut reader).unwrap() else { panic!("owned host was not attached"); };
+            write_msg(&mut writer, &FromHost::Hello { host_proto: HOST_PROTO, child_pid: 0, host_pid: std::process::id(), exited: None }).unwrap();
+            if replay { write_msg(&mut writer, &FromHost::Data(b"\x1b[6n".to_vec())).unwrap(); }
+            // New live query must still be answered, after the restored reply.
+            write_msg(&mut writer, &FromHost::Data(b"\x1b[5n".to_vec())).unwrap();
+            let mut inputs = Vec::new();
+            while inputs.len() < 3 {
+                match read_msg::<_, ToHost>(&mut reader).unwrap() {
+                    Some(ToHost::Input(data)) => { inputs.push(data); if inputs.len() == 2 { queried.send(()).unwrap(); } },
+                    Some(_) => {},
+                    None => panic!("owned host closed before receiving replies"),
+                }
+            }
+            capture.send((replay, inputs)).unwrap();
+            write_msg(&mut writer, &FromHost::Exit(0)).unwrap();
+        });
+        let mut emu = Emu::new(80, 24);
+        let events = emu.advance(b"\x1b[6n");
+        let pending: Vec<Vec<u8>> = events.into_iter().filter_map(|event| if let Event::PtyWrite(reply) = event { Some(reply.into_bytes()) } else { None }).collect();
+        assert_eq!(pending, vec![b"\x1b[1;1R".to_vec()]);
+        crate::ptyhost::save_registry(&socket, &[HostRecord { session: 777, endpoint, name: None, workspace: None, cwd: None, created_unix: 0, terminal_replies: pending, terminal_dump: Some(postcard::to_stdvec(&emu.dump()).unwrap()) }]);
+        let daemon = Daemon::new(socket);
+        daemon.adopt_orphans();
+        let session = daemon.session(777).unwrap();
+        // Wait for the new live response before sending the following user input.
+        answered.recv_timeout(Duration::from_secs(5)).unwrap();
+        session.input.send(b"AFTER\n".to_vec()).unwrap();
+        let (replay, inputs) = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!replay, "restored state must use pending-only host attachment");
+        assert_eq!(inputs, vec![b"\x1b[1;1R".to_vec(), b"\x1b[0n".to_vec(), b"AFTER\n".to_vec()]);
+        worker.join().unwrap();
+    }
 
     #[test]
     fn a_busy_panel_cannot_block_another_panels_frame_or_health() {

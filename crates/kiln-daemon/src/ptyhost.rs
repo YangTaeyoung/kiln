@@ -613,6 +613,10 @@ pub struct HostRecord {
     pub workspace: Option<String>,
     pub cwd: Option<String>,
     pub created_unix: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_replies: Vec<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_dump: Option<Vec<u8>>,
 }
 
 pub fn registry_path(daemon_socket: &str) -> std::path::PathBuf {

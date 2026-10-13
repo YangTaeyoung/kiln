@@ -4,6 +4,7 @@
 pub mod client;
 pub mod emu;
 pub mod images;
+mod input_queue;
 #[cfg(target_os = "macos")]
 pub mod macos_responsibility;
 pub mod osc;
