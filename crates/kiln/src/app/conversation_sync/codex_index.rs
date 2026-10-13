@@ -288,10 +288,12 @@ for line in sys.stdin:
         let source = destination(&pair, &seed, &id, chrono::Utc::now()).unwrap();
         let messages = vec![
             format::Message {
+                images: Vec::new(),
                 role: "user".into(),
                 text: "Native index fixture: original user message".into(),
             },
             format::Message {
+                images: Vec::new(),
                 role: "assistant".into(),
                 text: "Native index fixture: original assistant message".into(),
             },

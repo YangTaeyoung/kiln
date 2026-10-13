@@ -147,6 +147,40 @@ fn files(
 /// Read only bounded leading rows until the native session identity appears.
 fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
     safe_path(root, path)?;
+    // Native CLIs create metadata-only session files before a first prompt. These
+    // are not conversations and must not consume the initial twenty slots.
+    if fs::metadata(path)?.len() < 2 * 1024 * 1024 {
+        let mut input = BufReader::new(fs::File::open(path)?.take(2 * 1024 * 1024));
+        let mut line = Vec::new();
+        let mut has_prompt = false;
+        for index in 0..64 {
+            line.clear();
+            if input.read_until(b'\n', &mut line)? == 0 {
+                break;
+            }
+            if let Ok(row) = serde_json::from_slice::<serde_json::Value>(&line) {
+                has_prompt = tool == Tool::Claude
+                    && row["type"] == "user"
+                    && row["isMeta"] != true
+                    && !row["message"]["content"].as_str().is_some_and(|s| {
+                        s.starts_with("<local-command-") || s.starts_with("<command-name>")
+                    })
+                    || row["type"] == "response_item"
+                        && row["payload"]["type"] == "message"
+                        && row["payload"]["role"] == "user"
+                    || row["type"] == "event_msg"
+                        && (row["payload"]["type"] == "user_message"
+                            || row["payload"]["item"]["type"] == "UserMessage");
+            }
+            if has_prompt || index == 63 {
+                has_prompt = true;
+                break;
+            }
+        }
+        if !has_prompt {
+            return Ok(None);
+        }
+    }
     let mut reader = BufReader::new(fs::File::open(path)?.take(2 * 1024 * 1024));
     let mut line = Vec::new();
     for _ in 0..64 {
@@ -224,6 +258,8 @@ pub(super) fn find(
     }
     #[derive(Serialize, Deserialize)]
     struct WorkspaceSeed {
+        #[serde(default)]
+        conversations_only: bool,
         started: SystemTime,
         paths: Vec<PathBuf>,
     }
@@ -233,6 +269,8 @@ pub(super) fn find(
     } else {
         BTreeMap::new()
     };
+    // Upgrade the old selection once: it could contain metadata-only sessions.
+    seeds.retain(|_, seed| seed.conversations_only);
     let scan_started = SystemTime::now();
     let keys: BTreeMap<_, _> = scope
         .workspaces
@@ -317,6 +355,7 @@ pub(super) fn find(
         seeds.insert(
             key,
             WorkspaceSeed {
+                conversations_only: true,
                 started: scan_started,
                 paths,
             },

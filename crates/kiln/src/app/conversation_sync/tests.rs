@@ -5,14 +5,389 @@ use serde_json::json;
 fn messages() -> Vec<Message> {
     vec![
         Message {
+            images: Vec::new(),
             role: "user".into(),
             text: "Remember the exact token kiln-orchid-731.\nKeep this second line.".into(),
         },
         Message {
+            images: Vec::new(),
             role: "assistant".into(),
             text: "Recorded kiln-orchid-731.\n```rust\nlet exact = 731;\n```".into(),
         },
     ]
+}
+
+#[test]
+fn active_append_preserves_checkpoint_but_rewrite_and_replacement_retry() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let expected = reader::rows(&f.source, &mut String::new()).unwrap();
+        let actual = reader::rows_before_validation(&f.source, &mut String::new(), || {
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&f.source.path)
+                .unwrap()
+                .write_all(b"{\"type\":\"unfinished")
+                .unwrap();
+        })
+        .unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(read_messages(&f.source).unwrap(), messages());
+        let changed = reader::rows_before_validation(&f.source, &mut String::new(), || {
+            fs::write(&f.source.path, b"{}\n").unwrap();
+        });
+        assert!(
+            changed
+                .unwrap_err()
+                .to_string()
+                .contains("changed while reading")
+        );
+        let replaced = reader::rows_before_validation(&f.source, &mut String::new(), || {
+            let replacement = f.source.path.with_extension("replacement");
+            fs::write(&replacement, b"{}\n").unwrap();
+            fs::rename(replacement, &f.source.path).unwrap();
+        });
+        assert!(
+            replaced
+                .unwrap_err()
+                .to_string()
+                .contains("changed while reading")
+        );
+    }
+}
+
+#[test]
+fn historical_versions_directory_changes_and_tool_references_preserve_identity() {
+    let f = Fixture::new(Tool::Claude);
+    let mut data = rows(&fs::read(&f.source.path).unwrap());
+    data[0]["version"] = json!("2.1.289");
+    data[1]["version"] = json!("2.1.295");
+    data[1]["cwd"] = json!("/tmp/changed-directory");
+    data[1]["message"]["content"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type":"tool_reference","tool_name":"fixture_lookup"}));
+    let bytes = data.iter().map(|r| format!("{r}\n")).collect::<String>();
+    fs::write(&f.source.path, &bytes).unwrap();
+    assert_eq!(f.scan().published, 1);
+    assert_eq!(fs::read_to_string(&f.source.path).unwrap(), bytes);
+    data[1]["sessionId"] = json!(stable_id("different-session"));
+    fs::write(
+        &f.source.path,
+        data.iter().map(|r| format!("{r}\n")).collect::<String>(),
+    )
+    .unwrap();
+    assert!(f.scan().errors[0].contains("identity"));
+}
+
+#[test]
+fn native_images_roundtrip_without_data_loss_or_sync_echo() {
+    // Public one-pixel PNG fixture, not a user's attachment.
+    let url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let mut expected = messages();
+        expected.insert(
+            1,
+            Message {
+                role: "user".into(),
+                text: String::new(),
+                images: vec![url.into()],
+            },
+        );
+        let bytes = format::render(
+            tool,
+            &f.source.id,
+            &f.source.cwd,
+            "2026-10-13T00:00:00Z",
+            &expected,
+        )
+        .unwrap();
+        fs::write(&f.source.path, &bytes).unwrap();
+        assert_eq!(read_messages(&f.source).unwrap(), expected);
+        let status = f.scan();
+        assert!(status.errors.is_empty(), "{:?}", status.errors);
+        assert_eq!(status.published, 1);
+        let state = f.state();
+        let copy = state.entries.values().find(|e| e.imported).unwrap();
+        assert_eq!(read_messages(&copy.source).unwrap(), expected);
+        assert_eq!(f.scan().published, 0);
+        assert_eq!(fs::read(&f.source.path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn missing_image_bytes_never_marks_a_conversation_complete() {
+    let f = Fixture::new(Tool::Codex);
+    let mut data = rows(&fs::read(&f.source.path).unwrap());
+    let user = data
+        .iter_mut()
+        .find(|r| r["payload"]["item"]["type"] == "UserMessage")
+        .unwrap();
+    user["payload"]["item"]["content"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type":"local_image","path":"/missing/attachment.png"}));
+    fs::write(
+        &f.source.path,
+        data.iter().map(|r| format!("{r}\n")).collect::<String>(),
+    )
+    .unwrap();
+    let status = f.scan();
+    assert_eq!(status.published, 0);
+    assert_eq!(status.rows.values().next().unwrap().phase, Phase::Failed);
+    assert!(status.errors[0].contains("original bytes"));
+}
+
+#[test]
+fn obsolete_echo_bookkeeping_is_retired_only_for_unchanged_imports() {
+    let f = Fixture::new(Tool::Codex);
+    assert_eq!(f.scan().published, 1);
+    let mut state = f.state();
+    let entry = state.entries.values_mut().find(|e| e.imported).unwrap();
+    let copy = entry.source.clone();
+    let before = fs::read(&copy.path).unwrap();
+    entry.seen = "obsolete-parser-fingerprint".into();
+    entry.copied_to = Some(Continuation {
+        tool: Tool::Codex,
+        id: f.source.id.clone(),
+        cwd: f.source.cwd.clone(),
+        root: f.source.root.clone(),
+        revision: 0,
+    });
+    entry.copies = vec![entry.copied_to.clone().unwrap()];
+    let path = f.config.join("conversation-sync").join(format!(
+        "{}.json",
+        digest(&serde_json::to_vec(&f.pair).unwrap())
+    ));
+    fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+    let status = f.scan();
+    assert_eq!(status.published, 0);
+    assert_eq!(status.rows.len(), 1);
+    assert_eq!(fs::read(&copy.path).unwrap(), before);
+    assert!(
+        f.state()
+            .entries
+            .values()
+            .find(|e| e.imported)
+            .unwrap()
+            .copied_to
+            .is_none()
+    );
+}
+
+#[test]
+fn cli_looking_original_text_is_preserved_as_content_in_both_destinations() {
+    let mut original = messages();
+    original[0].text = "<command-name>/fixture</command-name>\nThis is original history.".into();
+    for tool in Tool::ALL {
+        let bytes = format::render(
+            tool,
+            &stable_id("reserved-text"),
+            "/tmp/project",
+            "2026-10-13T00:00:00Z",
+            &original,
+        )
+        .unwrap();
+        let data = rows(&bytes);
+        assert_eq!(format::parse(tool, &data).unwrap(), original);
+        if tool == Tool::Claude {
+            assert!(data[0]["message"]["content"].is_array());
+        }
+    }
+}
+
+#[test]
+fn codex_visible_only_answer_is_retained_without_duplicate_projection() {
+    let f = Fixture::new(Tool::Codex);
+    let mut data = rows(&fs::read(&f.source.path).unwrap());
+    assert_eq!(format::parse(Tool::Codex, &data).unwrap(), messages());
+    data.retain(|r| !(r["type"] == "response_item" && r["payload"]["role"] == "assistant"));
+    assert_eq!(format::parse(Tool::Codex, &data).unwrap(), messages());
+}
+
+#[test]
+fn sync_dialog_keeps_error_visible_and_identical_across_idle_polls() {
+    use egui_kittest::{Harness, kittest::Queryable};
+    let f = Fixture::new(Tool::Claude);
+    let mut manager = Manager::default();
+    manager.configured = Some(f.pair.clone());
+    manager.status = f.scan();
+    let mut row = manager.status.rows.values().next().unwrap().clone();
+    row.phase = Phase::Failed;
+    row.detail = "Provider file-ID image cannot be transferred without its original bytes".into();
+    row.title = "Review the project screenshots and preserve every attachment".into();
+    manager.status.rows.clear();
+    for i in 0..20 {
+        manager
+            .status
+            .rows
+            .insert(format!("fixture-{i:02}"), row.clone());
+    }
+    let accounts = AccountManager::with_env(kiln_accounts::Env::sandbox(f._temp.path(), false).0);
+    let mut settings = super::super::state::Settings::default();
+    settings.conversation_sync_pair = Some(f.pair.clone());
+    let mut initialized = false;
+    let mut h = Harness::builder().with_size([760.0, 620.0]).build_ui_state(
+        |ui, manager: &mut Manager| {
+            if !initialized {
+                kiln_common::fonts::install(ui.ctx());
+                kiln_common::Theme::current().apply(ui.ctx());
+                initialized = true;
+                return;
+            }
+            manager.dialog(
+                ui.ctx(),
+                "Workspace fixture",
+                Path::new(&f.source.cwd),
+                true,
+                &mut settings,
+                &accounts,
+            );
+        },
+        manager,
+    );
+    h.run_steps(4);
+    let reason = failure_reason(&row.detail);
+    let visible = h
+        .query_all_by_label(&reason)
+        .find(|n| h.ctx.content_rect().contains_rect(n.rect()))
+        .expect("error reason visible without scrolling")
+        .rect();
+    let footer = h.get_by_label("다시 확인").rect();
+    assert!(h.ctx.content_rect().contains_rect(footer));
+    h.render()
+        .unwrap()
+        .save("/tmp/kiln-0125-sync-dialog.png")
+        .unwrap();
+    for busy in [true, false, true, false] {
+        h.state_mut().busy = busy;
+        h.state_mut().status.discovering = busy;
+        h.run_steps(2);
+        assert_eq!(h.get_by_label("다시 확인").rect(), footer);
+        assert_eq!(
+            h.query_all_by_label(&reason).next().unwrap().rect(),
+            visible
+        );
+        assert!(h.query_by_label("워크스페이스 대화 찾는 중").is_none());
+    }
+}
+
+#[test]
+fn background_poll_keeps_failed_rows_and_does_not_retry_unchanged_files() {
+    let f = Fixture::new(Tool::Claude);
+    let original = fs::read(&f.source.path).unwrap();
+    let mut data = rows(&original);
+    data[0]["message"]["content"] = json!([{"type":"document"}]);
+    fs::write(
+        &f.source.path,
+        data.iter().map(|r| format!("{r}\n")).collect::<String>(),
+    )
+    .unwrap();
+    let mut cache = Cache::new();
+    let first = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    let at = cache.attempts[&f.source.path].2;
+    assert_eq!(first.rows.values().next().unwrap().phase, Phase::Failed);
+    let second = scan(&f.config, &f.pair, &f.gate, &mut cache, |s| {
+        assert_eq!(s.rows.values().next().unwrap().phase, Phase::Failed);
+    })
+    .unwrap();
+    assert_eq!(first.errors, second.errors);
+    assert_eq!(cache.attempts[&f.source.path].2, at);
+    // A changed source is retried immediately, without waiting for the backoff.
+    fs::write(&f.source.path, original).unwrap();
+    assert_eq!(
+        scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {})
+            .unwrap()
+            .published,
+        1
+    );
+}
+
+#[test]
+fn streaming_reader_does_not_apply_transcript_limit_to_private_reasoning() {
+    let f = Fixture::new(Tool::Codex);
+    let original = fs::read(&f.source.path).unwrap();
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&f.source.path)
+        .unwrap();
+    let padding = "x".repeat(33 * 1024 * 1024);
+    for _ in 0..2 {
+        writeln!(file, "{}", json!({"type":"response_item","payload":{"type":"reasoning","encrypted_content":padding}})).unwrap();
+    }
+    drop(file);
+    assert!(fs::metadata(&f.source.path).unwrap().len() > LIMIT);
+    assert_eq!(
+        read_messages(&f.source).unwrap(),
+        format::parse(Tool::Codex, &rows(&original)).unwrap()
+    );
+}
+
+#[test]
+fn compaction_recovers_originals_when_native_logical_parent_points_forward() {
+    let f = Fixture::new(Tool::Claude);
+    let mut data = rows(&fs::read(&f.source.path).unwrap());
+    let boundary = stable_id("compact-boundary");
+    let summary = stable_id("compact-summary");
+    let user = stable_id("after-compact-user");
+    data.push(json!({"type":"system","subtype":"compact_boundary","uuid":boundary,"parentUuid":null,"logicalParentUuid":summary}));
+    let mut row = data[0].clone();
+    row["uuid"] = json!(summary);
+    row["parentUuid"] = json!(boundary);
+    row["isCompactSummary"] = json!(true);
+    row["message"]["content"] = json!("Summary must never substitute for original history");
+    data.push(row);
+    let mut row = data[0].clone();
+    row["uuid"] = json!(user);
+    row["parentUuid"] = json!(summary);
+    row["message"]["content"] = json!("Continue after compaction");
+    data.push(row);
+    let mut row = data[1].clone();
+    row["uuid"] = json!(stable_id("after-compact-assistant"));
+    row["parentUuid"] = json!(user);
+    row["message"]["content"] = json!([{"type":"text","text":"Original continuation"}]);
+    data.push(row);
+    let actual = format::parse(Tool::Claude, &data).unwrap();
+    assert_eq!(&actual[..2], &messages());
+    assert_eq!(actual.len(), 4);
+    assert_eq!(actual[2].text, "Continue after compaction");
+    assert!(!actual.iter().any(|m| m.text.contains("Summary must")));
+}
+
+#[test]
+fn initial_selection_migrates_past_metadata_only_sessions() {
+    let f = Fixture::new(Tool::Codex);
+    let scope = workspace_scope(&f);
+    let mut empty_paths = Vec::new();
+    for i in 0..25 {
+        let mut source = f.source.clone();
+        source.id = stable_id(&format!("empty-{i}"));
+        source.path = f
+            .source
+            .path
+            .with_file_name(format!("rollout-{}.jsonl", source.id));
+        let mut meta = rows(&fs::read(&f.source.path).unwrap())[0].clone();
+        meta["payload"]["id"] = json!(source.id);
+        fs::write(&source.path, format!("{meta}\n")).unwrap();
+        empty_paths.push(source.path);
+    }
+    let key = digest(&serde_json::to_vec(&(scope.workspaces[0].clone(), &scope.roots)).unwrap());
+    let seeds = json!({key:{"started":SystemTime::now(),"paths":empty_paths[..20]}});
+    fs::write(
+        f.config.join("conversation-sync/workspace-discovery.json"),
+        serde_json::to_vec(&seeds).unwrap(),
+    )
+    .unwrap();
+    let found = discovery::find(
+        &f.config,
+        &scope,
+        &f.gate,
+        &mut discovery::MetadataCache::new(),
+    )
+    .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, f.source.id);
 }
 fn rows(bytes: &[u8]) -> Vec<serde_json::Value> {
     bytes
@@ -143,10 +518,12 @@ fn bidirectional_changes_are_native_and_do_not_echo() {
         assert_eq!(read_messages(&imported).unwrap(), messages());
         let mut extended = messages();
         extended.push(Message {
+            images: Vec::new(),
             role: "user".into(),
             text: "Continue from the other CLI.".into(),
         });
         extended.push(Message {
+            images: Vec::new(),
             role: "assistant".into(),
             text: "The exact token is kiln-orchid-731.".into(),
         });
@@ -188,10 +565,10 @@ fn partial_writes_attachments_versions_and_disable_are_safe() {
     let original = fs::read(&f.source.path).unwrap();
     fs::write(&f.source.path, &original[..original.len() - 1]).unwrap();
     assert_eq!(f.scan().published, 0);
-    assert!(!f.scan().errors.is_empty());
+    assert_eq!(f.scan().rows.values().next().unwrap().phase, Phase::Waiting);
     let mut unsupported = rows(&original);
     unsupported[0]["message"]["content"] =
-        json!([{"type":"image","source":{"type":"base64","data":"fixture"}}]);
+        json!([{"type":"document","source":{"type":"base64","data":"fixture"}}]);
     let serialize = |rows: &Vec<serde_json::Value>| {
         rows.iter()
             .map(|r| format!("{}\n", serde_json::to_string(r).unwrap()))
@@ -269,6 +646,10 @@ fn export_native_cli_fixtures() {
     };
     private_dir(&pair.claude.root).unwrap();
     private_dir(&pair.codex.root).unwrap();
+    let mut fixture_messages = messages();
+    if std::env::var_os("KILN_SYNC_FIXTURE_IMAGES").is_some() {
+        fixture_messages.insert(1, Message { role: "user".into(), text: String::new(), images: vec!["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC".into()] });
+    }
     for tool in Tool::ALL {
         let seed = Source {
             tool: opposite(tool),
@@ -286,7 +667,7 @@ fn export_native_cli_fixtures() {
                 &id,
                 &source.cwd,
                 &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                &messages(),
+                &fixture_messages,
             )
             .unwrap(),
         )
@@ -354,10 +735,12 @@ fn branches_and_restart_cache_preserve_every_source() {
     for (source, text) in [(&f.source, "Branch A"), (&imported, "Branch B")] {
         let mut ms = messages();
         ms.push(Message {
+            images: Vec::new(),
             role: "user".into(),
             text: text.into(),
         });
         ms.push(Message {
+            images: Vec::new(),
             role: "assistant".into(),
             text: format!("Reply {text}"),
         });
@@ -531,10 +914,12 @@ fn recovery_reuses_publication_plan_and_never_clobbers_a_collision() {
         .unwrap();
         let mut ms = messages();
         ms.push(Message {
+            images: Vec::new(),
             role: "user".into(),
             text: "Already continued after crash".into(),
         });
         ms.push(Message {
+            images: Vec::new(),
             role: "assistant".into(),
             text: "Native reply".into(),
         });
@@ -686,10 +1071,12 @@ fn default_and_connected_namespaces_receive_copies_and_continued_copies_sync_bac
     let mut continued = messages();
     continued.extend([
         Message {
+            images: Vec::new(),
             role: "user".into(),
             text: "Continue in the already-open default CLI".into(),
         },
         Message {
+            images: Vec::new(),
             role: "assistant".into(),
             text: "Continued exact history".into(),
         },
@@ -872,6 +1259,15 @@ fn inspect_existing_workspace_metadata_read_only() {
     .unwrap();
     let config = tempfile::tempdir().unwrap();
     private_dir(&config.path().join("conversation-sync")).unwrap();
+    if let Some(path) = manifest["imports_dir"].as_str() {
+        let target = config.path().join("conversation-sync/imports");
+        private_dir(&target).unwrap();
+        for entry in fs::read_dir(path).unwrap().flatten() {
+            if entry.path().extension().is_some_and(|e| e == "json") {
+                fs::copy(entry.path(), target.join(entry.file_name())).unwrap();
+            }
+        }
+    }
     let scope = discovery::Scope {
         workspaces: serde_json::from_value(manifest["workspaces"].clone()).unwrap(),
         roots: serde_json::from_value(manifest["roots"].clone()).unwrap(),
@@ -889,15 +1285,199 @@ fn inspect_existing_workspace_metadata_read_only() {
         sources.len(),
         start.elapsed()
     );
+    let mut report = Vec::new();
     for source in sources {
-        // No prompts, content, session IDs or account identities enter diagnostics.
-        match read_messages(&source) {
-            Ok(messages) => eprintln!(
-                "{}: {} portable messages",
-                source.tool.key(),
-                messages.len()
-            ),
-            Err(error) => eprintln!("{}: {}", source.tool.key(), error),
+        if discovery::imported(config.path(), &source)
+            .unwrap()
+            .is_some()
+        {
+            continue;
+        }
+        let result = match read_messages(&source) {
+            Ok(messages) => {
+                let images: usize = messages.iter().map(|m| m.images.len()).sum();
+                let bytes = serde_json::to_vec(&messages).unwrap().len();
+                eprintln!(
+                    "{} {}: {} messages, {} images, {} MiB",
+                    scope
+                        .workspace(&source.cwd)
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy(),
+                    source.tool.key(),
+                    messages.len(),
+                    images,
+                    bytes / 1024 / 1024
+                );
+                json!({"messages":messages.len(),"images":images,"portable_bytes":bytes})
+            }
+            Err(error) => {
+                eprintln!(
+                    "{} {}: {}",
+                    scope
+                        .workspace(&source.cwd)
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy(),
+                    source.tool.key(),
+                    error
+                );
+                json!({"error":error.to_string()})
+            }
+        };
+        report.push(json!({"source":source,"result":result}));
+    }
+    if let Some(path) = std::env::var_os("KILN_SYNC_INSPECT_REPORT") {
+        fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+}
+
+/// Explicit operator-only verification; never invoked by CI or ordinary tests.
+#[test]
+#[ignore]
+fn synchronize_explicitly_authorized_workspaces() {
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            std::env::var_os("KILN_SYNC_AUTHORIZED_MANIFEST")
+                .expect("explicit authorized workspace manifest"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["authorization"], "user-requested-workspace-sync");
+    let config = PathBuf::from(manifest["config"].as_str().unwrap());
+    let persisted: super::super::state::Persist =
+        serde_json::from_slice(&fs::read(config.join("state.json")).unwrap()).unwrap();
+    let workspaces: Vec<PathBuf> = serde_json::from_value(manifest["workspaces"].clone()).unwrap();
+    for root in &workspaces {
+        assert!(
+            persisted
+                .workspaces
+                .iter()
+                .any(|w| w.conversation_sync
+                    && w.root.canonicalize().ok() == root.canonicalize().ok()),
+            "workspace must already be opted in"
+        );
+    }
+    let pair = persisted.settings.conversation_sync_pair.unwrap();
+    let scope = discovery::Scope::new(&pair, workspaces).unwrap();
+    let gate = Arc::new(AtomicBool::new(true));
+    let mut cache = Cache::new();
+    let mut registry = codex_index::Registry::default();
+    let progress = std::cell::Cell::new(0);
+    let result = scan_with_index(
+        &config,
+        &pair,
+        &gate,
+        &mut cache,
+        Some(&scope),
+        |source| registry.ensure(source, &gate),
+        |status| {
+            if status.checked > progress.get() {
+                progress.set(status.checked);
+                eprintln!("Checked {}, published {}", status.checked, status.published);
+            }
+        },
+    )
+    .unwrap();
+    let state: State = serde_json::from_slice(
+        &fs::read(config.join("conversation-sync/workspace-state.json")).unwrap(),
+    )
+    .unwrap();
+    let mut report = Vec::new();
+    for (key, row) in &result.rows {
+        let entry = &state.entries[key];
+        let mut verified = 0;
+        for copy in &row.copies {
+            let target = state
+                .entries
+                .values()
+                .find(|e| e.source.id == copy.id && e.source.root == copy.root)
+                .unwrap();
+            let messages = read_messages(&target.source).unwrap();
+            assert_eq!(
+                digest(&serde_json::to_vec(&messages).unwrap()),
+                entry.seen,
+                "copy must retain all original messages and images"
+            );
+            registry.ensure(&target.source, &gate).unwrap();
+            verified += 1;
+        }
+        report.push(json!({"source":row.source,"workspace":row.workspace,"phase":format!("{:?}",row.phase),"error":row.detail,"verified_copies":verified,"copies":row.copies}));
+        eprintln!(
+            "Verified conversation {}, copies {}",
+            report.len(),
+            verified
+        );
+    }
+    fs::write(
+        manifest["report"].as_str().unwrap(),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        result.errors.is_empty(),
+        "{} conversations failed",
+        result.errors.len()
+    );
+    assert!(result.rows.values().all(|r| r.phase == Phase::Synced));
+}
+
+#[test]
+#[ignore]
+fn inspect_authorized_copy_integrity_read_only() {
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(std::env::var_os("KILN_SYNC_AUTHORIZED_MANIFEST").unwrap()).unwrap(),
+    )
+    .unwrap();
+    let config = PathBuf::from(manifest["config"].as_str().unwrap());
+    let state: State = serde_json::from_slice(
+        &fs::read(config.join("conversation-sync/workspace-state.json")).unwrap(),
+    )
+    .unwrap();
+    for entry in state
+        .entries
+        .values()
+        .filter(|e| !e.imported && !e.copies.is_empty())
+    {
+        let original = read_messages(&entry.source).unwrap();
+        if digest(&serde_json::to_vec(&original).unwrap()) != entry.seen {
+            continue;
+        }
+        let copy = &entry.copies[0];
+        let target = state
+            .entries
+            .values()
+            .find(|e| e.source.id == copy.id && e.source.root == copy.root)
+            .unwrap();
+        let copied = read_messages(&target.source).unwrap();
+        if original == copied {
+            continue;
+        }
+        eprintln!(
+            "Integrity mismatch {}: {} original, {} copied",
+            &entry.source.id[..8],
+            original.len(),
+            copied.len()
+        );
+        for (index, (a, b)) in original.iter().zip(&copied).enumerate() {
+            if a == b {
+                continue;
+            }
+            eprintln!(
+                "First difference {}: roles {} / {}; text lengths {} / {}; images {} / {}; local command {}",
+                index,
+                a.role,
+                b.role,
+                a.text.len(),
+                b.text.len(),
+                a.images.len(),
+                b.images.len(),
+                a.text.starts_with("<local-command-") || a.text.starts_with("<command-name>")
+            );
+            break;
         }
     }
 }
@@ -1091,7 +1671,8 @@ fn workspace_progress_distinguishes_discovery_empty_and_completed_batches() {
         .unwrap();
     h.state_mut().status.discovering = true;
     h.run_steps(2);
-    assert!(h.query_by_label("워크스페이스 대화 찾는 중").is_some());
+    assert!(h.query_by_label("워크스페이스 대화 찾는 중").is_none());
+    assert!(h.query_by_label("완료된 대화 모두 동기화됨").is_some());
     assert!(
         h.query_by_label("동기화 완료").is_some(),
         "discovery retains previous rows"
@@ -1223,12 +1804,14 @@ fn workspace_opt_in_defaults_off_and_round_trips_without_global_migration() {
     let old: super::super::state::Persist = serde_json::from_value(serde_json::json!({
         "settings": {"conversation_sync_enabled": true},
         "workspaces": [{"name":"A","root":"/example/a"}, {"name":"B","root":"/example/b"}]
-    })).unwrap();
+    }))
+    .unwrap();
     assert!(old.settings.conversation_sync_enabled);
     assert!(old.workspaces.iter().all(|w| !w.conversation_sync));
     let mut selected = old;
     selected.workspaces[0].conversation_sync = true;
-    let restored: super::super::state::Persist = serde_json::from_slice(&serde_json::to_vec(&selected).unwrap()).unwrap();
+    let restored: super::super::state::Persist =
+        serde_json::from_slice(&serde_json::to_vec(&selected).unwrap()).unwrap();
     assert!(restored.workspaces[0].conversation_sync);
     assert!(!restored.workspaces[1].conversation_sync);
 }
@@ -1246,8 +1829,14 @@ fn no_opted_in_workspaces_cancel_inflight_and_ignore_stale_results() {
     manager.tick(&mut settings, vec![], &egui::Context::default());
     assert!(!old_gate.load(Ordering::Acquire));
     assert!(manager.workspaces.is_empty());
-    manager.tx.send(Event::Progress(old_gate.clone(), f.scan())).unwrap();
-    manager.tx.send(Event::Scanned(old_gate, Err("stale cancelled scan".into()))).unwrap();
+    manager
+        .tx
+        .send(Event::Progress(old_gate.clone(), f.scan()))
+        .unwrap();
+    manager
+        .tx
+        .send(Event::Scanned(old_gate, Err("stale cancelled scan".into())))
+        .unwrap();
     manager.tick(&mut settings, vec![], &egui::Context::default());
     assert!(!manager.busy);
     assert!(manager.status.rows.is_empty());
@@ -1260,16 +1849,38 @@ fn workspace_status_and_badges_do_not_mix_other_folders() {
     let mut manager = Manager::default();
     manager.status = f.scan();
     let original = manager.status.rows.values().next().unwrap().clone();
-    manager.workspaces = vec!["/example/a".into(), "/example/b".into(), "/example/a/child".into()];
+    manager.workspaces = vec![
+        "/example/a".into(),
+        "/example/b".into(),
+        "/example/a/child".into(),
+    ];
     manager.status.rows.clear();
-    for (path, phase) in [("/example/a", Phase::Synced), ("/example/b", Phase::Failed), ("/example/a/child", Phase::Copying)] {
-        let mut row = original.clone(); row.source.cwd = path.into(); row.phase = phase;
+    for (path, phase) in [
+        ("/example/a", Phase::Synced),
+        ("/example/b", Phase::Failed),
+        ("/example/a/child", Phase::Copying),
+    ] {
+        let mut row = original.clone();
+        row.source.cwd = path.into();
+        row.phase = phase;
         manager.status.rows.insert(path.into(), row);
     }
-    assert_eq!(manager.workspace_status(Path::new("/example/a")).rows.len(), 1);
-    assert_eq!(manager.badge(Path::new("/example/a")).0, kiln_common::icons::Icon::Check);
-    assert_eq!(manager.badge(Path::new("/example/b")).0, kiln_common::icons::Icon::Warning);
-    assert_eq!(manager.badge(Path::new("/example/a/child")).0, kiln_common::icons::Icon::Refresh);
+    assert_eq!(
+        manager.workspace_status(Path::new("/example/a")).rows.len(),
+        1
+    );
+    assert_eq!(
+        manager.badge(Path::new("/example/a")).0,
+        kiln_common::icons::Icon::Check
+    );
+    assert_eq!(
+        manager.badge(Path::new("/example/b")).0,
+        kiln_common::icons::Icon::Warning
+    );
+    assert_eq!(
+        manager.badge(Path::new("/example/a/child")).0,
+        kiln_common::icons::Icon::Refresh
+    );
 }
 
 #[test]
@@ -1279,11 +1890,26 @@ fn workspace_status_uses_canonical_assignment_for_aliased_working_directories() 
     let root = PathBuf::from(&f.source.cwd);
     let alias = root.join("workspace-alias");
     std::os::unix::fs::symlink(&root, &alias).unwrap();
-    let scope = discovery::Scope { workspaces: vec![root.clone()], roots: vec![] };
-    let mut source = f.source.clone(); source.cwd = alias.to_string_lossy().into_owned();
-    let row = Conversation::from_entry(&Entry { source, seen: String::new(), imported: false, title: "Aliased working directory".into(), copied_to: None, copies: vec![] }, Some(&scope));
+    let scope = discovery::Scope {
+        workspaces: vec![root.clone()],
+        roots: vec![],
+    };
+    let mut source = f.source.clone();
+    source.cwd = alias.to_string_lossy().into_owned();
+    let row = Conversation::from_entry(
+        &Entry {
+            source,
+            seen: String::new(),
+            imported: false,
+            title: "Aliased working directory".into(),
+            copied_to: None,
+            copies: vec![],
+        },
+        Some(&scope),
+    );
     assert_eq!(row.workspace.as_ref(), Some(&root));
-    let mut manager = Manager::default(); manager.workspaces = vec![root.clone()];
+    let mut manager = Manager::default();
+    manager.workspaces = vec![root.clone()];
     manager.status.rows.insert("fixture".into(), row);
     assert_eq!(manager.workspace_status(&root).rows.len(), 1);
 }

@@ -2,6 +2,7 @@
 mod codex_index;
 mod discovery;
 mod format;
+mod reader;
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +24,8 @@ use std::{
 };
 
 const LIMIT: u64 = 64 * 1024 * 1024;
+const PORTABLE_LIMIT: u64 = 512 * 1024 * 1024;
+const COPY_LIMIT: u64 = 1024 * 1024 * 1024;
 const MAX_SOURCES: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -317,6 +320,8 @@ struct Continuation {
     cwd: String,
     #[serde(default)]
     root: PathBuf,
+    #[serde(default)]
+    revision: u8,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Phase {
@@ -368,17 +373,10 @@ struct Status {
 }
 
 fn read_messages(source: &Source) -> Result<Vec<format::Message>> {
-    safe_path(&source.root, &source.path)?;
-    let bytes = bounded(&source.path, LIMIT)?;
-    ensure!(
-        bytes.ends_with(b"\n"),
-        "Transcript write is incomplete; retrying"
-    );
-    let rows: Vec<serde_json::Value> = bytes
-        .split(|b| *b == b'\n')
-        .filter(|b| !b.is_empty())
-        .map(serde_json::from_slice)
-        .collect::<std::result::Result<_, _>>()?;
+    read_messages_titled(source, &mut String::new())
+}
+fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<format::Message>> {
+    let rows = reader::rows(source, title)?;
     match source.tool {
         Tool::Codex => {
             let meta = rows
@@ -390,20 +388,48 @@ fn read_messages(source: &Source) -> Result<Vec<format::Message>> {
                 "Codex transcript identity changed"
             );
             ensure!(
-                meta["payload"]["cli_version"] == "0.162.1",
-                "Unsupported Codex transcript version (supported: 0.162.1)"
+                matches!(
+                    meta["payload"]["cli_version"].as_str(),
+                    Some(
+                        "0.154.0"
+                            | "0.155.0-alpha.9.2"
+                            | "0.155.1"
+                            | "0.160.0"
+                            | "0.160.1"
+                            | "0.161.0"
+                            | "0.162.0-alpha.17.2"
+                            | "0.162.1"
+                    )
+                ),
+                "Unsupported Codex transcript version: {}",
+                meta["payload"]["cli_version"]
             );
         }
         Tool::Claude => {
             for row in &rows {
                 if matches!(row["type"].as_str(), Some("user" | "assistant")) {
                     ensure!(
-                        row["sessionId"] == source.id && row["cwd"] == source.cwd,
+                        row["sessionId"] == source.id
+                            && row["cwd"]
+                                .as_str()
+                                .is_some_and(|cwd| Path::new(cwd).is_absolute()),
                         "Claude transcript identity changed"
                     );
                     ensure!(
-                        row["version"] == "2.1.296",
-                        "Unsupported Claude transcript version (supported: 2.1.296)"
+                        matches!(
+                            row["version"].as_str(),
+                            Some(
+                                "2.1.272"
+                                    | "2.1.281"
+                                    | "2.1.289"
+                                    | "2.1.291"
+                                    | "2.1.292"
+                                    | "2.1.295"
+                                    | "2.1.296"
+                            )
+                        ),
+                        "Unsupported Claude transcript version: {}",
+                        row["version"]
                     );
                 }
             }
@@ -463,6 +489,8 @@ type Gate = Arc<AtomicBool>;
 struct Cache {
     messages: HashMap<PathBuf, (u64, SystemTime, String)>,
     metadata: discovery::MetadataCache,
+    rows: BTreeMap<String, Conversation>,
+    attempts: HashMap<PathBuf, (u64, SystemTime, Instant)>,
 }
 impl Cache {
     fn new() -> Self {
@@ -558,12 +586,14 @@ fn scan_with_index(
         }
     }
     let mut discovery_status = Status::default();
+    let mut discovered_paths = std::collections::HashSet::new();
     if let Some(scope) = scope {
         discovery_status.workspaces = scope.workspaces.len();
         discovery_status.discovering = true;
         notify(&discovery_status);
         let found = discovery::find(config, scope, gate, &mut cache.metadata)?;
         discovery_status.discovered = found.len();
+        discovered_paths.extend(found.iter().map(|s| s.path.clone()));
         for source in found {
             let key = source.path.to_string_lossy().into_owned();
             if !state.entries.contains_key(&key) {
@@ -588,7 +618,13 @@ fn scan_with_index(
     let active: BTreeMap<_, _> = state
         .entries
         .iter()
-        .filter(|(_, e)| scope.is_none_or(|s| s.contains(&e.source)))
+        .filter(|(_, e)| {
+            scope.is_none_or(|s| {
+                s.contains(&e.source)
+                    && (discovered_paths.contains(&e.source.path)
+                        || (!e.source.path.exists() && e.copied_to.is_some()))
+            })
+        })
         .map(|(k, e)| (k.clone(), e.clone()))
         .collect();
     ensure!(
@@ -603,7 +639,16 @@ fn scan_with_index(
         rows: active
             .iter()
             .filter(|(_, e)| !e.imported || e.copied_to.is_some())
-            .map(|(k, e)| (k.clone(), Conversation::from_entry(e, scope)))
+            .map(|(k, e)| {
+                (
+                    k.clone(),
+                    cache
+                        .rows
+                        .get(k)
+                        .cloned()
+                        .unwrap_or_else(|| Conversation::from_entry(e, scope)),
+                )
+            })
             .collect(),
         ..Default::default()
     };
@@ -624,25 +669,55 @@ fn scan_with_index(
             safe_path(&entry.source.root, &entry.source.path)?;
             let meta = fs::metadata(&entry.source.path)?;
             let stamp = (meta.len(), meta.modified()?, entry.seen.clone());
+            if cache
+                .attempts
+                .get(&entry.source.path)
+                .is_some_and(|(len, modified, at)| {
+                    *len == stamp.0
+                        && *modified == stamp.1
+                        && at.elapsed() < Duration::from_secs(30)
+                })
+                && status
+                    .rows
+                    .get(&key)
+                    .is_some_and(|r| matches!(r.phase, Phase::Failed | Phase::Waiting))
+            {
+                return Ok(());
+            }
+            cache.attempts.insert(
+                entry.source.path.clone(),
+                (stamp.0, stamp.1, Instant::now()),
+            );
             let destinations = scope
                 .map(|s| s.destinations(pair, entry.source.tool))
                 .unwrap_or_else(|| vec![pair.clone()]);
-            let routes_unchanged = entry.imported && entry.copied_to.is_none()
+            let mut routes_unchanged = entry.imported && entry.copied_to.is_none()
                 || scope.is_none()
                 || destinations.iter().all(|p| {
-                    entry
-                        .copies
-                        .iter()
-                        .any(|c| c.root == p.endpoint(opposite(entry.source.tool)).root)
+                    entry.copies.iter().any(|c| {
+                        c.root == p.endpoint(opposite(entry.source.tool)).root && c.revision == 2
+                    })
                 });
             if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
                 return Ok(());
             }
             if let Some(row) = status.rows.get_mut(&key) {
-                row.phase = Phase::Reading;
+                if row.phase == Phase::Queued {
+                    row.phase = Phase::Reading;
+                }
             }
             notify(&status);
-            let messages = read_messages(&entry.source)?;
+            let mut title = String::new();
+            let result = read_messages_titled(&entry.source, &mut title);
+            if let Some(row) = status.rows.get_mut(&key) {
+                if !title.is_empty() {
+                    row.title = title;
+                }
+            }
+            let messages = result?;
+            if let Some(row) = status.rows.get_mut(&key) {
+                row.detail.clear();
+            }
             if messages.is_empty() || !messages.iter().any(|m| m.role == "user") {
                 if let Some(row) = status.rows.get_mut(&key) {
                     row.phase = Phase::Waiting;
@@ -650,6 +725,63 @@ fn scan_with_index(
                 return Ok(());
             }
             let fingerprint = digest(&serde_json::to_vec(&messages)?);
+            if entry.imported
+                && discovery::imported(config, &entry.source)?.as_deref() == Some(&fingerprint)
+            {
+                // Older parsers could mistake their own projection for a new turn.
+                // The immutable import baseline proves this copy was not continued.
+                // Retire only that bookkeeping; preserve every native session file.
+                if entry.copied_to.is_some() || entry.seen != fingerprint {
+                    let saved = state.entries.get_mut(&key).unwrap();
+                    saved.seen = fingerprint;
+                    saved.copied_to = None;
+                    saved.copies.clear();
+                    replace(&state_path, &serde_json::to_vec(&state)?)?;
+                }
+                status.rows.remove(&key);
+                cache.messages.insert(entry.source.path.clone(), stamp);
+                return Ok(());
+            }
+            if fingerprint == entry.seen && !routes_unchanged && !entry.copies.is_empty() {
+                let mut verified = Vec::new();
+                for destination in &destinations {
+                    let root = &destination.endpoint(opposite(entry.source.tool)).root;
+                    if let Some(copy) = entry.copies.iter().find(|c| &c.root == root) {
+                        if let Some(target) = state
+                            .entries
+                            .values()
+                            .find(|e| e.source.id == copy.id && e.source.root == copy.root)
+                        {
+                            let reserved_text = target.source.tool == Tool::Claude
+                                && messages.iter().any(|m| {
+                                    m.role == "user"
+                                        && (m.text.starts_with("<local-command-")
+                                            || m.text.starts_with("<command-name>"))
+                                });
+                            if !reserved_text
+                                && read_messages(&target.source).is_ok_and(|m| m == messages)
+                            {
+                                index(&target.source)?;
+                                let mut copy = copy.clone();
+                                copy.revision = 2;
+                                verified.push(copy);
+                            }
+                        }
+                    }
+                }
+                // Adopt intact old copies without duplicating a large history during upgrade.
+                if verified.len() == destinations.len() {
+                    let saved = state.entries.get_mut(&key).unwrap();
+                    saved.copied_to = verified.first().cloned();
+                    saved.copies = verified.clone();
+                    replace(&state_path, &serde_json::to_vec(&state)?)?;
+                    if let Some(row) = status.rows.get_mut(&key) {
+                        row.target = verified.first().cloned();
+                        row.copies = verified;
+                    }
+                    routes_unchanged = true;
+                }
+            }
             if fingerprint == entry.seen && routes_unchanged {
                 if let Some(row) = status.rows.get_mut(&key) {
                     row.phase = Phase::Synced;
@@ -657,9 +789,9 @@ fn scan_with_index(
                 cache.messages.insert(entry.source.path.clone(), stamp);
                 return Ok(());
             }
-            let title = messages
+            let parsed_title = messages
                 .iter()
-                .find(|m| m.role == "user")
+                .find(|m| m.role == "user" && !m.text.is_empty())
                 .map(|m| {
                     m.text
                         .lines()
@@ -670,6 +802,12 @@ fn scan_with_index(
                         .collect::<String>()
                 })
                 .unwrap_or_default();
+            let title = status
+                .rows
+                .get(&key)
+                .filter(|r| !r.title.is_empty())
+                .map(|r| r.title.clone())
+                .unwrap_or(parsed_title);
             let row = status
                 .rows
                 .entry(key.clone())
@@ -684,7 +822,7 @@ fn scan_with_index(
                 // must see a continuation even when the other CLI was opened outside Kiln.
                 let identity = if scope.is_some() {
                     format!(
-                        "{}:{key}:{fingerprint}:{}",
+                        "{}:v2:{key}:{fingerprint}:{}",
                         state_path.display(),
                         destination_pair
                             .endpoint(opposite(entry.source.tool))
@@ -724,16 +862,26 @@ fn scan_with_index(
                     &plan.timestamp,
                     &messages,
                 )?;
+                let converted: Vec<serde_json::Value> = bytes
+                    .split(|b| *b == b'\n')
+                    .filter(|b| !b.is_empty())
+                    .map(serde_json::from_slice)
+                    .collect::<std::result::Result<_, _>>()?;
                 ensure!(
-                    bytes.len() as u64 <= LIMIT,
-                    "Converted conversation exceeds the 64 MiB sync limit"
+                    format::parse(plan.source.tool, &converted)? == messages,
+                    "Converted conversation did not retain every message and attachment"
+                );
+                drop(converted);
+                ensure!(
+                    bytes.len() as u64 <= COPY_LIMIT,
+                    "Converted conversation exceeds the 1 GiB sync limit"
                 );
                 if !gate.load(Ordering::Acquire) {
                     return Ok(());
                 }
                 if plan.source.path.exists() {
                     ensure!(
-                        bounded(&plan.source.path, LIMIT)?.starts_with(&bytes),
+                        bounded(&plan.source.path, COPY_LIMIT)?.starts_with(&bytes),
                         "Continuation collision; existing conversation was preserved"
                     );
                 }
@@ -743,6 +891,15 @@ fn scan_with_index(
                     publish(&plan.source.path, &bytes)?;
                 }
                 index(&plan.source)?;
+                let copied_meta = fs::metadata(&plan.source.path)?;
+                cache.messages.insert(
+                    plan.source.path.clone(),
+                    (
+                        copied_meta.len(),
+                        copied_meta.modified()?,
+                        fingerprint.clone(),
+                    ),
+                );
                 status.published += 1;
                 state
                     .entries
@@ -760,6 +917,7 @@ fn scan_with_index(
                     id,
                     cwd: entry.source.cwd.clone(),
                     root: plan.source.root.clone(),
+                    revision: 2,
                 };
                 state.recent.insert(0, continuation.clone());
                 state.recent.truncate(8);
@@ -803,6 +961,20 @@ fn scan_with_index(
             ));
         }
     }
+    status.errors = status
+        .rows
+        .values()
+        .filter(|r| r.phase == Phase::Failed)
+        .map(|r| {
+            format!(
+                "{} {}: {}",
+                r.source.tool.display_name(),
+                r.source.id,
+                r.detail
+            )
+        })
+        .collect();
+    cache.rows = status.rows.clone();
     status.recent = state.recent;
     notify(&status);
     Ok(status)
@@ -812,6 +984,27 @@ enum Event {
     Progress(Gate, Status),
     Connected(Result<Pair, String>),
     Scanned(Gate, Result<Status, String>),
+}
+fn failure_reason(detail: &str) -> String {
+    use kiln_common::i18n::tr;
+    if detail.contains("limit") || detail.contains("MiB") {
+        tr("대화 용량이 연동 한도를 넘었습니다. 원본은 그대로 보관됩니다.").into()
+    } else if detail.contains("version") {
+        tr("아직 확인되지 않은 CLI 기록 형식입니다. 원본은 그대로 보관됩니다.").into()
+    } else if detail.contains("compacted")
+        || detail.contains("chain")
+        || detail.contains("inherited")
+    {
+        tr("전체 원문 연결을 확인할 수 없습니다. 요약본으로 대체하지 않고 연동을 보류합니다.")
+            .into()
+    } else if detail.contains("image") || detail.contains("content") || detail.contains("encoding")
+    {
+        tr("첨부 또는 메시지를 온전히 전달할 수 없어 연동을 보류합니다. 대화 정보에서 원인을 확인하세요.").into()
+    } else if detail.contains("retrying") {
+        tr("기록이 작성 중입니다. 저장이 끝나면 자동으로 다시 확인합니다.").into()
+    } else {
+        detail.to_owned()
+    }
 }
 pub struct Manager {
     pub(super) detail: Option<PathBuf>,
@@ -861,11 +1054,12 @@ impl Manager {
         // Poll quickly only while working; all filesystem/account operations stay off the UI thread.
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                Event::Progress(gate, mut status) => {
-                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) { continue; }
-                    if status.discovering {
-                        status.rows = self.status.rows.clone();
-                        status.watched = self.status.watched;
+                Event::Progress(gate, status) => {
+                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) {
+                        continue;
+                    }
+                    if status.discovering && !self.status.rows.is_empty() {
+                        continue;
                     }
                     self.status = status;
                 }
@@ -884,7 +1078,9 @@ impl Manager {
                 }
                 Event::Scanned(gate, result) => {
                     self.busy = false;
-                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) { continue; }
+                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) {
+                        continue;
+                    }
                     match result {
                         Ok(status) => {
                             self.status = status;
@@ -900,14 +1096,18 @@ impl Manager {
         if self.busy {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
-        let enabled =
-            settings.conversation_sync_enabled && settings.conversation_sync_pair.is_some() && !workspaces.is_empty();
+        let enabled = settings.conversation_sync_enabled
+            && settings.conversation_sync_pair.is_some()
+            && !workspaces.is_empty();
         if !enabled {
             self.cancel_scan();
             self.workspaces = workspaces;
             return;
         }
-        if self.configured != settings.conversation_sync_pair || self.workspaces != workspaces || !self.gate.load(Ordering::Acquire) {
+        if self.configured != settings.conversation_sync_pair
+            || self.workspaces != workspaces
+            || !self.gate.load(Ordering::Acquire)
+        {
             self.gate.store(false, Ordering::Release);
             self.gate = Arc::new(AtomicBool::new(true));
             self.workspaces = workspaces;
@@ -957,20 +1157,29 @@ impl Manager {
     }
     pub(super) fn accounts_ready(accounts: &AccountManager) -> bool {
         [Tool::Claude, Tool::Codex].into_iter().all(|tool| {
-            accounts.active(tool).is_some_and(|id| !accounts.pending_login(tool, &id) && !accounts.login_required(tool, &id)
-                && accounts.profiles(tool).iter().any(|p| p.id == id))
+            accounts.active(tool).is_some_and(|id| {
+                !accounts.pending_login(tool, &id)
+                    && !accounts.login_required(tool, &id)
+                    && accounts.profiles(tool).iter().any(|p| p.id == id)
+            })
         })
     }
     pub(super) fn cancel_scan(&mut self) {
         self.gate.store(false, Ordering::Release);
         self.next = Instant::now();
     }
-    pub(super) fn enable(&mut self, settings: &mut super::state::Settings, accounts: &AccountManager) {
+    pub(super) fn enable(
+        &mut self,
+        settings: &mut super::state::Settings,
+        accounts: &AccountManager,
+    ) {
         if settings.conversation_sync_pair.is_some() {
             settings.conversation_sync_enabled = true;
             return;
         }
-        if self.connecting || self.busy { return; }
+        if self.connecting || self.busy {
+            return;
+        }
         self.busy = true;
         self.connecting = true;
         self.error = None;
@@ -979,20 +1188,43 @@ impl Manager {
         std::thread::spawn(move || {
             let result = if Self::accounts_ready(&accounts) {
                 Pair::connect(&accounts).map_err(|e| e.to_string())
-            } else { Err(kiln_common::i18n::tr("설정에서 Claude Code와 Codex 계정을 먼저 연결하세요.").to_owned()) };
+            } else {
+                Err(
+                    kiln_common::i18n::tr("설정에서 Claude Code와 Codex 계정을 먼저 연결하세요.")
+                        .to_owned(),
+                )
+            };
             let _ = tx.send(Event::Connected(result));
         });
     }
     fn workspace_status(&self, root: &Path) -> Status {
-        let rows: BTreeMap<_, _> = self.status.rows.iter().filter(|(_, row)| {
-            if let Some(workspace) = &row.workspace { return workspace == root; }
-            let cwd = Path::new(&row.source.cwd);
-            cwd.starts_with(root) && !self.workspaces.iter().any(|other| other != root && other.starts_with(root) && cwd.starts_with(other))
-        }).map(|(key, row)| (key.clone(), row.clone())).collect();
+        let rows: BTreeMap<_, _> = self
+            .status
+            .rows
+            .iter()
+            .filter(|(_, row)| {
+                if let Some(workspace) = &row.workspace {
+                    return workspace == root;
+                }
+                let cwd = Path::new(&row.source.cwd);
+                cwd.starts_with(root)
+                    && !self.workspaces.iter().any(|other| {
+                        other != root && other.starts_with(root) && cwd.starts_with(other)
+                    })
+            })
+            .map(|(key, row)| (key.clone(), row.clone()))
+            .collect();
         Status {
             watched: rows.len(),
-            checked: rows.values().filter(|r| matches!(r.phase, Phase::Synced | Phase::Failed | Phase::Waiting)).count(),
-            published: rows.values().filter(|r| r.phase == Phase::Synced).map(|r| r.copies.len().max(usize::from(r.target.is_some()))).sum(),
+            checked: rows
+                .values()
+                .filter(|r| matches!(r.phase, Phase::Synced | Phase::Failed | Phase::Waiting))
+                .count(),
+            published: rows
+                .values()
+                .filter(|r| r.phase == Phase::Synced)
+                .map(|r| r.copies.len().max(usize::from(r.target.is_some())))
+                .sum(),
             rows,
             workspaces: 1,
             discovering: self.status.discovering || self.connecting,
@@ -1000,22 +1232,57 @@ impl Manager {
         }
     }
     pub(super) fn badge(&self, root: &Path) -> (kiln_common::icons::Icon, egui::Color32, String) {
-        use kiln_common::{Theme, icons::Icon, i18n::tr};
+        use kiln_common::{Theme, i18n::tr, icons::Icon};
         let theme = Theme::current();
         let status = self.workspace_status(root);
         if self.error.is_some() || status.rows.values().any(|r| r.phase == Phase::Failed) {
-            (Icon::Warning, theme.orange, tr("대화 연동 · 확인 필요").into())
-        } else if self.connecting || status.discovering || status.rows.values().any(|r| matches!(r.phase, Phase::Queued | Phase::Reading | Phase::Copying)) || (self.busy && status.rows.is_empty()) {
-            (Icon::Refresh, theme.blue, kiln_common::trf!("대화 연동 중 · {}/{}", status.checked, status.watched))
+            (
+                Icon::Warning,
+                theme.orange,
+                tr("대화 연동 · 확인 필요").into(),
+            )
+        } else if self.connecting
+            || (status.discovering && status.rows.is_empty())
+            || status
+                .rows
+                .values()
+                .any(|r| matches!(r.phase, Phase::Queued | Phase::Reading | Phase::Copying))
+            || (self.busy && status.rows.is_empty())
+        {
+            (
+                Icon::Refresh,
+                theme.blue,
+                kiln_common::trf!("대화 연동 중 · {}/{}", status.checked, status.watched),
+            )
         } else if status.rows.is_empty() {
-            (Icon::Plug, theme.text_dim, tr("대화 연동됨 · 대화 대기").into())
+            (
+                Icon::Plug,
+                theme.text_dim,
+                tr("대화 연동됨 · 대화 대기").into(),
+            )
         } else if status.rows.values().any(|r| r.phase == Phase::Waiting) {
-            (Icon::History, theme.blue, tr("대화 연동 · 응답 완료 대기").into())
+            (
+                Icon::History,
+                theme.blue,
+                tr("대화 연동 · 응답 완료 대기").into(),
+            )
         } else {
-            (Icon::Check, theme.green, kiln_common::trf!("대화 연동 완료 · {}개", status.rows.len()))
+            (
+                Icon::Check,
+                theme.green,
+                kiln_common::trf!("대화 연동 완료 · {}개", status.rows.len()),
+            )
         }
     }
-    pub(super) fn dialog(&mut self, ctx: &egui::Context, name: &str, root: &Path, enabled: bool, settings: &mut super::state::Settings, accounts: &AccountManager) {
+    pub(super) fn dialog(
+        &mut self,
+        ctx: &egui::Context,
+        name: &str,
+        root: &Path,
+        enabled: bool,
+        settings: &mut super::state::Settings,
+        accounts: &AccountManager,
+    ) {
         use kiln_common::{Theme, fonts, i18n::tr};
         let theme = Theme::current();
         let mut close = false;
@@ -1030,32 +1297,44 @@ impl Manager {
                         close = kiln_common::widgets::icon_button(ui, kiln_common::icons::Icon::Close, 28.0, false, tr("닫기 (Esc)")).clicked();
                     });
                 });
-                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-150.0).max(180.0)).show(ui, |ui| {
+                ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(name).font(fonts::semibold(14.0)));
-                    ui.add(egui::Label::new(root.display().to_string()).wrap());
-                    if let Some(pair) = &settings.conversation_sync_pair {
-                        ui.label(format!("Claude Code: {} ↔ Codex: {}", pair.claude.label, pair.codex.label));
+                    ui.add(egui::Label::new(egui::RichText::new(root.display().to_string()).color(theme.text_dim)).truncate()).on_hover_text(root.display().to_string());
+                });
+                if let Some(pair) = &settings.conversation_sync_pair {
+                    ui.add(egui::Label::new(format!("Claude Code: {} ↔ Codex: {}", pair.claude.label, pair.codex.label)).truncate());
+                }
+                // A single scroll surface; fixed summary and footer never reflow with polling.
+                let list_height = (ctx.content_rect().height() - 340.0).clamp(120.0, 520.0);
+                self.progress_status_ui(ui, enabled, &status, list_height);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(tr("연동 범위와 지원 형식")).on_hover_text(tr("이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다."))
+                        .on_hover_text(tr("이미지를 포함한 원문을 연동합니다. 전달할 수 없는 첨부가 있으면 완료로 표시하지 않습니다."));
+                    if ui.button(tr("다시 확인")).clicked() {
+                        self.cache = Arc::new(Mutex::new(Cache::new()));
+                        self.next = Instant::now();
                     }
-                    ui.add_space(8.0);
-                    ui.add(egui::Label::new(tr("이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다.")).wrap());
-                    ui.add(egui::Label::new(egui::RichText::new(tr("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.")).color(theme.text_dim)).wrap());
-                    self.progress_status_ui(ui, enabled, &status);
                     if enabled && settings.conversation_sync_pair.is_none() && !self.connecting && Self::accounts_ready(accounts)
                         && ui.button(tr("계정 연결 다시 시도")).clicked() { self.enable(settings, accounts); }
-                    ui.add_space(8.0);
-                    ui.collapsing(tr("연동 범위와 지원 형식"), |ui| {
-                        ui.add(egui::Label::new(tr("기존에 열어 둔 세션도 포함합니다. 워크스페이스와 하위 폴더의 기본 CLI · 연결 계정 기록을 찾고, 두 저장 위치에 동기화합니다.")).wrap());
-                        ui.add(egui::Label::new(tr("응답마다 새 사본이 생깁니다. 열린 세션은 자동으로 바뀌지 않습니다. 이미지·첨부 파일은 지원하지 않습니다. Codex 0.162.1 · Claude Code 2.1.296 지원.")).wrap());
-                    });
                 });
+                ui.add(egui::Label::new(egui::RichText::new(tr("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.")).color(theme.text_dim)).wrap());
             });
-        if close || modal.should_close() { self.detail = None; }
+        if close || modal.should_close() {
+            self.detail = None;
+        }
     }
     #[cfg(test)]
     fn progress_ui(&self, ui: &mut egui::Ui, enabled: bool) {
-        self.progress_status_ui(ui, enabled, &self.status);
+        self.progress_status_ui(ui, enabled, &self.status, 280.0);
     }
-    fn progress_status_ui(&self, ui: &mut egui::Ui, enabled: bool, status: &Status) {
+    fn progress_status_ui(
+        &self,
+        ui: &mut egui::Ui,
+        enabled: bool,
+        status: &Status,
+        list_height: f32,
+    ) {
         use kiln_common::{
             Theme, fonts,
             i18n::tr,
@@ -1084,7 +1363,7 @@ impl Manager {
                 theme.orange,
                 tr("확인이 필요한 대화가 있습니다"),
             )
-        } else if status.discovering {
+        } else if status.discovering && status.rows.is_empty() {
             (Icon::Refresh, theme.blue, tr("워크스페이스 대화 찾는 중"))
         } else if copying {
             (Icon::Refresh, theme.blue, tr("대화 동기화 중"))
@@ -1125,7 +1404,8 @@ impl Manager {
                 if enabled && status.rows.is_empty() && !self.busy && status.workspaces > 0 {
                     ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code 또는 Codex 대화를 시작하면 자동으로 연결됩니다.")).wrap());
                 }
-                if enabled && self.busy && status.watched > 0 {
+                ui.label(kiln_common::trf!("완료 {}개 · 확인 필요 {}개 · 대기 {}개", status.rows.values().filter(|r| r.phase == Phase::Synced).count(), failed, waiting));
+                if enabled && status.watched > 0 {
                     let fraction = status.checked as f32 / status.watched as f32;
                     ui.add(egui::ProgressBar::new(fraction).text(kiln_common::trf!(
                         "기록 확인 {}/{} · 연결된 사본 {}개",
@@ -1145,7 +1425,9 @@ impl Manager {
                 }
                 egui::ScrollArea::vertical()
                     .id_salt("conversation-sync-progress")
-                    .max_height(280.0)
+                    .max_height(list_height)
+                    .min_scrolled_height(list_height)
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (key, row) in &status.rows {
                             ui.push_id(key, |ui| {
@@ -1191,6 +1473,14 @@ impl Manager {
                                         opposite(row.source.tool).display_name()
                                     ));
                                 });
+                                if !row.detail.is_empty() {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(failure_reason(&row.detail)).color(theme.orange),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
                                 let title = if row.title.is_empty() {
                                     row.source.id.as_str()
                                 } else {
@@ -1203,24 +1493,14 @@ impl Manager {
                                     .truncate(),
                                 )
                                 .on_hover_text(title);
-                                ui.label(
-                                    egui::RichText::new(
-                                        Path::new(&row.source.cwd)
-                                            .file_name()
-                                            .unwrap_or_default()
-                                            .to_string_lossy(),
-                                    )
-                                    .color(theme.text_dim),
-                                )
-                                .on_hover_text(&row.source.cwd);
-                                if !row.detail.is_empty() {
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new(&row.detail).color(theme.orange),
-                                        )
-                                        .wrap(),
-                                    );
-                                }
+                                ui.collapsing(tr("대화 정보"), |ui| {
+                                    ui.add(egui::Label::new(&row.source.cwd).wrap());
+                                    ui.label(&row.source.id);
+                                    ui.add(egui::Label::new(&row.detail).wrap());
+                                    if ui.small_button(tr("오류 정보 복사")).clicked() {
+                                        ui.ctx().copy_text(format!("{}\n{}\n{}", row.source.tool.display_name(), row.source.id, row.detail));
+                                    }
+                                });
                                 let targets = if row.copies.is_empty() {
                                     row.target.iter().collect::<Vec<_>>()
                                 } else { row.copies.iter().collect::<Vec<_>>() };
