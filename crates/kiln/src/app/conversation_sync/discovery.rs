@@ -40,7 +40,7 @@ impl Scope {
     pub fn contains(&self, source: &Source) -> bool {
         self.roots.contains(&(source.tool, source.root.clone())) && self.matches_cwd(&source.cwd)
     }
-    fn workspace(&self, cwd: &str) -> Option<&PathBuf> {
+    pub(super) fn workspace(&self, cwd: &str) -> Option<&PathBuf> {
         let cwd = Path::new(cwd).canonicalize().ok()?;
         self.workspaces
             .iter()

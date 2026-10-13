@@ -1271,3 +1271,19 @@ fn workspace_status_and_badges_do_not_mix_other_folders() {
     assert_eq!(manager.badge(Path::new("/example/b")).0, kiln_common::icons::Icon::Warning);
     assert_eq!(manager.badge(Path::new("/example/a/child")).0, kiln_common::icons::Icon::Refresh);
 }
+
+#[test]
+#[cfg(unix)]
+fn workspace_status_uses_canonical_assignment_for_aliased_working_directories() {
+    let f = Fixture::new(Tool::Claude);
+    let root = PathBuf::from(&f.source.cwd);
+    let alias = root.join("workspace-alias");
+    std::os::unix::fs::symlink(&root, &alias).unwrap();
+    let scope = discovery::Scope { workspaces: vec![root.clone()], roots: vec![] };
+    let mut source = f.source.clone(); source.cwd = alias.to_string_lossy().into_owned();
+    let row = Conversation::from_entry(&Entry { source, seen: String::new(), imported: false, title: "Aliased working directory".into(), copied_to: None, copies: vec![] }, Some(&scope));
+    assert_eq!(row.workspace.as_ref(), Some(&root));
+    let mut manager = Manager::default(); manager.workspaces = vec![root.clone()];
+    manager.status.rows.insert("fixture".into(), row);
+    assert_eq!(manager.workspace_status(&root).rows.len(), 1);
+}

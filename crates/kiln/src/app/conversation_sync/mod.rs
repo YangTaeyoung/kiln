@@ -329,6 +329,7 @@ enum Phase {
 }
 #[derive(Clone)]
 struct Conversation {
+    workspace: Option<PathBuf>,
     source: Source,
     title: String,
     phase: Phase,
@@ -337,8 +338,9 @@ struct Conversation {
     copies: Vec<Continuation>,
 }
 impl Conversation {
-    fn from_entry(entry: &Entry) -> Self {
+    fn from_entry(entry: &Entry, scope: Option<&discovery::Scope>) -> Self {
         Self {
+            workspace: scope.and_then(|s| s.workspace(&entry.source.cwd)).cloned(),
             source: entry.source.clone(),
             title: entry.title.clone(),
             phase: if entry.copied_to.is_some() {
@@ -601,7 +603,7 @@ fn scan_with_index(
         rows: active
             .iter()
             .filter(|(_, e)| !e.imported || e.copied_to.is_some())
-            .map(|(k, e)| (k.clone(), Conversation::from_entry(e)))
+            .map(|(k, e)| (k.clone(), Conversation::from_entry(e, scope)))
             .collect(),
         ..Default::default()
     };
@@ -671,7 +673,7 @@ fn scan_with_index(
             let row = status
                 .rows
                 .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry));
+                .or_insert_with(|| Conversation::from_entry(&entry, scope));
             row.title = title.clone();
             row.phase = Phase::Copying;
             notify(&status);
@@ -787,7 +789,7 @@ fn scan_with_index(
             let row = status
                 .rows
                 .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry));
+                .or_insert_with(|| Conversation::from_entry(&entry, scope));
             row.phase = if error.to_string().contains("retrying") {
                 Phase::Waiting
             } else {
@@ -983,6 +985,7 @@ impl Manager {
     }
     fn workspace_status(&self, root: &Path) -> Status {
         let rows: BTreeMap<_, _> = self.status.rows.iter().filter(|(_, row)| {
+            if let Some(workspace) = &row.workspace { return workspace == root; }
             let cwd = Path::new(&row.source.cwd);
             cwd.starts_with(root) && !self.workspaces.iter().any(|other| other != root && other.starts_with(root) && cwd.starts_with(other))
         }).map(|(key, row)| (key.clone(), row.clone())).collect();
