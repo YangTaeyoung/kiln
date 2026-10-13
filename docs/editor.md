@@ -13,11 +13,14 @@ comment commands and the language identity sent to a configured language server.
 
 ## File explorer
 
-Environment files (`.env`, `.env.*` and `.envrc`) remain visible in the default
-file list, even when Git ignores them. Click or use keyboard navigation to open
-them normally. Their ignored decoration remains; visibility does not change
-Git tracking or repository rules. Other ignored entries still use **Show ignored
-files**, including generated directories and similarly named `.env.*` folders.
+Git-ignored files and folders are visible by default, including `.env`,
+`.env.prod`, logs and generated directories. Muted names and icons plus a small
+**Ignored** badge distinguish them from other entries; hover explains the rule.
+Click or use keyboard navigation to open them normally. Folders load only when
+expanded. Visibility does not change Git tracking or repository rules.
+
+**Hide ignored files** is an explicit view filter, rather than the default.
+Internal `.git` and `.DS_Store` metadata stays hidden independently of Git rules.
 
 The reference behavior distinguishes file visibility from Git tracking:
 [VS Code Explorer](https://code.visualstudio.com/docs/editing/getting-started/userinterface#_explorer).

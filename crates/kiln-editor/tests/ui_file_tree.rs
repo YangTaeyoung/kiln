@@ -82,8 +82,10 @@ fn clicking_expands_dirs_and_opens_files() {
     let root = d.path().to_path_buf();
     let mut h = harness(&root);
     h.run();
-    assert!(h.query_by_label("target").is_none(), "gitignored dir hidden");
-    assert!(h.query_by_label("build.log").is_none());
+    h.get_by_label("target");
+    h.get_by_label("build.log").click();
+    h.run();
+    assert_eq!(take_events(&mut h), vec![EditorEvent::OpenFile(root.join("build.log"))]);
     h.get_by_label("src").click();
     h.run();
     assert!(h.state().tree.is_expanded(&root.join("src")));
@@ -103,9 +105,9 @@ fn ignored_environment_configs_are_visible_and_open_from_the_default_explorer() 
     std::fs::write(root.join("src/.env.prod"), "FIXTURE_ONLY=2\n").unwrap();
     let mut h = harness(&root);
     h.run();
-    assert!(!h.state().tree.show_ignored());
-    assert!(h.query_by_label("target").is_none());
-    assert!(h.query_by_label("build.log").is_none());
+    assert!(h.state().tree.show_ignored());
+    h.get_by_label("target");
+    h.get_by_label("build.log");
     for name in [".env", ".env.prod", ".env.local", ".envrc"] {
         h.get_by_label(name).click();
         h.run();
@@ -119,6 +121,53 @@ fn ignored_environment_configs_are_visible_and_open_from_the_default_explorer() 
     h.key_press(Key::Enter);
     h.run();
     assert_eq!(take_events(&mut h), vec![EditorEvent::OpenFile(root.join("src/.env.prod"))]);
+}
+
+#[test]
+fn ignored_badges_fit_narrow_views_in_all_languages() {
+    for language in kiln_common::i18n::Language::ALL {
+        kiln_common::i18n::with_language(language, || {
+            let d = fixture();
+            let root = d.path();
+            std::fs::write(root.join(".gitignore"), "/target\n*.log\n.env*\n").unwrap();
+            std::fs::write(root.join(".env.production.local"), "FIXTURE_ONLY=1\n").unwrap();
+            std::fs::write(root.join("target/debug/.env.production.local"), "FIXTURE_ONLY=1\n").unwrap();
+            let mut tree = FileTree::new(root.to_path_buf());
+            // Decorations and ignored markers have distinct reserved space.
+            tree.set_decorations(HashMap::from([(root.join("build.log"), Decoration { color: Color32::YELLOW, badge: Some('M') })]));
+            let mut h = Harness::builder().with_size(egui::vec2(240.0, 420.0)).wgpu().build_ui_state(
+                |ui, state: &mut State| { if common::fonts_ready(ui.ctx()) { state.events.extend(state.tree.ui_embedded(ui)); } },
+                State { tree, events: vec![] },
+            );
+            common::apply_theme(&h.ctx);
+            h.run();
+            h.remove_cursor();
+            h.run();
+            let label = kiln_common::i18n::tr("제외됨");
+            let mut badges = 0;
+            for shape in &h.output().shapes {
+                if let egui::epaint::Shape::Text(text) = &shape.shape {
+                    if text.galley.text() == label {
+                        badges += 1;
+                        let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        assert!(h.ctx.content_rect().contains_rect(bounds), "{language:?}: ignored marker clipped");
+                        assert_eq!(text.fallback_color, kiln_common::Theme::current().text_faint);
+                    }
+                    if text.galley.text() == ".env.production.local" {
+                        assert_eq!(text.fallback_color, kiln_common::Theme::current().text_faint);
+                    }
+                }
+            }
+            assert_eq!(badges, 3, "environment file, log and generated folder each expose status");
+            h.render().unwrap().save(format!("/tmp/kiln022-explorer-{language:?}.png")).unwrap();
+            h.get_by_label("target").click(); h.run();
+            assert!(h.state().tree.is_expanded(&root.join("target")));
+            h.get_by_label("debug").click(); h.run();
+            h.render().unwrap().save(format!("/tmp/kiln022-explorer-nested-{language:?}.png")).unwrap();
+            h.get_by_label("kiln").click(); h.run();
+            assert_eq!(take_events(&mut h), vec![EditorEvent::OpenFile(root.join("target/debug/kiln"))]);
+        });
+    }
 }
 
 #[test]
@@ -300,7 +349,7 @@ fn embedded_tree_moves_header_actions_into_the_host_menu() {
     assert!(h.query_by_label("새 파일…").is_none());
     h.get_by_label("docs").click(); h.run_steps(2);
     h.get_by_label("파일 작업").click(); h.run_steps(2);
-    for label in ["새 파일…", "새 폴더…", "새로 고침", "폴더 모두 접기", "무시된 파일 표시"] { h.get_by_label(label); }
+    for label in ["새 파일…", "새 폴더…", "새로 고침", "폴더 모두 접기", "무시된 파일 숨기기"] { h.get_by_label(label); }
     h.get_by_label("새 파일…").click(); h.run_steps(2);
     h.event(Event::Text("created.txt".into())); h.run_steps(2);
     h.key_press(Key::Enter); h.run_steps(2);
@@ -314,6 +363,10 @@ fn embedded_tree_moves_header_actions_into_the_host_menu() {
     h.get_by_label("파일 작업").click(); h.run_steps(2);
     h.get_by_label("폴더 모두 접기").click(); h.run_steps(2);
     assert!(!h.state().tree.is_expanded(&root.join("docs")));
+    h.get_by_label("파일 작업").click(); h.run_steps(2);
+    h.get_by_label("무시된 파일 숨기기").click(); h.run_steps(2);
+    assert!(!h.state().tree.show_ignored());
+    assert!(h.query_by_label("target").is_none());
     h.get_by_label("파일 작업").click(); h.run_steps(2);
     h.get_by_label("무시된 파일 표시").click(); h.run_steps(2);
     assert!(h.state().tree.show_ignored());

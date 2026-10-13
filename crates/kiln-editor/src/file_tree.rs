@@ -1,8 +1,7 @@
-//! 지연 로딩 파일 탐색기. .gitignore 존중, 파일 감시로 펼쳐진 폴더만 다시 읽는다.
+//! 지연 로딩 파일 탐색기. 무시된 항목도 표시하고 펼쳐진 폴더만 다시 읽는다.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
@@ -32,7 +31,7 @@ pub struct DirEntry {
     pub path: PathBuf,
     pub name: String,
     pub is_dir: bool,
-    /// Git/ignore status, independent of visibility for environment config files.
+    /// Git/ignore status, independent of default explorer visibility.
     pub ignored: bool,
 }
 
@@ -74,12 +73,14 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
-/// List one folder, directories first. Environment configuration files remain
-/// visible even when ignored; `show_ignored` controls other ignored entries.
+/// List one folder, directories first. Ignore rules decorate entries by default;
+/// callers can explicitly filter them. Internal filesystem metadata stays hidden.
 pub fn list_dir(dir: &Path, show_ignored: bool) -> std::io::Result<Vec<DirEntry>> {
-    let mut visible: HashSet<OsString> = HashSet::new();
-    let walker = ignore::WalkBuilder::new(dir)
-        .max_depth(Some(1))
+    let directory = std::fs::canonicalize(dir)?;
+    // Path matchers preserve excluded ancestors without traversing any sibling
+    // directories. A walker rooted at `dir` instead bypasses that root's rules.
+    let anchor = directory.ancestors().last().unwrap();
+    let mut matcher = ignore::WalkBuilder::new(anchor)
         .hidden(false)
         .git_ignore(true)
         .git_global(true)
@@ -88,27 +89,24 @@ pub fn list_dir(dir: &Path, show_ignored: bool) -> std::io::Result<Vec<DirEntry>
         .ignore(true)
         .parents(true)
         .follow_links(false)
-        .build();
-    for e in walker.flatten() {
-        if e.depth() == 1 {
-            visible.insert(e.file_name().to_owned());
-        }
-    }
+        .build_matchers().pop().unwrap();
     let mut out = Vec::new();
     for de in std::fs::read_dir(dir)? {
         let Ok(de) = de else { continue };
         let name_os = de.file_name();
         let name = name_os.to_string_lossy().into_owned();
-        let ignored = name == ".git" || name == ".DS_Store" || !visible.contains(&name_os);
+        if name == ".git" || name == ".DS_Store" {
+            continue;
+        }
         let path = de.path();
         let is_dir = match de.file_type() {
             Ok(ft) if ft.is_symlink() => path.is_dir(),
             Ok(ft) => ft.is_dir(),
             Err(_) => false,
         };
-        let environment_file = !is_dir
-            && (name == ".env" || name.starts_with(".env.") || name == ".envrc");
-        if ignored && !show_ignored && !environment_file {
+        let absolute = directory.join(&name_os);
+        let ignored = matcher.matched(absolute.strip_prefix(anchor).unwrap(), is_dir).is_ignore();
+        if ignored && !show_ignored {
             continue;
         }
         out.push(DirEntry { path, name, is_dir, ignored });
@@ -226,7 +224,7 @@ impl FileTree {
             rows_dirty: true,
             selected: None,
             focus_pending: false,
-            show_ignored: false,
+            show_ignored: true,
             decorations: HashMap::new(),
             dir_decor: HashMap::new(),
             rename: None,
@@ -273,7 +271,7 @@ impl FileTree {
         self.show_ignored = show_ignored;
         self.use_trash = use_trash;
         *self.ctx.lock() = ctx;
-        if show_ignored {
+        if !show_ignored {
             self.refresh();
         }
         self.set_decorations(decorations);
@@ -858,7 +856,9 @@ impl FileTree {
                     let folder_color = kiln_common::widgets::lerp_color(t.text_dim, t.accent, 0.35).gamma_multiply(dim);
                     ui_kit::paint_icon(p, icon_rect, if expanded { Icon::FolderOpen } else { Icon::Folder }, folder_color);
                 } else {
-                    ui_kit::paint_file_badge(p, icon_rect, &e.name);
+                    let mut icon_painter = p.clone();
+                    icon_painter.multiply_opacity(if e.ignored { 0.55 } else { 1.0 });
+                    ui_kit::paint_file_badge(&icon_painter, icon_rect, &e.name);
                 }
                 let deco = self.decorations.get(&e.path).copied();
                 let dir_dot = if e.is_dir { self.dir_decor.get(&e.path).copied() } else { None };
@@ -872,11 +872,22 @@ impl FileTree {
                     let edit_rect = Rect::from_min_max(pos2(text_left - 6.0, rect.top() + 2.0), pos2(rect.right() - 8.0, rect.bottom() - 2.0));
                     self.inline_edit(ui, edit_rect, false);
                 } else {
-                    let right_reserved = if deco.and_then(|d| d.badge).is_some() || dir_dot.is_some() { 30.0 } else { 10.0 };
+                    let status_reserved = if deco.and_then(|d| d.badge).is_some() || dir_dot.is_some() { 30.0 } else { 10.0 };
+                    let ignored_label = e.ignored.then(|| kiln_common::i18n::tr("제외됨"));
+                    let ignored_galley = ignored_label.map(|label| p.layout_no_wrap(label.into(), FontId::proportional(10.5), t.text_faint));
+                    // Keep status badges outside the filename clip, including narrow views.
+                    let ignored_width = ignored_galley.as_ref().map_or(0.0, |g| g.size().x + 12.0);
+                    let right_reserved = status_reserved + ignored_width;
                     let clip = Rect::from_min_max(pos2(text_left, rect.top()), pos2(rect.right() - right_reserved, rect.bottom()));
                     let pc = ui.painter().with_clip_rect(clip.intersect(ui.clip_rect()));
                     pc.text(pos2(text_left, rect.center().y), Align2::LEFT_CENTER, &e.name, FontId::proportional(13.5), color);
                     let p = ui.painter();
+                    if let Some(galley) = ignored_galley {
+                        let right = rect.right() - status_reserved;
+                        let badge_rect = Rect::from_center_size(pos2(right - ignored_width / 2.0, rect.center().y), vec2(ignored_width - 4.0, 16.0));
+                        p.rect_filled(badge_rect, 4.0, kiln_common::widgets::tint(t.text_faint, 0.08));
+                        p.galley(badge_rect.center() - galley.size() / 2.0, galley, t.text_faint);
+                    }
                     if let Some(b) = deco.and_then(|d| d.badge) {
                         let c = deco.map(|d| d.color).unwrap_or(t.text_dim);
                         let br = Rect::from_center_size(pos2(rect.right() - 20.0, rect.center().y), vec2(18.0, 17.0));
@@ -899,6 +910,9 @@ impl FileTree {
                     actions.push(Action::Select(e.path.clone()));
                 }
                 self.row_menu(&resp, &e, actions);
+                if e.ignored {
+                    resp.on_hover_text(kiln_common::i18n::tr("Git/ignore 규칙에서 제외된 항목입니다"));
+                }
             }
         }
     }
@@ -1352,32 +1366,41 @@ mod tests {
     }
 
     #[test]
-    fn ignored_environment_files_stay_visible_without_unhiding_generated_directories() {
+    fn ignored_entries_are_visible_by_default_and_explicit_filter_survives_root_changes() {
         let d = tree_fixture();
         let root = d.path();
         std::fs::write(root.join(".gitignore"), "/target\n*.log\n.env\n.env.*\n.envrc\n").unwrap();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".DS_Store"), "fixture").unwrap();
         for dir in [root.to_path_buf(), root.join("src")] {
             for name in [".env", ".env.prod", ".env.local", ".env.production.local", ".env.example", ".envrc"] {
                 std::fs::write(dir.join(name), "FIXTURE_ONLY=1\n").unwrap();
             }
-            // A similarly named directory is not a configuration file.
             std::fs::create_dir(dir.join(".env.cache")).unwrap();
-            let entries = list_dir(&dir, false).unwrap();
-            for name in [".env", ".env.prod", ".env.local", ".env.production.local", ".env.example", ".envrc"] {
-                let entry = entries.iter().find(|entry| entry.name == name).unwrap();
-                assert!(entry.ignored && !entry.is_dir);
+            let entries = list_dir(&dir, true).unwrap();
+            for name in [".env", ".env.prod", ".env.local", ".env.production.local", ".env.example", ".envrc", ".env.cache"] {
+                assert!(entries.iter().find(|entry| entry.name == name).unwrap().ignored);
             }
-            assert!(!entries.iter().any(|entry| entry.name == ".env.cache"));
+            assert!(!entries.iter().any(|entry| entry.name == ".git" || entry.name == ".DS_Store"));
         }
         let mut tree = FileTree::new(root.to_path_buf());
+        assert!(tree.show_ignored());
         tree.set_expanded(&root.join("src"), true);
-        assert!(tree.visible_paths().contains(&root.join("src/.env.prod")));
-        assert!(!tree.visible_paths().contains(&root.join("target")));
-        tree.set_show_ignored(true);
-        assert!(tree.visible_paths().contains(&root.join("target")));
+        for name in ["src/.env.prod", "target", "app.log", ".env.cache"] {
+            assert!(tree.visible_paths().contains(&root.join(name)));
+        }
+        assert!(list_dir(&root.join("target"), true).unwrap().iter().find(|e| e.name == "debug").unwrap().ignored,
+            "children inherit the ignored directory status");
         tree.set_show_ignored(false);
+        for name in [".env.prod", "target", "app.log", ".env.cache"] {
+            assert!(!tree.visible_paths().contains(&root.join(name)));
+        }
+        tree.set_root(root.join("src"));
+        assert!(!tree.show_ignored());
+        assert!(!tree.visible_paths().contains(&root.join("src/.env.prod")));
+        tree.set_show_ignored(true);
+        tree.set_root(root.to_path_buf());
         assert!(tree.visible_paths().contains(&root.join(".env.prod")));
-        assert!(!tree.visible_paths().contains(&root.join("target")));
     }
 
     #[test]
@@ -1397,7 +1420,8 @@ mod tests {
         assert_eq!(t.loaded_dirs().len(), 3);
         let vis = t.visible_paths();
         assert!(vis.contains(&d.path().join("src/nested/x.txt")));
-        assert!(!vis.iter().any(|p| p.starts_with(d.path().join("target"))));
+        assert!(vis.contains(&d.path().join("target")));
+        assert!(!vis.contains(&d.path().join("target/debug")), "ignored folders remain lazy");
         assert_eq!(t.selected(), Some(d.path().join("src/nested/x.txt").as_path()));
     }
 

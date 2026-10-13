@@ -10953,5 +10953,15 @@
     "en": "Updating…",
     "ja": "更新中…",
     "zh-CN": "正在更新…"
+  },
+  "제외됨": {
+    "en": "Ignored",
+    "ja": "対象外",
+    "zh-CN": "已忽略"
+  },
+  "Git/ignore 규칙에서 제외된 항목입니다": {
+    "en": "Excluded by Git/ignore rules",
+    "ja": "Git/ignore ルールの対象外です",
+    "zh-CN": "已被 Git/ignore 规则排除"
   }
 }
