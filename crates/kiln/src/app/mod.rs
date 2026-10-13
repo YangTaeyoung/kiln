@@ -573,7 +573,9 @@ impl KilnApp {
         }
         self.last_save_at = Instant::now();
         let p = self.persist();
-        if self.last_saved.as_ref() != Some(&p) {
+        // Closing requires a durable checkpoint even when the in-memory state
+        // is unchanged: the file may have been removed, blocked or corrupted.
+        if force || self.last_saved.as_ref() != Some(&p) {
             match state::save(&p) {
                 Ok(()) => { self.last_saved = Some(p); self.save_error = None; }
                 Err(error) => {
