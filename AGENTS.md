@@ -12,6 +12,7 @@ the user's shells, agents, builds, or servers.
 - [Pane layout](docs/pane-layout.md) — accepted movement, boundary scope and snapping behavior.
 - [Remote files and verification](docs/maintainers/remote-files-verification.md) — isolated provider fixtures and explicit coverage boundaries.
 - [Automatic account usage](docs/maintainers/account-usage.md) — background cadence, provider contracts, bounded requests and isolated verification.
+- [0.1.23 release verification](docs/maintainers/0.1.23-status.md) — native conversation continuity, progress indicators and verified distribution.
 - [0.1.22 release verification](docs/maintainers/0.1.22-status.md) — credential selection, account-specific sign-in and responsive CLI updates.
 - [0.1.21 release verification](docs/maintainers/0.1.21-status.md) — automatic per-account usage, deadline scheduling and sign-in recovery.
 - [Agent accounts](docs/accounts.md) — official CLI browser sign-in and profile isolation.
