@@ -662,6 +662,11 @@ impl KilnApp {
             ..Default::default()
         });
         if spec.workspace.is_none() { spec.workspace = ws_info.map(|w| w.1); }
+        // New sessions start at the size of the largest terminal drawn in the latest pass.
+        if let Some((cols, rows)) = self.conn.terminal_grid() {
+            spec.cols = cols;
+            spec.rows = rows;
+        }
         if let Some(req) = self.conn.create(spec) {
             *pending = Some(req);
             self.pending_creates.insert(req, pane);

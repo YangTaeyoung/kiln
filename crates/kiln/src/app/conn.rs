@@ -86,6 +86,8 @@ pub struct Conn {
     /// 붙어 있는 세션이 마지막으로 그려진 `pump` 회차와 시각.
     drawn: HashMap<SessionId, (u64, Instant)>,
     pumps: u64,
+    /// Largest terminal grid drawn in the latest `pump` pass, and that pass.
+    grid: Option<((u16, u16), u64)>,
     /// Explicitly closed sessions stay hidden from late PTY exit/update events.
     closing_sessions: std::collections::HashSet<SessionId>,
     pub events: Vec<ConnEvent>,
@@ -126,6 +128,7 @@ impl Conn {
             attached: HashMap::new(),
             drawn: HashMap::new(),
             pumps: 0,
+            grid: None,
             closing_sessions: Default::default(),
             events: Vec::new(),
             ctx,
@@ -167,6 +170,7 @@ impl Conn {
             attached: HashMap::new(),
             drawn: HashMap::new(),
             pumps: 0,
+            grid: None,
             closing_sessions: Default::default(),
             events: Vec::new(),
             ctx,
@@ -449,6 +453,10 @@ impl Conn {
 
     pub fn attach(&mut self, sid: SessionId, cols: u16, rows: u16) {
         self.drawn.insert(sid, (self.pumps, Instant::now()));
+        let area = |(c, r): (u16, u16)| u32::from(c) * u32::from(r);
+        if self.grid.is_none_or(|(grid, pass)| pass != self.pumps || area(grid) < area((cols, rows))) {
+            self.grid = Some(((cols, rows), self.pumps));
+        }
         if self.attached.get(&sid) != Some(&(cols, rows)) {
             let first = !self.attached.contains_key(&sid);
             self.attached.insert(sid, (cols, rows));
@@ -458,6 +466,11 @@ impl Conn {
                 self.send(ClientMsg::Resize { session: sid, cols, rows });
             }
         }
+    }
+
+    /// 최근에 그린 가장 큰 터미널의 열·행. 새 세션을 이 크기로 만든다.
+    pub fn terminal_grid(&self) -> Option<(u16, u16)> {
+        self.grid.map(|(grid, _)| grid)
     }
 
     /// 크기를 바꾸지 않고 화면을 계속 받는다(검사 화면처럼 터미널 캔버스 없이 표시할 때).
@@ -886,6 +899,19 @@ mod completion_snapshot_transition_tests {
 #[cfg(test)]
 mod hidden_session_tests {
     use super::*;
+    #[test]
+    fn terminal_grid_is_the_largest_size_drawn_in_the_latest_pass() {
+        let mut conn = Conn::offline(egui::Context::default());
+        assert_eq!(conn.terminal_grid(), None);
+        conn.pumps = 1;
+        conn.attach(1, 90, 20);
+        conn.attach(2, 180, 50);
+        conn.attach(3, 60, 40);
+        assert_eq!(conn.terminal_grid(), Some((180, 50)));
+        conn.pumps = 2;
+        conn.attach(1, 120, 30);
+        assert_eq!(conn.terminal_grid(), Some((120, 30)), "a new pass replaces the previous layout");
+    }
     #[test]
     fn focus_reports_are_not_recorded_as_user_input() {
         let conn = Conn::offline(egui::Context::default());
