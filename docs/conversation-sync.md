@@ -31,13 +31,38 @@ conversation display and become part of the next model request. Kiln creates no
 summary prompt, handoff note, or extra model request. Different conversations in
 the same folder remain separate; workspace discovery does not merge their histories.
 
+## Matching names and readable history
+
+Kiln uses the source CLI's saved conversation name for both resume pickers. Codex
+names come from its native metadata API, including names present only in its
+database; the append-only text index is a fallback. A
+native rename is detected even when no new response was written. Claude's custom
+name takes precedence over its generated name; unnamed sessions use the first
+prompt. Kiln pins a missing Claude title through its native title sidecar and a missing
+Codex name through its native API, leaving source transcript bodies unchanged. Codex copies receive the same name through
+`thread/name/set`, followed by a metadata read that checks persistence.
+
+Historical tool calls/results use the same labeled, fenced text in both CLIs.
+Complete JSON tool results are decoded into fields and multiline output, including
+adjacent JSON responses and nested text blocks. Invalid or truncated JSON stays
+verbatim. Code and angle-bracket text stay inside fences, and source-reference
+footers are displayed as literal text. The exact original tool text is retained
+in local copy metadata with a hash of its visible representation; an edited
+visible message is never silently replaced by that metadata. Images retain their
+original native blocks. A Codex visible answer and its raw response with the same
+message ID appear once, including when their reference footers differ.
+
+The native clients still control typography and terminal layout. This aligns names
+and portable message content, not their entire UI. New corrected copies appear
+in `/resume`; existing open sessions and earlier copies retain their history.
+
 ## Read synchronization status
 
 Click a workspace's sync icon or choose **View conversation sync status** from its
 context menu. The workspace icon and its status dialog show waiting, working, attention-needed, paused, or a green
 check when all completed conversations have been synchronized. During work it
 shows the number of transcript records checked and new copies created. The list
-shows each source conversation's first prompt, project, direction, status, and a
+shows each source conversation's native title (or first prompt when unnamed), project, direction, status, and a
 button to copy its continuation ID. Copies that have not been continued are
 hidden from the list to avoid displaying both sides of the same transfer.
 Codex native import provenance is also checked: importing an unchanged Kiln copy
@@ -55,7 +80,7 @@ The check refers to **completed responses**, not an answer still being generated
 - New continuations target **Codex CLI 0.162.1** and **Claude Code 2.1.296**.
   Verified input versions include Codex 0.154.0, 0.155.0-alpha.9.2, 0.155.1,
   0.160.0, 0.160.1, 0.161.0, 0.162.0-alpha.17.2 and 0.162.1; Claude Code
-  2.1.272, 2.1.281, 2.1.289, 2.1.291, 2.1.292, 2.1.295 and 2.1.296.
+  2.1.272, 2.1.281, 2.1.289, 2.1.291, 2.1.292, 2.1.295, 2.1.296 and 2.1.299.
   Identity and content validation still apply to every transcript. Changing
   working directories within the same Claude session does not invalidate it.
   Unknown versions fail visibly; an auto-update may require an adapter update.
@@ -72,7 +97,7 @@ The check refers to **completed responses**, not an answer still being generated
   native `AgentMessage` text is retained without duplicating both projections.
 - Each changed, completed transcript creates a **new native session**. An already
   open CLI keeps its current history until you select the latest copy. Kiln never
-  edits an existing conversation or merges parallel branches. Continuing an older
+  rewrites an existing transcript body or merges parallel branches. Continuing an older
   copy creates a separate branch. Earlier copies remain in the resume picker.
 - A complete local transcript is required. Codex inherited-history references,
   subagent conversations, broken Claude parent chains, and Claude project path
@@ -125,3 +150,7 @@ References: [Codex app-server](https://learn.chatgpt.com/docs/app-server),
 [Claude lifecycle hooks](https://code.claude.com/docs/en/hooks).
 
 Native indexing reference: [Codex thread/read and list regression](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/tests/suite/v2/thread_read.rs#L107).
+
+Title references: [Claude session naming](https://code.claude.com/docs/en/sessions),
+[Codex name persistence regression](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/tests/suite/v2/thread_name_persistence.rs),
+and [Codex append-only title index](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/rollout/src/session_index.rs).

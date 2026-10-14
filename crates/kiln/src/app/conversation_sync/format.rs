@@ -215,7 +215,7 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
             Some("assistant") => "assistant",
             _ => continue,
         };
-        let content = &row["message"]["content"];
+        let content = super::portable::content(row, &row["message"]["content"]);
         // CLI commands and their local output are not user prompts to another provider.
         if role == "user"
             && content.as_str().is_some_and(|s| {
@@ -236,7 +236,7 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
                 continue;
             }
         }
-        messages.extend(text_blocks(content, role)?);
+        messages.extend(text_blocks(&content, role)?);
     }
     Ok(messages)
 }
@@ -258,6 +258,7 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
     let mut expected_images: HashMap<String, usize> = HashMap::new();
     let mut copied_images: HashMap<String, usize> = HashMap::new();
     let mut raw_answers: HashMap<usize, HashSet<String>> = HashMap::new();
+    let mut raw_ids = HashSet::new();
     let mut turn = 0;
     for row in rows {
         let p = &row["payload"];
@@ -274,7 +275,11 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
                         .collect::<String>()
                 })
                 .unwrap_or_default();
-            raw_answers.entry(turn).or_default().insert(text);
+            if let Some(id) = p["id"].as_str() {
+                raw_ids.insert((turn, id));
+            } else {
+                raw_answers.entry(turn).or_default().insert(text);
+            }
         }
         if row["type"] == "event_msg" && p["type"] == "user_message" {
             if let Some(t) = p["message"].as_str() {
@@ -339,6 +344,7 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
                     // Some native/imported logs persist a visible answer without a Responses
                     // message. Preserve that original answer; never duplicate both projections.
                     if visible_ids.insert(id)
+                        && !raw_ids.contains(&(turn, id))
                         && !raw_answers
                             .get(&turn)
                             .is_some_and(|answers| answers.contains(&text))
@@ -396,7 +402,10 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
                         messages.extend(parts);
                     }
                 }
-                Some("assistant") => messages.extend(text_blocks(&p["content"], "assistant")?),
+                Some("assistant") => messages.extend(text_blocks(
+                    &super::portable::content(row, &p["content"]),
+                    "assistant",
+                )?),
                 _ => {} // system/developer instructions stay with their provider.
             },
             Some("function_call" | "custom_tool_call") => messages.push(Message {
@@ -463,6 +472,18 @@ pub fn render(
     timestamp: &str,
     messages: &[Message],
 ) -> Result<Vec<u8>> {
+    let title = super::titles::fallback(messages);
+    render_titled(tool, id, cwd, timestamp, messages, &title)
+}
+
+pub fn render_titled(
+    tool: Tool,
+    id: &str,
+    cwd: &str,
+    timestamp: &str,
+    messages: &[Message],
+    title: &str,
+) -> Result<Vec<u8>> {
     ensure!(
         !messages.is_empty() && messages.iter().any(|m| m.role == "user"),
         "No completed user conversation"
@@ -473,32 +494,25 @@ pub fn render(
             let mut parent: Option<String> = None;
             for (i, m) in messages.iter().enumerate() {
                 let mid = super::stable_id(&format!("{id}:{i}"));
+                let shown = if m.role == "assistant" {
+                    super::portable::display(&m.text)
+                } else {
+                    m.text.clone()
+                };
                 let payload = if m.role == "user" {
                     json!({"role":"user","content":claude_content(m)?})
                 } else {
-                    json!({"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":[{"type":"text","text":m.text}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}})
+                    json!({"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":[{"type":"text","text":shown}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}})
                 };
                 rows.push(json!({"type":m.role,"uuid":mid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296","message":payload}));
+                super::portable::annotate(rows.last_mut().unwrap(), &m.text, &shown);
                 parent = Some(mid);
             }
             // Native pickers inspect bounded head/tail windows. A long initial
             // message can fill the head before a complete prompt is available.
-            let title = messages
-                .iter()
-                .find(|m| m.role == "user" && !m.text.trim().is_empty())
-                .map(|m| {
-                    m.text
-                        .lines()
-                        .next()
-                        .unwrap_or_default()
-                        .chars()
-                        .take(96)
-                        .collect::<String>()
-                })
-                .unwrap_or_else(|| "Linked conversation".into());
             rows.push(
                 json!({"type":"custom-title","sessionId":id,"customTitle":title,
-                "uuid":super::stable_id(&format!("{id}:title")),"timestamp":timestamp}),
+                "uuid":super::stable_id(&format!("{id}:title")),"timestamp":timestamp,"kiln_projection":4}),
             );
         }
         Tool::Codex => {
@@ -507,9 +521,14 @@ pub fn render(
             rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"task_started","turn_id":turn,"model_context_window":null,"collaboration_mode_kind":"default"}}));
             for (i, m) in messages.iter().enumerate() {
                 let mid = super::stable_id(&format!("{id}:{i}"));
+                let shown = if m.role == "assistant" {
+                    super::portable::display(&m.text)
+                } else {
+                    m.text.clone()
+                };
                 let mut content = Vec::new();
                 if !m.text.is_empty() {
-                    content.push(json!({"type":if m.role=="user"{"input_text"}else{"output_text"},"text":m.text}));
+                    content.push(json!({"type":if m.role=="user"{"input_text"}else{"output_text"},"text":shown}));
                 }
                 content.extend(
                     m.images
@@ -521,6 +540,7 @@ pub fn render(
                     p["phase"] = json!("final_answer");
                 }
                 rows.push(json!({"timestamp":timestamp,"type":"response_item","payload":p,"metadata":{"client_authored":true}}));
+                super::portable::annotate(rows.last_mut().unwrap(), &m.text, &shown);
                 let item = if m.role == "user" {
                     {
                         let mut content = Vec::new();
@@ -535,11 +555,13 @@ pub fn render(
                         json!({"type":"UserMessage","id":mid,"content":content})
                     }
                 } else {
-                    json!({"type":"AgentMessage","id":mid,"content":[{"type":"Text","text":m.text}],"phase":"final_answer"})
+                    json!({"type":"AgentMessage","id":mid,"content":[{"type":"Text","text":shown}],"phase":"final_answer"})
                 };
                 rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":item,"completed_at_ms":0}}));
             }
-            rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"task_complete","turn_id":turn,"last_agent_message":messages.last().map(|m|m.text.as_str())}}));
+            rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"task_complete","turn_id":turn,"last_agent_message":null}}));
+            rows.last_mut().unwrap()["kiln_projection"] = json!(4);
+            rows.last_mut().unwrap()["kiln_title"] = json!(title);
             for (i, row) in rows.iter_mut().enumerate() {
                 row["ordinal"] = json!(i);
             }
