@@ -669,6 +669,8 @@ impl TermView {
     }
 
     fn request_size(&mut self, ctx: &egui::Context, conn: &mut Conn, cols: u16, rows: u16) {
+        // 크기가 안정되기를 기다리는 동안에도 보이는 세션의 화면은 계속 받는다.
+        conn.keep_attached(self.session);
         let now = std::time::Instant::now();
         match self.pending_size {
             Some((sz, _)) if sz == (cols, rows) => {}
