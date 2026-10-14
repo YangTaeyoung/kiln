@@ -12,7 +12,9 @@ are included; reopening a panel or receiving a lifecycle hook is not required.
 
 The initial synchronization selects the **20 most recently modified conversations
 per workspace**, across both tools and their default/connected namespaces. The
-selection is persisted so restarting Kiln continues the same initial batch. Metadata-only CLI sessions and local-command-only sessions do not consume a slot. On upgrading from 0.1.24, the initial selection is refreshed once to exclude those empty sessions. New
+selection is persisted so restarting Kiln continues the same initial batch. Version
+0.1.28 refreshes that selection once to include Codex compressed (`.jsonl.zst`)
+histories. Compression and native materialization retain the same conversation ID. Metadata-only CLI sessions and local-command-only sessions do not consume a slot. On upgrading from 0.1.24, the initial selection is refreshed once to exclude those empty sessions. New
 and modified conversations are discovered afterward, including an older session
 that saves another update. Closing a workspace pauses its synchronization; linking
 a different workspace starts that folder's own initial batch. Overlapping folders
@@ -26,7 +28,7 @@ are deduplicated. Switching the active account does not redirect the pinned
 connection. The status dialog identifies the pinned account pair. Sync remains opt-in.
 
 In the other CLI, open the same project and use **`/resume`** to select the newest
-conversation copy. Original user and assistant messages appear in the CLI's normal
+linked conversation. Original user and assistant messages appear in the CLI's normal
 conversation display and become part of the next model request. Kiln creates no
 summary prompt, handoff note, or extra model request. Different conversations in
 the same folder remain separate; workspace discovery does not merge their histories.
@@ -53,8 +55,36 @@ original native blocks. A Codex visible answer and its raw response with the sam
 message ID appear once, including when their reference footers differ.
 
 The native clients still control typography and terminal layout. This aligns names
-and portable message content, not their entire UI. New corrected copies appear
-in `/resume`; existing open sessions and earlier copies retain their history.
+and portable message content, not their entire UI.
+
+## One canonical conversation and exclusive handover
+
+Each linked conversation keeps one native ID per tool and account namespace.
+Completed continuations append to that existing endpoint; switching back does not
+create another copy. Kiln preserves the existing native log bytes, including its
+provider-private records, and verifies every transferred message and image before
+publishing the appended checkpoint. A conflicting branch remains intact and is
+reported for attention rather than silently merged.
+
+Inside Kiln, opening the same linked conversation requests ownership for the new
+panel. Kiln interrupts the previous managed CLI and the newly opened reader,
+waits for confirmed exits, synchronizes the final saved checkpoint, and reopens
+only the requested panel at its canonical ID. Prompts wait while ownership is
+being transferred. Capacity recovery and automatic CLI restarts cannot reclaim
+an inactive conversation. Other conversations continue running. If a CLI does
+not exit or history cannot be verified, the new panel stays waiting with a
+visible status; Kiln does not force-kill it or claim that transfer completed.
+
+Old generated snapshots are consolidated only when recorded publication/import
+provenance proves that they belong to this conversation and their full history
+is already present in its canonical endpoint. Superseded snapshots are archived
+with an integrity manifest. Codex snapshots with descendant histories remain
+available for review instead of archiving those descendants implicitly. Original conversations and divergent branches remain
+intact. An old alias opened inside Kiln is redirected to the canonical ID.
+
+Exclusive handover applies to managed Kiln agent panels. External terminals and
+other desktop applications do not participate in Kiln's ownership protocol;
+close those readers before continuing the same linked conversation in Kiln.
 
 ## Read synchronization status
 
@@ -95,10 +125,12 @@ The check refers to **completed responses**, not an answer still being generated
   visibly. A conversation is **not marked complete** by dropping an attachment.
   When a Codex visible answer has no corresponding Responses message, its original
   native `AgentMessage` text is retained without duplicating both projections.
-- Each changed, completed transcript creates a **new native session**. An already
-  open CLI keeps its current history until you select the latest copy. Kiln never
-  rewrites an existing transcript body or merges parallel branches. Continuing an older
-  copy creates a separate branch. Earlier copies remain in the resume picker.
+- Each linked conversation retains its canonical native IDs. Existing history is
+  preserved byte for byte and new messages are appended after prefix validation.
+  Managed open endpoints wait for handover before publication. Unrelated or
+  divergent histories are never merged based on matching titles or prompts.
+  Interrupted turns retain their saved request, tool records, and explicit
+  interruption marker; unpersisted streamed output cannot be reconstructed.
 - A complete local transcript is required. Codex inherited-history references,
   subagent conversations, broken Claude parent chains, and Claude project path
   encodings over 200 characters are rejected. Claude compaction can be traversed
@@ -111,8 +143,8 @@ The check refers to **completed responses**, not an answer still being generated
   not count toward the retained bound. While a CLI appends records, the reader
   verifies that the captured prefix is unchanged and transfers only complete
   records from that checkpoint. Rewrites and replacements retry. Converted copies are limited to 1 GiB;
-  the tracked-record limit is 4096. Full copies consume disk space; Kiln does not
-  automatically delete CLI history. Context-window limits and provider-side
+  the tracked-record limit is 4096. Full histories and archived snapshots consume
+  disk space; archived contents remain available locally. Context-window limits and provider-side
   compaction still apply when a CLI resumes a long conversation.
 
 ## Implementation and validation
@@ -126,7 +158,9 @@ files are copied by the synchronizer. Private files, bounded stable reads,
 symlink rejection, a process lock, atomic no-clobber publication and a persisted
 retry plan protect original transcripts. Imported fingerprints suppress loops across both destination namespaces. A durable
 import baseline and per-destination publication plans make partial failures retryable
-without replacing an existing conversation. Codex copies are also registered with
+without generating another conversation ID. `canonical.rs` validates append-only
+updates and provenance-based snapshot retirement; `handover.rs` stores ownership,
+and `agent_handover.rs` coordinates managed PTY exit and restart. Codex endpoints are registered with
 its native metadata index through `codex --no-daemon app-server` and `thread/read`
 (without turns); this prevents an existing `/resume` database from hiding a newly
 written file. This metadata read does not start a model turn. Registration has a

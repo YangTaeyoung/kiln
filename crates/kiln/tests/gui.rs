@@ -85,6 +85,75 @@ fn shutdown(base: &std::path::Path) {
     }
 }
 
+#[test]
+fn linked_resume_stops_the_old_agent_flushes_history_and_reopens_only_the_winner() {
+    use std::os::unix::fs::PermissionsExt;
+    use kiln::{app::{Action, agent_runtime},};
+    use kiln_accounts::Tool;
+    use serde_json::json;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("exclusive-handover");
+    struct Cleanup(PathBuf, Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl Drop for Cleanup { fn drop(&mut self) { shutdown(&self.0); for (key, value) in &self.1 { unsafe { if let Some(value) = value { std::env::set_var(key, value); } else { std::env::remove_var(key); } } } } }
+    let _cleanup = Cleanup(base.clone(), ["PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"].into_iter().map(|key| (key, std::env::var_os(key))).collect());
+    let codex = base.join("codex"); let claude = base.join("claude"); let bin = base.join("bin");
+    for dir in [&codex, &claude, &bin] { std::fs::create_dir_all(dir).unwrap(); }
+    for tool in Tool::ALL {
+        let path = bin.join(tool.key());
+        std::fs::write(&path, include_str!("fixtures/handover_cli.py")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    unsafe { std::env::set_var("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default())); std::env::set_var("CODEX_HOME", &codex); std::env::set_var("CLAUDE_CONFIG_DIR", &claude); }
+    let mut h = Harness::builder().with_size([1100.,720.]).wgpu().build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    let manager = h.state().debug_accounts();
+    let home = base.join("accounts/home");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    std::fs::write(home.join(".claude/.credentials.json"), r#"{"claudeAiOauth":{"accessToken":"fixture-only","refreshToken":"fixture-only"}}"#).unwrap();
+    std::fs::write(home.join(".claude.json"), json!({"oauthAccount":{"emailAddress":"handover@example.invalid"}}).to_string()).unwrap();
+    use base64::Engine;
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"email":"handover@example.invalid"}"#);
+    std::fs::write(home.join(".codex/auth.json"), json!({"tokens":{"id_token":format!("x.{claims}.x"),"access_token":"fixture-only","refresh_token":"fixture-only"}}).to_string()).unwrap();
+    for tool in Tool::ALL { manager.save_current(tool, "Handover fixture").unwrap(); }
+    let endpoint = |tool, key| PathBuf::from(&manager.launch_environment(tool).unwrap().into_iter().find(|(k, _)| k == key).unwrap().1);
+    let codex = endpoint(Tool::Codex, "CODEX_HOME"); let claude = endpoint(Tool::Claude, "CLAUDE_CONFIG_DIR");
+    unsafe { std::env::set_var("CODEX_HOME", &codex); std::env::set_var("CLAUDE_CONFIG_DIR", &claude); }
+    let id = "11111111-1234-1234-1234-123456789abc";
+    let path = codex.join("sessions/2026/10/14").join(format!("rollout-{id}.jsonl"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let seed = [json!({"type":"session_meta","payload":{"id":id,"cwd":proj,"cli_version":"0.162.1"}}),
+        json!({"type":"event_msg","payload":{"type":"user_message","message":"Remember this conversation","images":[],"local_images":[]}}),
+        json!({"type":"response_item","payload":{"type":"message","id":"user-seed","role":"user","content":[{"type":"input_text","text":"Remember this conversation"}]}}),
+        json!({"type":"response_item","payload":{"type":"message","id":"assistant-seed","role":"assistant","content":[{"type":"output_text","text":"The initial answer"}]}}),
+        json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":"seed"}})];
+    std::fs::write(path, seed.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
+    h.state_mut().debug_queue_action(Action::ToggleWorkspaceConversationSync(0));
+    let launches = || std::fs::read_to_string(base.join("cfg/fixture-launches.jsonl")).unwrap_or_default().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).collect::<Vec<_>>();
+    assert!(pump_until(&mut h, 20, |_| std::fs::read(base.join("cfg/conversation-sync/native-links.json")).is_ok_and(|b| b.len() > 2)));
+    h.key_press(egui::Key::Escape); h.run_steps(3);
+    h.state_mut().debug_queue_action(Action::DirectAgent { tool:Tool::Codex, cwd:Some(proj.clone()) });
+    assert!(pump_until(&mut h, 25, |_| launches().iter().any(|l| l["tool"] == "codex" && l["resumed"] == true)));
+    let codex_record = agent_runtime::record_path(&h.state().debug_focused_launch_spec().unwrap()).unwrap();
+    let old_session = h.state().debug_focused_session().unwrap();
+    let unrelated = base.join("unrelated"); std::fs::create_dir(&unrelated).unwrap();
+    h.state_mut().debug_queue_action(Action::CreateWorkspace { root:unrelated.clone(), name:"Unrelated".into() }); h.run_steps(3);
+    h.state_mut().debug_queue_action(Action::DirectAgent { tool:Tool::Claude, cwd:Some(unrelated) });
+    assert!(pump_until(&mut h, 10, |_| launches().iter().any(|l| l["unrelated"] == true)));
+    let untouched = launches().into_iter().find(|l| l["unrelated"] == true).unwrap();
+    h.state_mut().debug_queue_action(Action::SelectWorkspace(0)); h.run_steps(3);
+    h.state_mut().debug_queue_action(Action::DirectAgent { tool:Tool::Claude, cwd:Some(proj) });
+    assert!(pump_until(&mut h, 30, |_| launches().iter().any(|l| l["tool"] == "claude" && l["resumed"] == true && l["final_two"] == true)), "the new CLI must load the final answer written while the old one stopped");
+    assert_eq!(agent_runtime::read(&codex_record).unwrap().conversation.as_deref(), Some(id));
+    let cli = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None).unwrap();
+    cli.send(kiln_proto::ClientMsg::ListSessions { req: 77 });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let infos = loop { if let Ok(kiln_proto::ServerMsg::Sessions { req:77, sessions }) = cli.rx.recv_timeout(Duration::from_millis(100)) { break sessions; } assert!(Instant::now() < deadline); };
+    assert!(infos.iter().find(|i| i.id == old_session).unwrap().exited.is_some());
+    assert!(unsafe { libc::kill(untouched["pid"].as_i64().unwrap() as i32, 0) } == 0, "the unrelated managed agent must stay alive");
+    let new_ids: std::collections::HashSet<_> = launches().iter().filter(|l| l["unrelated"] != true).map(|l| (l["tool"].as_str().unwrap().to_owned(), l["id"].as_str().unwrap().to_owned())).collect();
+    assert_eq!(new_ids.len(), 2);
+}
+
 fn pump_until(h: &mut Harness<'_, KilnApp>, secs: u64, mut f: impl FnMut(&mut Harness<'_, KilnApp>) -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < deadline {
@@ -1936,7 +2005,7 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     // The saved pair points only at the fixture. The empty workspace has no transcripts.
     h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
     h.get_by_label("대화 연동").click(); h.run_steps(3);
-    assert!(h.query_by_label("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.").is_some());
+    assert!(h.query_by_label("같은 폴더에서 /resume으로 정본을 여세요. Kiln 안에서는 이전 에이전트를 중지한 뒤 이어갑니다.").is_some());
     assert!(pump_until(&mut h, 10, |h| h.query_by_label("연결됨 · 해당 폴더에서 대화를 찾지 못함").is_some()));
     assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
     let panes_before = h.state().debug_pane_count();
@@ -1951,6 +2020,7 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     assert!(h.query_by_label("대화 연동 해제").is_none());
     assert!(h.query_by_label("대화 연동").is_some());
     h.key_press(egui::Key::Escape); h.run_steps(2);
+    assert!(pump_until(&mut h, 10, |h| h.query_by_label("대화 연동됨 · 대화 대기").is_some()), "restored workspace sync must finish discovery before clicking its idle badge");
     h.get_by_label("대화 연동됨 · 대화 대기").click(); h.run_steps(2);
     assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
     h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);

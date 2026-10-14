@@ -225,7 +225,8 @@ fn files(
         let path = entry.path();
         if ty.is_dir() && depth > 0 {
             files(root, &path, depth - 1, budget, out, gate)?;
-        } else if ty.is_file() && path.extension().is_some_and(|e| e == "jsonl") {
+        } else if ty.is_file() && (path.extension().is_some_and(|e| e == "jsonl")
+            || storage::compressed(&path) && !path.with_extension("").exists()) {
             out.push(path);
         }
     }
@@ -234,19 +235,22 @@ fn files(
 
 /// Read only bounded leading rows until the native session identity appears.
 fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
+    if tool == Tool::Claude && storage::compressed(path) { return Ok(None); }
     safe_path(root, path)?;
     // Native CLIs create metadata-only session files before a first prompt. These
     // are not conversations and must not consume the initial twenty slots.
     if fs::metadata(path)?.len() < 2 * 1024 * 1024 {
-        let mut input = BufReader::new(fs::File::open(path)?.take(2 * 1024 * 1024));
+        let mut input = BufReader::new(storage::open(root, path)?.0.take(2 * 1024 * 1024));
         let mut line = Vec::new();
         let mut has_prompt = false;
         let mut saw_user = false;
+        let mut head_bytes = 0;
         for index in 0..64 {
             line.clear();
             if input.read_until(b'\n', &mut line)? == 0 {
                 break;
             }
+            head_bytes += line.len();
             if let Ok(row) = serde_json::from_slice::<serde_json::Value>(&line) {
                 let content =
                     if tool == Tool::Claude && row["type"] == "user" && row["isMeta"] != true {
@@ -279,11 +283,11 @@ fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
                 break;
             }
         }
-        if !has_prompt {
+        if !has_prompt && head_bytes < 2 * 1024 * 1024 {
             return Ok(None);
         }
     }
-    let mut reader = BufReader::new(fs::File::open(path)?.take(2 * 1024 * 1024));
+    let mut reader = BufReader::new(storage::open(root, path)?.0.take(2 * 1024 * 1024));
     let mut line = Vec::new();
     for _ in 0..64 {
         line.clear();
@@ -339,7 +343,7 @@ fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
         return Ok(Some(Source {
             tool,
             root: root.into(),
-            path: path.into(),
+            path: storage::logical(tool, path),
             cwd: cwd.into(),
             id: id.into(),
         }));
@@ -371,8 +375,8 @@ pub(super) fn find(
     } else {
         BTreeMap::new()
     };
-    // Upgrade the old selection once: it could contain metadata-only sessions.
-    seeds.retain(|_, seed| seed.selection_revision == 3);
+    // Refresh once to include native compressed histories in the initial twenty.
+    seeds.retain(|_, seed| seed.selection_revision == 4);
     let scan_started = SystemTime::now();
     let keys: BTreeMap<_, _> = scope
         .workspaces
@@ -434,12 +438,12 @@ pub(super) fn find(
             }
             let is_import = imported(config, &source)?.is_some();
             if is_import {
-                selected.insert(path.clone(), source);
+                selected.insert(source.path.clone(), source);
                 continue;
             }
             if let Some(seed) = seeds.get(&keys[workspace]) {
-                if modified >= seed.started || seed.paths.contains(&path) {
-                    selected.insert(path, source);
+                if modified >= seed.started || seed.paths.contains(&source.path) {
+                    selected.insert(source.path.clone(), source);
                 }
             } else {
                 candidates
@@ -465,7 +469,7 @@ pub(super) fn find(
         seeds.insert(
             key,
             WorkspaceSeed {
-                selection_revision: 3,
+                selection_revision: 4,
                 started: scan_started,
                 paths,
             },

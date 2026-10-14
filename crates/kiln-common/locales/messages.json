@@ -11268,5 +11268,55 @@
     "en": "Cancel auto-retry",
     "ja": "自動再試行をキャンセル",
     "zh-CN": "取消自动重试"
+  },
+  "기존 CLI가 아직 종료되지 않았습니다. 해당 패널을 확인하세요. 새 작업은 대기 중입니다.": {
+    "en": "The previous CLI has not exited. Check its panel; new work is waiting.",
+    "ja": "以前のCLIが終了していません。該当パネルを確認してください。新しい作業は待機中です。",
+    "zh-CN": "原有CLI尚未退出。请检查对应面板，新任务正在等待。"
+  },
+  "기존 에이전트를 중지하고 마지막 대화를 동기화한 뒤 다시 엽니다.": {
+    "en": "Stopping the previous agent and syncing its latest history before reopening.",
+    "ja": "以前のエージェントを停止し、最新の履歴を同期してから開き直します。",
+    "zh-CN": "停止原有代理并同步最新记录后重新打开。"
+  },
+  "대화 동기화 대기": {
+    "en": "Waiting for conversation sync",
+    "ja": "会話の同期を待機中",
+    "zh-CN": "等待会话同步"
+  },
+  "대화 재개 중": {
+    "en": "Resuming conversation",
+    "ja": "会話を再開中",
+    "zh-CN": "正在恢复会话"
+  },
+  "대화 전환 대기": {
+    "en": "Waiting to transfer conversation",
+    "ja": "会話の切り替えを待機中",
+    "zh-CN": "等待切换会话"
+  },
+  "대화 전환 중": {
+    "en": "Transferring conversation",
+    "ja": "会話を切り替え中",
+    "zh-CN": "正在切换会话"
+  },
+  "대화 전환 확인 필요": {
+    "en": "Conversation transfer needs attention",
+    "ja": "会話の切り替えを確認してください",
+    "zh-CN": "会话切换需要检查"
+  },
+  "이전 에이전트를 중지했습니다. 동기화된 정본으로 새 에이전트를 여는 중입니다.": {
+    "en": "The previous agent has stopped. Opening the new agent with synchronized canonical history.",
+    "ja": "以前のエージェントを停止しました。同期済みの正本で新しいエージェントを開いています。",
+    "zh-CN": "原有代理已停止。正在使用同步后的主会话记录打开新代理。"
+  },
+  "정본 확인이 끝나지 않아 재개를 대기합니다. 워크스페이스의 대화 연동 상태에서 원인을 확인하세요.": {
+    "en": "Resume is waiting for canonical history verification. Check conversation sync status in the workspace.",
+    "ja": "正本の確認が完了するまで再開を待機します。ワークスペースの会話同期状態を確認してください。",
+    "zh-CN": "正在等待主会话记录验证后再恢复。请查看工作区的会话同步状态。"
+  },
+  "같은 폴더에서 /resume으로 정본을 여세요. Kiln 안에서는 이전 에이전트를 중지한 뒤 이어갑니다.": {
+    "en": "Open the canonical conversation with /resume in the same folder. Inside Kiln, the previous agent stops before you continue.",
+    "ja": "同じフォルダーで /resume を使って正本を開いてください。Kiln 内では以前のエージェントを停止してから続行します。",
+    "zh-CN": "在同一文件夹中使用 /resume 打开主会话。在 Kiln 内，继续前会先停止原有代理。"
   }
 }

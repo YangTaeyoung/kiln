@@ -1,9 +1,12 @@
 //! Opt-in native continuations discovered within open workspace folders.
 mod codex_index;
+mod canonical;
 mod discovery;
 mod format;
+pub(super) mod handover;
 mod portable;
 mod reader;
+mod storage;
 #[cfg(test)]
 mod tests;
 mod titles;
@@ -29,10 +32,21 @@ const LIMIT: u64 = 64 * 1024 * 1024;
 const PORTABLE_LIMIT: u64 = 512 * 1024 * 1024;
 const COPY_LIMIT: u64 = 1024 * 1024 * 1024;
 const MAX_SOURCES: usize = 4096;
-const PROJECTION_REVISION: u8 = 4;
+const PROJECTION_REVISION: u8 = 5;
+
+enum Metadata<'a> {
+    Read,
+    Name(&'a str),
+    Archive,
+}
+impl<'a> Metadata<'a> {
+    fn title(&self) -> Option<&'a str> {
+        match self { Self::Name(title) => Some(title), _ => None }
+    }
+}
 
 fn has_current_native_projection(source: &Source, title: &str) -> Result<bool> {
-    Ok(titles::projection(source)?.as_deref() == Some(title))
+    Ok(titles::raw_projection(source)?.as_deref() == Some(title))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -162,7 +176,7 @@ pub(super) fn track(
                 })
         })
         .canonicalize()?;
-    let path = PathBuf::from(transcript);
+    let path = storage::logical(record.tool, Path::new(transcript));
     safe_path(&root, &path)?;
     let id = record
         .conversation
@@ -306,6 +320,12 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
 struct State {
     entries: BTreeMap<String, Entry>,
     recent: Vec<Continuation>,
+    #[serde(default)]
+    lineage: BTreeMap<String, String>,
+    #[serde(default)]
+    lineage_checked: std::collections::BTreeSet<String>,
+    #[serde(default)]
+    archived: BTreeMap<String, PathBuf>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Entry {
@@ -368,6 +388,8 @@ impl Conversation {
 }
 #[derive(Clone, Default)]
 struct Status {
+    groups: BTreeMap<String, String>,
+    settled: std::collections::BTreeSet<String>,
     watched: usize,
     published: usize,
     errors: Vec<String>,
@@ -453,6 +475,7 @@ fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<forma
         }
     }
     let messages = format::parse(source.tool, &rows)?;
+    *title = titles::clean(title);
     if title.trim().is_empty() {
         *title = titles::fallback(&messages);
     }
@@ -556,8 +579,15 @@ fn scan_with_index(
         gate,
         cache,
         scope,
-        |source, title| {
-            if title.is_some() {
+        |source, request| {
+            if matches!(request, Metadata::Archive) {
+                let physical = storage::physical(source);
+                let path = source.root.join("archived_sessions").join(physical.file_name().unwrap());
+                private_dir(path.parent().unwrap())?;
+                fs::rename(&physical, &path)?;
+                return Ok(Some(path.to_string_lossy().into_owned()));
+            }
+            if request.title().is_some() {
                 index(source)?;
             }
             Ok(None)
@@ -571,7 +601,7 @@ fn scan_with_metadata(
     gate: &Gate,
     cache: &mut Cache,
     scope: Option<&discovery::Scope>,
-    mut metadata: impl FnMut(&Source, Option<&str>) -> Result<Option<String>>,
+    mut metadata: impl FnMut(&Source, Metadata<'_>) -> Result<Option<String>>,
     notify: impl Fn(&Status),
 ) -> Result<Status> {
     let dir = config.join("conversation-sync");
@@ -667,6 +697,9 @@ fn scan_with_metadata(
         // Persist discoveries even before an incomplete or incompatible response can be copied.
         replace(&state_path, &serde_json::to_vec(&state)?)?;
     }
+    canonical::migrate(config, &state_path, &legacy_path, &mut state, scope)?;
+    state.archived.retain(|key, _| state.entries.get(key).is_none_or(|e| !storage::exists(&e.source)));
+    replace(&state_path, &serde_json::to_vec(&state)?)?;
     let active: BTreeMap<_, _> = state
         .entries
         .iter()
@@ -674,9 +707,10 @@ fn scan_with_metadata(
             scope.is_none_or(|s| {
                 s.contains(&e.source)
                     && (discovered_paths.contains(&e.source.path)
-                        || (!e.source.path.exists() && e.copied_to.is_some()))
+                        || (!storage::exists(&e.source) && e.copied_to.is_some()))
             })
         })
+        .filter(|(key, _)| !state.archived.contains_key(*key))
         .map(|(k, e)| (k.clone(), e.clone()))
         .collect();
     ensure!(
@@ -684,6 +718,7 @@ fn scan_with_metadata(
         "Sync source limit reached (4096); reconnect with a fresh namespace"
     );
     let mut status = Status {
+        groups: canonical::groups(&state),
         watched: active.len(),
         workspaces: discovery_status.workspaces,
         discovered: discovery_status.discovered,
@@ -705,12 +740,14 @@ fn scan_with_metadata(
         ..Default::default()
     };
     notify(&status);
-    for (key, entry) in active {
+    for (key, _) in active {
+        // Earlier endpoints in this scan may have updated this exact conversation.
+        let entry = state.entries[&key].clone();
         if !gate.load(Ordering::Acquire) {
             break;
         }
         status.checked += 1;
-        if !entry.source.path.exists() {
+        if !storage::exists(&entry.source) {
             if let Some(row) = status.rows.get_mut(&key) {
                 row.phase = Phase::Waiting;
                 row.detail = "Transcript not available yet".into();
@@ -718,8 +755,8 @@ fn scan_with_metadata(
             continue;
         }
         let result = (|| -> Result<()> {
-            safe_path(&entry.source.root, &entry.source.path)?;
-            let meta = fs::metadata(&entry.source.path)?;
+            safe_path(&entry.source.root, &storage::physical(&entry.source))?;
+            let meta = storage::metadata(&entry.source)?;
             let stamp = (meta.len(), meta.modified()?, entry.seen.clone());
             if cache
                 .attempts
@@ -744,7 +781,7 @@ fn scan_with_metadata(
                 .map(|s| s.destinations(pair, entry.source.tool))
                 .unwrap_or_else(|| vec![pair.clone()]);
             let native_title = if entry.source.tool == Tool::Codex {
-                metadata(&entry.source, None)?.or(cache.titles.name(&entry.source)?)
+                metadata(&entry.source, Metadata::Read)?.or(cache.titles.name(&entry.source)?)
             } else {
                 cache.titles.name(&entry.source)?
             };
@@ -790,7 +827,7 @@ fn scan_with_metadata(
             }
             let fingerprint = digest(&serde_json::to_vec(&messages)?);
             if entry.imported
-                && (entry.title.is_empty() || title == entry.title)
+                && (entry.title.is_empty() || title == titles::clean(&entry.title))
                 && discovery::imported(config, &entry.source)?.as_deref() == Some(&fingerprint)
             {
                 // Older parsers could mistake their own projection for a new turn.
@@ -822,7 +859,7 @@ fn scan_with_metadata(
                             if has_current_native_projection(&target.source, &title)?
                                 && read_messages(&target.source).is_ok_and(|m| m == messages)
                             {
-                                metadata(&target.source, Some(&title))?;
+                                metadata(&target.source, Metadata::Name(&title))?;
                                 let mut copy = copy.clone();
                                 copy.revision = PROJECTION_REVISION;
                                 verified.push(copy);
@@ -833,6 +870,7 @@ fn scan_with_metadata(
                 // Adopt intact old copies without duplicating a large history during upgrade.
                 if verified.len() == destinations.len() {
                     let saved = state.entries.get_mut(&key).unwrap();
+                    saved.title = title.clone();
                     saved.copied_to = verified.first().cloned();
                     saved.copies = verified.clone();
                     replace(&state_path, &serde_json::to_vec(&state)?)?;
@@ -850,25 +888,6 @@ fn scan_with_metadata(
                 cache.messages.insert(entry.source.path.clone(), stamp);
                 return Ok(());
             }
-            let parsed_title = messages
-                .iter()
-                .find(|m| m.role == "user" && !m.text.is_empty())
-                .map(|m| {
-                    m.text
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .chars()
-                        .take(96)
-                        .collect::<String>()
-                })
-                .unwrap_or_default();
-            let title = status
-                .rows
-                .get(&key)
-                .filter(|r| !r.title.is_empty())
-                .map(|r| r.title.clone())
-                .unwrap_or(parsed_title);
             let row = status
                 .rows
                 .entry(key.clone())
@@ -881,31 +900,19 @@ fn scan_with_metadata(
             for destination_pair in destinations {
                 // Include the namespace in workspace mode; both default and connected CLIs
                 // must see a continuation even when the other CLI was opened outside Kiln.
-                let identity = if scope.is_some() {
-                    format!(
-                        "{}:v4:{key}:{fingerprint}:{}:{}",
-                        state_path.display(),
-                        digest(title.as_bytes()),
-                        destination_pair
-                            .endpoint(opposite(entry.source.tool))
-                            .root
-                            .display()
-                    )
-                } else {
-                    format!(
-                        "{}:v4:{key}:{fingerprint}:{}",
-                        state_path.display(),
-                        digest(title.as_bytes())
-                    )
-                };
-                let id = stable_id(&identity);
+                let target_root = &destination_pair.endpoint(opposite(entry.source.tool)).root;
+                let existing = canonical::destination(&state, &key, opposite(entry.source.tool), target_root);
+                let id = existing.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| stable_id(&format!(
+                    "{}:canonical:{key}:{}", state_path.display(), target_root.display())));
                 let plan_path = dir.join(format!("pending-{id}.json"));
                 #[derive(Serialize, Deserialize)]
                 struct Plan {
                     source: Source,
                     timestamp: String,
                 }
-                let plan: Plan = if plan_path.exists() {
+                let plan: Plan = if let Some(source) = existing {
+                    Plan { source, timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true) }
+                } else if plan_path.exists() {
                     serde_json::from_slice(&bounded(&plan_path, 16 * 1024)?)?
                 } else {
                     let now = chrono::Utc::now();
@@ -946,11 +953,16 @@ fn scan_with_metadata(
                 if !gate.load(Ordering::Acquire) {
                     return Ok(());
                 }
-                if plan.source.path.exists() {
-                    ensure!(
-                        bounded(&plan.source.path, COPY_LIMIT)?.starts_with(&bytes),
-                        "Continuation collision; existing conversation was preserved"
-                    );
+                let existed = storage::exists(&plan.source);
+                if existed {
+                    // Only an explicit stored edge permits updating an existing native ID.
+                    if state.entries.contains_key(&plan.source.path.to_string_lossy().into_owned()) {
+                        let _write_guard = handover::write_guard(config, &plan.source)?;
+                        canonical::update(&plan.source, &messages, &title, &plan.timestamp)?;
+                    } else {
+                        ensure!(storage::bytes(&plan.source, COPY_LIMIT)?.starts_with(&bytes),
+                            "Continuation collision; existing conversation was preserved");
+                    }
                 }
                 // Record the baseline before publication so a crash cannot make discovery echo it.
                 discovery::remember_projection(
@@ -959,11 +971,11 @@ fn scan_with_metadata(
                     &fingerprint,
                     Some(&messages),
                 )?;
-                if !plan.source.path.exists() {
+                if !existed {
                     publish(&plan.source.path, &bytes)?;
                 }
-                metadata(&plan.source, Some(&title))?;
-                let copied_meta = fs::metadata(&plan.source.path)?;
+                metadata(&plan.source, Metadata::Name(&title))?;
+                let copied_meta = storage::metadata(&plan.source)?;
                 cache.messages.insert(
                     plan.source.path.clone(),
                     (
@@ -973,7 +985,7 @@ fn scan_with_metadata(
                     ),
                 );
                 status.published += 1;
-                state
+                let target_entry = state
                     .entries
                     .entry(plan.source.path.to_string_lossy().into_owned())
                     .or_insert(Entry {
@@ -984,6 +996,9 @@ fn scan_with_metadata(
                         copied_to: None,
                         copies: Vec::new(),
                     });
+                target_entry.seen = fingerprint.clone();
+                target_entry.title = title.clone();
+                state.lineage.entry(plan.source.path.to_string_lossy().into_owned()).or_insert_with(|| key.clone());
                 let continuation = Continuation {
                     tool: plan.source.tool,
                     id,
@@ -991,6 +1006,7 @@ fn scan_with_metadata(
                     root: plan.source.root.clone(),
                     revision: PROJECTION_REVISION,
                 };
+                state.recent.retain(|c| c.id != continuation.id || c.root != continuation.root);
                 state.recent.insert(0, continuation.clone());
                 state.recent.truncate(8);
                 copies.push(continuation);
@@ -998,7 +1014,7 @@ fn scan_with_metadata(
                 pending_plans.push(plan_path);
             }
             if entry.source.tool == Tool::Codex {
-                metadata(&entry.source, Some(&title))?;
+                metadata(&entry.source, Metadata::Name(&title))?;
             }
             titles::pin_claude(&entry.source, &title)?;
             let saved = state.entries.get_mut(&key).unwrap();
@@ -1037,6 +1053,7 @@ fn scan_with_metadata(
             ));
         }
     }
+    canonical::retire(config, &state_path, &mut state, scope, gate, &mut status, &mut metadata)?;
     status.errors = status
         .rows
         .values()
@@ -1051,6 +1068,11 @@ fn scan_with_metadata(
         })
         .collect();
     cache.rows = status.rows.clone();
+    if gate.load(Ordering::Acquire) {
+        handover::publish_links(config, &state, scope)?;
+        status.settled = handover::settled(config, &state, cache, &status)?;
+    }
+    status.groups = canonical::groups(&state);
     status.recent = state.recent;
     notify(&status);
     Ok(status)
@@ -1083,6 +1105,7 @@ fn failure_reason(detail: &str) -> String {
     }
 }
 pub struct Manager {
+    completed: u64,
     pub(super) detail: Option<PathBuf>,
     tx: mpsc::SyncSender<Event>,
     rx: mpsc::Receiver<Event>,
@@ -1100,6 +1123,7 @@ impl Default for Manager {
     fn default() -> Self {
         let (tx, rx) = mpsc::sync_channel(8);
         Self {
+            completed: 0,
             detail: None,
             tx,
             rx,
@@ -1121,6 +1145,15 @@ impl Drop for Manager {
     }
 }
 impl Manager {
+    pub(super) fn refresh_for_handover(&mut self) -> Option<u64> {
+        if self.busy { return None; }
+        self.cache = Arc::new(Mutex::new(Cache::new()));
+        self.next = Instant::now();
+        Some(self.completed)
+    }
+    pub(super) fn handover_ready(&self, after: u64, group: &str) -> bool {
+        self.completed > after && self.error.is_none() && self.status.settled.contains(group)
+    }
     pub fn tick(
         &mut self,
         settings: &mut super::state::Settings,
@@ -1157,6 +1190,7 @@ impl Manager {
                     if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) {
                         continue;
                     }
+                    self.completed += 1;
                     match result {
                         Ok(status) => {
                             self.status = status;
@@ -1177,6 +1211,7 @@ impl Manager {
             && !workspaces.is_empty();
         if !enabled {
             self.cancel_scan();
+            let _ = handover::disable(&kiln_common::paths::config_dir());
             self.workspaces = workspaces;
             return;
         }
@@ -1218,7 +1253,7 @@ impl Manager {
                         &gate,
                         &mut cache.lock().unwrap(),
                         Some(&scope),
-                        |source, title| registry.metadata(source, &gate, title),
+                        |source, request| registry.apply(source, &gate, request),
                         |status| {
                             if last_progress.get().elapsed() >= Duration::from_millis(100) {
                                 last_progress.set(Instant::now());
@@ -1290,6 +1325,7 @@ impl Manager {
             })
             .map(|(key, row)| (key.clone(), row.clone()))
             .collect();
+        let rows = canonical::group_rows(rows, &self.status.groups);
         Status {
             watched: rows.len(),
             checked: rows
@@ -1394,7 +1430,7 @@ impl Manager {
                     if enabled && settings.conversation_sync_pair.is_none() && !self.connecting && Self::accounts_ready(accounts)
                         && ui.button(tr("계정 연결 다시 시도")).clicked() { self.enable(settings, accounts); }
                 });
-                ui.add(egui::Label::new(egui::RichText::new(tr("상대 CLI에서 같은 폴더를 열고 /resume으로 이어가세요. 열린 세션은 자동으로 바뀌지 않습니다.")).color(theme.text_dim)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(tr("같은 폴더에서 /resume으로 정본을 여세요. Kiln 안에서는 이전 에이전트를 중지한 뒤 이어갑니다.")).color(theme.text_dim)).wrap());
             });
         if close || modal.should_close() {
             self.detail = None;

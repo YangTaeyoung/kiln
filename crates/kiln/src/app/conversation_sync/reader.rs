@@ -12,17 +12,18 @@ pub(super) fn rows_before_validation(
     title: &mut String,
     before_validation: impl FnOnce(),
 ) -> Result<Vec<Value>> {
-    safe_path(&source.root, &source.path)?;
-    let file = fs::File::open(&source.path)?;
-    let before = file.metadata()?;
+    let physical = storage::physical(source);
+    let (file, before) = storage::open(&source.root, &physical)?;
+    let compressed = storage::compressed(&physical);
     ensure!(
         before.len() <= 1024 * 1024 * 1024,
         "Transcript exceeds the 1 GiB reading limit"
     );
-    let mut reader = BufReader::new(file.take(before.len()));
+    let mut reader = BufReader::new(file);
     let mut rows = Vec::new();
     let mut line = Vec::new();
     let mut retained = 0;
+    let mut decoded = 0u64;
     let mut snapshot_digest = Sha256::new();
     loop {
         line.clear();
@@ -38,6 +39,8 @@ pub(super) fn rows_before_validation(
             line.len() as u64 <= LIMIT,
             "Transcript row exceeds the 64 MiB reading limit"
         );
+        decoded += line.len() as u64;
+        ensure!(decoded <= COPY_LIMIT, "Decoded transcript exceeds the 1 GiB reading limit");
         snapshot_digest.update(&line);
         // A writer can be in the middle of its next record. Only complete records
         // in the initial bounded prefix participate in this checkpoint.
@@ -92,6 +95,7 @@ pub(super) fn rows_before_validation(
                                 | "item_completed"
                                 | "task_complete"
                                 | "turn_complete"
+                                | "turn_aborted"
                                 | "thread_rolled_back"
                         )
                     ) => {}
@@ -137,7 +141,12 @@ pub(super) fn rows_before_validation(
         rows.push(row);
     }
     before_validation();
-    let after = fs::metadata(&source.path)?;
+    ensure!(storage::physical(source) == physical, "Transcript storage changed; retrying");
+    if compressed {
+        storage::unchanged(source, &physical, &before)?;
+        return Ok(rows);
+    }
+    let after = storage::metadata(source)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -153,7 +162,7 @@ pub(super) fn rows_before_validation(
     if before.len() != after.len() || before.modified()? != after.modified()? {
         // Permit appends only after verifying every byte of the captured prefix.
         // Rewrites/truncations must never be mistaken for a completed checkpoint.
-        let mut check = fs::File::open(&source.path)?.take(before.len());
+        let mut check = fs::File::open(&physical)?.take(before.len());
         let mut verified = Sha256::new();
         let mut buffer = [0u8; 64 * 1024];
         let mut count = 0;
@@ -193,7 +202,8 @@ fn row_title(tool: Tool, row: &Value) -> String {
         Tool::Claude
             if row["type"] == "user"
                 && row["isMeta"] != true
-                && row["isCompactSummary"] != true =>
+                && row["isCompactSummary"] != true
+                && super::format::claude_interruption(row).is_none() =>
         {
             &row["message"]["content"]
         }
