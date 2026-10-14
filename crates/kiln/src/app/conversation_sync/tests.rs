@@ -2826,3 +2826,20 @@ fn unnamed_history_normalizes_title_whitespace_without_changing_messages() {
         assert_eq!(f.scan().published, 0);
     }
 }
+
+#[test]
+fn streamed_comparison_matches_plain_and_compressed_transcripts_exactly() {
+    let f = Fixture::new(Tool::Codex);
+    let bytes = fs::read(&f.source.path).unwrap();
+    assert!(storage::equals(&f.source, &bytes).unwrap());
+    assert!(!storage::equals(&f.source, &bytes[..bytes.len() - 1]).unwrap());
+    assert!(!storage::equals(&f.source, &[bytes.as_slice(), b"\n"].concat()).unwrap());
+    let mut changed = bytes.clone();
+    changed[0] ^= 1;
+    assert!(!storage::equals(&f.source, &changed).unwrap());
+    let packed = f.source.path.with_extension("jsonl.zst");
+    fs::write(&packed, zstd::encode_all(bytes.as_slice(), 3).unwrap()).unwrap();
+    fs::remove_file(&f.source.path).unwrap();
+    assert!(storage::equals(&f.source, &bytes).unwrap());
+    assert!(!storage::equals(&f.source, &changed).unwrap());
+}

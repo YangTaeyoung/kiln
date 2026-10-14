@@ -84,6 +84,26 @@ pub(super) fn bytes(source: &Source, limit: u64) -> Result<Vec<u8>> {
     unchanged(source, &path, &before)?;
     Ok(bytes)
 }
+/// Whether the decoded transcript is exactly `expected`, compared in chunks without
+/// buffering the file; fails if the file changes while it is read.
+pub(super) fn equals(source: &Source, expected: &[u8]) -> Result<bool> {
+    let path = physical(source);
+    let (mut input, before) = open(&source.root, &path)?;
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut offset = 0;
+    loop {
+        let read = input.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        if expected.get(offset..offset + read) != Some(&buffer[..read]) {
+            return Ok(false);
+        }
+        offset += read;
+    }
+    unchanged(source, &path, &before)?;
+    Ok(offset == expected.len())
+}
 pub(super) fn tail(source: &Source, count: usize) -> Result<Vec<u8>> {
     let path = physical(source);
     if !compressed(&path) {

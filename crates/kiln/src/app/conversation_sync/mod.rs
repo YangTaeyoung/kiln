@@ -1020,41 +1020,48 @@ fn scan_with_metadata(
                     "Destination namespace changed"
                 );
                 safe_path(&plan.source.root, &plan.source.path)?;
-                let bytes = format::render_titled(
-                    plan.source.tool,
-                    &id,
-                    &entry.source.cwd,
-                    &plan.timestamp,
-                    &messages,
-                    &title,
-                )?;
-                let converted: Vec<serde_json::Value> = bytes
-                    .split(|b| *b == b'\n')
-                    .filter(|b| !b.is_empty())
-                    .map(serde_json::from_slice)
-                    .collect::<std::result::Result<_, _>>()?;
-                ensure!(
-                    format::parse(plan.source.tool, &converted)? == messages,
-                    "Converted conversation did not retain every message and attachment"
-                );
-                drop(converted);
-                ensure!(
-                    bytes.len() as u64 <= COPY_LIMIT,
-                    "Converted conversation exceeds the 1 GiB sync limit"
-                );
+                let existed = storage::exists(&plan.source);
+                // Only an explicit stored edge permits updating an existing native ID.
+                let linked = existed
+                    && state.entries.contains_key(&plan.source.path.to_string_lossy().into_owned());
+                // A linked endpoint is appended and verified by `canonical::update`;
+                // a complete conversion is rendered only for a new copy or a collision check.
+                let bytes = if linked {
+                    Vec::new()
+                } else {
+                    let bytes = format::render_titled(
+                        plan.source.tool,
+                        &id,
+                        &entry.source.cwd,
+                        &plan.timestamp,
+                        &messages,
+                        &title,
+                    )?;
+                    let converted: Vec<serde_json::Value> = bytes
+                        .split(|b| *b == b'\n')
+                        .filter(|b| !b.is_empty())
+                        .map(serde_json::from_slice)
+                        .collect::<std::result::Result<_, _>>()?;
+                    ensure!(
+                        format::parse(plan.source.tool, &converted)? == messages,
+                        "Converted conversation did not retain every message and attachment"
+                    );
+                    drop(converted);
+                    ensure!(
+                        bytes.len() as u64 <= COPY_LIMIT,
+                        "Converted conversation exceeds the 1 GiB sync limit"
+                    );
+                    bytes
+                };
                 if !gate.load(Ordering::Acquire) {
                     return Ok(());
                 }
-                let existed = storage::exists(&plan.source);
-                if existed {
-                    // Only an explicit stored edge permits updating an existing native ID.
-                    if state.entries.contains_key(&plan.source.path.to_string_lossy().into_owned()) {
-                        let _write_guard = handover::write_guard(config, &plan.source)?;
-                        canonical::update(&plan.source, &messages, &title, &plan.timestamp)?;
-                    } else {
-                        ensure!(storage::bytes(&plan.source, COPY_LIMIT)?.starts_with(&bytes),
-                            "Continuation collision; existing conversation was preserved");
-                    }
+                if linked {
+                    let _write_guard = handover::write_guard(config, &plan.source)?;
+                    canonical::update(&plan.source, &messages, &title, &plan.timestamp)?;
+                } else if existed {
+                    ensure!(storage::bytes(&plan.source, COPY_LIMIT)?.starts_with(&bytes),
+                        "Continuation collision; existing conversation was preserved");
                 }
                 // Record the baseline before publication so a crash cannot make discovery echo it.
                 discovery::remember_projection(

@@ -455,7 +455,10 @@ pub(super) fn update(
         &digest(&old),
         last_ordinal,
     )?;
-    let mut candidate = old.clone();
+    // The parsed endpoint is released before the prospective bytes are parsed again.
+    drop((rows, current));
+    let old_len = old.len();
+    let mut candidate = old;
     candidate.extend_from_slice(&suffix);
     ensure!(
         candidate.len() as u64 <= COPY_LIMIT,
@@ -476,7 +479,7 @@ pub(super) fn update(
         "Appended conversation did not retain every message and attachment"
     );
     ensure!(
-        storage::physical(source) == physical && storage::bytes(source, COPY_LIMIT)? == old,
+        storage::physical(source) == physical && storage::equals(source, &candidate[..old_len])?,
         "Transcript changed before publication; retrying"
     );
     if storage::compressed(&physical) {
@@ -487,7 +490,7 @@ pub(super) fn update(
             "Compressed transcript exceeds its writing limit"
         );
         ensure!(
-            storage::physical(source) == physical && storage::bytes(source, COPY_LIMIT)? == old,
+            storage::physical(source) == physical && storage::equals(source, &candidate[..old_len])?,
             "Transcript changed before publication; retrying"
         );
         packed.as_file().sync_all()?;
