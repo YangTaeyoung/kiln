@@ -240,7 +240,11 @@ impl RepositoryWorkspace {
             }
         }
         Some(super::tools::RepoLine {
-            branch: kiln_common::trf!("{}개 저장소", inventory.roots.len()),
+            branch: if inventory.roots.is_empty() {
+                kiln_common::i18n::tr("Git 저장소 없음").into()
+            } else {
+                kiln_common::trf!("{}개 저장소", inventory.roots.len())
+            },
             dirty,
             ahead,
             behind,
@@ -1705,6 +1709,11 @@ mod tests {
         assert_eq!(after.ahead, before.ahead);
         assert_eq!(after.behind, before.behind);
         assert_eq!(workspace.decorations().len(), decorations_before);
+    }
+
+    #[test]
+    fn summary_names_a_folder_without_repositories() {
+        assert_eq!(fixture(0).summary().unwrap().branch, "Git 저장소 없음");
     }
 
     #[test]
