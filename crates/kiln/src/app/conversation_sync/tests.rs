@@ -545,8 +545,8 @@ fn bidirectional_changes_are_native_and_do_not_echo() {
         assert_eq!(f.scan().published, 0);
         assert_eq!(
             read_messages(&f.source).unwrap(),
-            messages(),
-            "original session is immutable"
+            extended,
+            "the original native ID receives the continued history"
         );
         let state = f.state();
         let latest = &state.recent[0];
@@ -558,6 +558,288 @@ fn bidirectional_changes_are_native_and_do_not_echo() {
             .unwrap();
         assert_eq!(read_messages(&back.source).unwrap(), extended);
     }
+}
+
+#[test]
+fn repeated_resume_updates_the_same_two_native_ids_and_preserves_existing_bytes() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        assert_eq!(f.scan().published, 1);
+        let peer = f.state().entries.values().find(|e| e.source.tool == opposite(tool)).unwrap().source.clone();
+        let original = fs::read(&f.source.path).unwrap();
+        let mut expected = messages();
+        for round in 0..3 {
+            let (writer, receiver) = if round % 2 == 0 { (&peer, &f.source) } else { (&f.source, &peer) };
+            let before = fs::read(&receiver.path).unwrap();
+            expected.push(Message { role: "user".into(), text: format!("Question {round}"), images: vec![] });
+            expected.push(Message { role: "assistant".into(), text: format!("Answer {round}"), images: vec![] });
+            fs::write(&writer.path, format::render(writer.tool, &writer.id, &writer.cwd, "2026-10-14T00:00:00Z", &expected).unwrap()).unwrap();
+            let status = f.scan();
+            assert!(status.errors.is_empty(), "{:?}", status.errors);
+            assert_eq!(f.state().entries.len(), 2, "a continuation must not create a third native session");
+            assert_eq!(read_messages(receiver).unwrap(), expected);
+            assert!(fs::read(&receiver.path).unwrap().starts_with(&before), "native records must survive byte for byte");
+            assert_eq!(f.scan().published, 0, "the appended history must not echo back");
+        }
+        assert!(!original.is_empty());
+    }
+}
+
+#[test]
+fn divergent_linked_histories_are_preserved_and_report_a_conflict() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
+    for source in [&f.source, &peer] {
+        let mut ms = messages();
+        ms.push(Message { role: "user".into(), text: source.tool.key().into(), images: vec![] });
+        ms.push(Message { role: "assistant".into(), text: "Independent reply".into(), images: vec![] });
+        fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &ms).unwrap()).unwrap();
+    }
+    let before = [fs::read(&f.source.path).unwrap(), fs::read(&peer.path).unwrap()];
+    let status = f.scan();
+    assert!(status.errors.iter().any(|e| e.contains("diverged")), "{:?}", status.errors);
+    assert_eq!(f.state().entries.len(), 2);
+    assert_eq!(fs::read(&f.source.path).unwrap(), before[0]);
+    assert_eq!(fs::read(&peer.path).unwrap(), before[1]);
+}
+
+#[test]
+fn open_managed_endpoint_defers_updates_until_the_daemon_exit_lease_releases() {
+    let f = Fixture::new(Tool::Codex);
+    f.scan();
+    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
+    let path = f.config.join("agent-sessions/peer.json");
+    private_dir(path.parent().unwrap()).unwrap();
+    let record = super::super::agent_runtime::Record { tool: peer.tool, spec: kiln_proto::SpawnSpec {
+        cwd: Some(peer.cwd.clone()), env: vec![(env_key(peer.tool).into(), peer.root.to_string_lossy().into_owned())], ..Default::default()
+    }, version: String::new(), generation: "fixture".into(), conversation: Some(peer.id.clone()), confirmed: true, request_started: false };
+    fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    let lease = handover::live_lease(&path).unwrap();
+    let mut extended = messages();
+    extended.push(Message { role:"user".into(),text:"A new turn".into(),images:vec![] });
+    extended.push(Message { role:"assistant".into(),text:"New answer".into(),images:vec![] });
+    fs::write(&f.source.path, format::render(f.source.tool, &f.source.id, &f.source.cwd, "2026-10-14T00:00:00Z", &extended).unwrap()).unwrap();
+    let before = fs::read(&peer.path).unwrap();
+    let waiting = f.scan();
+    assert_eq!(waiting.published, 0);
+    assert!(waiting.rows.values().any(|r| r.phase == Phase::Waiting && r.detail.contains("still open")));
+    assert_eq!(fs::read(&peer.path).unwrap(), before);
+    assert!(waiting.settled.is_empty());
+    drop(lease);
+    let completed = f.scan();
+    assert!(completed.errors.is_empty(), "{:?}", completed.errors);
+    assert_eq!(read_messages(&peer).unwrap(), extended);
+    assert_eq!(completed.settled.len(), 1);
+}
+
+#[test]
+fn syncing_one_conversation_does_not_lock_unrelated_native_starts() {
+    let f = Fixture::new(Tool::Codex);
+    f.scan();
+    let _guard = handover::write_guard(&f.config, &f.source).unwrap();
+    let other = super::super::agent_runtime::Record { tool: Tool::Codex, spec: kiln_proto::SpawnSpec {
+        cwd: Some(f.source.cwd.clone()), env:vec![(env_key(Tool::Codex).into(),f.source.root.to_string_lossy().into_owned())], ..Default::default()
+    }, version:String::new(), generation:"other".into(), conversation:Some(stable_id("unrelated-native")), confirmed:true, request_started:false };
+    let mut links = handover::links(&f.config).unwrap();
+    links.push(handover::Link { tool:Tool::Codex, root:f.source.root.clone(), id:other.conversation.clone().unwrap(), group:"unrelated-group".into(), canonical_id:other.conversation.clone().unwrap() });
+    fs::write(f.config.join("conversation-sync/native-links.json"),serde_json::to_vec(&links).unwrap()).unwrap();
+    assert!(handover::event(&f.config,&f.config.join("other.json"),&other,"SessionStart").is_ok());
+    assert!(handover::write_guard(&f.config,&f.source).is_err(), "same conversation remains locked");
+}
+#[test]
+fn old_snapshot_identity_recovers_lineage_without_matching_unrelated_text() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let state_path = f.config.join("conversation-sync").join(format!("{}.json", digest(&serde_json::to_vec(&f.pair).unwrap())));
+    let fingerprint = digest(&serde_json::to_vec(&messages()).unwrap());
+    let title = titles::fallback(&messages());
+    let key = f.source.path.to_string_lossy().into_owned();
+    let old_id = stable_id(&format!("{}:v4:{key}:{fingerprint}:{}", state_path.display(), digest(title.as_bytes())));
+    let old = destination(&f.pair, &f.source, &old_id, chrono::Utc::now()).unwrap();
+    publish(&old.path, &format::render_titled(old.tool, &old.id, &old.cwd, "2026-10-14T00:00:00Z", &messages(), &title).unwrap()).unwrap();
+    discovery::remember_projection(&f.config, &old, &fingerprint, Some(&messages())).unwrap();
+    let mut state = f.state();
+    state.entries.insert(old.path.to_string_lossy().into_owned(), Entry { source:old.clone(), seen:fingerprint, imported:true, title, copied_to:None, copies:vec![] });
+    replace(&state_path, &serde_json::to_vec(&state).unwrap()).unwrap();
+    f.scan();
+    let state = f.state();
+    assert!(canonical::members(&state, &key).contains(&old.path.to_string_lossy().into_owned()), "the exact historical publication hash proves this edge");
+}
+
+#[test]
+fn redundant_projection_is_archived_with_recoverable_bytes_only_after_prefix_verification() {
+    for (diverged, compressed) in [(false, false), (true, false), (false, true), (true, true)] {
+        let f = Fixture::new(Tool::Claude);
+        f.scan();
+        let mut state = f.state();
+        let peer = state.entries.values().find(|e| e.imported).unwrap().source.clone();
+        let alias = destination(&f.pair, &f.source, &stable_id("old-alias"), chrono::Utc::now()).unwrap();
+        let mut ms = messages();
+        if diverged { ms[1].text = "A different branch".into(); }
+        let bytes = format::render(alias.tool, &alias.id, &alias.cwd, "2026-10-14T00:00:00Z", &ms).unwrap();
+        publish(&alias.path, &bytes).unwrap();
+        let physical = if compressed {
+            let path = alias.path.with_extension("jsonl.zst");
+            fs::write(&path, zstd::stream::encode_all(bytes.as_slice(),3).unwrap()).unwrap();
+            fs::remove_file(&alias.path).unwrap();
+            path
+        } else { alias.path.clone() };
+        let archived_bytes = fs::read(&physical).unwrap();
+        let fingerprint = digest(&serde_json::to_vec(&ms).unwrap());
+        discovery::remember_projection(&f.config, &alias, &fingerprint, Some(&ms)).unwrap();
+        let key = alias.path.to_string_lossy().into_owned();
+        state.entries.insert(key.clone(), Entry { source:alias.clone(), seen:fingerprint, imported:true, title:titles::fallback(&ms), copied_to:None, copies:vec![] });
+        state.lineage.insert(key.clone(), f.source.path.to_string_lossy().into_owned());
+        let path = f.config.join("conversation-sync").join(format!("{}.json", digest(&serde_json::to_vec(&f.pair).unwrap())));
+        replace(&path, &serde_json::to_vec(&state).unwrap()).unwrap();
+        f.scan();
+        let state = f.state();
+        assert!(peer.path.exists());
+        if diverged {
+            assert_eq!(fs::read(&physical).unwrap(), archived_bytes);
+            assert!(!state.archived.contains_key(&key));
+        } else {
+            assert!(!storage::exists(&alias), "only the canonical entry should remain in the native picker");
+            assert_eq!(fs::read(&state.archived[&key]).unwrap(), archived_bytes);
+            assert_eq!(f.scan().published, 0);
+        }
+    }
+}
+
+#[test]
+fn native_interruption_keeps_the_unanswered_prompt_and_explicit_abort_event() {
+    let f = Fixture::new(Tool::Codex);
+    let prompt = "Owned fixture interrupted prompt: preserve exactly.";
+    let event = json!({"type":"turn_aborted","root_turn_id":"fixture-turn","turn_id":"fixture-turn","reason":"interrupted","started_at":1791956448_u64,"completed_at":1791956448_u64,"duration_ms":52});
+    let mut bytes = fs::read(&f.source.path).unwrap();
+    for row in [json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"fixture-turn"}}),
+        json!({"type":"event_msg","payload":{"type":"item_completed","thread_id":f.source.id,"turn_id":"fixture-turn","item":{"type":"UserMessage","id":"fixture-user","content":[{"type":"text","text":prompt,"text_elements":[]}]}}}),
+        json!({"type":"response_item","payload":{"type":"message","id":"fixture-user","role":"user","content":[{"type":"input_text","text":prompt}]}}),
+        json!({"type":"event_msg","payload":event})] { bytes.extend_from_slice(format!("{row}\n").as_bytes()); }
+    fs::write(&f.source.path, bytes).unwrap();
+    let ms = read_messages(&f.source).unwrap();
+    assert!(ms.iter().any(|m| m.role == "user" && m.text == prompt), "interrupted work must not lose its latest request");
+    assert_eq!(ms.last().unwrap().text, format!("[Session event: turn_aborted]\n{event}"));
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let state = f.state();
+    assert_eq!(read_messages(&state.entries.values().find(|e| e.imported).unwrap().source).unwrap(), ms);
+}
+
+#[test]
+fn claude_interruption_written_before_its_prompt_keeps_both_native_records() {
+    let f = Fixture::new(Tool::Claude);
+    let parent = rows(&fs::read(&f.source.path).unwrap())[1]["uuid"].clone();
+    let marker = json!({"type":"user","uuid":"interrupted-marker","parentUuid":"unpersisted-assistant","promptId":"interrupted-prompt","sessionId":f.source.id,"cwd":f.source.cwd,"version":"2.1.299","timestamp":"2026-10-14T05:42:50.373Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}});
+    let prompt = json!({"type":"user","uuid":"actual-user","parentUuid":parent,"promptId":"interrupted-prompt","sessionId":f.source.id,"cwd":f.source.cwd,"version":"2.1.299","timestamp":"2026-10-14T05:42:50.312Z","message":{"role":"user","content":"Keep this interrupted Claude request"}});
+    let mut bytes = fs::read(&f.source.path).unwrap();
+    bytes.extend_from_slice(format!("{marker}\n{prompt}\n").as_bytes());
+    fs::write(&f.source.path, bytes).unwrap();
+    let ms = read_messages(&f.source).unwrap();
+    assert!(ms.iter().any(|m| m.text == "Keep this interrupted Claude request"));
+    assert!(ms.iter().any(|m| m.role == "user" && m.text == "[Request interrupted by user]"));
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let state = f.state();
+    let peer = state.entries.values().find(|e| e.imported).unwrap();
+    assert_eq!(read_messages(&peer.source).unwrap(), ms);
+    assert_eq!(f.scan().published, 0);
+    let mut file = fs::OpenOptions::new().append(true).open(&f.source.path).unwrap();
+    for row in [json!({"type":"user","uuid":"next-user","parentUuid":"interrupted-marker","promptId":"next-prompt","sessionId":f.source.id,"cwd":f.source.cwd,"version":"2.1.299","message":{"role":"user","content":"Continue the same work"}}),
+        json!({"type":"assistant","uuid":"next-answer","parentUuid":"next-user","promptId":"next-prompt","sessionId":f.source.id,"cwd":f.source.cwd,"version":"2.1.299","message":{"role":"assistant","content":[{"type":"text","text":"Continued"}],"stop_reason":"end_turn"}})] {
+        writeln!(file, "{row}").unwrap();
+    }
+    let continued = read_messages(&f.source).unwrap();
+    assert!(continued.starts_with(&ms), "native continuation must preserve the interrupted checkpoint");
+    assert_eq!(continued.len(), ms.len() + 2);
+}
+
+#[test]
+fn canonical_append_accepts_assistant_only_continuations_without_inventing_a_prompt() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let original = fs::read(&f.source.path).unwrap();
+        let mut messages = read_messages(&f.source).unwrap();
+        messages.push(format::Message { role:"assistant".into(), text:"An additional recorded result".into(), images:vec![] });
+        canonical::update(&f.source, &messages, "Shared title", "2026-10-14T06:00:00Z").unwrap();
+        assert!(fs::read(&f.source.path).unwrap().starts_with(&original));
+        assert_eq!(read_messages(&f.source).unwrap(), messages);
+    }
+}
+
+#[test]
+fn native_append_continues_ordinals_after_provider_only_records() {
+    let f = Fixture::new(Tool::Codex);
+    let mut file = fs::OpenOptions::new().append(true).open(&f.source.path).unwrap();
+    writeln!(file, "{}", json!({"ordinal":9000,"type":"response_item","payload":{"type":"reasoning","encrypted_content":"owned-fixture-only"}})).unwrap();
+    let mut ms = messages();
+    ms.push(Message { role:"assistant".into(), text:"New recorded answer".into(), images:vec![] });
+    let before = fs::read(&f.source.path).unwrap();
+    canonical::update(&f.source,&ms,"Shared title","2026-10-14T07:00:00Z").unwrap();
+    let after = fs::read(&f.source.path).unwrap();
+    assert!(after.starts_with(&before));
+    assert!(rows(&after[before.len()..]).iter().all(|r| r["ordinal"].as_u64().unwrap() > 9000));
+    assert_eq!(read_messages(&f.source).unwrap(),ms);
+}
+#[test]
+fn compressed_codex_history_is_discovered_and_appended_without_changing_its_id() {
+    let f = Fixture::new(Tool::Codex);
+    let original = fs::read(&f.source.path).unwrap();
+    let compressed = f.source.path.with_extension("jsonl.zst");
+    fs::write(&compressed, zstd::stream::encode_all(original.as_slice(), 3).unwrap()).unwrap();
+    fs::remove_file(&f.source.path).unwrap();
+    assert_eq!(read_messages(&f.source).unwrap(), messages());
+    let scope = workspace_scope(&f);
+    let first = workspace_scan(&f, &scope);
+    assert_eq!(first.published, 1);
+    assert!(first.errors.is_empty(), "{:?}", first.errors);
+    assert!(workspace_state(&f).entries.contains_key(&f.source.path.to_string_lossy().into_owned()));
+    let mut continued = messages();
+    continued.push(Message { role:"user".into(), text:"Continue the compressed canonical history".into(), images:vec![] });
+    continued.push(Message { role:"assistant".into(), text:"The original ID is retained".into(), images:vec![] });
+    canonical::update(&f.source, &continued, "Compressed native title", "2026-10-14T07:00:00Z").unwrap();
+    assert!(!f.source.path.exists(), "keep a single native representation");
+    let decoded = zstd::stream::decode_all(fs::File::open(&compressed).unwrap()).unwrap();
+    assert!(decoded.starts_with(&original));
+    assert_eq!(read_messages(&f.source).unwrap(), continued);
+    assert_eq!(titles::projection(&f.source).unwrap().as_deref(), Some("Compressed native title"));
+    assert!(workspace_scan(&f, &scope).errors.is_empty());
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+}
+#[test]
+fn compressed_history_rejects_corruption_symlinks_and_oversized_decoding() {
+    let f = Fixture::new(Tool::Codex);
+    let raw = fs::read(&f.source.path).unwrap();
+    let path = f.source.path.with_extension("jsonl.zst");
+    let packed = zstd::stream::encode_all(raw.as_slice(), 3).unwrap();
+    fs::write(&path, &packed).unwrap();
+    fs::remove_file(&f.source.path).unwrap();
+    assert!(storage::bytes(&f.source, 32).unwrap_err().to_string().contains("limit"));
+    fs::write(&path, &packed[..packed.len()-4]).unwrap();
+    assert!(read_messages(&f.source).is_err());
+    #[cfg(unix)] {
+        fs::remove_file(&path).unwrap();
+        let outside = f._temp.path().join("private-transcript");
+        fs::write(&outside, packed).unwrap();
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        assert!(read_messages(&f.source).unwrap_err().to_string().contains("Symlink"));
+    }
+}
+#[test]
+fn compression_after_initial_selection_keeps_the_selected_conversation() {
+    let f = Fixture::new(Tool::Codex);
+    let scope = workspace_scope(&f);
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+    let packed = f.source.path.with_extension("jsonl.zst");
+    fs::write(&packed, zstd::stream::encode_all(fs::read(&f.source.path).unwrap().as_slice(), 3).unwrap()).unwrap();
+    fs::remove_file(&f.source.path).unwrap();
+    let found = discovery::find(&f.config, &scope, &f.gate, &mut HashMap::new()).unwrap();
+    assert_eq!(found.iter().filter(|s| s.id == f.source.id).count(), 1);
+    assert!(found.iter().any(|s| s.path == f.source.path));
+    // A materialized plain log wins if the native CLI has not yet removed its compressed sibling.
+    fs::write(&f.source.path, b"not a valid native transcript\n").unwrap();
+    assert!(read_messages(&f.source).is_err());
 }
 #[test]
 fn partial_writes_attachments_versions_and_disable_are_safe() {
@@ -667,6 +949,15 @@ fn export_native_cli_fixtures() {
         };
         let id = stable_id(tool.key());
         let source = destination(&pair, &seed, &id, chrono::Utc::now()).unwrap();
+        let append_only = std::env::var_os("KILN_SYNC_FIXTURE_APPEND_ONLY").is_some();
+        let source = if append_only {
+            let saved: Source = serde_json::from_slice(&fs::read(dir.join(format!("{}.json", tool.key()))).unwrap()).unwrap();
+            assert_eq!(saved.root, pair.endpoint(tool).root);
+            assert_eq!(saved.cwd, dir.to_string_lossy());
+            assert_eq!(saved.id, id);
+            saved
+        } else { source };
+        if !append_only {
         publish(
             &source.path,
             &format::render_titled(
@@ -680,6 +971,21 @@ fn export_native_cli_fixtures() {
             .unwrap(),
         )
         .unwrap();
+        }
+        if tool == Tool::Codex && std::env::var_os("KILN_SYNC_FIXTURE_COMPRESSED").is_some() && source.path.exists() {
+            let packed = source.path.with_extension("jsonl.zst");
+            let bytes = fs::read(&source.path).unwrap();
+            fs::write(&packed, zstd::stream::encode_all(bytes.as_slice(), 3).unwrap()).unwrap();
+            fs::remove_file(&source.path).unwrap();
+        }
+        if std::env::var_os("KILN_SYNC_FIXTURE_CONTINUATIONS").is_some() {
+            let mut continued = fixture_messages.clone();
+            for index in 1..=3 {
+                continued.push(Message { role:"user".into(), text:format!("Canonical continuation {index}"), images:vec![] });
+                continued.push(Message { role:"assistant".into(), text:format!("Recorded canonical continuation {index}"), images:vec![] });
+                canonical::update(&source, &continued, &fixture_title, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)).unwrap();
+            }
+        }
         fs::write(
             dir.join(format!("{}.json", tool.key())),
             serde_json::to_vec_pretty(&source).unwrap(),
@@ -766,8 +1072,9 @@ fn branches_and_restart_cache_preserve_every_source() {
         .unwrap();
     }
     let changed = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert_eq!(changed.published, 2);
-    assert!(changed.errors.is_empty());
+    assert_eq!(changed.published, 0);
+    assert!(changed.errors.iter().all(|e| e.contains("diverged")));
+    assert!(!changed.errors.is_empty());
     assert_eq!(changed.rows.len(), 2);
     assert_eq!(f.scan().published, 0);
     assert!(
@@ -907,13 +1214,11 @@ fn recovery_reuses_publication_plan_and_never_clobbers_a_collision() {
             "{}.json",
             digest(&serde_json::to_vec(&f.pair).unwrap())
         ));
-        let fingerprint = digest(&serde_json::to_vec(&messages()).unwrap());
         let key = f.source.path.to_string_lossy();
-        let title = titles::clean(messages()[0].text.lines().next().unwrap());
         let id = stable_id(&format!(
-            "{}:v4:{key}:{fingerprint}:{}",
+            "{}:canonical:{key}:{}",
             state_path.display(),
-            digest(title.as_bytes())
+            f.pair.claude.root.display()
         ));
         let date = chrono::DateTime::parse_from_rfc3339("2026-10-12T23:59:59.000Z")
             .unwrap()
@@ -1078,7 +1383,10 @@ fn native_import_of_a_kiln_copy_does_not_echo_but_new_turns_sync() {
     let again = workspace_scan(&f, &scope);
     assert_eq!(again.published, 0);
     assert_eq!(again.rows.len(), 1);
-    assert_eq!(fs::read(&external.path).unwrap(), bytes);
+    let archived = workspace_state(&f).archived[&external.path.to_string_lossy().into_owned()].clone();
+    assert_eq!(fs::read(&archived).unwrap(), bytes);
+    // A native unarchive restores the old endpoint; new turns still join its group.
+    fs::rename(&archived, &external.path).unwrap();
     let mut continued = messages();
     continued.push(Message {
         role: "user".into(),
@@ -1438,6 +1746,11 @@ fn inspect_existing_workspace_metadata_read_only() {
             Ok(messages) => {
                 let images: usize = messages.iter().map(|m| m.images.len()).sum();
                 let bytes = serde_json::to_vec(&messages).unwrap().len();
+                for tool in Tool::ALL {
+                    let rendered = format::render_titled(tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &messages, "Read-only integrity check").unwrap();
+                    let parsed_rows: Vec<serde_json::Value> = rendered.split(|b| *b == b'\n').filter(|b| !b.is_empty()).map(serde_json::from_slice).collect::<std::result::Result<_, _>>().unwrap();
+                    assert!(format::parse(tool, &parsed_rows).unwrap() == messages, "Native round-trip changed message or image bytes");
+                }
                 eprintln!(
                     "{} {}: {} messages, {} images, {} MiB",
                     scope
@@ -1451,7 +1764,7 @@ fn inspect_existing_workspace_metadata_read_only() {
                     images,
                     bytes / 1024 / 1024
                 );
-                json!({"messages":messages.len(),"images":images,"portable_bytes":bytes})
+                json!({"messages":messages.len(),"images":images,"portable_bytes":bytes,"both_native_formats_verified":true})
             }
             Err(error) => {
                 eprintln!(
@@ -1514,7 +1827,7 @@ fn synchronize_explicitly_authorized_workspaces() {
         &gate,
         &mut cache,
         Some(&scope),
-        |source, title| registry.metadata(source, &gate, title),
+        |source, request| registry.apply(source, &gate, request),
         |status| {
             if status.checked > progress.get() {
                 progress.set(status.checked);
@@ -2279,7 +2592,8 @@ fn database_only_native_names_override_text_index_and_renames_do_not_need_new_tu
             &f.gate,
             &mut cache,
             None,
-            |source, title| {
+            |source, request| {
+                let title = request.title();
                 if source.path == f.source.path && title.is_none() {
                     Ok(Some(name.into()))
                 } else {
@@ -2306,6 +2620,25 @@ fn database_only_native_names_override_text_index_and_renames_do_not_need_new_tu
         "Renamed in native database"
     );
     assert_eq!(run("Renamed in native database").published, 0);
+}
+
+#[test]
+fn resumed_import_keeps_native_title_even_before_it_has_a_status_row() {
+    let f = Fixture::new(Tool::Claude);
+    assert_eq!(f.scan().published, 1);
+    let copy = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
+    let mut continued = messages();
+    continued.push(Message { role: "user".into(), text: "Continue here".into(), images: vec![] });
+    continued.push(Message { role: "assistant".into(), text: "A new answer".into(), images: vec![] });
+    fs::write(&copy.path, format::render(copy.tool, &copy.id, &copy.cwd, "2026-10-14T00:00:00Z", &continued).unwrap()).unwrap();
+    let status = scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), None,
+        |source, request| Ok((source.path == copy.path && request.title().is_none()).then(|| "Shared native name".into())), |_| {}).unwrap();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(status.rows[&copy.path.to_string_lossy().into_owned()].title, "Shared native name");
+    let state = f.state();
+    let target = &state.entries[&copy.path.to_string_lossy().into_owned()].copied_to.as_ref().unwrap();
+    let target = state.entries.values().find(|e| e.source.id == target.id).unwrap();
+    assert_eq!(titles::projection(&target.source).unwrap().as_deref(), Some("Shared native name"));
 }
 
 #[test]
@@ -2381,8 +2714,8 @@ fn unnamed_history_normalizes_title_whitespace_without_changing_messages() {
             &f.gate,
             &mut Cache::new(),
             None,
-            |_, title| {
-                if let Some(title) = title {
+            |_, request| {
+                if let Some(title) = request.title() {
                     assert_eq!(title, title.trim());
                 }
                 Ok(None)

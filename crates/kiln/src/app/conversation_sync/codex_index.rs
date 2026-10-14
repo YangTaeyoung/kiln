@@ -13,6 +13,29 @@ pub(super) struct Registry {
     binary: Option<PathBuf>,
 }
 impl Registry {
+    pub fn apply(&mut self, source: &Source, gate: &Gate, request: Metadata<'_>) -> Result<Option<String>> {
+        if matches!(request, Metadata::Archive) {
+            self.metadata(source, gate, None)?;
+            let connection = self.connections.get_mut(&source.root).context("Missing native archive connection")?;
+            // The native archive also moves descendants. Never retire an alias
+            // with a separate subagent history, even when the parent's prefix matches.
+            let descendants = connection.request("thread/list", json!({
+                "ancestorThreadId":source.id,"limit":1,"modelProviders":[],
+                "sourceKinds":["cli","vscode","exec","appServer","subAgent","subAgentReview","subAgentCompact","subAgentThreadSpawn","subAgentOther","unknown"]
+            }), gate)?;
+            ensure!(descendants["data"].as_array().is_some_and(|d| d.is_empty()) && descendants["nextCursor"].is_null(),
+                "Linked snapshot has descendant histories; preserved for review");
+            connection.request("thread/archive", json!({"threadId":source.id}), gate)?;
+            let result = connection.request("thread/read", json!({"threadId":source.id,"includeTurns":false}), gate)?;
+            ensure!(result["thread"]["id"] == source.id, "Archived a different native conversation");
+            let path = PathBuf::from(result["thread"]["path"].as_str().context("Missing archived transcript path")?);
+            let path = storage::physical(&Source { path, ..source.clone() });
+            safe_path(&source.root, &path)?;
+            ensure!(path.starts_with(source.root.join("archived_sessions")), "Native archive path was not archived");
+            return Ok(Some(path.to_string_lossy().into_owned()));
+        }
+        self.metadata(source, gate, request.title())
+    }
     pub fn ensure(&mut self, source: &Source, gate: &Gate) -> Result<()> {
         let title = titles::projection(source)?;
         self.metadata(source, gate, title.as_deref()).map(|_| ())
@@ -172,7 +195,7 @@ impl Connection {
         };
         connection.request(
             "initialize",
-            json!({"clientInfo":{"name":"kiln","version":env!("CARGO_PKG_VERSION")}}),
+            json!({"clientInfo":{"name":"kiln","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}),
             gate,
         )?;
         connection.send(json!({"method":"initialized"}))?;
@@ -289,6 +312,38 @@ for line in sys.stdin:
                 .to_string()
                 .contains("paused")
         );
+    }
+    #[test]
+    fn native_archive_preserves_descendant_histories() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let script = root.join("codex-fixture");
+        fs::write(&script, r#"#!/usr/bin/env python3
+import json,sys
+from pathlib import Path
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ method=r['method']
+ if method=='initialize': result={}
+ elif method=='thread/read': result={'thread':{'id':'fixture','path':str(Path.cwd()/'rollout.jsonl')}}
+ elif method=='thread/list':
+  assert r['params']['ancestorThreadId']=='fixture'
+  assert 'subAgentThreadSpawn' in r['params']['sourceKinds']
+  result={'data':[{'id':'separate-child'}],'nextCursor':None}
+ else:
+  Path('unexpected-archive').write_text(method)
+  raise RuntimeError(method)
+ print(json.dumps({'id':r['id'],'result':result}),flush=True)
+"#).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let source = Source { tool:Tool::Codex, root:root.clone(), path:root.join("rollout.jsonl"), cwd:root.to_string_lossy().into_owned(), id:"fixture".into() };
+        let gate = Arc::new(AtomicBool::new(true));
+        let mut registry = Registry::default();
+        registry.connections.insert(root.clone(), Connection::start(&script, &root, &gate, Duration::from_secs(3)).unwrap());
+        assert!(registry.apply(&source, &gate, Metadata::Archive).unwrap_err().to_string().contains("descendant histories"));
+        assert!(!root.join("unexpected-archive").exists());
     }
     #[test]
     #[ignore]

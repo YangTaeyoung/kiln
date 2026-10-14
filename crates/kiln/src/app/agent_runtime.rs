@@ -227,6 +227,14 @@ pub fn renew(path: &Path) -> Result<SpawnSpec> {
     private_write(path, &serde_json::to_vec(&record)?)?;
     launch_spec(path, &record, true, None)
 }
+pub(super) fn redirect(path: &Path, generation: &str, id: &str) -> Result<()> {
+    ensure!(valid_id(id), "Invalid canonical conversation ID");
+    let _lock = lock_record(path)?;
+    let mut record = read(path)?;
+    ensure!(record.generation == generation, "Conversation transfer was superseded");
+    record.conversation = Some(id.into());
+    private_write(path, &serde_json::to_vec(&record)?)
+}
 pub fn request_spec(agent: &SpawnSpec, request: &Path) -> Result<SpawnSpec> {
     let path = record_path(agent).context("missing launch record")?;
     let record = read(&path)?;
@@ -340,6 +348,7 @@ pub fn run_request(
     let retry = std::env::var("KILN_CAPACITY_RETRY_TURN").ok();
     if let Some(turn) = &retry {
         ensure!(resumed && record.tool == Tool::Codex, "invalid capacity retry");
+        ensure!(!super::conversation_sync::handover::blocked(&kiln_common::paths::config_dir(), path, &record), "Conversation ownership transferred; capacity retry cancelled");
         let failure = super::capacity_recovery::failure(&record)?.context("capacity error no longer current")?;
         ensure!(&failure.turn == turn, "capacity retry superseded by another turn");
         spec.args.push(super::capacity_recovery::CONTINUE.into());
@@ -443,9 +452,14 @@ fn valid_id(id: &str) -> bool {
 }
 /// Hidden helper: accepts only a SessionStart UUID, never writes transcript or token data.
 pub fn hook(path: &Path, generation: &str, input: impl Read) -> Result<()> {
-    hook_in(&directory(), path, generation, input)
+    match hook_in(&directory(), path, generation, input) {
+        Ok(Some(output)) => println!("{output}"),
+        Ok(None) => {},
+        Err(error) => println!("{}", serde_json::json!({"decision":"block","reason":format!("Kiln could not confirm conversation ownership: {error}")})),
+    }
+    Ok(())
 }
-fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Result<()> {
+fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Result<Option<serde_json::Value>> {
     let root = root.canonicalize()?;
     ensure!(
         path.parent()
@@ -476,7 +490,7 @@ fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Resu
     if event.get("agent_id").is_some_and(|v| !v.is_null())
         || event.get("parent_session_id").is_some_and(|v| !v.is_null())
     {
-        return Ok(());
+        return Ok(None);
     }
     if !record.confirmed
         && let Some(expected) = &record.conversation
@@ -493,7 +507,10 @@ fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Resu
         // Missing/not-yet-created transcript metadata must not break native CLI hooks.
         let _ = super::conversation_sync::track(config, &record, transcript);
     }
-    Ok(())
+    if let Some(config) = root.parent() {
+        return super::conversation_sync::handover::event(config, path, &record, event["hook_event_name"].as_str().unwrap());
+    }
+    Ok(None)
 }
 fn bounded(mut cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
     cmd.stdin(Stdio::null())
@@ -1037,6 +1054,58 @@ mod tests {
         assert!(!read(&a).unwrap().confirmed);
         hook_in(d.path(), &a, "a.json", event(id).as_bytes()).unwrap();
         assert!(read(&a).unwrap().confirmed);
+    }
+
+    #[test]
+    fn linked_resume_requests_handover_without_reclaiming_on_an_old_prompt() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().canonicalize().unwrap();
+        let dir = config.join("agent-sessions");
+        fs::create_dir_all(&dir).unwrap();
+        let mut links = vec![];
+        let mut records = vec![];
+        for (i, tool) in Tool::ALL.into_iter().enumerate() {
+            let root = config.join(tool.key());
+            fs::create_dir(&root).unwrap();
+            let id = format!("{}2345678-1234-1234-1234-123456789abc", i + 1);
+            let path = dir.join(format!("{}.json", tool.key()));
+            let generation = format!("launch-{i}");
+            let record = Record { tool, spec: SpawnSpec {
+                cwd: Some(config.to_string_lossy().into_owned()),
+                env: vec![(if tool == Tool::Claude { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" }.into(), root.to_string_lossy().into_owned())],
+                ..Default::default()
+            }, version: String::new(), conversation: None, generation: generation.clone(), confirmed: false, request_started: false };
+            private_write(&path, &serde_json::to_vec(&record).unwrap()).unwrap();
+            links.push(serde_json::json!({"tool":tool,"root":root,"id":id,"group":"linked-fixture","canonical_id":id}));
+            records.push((path, generation, id));
+        }
+        fs::create_dir_all(config.join("conversation-sync")).unwrap();
+        fs::write(config.join("conversation-sync/native-links.json"), serde_json::to_vec(&links).unwrap()).unwrap();
+        let event = |event: &str, id: &str| serde_json::json!({"hook_event_name":event,"session_id":id}).to_string();
+        for (path, generation, id) in &records {
+            hook_in(&dir, path, generation, event("SessionStart", id).as_bytes()).unwrap();
+        }
+        let claims_path = config.join("conversation-sync/owners.json");
+        let before = fs::read(&claims_path).expect("resuming the linked peer must request an exclusive handover");
+        let owners: serde_json::Value = serde_json::from_slice(&before).unwrap();
+        assert_eq!(owners["linked-fixture"]["record"], serde_json::json!(records[1].0));
+        assert_eq!(owners["linked-fixture"]["ready"], false);
+        let blocked = hook_in(&dir, &records[0].0, &records[0].1, event("UserPromptSubmit", &records[0].2).as_bytes()).unwrap().unwrap();
+        assert_eq!(blocked["decision"], "block");
+        assert_eq!(fs::read(&claims_path).unwrap(), before, "an old prompt must not steal the conversation back");
+        let handover = super::super::conversation_sync::handover::owners(&config).unwrap();
+        let sequence = handover["linked-fixture"].sequence;
+        let mut winner = read(&records[1].0).unwrap();
+        winner.generation = "reloaded".into();
+        assert!(!super::super::conversation_sync::handover::pending_matches(&handover["linked-fixture"], &records[1].0, &winner));
+        winner.confirmed = false;
+        assert!(super::super::conversation_sync::handover::pending_matches(&handover["linked-fixture"], &records[1].0, &winner), "a renewed record must recover if ownership persistence failed before launch");
+        private_write(&records[1].0, &serde_json::to_vec(&winner).unwrap()).unwrap();
+        super::super::conversation_sync::handover::grant(&config, "linked-fixture", sequence, &records[1].0, &winner).unwrap();
+        assert!(hook_in(&dir, &records[1].0, "reloaded", event("SessionStart", &records[1].2).as_bytes()).unwrap().is_none());
+        assert!(hook_in(&dir, &records[1].0, "reloaded", event("UserPromptSubmit", &records[1].2).as_bytes()).unwrap().is_none());
+        assert!(super::super::conversation_sync::handover::blocked(&config, &records[0].0, &read(&records[0].0).unwrap()));
+        assert!(!super::super::conversation_sync::handover::blocked(&config, &records[1].0, &winner));
     }
     #[test]
     fn unpinned_account_cannot_restart() {

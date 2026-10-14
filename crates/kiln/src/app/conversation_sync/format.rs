@@ -108,7 +108,19 @@ pub fn parse(tool: Tool, rows: &[Value]) -> Result<Vec<Message>> {
     }
 }
 
+pub(super) fn claude_interruption(row: &Value) -> Option<&str> {
+    if row["type"] != "user" || row["promptId"].as_str().is_none() { return None; }
+    let content = &row["message"]["content"];
+    let text = content.as_str().or_else(|| {
+        let blocks = content.as_array()?;
+        (blocks.len() == 1).then(|| blocks[0]["text"].as_str()).flatten()
+    })?;
+    matches!(text, "[Request interrupted by user]" | "[Request interrupted by user for tool use]").then_some(text)
+}
+
 fn claude(rows: &[Value]) -> Result<Vec<Message>> {
+    let interruptions: HashMap<&str, &Value> = rows.iter().filter(|row| claude_interruption(row).is_some())
+        .filter_map(|row| Some((row["promptId"].as_str()?, row))).collect();
     let by_id: HashMap<&str, &Value> = rows
         .iter()
         .filter_map(|r| r["uuid"].as_str().map(|id| (id, r)))
@@ -174,7 +186,14 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
                 .map(Some)
                 .context("Claude compacted history requires a complete original conversation")?
         } else {
-            current["parentUuid"].as_str()
+            let parent = current["parentUuid"].as_str();
+            if claude_interruption(current).is_some() && parent.is_some_and(|id| !by_id.contains_key(id)) {
+                // Native 2.1.299 can flush the interruption before its prompt and
+                // reference an assistant UUID which was never persisted. promptId
+                // still identifies the original user record without text matching.
+                rows.iter().rev().find(|row| row["type"] == "user" && row["promptId"] == current["promptId"] && claude_interruption(row).is_none())
+                    .and_then(|row| row["uuid"].as_str()).context("Interrupted Claude prompt is missing")?.into()
+            } else { parent }
         };
         let Some(parent) = parent else {
             break;
@@ -190,16 +209,17 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
     }
     chain.reverse();
     let Some(last) = chain.iter().rposition(|r| {
-        r["type"] == "assistant"
+        (r["type"] == "assistant"
             && matches!(
                 r["message"]["stop_reason"].as_str(),
                 Some("end_turn" | "stop_sequence")
-            )
+            )) || r["promptId"].as_str().is_some_and(|id| interruptions.contains_key(id))
     }) else {
         return Ok(vec![]);
     };
     let mut messages = Vec::new();
-    for row in &chain[..=last] {
+    let mut emitted_interruptions = HashSet::new();
+    for (index, row) in chain[..=last].iter().enumerate() {
         if row["isCompactSummary"] == true {
             ensure!(
                 chain.iter().any(|r| r["subtype"] == "compact_boundary"),
@@ -237,6 +257,16 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
             }
         }
         messages.extend(text_blocks(&content, role)?);
+        if let Some(prompt) = row["promptId"].as_str()
+            && let Some(interruption) = interruptions.get(prompt)
+            && (index == last || chain[index + 1]["promptId"].as_str() != Some(prompt))
+            && emitted_interruptions.insert(prompt)
+        {
+            if !chain[..=index].iter().any(|r| std::ptr::eq(*r, *interruption)) {
+                messages.extend(text_blocks(&interruption["message"]["content"], "user")?);
+            }
+            messages.push(Message { role:"assistant".into(), text:format!("[Session event: interrupted]\n{}", claude_interruption(interruption).unwrap()), images:vec![] });
+        }
     }
     Ok(messages)
 }
@@ -355,6 +385,11 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
                     }
                 }
                 Some("task_complete" | "turn_complete") => {
+                    completed_len = messages.len();
+                    boundaries.push(completed_len);
+                }
+                Some("turn_aborted") => {
+                    messages.push(Message { role:"assistant".into(), text:format!("[Session event: turn_aborted]\n{p}"), images:vec![] });
                     completed_len = messages.len();
                     boundaries.push(completed_len);
                 }
@@ -488,6 +523,13 @@ pub fn render_titled(
         !messages.is_empty() && messages.iter().any(|m| m.role == "user"),
         "No completed user conversation"
     );
+    render_messages(tool, id, cwd, timestamp, messages, title)
+}
+
+fn render_messages(
+    tool: Tool, id: &str, cwd: &str, timestamp: &str,
+    messages: &[Message], title: &str,
+) -> Result<Vec<u8>> {
     let mut rows = Vec::new();
     match tool {
         Tool::Claude => {
@@ -512,7 +554,7 @@ pub fn render_titled(
             // message can fill the head before a complete prompt is available.
             rows.push(
                 json!({"type":"custom-title","sessionId":id,"customTitle":title,
-                "uuid":super::stable_id(&format!("{id}:title")),"timestamp":timestamp,"kiln_projection":4}),
+                "uuid":super::stable_id(&format!("{id}:title")),"timestamp":timestamp,"kiln_projection":super::PROJECTION_REVISION}),
             );
         }
         Tool::Codex => {
@@ -560,7 +602,7 @@ pub fn render_titled(
                 rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":item,"completed_at_ms":0}}));
             }
             rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"task_complete","turn_id":turn,"last_agent_message":null}}));
-            rows.last_mut().unwrap()["kiln_projection"] = json!(4);
+            rows.last_mut().unwrap()["kiln_projection"] = json!(super::PROJECTION_REVISION);
             rows.last_mut().unwrap()["kiln_title"] = json!(title);
             for (i, row) in rows.iter_mut().enumerate() {
                 row["ordinal"] = json!(i);
@@ -572,6 +614,55 @@ pub fn render_titled(
         serde_json::to_writer(&mut bytes, &row)?;
         bytes.push(b'\n');
     }
+    Ok(bytes)
+}
+
+/// A separate seed makes appended message IDs distinct from every earlier batch.
+/// Session identity stays fixed, and Claude's first new parent is the actual
+/// native leaf, not a reconstructed/imported message ID.
+pub(super) fn render_suffix(
+    tool: Tool, id: &str, cwd: &str, timestamp: &str, messages: &[Message],
+    title: &str, existing: &[Value], checkpoint: &str, last_ordinal: Option<u64>,
+) -> Result<Vec<u8>> {
+    let seed = super::stable_id(&format!("{id}:append:{checkpoint}"));
+    // An existing conversation can append only recorded assistant/tool output.
+    // Validate the full history in canonical::update, without inventing a user.
+    let mut rows: Vec<Value> = if messages.is_empty() {
+        vec![]
+    } else {
+        let bytes = render_messages(tool, &seed, cwd, timestamp, messages, title)?;
+        bytes.split(|b| *b == b'\n').filter(|b| !b.is_empty())
+            .map(serde_json::from_slice).collect::<std::result::Result<_, _>>()?
+    };
+    match tool {
+        Tool::Claude => {
+            let parent = existing.iter().rev().find(|r| {
+                matches!(r["type"].as_str(), Some("user" | "assistant")) && r["isSidechain"] != true
+            }).and_then(|r| r["uuid"].as_str()).context("Missing native Claude leaf")?;
+            if let Some(first) = rows.first_mut() {
+                first["parentUuid"] = json!(parent);
+            } else {
+                rows.push(json!({"type":"custom-title", "customTitle":title, "kiln_projection":super::PROJECTION_REVISION,
+                    "uuid":super::stable_id(&format!("{seed}:title")), "timestamp":timestamp}));
+            }
+            for row in &mut rows { row["sessionId"] = json!(id); }
+        }
+        Tool::Codex => {
+            rows.retain(|r| r["type"] != "session_meta");
+            if rows.is_empty() {
+                rows.push(json!({"timestamp":timestamp,"type":"event_msg",
+                    "payload":{"type":"task_complete","turn_id":seed,"last_agent_message":null},
+                    "kiln_projection":super::PROJECTION_REVISION,"kiln_title":title}));
+            }
+            let ordinal = last_ordinal.unwrap_or(0).checked_add(1).context("Native transcript ordinal overflow")?;
+            for (i, row) in rows.iter_mut().enumerate() {
+                row["ordinal"] = json!(ordinal.checked_add(i as u64).context("Native transcript ordinal overflow")?);
+                if row["payload"]["type"] == "item_completed" { row["payload"]["thread_id"] = json!(id); }
+            }
+        }
+    }
+    let mut bytes = Vec::new();
+    for row in rows { serde_json::to_writer(&mut bytes, &row)?; bytes.push(b'\n'); }
     Ok(bytes)
 }
 

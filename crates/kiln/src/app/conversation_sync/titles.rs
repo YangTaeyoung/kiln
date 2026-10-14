@@ -1,7 +1,7 @@
 //! Native resume titles. Only title metadata is pinned; transcript bodies are immutable.
 use super::*;
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 
 pub(super) fn clean(value: &str) -> String {
     value
@@ -151,15 +151,14 @@ pub(super) fn pin_claude(source: &Source, title: &str) -> Result<()> {
 }
 
 pub(super) fn projection(source: &Source) -> Result<Option<String>> {
-    let mut file = fs::File::open(&source.path)?;
-    let len = file.metadata()?.len();
-    file.seek(SeekFrom::Start(len.saturating_sub(4096)))?;
-    let mut tail = Vec::new();
-    file.take(4096).read_to_end(&mut tail)?;
+    Ok(raw_projection(source)?.map(|s| clean(&s)))
+}
+pub(super) fn raw_projection(source: &Source) -> Result<Option<String>> {
+    let tail = storage::tail(source, 4096)?;
     Ok(tail
         .split(|b| *b == b'\n')
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
-        .filter(|r| r["kiln_projection"] == 4)
+        .filter(|r| matches!(r["kiln_projection"].as_u64(), Some(4 | 5)))
         .filter_map(|r| {
             r[if source.tool == Tool::Claude {
                 "customTitle"
@@ -167,7 +166,7 @@ pub(super) fn projection(source: &Source) -> Result<Option<String>> {
                 "kiln_title"
             }]
             .as_str()
-            .map(clean)
+            .map(str::to_owned)
         })
         .last())
 }

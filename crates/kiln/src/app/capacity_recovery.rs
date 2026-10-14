@@ -305,6 +305,10 @@ impl KilnApp {
                 let Ok(record) = agent_runtime::read(&path) else {
                     continue;
                 };
+                if super::conversation_sync::handover::blocked(&kiln_common::paths::config_dir(), &path, &record) {
+                    self.capacity_recovery.cancel(row.pane);
+                    continue;
+                }
                 if record.generation != row.generation
                     || record.conversation != row.conversation
                     || !record.confirmed
