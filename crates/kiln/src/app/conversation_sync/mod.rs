@@ -1257,6 +1257,8 @@ pub struct Manager {
     /// Native links were emptied after synchronization stopped.
     links_cleared: bool,
     worker: Option<worker::Worker>,
+    /// Executable and build identity the worker is started from, captured at startup.
+    worker_exe: (PathBuf, String),
     scan_id: u64,
     worker_scan: Option<u64>,
     /// The next worker scan clears retry delays / starts from an empty cache.
@@ -1288,6 +1290,11 @@ impl Default for Manager {
             urgent: false,
             links_cleared: false,
             worker: None,
+            worker_exe: {
+                let exe = super::conn::daemon_exe();
+                let build = kiln_daemon::exe_build_id(&exe);
+                (exe, build)
+            },
             scan_id: 0,
             worker_scan: None,
             expedite_next: false,
@@ -1449,11 +1456,13 @@ impl Manager {
     /// Sends the scan to the sync worker process; false when no worker can run it,
     /// in which case the scan runs on a thread of this process.
     fn scan_in_worker(&mut self, pair: &Pair, quiet: Duration, ctx: &egui::Context) -> bool {
-        if cfg!(test) {
+        // An executable replaced on disk (an installed update) may not speak this protocol.
+        let (exe, build) = &self.worker_exe;
+        if cfg!(test) || kiln_daemon::exe_build_id(exe) != *build {
             return false;
         }
         if !self.worker.as_mut().is_some_and(worker::Worker::alive) {
-            self.worker = worker::Worker::start(&super::conn::daemon_exe(), self.tx.clone(), ctx.clone()).ok();
+            self.worker = worker::Worker::start(exe, self.tx.clone(), ctx.clone()).ok();
         }
         let Some(worker) = self.worker.as_mut() else {
             return false;
