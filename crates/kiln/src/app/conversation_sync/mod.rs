@@ -122,8 +122,49 @@ fn opposite(tool: Tool) -> Tool {
         Tool::Claude
     }
 }
+fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        text.push(DIGITS[usize::from(b >> 4)] as char);
+        text.push(DIGITS[usize::from(b & 15)] as char);
+    }
+    text
+}
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex(&Sha256::digest(bytes))
+}
+/// Hashes the compact JSON encoding without materializing it; equal to `digest(&to_vec(value))`.
+fn json_digest(value: &impl Serialize) -> Result<String> {
+    struct Hasher(Sha256);
+    impl Write for Hasher {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut hasher = Hasher(Sha256::new());
+    serde_json::to_writer(&mut hasher, value)?;
+    Ok(hex(&hasher.0.finalize()))
+}
+/// Length of the compact JSON encoding, without allocating it.
+fn json_len(value: &impl Serialize) -> Result<u64> {
+    struct Counter(u64);
+    impl Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len() as u64;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter(0);
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
 }
 fn stable_id(text: &str) -> String {
     let mut bytes = Sha256::digest(text.as_bytes());
@@ -306,6 +347,15 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
+/// `replace`, skipped when the file already holds exactly these bytes.
+fn replace_changed(path: &Path, bytes: &[u8]) -> Result<()> {
+    let unchanged = fs::symlink_metadata(path).is_ok_and(|m| m.is_file() && m.len() == bytes.len() as u64)
+        && fs::read(path).is_ok_and(|current| current == bytes);
+    if unchanged {
+        return Ok(());
+    }
+    replace(path, bytes)
+}
 fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("Missing state parent")?;
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
@@ -405,6 +455,13 @@ fn read_messages(source: &Source) -> Result<Vec<format::Message>> {
     read_messages_titled(source, &mut String::new())
 }
 fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<format::Message>> {
+    read_rows_titled(source, title).map(|(_, messages)| messages)
+}
+/// Validated native rows and their portable messages from one read of the transcript.
+fn read_rows_titled(
+    source: &Source,
+    title: &mut String,
+) -> Result<(Vec<serde_json::Value>, Vec<format::Message>)> {
     let preferred = if title.is_empty() {
         titles::Cache::default().name(source)?.unwrap_or_default()
     } else {
@@ -479,7 +536,7 @@ fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<forma
     if title.trim().is_empty() {
         *title = titles::fallback(&messages);
     }
-    Ok(messages)
+    Ok((rows, messages))
 }
 fn destination(
     pair: &Pair,
@@ -536,11 +593,34 @@ struct Cache {
     titles: titles::Cache,
     rows: BTreeMap<String, Conversation>,
     attempts: HashMap<PathBuf, (u64, SystemTime, Instant)>,
+    /// Consecutive unsettled attempts per unchanged source; selects its retry delay.
+    failures: HashMap<PathBuf, u32>,
+    /// Snapshot-retirement attempts keyed by source, stamped with both histories.
+    retirements: HashMap<String, (Vec<(u64, SystemTime)>, Instant, u32)>,
+    /// Sources modified within this window are left until their writer pauses.
+    quiet: Duration,
 }
 impl Cache {
     fn new() -> Self {
         Self::default()
     }
+    /// Retries are immediate on the next scan; cached results of unchanged files are kept.
+    fn expedite(&mut self) {
+        self.attempts.clear();
+        self.failures.clear();
+        self.retirements.clear();
+    }
+}
+/// Retry delay for an unchanged source after `failures` consecutive unsettled attempts.
+fn retry_delay(failures: u32) -> Duration {
+    Duration::from_secs(30 << failures.saturating_sub(1).min(2))
+}
+/// Whether a file was modified within `quiet` of now; future timestamps count as settled.
+fn recently_modified(modified: SystemTime, quiet: Duration) -> bool {
+    !quiet.is_zero()
+        && SystemTime::now()
+            .duration_since(modified)
+            .is_ok_and(|age| age < quiet)
 }
 #[cfg(test)]
 fn scan(
@@ -695,11 +775,11 @@ fn scan_with_metadata(
             }
         }
         // Persist discoveries even before an incomplete or incompatible response can be copied.
-        replace(&state_path, &serde_json::to_vec(&state)?)?;
+        replace_changed(&state_path, &serde_json::to_vec(&state)?)?;
     }
     canonical::migrate(config, &state_path, &legacy_path, &mut state, scope)?;
     state.archived.retain(|key, _| state.entries.get(key).is_none_or(|e| !storage::exists(&e.source)));
-    replace(&state_path, &serde_json::to_vec(&state)?)?;
+    replace_changed(&state_path, &serde_json::to_vec(&state)?)?;
     let active: BTreeMap<_, _> = state
         .entries
         .iter()
@@ -754,29 +834,29 @@ fn scan_with_metadata(
             }
             continue;
         }
+        // Skipped checks keep the source's retry count; completed ones update it.
+        let mut deferred = false;
         let result = (|| -> Result<()> {
             safe_path(&entry.source.root, &storage::physical(&entry.source))?;
             let meta = storage::metadata(&entry.source)?;
             let stamp = (meta.len(), meta.modified()?, entry.seen.clone());
-            if cache
-                .attempts
-                .get(&entry.source.path)
-                .is_some_and(|(len, modified, at)| {
-                    *len == stamp.0
-                        && *modified == stamp.1
-                        && at.elapsed() < Duration::from_secs(30)
-                })
-                && status
-                    .rows
-                    .get(&key)
-                    .is_some_and(|r| matches!(r.phase, Phase::Failed | Phase::Waiting))
+            if let Some((len, modified, at)) = cache.attempts.get(&entry.source.path)
+                && *len == stamp.0
+                && *modified == stamp.1
+                && cache
+                    .failures
+                    .get(&entry.source.path)
+                    .is_some_and(|failures| at.elapsed() < retry_delay(*failures))
             {
+                // Imported copies have no initial row; keep their last reported outcome visible.
+                if !status.rows.contains_key(&key)
+                    && let Some(row) = cache.rows.get(&key)
+                {
+                    status.rows.insert(key.clone(), row.clone());
+                }
+                deferred = true;
                 return Ok(());
             }
-            cache.attempts.insert(
-                entry.source.path.clone(),
-                (stamp.0, stamp.1, Instant::now()),
-            );
             let destinations = scope
                 .map(|s| s.destinations(pair, entry.source.tool))
                 .unwrap_or_else(|| vec![pair.clone()]);
@@ -799,6 +879,18 @@ fn scan_with_metadata(
             if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
                 return Ok(());
             }
+            if recently_modified(stamp.1, cache.quiet) {
+                if let Some(row) = status.rows.get_mut(&key) {
+                    row.phase = Phase::Waiting;
+                    row.detail = "Transcript is being written; retrying".into();
+                }
+                deferred = true;
+                return Ok(());
+            }
+            cache.attempts.insert(
+                entry.source.path.clone(),
+                (stamp.0, stamp.1, Instant::now()),
+            );
             if let Some(row) = status.rows.get_mut(&key) {
                 if row.phase == Phase::Queued {
                     row.phase = Phase::Reading;
@@ -825,7 +917,7 @@ fn scan_with_metadata(
                 }
                 return Ok(());
             }
-            let fingerprint = digest(&serde_json::to_vec(&messages)?);
+            let fingerprint = json_digest(&messages)?;
             if entry.imported
                 && (entry.title.is_empty() || title == titles::clean(&entry.title))
                 && discovery::imported(config, &entry.source)?.as_deref() == Some(&fingerprint)
@@ -1035,6 +1127,11 @@ fn scan_with_metadata(
             row.copies = copies;
             Ok(())
         })();
+        let settled = result.is_ok()
+            && status
+                .rows
+                .get(&key)
+                .is_none_or(|r| !matches!(r.phase, Phase::Failed | Phase::Waiting));
         if let Err(error) = result {
             let row = status
                 .rows
@@ -1052,8 +1149,15 @@ fn scan_with_metadata(
                 entry.source.id
             ));
         }
+        if !deferred {
+            if settled {
+                cache.failures.remove(&entry.source.path);
+            } else {
+                *cache.failures.entry(entry.source.path.clone()).or_default() += 1;
+            }
+        }
     }
-    canonical::retire(config, &state_path, &mut state, scope, gate, &mut status, &mut metadata)?;
+    canonical::retire(config, &state_path, &mut state, scope, gate, &mut status, cache, &mut metadata)?;
     status.errors = status
         .rows
         .values()
@@ -1104,7 +1208,18 @@ fn failure_reason(detail: &str) -> String {
         detail.to_owned()
     }
 }
+#[derive(Clone, Copy)]
+enum Badge {
+    Attention,
+    Working { checked: usize, watched: usize },
+    Empty,
+    Waiting,
+    Synced(usize),
+}
 pub struct Manager {
+    /// Increases whenever the status, error, activity flags or workspace list change.
+    revision: u64,
+    badges: std::cell::RefCell<HashMap<PathBuf, (u64, Badge)>>,
     completed: u64,
     pub(super) detail: Option<PathBuf>,
     tx: mpsc::SyncSender<Event>,
@@ -1118,11 +1233,20 @@ pub struct Manager {
     configured: Option<Pair>,
     workspaces: Vec<PathBuf>,
     cache: Arc<Mutex<Cache>>,
+    registry: Arc<Mutex<codex_index::Registry>>,
+    /// The next scan neither waits for active writers nor applies retry delays.
+    urgent: bool,
+    /// Native links were emptied after synchronization stopped.
+    links_cleared: bool,
 }
+/// Background scans leave a transcript until it has been unchanged this long.
+const QUIET: Duration = Duration::from_secs(10);
 impl Default for Manager {
     fn default() -> Self {
         let (tx, rx) = mpsc::sync_channel(8);
         Self {
+            revision: 0,
+            badges: Default::default(),
             completed: 0,
             detail: None,
             tx,
@@ -1136,6 +1260,9 @@ impl Default for Manager {
             configured: None,
             workspaces: Vec::new(),
             cache: Arc::new(Mutex::new(Cache::new())),
+            registry: Default::default(),
+            urgent: false,
+            links_cleared: false,
         }
     }
 }
@@ -1147,7 +1274,9 @@ impl Drop for Manager {
 impl Manager {
     pub(super) fn refresh_for_handover(&mut self) -> Option<u64> {
         if self.busy { return None; }
-        self.cache = Arc::new(Mutex::new(Cache::new()));
+        // Keeps results cached per file length and modification time; clears retry delays.
+        self.cache.lock().unwrap().expedite();
+        self.urgent = true;
         self.next = Instant::now();
         Some(self.completed)
     }
@@ -1162,6 +1291,7 @@ impl Manager {
     ) {
         // Poll quickly only while working; all filesystem/account operations stay off the UI thread.
         while let Ok(event) = self.rx.try_recv() {
+            self.revision += 1;
             match event {
                 Event::Progress(gate, status) => {
                     if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) {
@@ -1211,20 +1341,30 @@ impl Manager {
             && !workspaces.is_empty();
         if !enabled {
             self.cancel_scan();
-            let _ = handover::disable(&kiln_common::paths::config_dir());
-            self.workspaces = workspaces;
+            if !self.links_cleared {
+                self.links_cleared = handover::disable(&kiln_common::paths::config_dir()).is_ok();
+            }
+            if self.workspaces != workspaces {
+                self.revision += 1;
+                self.workspaces = workspaces;
+            }
             return;
         }
+        self.links_cleared = false;
         if self.configured != settings.conversation_sync_pair
             || self.workspaces != workspaces
             || !self.gate.load(Ordering::Acquire)
         {
             self.gate.store(false, Ordering::Release);
             self.gate = Arc::new(AtomicBool::new(true));
+            self.revision += 1;
             self.workspaces = workspaces;
             self.status = Status::default();
             self.configured = settings.conversation_sync_pair.clone();
             self.cache = Arc::new(Mutex::new(Cache::new()));
+            let registry = std::mem::take(&mut self.registry);
+            // Stopping metadata readers waits for their exit off the UI thread.
+            std::thread::spawn(move || drop(registry));
             self.next = Instant::now();
         }
         ctx.request_repaint_after(if self.busy {
@@ -1236,22 +1376,28 @@ impl Manager {
             return;
         }
         self.busy = true;
+        self.revision += 1;
         self.next = Instant::now() + Duration::from_secs(3);
         let pair = settings.conversation_sync_pair.clone().unwrap();
         let workspaces = self.workspaces.clone();
         let gate = self.gate.clone();
         let tx = self.tx.clone();
         let cache = self.cache.clone();
+        let registry = self.registry.clone();
+        let quiet = if std::mem::take(&mut self.urgent) { Duration::ZERO } else { QUIET };
         std::thread::spawn(move || {
             let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
             let result = discovery::Scope::new(&pair, workspaces)
                 .and_then(|scope| {
-                    let mut registry = codex_index::Registry::default();
+                    let mut registry = registry.lock().unwrap();
+                    registry.begin_scan();
+                    let mut cache = cache.lock().unwrap();
+                    cache.quiet = quiet;
                     scan_with_metadata(
                         &kiln_common::paths::config_dir(),
                         &pair,
                         &gate,
-                        &mut cache.lock().unwrap(),
+                        &mut cache,
                         Some(&scope),
                         |source, request| registry.apply(source, &gate, request),
                         |status| {
@@ -1294,6 +1440,7 @@ impl Manager {
         self.busy = true;
         self.connecting = true;
         self.error = None;
+        self.revision += 1;
         let accounts = accounts.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -1343,16 +1490,15 @@ impl Manager {
             ..Status::default()
         }
     }
-    pub(super) fn badge(&self, root: &Path) -> (kiln_common::icons::Icon, egui::Color32, String) {
-        use kiln_common::{Theme, i18n::tr, icons::Icon};
-        let theme = Theme::current();
+    fn badge_state(&self, root: &Path) -> Badge {
+        if let Some((revision, badge)) = self.badges.borrow().get(root)
+            && *revision == self.revision
+        {
+            return *badge;
+        }
         let status = self.workspace_status(root);
-        if self.error.is_some() || status.rows.values().any(|r| r.phase == Phase::Failed) {
-            (
-                Icon::Warning,
-                theme.orange,
-                tr("대화 연동 · 확인 필요").into(),
-            )
+        let badge = if self.error.is_some() || status.rows.values().any(|r| r.phase == Phase::Failed) {
+            Badge::Attention
         } else if self.connecting
             || (status.discovering && status.rows.is_empty())
             || status
@@ -1361,29 +1507,35 @@ impl Manager {
                 .any(|r| matches!(r.phase, Phase::Queued | Phase::Reading | Phase::Copying))
             || (self.busy && status.rows.is_empty())
         {
-            (
+            Badge::Working { checked: status.checked, watched: status.watched }
+        } else if status.rows.is_empty() {
+            Badge::Empty
+        } else if status.rows.values().any(|r| r.phase == Phase::Waiting) {
+            Badge::Waiting
+        } else {
+            Badge::Synced(status.rows.len())
+        };
+        self.badges.borrow_mut().insert(root.to_path_buf(), (self.revision, badge));
+        badge
+    }
+    /// Workspace badges are recomputed only after the sync status changes.
+    pub(super) fn badge(&self, root: &Path) -> (kiln_common::icons::Icon, egui::Color32, String) {
+        use kiln_common::{Theme, i18n::tr, icons::Icon};
+        let theme = Theme::current();
+        match self.badge_state(root) {
+            Badge::Attention => (Icon::Warning, theme.orange, tr("대화 연동 · 확인 필요").into()),
+            Badge::Working { checked, watched } => (
                 Icon::Refresh,
                 theme.blue,
-                kiln_common::trf!("대화 연동 중 · {}/{}", status.checked, status.watched),
-            )
-        } else if status.rows.is_empty() {
-            (
-                Icon::Plug,
-                theme.text_dim,
-                tr("대화 연동됨 · 대화 대기").into(),
-            )
-        } else if status.rows.values().any(|r| r.phase == Phase::Waiting) {
-            (
-                Icon::History,
-                theme.blue,
-                tr("대화 연동 · 응답 완료 대기").into(),
-            )
-        } else {
-            (
+                kiln_common::trf!("대화 연동 중 · {}/{}", checked, watched),
+            ),
+            Badge::Empty => (Icon::Plug, theme.text_dim, tr("대화 연동됨 · 대화 대기").into()),
+            Badge::Waiting => (Icon::History, theme.blue, tr("대화 연동 · 응답 완료 대기").into()),
+            Badge::Synced(count) => (
                 Icon::Check,
                 theme.green,
-                kiln_common::trf!("대화 연동 완료 · {}개", status.rows.len()),
-            )
+                kiln_common::trf!("대화 연동 완료 · {}개", count),
+            ),
         }
     }
     pub(super) fn dialog(
@@ -1425,6 +1577,7 @@ impl Manager {
                         .on_hover_text(tr("이미지를 포함한 원문을 연동합니다. 전달할 수 없는 첨부가 있으면 완료로 표시하지 않습니다."));
                     if ui.button(tr("다시 확인")).clicked() {
                         self.cache = Arc::new(Mutex::new(Cache::new()));
+                        self.urgent = true;
                         self.next = Instant::now();
                     }
                     if enabled && settings.conversation_sync_pair.is_none() && !self.connecting && Self::accounts_ready(accounts)

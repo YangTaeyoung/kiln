@@ -130,6 +130,7 @@ pub(super) fn retire(
     scope: Option<&discovery::Scope>,
     gate: &Gate,
     status: &mut Status,
+    cache: &mut Cache,
     metadata: &mut impl FnMut(&Source, Metadata<'_>) -> Result<Option<String>>,
 ) -> Result<()> {
     let keys: Vec<_> = state.entries.keys().cloned().collect();
@@ -149,6 +150,24 @@ pub(super) fn retire(
             continue;
         };
         if source.path == target.path {
+            continue;
+        }
+        let stamps: Vec<_> = [&source, &target]
+            .into_iter()
+            .map(|s| {
+                storage::metadata(s)
+                    .ok()
+                    .and_then(|m| Some((m.len(), m.modified().ok()?)))
+                    .unwrap_or((0, SystemTime::UNIX_EPOCH))
+            })
+            .collect();
+        if let Some((seen, at, failures)) = cache.retirements.get(&key)
+            && *seen == stamps
+            && at.elapsed() < retry_delay(*failures)
+        {
+            if let Some(row) = cache.rows.get(&key) {
+                status.rows.entry(key.clone()).or_insert_with(|| row.clone());
+            }
             continue;
         }
         let manifest = config
@@ -248,6 +267,14 @@ pub(super) fn retire(
             );
             Ok(Some(destination))
         })();
+        if result.is_ok() {
+            cache.retirements.remove(&key);
+        } else {
+            let failures = cache.retirements.get(&key).map_or(0, |(_, _, n)| *n) + 1;
+            cache
+                .retirements
+                .insert(key.clone(), (stamps, Instant::now(), failures));
+        }
         match result {
             Ok(Some(path)) => {
                 state.archived.insert(key.clone(), path);
@@ -398,7 +425,7 @@ pub(super) fn update(
         "Transcript is being written; retrying"
     );
     let mut old_title = String::new();
-    let current = read_messages_titled(source, &mut old_title)?;
+    let (rows, current) = read_rows_titled(source, &mut old_title)?;
     if current.len() > messages.len() && current.starts_with(messages) {
         anyhow::bail!("Linked conversation has newer messages; retrying from its current endpoint");
     }
@@ -412,7 +439,6 @@ pub(super) fn update(
     {
         return Ok(false);
     }
-    let rows = reader::rows(source, &mut String::new())?;
     #[derive(Deserialize)]
     struct Ordinal { ordinal: Option<u64> }
     let last_ordinal = old.split(|b| *b == b'\n')

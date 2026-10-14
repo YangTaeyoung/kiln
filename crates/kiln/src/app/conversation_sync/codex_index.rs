@@ -12,7 +12,18 @@ pub(super) struct Registry {
     failures: HashMap<PathBuf, String>,
     binary: Option<PathBuf>,
 }
+/// Metadata readers older than this are restarted before the next scan uses them.
+const CONNECTION_LIFETIME: Duration = Duration::from_secs(60);
 impl Registry {
+    /// Readers persist across scans for `CONNECTION_LIFETIME`; failures are retried each scan.
+    pub fn begin_scan(&mut self) {
+        self.failures.clear();
+        self.connections
+            .retain(|_, connection| connection.started.elapsed() < CONNECTION_LIFETIME);
+        if self.connections.is_empty() {
+            self.binary = None;
+        }
+    }
     pub fn apply(&mut self, source: &Source, gate: &Gate, request: Metadata<'_>) -> Result<Option<String>> {
         if matches!(request, Metadata::Archive) {
             self.metadata(source, gate, None)?;
@@ -51,6 +62,13 @@ impl Registry {
         }
         if let Some(error) = self.failures.get(&source.root) {
             anyhow::bail!("{error}");
+        }
+        if self
+            .connections
+            .get_mut(&source.root)
+            .is_some_and(|c| !matches!(c.child.try_wait(), Ok(None)))
+        {
+            self.connections.remove(&source.root);
         }
         let result = (|| {
             if !self.connections.contains_key(&source.root) {
@@ -137,6 +155,7 @@ impl Registry {
     }
 }
 struct Connection {
+    started: Instant,
     child: Child,
     input: ChildStdin,
     replies: mpsc::Receiver<Result<Value, String>>,
@@ -187,6 +206,7 @@ impl Connection {
             }
         });
         let mut connection = Self {
+            started: Instant::now(),
             child,
             input,
             replies,

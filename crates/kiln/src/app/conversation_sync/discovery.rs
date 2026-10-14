@@ -476,7 +476,7 @@ pub(super) fn find(
         );
     }
     // Persist the selection itself before returning, making initial sync resumable.
-    replace(&seeds_path, &serde_json::to_vec(&seeds)?)?;
+    replace_changed(&seeds_path, &serde_json::to_vec(&seeds)?)?;
     ensure!(
         selected.len() <= MAX_SOURCES,
         "Workspace conversation limit reached (4096)"

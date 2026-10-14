@@ -605,6 +605,65 @@ fn divergent_linked_histories_are_preserved_and_report_a_conflict() {
 }
 
 #[test]
+fn unchanged_conflicting_original_and_continued_copy_wait_for_the_retry_delay() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
+    for source in [&f.source, &peer] {
+        let mut ms = messages();
+        ms.push(Message { role: "user".into(), text: source.tool.key().into(), images: vec![] });
+        ms.push(Message { role: "assistant".into(), text: "Independent reply".into(), images: vec![] });
+        fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &ms).unwrap()).unwrap();
+    }
+    let mut cache = Cache::new();
+    let first = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(first.errors.len(), 2, "{:?}", first.errors);
+    let read_at = |cache: &Cache| [&f.source, &peer].map(|s| cache.attempts[&s.path].2);
+    let attempted = read_at(&cache);
+    let second = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(read_at(&cache), attempted, "neither history is read again");
+    assert_eq!(second.errors, first.errors, "both conflicts stay reported");
+    assert_eq!(cache.failures[&peer.path], 1);
+    cache.expedite();
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert!(read_at(&cache).iter().zip(attempted).all(|(now, before)| *now > before));
+}
+
+#[test]
+fn retry_delay_grows_from_thirty_seconds_to_two_minutes() {
+    assert_eq!([1, 2, 3, 9].map(retry_delay), [30, 60, 120, 120].map(Duration::from_secs));
+}
+
+#[test]
+fn transcript_written_within_the_quiet_window_waits_without_being_read() {
+    let f = Fixture::new(Tool::Claude);
+    let mut cache = Cache::new();
+    cache.quiet = Duration::from_secs(3600);
+    let waiting = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(waiting.published, 0);
+    let row = waiting.rows.values().next().unwrap();
+    assert_eq!(row.phase, Phase::Waiting);
+    assert!(row.detail.contains("being written"), "{}", row.detail);
+    assert!(!cache.attempts.contains_key(&f.source.path));
+    assert!(!cache.failures.contains_key(&f.source.path));
+    cache.quiet = Duration::ZERO;
+    assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
+}
+
+#[test]
+fn streamed_hashes_and_lengths_equal_the_encoded_bytes() {
+    assert_eq!(
+        digest(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    let value = json!({"text": "줄\n\"quoted\"", "messages": messages()});
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert_eq!(json_digest(&value).unwrap(), digest(&bytes));
+    assert_eq!(json_len(&value).unwrap(), bytes.len() as u64);
+    assert_eq!(json_digest(&messages()).unwrap(), digest(&serde_json::to_vec(&messages()).unwrap()));
+}
+
+#[test]
 fn open_managed_endpoint_defers_updates_until_the_daemon_exit_lease_releases() {
     let f = Fixture::new(Tool::Codex);
     f.scan();

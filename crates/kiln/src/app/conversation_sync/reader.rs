@@ -133,7 +133,7 @@ pub(super) fn rows_before_validation(
         if title.is_empty() {
             *title = row_title(source.tool, &row);
         }
-        retained += serde_json::to_vec(&row)?.len() as u64;
+        retained += json_len(&row)?;
         ensure!(
             retained <= PORTABLE_LIMIT,
             "Portable conversation exceeds the 512 MiB sync limit"
