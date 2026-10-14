@@ -61,7 +61,7 @@ fn historical_versions_directory_changes_and_tool_references_preserve_identity()
     let f = Fixture::new(Tool::Claude);
     let mut data = rows(&fs::read(&f.source.path).unwrap());
     data[0]["version"] = json!("2.1.289");
-    data[1]["version"] = json!("2.1.295");
+    data[1]["version"] = json!("2.1.299");
     data[1]["cwd"] = json!("/tmp/changed-directory");
     data[1]["message"]["content"]
         .as_array_mut()

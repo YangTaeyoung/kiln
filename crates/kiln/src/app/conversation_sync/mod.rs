@@ -442,6 +442,7 @@ fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<forma
                                     | "2.1.292"
                                     | "2.1.295"
                                     | "2.1.296"
+                                    | "2.1.299"
                             )
                         ),
                         "Unsupported Claude transcript version: {}",

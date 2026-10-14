@@ -78,7 +78,7 @@ The check refers to **completed responses**, not an answer still being generated
 - New continuations target **Codex CLI 0.162.1** and **Claude Code 2.1.296**.
   Verified input versions include Codex 0.154.0, 0.155.0-alpha.9.2, 0.155.1,
   0.160.0, 0.160.1, 0.161.0, 0.162.0-alpha.17.2 and 0.162.1; Claude Code
-  2.1.272, 2.1.281, 2.1.289, 2.1.291, 2.1.292, 2.1.295 and 2.1.296.
+  2.1.272, 2.1.281, 2.1.289, 2.1.291, 2.1.292, 2.1.295, 2.1.296 and 2.1.299.
   Identity and content validation still apply to every transcript. Changing
   working directories within the same Claude session does not invalidate it.
   Unknown versions fail visibly; an auto-update may require an adapter update.
