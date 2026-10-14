@@ -284,10 +284,11 @@ fn watcher_picks_up_new_files_in_expanded_dirs() {
     let d = fixture();
     let root = d.path().to_path_buf();
     let mut h = harness(&root);
-    h.run();
+    // Watcher callbacks can repaint during expansion. Wait for visible content,
+    // rather than requiring the asynchronous tree to become idle in four frames.
+    assert!(common::wait_until(&mut h, 5.0, |h| h.query_by_label("src").is_some()));
     h.get_by_label("src").click();
-    h.run();
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(common::wait_until(&mut h, 5.0, |h| h.query_by_label("main.rs").is_some()));
     std::fs::write(root.join("src/fresh.rs"), "").unwrap();
     std::fs::write(root.join("target/debug/noise.o"), "").unwrap();
     let ok = common::wait_until(&mut h, 5.0, |h| h.query_by_label("fresh.rs").is_some());
