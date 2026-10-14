@@ -1746,7 +1746,8 @@ fn inspect_existing_workspace_metadata_read_only() {
             Ok(messages) => {
                 let images: usize = messages.iter().map(|m| m.images.len()).sum();
                 let bytes = serde_json::to_vec(&messages).unwrap().len();
-                for tool in Tool::ALL {
+                // A newly opened live conversation can have no completed checkpoint yet.
+                for tool in Tool::ALL.into_iter().filter(|_| !messages.is_empty()) {
                     let rendered = format::render_titled(tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &messages, "Read-only integrity check").unwrap();
                     let parsed_rows: Vec<serde_json::Value> = rendered.split(|b| *b == b'\n').filter(|b| !b.is_empty()).map(serde_json::from_slice).collect::<std::result::Result<_, _>>().unwrap();
                     assert!(format::parse(tool, &parsed_rows).unwrap() == messages, "Native round-trip changed message or image bytes");
@@ -1764,7 +1765,7 @@ fn inspect_existing_workspace_metadata_read_only() {
                     images,
                     bytes / 1024 / 1024
                 );
-                json!({"messages":messages.len(),"images":images,"portable_bytes":bytes,"both_native_formats_verified":true})
+                json!({"messages":messages.len(),"images":images,"portable_bytes":bytes,"both_native_formats_verified":!messages.is_empty(),"waiting_for_first_completed_turn":messages.is_empty()})
             }
             Err(error) => {
                 eprintln!(
