@@ -527,7 +527,14 @@ impl Conn {
                 && ctx.memory(|m| m.focused()) == Some(*widget) && !egui::Popup::is_any_open(ctx))
         }).map(|(session, _, _)| session);
         for (session, focused) in self.terminal_focus_changes(next) {
-            self.input(session, if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec());
+            self.report_focus(session, focused);
+        }
+    }
+
+    /// 포커스 보고(CSI I/O)를 보낸다. 사용자 입력 시각으로는 기록하지 않는다.
+    fn report_focus(&self, sid: SessionId, focused: bool) {
+        if self.terminal_health.get(&sid).is_none_or(|h| h.state == TerminalState::Healthy) {
+            self.send(ClientMsg::Input { session: sid, data: if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec() });
         }
     }
 
@@ -879,6 +886,15 @@ mod completion_snapshot_transition_tests {
 #[cfg(test)]
 mod hidden_session_tests {
     use super::*;
+    #[test]
+    fn focus_reports_are_not_recorded_as_user_input() {
+        let conn = Conn::offline(egui::Context::default());
+        conn.report_focus(1, false);
+        conn.report_focus(1, true);
+        assert!(conn.input_times.borrow().is_empty());
+        conn.input(1, b"x".to_vec());
+        assert!(conn.input_times.borrow().contains_key(&1));
+    }
     #[test]
     fn sessions_not_drawn_in_the_last_pass_detach_after_the_grace_period() {
         let mut conn = Conn::offline(egui::Context::default());
