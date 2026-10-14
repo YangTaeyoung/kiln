@@ -2844,6 +2844,16 @@ fn streamed_comparison_matches_plain_and_compressed_transcripts_exactly() {
     assert!(!storage::equals(&f.source, &changed).unwrap());
 }
 
+/// Worker tests register no native metadata, like `scan_with_index`.
+#[derive(Default)]
+struct NoNativeMetadata;
+impl worker::NativeMetadata for NoNativeMetadata {
+    fn begin_scan(&mut self) {}
+    fn apply(&mut self, _: &Source, _: &Gate, _: Metadata<'_>) -> Result<Option<String>> {
+        Ok(None)
+    }
+}
+
 #[cfg(unix)]
 struct WorkerFixture {
     gui: std::os::unix::net::UnixStream,
@@ -2872,7 +2882,7 @@ impl WorkerFixture {
         let (tx, replies) = mpsc::channel();
         let (config, roots) = (f.config.clone(), workspace_scope(f).roots);
         let done = std::thread::spawn(move || {
-            worker::serve_with(std::io::BufReader::new(worker_end), Lines(tx, Vec::new()), &config, recycle_peak, move |_, workspaces| {
+            worker::serve_with::<NoNativeMetadata>(std::io::BufReader::new(worker_end), Lines(tx, Vec::new()), &config, recycle_peak, move |_, workspaces| {
                 Ok(discovery::Scope { workspaces, roots: roots.clone() })
             })
         });

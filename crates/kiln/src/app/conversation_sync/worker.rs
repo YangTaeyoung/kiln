@@ -8,6 +8,20 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 /// file-stamped results and exits; the next scan starts a new worker that loads them.
 const RECYCLE_PEAK: u64 = 512 * 1024 * 1024;
 
+/// Native metadata used by worker scans (Codex `/resume` registration in the app).
+pub(super) trait NativeMetadata: Default {
+    fn begin_scan(&mut self);
+    fn apply(&mut self, source: &Source, gate: &Gate, request: Metadata<'_>) -> Result<Option<String>>;
+}
+impl NativeMetadata for codex_index::Registry {
+    fn begin_scan(&mut self) {
+        codex_index::Registry::begin_scan(self);
+    }
+    fn apply(&mut self, source: &Source, gate: &Gate, request: Metadata<'_>) -> Result<Option<String>> {
+        codex_index::Registry::apply(self, source, gate, request)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub(super) enum Request {
     Scan {
@@ -59,7 +73,7 @@ fn peak_resident() -> u64 {
 
 /// Entry point of `kiln sync-worker`; returns when the GUI closes its input.
 pub fn serve() -> Result<()> {
-    serve_with(
+    serve_with::<codex_index::Registry>(
         BufReader::new(std::io::stdin()),
         std::io::stdout(),
         &kiln_common::paths::config_dir(),
@@ -77,7 +91,7 @@ struct Shared {
     closed: bool,
 }
 
-pub(super) fn serve_with(
+pub(super) fn serve_with<M: NativeMetadata>(
     input: impl BufRead + Send + 'static,
     output: impl Write,
     config: &Path,
@@ -121,7 +135,7 @@ pub(super) fn serve_with(
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
     let _ = fs::remove_file(&saved);
-    let mut registry = codex_index::Registry::default();
+    let mut registry = M::default();
     let output = std::cell::RefCell::new(output);
     for request in requests {
         let Request::Scan { id, pair, workspaces, quiet_ms, expedite, reset } = request else {
@@ -129,7 +143,7 @@ pub(super) fn serve_with(
         };
         if reset {
             cache = Cache::new();
-            registry = codex_index::Registry::default();
+            registry = M::default();
         }
         if expedite {
             cache.expedite();
