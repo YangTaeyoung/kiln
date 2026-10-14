@@ -2346,3 +2346,77 @@ fn unnamed_image_only_history_gets_a_nonempty_shared_resume_title() {
     assert_eq!(read_messages(&copy.source).unwrap(), ms);
     assert_eq!(f.scan().published, 0);
 }
+
+#[test]
+fn unnamed_history_normalizes_title_whitespace_without_changing_messages() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let mut expected = messages();
+        expected[0].text = "  공백이 있는 제목? \t\n본문은 그대로 보존합니다.  ".into();
+        let mut data = rows(
+            &format::render(
+                tool,
+                &f.source.id,
+                &f.source.cwd,
+                "2026-10-14T00:00:00Z",
+                &expected,
+            )
+            .unwrap(),
+        );
+        for row in &mut data {
+            row.as_object_mut().unwrap().remove("kiln_title");
+            row.as_object_mut().unwrap().remove("customTitle");
+        }
+        let bytes = data.iter().map(|r| format!("{r}\n")).collect::<String>();
+        fs::write(&f.source.path, &bytes).unwrap();
+        let mut title = String::new();
+        assert_eq!(
+            read_messages_titled(&f.source, &mut title).unwrap(),
+            expected
+        );
+        assert_eq!(title, "공백이 있는 제목?");
+        let status = scan_with_metadata(
+            &f.config,
+            &f.pair,
+            &f.gate,
+            &mut Cache::new(),
+            None,
+            |_, title| {
+                if let Some(title) = title {
+                    assert_eq!(title, title.trim());
+                }
+                Ok(None)
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert!(status.errors.is_empty(), "{:?}", status.errors);
+        assert_eq!(status.published, 1);
+        assert_eq!(fs::read_to_string(&f.source.path).unwrap(), bytes);
+        assert_eq!(
+            read_messages(
+                &f.state()
+                    .entries
+                    .values()
+                    .find(|e| e.imported)
+                    .unwrap()
+                    .source
+            )
+            .unwrap(),
+            expected
+        );
+        let mut state = f.state();
+        for entry in state.entries.values_mut().filter(|e| e.imported) {
+            entry.title.push(' ');
+        }
+        replace(
+            &f.config.join("conversation-sync").join(format!(
+                "{}.json",
+                digest(&serde_json::to_vec(&f.pair).unwrap())
+            )),
+            &serde_json::to_vec(&state).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(f.scan().published, 0);
+    }
+}

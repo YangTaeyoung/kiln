@@ -453,6 +453,7 @@ fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<forma
         }
     }
     let messages = format::parse(source.tool, &rows)?;
+    *title = titles::clean(title);
     if title.trim().is_empty() {
         *title = titles::fallback(&messages);
     }
@@ -790,7 +791,7 @@ fn scan_with_metadata(
             }
             let fingerprint = digest(&serde_json::to_vec(&messages)?);
             if entry.imported
-                && (entry.title.is_empty() || title == entry.title)
+                && (entry.title.is_empty() || title == titles::clean(&entry.title))
                 && discovery::imported(config, &entry.source)?.as_deref() == Some(&fingerprint)
             {
                 // Older parsers could mistake their own projection for a new turn.
