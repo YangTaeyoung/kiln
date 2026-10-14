@@ -472,11 +472,7 @@ pub fn render(
     timestamp: &str,
     messages: &[Message],
 ) -> Result<Vec<u8>> {
-    let title = messages
-        .iter()
-        .find(|m| m.role == "user" && !m.text.trim().is_empty())
-        .map(|m| super::titles::clean(m.text.lines().next().unwrap_or_default()))
-        .unwrap_or_else(|| "Linked conversation".into());
+    let title = super::titles::fallback(messages);
     render_titled(tool, id, cwd, timestamp, messages, &title)
 }
 

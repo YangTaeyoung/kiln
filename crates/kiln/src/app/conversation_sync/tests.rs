@@ -2307,3 +2307,42 @@ fn database_only_native_names_override_text_index_and_renames_do_not_need_new_tu
     );
     assert_eq!(run("Renamed in native database").published, 0);
 }
+
+#[test]
+fn unnamed_image_only_history_gets_a_nonempty_shared_resume_title() {
+    let f = Fixture::new(Tool::Codex);
+    let ms = vec![Message { role: "user".into(), text: String::new(), images: vec!["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC".into()] }, Message { role: "assistant".into(), text: "Image received.".into(), images: vec![] }];
+    let mut data = rows(
+        &format::render(
+            Tool::Codex,
+            &f.source.id,
+            &f.source.cwd,
+            "2026-10-14T00:00:00Z",
+            &ms,
+        )
+        .unwrap(),
+    );
+    for row in &mut data {
+        row.as_object_mut().unwrap().remove("kiln_title");
+    }
+    fs::write(
+        &f.source.path,
+        data.iter().map(|r| format!("{r}\n")).collect::<String>(),
+    )
+    .unwrap();
+    let status = f.scan();
+    assert!(status.errors.is_empty());
+    assert_eq!(status.published, 1);
+    assert_eq!(
+        status.rows.values().next().unwrap().title,
+        "Linked conversation"
+    );
+    let state = f.state();
+    let copy = state.entries.values().find(|e| e.imported).unwrap();
+    assert_eq!(
+        titles::projection(&copy.source).unwrap().as_deref(),
+        Some("Linked conversation")
+    );
+    assert_eq!(read_messages(&copy.source).unwrap(), ms);
+    assert_eq!(f.scan().published, 0);
+}

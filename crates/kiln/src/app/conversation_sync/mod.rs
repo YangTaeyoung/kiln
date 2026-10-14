@@ -452,7 +452,11 @@ fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<forma
             }
         }
     }
-    format::parse(source.tool, &rows)
+    let messages = format::parse(source.tool, &rows)?;
+    if title.trim().is_empty() {
+        *title = titles::fallback(&messages);
+    }
+    Ok(messages)
 }
 fn destination(
     pair: &Pair,

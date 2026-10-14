@@ -13,6 +13,15 @@ pub(super) fn clean(value: &str) -> String {
         .trim()
         .into()
 }
+pub(super) fn fallback(messages: &[format::Message]) -> String {
+    messages
+        .iter()
+        .filter(|m| m.role == "user")
+        .flat_map(|m| m.text.lines())
+        .map(clean)
+        .find(|s| !s.is_empty())
+        .unwrap_or_else(|| "Linked conversation".into())
+}
 fn sidecar(source: &Source) -> Result<PathBuf> {
     let path = source
         .path
