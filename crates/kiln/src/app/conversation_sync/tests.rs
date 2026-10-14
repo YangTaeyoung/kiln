@@ -1508,13 +1508,13 @@ fn synchronize_explicitly_authorized_workspaces() {
     let mut cache = Cache::new();
     let mut registry = codex_index::Registry::default();
     let progress = std::cell::Cell::new(0);
-    let result = scan_with_index(
+    let result = scan_with_metadata(
         &config,
         &pair,
         &gate,
         &mut cache,
         Some(&scope),
-        |source| registry.ensure(source, &gate),
+        |source, title| registry.metadata(source, &gate, title),
         |status| {
             if status.checked > progress.get() {
                 progress.set(status.checked);
@@ -2266,4 +2266,44 @@ fn native_import_without_private_metadata_does_not_echo_readable_tool_history() 
     assert!(again.errors.is_empty(), "{:?}", again.errors);
     assert_eq!(again.published, 0);
     assert_eq!(again.rows.len(), 1);
+}
+
+#[test]
+fn database_only_native_names_override_text_index_and_renames_do_not_need_new_turns() {
+    let f = Fixture::new(Tool::Codex);
+    let mut cache = Cache::new();
+    let mut run = |name: &str| {
+        scan_with_metadata(
+            &f.config,
+            &f.pair,
+            &f.gate,
+            &mut cache,
+            None,
+            |source, title| {
+                if source.path == f.source.path && title.is_none() {
+                    Ok(Some(name.into()))
+                } else {
+                    Ok(None)
+                }
+            },
+            |_| {},
+        )
+        .unwrap()
+    };
+    let first = run("Native database title");
+    assert!(first.errors.is_empty());
+    assert_eq!(first.published, 1);
+    assert_eq!(
+        first.rows.values().next().unwrap().title,
+        "Native database title"
+    );
+    assert_eq!(run("Native database title").published, 0);
+    let renamed = run("Renamed in native database");
+    assert!(renamed.errors.is_empty());
+    assert_eq!(renamed.published, 1);
+    assert_eq!(
+        renamed.rows.values().next().unwrap().title,
+        "Renamed in native database"
+    );
+    assert_eq!(run("Renamed in native database").published, 0);
 }

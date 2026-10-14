@@ -14,8 +14,17 @@ pub(super) struct Registry {
 }
 impl Registry {
     pub fn ensure(&mut self, source: &Source, gate: &Gate) -> Result<()> {
+        let title = titles::projection(source)?;
+        self.metadata(source, gate, title.as_deref()).map(|_| ())
+    }
+    pub fn metadata(
+        &mut self,
+        source: &Source,
+        gate: &Gate,
+        title: Option<&str>,
+    ) -> Result<Option<String>> {
         if source.tool != Tool::Codex {
-            return Ok(());
+            return Ok(None);
         }
         if let Some(error) = self.failures.get(&source.root) {
             anyhow::bail!("{error}");
@@ -46,17 +55,35 @@ impl Registry {
                 gate,
             )?;
             ensure!(
-                result["thread"]["id"] == source.id && result["thread"]["cwd"] == source.cwd,
+                result["thread"]["id"] == source.id,
                 "Codex /resume registration returned a different conversation"
             );
-            ensure!(
-                result["thread"]["path"]
-                    .as_str()
-                    .is_some_and(|p| Path::new(p) == source.path),
-                "Codex /resume registration returned a different transcript"
-            );
-            if let Some(title) = titles::projection(source)? {
-                if result["thread"]["name"].as_str() != Some(title.as_str()) {
+            if !result["thread"]["path"]
+                .as_str()
+                .is_some_and(|p| Path::new(p) == source.path)
+            {
+                // Older imported logs can share a native ID with a canonical rollout.
+                // Do not use that other file's name, or poison this root's connection.
+                ensure!(
+                    title.is_none(),
+                    "Codex /resume registration returned a different transcript"
+                );
+                return Ok(None);
+            }
+            let mut name = result["thread"]["name"]
+                .as_str()
+                .map(titles::clean)
+                .filter(|s| !s.is_empty());
+            if let Some(title) = title {
+                // A concurrent native rename of an original wins over pinning its fallback.
+                let copy = titles::projection(source)?.is_some();
+                if copy {
+                    ensure!(
+                        result["thread"]["cwd"] == source.cwd,
+                        "Codex copy working directory changed"
+                    );
+                }
+                if name.as_deref() != Some(title) && (copy || name.is_none()) {
                     connection.request(
                         "thread/name/set",
                         json!({"threadId":source.id,"name":title}),
@@ -71,9 +98,10 @@ impl Registry {
                         named["thread"]["name"] == title,
                         "Codex /resume title was not retained"
                     );
+                    name = Some(title.into());
                 }
             }
-            Ok(())
+            Ok(name)
         })();
         if let Err(error) = &result {
             self.connections.remove(&source.root);
@@ -342,6 +370,25 @@ for line in sys.stdin:
             after["data"].as_array().unwrap().iter().any(
                 |t| t["id"] == id && t["name"] == "Native index fixture: original user message"
             )
+        );
+        // The native database can carry a name absent from the append-only index.
+        let title_index = root.join("session_index.jsonl");
+        let hidden_index = root.join("session_index.fixture-backup");
+        fs::rename(&title_index, &hidden_index).unwrap();
+        registry.connections.clear();
+        let database_name = registry.metadata(&source, &gate, None);
+        fs::rename(&hidden_index, &title_index).unwrap();
+        assert_eq!(
+            database_name.unwrap().as_deref(),
+            Some("Native index fixture: original user message")
+        );
+        let mut historical = source.clone();
+        historical.path = dir.join("noncanonical-copy.jsonl");
+        assert!(
+            registry
+                .metadata(&historical, &gate, None)
+                .unwrap()
+                .is_none()
         );
         assert_eq!(read_messages(&source).unwrap(), messages);
         if dir.join("codex.json").is_file() {

@@ -536,6 +536,7 @@ fn scan_scoped(
 ) -> Result<Status> {
     scan_with_index(config, pair, gate, cache, scope, |_| Ok(()), notify)
 }
+#[cfg(test)]
 fn scan_with_index(
     config: &Path,
     pair: &Pair,
@@ -543,6 +544,30 @@ fn scan_with_index(
     cache: &mut Cache,
     scope: Option<&discovery::Scope>,
     mut index: impl FnMut(&Source) -> Result<()>,
+    notify: impl Fn(&Status),
+) -> Result<Status> {
+    scan_with_metadata(
+        config,
+        pair,
+        gate,
+        cache,
+        scope,
+        |source, title| {
+            if title.is_some() {
+                index(source)?;
+            }
+            Ok(None)
+        },
+        notify,
+    )
+}
+fn scan_with_metadata(
+    config: &Path,
+    pair: &Pair,
+    gate: &Gate,
+    cache: &mut Cache,
+    scope: Option<&discovery::Scope>,
+    mut metadata: impl FnMut(&Source, Option<&str>) -> Result<Option<String>>,
     notify: impl Fn(&Status),
 ) -> Result<Status> {
     let dir = config.join("conversation-sync");
@@ -714,7 +739,11 @@ fn scan_with_index(
             let destinations = scope
                 .map(|s| s.destinations(pair, entry.source.tool))
                 .unwrap_or_else(|| vec![pair.clone()]);
-            let native_title = cache.titles.name(&entry.source)?;
+            let native_title = if entry.source.tool == Tool::Codex {
+                metadata(&entry.source, None)?.or(cache.titles.name(&entry.source)?)
+            } else {
+                cache.titles.name(&entry.source)?
+            };
             let renamed = native_title
                 .as_ref()
                 .is_some_and(|name| name != &entry.title);
@@ -789,7 +818,7 @@ fn scan_with_index(
                             if has_current_native_projection(&target.source, &title)?
                                 && read_messages(&target.source).is_ok_and(|m| m == messages)
                             {
-                                index(&target.source)?;
+                                metadata(&target.source, Some(&title))?;
                                 let mut copy = copy.clone();
                                 copy.revision = PROJECTION_REVISION;
                                 verified.push(copy);
@@ -929,7 +958,7 @@ fn scan_with_index(
                 if !plan.source.path.exists() {
                     publish(&plan.source.path, &bytes)?;
                 }
-                index(&plan.source)?;
+                metadata(&plan.source, Some(&title))?;
                 let copied_meta = fs::metadata(&plan.source.path)?;
                 cache.messages.insert(
                     plan.source.path.clone(),
@@ -963,6 +992,9 @@ fn scan_with_index(
                 copies.push(continuation);
                 replace(&state_path, &serde_json::to_vec(&state)?)?;
                 pending_plans.push(plan_path);
+            }
+            if entry.source.tool == Tool::Codex {
+                metadata(&entry.source, Some(&title))?;
             }
             titles::pin_claude(&entry.source, &title)?;
             let saved = state.entries.get_mut(&key).unwrap();
@@ -1176,13 +1208,13 @@ impl Manager {
             let result = discovery::Scope::new(&pair, workspaces)
                 .and_then(|scope| {
                     let mut registry = codex_index::Registry::default();
-                    scan_with_index(
+                    scan_with_metadata(
                         &kiln_common::paths::config_dir(),
                         &pair,
                         &gate,
                         &mut cache.lock().unwrap(),
                         Some(&scope),
-                        |source| registry.ensure(source, &gate),
+                        |source, title| registry.metadata(source, &gate, title),
                         |status| {
                             if last_progress.get().elapsed() >= Duration::from_millis(100) {
                                 last_progress.set(Instant::now());

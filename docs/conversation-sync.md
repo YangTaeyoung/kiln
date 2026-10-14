@@ -33,11 +33,13 @@ the same folder remain separate; workspace discovery does not merge their histor
 
 ## Matching names and readable history
 
-Kiln uses the source CLI's saved conversation name for both resume pickers. A
+Kiln uses the source CLI's saved conversation name for both resume pickers. Codex
+names come from its native metadata API, including names present only in its
+database; the append-only text index is a fallback. A
 native rename is detected even when no new response was written. Claude's custom
 name takes precedence over its generated name; unnamed sessions use the first
-prompt. Kiln pins a missing Claude title through its native title sidecar, leaving
-the source transcript body unchanged. Codex copies receive the same name through
+prompt. Kiln pins a missing Claude title through its native title sidecar and a missing
+Codex name through its native API, leaving source transcript bodies unchanged. Codex copies receive the same name through
 `thread/name/set`, followed by a metadata read that checks persistence.
 
 Historical tool calls/results use the same labeled, fenced text in both CLIs.
