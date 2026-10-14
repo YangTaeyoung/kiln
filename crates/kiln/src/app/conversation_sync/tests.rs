@@ -2849,6 +2849,7 @@ struct WorkerFixture {
     gui: std::os::unix::net::UnixStream,
     replies: mpsc::Receiver<String>,
     done: std::thread::JoinHandle<Result<()>>,
+    exiting: bool,
 }
 #[cfg(unix)]
 impl WorkerFixture {
@@ -2875,7 +2876,7 @@ impl WorkerFixture {
                 Ok(discovery::Scope { workspaces, roots: roots.clone() })
             })
         });
-        Self { gui, replies, done }
+        Self { gui, replies, done, exiting: false }
     }
     fn send(&mut self, request: &worker::Request) {
         let mut line = serde_json::to_vec(request).unwrap();
@@ -2886,8 +2887,9 @@ impl WorkerFixture {
         self.send(&worker::Request::Scan { id, pair: f.pair.clone(), workspaces: vec![PathBuf::from(&f.source.cwd)], quiet_ms: 0, expedite: false, reset: false });
         loop {
             let line = self.replies.recv_timeout(Duration::from_secs(30)).expect("worker reply");
-            if let worker::Reply::Scanned { id: done, result } = serde_json::from_str(&line).unwrap() {
+            if let worker::Reply::Scanned { id: done, result, exiting } = serde_json::from_str(&line).unwrap() {
                 assert_eq!(done, id);
+                self.exiting = exiting;
                 return result.unwrap();
             }
         }
@@ -2912,8 +2914,9 @@ fn sync_worker_keeps_file_stamped_results_across_scans_and_restarts() {
     let mut recycling = WorkerFixture::start(&f, 0);
     fs::write(&f.source.path, format::render(f.source.tool, &f.source.id, &f.source.cwd, "2026-10-14T00:00:00Z", &extended).unwrap()).unwrap();
     assert_eq!(recycling.scan(&f, 3).published, 1);
+    assert!(recycling.exiting, "the reply announces the exit");
+    assert!(worker::cache_path(&f.config).exists(), "results are saved before the reply");
     recycling.done.join().unwrap().unwrap();
-    assert!(worker::cache_path(&f.config).exists(), "a recycled worker leaves its results for the next one");
     let mut next = WorkerFixture::start(&f, u64::MAX);
     assert_eq!(next.scan(&f, 4).published, 0, "the next worker reuses the saved results");
     assert!(!worker::cache_path(&f.config).exists());
@@ -2932,4 +2935,35 @@ fn sync_worker_reports_a_cancelled_scan_without_publishing() {
     assert_eq!(worker.scan(&f, 2).published, 1);
     drop(worker.gui);
     worker.done.join().unwrap().unwrap();
+}
+
+#[test]
+fn saved_cache_keeps_retry_delays_for_a_restarted_worker() {
+    let f = Fixture::new(Tool::Claude);
+    let original = fs::read(&f.source.path).unwrap();
+    let mut data = rows(&original);
+    data[0]["message"]["content"] = json!([{"type":"document"}]);
+    fs::write(&f.source.path, data.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
+    let mut cache = Cache::new();
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    let attempted = cache.attempts[&f.source.path];
+    let mut restored: Cache = serde_json::from_slice(&serde_json::to_vec(&cache).unwrap()).unwrap();
+    assert_eq!(restored.failures, cache.failures);
+    let second = scan(&f.config, &f.pair, &f.gate, &mut restored, |_| {}).unwrap();
+    assert_eq!(restored.attempts[&f.source.path], attempted, "the failing history is not read again");
+    assert_eq!(second.rows.values().next().unwrap().phase, Phase::Failed);
+}
+
+#[test]
+fn a_row_left_waiting_is_marked_synced_when_its_unchanged_file_is_cached_as_synced() {
+    let f = Fixture::new(Tool::Claude);
+    let mut cache = Cache::new();
+    assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
+    for row in cache.rows.values_mut() {
+        row.phase = Phase::Waiting;
+        row.detail = "Transcript is being written; retrying".into();
+    }
+    let status = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert!(status.rows.values().all(|r| r.phase == Phase::Synced && r.detail.is_empty()));
+    assert_eq!(status.published, 0);
 }

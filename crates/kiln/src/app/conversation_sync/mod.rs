@@ -592,21 +592,18 @@ fn destination(
 
 /// Cancellation never blocks the UI on filesystem IO. An in-progress atomic publish may finish.
 type Gate = Arc<AtomicBool>;
-/// File-stamped results survive a sync worker restart; retry bookkeeping does not.
+/// File-stamped results and retry delays survive a sync worker restart.
 #[derive(Default, Serialize, Deserialize)]
 struct Cache {
     messages: HashMap<PathBuf, (u64, SystemTime, String)>,
     metadata: discovery::MetadataCache,
     titles: titles::Cache,
     rows: BTreeMap<String, Conversation>,
-    #[serde(skip)]
-    attempts: HashMap<PathBuf, (u64, SystemTime, Instant)>,
+    attempts: HashMap<PathBuf, (u64, SystemTime, SystemTime)>,
     /// Consecutive unsettled attempts per unchanged source; selects its retry delay.
-    #[serde(skip)]
     failures: HashMap<PathBuf, u32>,
     /// Snapshot-retirement attempts keyed by source, stamped with both histories.
-    #[serde(skip)]
-    retirements: HashMap<String, (Vec<(u64, SystemTime)>, Instant, u32)>,
+    retirements: HashMap<String, (Vec<(u64, SystemTime)>, SystemTime, u32)>,
     /// Sources modified within this window are left until their writer pauses.
     #[serde(skip)]
     quiet: Duration,
@@ -857,7 +854,7 @@ fn scan_with_metadata(
                 && cache
                     .failures
                     .get(&entry.source.path)
-                    .is_some_and(|failures| at.elapsed() < retry_delay(*failures))
+                    .is_some_and(|failures| at.elapsed().unwrap_or_default() < retry_delay(*failures))
             {
                 // Imported copies have no initial row; keep their last reported outcome visible.
                 if !status.rows.contains_key(&key)
@@ -888,9 +885,21 @@ fn scan_with_metadata(
                         })
                     }));
             if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
+                // Only completed synchronization records this exact stamp.
+                if let Some(row) = status.rows.get_mut(&key)
+                    && row.phase != Phase::Synced
+                {
+                    row.phase = Phase::Synced;
+                    row.detail.clear();
+                }
                 return Ok(());
             }
             if recently_modified(stamp.1, cache.quiet) {
+                if !status.rows.contains_key(&key)
+                    && let Some(row) = cache.rows.get(&key)
+                {
+                    status.rows.insert(key.clone(), row.clone());
+                }
                 if let Some(row) = status.rows.get_mut(&key) {
                     row.phase = Phase::Waiting;
                     row.detail = "Transcript is being written; retrying".into();
@@ -900,7 +909,7 @@ fn scan_with_metadata(
             }
             cache.attempts.insert(
                 entry.source.path.clone(),
-                (stamp.0, stamp.1, Instant::now()),
+                (stamp.0, stamp.1, SystemTime::now()),
             );
             if let Some(row) = status.rows.get_mut(&key) {
                 if row.phase == Phase::Queued {
@@ -1379,7 +1388,8 @@ impl Manager {
         if !enabled {
             self.cancel_scan();
             if !self.links_cleared {
-                self.links_cleared = handover::disable(&kiln_common::paths::config_dir()).is_ok();
+                // A scan still running may publish links once more; clear again after it ends.
+                self.links_cleared = handover::disable(&kiln_common::paths::config_dir()).is_ok() && !self.busy;
             }
             if self.workspaces != workspaces {
                 self.revision += 1;
@@ -1393,6 +1403,7 @@ impl Manager {
             || !self.gate.load(Ordering::Acquire)
         {
             self.gate.store(false, Ordering::Release);
+            self.cancel_worker_scan();
             self.gate = Arc::new(AtomicBool::new(true));
             self.revision += 1;
             self.workspaces = workspaces;
@@ -1491,11 +1502,14 @@ impl Manager {
             })
         })
     }
-    pub(super) fn cancel_scan(&mut self) {
-        self.gate.store(false, Ordering::Release);
+    fn cancel_worker_scan(&mut self) {
         if let (Some(worker), Some(id)) = (self.worker.as_mut(), self.worker_scan.take()) {
             worker.cancel(id);
         }
+    }
+    pub(super) fn cancel_scan(&mut self) {
+        self.gate.store(false, Ordering::Release);
+        self.cancel_worker_scan();
         self.next = Instant::now();
     }
     pub(super) fn enable(

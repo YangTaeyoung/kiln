@@ -350,8 +350,8 @@ mod inspector_state_tests {
 
 /// An agent launch whose account environment and record are prepared on a worker.
 struct PreparingAgent {
-    /// Canonical root of the workspace the launch was requested from.
-    workspace: PathBuf,
+    /// Id of the workspace the launch was requested from.
+    workspace: u64,
     task: kiln_common::task::Task<Result<SpawnSpec, String>>,
     request: Option<(agent_launch::Prepared, String)>,
 }
@@ -839,20 +839,22 @@ impl KilnApp {
                 None => Ok(spec),
             }
         });
-        let workspace = self.ws().tools.canonical_root().to_path_buf();
+        let workspace = self.ws().id;
         self.preparing_agents.push(PreparingAgent { workspace, task, request });
     }
 
     fn start_prepared_agents(&mut self, ctx: &egui::Context) {
         let mut index = 0;
         while index < self.preparing_agents.len() {
-            if self.preparing_agents[index].task.poll().is_none() {
+            if self.preparing_agents[index].task.is_pending() {
                 index += 1;
                 continue;
             }
             let PreparingAgent { workspace, mut task, request } = self.preparing_agents.remove(index);
-            let result = task.take().expect("prepared agent result");
-            let target = self.workspaces.iter().position(|w| w.tools.canonical_root() == workspace);
+            let result = task
+                .take()
+                .unwrap_or_else(|| Err(kiln_common::i18n::tr("작업을 시작할 수 없습니다").into()));
+            let target = self.workspaces.iter().position(|w| w.id == workspace);
             match (result, target) {
                 (Ok(spec), Some(target)) => self.open_agent_page(target, spec, request, ctx),
                 (result, _) => {
@@ -1601,8 +1603,8 @@ impl KilnApp {
                 }
                 let tool=match program.as_str() {"claude"=>kiln_accounts::Tool::Claude,"codex"=>kiln_accounts::Tool::Codex,_=>return};
                 // One request per workspace is prepared at a time; the composer stays open until it starts.
-                let root=self.ws().tools.canonical_root().to_path_buf();
-                if self.preparing_agents.iter().any(|p|p.request.is_some() && p.workspace==root) {return;}
+                let workspace=self.ws().id;
+                if self.preparing_agents.iter().any(|p|p.request.is_some() && p.workspace==workspace) {return;}
                 let prepared=match agent_launch::prepare(&program,&context,&request) {
                     Ok(prepared)=>prepared,
                     Err(error)=>{self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"),error,ToastKind::Error,None);return;}

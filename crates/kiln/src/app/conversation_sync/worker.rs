@@ -25,7 +25,13 @@ pub(super) enum Request {
 #[derive(Serialize, Deserialize)]
 pub(super) enum Reply {
     Progress { id: u64, status: Status },
-    Scanned { id: u64, result: Result<Status, String> },
+    Scanned {
+        id: u64,
+        result: Result<Status, String>,
+        /// The worker saved its results and exits; later scans need a new worker.
+        #[serde(default)]
+        exiting: bool,
+    },
 }
 
 pub(super) fn cache_path(config: &Path) -> PathBuf {
@@ -67,6 +73,8 @@ struct Shared {
     current: Option<(u64, Gate)>,
     /// Highest scan id the GUI has cancelled.
     cancelled: u64,
+    /// The GUI closed its input; queued scans are cancelled.
+    closed: bool,
 }
 
 pub(super) fn serve_with(
@@ -101,7 +109,9 @@ pub(super) fn serve_with(
             }
         }
         // A closed input means the GUI is gone; the running scan stops at its next check.
-        if let Some((_, gate)) = &reader.lock().unwrap().current {
+        let mut shared = reader.lock().unwrap();
+        shared.closed = true;
+        if let Some((_, gate)) = &shared.current {
             gate.store(false, Ordering::Release);
         }
     });
@@ -128,7 +138,7 @@ pub(super) fn serve_with(
         let gate: Gate = Arc::new(AtomicBool::new(true));
         {
             let mut shared = shared.lock().unwrap();
-            if shared.cancelled >= id {
+            if shared.cancelled >= id || shared.closed {
                 gate.store(false, Ordering::Release);
             }
             shared.current = Some((id, gate.clone()));
@@ -155,10 +165,13 @@ pub(super) fn serve_with(
             })
             .map_err(|e| e.to_string());
         shared.lock().unwrap().current = None;
-        write_line(&mut *output.borrow_mut(), &Reply::Scanned { id, result })?;
-        if peak_resident() > recycle_peak {
+        let exiting = peak_resident() > recycle_peak;
+        if exiting {
             private_dir(saved.parent().context("Missing sync directory")?)?;
             replace(&saved, &serde_json::to_vec(&cache)?)?;
+        }
+        write_line(&mut *output.borrow_mut(), &Reply::Scanned { id, result, exiting })?;
+        if exiting {
             return Ok(());
         }
     }
@@ -170,6 +183,8 @@ pub(super) struct Worker {
     child: Option<Child>,
     input: ChildStdin,
     pending: Arc<Mutex<HashMap<u64, Gate>>>,
+    /// Set when the worker announced its exit; no further scans are sent to it.
+    exiting: Arc<AtomicBool>,
 }
 impl Worker {
     pub fn start(exe: &Path, events: mpsc::SyncSender<Event>, ctx: egui::Context) -> Result<Self> {
@@ -184,6 +199,8 @@ impl Worker {
         let output = child.stdout.take().context("Sync worker output unavailable")?;
         let pending: Arc<Mutex<HashMap<u64, Gate>>> = Arc::default();
         let replies = pending.clone();
+        let exiting = Arc::new(AtomicBool::new(false));
+        let announced = exiting.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(output).lines() {
                 let Ok(line) = line else { break };
@@ -195,7 +212,10 @@ impl Worker {
                             let _ = events.try_send(Event::Progress(gate, status));
                         }
                     }
-                    Reply::Scanned { id, result } => {
+                    Reply::Scanned { id, result, exiting } => {
+                        if exiting {
+                            announced.store(true, Ordering::Release);
+                        }
                         let gate = replies.lock().unwrap().remove(&id);
                         if let Some(gate) = gate {
                             let _ = events.send(Event::Scanned(gate, result));
@@ -213,10 +233,11 @@ impl Worker {
             }
             ctx.request_repaint();
         });
-        Ok(Self { child: Some(child), input, pending })
+        Ok(Self { child: Some(child), input, pending, exiting })
     }
     pub fn alive(&mut self) -> bool {
-        self.child.as_mut().is_some_and(|child| matches!(child.try_wait(), Ok(None)))
+        !self.exiting.load(Ordering::Acquire)
+            && self.child.as_mut().is_some_and(|child| matches!(child.try_wait(), Ok(None)))
     }
     #[allow(clippy::too_many_arguments)]
     pub fn scan(

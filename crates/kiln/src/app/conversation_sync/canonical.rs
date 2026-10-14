@@ -163,7 +163,7 @@ pub(super) fn retire(
             .collect();
         if let Some((seen, at, failures)) = cache.retirements.get(&key)
             && *seen == stamps
-            && at.elapsed() < retry_delay(*failures)
+            && at.elapsed().unwrap_or_default() < retry_delay(*failures)
         {
             if let Some(row) = cache.rows.get(&key) {
                 status.rows.entry(key.clone()).or_insert_with(|| row.clone());
@@ -273,7 +273,7 @@ pub(super) fn retire(
             let failures = cache.retirements.get(&key).map_or(0, |(_, _, n)| *n) + 1;
             cache
                 .retirements
-                .insert(key.clone(), (stamps, Instant::now(), failures));
+                .insert(key.clone(), (stamps, SystemTime::now(), failures));
         }
         match result {
             Ok(Some(path)) => {
