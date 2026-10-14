@@ -652,6 +652,11 @@ fn export_native_cli_fixtures() {
     if std::env::var_os("KILN_SYNC_FIXTURE_IMAGES").is_some() {
         fixture_messages.insert(1, Message { role: "user".into(), text: String::new(), images: vec!["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC".into()] });
     }
+    if std::env::var_os("KILN_SYNC_FIXTURE_TOOLS").is_some() {
+        fixture_messages.push(Message { role: "assistant".into(), images: vec![], text: "[Tool result: fixture_call]\nScript completed\nOutput:\n{\"output\":\"첫째 줄\\n둘째 줄 <content>\",\"exit_code\":0}{\"content\":[{\"type\":\"text\",\"text\":\"결과: 성공\"}]}".into() });
+    }
+    let fixture_title = std::env::var("KILN_SYNC_FIXTURE_TITLE")
+        .unwrap_or_else(|_| messages()[0].text.lines().next().unwrap().into());
     for tool in Tool::ALL {
         let seed = Source {
             tool: opposite(tool),
@@ -664,12 +669,13 @@ fn export_native_cli_fixtures() {
         let source = destination(&pair, &seed, &id, chrono::Utc::now()).unwrap();
         publish(
             &source.path,
-            &format::render(
+            &format::render_titled(
                 tool,
                 &id,
                 &source.cwd,
                 &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                 &fixture_messages,
+                &fixture_title,
             )
             .unwrap(),
         )
@@ -903,7 +909,12 @@ fn recovery_reuses_publication_plan_and_never_clobbers_a_collision() {
         ));
         let fingerprint = digest(&serde_json::to_vec(&messages()).unwrap());
         let key = f.source.path.to_string_lossy();
-        let id = stable_id(&format!("{}:{key}:{fingerprint}", state_path.display()));
+        let title = titles::clean(messages()[0].text.lines().next().unwrap());
+        let id = stable_id(&format!(
+            "{}:v4:{key}:{fingerprint}:{}",
+            state_path.display(),
+            digest(title.as_bytes())
+        ));
         let date = chrono::DateTime::parse_from_rfc3339("2026-10-12T23:59:59.000Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
@@ -1031,7 +1042,10 @@ fn native_import_of_a_kiln_copy_does_not_echo_but_new_turns_sync() {
     assert_eq!(workspace_scan(&f, &scope).published, 1);
     let state = workspace_state(&f);
     let copied = &state.entries.values().find(|e| e.imported).unwrap().source;
-    assert!(has_current_native_projection(copied).unwrap());
+    assert!(
+        has_current_native_projection(copied, &titles::projection(copied).unwrap().unwrap())
+            .unwrap()
+    );
     let external = destination(
         &f.pair,
         copied,
@@ -2039,4 +2053,217 @@ fn workspace_status_uses_canonical_assignment_for_aliased_working_directories() 
     manager.workspaces = vec![root.clone()];
     manager.status.rows.insert("fixture".into(), row);
     assert_eq!(manager.workspace_status(&root).rows.len(), 1);
+}
+
+#[test]
+fn visible_answer_with_hidden_citations_is_not_duplicated_by_text_difference() {
+    let f = Fixture::new(Tool::Codex);
+    let mut data = rows(&fs::read(&f.source.path).unwrap());
+    let answer =
+        "Exactly one final answer.\n<oai-mem-citation>\nlocal-reference\n</oai-mem-citation>";
+    for row in &mut data {
+        if row["type"] == "response_item" && row["payload"]["role"] == "assistant" {
+            row["payload"]["content"][0]["text"] = json!(answer);
+        }
+        if row["type"] == "event_msg" && row["payload"]["item"]["type"] == "AgentMessage" {
+            row["payload"]["item"]["content"][0]["text"] = json!("Exactly one final answer.");
+        }
+    }
+    let parsed = format::parse(Tool::Codex, &data).unwrap();
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed[1].text, answer);
+}
+
+#[test]
+fn readable_tool_records_retain_raw_bytes_and_respect_edits_in_both_clis() {
+    let raw = "[Tool result: call_fixture]\nScript completed\nOutput:\n{\"exit_code\":0,\"output\":\"첫째 줄\\n둘째 줄 <tag> ``` 코드\"}{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"결과\\\":\\\"성공\\\"}\"}]}";
+    let mut input = messages();
+    input.insert(
+        1,
+        Message {
+            role: "assistant".into(),
+            text: raw.into(),
+            images: vec![],
+        },
+    );
+    for tool in Tool::ALL {
+        let bytes = format::render_titled(
+            tool,
+            &stable_id("portable-fixture"),
+            "/tmp/fixture",
+            "2026-10-14T00:00:00Z",
+            &input,
+            "Stable conversation title",
+        )
+        .unwrap();
+        let mut data = rows(&bytes);
+        assert_eq!(format::parse(tool, &data).unwrap(), input);
+        let row = data
+            .iter_mut()
+            .find(|r| r["kiln_sync"]["original_text"] == raw)
+            .unwrap();
+        let content = if tool == Tool::Claude {
+            &mut row["message"]["content"][0]["text"]
+        } else {
+            &mut row["payload"]["content"][0]["text"]
+        };
+        let shown = content.as_str().unwrap();
+        assert!(shown.contains("첫째 줄\n둘째 줄 <tag> ``` 코드"));
+        assert!(shown.contains("결과: 성공"));
+        assert!(!shown.contains("\\n"));
+        assert!(shown.contains("````text"));
+        *content = json!("Explicitly edited historical record");
+        let changed = format::parse(tool, &data).unwrap();
+        assert_eq!(changed[1].text, "Explicitly edited historical record");
+    }
+}
+
+#[test]
+fn native_titles_survive_new_turns_and_metadata_only_renames_trigger_new_copies() {
+    let f = Fixture::new(Tool::Codex);
+    let scope = workspace_scope(&f);
+    let path = f.source.root.join("session_index.jsonl");
+    let set_name = |name: &str| {
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(
+                format!(
+                    "{}\n",
+                    json!({"id":f.source.id,"thread_name":name,"updated_at":"2026-10-14T00:00:00Z"})
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+    };
+    set_name("Original named conversation");
+    let source_bytes = fs::read(&f.source.path).unwrap();
+    let mut cache = Cache::new();
+    let run = |cache: &mut Cache| {
+        scan_scoped(&f.config, &f.pair, &f.gate, cache, Some(&scope), |_| {}).unwrap()
+    };
+    let first = run(&mut cache);
+    assert!(first.errors.is_empty(), "{:?}", first.errors);
+    assert_eq!(first.published, 1);
+    assert_eq!(
+        first.rows.values().next().unwrap().title,
+        "Original named conversation"
+    );
+    let copy = workspace_state(&f)
+        .entries
+        .into_values()
+        .find(|e| e.imported)
+        .unwrap();
+    assert_eq!(
+        titles::projection(&copy.source).unwrap().unwrap(),
+        "Original named conversation"
+    );
+    assert_eq!(run(&mut cache).published, 0);
+    set_name("Renamed conversation");
+    let renamed = run(&mut cache);
+    assert!(renamed.errors.is_empty(), "{:?}", renamed.errors);
+    assert_eq!(renamed.published, 1);
+    assert_eq!(
+        renamed.rows.values().next().unwrap().title,
+        "Renamed conversation"
+    );
+    assert_eq!(run(&mut cache).published, 0);
+    assert_eq!(fs::read(&f.source.path).unwrap(), source_bytes);
+}
+
+#[test]
+fn claude_user_title_overrides_sidecar_and_ai_title_without_changing_transcript() {
+    let f = Fixture::new(Tool::Claude);
+    let original = fs::read(&f.source.path).unwrap();
+    titles::pin_claude(&f.source, "Pinned name").unwrap();
+    let mut cache = titles::Cache::default();
+    assert_eq!(
+        cache.name(&f.source).unwrap().as_deref(),
+        Some("Pinned name")
+    );
+    let mut data = rows(&original);
+    data.push(json!({"type":"summary","aiTitle":"Generated name","sessionId":f.source.id}));
+    assert_eq!(
+        titles::from_rows(&f.source, &data, "Pinned name"),
+        messages()[0].text.lines().next().unwrap()
+    );
+    data.push(json!({"type":"custom-title","customTitle":"User renamed","sessionId":f.source.id}));
+    assert_eq!(
+        titles::from_rows(&f.source, &data, "Pinned name"),
+        "User renamed"
+    );
+    assert_eq!(fs::read(&f.source.path).unwrap(), original);
+}
+
+#[test]
+fn native_import_without_private_metadata_does_not_echo_readable_tool_history() {
+    let f = Fixture::new(Tool::Codex);
+    let mut ms = messages();
+    ms.push(Message {
+        role: "assistant".into(),
+        images: vec![],
+        text: "[Tool result: example]\n{\"output\":\"line one\\nline two\"}".into(),
+    });
+    fs::write(
+        &f.source.path,
+        format::render(
+            Tool::Codex,
+            &f.source.id,
+            &f.source.cwd,
+            "2026-10-13T00:00:00Z",
+            &ms,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let scope = workspace_scope(&f);
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+    let state = workspace_state(&f);
+    let copied = &state.entries.values().find(|e| e.imported).unwrap().source;
+    let external = destination(
+        &f.pair,
+        copied,
+        &stable_id("readable-native-import"),
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    let mut imported = rows(
+        &format::render(
+            Tool::Codex,
+            &external.id,
+            &external.cwd,
+            "2026-10-13T00:00:00Z",
+            &ms,
+        )
+        .unwrap(),
+    );
+    for row in &mut imported {
+        row.as_object_mut().unwrap().remove("kiln_sync");
+    }
+    publish(
+        &external.path,
+        imported
+            .iter()
+            .map(|r| format!("{r}\n"))
+            .collect::<String>()
+            .as_bytes(),
+    )
+    .unwrap();
+    fs::write(
+        f.pair
+            .codex
+            .root
+            .join("external_agent_session_imports.json"),
+        serde_json::to_vec(
+            &json!({"records":[{"source_path":copied.path,"imported_thread_id":external.id}]}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let again = workspace_scan(&f, &scope);
+    assert!(again.errors.is_empty(), "{:?}", again.errors);
+    assert_eq!(again.published, 0);
+    assert_eq!(again.rows.len(), 1);
 }

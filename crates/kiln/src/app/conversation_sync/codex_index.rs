@@ -55,6 +55,24 @@ impl Registry {
                     .is_some_and(|p| Path::new(p) == source.path),
                 "Codex /resume registration returned a different transcript"
             );
+            if let Some(title) = titles::projection(source)? {
+                if result["thread"]["name"].as_str() != Some(title.as_str()) {
+                    connection.request(
+                        "thread/name/set",
+                        json!({"threadId":source.id,"name":title}),
+                        gate,
+                    )?;
+                    let named = connection.request(
+                        "thread/read",
+                        json!({"threadId":source.id,"includeTurns":false}),
+                        gate,
+                    )?;
+                    ensure!(
+                        named["thread"]["name"] == title,
+                        "Codex /resume title was not retained"
+                    );
+                }
+            }
             Ok(())
         })();
         if let Err(error) = &result {
@@ -321,13 +339,30 @@ for line in sys.stdin:
             .request("thread/list", params, &gate)
             .unwrap();
         assert!(
-            after["data"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|t| t["id"] == id)
+            after["data"].as_array().unwrap().iter().any(
+                |t| t["id"] == id && t["name"] == "Native index fixture: original user message"
+            )
         );
         assert_eq!(read_messages(&source).unwrap(), messages);
-        println!("Native index registration verified: {id}");
+        if dir.join("codex.json").is_file() {
+            let fixture: Source =
+                serde_json::from_slice(&fs::read(dir.join("codex.json")).unwrap()).unwrap();
+            let expected = titles::projection(&fixture)
+                .unwrap()
+                .expect("fresh exported fixture");
+            registry.ensure(&fixture, &gate).unwrap();
+            let reply = registry
+                .connections
+                .get_mut(&root)
+                .unwrap()
+                .request(
+                    "thread/read",
+                    json!({"threadId":fixture.id,"includeTurns":false}),
+                    &gate,
+                )
+                .unwrap();
+            assert_eq!(reply["thread"]["name"], expected);
+        }
+        println!("Native index registration and name persistence verified: {id}");
     }
 }

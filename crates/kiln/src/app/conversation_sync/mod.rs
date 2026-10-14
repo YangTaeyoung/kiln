@@ -2,9 +2,11 @@
 mod codex_index;
 mod discovery;
 mod format;
+mod portable;
 mod reader;
 #[cfg(test)]
 mod tests;
+mod titles;
 
 use anyhow::{Context, Result, ensure};
 use kiln_accounts::{AccountManager, Tool};
@@ -27,26 +29,10 @@ const LIMIT: u64 = 64 * 1024 * 1024;
 const PORTABLE_LIMIT: u64 = 512 * 1024 * 1024;
 const COPY_LIMIT: u64 = 1024 * 1024 * 1024;
 const MAX_SOURCES: usize = 4096;
-const PROJECTION_REVISION: u8 = 3;
+const PROJECTION_REVISION: u8 = 4;
 
-fn has_current_native_projection(source: &Source) -> Result<bool> {
-    if source.tool == Tool::Codex {
-        return Ok(true);
-    }
-    // Revision 3 ends new Claude copies with native picker metadata. Its presence
-    // also distinguishes repaired text-block content from the older projection.
-    use std::io::{Seek, SeekFrom};
-    let mut file = fs::File::open(&source.path)?;
-    let len = file.metadata()?.len();
-    file.seek(SeekFrom::Start(len.saturating_sub(4096)))?;
-    let mut tail = Vec::new();
-    file.take(4096).read_to_end(&mut tail)?;
-    let expected = stable_id(&format!("{}:title", source.id));
-    Ok(tail.split(|b| *b == b'\n').any(|line| {
-        serde_json::from_slice::<serde_json::Value>(line).is_ok_and(|r| {
-            r["type"] == "custom-title" && r["sessionId"] == source.id && r["uuid"] == expected
-        })
-    }))
+fn has_current_native_projection(source: &Source, title: &str) -> Result<bool> {
+    Ok(titles::projection(source)?.as_deref() == Some(title))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -397,7 +383,16 @@ fn read_messages(source: &Source) -> Result<Vec<format::Message>> {
     read_messages_titled(source, &mut String::new())
 }
 fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<format::Message>> {
+    let preferred = if title.is_empty() {
+        titles::Cache::default().name(source)?.unwrap_or_default()
+    } else {
+        title.clone()
+    };
     let rows = reader::rows(source, title)?;
+    let native_title = titles::from_rows(source, &rows, &preferred);
+    if !native_title.is_empty() {
+        *title = native_title;
+    }
     match source.tool {
         Tool::Codex => {
             let meta = rows
@@ -510,6 +505,7 @@ type Gate = Arc<AtomicBool>;
 struct Cache {
     messages: HashMap<PathBuf, (u64, SystemTime, String)>,
     metadata: discovery::MetadataCache,
+    titles: titles::Cache,
     rows: BTreeMap<String, Conversation>,
     attempts: HashMap<PathBuf, (u64, SystemTime, Instant)>,
 }
@@ -717,14 +713,18 @@ fn scan_with_index(
             let destinations = scope
                 .map(|s| s.destinations(pair, entry.source.tool))
                 .unwrap_or_else(|| vec![pair.clone()]);
-            let mut routes_unchanged = entry.imported && entry.copied_to.is_none()
-                || scope.is_none()
-                || destinations.iter().all(|p| {
-                    entry.copies.iter().any(|c| {
-                        c.root == p.endpoint(opposite(entry.source.tool)).root
-                            && c.revision == PROJECTION_REVISION
-                    })
-                });
+            let native_title = cache.titles.name(&entry.source)?;
+            let renamed = native_title
+                .as_ref()
+                .is_some_and(|name| name != &entry.title);
+            let mut routes_unchanged = !renamed
+                && (entry.imported && entry.copied_to.is_none()
+                    || destinations.iter().all(|p| {
+                        entry.copies.iter().any(|c| {
+                            c.root == p.endpoint(opposite(entry.source.tool)).root
+                                && c.revision == PROJECTION_REVISION
+                        })
+                    }));
             if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
                 return Ok(());
             }
@@ -734,14 +734,17 @@ fn scan_with_index(
                 }
             }
             notify(&status);
-            let mut title = String::new();
+            let mut title = native_title.unwrap_or_default();
             let result = read_messages_titled(&entry.source, &mut title);
             if let Some(row) = status.rows.get_mut(&key) {
                 if !title.is_empty() {
-                    row.title = title;
+                    row.title = title.clone();
                 }
             }
             let messages = result?;
+            if title != entry.title {
+                routes_unchanged = false;
+            }
             if let Some(row) = status.rows.get_mut(&key) {
                 row.detail.clear();
             }
@@ -753,14 +756,17 @@ fn scan_with_index(
             }
             let fingerprint = digest(&serde_json::to_vec(&messages)?);
             if entry.imported
+                && (entry.title.is_empty() || title == entry.title)
                 && discovery::imported(config, &entry.source)?.as_deref() == Some(&fingerprint)
             {
                 // Older parsers could mistake their own projection for a new turn.
                 // The immutable import baseline proves this copy was not continued.
                 // Retire only that bookkeeping; preserve every native session file.
-                if entry.copied_to.is_some() || entry.seen != fingerprint {
+                if entry.copied_to.is_some() || entry.seen != fingerprint || entry.title.is_empty()
+                {
                     let saved = state.entries.get_mut(&key).unwrap();
                     saved.seen = fingerprint;
+                    saved.title = title;
                     saved.copied_to = None;
                     saved.copies.clear();
                     replace(&state_path, &serde_json::to_vec(&state)?)?;
@@ -779,7 +785,7 @@ fn scan_with_index(
                             .values()
                             .find(|e| e.source.id == copy.id && e.source.root == copy.root)
                         {
-                            if has_current_native_projection(&target.source)?
+                            if has_current_native_projection(&target.source, &title)?
                                 && read_messages(&target.source).is_ok_and(|m| m == messages)
                             {
                                 index(&target.source)?;
@@ -843,15 +849,20 @@ fn scan_with_index(
                 // must see a continuation even when the other CLI was opened outside Kiln.
                 let identity = if scope.is_some() {
                     format!(
-                        "{}:v3:{key}:{fingerprint}:{}",
+                        "{}:v4:{key}:{fingerprint}:{}:{}",
                         state_path.display(),
+                        digest(title.as_bytes()),
                         destination_pair
                             .endpoint(opposite(entry.source.tool))
                             .root
                             .display()
                     )
                 } else {
-                    format!("{}:{key}:{fingerprint}", state_path.display())
+                    format!(
+                        "{}:v4:{key}:{fingerprint}:{}",
+                        state_path.display(),
+                        digest(title.as_bytes())
+                    )
                 };
                 let id = stable_id(&identity);
                 let plan_path = dir.join(format!("pending-{id}.json"));
@@ -876,12 +887,13 @@ fn scan_with_index(
                     "Destination namespace changed"
                 );
                 safe_path(&plan.source.root, &plan.source.path)?;
-                let bytes = format::render(
+                let bytes = format::render_titled(
                     plan.source.tool,
                     &id,
                     &entry.source.cwd,
                     &plan.timestamp,
                     &messages,
+                    &title,
                 )?;
                 let converted: Vec<serde_json::Value> = bytes
                     .split(|b| *b == b'\n')
@@ -907,7 +919,12 @@ fn scan_with_index(
                     );
                 }
                 // Record the baseline before publication so a crash cannot make discovery echo it.
-                discovery::remember_import(config, &plan.source, &fingerprint)?;
+                discovery::remember_projection(
+                    config,
+                    &plan.source,
+                    &fingerprint,
+                    Some(&messages),
+                )?;
                 if !plan.source.path.exists() {
                     publish(&plan.source.path, &bytes)?;
                 }
@@ -946,6 +963,7 @@ fn scan_with_index(
                 replace(&state_path, &serde_json::to_vec(&state)?)?;
                 pending_plans.push(plan_path);
             }
+            titles::pin_claude(&entry.source, &title)?;
             let saved = state.entries.get_mut(&key).unwrap();
             saved.seen = fingerprint.clone();
             saved.title = title;

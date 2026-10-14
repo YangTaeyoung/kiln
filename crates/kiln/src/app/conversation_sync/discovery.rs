@@ -72,6 +72,8 @@ impl Scope {
 struct Import {
     source: Source,
     fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    visible_fingerprint: Option<String>,
 }
 fn import_path(config: &Path, source: &Source) -> PathBuf {
     config.join("conversation-sync/imports").join(format!(
@@ -80,13 +82,39 @@ fn import_path(config: &Path, source: &Source) -> PathBuf {
     ))
 }
 pub(super) fn remember_import(config: &Path, source: &Source, fingerprint: &str) -> Result<()> {
+    remember_projection(config, source, fingerprint, None)
+}
+pub(super) fn remember_projection(
+    config: &Path,
+    source: &Source,
+    fingerprint: &str,
+    messages: Option<&[format::Message]>,
+) -> Result<()> {
     let path = import_path(config, source);
     if !path.exists() {
+        let visible_fingerprint = messages
+            .map(|messages| {
+                let visible: Vec<_> = messages
+                    .iter()
+                    .map(|m| format::Message {
+                        role: m.role.clone(),
+                        images: m.images.clone(),
+                        text: if m.role == "assistant" {
+                            portable::display(&m.text)
+                        } else {
+                            m.text.clone()
+                        },
+                    })
+                    .collect();
+                serde_json::to_vec(&visible).map(|bytes| digest(&bytes))
+            })
+            .transpose()?;
         publish(
             &path,
             &serde_json::to_vec(&Import {
                 source: source.clone(),
                 fingerprint: fingerprint.into(),
+                visible_fingerprint,
             })?,
         )?;
     }
@@ -141,7 +169,10 @@ fn external_import_baselines(
             && origin.source.path == record.source_path
             && scope.contains(&origin.source)
         {
-            baselines.insert(record.imported_thread_id, origin.fingerprint);
+            baselines.insert(
+                record.imported_thread_id,
+                origin.visible_fingerprint.unwrap_or(origin.fingerprint),
+            );
         }
     }
     Ok(baselines)
