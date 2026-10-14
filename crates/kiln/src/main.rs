@@ -30,6 +30,8 @@ enum Cmd {
     #[command(hide = true)]
     AgentHook,
     #[command(hide = true)]
+    SyncWorker,
+    #[command(hide = true)]
     AgentRun { #[arg(long)] record: std::path::PathBuf, #[arg(long)] generation: String, #[arg(long)] request: Option<std::path::PathBuf>, #[arg(long)] resume: bool },
     #[cfg(feature = "updater-test")]
     #[command(hide = true)]
@@ -129,6 +131,7 @@ fn main() -> anyhow::Result<()> {
             app::agent_runtime::hook(std::path::Path::new(&record), &generation, std::io::stdin().lock())
         },
         Some(Cmd::AgentRun { record, generation, request, resume }) => app::agent_runtime::run_request(&record,&generation,request.as_deref(),resume),
+        Some(Cmd::SyncWorker) => app::conversation_sync::serve_worker(),
         #[cfg(feature = "updater-test")]
         Some(Cmd::UpdaterTestRoot) => {
             println!("{}", std::path::Path::new(option_env!("KILN_UPDATER_TEST_ROOT").unwrap()).canonicalize()?.display());

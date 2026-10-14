@@ -240,9 +240,6 @@ fn load_path(path: &std::path::Path) -> LoadReport {
     report
 }
 
-/// Return failure to the caller so its last-saved cache and recovery UI remain truthful.
-pub fn save(p: &Persist) -> Result<(), String> { save_path(&path(), p) }
-
 /// Saves snapshots on a background thread. Only the newest unsaved snapshot is kept;
 /// every result carries the sequence number returned for its snapshot. Dropping the
 /// writer waits until a queued snapshot has been written.

@@ -10,6 +10,12 @@ mod storage;
 #[cfg(test)]
 mod tests;
 mod titles;
+mod worker;
+
+/// Entry point of the hidden `kiln sync-worker` command.
+pub fn serve_worker() -> Result<()> {
+    worker::serve()
+}
 
 use anyhow::{Context, Result, ensure};
 use kiln_accounts::{AccountManager, Tool};
@@ -400,7 +406,7 @@ struct Continuation {
     #[serde(default)]
     revision: u8,
 }
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum Phase {
     Queued,
     Reading,
@@ -409,7 +415,7 @@ enum Phase {
     Waiting,
     Failed,
 }
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Conversation {
     workspace: Option<PathBuf>,
     source: Source,
@@ -436,7 +442,7 @@ impl Conversation {
         }
     }
 }
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct Status {
     groups: BTreeMap<String, String>,
     settled: std::collections::BTreeSet<String>,
@@ -586,18 +592,23 @@ fn destination(
 
 /// Cancellation never blocks the UI on filesystem IO. An in-progress atomic publish may finish.
 type Gate = Arc<AtomicBool>;
-#[derive(Default)]
+/// File-stamped results survive a sync worker restart; retry bookkeeping does not.
+#[derive(Default, Serialize, Deserialize)]
 struct Cache {
     messages: HashMap<PathBuf, (u64, SystemTime, String)>,
     metadata: discovery::MetadataCache,
     titles: titles::Cache,
     rows: BTreeMap<String, Conversation>,
+    #[serde(skip)]
     attempts: HashMap<PathBuf, (u64, SystemTime, Instant)>,
     /// Consecutive unsettled attempts per unchanged source; selects its retry delay.
+    #[serde(skip)]
     failures: HashMap<PathBuf, u32>,
     /// Snapshot-retirement attempts keyed by source, stamped with both histories.
+    #[serde(skip)]
     retirements: HashMap<String, (Vec<(u64, SystemTime)>, Instant, u32)>,
     /// Sources modified within this window are left until their writer pauses.
+    #[serde(skip)]
     quiet: Duration,
 }
 impl Cache {
@@ -1245,6 +1256,12 @@ pub struct Manager {
     urgent: bool,
     /// Native links were emptied after synchronization stopped.
     links_cleared: bool,
+    worker: Option<worker::Worker>,
+    scan_id: u64,
+    worker_scan: Option<u64>,
+    /// The next worker scan clears retry delays / starts from an empty cache.
+    expedite_next: bool,
+    reset_next: bool,
 }
 /// Background scans leave a transcript until it has been unchanged this long.
 const QUIET: Duration = Duration::from_secs(10);
@@ -1270,6 +1287,11 @@ impl Default for Manager {
             registry: Default::default(),
             urgent: false,
             links_cleared: false,
+            worker: None,
+            scan_id: 0,
+            worker_scan: None,
+            expedite_next: false,
+            reset_next: false,
         }
     }
 }
@@ -1283,6 +1305,7 @@ impl Manager {
         if self.busy { return None; }
         // Keeps results cached per file length and modification time; clears retry delays.
         self.cache.lock().unwrap().expedite();
+        self.expedite_next = true;
         self.urgent = true;
         self.next = Instant::now();
         Some(self.completed)
@@ -1369,6 +1392,7 @@ impl Manager {
             self.status = Status::default();
             self.configured = settings.conversation_sync_pair.clone();
             self.cache = Arc::new(Mutex::new(Cache::new()));
+            self.reset_next = true;
             let registry = std::mem::take(&mut self.registry);
             // Stopping metadata readers waits for their exit off the UI thread.
             std::thread::spawn(move || drop(registry));
@@ -1386,12 +1410,15 @@ impl Manager {
         self.revision += 1;
         self.next = Instant::now() + Duration::from_secs(3);
         let pair = settings.conversation_sync_pair.clone().unwrap();
+        let quiet = if std::mem::take(&mut self.urgent) { Duration::ZERO } else { QUIET };
+        if self.scan_in_worker(&pair, quiet, ctx) {
+            return;
+        }
         let workspaces = self.workspaces.clone();
         let gate = self.gate.clone();
         let tx = self.tx.clone();
         let cache = self.cache.clone();
         let registry = self.registry.clone();
-        let quiet = if std::mem::take(&mut self.urgent) { Duration::ZERO } else { QUIET };
         std::thread::spawn(move || {
             let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
             let result = discovery::Scope::new(&pair, workspaces)
@@ -1419,6 +1446,33 @@ impl Manager {
             let _ = tx.send(Event::Scanned(gate, result));
         });
     }
+    /// Sends the scan to the sync worker process; false when no worker can run it,
+    /// in which case the scan runs on a thread of this process.
+    fn scan_in_worker(&mut self, pair: &Pair, quiet: Duration, ctx: &egui::Context) -> bool {
+        if cfg!(test) {
+            return false;
+        }
+        if !self.worker.as_mut().is_some_and(worker::Worker::alive) {
+            self.worker = worker::Worker::start(&super::conn::daemon_exe(), self.tx.clone(), ctx.clone()).ok();
+        }
+        let Some(worker) = self.worker.as_mut() else {
+            return false;
+        };
+        self.scan_id += 1;
+        let (expedite, reset) = (std::mem::take(&mut self.expedite_next), std::mem::take(&mut self.reset_next));
+        match worker.scan(self.scan_id, self.gate.clone(), pair, &self.workspaces, quiet, expedite, reset) {
+            Ok(()) => {
+                self.worker_scan = Some(self.scan_id);
+                true
+            }
+            Err(_) => {
+                self.worker = None;
+                self.expedite_next |= expedite;
+                self.reset_next |= reset;
+                false
+            }
+        }
+    }
     pub(super) fn accounts_ready(accounts: &AccountManager) -> bool {
         [Tool::Claude, Tool::Codex].into_iter().all(|tool| {
             accounts.active(tool).is_some_and(|id| {
@@ -1430,6 +1484,9 @@ impl Manager {
     }
     pub(super) fn cancel_scan(&mut self) {
         self.gate.store(false, Ordering::Release);
+        if let (Some(worker), Some(id)) = (self.worker.as_mut(), self.worker_scan.take()) {
+            worker.cancel(id);
+        }
         self.next = Instant::now();
     }
     pub(super) fn enable(
@@ -1584,6 +1641,7 @@ impl Manager {
                         .on_hover_text(tr("이미지를 포함한 원문을 연동합니다. 전달할 수 없는 첨부가 있으면 완료로 표시하지 않습니다."));
                     if ui.button(tr("다시 확인")).clicked() {
                         self.cache = Arc::new(Mutex::new(Cache::new()));
+                        self.reset_next = true;
                         self.urgent = true;
                         self.next = Instant::now();
                     }

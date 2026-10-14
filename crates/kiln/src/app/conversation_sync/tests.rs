@@ -2843,3 +2843,93 @@ fn streamed_comparison_matches_plain_and_compressed_transcripts_exactly() {
     assert!(storage::equals(&f.source, &bytes).unwrap());
     assert!(!storage::equals(&f.source, &changed).unwrap());
 }
+
+#[cfg(unix)]
+struct WorkerFixture {
+    gui: std::os::unix::net::UnixStream,
+    replies: mpsc::Receiver<String>,
+    done: std::thread::JoinHandle<Result<()>>,
+}
+#[cfg(unix)]
+impl WorkerFixture {
+    fn start(f: &Fixture, recycle_peak: u64) -> Self {
+        struct Lines(mpsc::Sender<String>, Vec<u8>);
+        impl Write for Lines {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.1.extend_from_slice(bytes);
+                while let Some(end) = self.1.iter().position(|b| *b == b'\n') {
+                    let line: Vec<u8> = self.1.drain(..=end).collect();
+                    let _ = self.0.send(String::from_utf8_lossy(&line).trim_end().to_owned());
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (gui, worker_end) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (tx, replies) = mpsc::channel();
+        let (config, roots) = (f.config.clone(), workspace_scope(f).roots);
+        let done = std::thread::spawn(move || {
+            worker::serve_with(std::io::BufReader::new(worker_end), Lines(tx, Vec::new()), &config, recycle_peak, move |_, workspaces| {
+                Ok(discovery::Scope { workspaces, roots: roots.clone() })
+            })
+        });
+        Self { gui, replies, done }
+    }
+    fn send(&mut self, request: &worker::Request) {
+        let mut line = serde_json::to_vec(request).unwrap();
+        line.push(b'\n');
+        self.gui.write_all(&line).unwrap();
+    }
+    fn scan(&mut self, f: &Fixture, id: u64) -> Status {
+        self.send(&worker::Request::Scan { id, pair: f.pair.clone(), workspaces: vec![PathBuf::from(&f.source.cwd)], quiet_ms: 0, expedite: false, reset: false });
+        loop {
+            let line = self.replies.recv_timeout(Duration::from_secs(30)).expect("worker reply");
+            if let worker::Reply::Scanned { id: done, result } = serde_json::from_str(&line).unwrap() {
+                assert_eq!(done, id);
+                return result.unwrap();
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_worker_keeps_file_stamped_results_across_scans_and_restarts() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let mut worker = WorkerFixture::start(&f, u64::MAX);
+    assert_eq!(worker.scan(&f, 1).published, 1);
+    assert_eq!(worker.scan(&f, 2).published, 0, "unchanged histories are not copied again");
+    drop(worker.gui);
+    worker.done.join().unwrap().unwrap();
+    assert!(!worker::cache_path(&f.config).exists());
+
+    let mut extended = messages();
+    extended.push(Message { role: "user".into(), text: "A new turn".into(), images: vec![] });
+    extended.push(Message { role: "assistant".into(), text: "New answer".into(), images: vec![] });
+    let mut recycling = WorkerFixture::start(&f, 0);
+    fs::write(&f.source.path, format::render(f.source.tool, &f.source.id, &f.source.cwd, "2026-10-14T00:00:00Z", &extended).unwrap()).unwrap();
+    assert_eq!(recycling.scan(&f, 3).published, 1);
+    recycling.done.join().unwrap().unwrap();
+    assert!(worker::cache_path(&f.config).exists(), "a recycled worker leaves its results for the next one");
+    let mut next = WorkerFixture::start(&f, u64::MAX);
+    assert_eq!(next.scan(&f, 4).published, 0, "the next worker reuses the saved results");
+    assert!(!worker::cache_path(&f.config).exists());
+    drop(next.gui);
+    next.done.join().unwrap().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_worker_reports_a_cancelled_scan_without_publishing() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let mut worker = WorkerFixture::start(&f, u64::MAX);
+    worker.send(&worker::Request::Cancel { id: 1 });
+    assert_eq!(worker.scan(&f, 1).published, 0, "a scan cancelled before it starts publishes nothing");
+    assert_eq!(worker.scan(&f, 2).published, 1);
+    drop(worker.gui);
+    worker.done.join().unwrap().unwrap();
+}

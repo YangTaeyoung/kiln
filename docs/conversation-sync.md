@@ -149,7 +149,12 @@ The check refers to **completed responses**, not an answer still being generated
 
 ## Implementation and validation
 
-`app/conversation_sync/discovery.rs` performs bounded metadata discovery with a
+Scans run in a separate `kiln sync-worker` process started by the GUI, so reading
+large transcripts does not grow the GUI's memory. After a scan whose peak memory
+exceeded 512 MiB, the worker saves its file-stamped results to the private
+`conversation-sync/worker-cache.json` and exits; the next scan starts a new worker
+that loads and removes that file. If the worker cannot start, the scan runs inside
+the GUI process. `app/conversation_sync/discovery.rs` performs bounded metadata discovery with a
 file-change cache and persisted initial selections. `format.rs` holds the native
 adapters, `reader.rs` bounds streamed records, and `mod.rs` owns the worker and
 workspace status UI. Managed lifecycle hooks
