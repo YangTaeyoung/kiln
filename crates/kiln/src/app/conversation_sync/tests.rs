@@ -2967,3 +2967,15 @@ fn a_row_left_waiting_is_marked_synced_when_its_unchanged_file_is_cached_as_sync
     assert!(status.rows.values().all(|r| r.phase == Phase::Synced && r.detail.is_empty()));
     assert_eq!(status.published, 0);
 }
+
+#[test]
+fn a_synchronized_conversation_whose_original_was_deleted_stays_synced() {
+    let f = Fixture::new(Tool::Claude);
+    let mut cache = Cache::new();
+    assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
+    fs::remove_file(&f.source.path).unwrap();
+    let status = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    let row = &status.rows[&f.source.path.to_string_lossy().into_owned()];
+    assert_eq!(row.phase, Phase::Synced, "its copies remain available");
+    assert!(row.target.is_some());
+}

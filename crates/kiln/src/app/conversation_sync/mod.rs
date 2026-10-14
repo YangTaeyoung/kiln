@@ -837,8 +837,14 @@ fn scan_with_metadata(
         status.checked += 1;
         if !storage::exists(&entry.source) {
             if let Some(row) = status.rows.get_mut(&key) {
-                row.phase = Phase::Waiting;
-                row.detail = "Transcript not available yet".into();
+                // A removed original keeps its published copies; an unwritten one is still awaited.
+                if entry.copied_to.is_some() {
+                    row.phase = Phase::Synced;
+                    row.detail.clear();
+                } else {
+                    row.phase = Phase::Waiting;
+                    row.detail = "Transcript not available yet".into();
+                }
             }
             continue;
         }
