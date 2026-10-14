@@ -1561,12 +1561,13 @@ impl KilnApp {
                 for (pane_index,id) in page.root.panes().into_iter().enumerate() {
                     let Some(pane) = self.panes.get(&id) else { continue; };
                     let info = self.card_info(id);
+                    let roots = [ws.root.as_path(), ws.tools.canonical_root()];
                     let (kind, path) = match &pane.kind {
-                        PaneKind::Term { .. } => (kiln_common::i18n::tr("터미널"), pane.cwd.clone().unwrap_or_else(|| info.right.clone())),
+                        PaneKind::Term { .. } => (kiln_common::i18n::tr("터미널"), pane.cwd.as_deref().map(|cwd| super::workspace_path(Path::new(cwd), &roots)).unwrap_or_else(|| info.right.clone())),
                         PaneKind::Tool(tool) => {
                             let key = tool.key();
                             let kind = if key.starts_with("db") { kiln_common::i18n::tr("데이터베이스") } else if key.starts_with("git-history") || key.starts_with("diff") || key.starts_with("commit") || key.starts_with("range:") || key.starts_with("issue:") || key.starts_with("history") || key.starts_with("pr:") { "Git" } else { kiln_common::i18n::tr("편집기") };
-                            (kind, tool.path().map(|p| short_path(p)).unwrap_or_default())
+                            (kind, tool.path().map(|p| super::workspace_path(p, &roots)).unwrap_or_default())
                         }
                     };
                     let detail = if path.is_empty() { info.detail } else { path };

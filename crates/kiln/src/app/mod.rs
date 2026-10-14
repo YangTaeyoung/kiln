@@ -2280,6 +2280,30 @@ fn normalize_path(p: PathBuf) -> PathBuf {
     }
 }
 
+/// `p` relative to the first workspace root that contains it, or `short_path` otherwise.
+/// The root itself is shown with `short_path`.
+pub(crate) fn workspace_path(p: &Path, roots: &[&Path]) -> String {
+    roots
+        .iter()
+        .find_map(|root| p.strip_prefix(root).ok())
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(|relative| relative.to_string_lossy().into_owned())
+        .unwrap_or_else(|| short_path(p))
+}
+
+#[cfg(test)]
+mod workspace_path_tests {
+    use super::*;
+    #[test]
+    fn paths_inside_either_workspace_root_are_relative() {
+        let roots = [Path::new("/tmp/work"), Path::new("/private/tmp/work")];
+        assert_eq!(workspace_path(Path::new("/private/tmp/work/src/main.rs"), &roots), "src/main.rs");
+        assert_eq!(workspace_path(Path::new("/tmp/work/api"), &roots), "api");
+        assert_eq!(workspace_path(Path::new("/private/tmp/work"), &roots), "/private/tmp/work");
+        assert_eq!(workspace_path(Path::new("/opt/elsewhere"), &roots), "/opt/elsewhere");
+    }
+}
+
 pub(crate) fn short_path(p: &Path) -> String {
     let s = p.to_string_lossy().into_owned();
     if let Some(home) = std::env::var_os("HOME") {
