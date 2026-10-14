@@ -634,6 +634,19 @@ fn open_managed_endpoint_defers_updates_until_the_daemon_exit_lease_releases() {
 }
 
 #[test]
+fn prompts_continue_while_their_history_is_being_synchronized() {
+    let f = Fixture::new(Tool::Codex);
+    f.scan();
+    let record = super::super::agent_runtime::Record { tool: Tool::Codex, spec: kiln_proto::SpawnSpec {
+        cwd: Some(f.source.cwd.clone()), env:vec![(env_key(Tool::Codex).into(),f.source.root.to_string_lossy().into_owned())], ..Default::default()
+    }, version:String::new(), generation:"panel".into(), conversation:Some(f.source.id.clone()), confirmed:true, request_started:false };
+    assert!(handover::link(&handover::links(&f.config).unwrap(), &record).is_some());
+    let _syncing = handover::write_guard(&f.config, &f.source).unwrap();
+    let _publishing = handover::lock(&f.config).unwrap();
+    assert!(handover::event(&f.config, &f.config.join("panel.json"), &record, "UserPromptSubmit", None).unwrap().is_none());
+}
+
+#[test]
 fn syncing_one_conversation_does_not_lock_unrelated_native_starts() {
     let f = Fixture::new(Tool::Codex);
     f.scan();
@@ -644,7 +657,7 @@ fn syncing_one_conversation_does_not_lock_unrelated_native_starts() {
     let mut links = handover::links(&f.config).unwrap();
     links.push(handover::Link { tool:Tool::Codex, root:f.source.root.clone(), id:other.conversation.clone().unwrap(), group:"unrelated-group".into(), canonical_id:other.conversation.clone().unwrap() });
     fs::write(f.config.join("conversation-sync/native-links.json"),serde_json::to_vec(&links).unwrap()).unwrap();
-    assert!(handover::event(&f.config,&f.config.join("other.json"),&other,"SessionStart").is_ok());
+    assert!(handover::event(&f.config,&f.config.join("other.json"),&other,"SessionStart",None).is_ok());
     assert!(handover::write_guard(&f.config,&f.source).is_err(), "same conversation remains locked");
 }
 #[test]
