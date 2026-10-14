@@ -535,12 +535,18 @@ impl Daemon {
                     let _ = sess.input.respond(s.into_bytes());
                 }
                 Event::Title(t) => {
-                    sess.info.lock().title = t;
-                    updated = true;
+                    let mut info = sess.info.lock();
+                    if info.title != t {
+                        info.title = t;
+                        updated = true;
+                    }
                 }
                 Event::ResetTitle => {
-                    sess.info.lock().title.clear();
-                    updated = true;
+                    let mut info = sess.info.lock();
+                    if !info.title.is_empty() {
+                        info.title.clear();
+                        updated = true;
+                    }
                 }
                 Event::Bell => {
                     let mut i = sess.info.lock();

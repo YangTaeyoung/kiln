@@ -304,13 +304,22 @@ pub fn empty_state(ui: &mut Ui, icon: Icon, text: &str, action: Option<&str>) ->
     clicked
 }
 
+/// 장식 애니메이션의 다음 프레임 간격. 창이 포커스를 잃으면 느리게 갱신한다.
+pub fn animation_frame(ctx: &egui::Context) -> std::time::Duration {
+    if ctx.input(|i| i.focused) {
+        std::time::Duration::from_millis(33)
+    } else {
+        std::time::Duration::from_millis(250)
+    }
+}
+
 /// 상태 점(주의가 필요하면 부드럽게 깜박인다).
 pub fn status_dot(ui: &Ui, center: egui::Pos2, color: Color32, pulse: bool) {
     if pulse {
         let time = ui.input(|i| i.time);
         let a = ((time * 3.0).sin() * 0.5 + 0.5) as f32;
         ui.painter().circle_filled(center, 3.5 + 3.0 * a, Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (70.0 * (1.0 - a)) as u8));
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        ui.ctx().request_repaint_after(animation_frame(ui.ctx()));
     }
     ui.painter().circle_filled(center, 3.5, color);
 }

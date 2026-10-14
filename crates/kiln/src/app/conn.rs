@@ -6,6 +6,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// 세션 상태(정보·텔레메트리·건강) 메시지는 이 간격 안에서 모아 다시 그린다.
+const STATUS_REPAINT_DELAY: Duration = Duration::from_millis(100);
+/// 이 시간 넘게 그려지지 않은 세션은 화면 프레임 수신을 멈춘다.
+const HIDDEN_DETACH_AFTER: Duration = Duration::from_secs(2);
+
 /// 클라이언트가 보관하는 세션 화면.
 #[derive(Default)]
 pub struct Screen {
@@ -78,6 +83,9 @@ pub struct Conn {
     pub command_outputs: HashMap<(SessionId, u64), (String, bool)>,
     /// 붙어 있는 세션과 요청한 크기.
     attached: HashMap<SessionId, (u16, u16)>,
+    /// 붙어 있는 세션이 마지막으로 그려진 `pump` 회차와 시각.
+    drawn: HashMap<SessionId, (u64, Instant)>,
+    pumps: u64,
     /// Explicitly closed sessions stay hidden from late PTY exit/update events.
     closing_sessions: std::collections::HashSet<SessionId>,
     pub events: Vec<ConnEvent>,
@@ -116,6 +124,8 @@ impl Conn {
             observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
             attached: HashMap::new(),
+            drawn: HashMap::new(),
+            pumps: 0,
             closing_sessions: Default::default(),
             events: Vec::new(),
             ctx,
@@ -155,6 +165,8 @@ impl Conn {
             observed_agents: HashMap::new(),
             command_outputs: HashMap::new(),
             attached: HashMap::new(),
+            drawn: HashMap::new(),
+            pumps: 0,
             closing_sessions: Default::default(),
             events: Vec::new(),
             ctx,
@@ -183,7 +195,14 @@ impl Conn {
     fn try_connect(&mut self) {
         self.last_attempt = Some(Instant::now());
         let ctx = self.ctx.clone();
-        let notify: kiln_daemon::client::Notify = Arc::new(move || ctx.request_repaint());
+        // 화면·연결 변화는 즉시, 세션 상태 갱신은 짧게 모아서 다시 그린다.
+        let notify: kiln_daemon::client::Notify = Arc::new(move |status_only| {
+            if status_only {
+                ctx.request_repaint_after(STATUS_REPAINT_DELAY);
+            } else {
+                ctx.request_repaint();
+            }
+        });
         match Client::connect_or_spawn(&self.socket, &self.exe, Some(notify)) {
             Ok(c) => {
                 self.shell_completions.clear();
@@ -227,6 +246,10 @@ impl Conn {
 
     /// 매 프레임 호출: 서버 메시지를 처리하고 끊겼으면 재연결한다.
     pub fn pump(&mut self) {
+        self.pumps += 1;
+        if self.is_connected() {
+            self.detach_hidden();
+        }
         self.sync_palette();
         let mut disconnected = false;
         let mut msgs = Vec::new();
@@ -425,6 +448,7 @@ impl Conn {
     }
 
     pub fn attach(&mut self, sid: SessionId, cols: u16, rows: u16) {
+        self.drawn.insert(sid, (self.pumps, Instant::now()));
         if self.attached.get(&sid) != Some(&(cols, rows)) {
             let first = !self.attached.contains_key(&sid);
             self.attached.insert(sid, (cols, rows));
@@ -436,7 +460,33 @@ impl Conn {
         }
     }
 
+    /// 크기를 바꾸지 않고 화면을 계속 받는다(검사 화면처럼 터미널 캔버스 없이 표시할 때).
+    pub fn keep_attached(&mut self, sid: SessionId) {
+        if self.attached.contains_key(&sid) {
+            self.drawn.insert(sid, (self.pumps, Instant::now()));
+        }
+    }
+
+    /// 직전 회차에 그려지지 않고 `HIDDEN_DETACH_AFTER`가 지난 세션을 뗀다.
+    /// 다시 그려지면 `attach`가 전체 화면을 새로 받는다.
+    fn detach_hidden(&mut self) {
+        let hidden: Vec<_> = self
+            .attached
+            .keys()
+            .filter(|sid| {
+                self.drawn.get(sid).is_none_or(|(pump, at)| {
+                    pump.saturating_add(1) < self.pumps && at.elapsed() >= HIDDEN_DETACH_AFTER
+                })
+            })
+            .copied()
+            .collect();
+        for sid in hidden {
+            self.detach(sid);
+        }
+    }
+
     pub fn detach(&mut self, sid: SessionId) {
+        self.drawn.remove(&sid);
         if self.attached.remove(&sid).is_some() {
             self.send(ClientMsg::Detach { session: sid });
         }
@@ -823,5 +873,40 @@ mod completion_snapshot_transition_tests {
                     "a delayed return-to-Zsh status must not discard a fresh request");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod hidden_session_tests {
+    use super::*;
+    #[test]
+    fn sessions_not_drawn_in_the_last_pass_detach_after_the_grace_period() {
+        let mut conn = Conn::offline(egui::Context::default());
+        conn.pumps = 10;
+        conn.attach(1, 80, 24);
+        conn.attach(2, 80, 24);
+        conn.pumps = 11;
+        conn.attach(1, 80, 24);
+        let stale = Instant::now() - HIDDEN_DETACH_AFTER - Duration::from_millis(1);
+        for sid in [1, 2] {
+            conn.drawn.get_mut(&sid).unwrap().1 = stale;
+        }
+        conn.pumps = 12;
+        conn.detach_hidden();
+        assert!(conn.attached.contains_key(&1), "drawn in the previous pass");
+        assert!(!conn.attached.contains_key(&2), "hidden past the grace period");
+        conn.pumps = 20;
+        conn.attach(2, 80, 24);
+        conn.pumps = 30;
+        conn.detach_hidden();
+        assert!(conn.attached.contains_key(&2), "recently drawn sessions stay attached across idle passes");
+        assert!(!conn.attached.contains_key(&1));
+        conn.attach(1, 80, 24);
+        conn.drawn.get_mut(&1).unwrap().1 = stale;
+        conn.drawn.get_mut(&2).unwrap().1 = stale;
+        conn.keep_attached(1);
+        conn.pumps = 31;
+        conn.detach_hidden();
+        assert_eq!(conn.attached.keys().copied().collect::<Vec<_>>(), vec![1], "inspected sessions stay attached");
     }
 }

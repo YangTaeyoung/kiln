@@ -68,7 +68,7 @@ pub(super) fn paint_running(ui: &egui::Ui, center: egui::Pos2, color: Color32) {
         center + vec2(angle.cos(), angle.sin()) * radius
     }).collect();
     ui.painter().add(egui::Shape::line(points, Stroke::new(1.7, color)));
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    ui.ctx().request_repaint_after(kiln_common::widgets::animation_frame(ui.ctx()));
 }
 
 pub(super) fn agent_icon(agent: Option<kiln_accounts::Tool>) -> Icon {
@@ -89,7 +89,7 @@ pub(super) fn paint_agent_progress(ui: &egui::Ui, center: egui::Pos2, color: Col
         center + vec2(angle.cos(), angle.sin()) * 11.5
     }).collect();
     ui.painter().add(egui::Shape::line(points, Stroke::new(1.0, color)));
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    ui.ctx().request_repaint_after(kiln_common::widgets::animation_frame(ui.ctx()));
 }
 
 pub(super) fn title_activity(title: &str, activity: kiln_proto::AgentActivity, exited: Option<i32>) -> kiln_proto::AgentActivity {
@@ -758,7 +758,7 @@ impl KilnApp {
         let sync_enabled = ws.conversation_sync;
         let sync_root = ws.tools.canonical_root().to_path_buf();
         let sync_badge = sync_enabled.then(|| self.conversation_sync.badge(&sync_root));
-        let task_context = self.projects.task_context(&root_path);
+        let task_context = self.projects.task_context(&root_path, &sync_root);
         let h = if wide { if tasks.len()>3 {70.0}else{52.0} } else { 44.0 };
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
         resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), active, &name));

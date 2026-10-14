@@ -243,6 +243,78 @@ fn load_path(path: &std::path::Path) -> LoadReport {
 /// Return failure to the caller so its last-saved cache and recovery UI remain truthful.
 pub fn save(p: &Persist) -> Result<(), String> { save_path(&path(), p) }
 
+/// Saves snapshots on a background thread. Only the newest unsaved snapshot is kept;
+/// every result carries the sequence number returned for its snapshot. Dropping the
+/// writer waits until a queued snapshot has been written.
+pub struct StateWriter {
+    shared: std::sync::Arc<(std::sync::Mutex<WriterSlot>, std::sync::Condvar)>,
+    worker: Option<std::thread::JoinHandle<()>>,
+    results: std::sync::mpsc::Receiver<(u64, Persist, Result<(), String>)>,
+    path: PathBuf,
+    sequence: u64,
+}
+#[derive(Default)]
+struct WriterSlot {
+    pending: Option<(u64, Persist)>,
+    busy: bool,
+    closed: bool,
+}
+impl StateWriter {
+    pub fn new(path: PathBuf) -> Self {
+        let shared = std::sync::Arc::new((std::sync::Mutex::new(WriterSlot::default()), std::sync::Condvar::new()));
+        let (tx, results) = std::sync::mpsc::channel();
+        let (worker, target) = (shared.clone(), path.clone());
+        let worker = std::thread::Builder::new().name("kiln-state-writer".into()).spawn(move || loop {
+            let (sequence, snapshot) = {
+                let (slot, ready) = &*worker;
+                let mut slot = slot.lock().unwrap();
+                while slot.pending.is_none() && !slot.closed { slot = ready.wait(slot).unwrap(); }
+                let Some(next) = slot.pending.take() else { return };
+                slot.busy = true;
+                next
+            };
+            let result = save_path(&target, &snapshot);
+            let (slot, ready) = &*worker;
+            slot.lock().unwrap().busy = false;
+            ready.notify_all();
+            if tx.send((sequence, snapshot, result)).is_err() { return; }
+        }).expect("state writer thread");
+        Self { shared, worker: Some(worker), results, path, sequence: 0 }
+    }
+    /// Queues `snapshot`, replacing any snapshot not yet being written.
+    pub fn submit(&mut self, snapshot: Persist) -> u64 {
+        self.sequence += 1;
+        let (slot, ready) = &*self.shared;
+        slot.lock().unwrap().pending = Some((self.sequence, snapshot));
+        ready.notify_all();
+        self.sequence
+    }
+    /// Writes `snapshot` on the calling thread after any in-progress background write,
+    /// discarding queued snapshots.
+    pub fn save_now(&mut self, snapshot: &Persist) -> (u64, Result<(), String>) {
+        self.sequence += 1;
+        let (slot, ready) = &*self.shared;
+        let mut slot = slot.lock().unwrap();
+        slot.pending = None;
+        while slot.busy { slot = ready.wait(slot).unwrap(); }
+        (self.sequence, save_path(&self.path, snapshot))
+    }
+    /// Results of completed background writes, oldest first.
+    pub fn completed(&self) -> Vec<(u64, Persist, Result<(), String>)> {
+        self.results.try_iter().collect()
+    }
+}
+impl Drop for StateWriter {
+    fn drop(&mut self) {
+        let (slot, ready) = &*self.shared;
+        slot.lock().unwrap().closed = true;
+        ready.notify_all();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 fn save_path(path: &std::path::Path, p: &Persist) -> Result<(), String> {
     match std::fs::read(path) {
         Ok(bytes) => { serde_json::from_slice::<Persist>(&bytes).map_err(|e| kiln_common::trf!("손상된 기존 상태 파일을 덮어쓰지 않았습니다: {e}"))?; }
@@ -258,8 +330,9 @@ fn save_path(path: &std::path::Path, p: &Persist) -> Result<(), String> {
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+        let bytes = serde_json::to_vec_pretty(p).map_err(|e| e.to_string())?;
         let mut file = options.open(&temp).map_err(|e| e.to_string())?;
-        serde_json::to_writer_pretty(&mut file, p).map_err(|e| e.to_string())?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
         file.flush().map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
         std::fs::rename(&temp, path).map_err(|e| e.to_string())?;
@@ -274,6 +347,33 @@ fn save_path(path: &std::path::Path, p: &Persist) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_writer_keeps_the_newest_snapshot_and_forced_saves_win() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("state.json");
+        let mut writer = StateWriter::new(path.clone());
+        let snapshot = |active| Persist { active, ..Persist::default() };
+        let mut latest = 0;
+        for active in 1..=5 { latest = writer.submit(snapshot(active)); }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut results = Vec::new();
+        while !results.iter().any(|(sequence, _, _): &(u64, Persist, Result<(), String>)| *sequence == latest) {
+            assert!(std::time::Instant::now() < deadline, "the newest snapshot is written");
+            results.extend(writer.completed());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(results.iter().all(|(_, _, result)| result.is_ok()));
+        assert!(results.windows(2).all(|w| w[0].0 < w[1].0), "results arrive in submission order");
+        assert_eq!(load_path(&path).state.active, 5);
+        writer.submit(snapshot(6));
+        let (forced, result) = writer.save_now(&snapshot(7));
+        result.unwrap();
+        assert!(forced > latest);
+        assert_eq!(load_path(&path).state.active, 7, "the forced snapshot replaces the queued one");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(writer.completed().iter().all(|(sequence, _, _)| *sequence < forced));
+        assert_eq!(load_path(&path).state.active, 7);
+    }
 
     #[test]
     fn corrupt_state_is_preserved_and_new_state_can_be_saved() {

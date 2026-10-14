@@ -18,7 +18,9 @@ pub struct Client {
     pub can_upgrade: bool,
 }
 
-pub type Notify = Arc<dyn Fn() + Send + Sync>;
+/// Called after each received message is queued. The argument is `true` when that
+/// message only refreshes session status (info, telemetry or health).
+pub type Notify = Arc<dyn Fn(bool) + Send + Sync>;
 
 impl Client {
     /// 연결 후 Hello 를 주고받는다. `notify` 는 서버 메시지가 도착할 때마다 호출된다.
@@ -53,16 +55,22 @@ impl Client {
         })?;
         std::thread::Builder::new().name("kiln-client-r".into()).spawn(move || {
             while let Ok(Some(m)) = read_msg::<_, ServerMsg>(&mut reader) {
+                let status_only = matches!(
+                    m,
+                    ServerMsg::SessionUpdated(_)
+                        | ServerMsg::SessionTelemetry { .. }
+                        | ServerMsg::TerminalHealth { .. }
+                );
                 if in_tx.send(m).is_err() {
                     break;
                 }
                 if let Some(n) = &notify {
-                    n();
+                    n(status_only);
                 }
             }
             drop(in_tx);
             if let Some(n) = &notify {
-                n();
+                n(false);
             }
         })?;
         Ok(Client { tx, rx, next_req: Arc::new(AtomicU32::new(1)), server_build, server_pid, can_upgrade })

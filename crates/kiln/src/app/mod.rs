@@ -297,6 +297,9 @@ pub struct KilnApp {
     notifications: notifications::NotificationCenter,
     last_saved: Option<Persist>,
     last_save_at: Instant,
+    state_writer: state::StateWriter,
+    /// Sequence of the newest save whose result has been applied.
+    saved_sequence: u64,
     focus_terminal: bool,
     restored: bool,
     window_focused: bool,
@@ -392,6 +395,8 @@ impl KilnApp {
             notifications: notifications::NotificationCenter::new(persisted.notifications.clone()),
             last_saved: None,
             last_save_at: Instant::now(),
+            state_writer: state::StateWriter::new(state::path()),
+            saved_sequence: 0,
             focus_terminal: true,
             restored: false,
             window_focused: true,
@@ -581,7 +586,11 @@ impl KilnApp {
         Persist { workspaces, active: self.active, settings: self.settings.clone(), sidebar_open: self.sidebar_open, notifications: self.notifications.items.clone(), recent_panes: self.recent_panes.clone(), terminal_launch_drafts:launch_drafts.into_values().collect() }
     }
 
+    /// Unforced saves are written by the state writer thread; forced saves are durable on return.
     fn save_if_changed(&mut self, force: bool) {
+        for (sequence, snapshot, result) in self.state_writer.completed() {
+            self.finish_save(sequence, snapshot, result);
+        }
         if !force && self.last_save_at.elapsed() < Duration::from_millis(500) {
             return;
         }
@@ -589,13 +598,25 @@ impl KilnApp {
         let p = self.persist();
         // Closing requires a durable checkpoint even when the in-memory state
         // is unchanged: the file may have been removed, blocked or corrupted.
-        if force || self.last_saved.as_ref() != Some(&p) {
-            match state::save(&p) {
-                Ok(()) => { self.last_saved = Some(p); self.save_error = None; }
-                Err(error) => {
-                    if self.save_error.as_ref() != Some(&error) { self.toast(kiln_common::i18n::tr("작업 상태 저장 실패"), &error, ToastKind::Error, None); }
-                    self.save_error = Some(error);
-                }
+        if force {
+            let (sequence, result) = self.state_writer.save_now(&p);
+            self.finish_save(sequence, p, result);
+        } else if self.last_saved.as_ref() != Some(&p) {
+            self.state_writer.submit(p);
+        }
+    }
+
+    /// Applies a save result unless a newer save has already been applied.
+    fn finish_save(&mut self, sequence: u64, snapshot: Persist, result: Result<(), String>) {
+        if sequence <= self.saved_sequence {
+            return;
+        }
+        self.saved_sequence = sequence;
+        match result {
+            Ok(()) => { self.last_saved = Some(snapshot); self.save_error = None; }
+            Err(error) => {
+                if self.save_error.as_ref() != Some(&error) { self.toast(kiln_common::i18n::tr("작업 상태 저장 실패"), &error, ToastKind::Error, None); }
+                self.save_error = Some(error);
             }
         }
     }
@@ -2209,7 +2230,7 @@ impl eframe::App for KilnApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
-            ctx.request_repaint_after(Duration::from_millis(250));
+            ctx.request_repaint_after(Duration::from_secs(1));
         }
         self.guard_window_close(ctx);
         // Window controls stay available while a settings or project modal is open.

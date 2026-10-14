@@ -47,8 +47,12 @@ struct Job {
 }
 
 impl KilnApp {
+    /// Runs every 250 ms while a transfer is in progress and every second otherwise.
     pub(super) fn tick_agent_handover(&mut self, ctx: &egui::Context) {
-        ctx.request_repaint_after(Duration::from_millis(250));
+        let transferring = !self.agent_handover.jobs.is_empty();
+        if transferring {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
         if !self.conn.is_connected()
             || self
                 .agent_handover
@@ -57,7 +61,14 @@ impl KilnApp {
         {
             return;
         }
-        self.agent_handover.next = Some(Instant::now() + Duration::from_millis(250));
+        self.agent_handover.next = Some(
+            Instant::now()
+                + if transferring {
+                    Duration::from_millis(250)
+                } else {
+                    Duration::from_secs(1)
+                },
+        );
         let config = kiln_common::paths::config_dir();
         let records: Vec<_> = self
             .launch_specs
