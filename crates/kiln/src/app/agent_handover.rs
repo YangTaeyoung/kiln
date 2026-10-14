@@ -6,9 +6,38 @@ use std::fs::File;
 #[derive(Default)]
 pub(super) struct Transfers {
     next: Option<Instant>,
-    leases: HashMap<PathBuf, File>,
+    leases: HashMap<PathBuf, WriterLease>,
     jobs: HashMap<String, Job>,
 }
+struct WriterLease {
+    _file: File,
+    pid: Option<u32>,
+}
+fn writer_may_be_running(exited: Option<bool>, pid: Option<u32>) -> bool {
+    if let Some(exited) = exited {
+        return !exited;
+    }
+    // Closing a pane removes its connection metadata before the daemon has
+    // finished stopping the CLI. Keep the lease until that writer is gone.
+    // A zero signal only checks existence; EPERM and unknown identity stay locked.
+    #[cfg(unix)]
+    {
+        let Some(pid) = pid
+            .and_then(|pid| i32::try_from(pid).ok())
+            .filter(|pid| *pid > 1)
+        else {
+            return true;
+        };
+        return unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
 struct Job {
     sequence: u128,
     started: Instant,
@@ -46,16 +75,30 @@ impl KilnApp {
             })
             .collect();
         // Hold until the session daemon confirms exit, including for older CLIs.
-        self.agent_handover.leases.retain(|path, _| {
-            records
+        self.agent_handover.leases.retain(|path, lease| {
+            let exited = records
                 .iter()
-                .any(|(_, _, p, _, exited)| p == path && !exited)
+                .find(|(_, _, p, _, _)| p == path)
+                .map(|(_, _, _, _, exited)| *exited);
+            writer_may_be_running(exited, lease.pid)
         });
-        for (_, _, path, _, exited) in &records {
+        for (_, session, path, _, exited) in &records {
             if !exited && !self.agent_handover.leases.contains_key(path) {
                 if let Ok(lease) = handover::live_lease(path) {
-                    self.agent_handover.leases.insert(path.clone(), lease);
+                    self.agent_handover.leases.insert(
+                        path.clone(),
+                        WriterLease {
+                            _file: lease,
+                            pid: None,
+                        },
+                    );
                 }
+            }
+            if let Some(lease) = self.agent_handover.leases.get_mut(path)
+                && let Some(info) = self.conn.infos.get(session)
+                && info.pid > 1
+            {
+                lease.pid = Some(info.pid);
             }
         }
         if !self.settings.conversation_sync_enabled {
@@ -223,5 +266,31 @@ impl KilnApp {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn closing_a_pane_does_not_release_a_live_native_writer() {
+        let mut writer = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = writer.id();
+        let alive = writer_may_be_running(None, Some(pid));
+        writer.kill().unwrap();
+        writer.wait().unwrap();
+        assert!(
+            alive,
+            "a removed pane still owns its transcript until its CLI exits"
+        );
+        assert!(!writer_may_be_running(None, Some(pid)));
+        assert!(
+            writer_may_be_running(None, None),
+            "missing process identity is not proof of exit"
+        );
+        assert!(!writer_may_be_running(Some(true), None));
     }
 }
