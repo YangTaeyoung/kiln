@@ -196,7 +196,7 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
         // At narrow widths keep the actionable status, move the timestamp to hover.
         if rect.right()-x > age_width+70.0 {ui.painter().text(pos2(rect.right()-8.0,rect.top()+26.0),Align2::RIGHT_CENTER,&age,fonts::regular(11.0),theme.text_dim);}
         widgets::focus_ring(ui,&response,4);
-        if response.clicked() {reveal=Some(task.pane);}
+        if widgets::selected_on_press(&response) {reveal=Some(task.pane);}
         response.on_hover_text(kiln_common::trf!("{}\n{}{}\n클릭하여 작업으로 이동",if agent_name.is_empty(){task.title.clone()}else{format!("{} · {agent_name}",task.title)},task.phase.label(),if age.is_empty(){String::new()}else{kiln_common::trf!("\n최근 명령·알림 기록: {age}")}));
     }
     if tasks.len()>3 {

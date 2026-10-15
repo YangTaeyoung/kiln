@@ -60,7 +60,12 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
     // Preserve the existing default location for ordinary installations.
     let persistence_path = std::env::var_os("KILN_CONFIG_DIR")
         .map(|directory| PathBuf::from(directory).join("egui.ron"));
-    let options = eframe::NativeOptions { viewport, persistence_path, ..Default::default() };
+    // Show each frame on the next display refresh instead of queuing a second frame ahead.
+    let wgpu_options = eframe::egui_wgpu::WgpuConfiguration {
+        surface: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY,
+        ..Default::default()
+    };
+    let options = eframe::NativeOptions { viewport, persistence_path, wgpu_options, ..Default::default() };
     eframe::run_native("Kiln", options, Box::new(move |cc| {
         #[cfg(target_os = "macos")]
         macos::install_quit_guard(&cc.egui_ctx);

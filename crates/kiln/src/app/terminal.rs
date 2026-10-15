@@ -373,7 +373,7 @@ impl TermView {
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, kiln_common::i18n::tr("터미널 화면")));
         // request_focus interrupts native IME even when the widget already owns
         // focus. Only request it for an actual transfer or an intentional click.
-        if (focus_request && !ui.memory(|m|m.has_focus(id))) || resp.clicked() || resp.drag_started() {
+        if (focus_request && !ui.memory(|m|m.has_focus(id))) || kiln_common::widgets::selected_on_press(&resp) || resp.drag_started() {
             self.clear_preedit();
             resp.request_focus();
         }
@@ -385,7 +385,7 @@ impl TermView {
         let focused = resp.has_focus();
         if !focused {self.clear_preedit();}
         out.focused = focused;
-        out.clicked = resp.clicked() || resp.drag_started();
+        out.clicked = kiln_common::widgets::selected_on_press(&resp) || resp.drag_started();
         if focused {
             ui.memory_mut(|m| {
                 m.set_focus_lock_filter(id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
