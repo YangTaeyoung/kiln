@@ -4,6 +4,7 @@ mod canonical;
 mod discovery;
 mod format;
 pub(super) mod handover;
+mod hub;
 mod portable;
 mod reader;
 mod storage;

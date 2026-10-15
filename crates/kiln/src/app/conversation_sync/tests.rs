@@ -3174,3 +3174,56 @@ fn published_links_match_a_per_conversation_destination_search() {
         assert_eq!(published, expected, "round {round}");
     }
 }
+
+fn text(role: &str, text: &str) -> Message {
+    Message { role: role.into(), text: text.into(), images: Vec::new() }
+}
+
+#[test]
+fn hub_events_append_rewrite_and_branch_round_trip() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("kiln");
+    let first = hub::NativeRef { tool: Tool::Claude, root: PathBuf::from("/a"), id: "one".into() };
+    let cid = hub::conversation_id(&first);
+    let mut store = hub::Hub::open(&config).unwrap();
+    store.state.conversations.insert(cid.clone(), hub::Record::new("Title", "/w"));
+    let old = vec![text("user", "q1"), text("assistant", "a1"), text("user", "q2")];
+    store.append(&cid, &old).unwrap();
+    assert_eq!(store.events(&cid).unwrap(), old);
+    let new = vec![text("user", "other q"), text("assistant", "other a")];
+    let replaced = store.rewrite(&cid, 1, &new).unwrap();
+    assert_eq!(replaced, old[1..].to_vec());
+    let mut expected = old[..1].to_vec();
+    expected.extend(new.clone());
+    assert_eq!(store.events(&cid).unwrap(), expected);
+    let branch = store.save_branch(&cid, 1, &replaced, Some(first.clone()), None).unwrap();
+    assert_eq!(store.branch_events(&branch).unwrap(), replaced);
+    store.save().unwrap();
+    let reopened = hub::Hub::open(&config).unwrap();
+    let record = &reopened.state.conversations[&cid];
+    assert_eq!(record.events, 3);
+    assert_eq!(record.branches.len(), 1);
+    assert_eq!(record.branches[0].base, 1);
+    assert_eq!(reopened.events(&cid).unwrap(), expected);
+}
+
+#[test]
+fn hub_identity_is_stable_and_aliases_resolve() {
+    let temp = tempfile::tempdir().unwrap();
+    let a = hub::NativeRef { tool: Tool::Codex, root: PathBuf::from("/r"), id: "id-a".into() };
+    let alias = hub::NativeRef { tool: Tool::Codex, root: PathBuf::from("/r"), id: "id-old".into() };
+    assert_eq!(hub::conversation_id(&a), hub::conversation_id(&a.clone()));
+    assert_ne!(hub::conversation_id(&a), hub::conversation_id(&alias));
+    let mut store = hub::Hub::open(&temp.path().join("kiln")).unwrap();
+    let cid = hub::conversation_id(&a);
+    let mut record = hub::Record::new("T", "/w");
+    record.projections.push(hub::Projection {
+        source: Source { tool: Tool::Codex, root: PathBuf::from("/r"), path: PathBuf::from("/r/x.jsonl"), cwd: "/w".into(), id: "id-a".into() },
+        synced: 0, stamp: None, origin: true,
+    });
+    record.aliases.push(alias.clone());
+    store.state.conversations.insert(cid.clone(), record);
+    assert_eq!(store.find(&a), Some(cid.as_str()));
+    assert_eq!(store.find(&alias), Some(cid.as_str()));
+    assert_eq!(store.find(&hub::NativeRef { id: "missing".into(), ..a }), None);
+}
