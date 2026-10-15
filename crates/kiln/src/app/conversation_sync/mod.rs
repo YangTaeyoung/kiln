@@ -426,6 +426,13 @@ struct Conversation {
     copies: Vec<Continuation>,
 }
 impl Conversation {
+    /// A failed row whose linked histories diverged; nothing is left for the user to resolve.
+    fn diverged(&self) -> bool {
+        self.phase == Phase::Failed && self.detail.contains(DIVERGED)
+    }
+    fn needs_attention(&self) -> bool {
+        self.phase == Phase::Failed && !self.diverged()
+    }
     fn from_entry(entry: &Entry, scope: Option<&discovery::Scope>) -> Self {
         Self {
             workspace: scope.and_then(|s| s.workspace(&entry.source.cwd)).cloned(),
@@ -631,18 +638,34 @@ fn retry_delay(failures: u32) -> Duration {
 }
 /// A failed attempt whose linked histories are all unchanged is retried after this delay.
 const FAILED_RECHECK: Duration = Duration::from_secs(60 * 60);
-/// Fingerprint of the length and modification time of every history linked to `key`.
-fn linked_stamp(state: &State, key: &str) -> u64 {
+/// Fingerprint of the length and modification time of every history in a linked group.
+fn linked_stamp(state: &State, members: &std::collections::BTreeSet<String>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::hash::DefaultHasher::new();
-    for member in canonical::members(state, key) {
+    for member in members {
         member.hash(&mut hasher);
-        if let Some(meta) = state.entries.get(&member).and_then(|e| storage::metadata(&e.source).ok()) {
+        if let Some(meta) = state.entries.get(member).and_then(|e| storage::metadata(&e.source).ok()) {
             meta.len().hash(&mut hasher);
             meta.modified().ok().hash(&mut hasher);
         }
     }
     hasher.finish()
+}
+/// Linked-group fingerprints for retry checks, computed once per scan on first use;
+/// changes later in the same scan are seen by the next scan.
+#[derive(Default)]
+struct LinkedStamps {
+    links: Option<canonical::Links>,
+    stamps: HashMap<usize, u64>,
+}
+impl LinkedStamps {
+    fn get(&mut self, state: &State, key: &str) -> u64 {
+        let links = self.links.get_or_insert_with(|| canonical::Links::new(state));
+        match links.group(key) {
+            Some((slot, members)) => *self.stamps.entry(slot).or_insert_with(|| linked_stamp(state, members)),
+            None => linked_stamp(state, &std::collections::BTreeSet::from([key.to_owned()])),
+        }
+    }
 }
 /// Whether a file was modified within `quiet` of now; future timestamps count as settled.
 fn recently_modified(modified: SystemTime, quiet: Duration) -> bool {
@@ -849,6 +872,7 @@ fn scan_with_metadata(
         ..Default::default()
     };
     notify(&status);
+    let mut stamps = LinkedStamps::default();
     for (key, _) in active {
         // Earlier endpoints in this scan may have updated this exact conversation.
         let entry = state.entries[&key].clone();
@@ -884,7 +908,7 @@ fn scan_with_metadata(
                     waited < retry_delay(*failures)
                         || (waited < FAILED_RECHECK
                             && cache.rows.get(&key).is_some_and(|r| r.phase == Phase::Failed)
-                            && cache.linked.get(&entry.source.path) == Some(&linked_stamp(&state, &key)))
+                            && cache.linked.get(&entry.source.path) == Some(&stamps.get(&state, &key)))
                 }
             {
                 // Imported copies have no initial row; keep their last reported outcome visible.
@@ -1213,7 +1237,7 @@ fn scan_with_metadata(
                 cache.linked.remove(&entry.source.path);
             } else {
                 *cache.failures.entry(entry.source.path.clone()).or_default() += 1;
-                cache.linked.insert(entry.source.path.clone(), linked_stamp(&state, &key));
+                cache.linked.insert(entry.source.path.clone(), linked_stamp(&state, &canonical::members(&state, &key)));
             }
         }
     }
@@ -1247,9 +1271,13 @@ enum Event {
     Connected(Result<Pair, String>),
     Scanned(Gate, Result<Status, String>),
 }
+/// Both linked histories continued separately; each is kept as its own conversation.
+const DIVERGED: &str = "Linked histories diverged; both conversations were preserved";
 fn failure_reason(detail: &str) -> String {
     use kiln_common::i18n::tr;
-    if detail.contains("limit") || detail.contains("MiB") {
+    if detail.contains(DIVERGED) {
+        tr("두 CLI에서 각각 이어 써서 하나로 합치지 않았습니다. 두 대화 모두 그대로 있으며 각 CLI의 /resume에서 따로 열 수 있습니다.").into()
+    } else if detail.contains("limit") || detail.contains("MiB") {
         tr("대화 용량이 연동 한도를 넘었습니다. 원본은 그대로 보관됩니다.").into()
     } else if detail.contains("version") {
         tr("아직 확인되지 않은 CLI 기록 형식입니다. 원본은 그대로 보관됩니다.").into()
@@ -1616,7 +1644,7 @@ impl Manager {
             return *badge;
         }
         let status = self.workspace_status(root);
-        let badge = if self.error.is_some() || status.rows.values().any(|r| r.phase == Phase::Failed) {
+        let badge = if self.error.is_some() || status.rows.values().any(Conversation::needs_attention) {
             Badge::Attention
         } else if self.connecting
             || (status.discovering && status.rows.is_empty())
@@ -1726,11 +1754,8 @@ impl Manager {
             icons::{self, Icon},
         };
         let theme = Theme::current();
-        let failed = status
-            .rows
-            .values()
-            .filter(|r| r.phase == Phase::Failed)
-            .count();
+        let failed = status.rows.values().filter(|r| r.needs_attention()).count();
+        let diverged = status.rows.values().filter(|r| r.diverged()).count();
         let waiting = status
             .rows
             .values()
@@ -1790,6 +1815,9 @@ impl Manager {
                     ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code 또는 Codex 대화를 시작하면 자동으로 연결됩니다.")).wrap());
                 }
                 ui.label(kiln_common::trf!("완료 {}개 · 확인 필요 {}개 · 대기 {}개", status.rows.values().filter(|r| r.phase == Phase::Synced).count(), failed, waiting));
+                if diverged > 0 {
+                    ui.label(egui::RichText::new(kiln_common::trf!("따로 이어진 대화 {}개 · 두 기록 모두 보관됨", diverged)).color(theme.text_dim));
+                }
                 if enabled && status.watched > 0 {
                     let fraction = status.checked as f32 / status.watched as f32;
                     ui.add(egui::ProgressBar::new(fraction).text(kiln_common::trf!(
@@ -1836,6 +1864,9 @@ impl Manager {
                                         Phase::Synced => {
                                             (Icon::Check, theme.green, tr("동기화 완료"))
                                         }
+                                        Phase::Failed if row.diverged() => {
+                                            (Icon::Info, theme.text_dim, tr("따로 이어짐"))
+                                        }
                                         Phase::Failed => {
                                             (Icon::Warning, theme.orange, tr("동기화 실패"))
                                         }
@@ -1861,7 +1892,8 @@ impl Manager {
                                 if !row.detail.is_empty() {
                                     ui.add(
                                         egui::Label::new(
-                                            egui::RichText::new(failure_reason(&row.detail)).color(theme.orange),
+                                            egui::RichText::new(failure_reason(&row.detail))
+                                                .color(if row.diverged() { theme.text_dim } else { theme.orange }),
                                         )
                                         .wrap(),
                                     );
@@ -1878,36 +1910,54 @@ impl Manager {
                                     .truncate(),
                                 )
                                 .on_hover_text(title);
-                                ui.collapsing(tr("대화 정보"), |ui| {
-                                    ui.add(egui::Label::new(&row.source.cwd).wrap());
-                                    ui.label(&row.source.id);
-                                    ui.add(egui::Label::new(&row.detail).wrap());
-                                    if ui.small_button(tr("오류 정보 복사")).clicked() {
-                                        ui.ctx().copy_text(format!("{}\n{}\n{}", row.source.tool.display_name(), row.source.id, row.detail));
-                                    }
-                                });
                                 let targets = if row.copies.is_empty() {
                                     row.target.iter().collect::<Vec<_>>()
                                 } else { row.copies.iter().collect::<Vec<_>>() };
-                                for target in targets {
-                                    ui.push_id(&target.id, |ui| {
-                                    if ui
-                                        .small_button(tr("이어갈 대화 ID 복사"))
-                                        .on_hover_text(format!("{}\n{}", target.id, target.root.display()))
-                                        .clicked()
-                                    {
-                                        ui.ctx().copy_text(target.id.clone());
-                                    }
-                                    if row.copies.len() > 1 {
-                                        let label = self.configured.as_ref()
-                                            .filter(|p| p.endpoint(target.tool).root == target.root)
-                                            .map(|p| p.endpoint(target.tool).label.clone())
-                                            .unwrap_or_else(|| tr("기본 CLI").to_owned());
-                                        ui.label(egui::RichText::new(label).color(theme.text_dim))
-                                            .on_hover_text(target.root.display().to_string());
-                                    }
-                                    });
+                                let account = |target: &Continuation| {
+                                    self.configured.as_ref()
+                                        .filter(|p| p.endpoint(target.tool).root == target.root)
+                                        .map(|p| p.endpoint(target.tool).label.clone())
+                                        .unwrap_or_else(|| tr("기본 CLI").to_owned())
+                                };
+                                if row.phase == Phase::Synced
+                                    && let Some(first) = targets.first()
+                                {
+                                    let accounts: Vec<_> = targets.iter().map(|t| account(t)).collect();
+                                    ui.add(egui::Label::new(egui::RichText::new(kiln_common::trf!(
+                                        "{}에서 /resume으로 이어가기 · {}",
+                                        first.tool.display_name(),
+                                        accounts.join(", ")
+                                    )).color(theme.text_dim)).wrap());
                                 }
+                                ui.collapsing(tr("대화 정보"), |ui| {
+                                    ui.add(egui::Label::new(&row.source.cwd).wrap());
+                                    ui.label(&row.source.id);
+                                    if !row.detail.is_empty() {
+                                        ui.add(egui::Label::new(&row.detail).wrap());
+                                        if ui.small_button(tr("오류 정보 복사")).clicked() {
+                                            ui.ctx().copy_text(format!("{}\n{}\n{}", row.source.tool.display_name(), row.source.id, row.detail));
+                                        }
+                                    }
+                                    for target in &targets {
+                                        ui.push_id(&target.id, |ui| {
+                                            ui.horizontal_wrapped(|ui| {
+                                                if ui
+                                                    .small_button(kiln_common::trf!("{} 대화 ID 복사", target.tool.display_name()))
+                                                    .on_hover_text(kiln_common::trf!(
+                                                        "/resume 목록에서 찾기 어려우면 이 ID로 직접 엽니다.\n{}\n{}",
+                                                        target.id,
+                                                        target.root.display()
+                                                    ))
+                                                    .clicked()
+                                                {
+                                                    ui.ctx().copy_text(target.id.clone());
+                                                }
+                                                ui.label(egui::RichText::new(account(target)).color(theme.text_dim))
+                                                    .on_hover_text(target.root.display().to_string());
+                                            });
+                                        });
+                                    }
+                                });
                             });
                         }
                     });

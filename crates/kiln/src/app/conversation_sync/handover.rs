@@ -113,29 +113,40 @@ pub(super) fn publish_links(
     scope: Option<&discovery::Scope>,
 ) -> Result<()> {
     let mut links = vec![];
+    let groups = canonical::Links::new(state);
+    let mut anchors: HashMap<usize, String> = HashMap::new();
+    let mut targets: HashMap<(usize, Tool, &Path), Option<String>> = HashMap::new();
     for (key, entry) in &state.entries {
         if scope.is_some_and(|s| !s.contains(&entry.source)) {
             continue;
         }
-        let members = canonical::members(state, key);
+        let (slot, members) = groups.group(key).unwrap();
         if members.len() < 2 {
             continue;
         }
-        let anchor = members
-            .iter()
-            .min_by_key(|key| (state.entries[*key].imported, *key))
-            .unwrap();
-        let Some(target) =
-            canonical::destination(state, key, entry.source.tool, &entry.source.root)
+        let Some(target) = targets
+            .entry((slot, entry.source.tool, &entry.source.root))
+            .or_insert_with(|| {
+                canonical::destination_in(state, members, entry.source.tool, &entry.source.root)
+                    .map(|target| target.id)
+            })
+            .clone()
         else {
             continue;
         };
+        let group = anchors.entry(slot).or_insert_with(|| {
+            let anchor = members
+                .iter()
+                .min_by_key(|key| (state.entries[*key].imported, *key))
+                .unwrap();
+            digest(anchor.as_bytes())
+        });
         links.push(Link {
             tool: entry.source.tool,
             root: entry.source.root.clone(),
             id: entry.source.id.clone(),
-            group: digest(anchor.as_bytes()),
-            canonical_id: target.id,
+            group: group.clone(),
+            canonical_id: target,
         });
     }
     let _lock = lock(config)?;
@@ -154,11 +165,27 @@ pub(super) fn settled(
     status: &Status,
 ) -> Result<std::collections::BTreeSet<String>> {
     let links = links(config)?;
+    // The first entry in key order represents each native identity.
+    let mut identities: HashMap<(Tool, &PathBuf, &String), &Entry> = HashMap::new();
+    for entry in state.entries.values() {
+        identities
+            .entry((entry.source.tool, &entry.source.root, &entry.source.id))
+            .or_insert(entry);
+    }
+    let unsettled: std::collections::HashSet<_> = status
+        .rows
+        .values()
+        .filter(|row| matches!(row.phase, Phase::Failed | Phase::Waiting))
+        .map(|row| (row.source.tool, &row.source.root, &row.source.id))
+        .collect();
+    let blocked: std::collections::HashSet<&str> = links
+        .iter()
+        .filter(|link| unsettled.contains(&(link.tool, &link.root, &link.id)))
+        .map(|link| link.group.as_str())
+        .collect();
     let mut groups: BTreeMap<String, Vec<&Entry>> = BTreeMap::new();
     for link in links.iter().filter(|l| l.id == l.canonical_id) {
-        if let Some(entry) = state.entries.values().find(|e| {
-            e.source.tool == link.tool && e.source.root == link.root && e.source.id == link.id
-        }) {
+        if let Some(entry) = identities.get(&(link.tool, &link.root, &link.id)) {
             groups.entry(link.group.clone()).or_default().push(entry);
         }
     }
@@ -166,15 +193,8 @@ pub(super) fn settled(
         .into_iter()
         .filter_map(|(group, entries)| {
             let first = entries.first()?;
-            (!status.rows.values().any(|row| {
-                matches!(row.phase, Phase::Failed | Phase::Waiting)
-                    && links.iter().any(|link| {
-                        link.group == group
-                            && link.tool == row.source.tool
-                            && link.root == row.source.root
-                            && link.id == row.source.id
-                    })
-            }) && entries.iter().any(|e| e.source.tool != first.source.tool)
+            (!blocked.contains(group.as_str())
+                && entries.iter().any(|e| e.source.tool != first.source.tool)
                 && !first.seen.is_empty()
                 && entries.iter().all(|entry| {
                     entry.seen == first.seen

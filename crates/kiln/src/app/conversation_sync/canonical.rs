@@ -3,20 +3,88 @@
 use super::*;
 use std::collections::BTreeSet;
 
+/// Linked-conversation groups of a state, computed in one pass over its
+/// publication edges (lineage and recorded copies).
+pub(super) struct Links {
+    group: HashMap<String, usize>,
+    members: Vec<BTreeSet<String>>,
+}
+impl Links {
+    pub(super) fn new(state: &State) -> Self {
+        let keys: Vec<&String> = state.entries.keys().collect();
+        let index: HashMap<&str, usize> =
+            keys.iter().enumerate().map(|(i, key)| (key.as_str(), i)).collect();
+        let ids: HashMap<_, _> = state
+            .entries
+            .iter()
+            .map(|(key, entry)| ((entry.source.tool, &entry.source.root, &entry.source.id), key))
+            .collect();
+        let mut parent: Vec<usize> = (0..keys.len()).collect();
+        fn root(parent: &mut [usize], mut i: usize) -> usize {
+            while parent[i] != i {
+                parent[i] = parent[parent[i]];
+                i = parent[i];
+            }
+            i
+        }
+        let join = |parent: &mut Vec<usize>, a: usize, b: usize| {
+            let (a, b) = (root(parent, a), root(parent, b));
+            if a != b {
+                parent[b] = a;
+            }
+        };
+        for (source, target) in &state.lineage {
+            if let (Some(&a), Some(&b)) = (index.get(source.as_str()), index.get(target.as_str())) {
+                join(&mut parent, a, b);
+            }
+        }
+        for (source, entry) in &state.entries {
+            for copy in entry.copies.iter().chain(entry.copied_to.iter()) {
+                if let Some(target) = ids.get(&(copy.tool, &copy.root, &copy.id)) {
+                    join(&mut parent, index[source.as_str()], index[target.as_str()]);
+                }
+            }
+        }
+        let mut group = HashMap::with_capacity(keys.len());
+        let mut members: Vec<BTreeSet<String>> = Vec::new();
+        let mut slots: HashMap<usize, usize> = HashMap::new();
+        for (i, key) in keys.iter().enumerate() {
+            let r = root(&mut parent, i);
+            let slot = *slots.entry(r).or_insert_with(|| {
+                members.push(BTreeSet::new());
+                members.len() - 1
+            });
+            members[slot].insert((*key).clone());
+            group.insert((*key).clone(), slot);
+        }
+        Self { group, members }
+    }
+    /// Keys linked to `key`, including `key` itself.
+    pub(super) fn members(&self, key: &str) -> BTreeSet<String> {
+        self.group(key)
+            .map(|(_, members)| members.clone())
+            .unwrap_or_else(|| BTreeSet::from([key.to_owned()]))
+    }
+    /// Index and members of the group containing a key of the state.
+    pub(super) fn group(&self, key: &str) -> Option<(usize, &BTreeSet<String>)> {
+        self.group.get(key).map(|slot| (*slot, &self.members[*slot]))
+    }
+}
+
 pub(super) fn groups(state: &State) -> BTreeMap<String, String> {
+    let links = Links::new(state);
     let mut groups = BTreeMap::new();
     for key in state.entries.keys() {
         if groups.contains_key(key) {
             continue;
         }
-        let members = members(state, key);
+        let (_, members) = links.group(key).unwrap();
         let anchor = members
             .iter()
             .min_by_key(|key| (state.entries[*key].imported, *key))
-            .unwrap()
-            .clone();
+            .unwrap();
         for member in members {
-            groups.insert(member, anchor.clone());
+            groups.insert(member.clone(), anchor.clone());
         }
     }
     groups
@@ -53,43 +121,20 @@ pub(super) fn group_rows(
 }
 
 pub(super) fn members(state: &State, key: &str) -> BTreeSet<String> {
-    let ids: HashMap<_, _> = state
-        .entries
-        .iter()
-        .map(|(key, entry)| {
-            (
-                (entry.source.tool, &entry.source.root, &entry.source.id),
-                key,
-            )
-        })
-        .collect();
-    let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
-    for (source, target) in &state.lineage {
-        if state.entries.contains_key(source) && state.entries.contains_key(target) {
-            edges.entry(source).or_default().push(target);
-            edges.entry(target).or_default().push(source);
-        }
-    }
-    for (source, entry) in &state.entries {
-        for copy in entry.copies.iter().chain(entry.copied_to.iter()) {
-            if let Some(target) = ids.get(&(copy.tool, &copy.root, &copy.id)) {
-                edges.entry(source).or_default().push(target);
-                edges.entry(target).or_default().push(source);
-            }
-        }
-    }
-    let mut members = BTreeSet::new();
-    let mut pending = vec![key];
-    while let Some(key) = pending.pop() {
-        if members.insert(key.to_owned()) {
-            pending.extend(edges.get(key).into_iter().flatten().copied());
-        }
-    }
-    members
+    Links::new(state).members(key)
 }
 
 pub(super) fn destination(state: &State, key: &str, tool: Tool, root: &Path) -> Option<Source> {
-    let members = members(state, key);
+    destination_in(state, &members(state, key), tool, root)
+}
+
+/// `destination` for a group whose members are already known.
+pub(super) fn destination_in(
+    state: &State,
+    members: &BTreeSet<String>,
+    tool: Tool,
+    root: &Path,
+) -> Option<Source> {
     let anchor = members
         .iter()
         .min_by_key(|key| (state.entries[*key].imported, *key))?;
@@ -134,6 +179,10 @@ pub(super) fn retire(
     metadata: &mut impl FnMut(&Source, Metadata<'_>) -> Result<Option<String>>,
 ) -> Result<()> {
     let keys: Vec<_> = state.entries.keys().cloned().collect();
+    // Groups and destinations are computed once for the pass; archiving leaves publication
+    // edges unchanged and never moves a destination.
+    let links = Links::new(state);
+    let mut destinations: HashMap<(usize, Tool, PathBuf), Option<Source>> = HashMap::new();
     for key in keys {
         if !gate.load(Ordering::Acquire) {
             break;
@@ -146,7 +195,12 @@ pub(super) fn retire(
             continue;
         }
         let source = entry.source.clone();
-        let Some(target) = destination(state, &key, source.tool, &source.root) else {
+        let (slot, members) = links.group(&key).unwrap();
+        let Some(target) = destinations
+            .entry((slot, source.tool, source.root.clone()))
+            .or_insert_with(|| destination_in(state, members, source.tool, &source.root))
+            .clone()
+        else {
             continue;
         };
         if source.path == target.path {
@@ -219,10 +273,7 @@ pub(super) fn retire(
                         && (a.text == b.text
                             || a.role == "assistant" && portable::display(&a.text) == b.text)
                 });
-            ensure!(
-                visible_prefix,
-                "Linked histories diverged; both conversations were preserved"
-            );
+            ensure!(visible_prefix, DIVERGED);
             let physical = storage::physical(&source);
             safe_path(&source.root, &physical)?;
             let bytes = bounded(&physical, COPY_LIMIT)?;
@@ -437,10 +488,7 @@ pub(super) fn update(
     if current.len() > messages.len() && current.starts_with(messages) {
         anyhow::bail!("Linked conversation has newer messages; retrying from its current endpoint");
     }
-    ensure!(
-        messages.starts_with(&current),
-        "Linked histories diverged; both conversations were preserved"
-    );
+    ensure!(messages.starts_with(&current), DIVERGED);
     if current == messages
         && old_title == title
         && titles::raw_projection(source)?.is_none_or(|raw| raw == title)

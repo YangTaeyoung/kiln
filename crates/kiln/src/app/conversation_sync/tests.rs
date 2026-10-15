@@ -1193,7 +1193,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     assert!(
         h.ctx
             .content_rect()
-            .contains_rect(h.get_by_label("이어갈 대화 ID 복사").rect())
+            .contains_rect(h.get_by_label("Codex에서 /resume으로 이어가기 · 기본 CLI").rect())
     );
     h.render()
         .unwrap()
@@ -1212,6 +1212,17 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     h.render()
         .unwrap()
         .save("/tmp/kiln-sync-progress-failed.png")
+        .unwrap();
+    let row = h.state_mut().0.status.rows.values_mut().next().unwrap();
+    row.detail = DIVERGED.into();
+    h.run_steps(2);
+    assert!(h.query_by_label("따로 이어짐").is_some());
+    assert!(h.query_by_label("동기화 실패").is_none());
+    assert!(h.query_by_label("확인이 필요한 대화가 있습니다").is_none());
+    assert!(h.query_by_label("따로 이어진 대화 1개 · 두 기록 모두 보관됨").is_some());
+    h.render()
+        .unwrap()
+        .save("/tmp/kiln-sync-progress-diverged.png")
         .unwrap();
 }
 
@@ -3020,4 +3031,146 @@ fn a_diverged_conversation_is_rechecked_only_when_a_linked_history_changes() {
     fs::write(&peer.path, continued.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
     scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
     assert!(cache.attempts[&f.source.path].2 > long_ago, "a changed linked history is checked again");
+}
+
+/// Reference search over publication edges, compared with `canonical::Links`.
+fn searched_members(state: &State, key: &str) -> std::collections::BTreeSet<String> {
+    let ids: HashMap<_, _> = state
+        .entries
+        .iter()
+        .map(|(key, entry)| {
+            (
+                (entry.source.tool, &entry.source.root, &entry.source.id),
+                key,
+            )
+        })
+        .collect();
+    let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (source, target) in &state.lineage {
+        if state.entries.contains_key(source) && state.entries.contains_key(target) {
+            edges.entry(source).or_default().push(target);
+            edges.entry(target).or_default().push(source);
+        }
+    }
+    for (source, entry) in &state.entries {
+        for copy in entry.copies.iter().chain(entry.copied_to.iter()) {
+            if let Some(target) = ids.get(&(copy.tool, &copy.root, &copy.id)) {
+                edges.entry(source).or_default().push(target);
+                edges.entry(target).or_default().push(source);
+            }
+        }
+    }
+    let mut members = std::collections::BTreeSet::new();
+    let mut pending = vec![key];
+    while let Some(key) = pending.pop() {
+        if members.insert(key.to_owned()) {
+            pending.extend(edges.get(key).into_iter().flatten().copied());
+        }
+    }
+    members
+}
+
+#[test]
+fn computed_groups_match_a_search_over_publication_edges() {
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    let roots = [PathBuf::from("/a"), PathBuf::from("/b")];
+    for _ in 0..20 {
+        let mut state = State::default();
+        let count = 2 + next(40);
+        for i in 0..count {
+            let tool = if next(2) == 0 { Tool::Claude } else { Tool::Codex };
+            let root = roots[next(2) as usize].clone();
+            // Repeated ids exercise entries that share one native identity.
+            let id = format!("id-{}", next(count));
+            let source = Source { tool, root: root.clone(), path: root.join(format!("{i}.jsonl")), cwd: "/w".into(), id };
+            state.entries.insert(format!("k{i}"), Entry { source, seen: String::new(), imported: next(2) == 0, title: String::new(), copied_to: None, copies: Vec::new() });
+        }
+        let keys: Vec<String> = state.entries.keys().cloned().collect();
+        for _ in 0..next(count) {
+            let (a, b) = (&keys[next(count) as usize], &keys[next(count) as usize]);
+            state.lineage.insert(a.clone(), if next(5) == 0 { "missing".into() } else { b.clone() });
+        }
+        for key in &keys {
+            for _ in 0..next(3) {
+                let target = &state.entries[&keys[next(count) as usize]].source;
+                let copy = Continuation { tool: target.tool, id: if next(6) == 0 { "absent".into() } else { target.id.clone() }, cwd: "/w".into(), root: target.root.clone(), revision: PROJECTION_REVISION };
+                let entry = state.entries.get_mut(key).unwrap();
+                if next(3) == 0 { entry.copied_to = Some(copy) } else { entry.copies.push(copy) }
+            }
+        }
+        let links = canonical::Links::new(&state);
+        for key in keys.iter().map(String::as_str).chain(["unknown"]) {
+            assert_eq!(links.members(key), searched_members(&state, key), "{key}");
+        }
+    }
+}
+
+#[test]
+fn published_links_match_a_per_conversation_destination_search() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config");
+    private_dir(&config.join("conversation-sync")).unwrap();
+    let roots = [dir.path().join("a"), dir.path().join("b")];
+    for root in &roots {
+        fs::create_dir_all(root).unwrap();
+    }
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    for round in 0..20 {
+        let mut state = State::default();
+        let count = 2 + next(40);
+        for i in 0..count {
+            let tool = if next(2) == 0 { Tool::Claude } else { Tool::Codex };
+            let root = roots[next(2) as usize].clone();
+            let path = root.join(format!("{round}-{i}.jsonl"));
+            // Missing transcripts cannot be destinations.
+            if next(4) != 0 {
+                fs::write(&path, b"").unwrap();
+            }
+            let source = Source { tool, root, path, cwd: "/w".into(), id: format!("id-{}", next(count)) };
+            state.entries.insert(format!("k{i}"), Entry { source, seen: String::new(), imported: next(2) == 0, title: String::new(), copied_to: None, copies: Vec::new() });
+        }
+        let keys: Vec<String> = state.entries.keys().cloned().collect();
+        for _ in 0..next(2 * count) {
+            let (a, b) = (&keys[next(count) as usize], &keys[next(count) as usize]);
+            state.lineage.insert(a.clone(), b.clone());
+        }
+        for key in &keys {
+            if next(3) == 0 {
+                let target = &state.entries[&keys[next(count) as usize]].source;
+                let copy = Continuation { tool: target.tool, id: target.id.clone(), cwd: "/w".into(), root: target.root.clone(), revision: PROJECTION_REVISION };
+                state.entries.get_mut(key).unwrap().copies.push(copy);
+            }
+        }
+        handover::publish_links(&config, &state, None).unwrap();
+        let mut expected = Vec::new();
+        for (key, entry) in &state.entries {
+            let members = searched_members(&state, key);
+            if members.len() < 2 {
+                continue;
+            }
+            let Some(target) = canonical::destination(&state, key, entry.source.tool, &entry.source.root) else {
+                continue;
+            };
+            let anchor = members.iter().min_by_key(|key| (state.entries[*key].imported, *key)).unwrap();
+            expected.push((entry.source.id.clone(), digest(anchor.as_bytes()), target.id));
+        }
+        let published: Vec<_> = handover::links(&config)
+            .unwrap()
+            .into_iter()
+            .map(|link| (link.id, link.group, link.canonical_id))
+            .collect();
+        assert_eq!(published, expected, "round {round}");
+    }
 }
