@@ -352,14 +352,14 @@ pub(super) enum Outcome {
 /// Compares a projection's native history with the canonical history; `synced` is the
 /// number of canonical events the projection last held and `native_newer` whether its
 /// file changed after the canonical history did.
-/// Whether two messages show the same content; a native rewrite that keeps only the
-/// displayed form of a recorded tool message still matches its original.
+/// Whether two messages show the same content: equal, an assistant message with the same
+/// displayed form, or the same shell command or result in either CLI's form.
 pub(super) fn same(a: &format::Message, b: &format::Message) -> bool {
     a == b
         || (a.role == b.role
             && a.images == b.images
             && a.role == "assistant"
-            && portable::display(&a.text) == portable::display(&b.text))
+            && (portable::display(&a.text) == portable::display(&b.text) || super::tools::same(&a.text, &b.text)))
 }
 /// Number of leading messages the two histories share.
 pub(super) fn shared(a: &[format::Message], b: &[format::Message]) -> usize {

@@ -165,7 +165,51 @@ fn scalar(text: &str) -> Option<(Value, &str)> {
     (!value.is_object() && !value.is_array()).then_some((value, &text[end..]))
 }
 
+/// The command of a shell call record.
+fn call_command(text: &str) -> Option<String> {
+    let (name, body) = record(text, "[Tool call: ")?;
+    match name {
+        "Bash" => {
+            let input: Value = serde_json::from_str(body).ok()?;
+            let fields = input.as_object()?;
+            fields
+                .keys()
+                .all(|k| matches!(k.as_str(), "command" | "description" | "timeout"))
+                .then(|| fields.get("command")?.as_str().map(str::to_owned))?
+        }
+        "exec" => exec_command(body).map(|(command, _)| command),
+        _ => None,
+    }
+}
+
+/// The exit code and output of a command result record, in either CLI's form.
+fn result_output(text: &str) -> Option<(i64, String)> {
+    let (_, output) = record(text, "[Tool result: ")?;
+    if let Some(split) = output.find("Output:\n").map(|i| i + "Output:\n".len())
+        && output.starts_with("Script ")
+        && let Ok(value) = serde_json::from_str::<Value>(&output[split..])
+        && let (Some(code), Some(shown)) = (value.get("exit_code").and_then(Value::as_i64), value.get("output").and_then(Value::as_str))
+    {
+        return Some((code, shown.to_owned()));
+    }
+    let (code, shown) = claude_exit(output);
+    Some((code, shown.to_owned()))
+}
+
+/// Whether two tool records show the same shell command, or the same result, in the forms
+/// of either CLI.
+pub(super) fn same(a: &str, b: &str) -> bool {
+    if let (Some(x), Some(y)) = (call_command(a), call_command(b)) {
+        return x == y;
+    }
+    matches!((result_output(a), result_output(b)), (Some(x), Some(y)) if x == y)
+}
+
 impl Shell {
+    /// Whether the command ran in `cwd`.
+    pub fn runs_in(&self, cwd: &str) -> bool {
+        self.cwd.as_deref().is_none_or(|dir| std::path::Path::new(cwd).join(dir) == std::path::Path::new(cwd))
+    }
     /// The Claude tool-use ID: the original one for a Claude command.
     pub fn claude_id(&self, seed: &str) -> String {
         match self.native {
@@ -204,8 +248,8 @@ impl Shell {
                 "output": [{"type": "input_text", "text": header}, {"type": "input_text", "text": result}]}),
         ))
     }
-    /// The Codex history item that shows the command and its output; Codex reads its working
-    /// directory as a file URL.
+    /// The Codex history item that shows the command and its output, with the working directory
+    /// as a file URL.
     pub fn command_execution(&self, id: &str, cwd: &str) -> Value {
         let dir = match &self.cwd {
             Some(dir) => std::path::Path::new(cwd).join(dir),

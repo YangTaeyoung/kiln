@@ -200,7 +200,8 @@ fn annotate_tool(row: &mut Value, original: &str) -> Result<()> {
 }
 
 /// Shell commands rendered as native tool records, by the index of their call message: a
-/// call and its result followed by another assistant message.
+/// call and its result followed by another assistant message, outside a group of parallel
+/// calls.
 fn shell_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Shell> {
     let mut pairs = HashMap::new();
     let mut i = 0;
@@ -210,7 +211,9 @@ fn shell_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Shell> {
             && result.role == "assistant"
             && messages[i + 2].role == "assistant"
             && call.images.is_empty()
-            && result.images.is_empty();
+            && result.images.is_empty()
+            && !(i > 0 && messages[i - 1].text.starts_with("[Tool call: "))
+            && !messages[i + 2].text.starts_with("[Tool result: ");
         if candidate && let Some(shell) = super::tools::shell(&call.text, &result.text) {
             pairs.insert(i, shell);
             i += 2;
@@ -670,7 +673,7 @@ fn render_messages(
                     continue;
                 }
                 let mid = super::stable_id(&format!("{id}:{i}"));
-                if let Some(shell) = pairs.get(&i) {
+                if let Some(shell) = pairs.get(&i).filter(|shell| shell.runs_in(cwd)) {
                     let rid = super::stable_id(&format!("{id}:{}", i + 1));
                     let tool_id = shell.claude_id(&format!("{id}:{i}:tool"));
                     let (call, result, structured) = shell.claude(&tool_id);

@@ -3562,7 +3562,7 @@ fn hub_cli_round_trip() {
             let mut history = turns(&[&format!("Remember the token started-in-{}.", tool.key()), "Remembered."]);
             history.extend(match tool {
                 Tool::Claude => shell_turn(CLAUDE_CALL, CLAUDE_RESULT),
-                Tool::Codex => shell_turn(CODEX_CALL, CODEX_RESULT),
+                Tool::Codex => shell_turn(&codex_call_in(&source.cwd), CODEX_RESULT),
             });
             publish(&source.path, &format::render_titled(tool, &source.id, &source.cwd, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true), &history, &format!("Hub fixture from {}", tool.display_name())).unwrap()).unwrap();
             publish(&tracked.join(format!("{}.json", tool.key())), &serde_json::to_vec(&source).unwrap()).unwrap();
@@ -3914,7 +3914,7 @@ fn a_scan_level_warning_offers_its_action_and_can_be_ignored() {
 }
 
 #[test]
-fn codex_checkpoints_keep_only_the_session_fields_their_parser_reads() {
+fn hub_state_stays_small_with_large_codex_session_instructions() {
     let f = Fixture::new(Tool::Codex);
     rewrite_rows(&f.source.path, |row| {
         if row["type"] == "session_meta" {
@@ -3977,6 +3977,11 @@ const CLAUDE_RESULT: &str = "[Tool result: toolu_01FixtureToolUseId0000]\nfirst\
 const CODEX_CALL: &str = "[Tool call: exec]\ntext(await tools.exec_command({cmd:\"ls -la\",\"max_output_tokens\":6000,workdir:\"/w\"}));\n";
 const CODEX_RESULT: &str = "[Tool result: call_FixtureCallId000000000000000000]\nScript completed\nWall time 0.1 seconds\nOutput:\n{\"chunk_id\":\"1a\",\"wall_time_seconds\":0.1,\"exit_code\":0,\"original_token_count\":2,\"output\":\"first\\nsecond\"}";
 
+/// `CODEX_CALL` run in `dir`.
+fn codex_call_in(dir: &str) -> String {
+    CODEX_CALL.replace("workdir:\"/w\"", &format!("workdir:{}", json!(dir)))
+}
+
 fn shell_turn(call: &str, result: &str) -> Vec<Message> {
     vec![text("user", "List the files."), text("assistant", call), text("assistant", result), text("assistant", "Listed.")]
 }
@@ -4037,7 +4042,7 @@ fn shell_pairs_render_as_native_codex_items() {
         let commands: Vec<&&serde_json::Value> = items.iter().filter(|i| i["type"] == "CommandExecution").collect();
         assert_eq!(commands.len(), 1, "{call}");
         assert_eq!(commands[0]["command"], json!(["/bin/zsh", "-lc", "ls -la"]));
-        assert_eq!(commands[0]["cwd"], "file:///w", "Codex reads the working directory as a file URL");
+        assert_eq!(commands[0]["cwd"], "file:///w", "the working directory is a file URL");
         assert_eq!((commands[0]["aggregated_output"].as_str(), commands[0]["exit_code"].as_i64(), commands[0]["status"].as_str()), (Some("first\nsecond"), Some(0), Some("completed")));
         assert_eq!(items.iter().filter(|i| i["type"] == "AgentMessage").count(), 1, "only the final answer is an agent message");
         assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history, "{call}");
@@ -4063,11 +4068,14 @@ fn a_shell_pair_that_ends_its_batch_stays_text() {
 
 #[test]
 fn shell_turns_reach_the_other_cli_as_native_records_without_echo() {
-    for (tool, call, result) in [(Tool::Claude, CLAUDE_CALL, CLAUDE_RESULT), (Tool::Codex, CODEX_CALL, CODEX_RESULT)] {
+    for tool in Tool::ALL {
         let f = Fixture::new(tool);
         assert!(f.scan().errors.is_empty());
         let mut extended = messages();
-        extended.extend(shell_turn(call, result));
+        extended.extend(match tool {
+            Tool::Claude => shell_turn(CLAUDE_CALL, CLAUDE_RESULT),
+            Tool::Codex => shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT),
+        });
         assert!(canonical::update(&f.source, &extended, "", "2026-10-15T00:00:00.000Z").unwrap());
         set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(30));
         let status = f.scan();
@@ -4085,4 +4093,80 @@ fn shell_turns_reach_the_other_cli_as_native_records_without_echo() {
         assert_eq!(f.scan().published, 0, "{tool:?}: no echo");
         assert_eq!(read_messages(&f.source).unwrap(), extended);
     }
+}
+
+#[test]
+fn parallel_tool_calls_stay_text() {
+    let read_call = "[Tool call: Read]\n{\"file_path\":\"/w/a\"}";
+    let read_result = "[Tool result: toolu_01ReadResultId000000000]\nAAA";
+    let history = vec![
+        text("user", "Do two things."),
+        text("assistant", read_call),
+        text("assistant", CLAUDE_CALL),
+        text("assistant", read_result),
+        text("assistant", CLAUDE_RESULT),
+        text("assistant", "Done."),
+    ];
+    for tool in Tool::ALL {
+        let data = rows(&format::render_titled(tool, &stable_id("parallel"), "/w", "2026-10-15T00:00:00Z", &history, "Parallel").unwrap());
+        assert!(
+            data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use" && r["payload"]["item"]["type"] != "CommandExecution"),
+            "{tool:?}: a call next to another call is not paired with the next result"
+        );
+        assert_eq!(format::parse(tool, &data).unwrap(), history);
+    }
+}
+
+#[test]
+fn a_codex_command_run_in_another_directory_stays_text_in_claude() {
+    let call = CODEX_CALL.replace("workdir:\"/w\"", "workdir:\"/elsewhere\"");
+    let history = shell_turn(&call, CODEX_RESULT);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("workdir"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
+    assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use"));
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    let data = rows(&format::render_titled(Tool::Codex, &stable_id("workdir"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
+    let command = data.iter().find(|r| r["payload"]["item"]["type"] == "CommandExecution").expect("command cell");
+    assert_eq!(command["payload"]["item"]["cwd"], "file:///elsewhere");
+}
+
+#[test]
+fn a_native_shell_record_read_without_its_annotation_keeps_the_conversation_together() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let claude = f.peer();
+    rewrite_rows(&claude.path, |row| {
+        row.as_object_mut().unwrap().remove("kiln_sync");
+    });
+    let shown = read_messages(&claude).unwrap();
+    assert_ne!(shown, history, "the Claude records read as Claude's own shell records");
+    assert_eq!(hub::shared(&history, &shown), history.len());
+    append_native_claude_turn(&claude, "Continue in Claude.", "Continued in Claude.");
+    set_modified(&claude.path, SystemTime::now() - Duration::from_secs(60));
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert!(f.source.path.exists(), "the Codex original stays in its resume list");
+    let state = f.hub();
+    let record = state.conversations.values().next().unwrap();
+    assert!(record.branches.is_empty());
+    let mut expected = history.clone();
+    expected.extend(turns(&["Continue in Claude.", "Continued in Claude."]));
+    assert_eq!(read_messages(&f.source).unwrap(), expected);
+    // A later Codex turn reaches the Claude projection through a full update.
+    let mut later = expected.clone();
+    later.extend(turns(&["Back in Codex.", "Back."]));
+    assert!(canonical::update(&f.source, &later, "", "2026-10-15T00:00:00.000Z").unwrap());
+    set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(30));
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    for p in store.state.conversations.values_mut().flat_map(|r| r.projections.iter_mut()) {
+        if p.source.path == claude.path {
+            p.checkpoint = None;
+        }
+    }
+    store.save().unwrap();
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(read_messages(&claude).unwrap().last().unwrap().text, "Back.");
 }

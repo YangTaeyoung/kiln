@@ -193,8 +193,8 @@ pub(super) fn archive_native(
 
 
 
-/// Appends `suffix` to an uncompressed transcript in place when it still has `length` bytes;
-/// a writer holding the file open keeps appending after it.
+/// Appends `suffix` in place to an uncompressed transcript that still has `length` bytes and,
+/// when given, the modification time `modified`.
 fn append_in_place(source: &Source, physical: &Path, length: u64, modified: Option<SystemTime>, suffix: &[u8]) -> Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = fs::OpenOptions::new().append(true).custom_flags(libc::O_NOFOLLOW).open(physical)?;
@@ -334,11 +334,12 @@ pub(super) fn update(
     );
     let mut old_title = String::new();
     let (rows, current) = read_rows_titled(source, &mut old_title)?;
-    if current.len() > messages.len() && current.starts_with(messages) {
+    let common = super::hub::shared(messages, &current);
+    if current.len() > messages.len() && common == messages.len() {
         anyhow::bail!("Linked conversation has newer messages; retrying from its current endpoint");
     }
-    ensure!(messages.starts_with(&current), DIVERGED);
-    if current == messages
+    ensure!(common == current.len(), DIVERGED);
+    if current.len() == messages.len()
         && old_title == title
         && titles::raw_projection(source)?.is_none_or(|raw| raw == title)
     {
@@ -360,6 +361,7 @@ pub(super) fn update(
         &digest(&old),
         last_ordinal,
     )?;
+    let old_count = current.len();
     // The parsed endpoint is released before the prospective bytes are parsed again.
     drop((rows, current));
     let old_len = old.len();
@@ -380,7 +382,11 @@ pub(super) fn update(
         ..source.clone()
     };
     ensure!(
-        read_messages(&check)? == messages,
+        read_messages(&check).is_ok_and(|read| {
+            read.len() == messages.len()
+                && super::hub::shared(messages, &read) == read.len()
+                && read[old_count..] == messages[old_count..]
+        }),
         "Appended conversation did not retain every message and attachment"
     );
     ensure!(

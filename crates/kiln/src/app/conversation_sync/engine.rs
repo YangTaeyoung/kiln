@@ -23,8 +23,8 @@ pub(super) fn projection_id(cid: &str, root: &Path, generation: usize) -> String
     stable_id(&format!("hub:{cid}:{}:{generation}", root.display()))
 }
 
-/// Lengths and modification times of the Codex state database files and title index of a
-/// namespace; a native rename changes them.
+/// Hash of the lengths and modification times of the Codex state database files and title
+/// index of a namespace.
 fn database_stamp(root: &Path) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut files = Vec::new();
@@ -676,7 +676,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 {
                     let record = hub.state.conversations.get_mut(cid).unwrap();
                     let p = &mut record.projections[i];
-                    // Claude shows the newest title record of the transcript before its sidecar.
+                    // A Claude title is the newest title record of the transcript, then its sidecar.
                     let title = match renamed {
                         Some(renamed) => renamed,
                         None if source.tool == Tool::Claude && !p.title.is_empty() => p.title.clone(),
@@ -912,9 +912,9 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             // continued since then is ingested on the next pass.
             let collision = || anyhow::anyhow!("Continuation collision; existing conversation was preserved");
             let existing = read_messages(&source).map_err(|_| collision())?;
-            if events.starts_with(&existing) {
+            if super::hub::shared(events, &existing) == existing.len() {
                 (existing.len(), Some(stamp(&source)?), None)
-            } else if existing.starts_with(events) {
+            } else if super::hub::shared(events, &existing) == events.len() {
                 (events.len(), None, None)
             } else {
                 return Err(collision());
