@@ -3875,3 +3875,34 @@ fn a_continuation_that_kept_only_displayed_tool_text_reaches_a_projection_withou
     expected.extend(turns(&["Continue after the tool.", "Continued after the tool."]));
     assert_eq!(read_messages(&f.source).unwrap(), expected);
 }
+
+#[test]
+fn a_scan_level_warning_offers_its_action_and_can_be_ignored() {
+    use egui_kittest::{Harness, kittest::Queryable};
+    let f = Fixture::new(Tool::Claude);
+    let root = PathBuf::from(&f.source.cwd);
+    let mut manager = Manager::default();
+    manager.workspaces = vec![root.clone()];
+    manager.error = Some("No space left on device (os error 28)".into());
+    manager.revision += 1;
+    assert!(matches!(manager.badge_state(&root), Badge::Attention));
+    let mut initialized = false;
+    let mut h = Harness::builder().with_size([560.0, 500.0]).build_ui_state(
+        |ui, manager: &mut Manager| {
+            if !initialized {
+                kiln_common::fonts::install(ui.ctx());
+                kiln_common::Theme::current().apply(ui.ctx());
+                initialized = true;
+                return;
+            }
+            manager.progress_ui(ui, true);
+        },
+        manager,
+    );
+    h.run_steps(3);
+    assert!(h.query_by_label("다시 시도").is_some());
+    h.get_by_label("무시").click();
+    h.run_steps(3);
+    assert!(!matches!(h.state().badge_state(&root), Badge::Attention), "the ignored scan warning leaves the badge");
+    assert!(h.query_by_label("다시 표시").is_some());
+}

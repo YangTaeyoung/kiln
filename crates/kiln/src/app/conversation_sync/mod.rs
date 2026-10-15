@@ -886,6 +886,27 @@ pub struct Manager {
     pub(super) open_accounts: bool,
     show_ignored: bool,
 }
+/// Ignore key of a failure of the whole scan.
+const SCAN_KEY: &str = "scan";
+/// The resolving action and Ignore button of a warning.
+fn attention_buttons(ui: &mut egui::Ui, key: &str, kind: Attention, actions: &mut Vec<RowAction>) {
+    use kiln_common::i18n::tr;
+    ui.horizontal_wrapped(|ui| {
+        let label = match kind {
+            Attention::Account => tr("계정 설정 열기"),
+            Attention::Storage | Attention::CodexCli => tr("다시 시도"),
+        };
+        if ui.small_button(label).clicked() {
+            actions.push(match kind {
+                Attention::Account => RowAction::OpenAccounts,
+                _ => RowAction::Retry,
+            });
+        }
+        if ui.small_button(tr("무시")).on_hover_text(tr("이 문제는 경고에서 빼고, 다른 문제가 생기면 다시 알립니다.")).clicked() {
+            actions.push(RowAction::Ignore(key.to_owned(), kind));
+        }
+    });
+}
 /// An action chosen in the status dialog.
 enum RowAction {
     OpenAccounts,
@@ -951,6 +972,13 @@ impl Drop for Manager {
 impl Manager {
     fn is_ignored(&self, key: &str, row: &Conversation) -> bool {
         row.attention().is_some_and(|kind| self.ignored.get(key) == Some(&kind))
+    }
+    /// The resolvable condition of a failed scan, unless it was ignored.
+    fn scan_attention(&self) -> Option<Attention> {
+        self.error
+            .as_deref()
+            .and_then(classify)
+            .filter(|kind| self.ignored.get(SCAN_KEY) != Some(kind))
     }
     fn save_ignored(&mut self) {
         self.revision += 1;
@@ -1260,7 +1288,7 @@ impl Manager {
             return *badge;
         }
         let status = self.workspace_status(root);
-        let badge = if self.error.as_deref().and_then(classify).is_some()
+        let badge = if self.scan_attention().is_some()
             || status.rows.iter().any(|(key, row)| row.attention().is_some() && !self.is_ignored(key, row))
         {
             Badge::Attention
@@ -1395,7 +1423,7 @@ impl Manager {
             .rows
             .values()
             .any(|r| matches!(r.phase, Phase::Reading | Phase::Copying));
-        let scan_attention = self.error.as_deref().and_then(classify).is_some();
+        let scan_attention = self.scan_attention().is_some();
         let (icon, color, label) = if !enabled {
             (Icon::Stop, theme.text_dim, tr("동기화 일시 중지"))
         } else if failed > 0 || scan_attention {
@@ -1470,6 +1498,15 @@ impl Manager {
                 if let Some(error) = &self.error {
                     let color = if scan_attention { theme.orange } else { theme.text_dim };
                     ui.add(egui::Label::new(egui::RichText::new(failure_reason(error)).color(color)).wrap());
+                    match (self.scan_attention(), classify(error)) {
+                        (Some(kind), _) => attention_buttons(ui, SCAN_KEY, kind, &mut actions),
+                        (None, Some(_)) => {
+                            if ui.small_button(tr("다시 표시")).clicked() {
+                                actions.push(RowAction::Unignore(SCAN_KEY.into()));
+                            }
+                        }
+                        (None, None) => {}
+                    }
                 }
                 if !enabled {
                     ui.label(
@@ -1550,21 +1587,7 @@ impl Manager {
                                     );
                                 }
                                 if let Some(kind) = attention {
-                                    ui.horizontal_wrapped(|ui| {
-                                        let label = match kind {
-                                            Attention::Account => tr("계정 설정 열기"),
-                                            Attention::Storage | Attention::CodexCli => tr("다시 시도"),
-                                        };
-                                        if ui.small_button(label).clicked() {
-                                            actions.push(match kind {
-                                                Attention::Account => RowAction::OpenAccounts,
-                                                _ => RowAction::Retry,
-                                            });
-                                        }
-                                        if ui.small_button(tr("무시")).on_hover_text(tr("이 문제는 경고에서 빼고, 다른 문제가 생기면 다시 알립니다.")).clicked() {
-                                            actions.push(RowAction::Ignore(key.clone(), kind));
-                                        }
-                                    });
+                                    attention_buttons(ui, key, kind, &mut actions);
                                 } else if is_ignored && ui.small_button(tr("다시 표시")).clicked() {
                                     actions.push(RowAction::Unignore(key.clone()));
                                 }
