@@ -2255,7 +2255,7 @@ fn readable_tool_records_retain_raw_bytes_and_respect_edits_in_both_clis() {
             &mut row["payload"]["content"][0]["text"]
         };
         let shown = content.as_str().unwrap();
-        assert!(shown.contains("첫째 줄\n둘째 줄 <tag> ``` 코드"));
+        assert!(shown.contains("첫째 줄\n   둘째 줄 <tag> ``` 코드"));
         assert!(shown.contains("결과: 성공"));
         assert!(!shown.contains("\\n"));
         assert!(shown.contains("````text"));
@@ -2879,7 +2879,7 @@ fn hub_identity_is_stable_and_aliases_resolve() {
     let mut record = hub::Record::new("T", "/w");
     record.projections.push(hub::Projection {
         source: Source { tool: Tool::Codex, root: PathBuf::from("/r"), path: PathBuf::from("/r/x.jsonl"), cwd: "/w".into(), id: "id-a".into() },
-        synced: 0, stamp: None, origin: true, removed: false, title: String::new(), checkpoint: None, database: None,
+        synced: 0, stamp: None, origin: true, removed: false, title: String::new(), checkpoint: None, database: None, rendered: 0,
     });
     record.aliases.push(alias.clone());
     store.state.conversations.insert(cid.clone(), record);
@@ -3532,8 +3532,8 @@ fn inspect_live_histories_read_only() {
     }
 }
 
-/// Hub round trip with installed CLIs: `export` writes one original per CLI, each with a
-/// shell command turn, into `claude/` and `codex/` under `KILN_HUB_FIXTURE_DIR` and projects
+/// Hub round trip with installed CLIs: `export` writes one original per CLI, each with
+/// tool call turns, into `claude/` and `codex/` under `KILN_HUB_FIXTURE_DIR` and projects
 /// them; `sync` reads the
 /// CLIs' continuations back and prints the last messages of every projection.
 #[test]
@@ -3560,10 +3560,18 @@ fn hub_cli_round_trip() {
             let path = native_path(tool, &pair.endpoint(tool).root, &work.to_string_lossy(), &id, chrono::Utc::now()).unwrap();
             let source = Source { tool, root: pair.endpoint(tool).root.clone(), path, cwd: work.to_string_lossy().into_owned(), id };
             let mut history = turns(&[&format!("Remember the token started-in-{}.", tool.key()), "Remembered."]);
-            history.extend(match tool {
-                Tool::Claude => shell_turn(CLAUDE_CALL, CLAUDE_RESULT),
-                Tool::Codex => shell_turn(&codex_call_in(&source.cwd), CODEX_RESULT),
-            });
+            match tool {
+                Tool::Claude => {
+                    history.extend(shell_turn(CLAUDE_CALL, CLAUDE_RESULT));
+                    history.extend(shell_turn(READ_CALL, READ_RESULT));
+                    history.extend(shell_turn("[Tool call: mcp__x__y]\n{\"a\":1}", "[Tool result: toolu_01McpResultId0000000000]\nok"));
+                }
+                Tool::Codex => {
+                    history.extend(shell_turn(&codex_call_in(&source.cwd), CODEX_RESULT));
+                    history.extend(shell_turn(JS_CALL, JS_RESULT));
+                    history.extend(shell_turn(CODEX_TWO_CALL, CODEX_TWO_RESULT));
+                }
+            }
             publish(&source.path, &format::render_titled(tool, &source.id, &source.cwd, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true), &history, &format!("Hub fixture from {}", tool.display_name())).unwrap()).unwrap();
             publish(&tracked.join(format!("{}.json", tool.key())), &serde_json::to_vec(&source).unwrap()).unwrap();
         }
@@ -4169,4 +4177,242 @@ fn a_native_shell_record_read_without_its_annotation_keeps_the_conversation_toge
     let status = f.scan();
     assert!(status.errors.is_empty(), "{:?}", status.errors);
     assert_eq!(read_messages(&claude).unwrap().last().unwrap().text, "Back.");
+}
+
+#[test]
+fn tool_records_read_like_the_cli_tool_display() {
+    use portable::display;
+    assert_eq!(display("[Tool call: Read]\n{\"file_path\":\"/w/a.rs\"}"), "Read(/w/a.rs)");
+    assert_eq!(display(CLAUDE_CALL), "Bash(ls -la)\n```text\nList files\n```");
+    assert_eq!(
+        display("[Tool call: js]\n{\"code\":\"await tab.click();\",\"title\":\"Open the heading\"}"),
+        "js(Open the heading)\n```text\nawait tab.click();\n```"
+    );
+    assert_eq!(
+        display("[Tool call: Grep]\n{\"output_mode\":\"content\",\"path\":\"/w\",\"pattern\":\"fn main\"}"),
+        "Grep(fn main)\n```text\noutput_mode: content\npath: /w\n```"
+    );
+    assert_eq!(
+        display("[Tool call: exec]\ntext(await tools.write_stdin({session_id:1,chars:\"y\"}));\n"),
+        "exec\n```text\ntext(await tools.write_stdin({session_id:1,chars:\"y\"}));\n```"
+    );
+    let long = format!("[Tool call: Agent]\n{}", json!({"description": "x".repeat(90), "prompt": "Check it"}));
+    assert_eq!(display(&long), format!("Agent({}…)\n```text\ndescription: {}\nprompt: Check it\n```", "x".repeat(80), "x".repeat(90)));
+    assert_eq!(
+        display("[Tool result: call_b74e]\nWall time: 2.9 seconds\nOutput: heading clicked"),
+        "```text\n⎿  Wall time: 2.9 seconds\n   Output: heading clicked\n```"
+    );
+    assert_eq!(display(CLAUDE_RESULT), "```text\n⎿  first\n   second\n```");
+    assert_eq!(display(CODEX_RESULT), "```text\n⎿  first\n   second\n```");
+    let failed = CODEX_RESULT.replace("\"exit_code\":0", "\"exit_code\":2");
+    assert_eq!(display(&failed), "```text\n⎿  Exit code 2\n   first\n   second\n```");
+    assert_eq!(display("[Tool result: toolu_x]\n"), "```text\n⎿  (No output)\n```");
+    assert_eq!(display("[Tool result: toolu_x]\nhas ``` fence"), "````text\n⎿  has ``` fence\n````");
+}
+
+const READ_CALL: &str = "[Tool call: Read]\n{\"file_path\":\"/w/notes.md\"}";
+const READ_RESULT: &str = "[Tool result: toolu_01ReadResultId000000000]\n     1\t# Notes\n     2\tfirst line\n";
+const JS_CALL: &str = "[Tool call: js]\n{\"code\":\"await tab.click();\",\"title\":\"Open the heading\"}";
+const JS_RESULT: &str = "[Tool result: call_JsResultId0000000000000000000]\nWall time: 2.9 seconds\nOutput: heading clicked";
+
+#[test]
+fn claude_built_in_tools_are_native_in_another_claude_namespace() {
+    let history = shell_turn(READ_CALL, READ_RESULT);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("builtin"), "/w", "2026-10-15T00:00:00Z", &history, "Read").unwrap());
+    let call = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_use").expect("a Read tool use");
+    assert_eq!(call["message"]["content"][0]["name"], "Read");
+    assert_eq!(call["message"]["content"][0]["input"], json!({"file_path": "/w/notes.md"}));
+    assert_eq!(call["message"]["content"][0]["id"], "toolu_01ReadResultId000000000");
+    let result = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_result").unwrap();
+    assert_eq!(result["message"]["content"][0]["content"], "     1\t# Notes\n     2\tfirst line\n");
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    for (call, result) in [(JS_CALL, JS_RESULT), ("[Tool call: mcp__x__y]\n{\"a\":1}", "[Tool result: toolu_01McpResultId0000000000]\nok")] {
+        let history = shell_turn(call, result);
+        let data = rows(&format::render_titled(Tool::Claude, &stable_id("builtin"), "/w", "2026-10-15T00:00:00Z", &history, "Other").unwrap());
+        assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use"), "{call}: a tool Claude Code does not define stays text");
+        assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    }
+}
+
+#[test]
+fn other_tools_are_codex_tool_call_cells() {
+    for (call, result, server, tool, arguments, output) in [
+        (READ_CALL, READ_RESULT, "claude_code", "Read", json!({"file_path": "/w/notes.md"}), "     1\t# Notes\n     2\tfirst line\n"),
+        (JS_CALL, JS_RESULT, "codex", "js", json!({"code": "await tab.click();", "title": "Open the heading"}), "Wall time: 2.9 seconds\nOutput: heading clicked"),
+        ("[Tool call: apply_patch]\n*** Begin Patch\n*** End Patch", "[Tool result: call_PatchResultId00000000000000000]\nDone", "codex", "apply_patch", json!({"input": "*** Begin Patch\n*** End Patch"}), "Done"),
+    ] {
+        let history = shell_turn(call, result);
+        let data = rows(&format::render_titled(Tool::Codex, &stable_id("cells"), "/w", "2026-10-15T00:00:00Z", &history, "Cells").unwrap());
+        let items: Vec<&serde_json::Value> = data.iter().filter(|r| r["payload"]["type"] == "item_completed").map(|r| &r["payload"]["item"]).collect();
+        let cell = items.iter().find(|i| i["type"] == "McpToolCall").unwrap_or_else(|| panic!("{call}: a tool call cell"));
+        assert_eq!((cell["server"].as_str(), cell["tool"].as_str()), (Some(server), Some(tool)));
+        assert_eq!(cell["arguments"], arguments);
+        assert_eq!(cell["result"]["content"][0]["text"], output);
+        assert_eq!(items.iter().filter(|i| i["type"] == "AgentMessage").count(), 1, "{call}: only the final answer is an agent message");
+        assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history, "{call}");
+    }
+}
+
+fn mark_rendered(f: &Fixture, path: &Path, rendered: u32) {
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    for p in store.state.conversations.values_mut().flat_map(|r| r.projections.iter_mut()) {
+        if p.source.path == path {
+            p.rendered = rendered;
+        }
+    }
+    store.save().unwrap();
+}
+
+/// Marks a projection as written by an earlier renderer and unchanged for twenty minutes.
+fn age_projection(f: &Fixture, path: &Path) {
+    set_modified(path, SystemTime::now() - Duration::from_secs(20 * 60));
+    let meta = fs::metadata(path).unwrap();
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    for p in store.state.conversations.values_mut().flat_map(|r| r.projections.iter_mut()) {
+        if p.source.path == path {
+            p.rendered = 0;
+            p.stamp = Some((meta.len(), meta.modified().unwrap()));
+        }
+    }
+    store.save().unwrap();
+}
+
+#[test]
+fn projections_written_by_an_earlier_renderer_are_written_again() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let old = f.peer();
+    age_projection(&f, &old.path);
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert!(!old.path.exists(), "the earlier projection leaves the resume list");
+    let new = f.peer();
+    assert_ne!(new.id, old.id);
+    assert_eq!(read_messages(&new).unwrap(), history);
+    assert!(rows(&fs::read(&new.path).unwrap()).iter().any(|r| r["message"]["content"][0]["type"] == "tool_use"));
+    assert!(f.source.path.exists(), "the original is never written again");
+    assert!(f.hub().conversations.values().next().unwrap().aliases.iter().any(|a| a.id == old.id));
+    assert_eq!(f.scan().published, 0);
+}
+
+#[test]
+fn projections_without_tool_records_are_kept_by_a_new_renderer() {
+    let f = Fixture::new(Tool::Codex);
+    assert!(f.scan().errors.is_empty());
+    let old = f.peer();
+    mark_rendered(&f, &old.path, 0);
+    assert!(f.scan().errors.is_empty());
+    assert!(old.path.exists());
+    assert_eq!(f.peer().id, old.id);
+    assert!(f.live().iter().filter(|p| !p.origin).all(|p| p.rendered > 0));
+}
+
+const CODEX_TWO_CALL: &str = "[Tool call: exec]\ntext(await tools.exec_command({cmd:\"pwd\",\"max_output_tokens\":1000}));\ntext(await tools.exec_command({cmd:\"ls (all)\",\"max_output_tokens\":1000}));\n";
+const CODEX_TWO_RESULT: &str = "[Tool result: call_TwoResultId00000000000000000000]\nScript completed\nWall time 0.2 seconds\nOutput:\n{\"chunk_id\":\"1\",\"wall_time_seconds\":0.1,\"exit_code\":0,\"original_token_count\":1,\"output\":\"/w\"}{\"chunk_id\":\"2\",\"wall_time_seconds\":0.1,\"exit_code\":1,\"original_token_count\":1,\"output\":\"a\\nb\"}";
+
+#[test]
+fn a_codex_program_with_several_commands_is_parallel_bash_in_claude() {
+    let history = shell_turn(CODEX_TWO_CALL, CODEX_TWO_RESULT);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
+    let call = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_use").expect("tool uses");
+    let uses = call["message"]["content"].as_array().unwrap();
+    let commands: Vec<&str> = uses.iter().map(|b| b["input"]["command"].as_str().unwrap()).collect();
+    assert_eq!(commands, ["pwd", "ls (all)"]);
+    let result = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_result").unwrap();
+    let results = result["message"]["content"].as_array().unwrap();
+    assert_eq!(results.iter().map(|b| b["tool_use_id"].clone()).collect::<Vec<_>>(), uses.iter().map(|b| b["id"].clone()).collect::<Vec<_>>());
+    assert_eq!((results[0]["content"].as_str(), results[1]["content"].as_str()), (Some("/w"), Some("Exit code 1\na\nb")));
+    assert_eq!(results[1]["is_error"], true);
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    let data = rows(&format::render_titled(Tool::Codex, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
+    let cells: Vec<&serde_json::Value> = data.iter().filter(|r| r["payload"]["item"]["type"] == "CommandExecution").map(|r| &r["payload"]["item"]).collect();
+    assert_eq!(cells.iter().map(|c| c["command"][2].as_str().unwrap()).collect::<Vec<_>>(), ["pwd", "ls (all)"]);
+    assert_eq!(data.iter().find(|r| r["payload"]["type"] == "custom_tool_call_output").unwrap()["payload"]["output"].as_array().unwrap().len(), 3);
+    assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history);
+    let short = CODEX_TWO_RESULT.split("{\"chunk_id\":\"2\"").next().unwrap();
+    let history = shell_turn(CODEX_TWO_CALL, short);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
+    assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use"), "a result for fewer commands stays text");
+}
+
+#[test]
+fn a_recently_written_projection_is_not_written_again() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let projection = f.peer();
+    mark_rendered(&f, &projection.path, 0);
+    assert!(f.scan().errors.is_empty());
+    assert!(projection.path.exists(), "a copy written within ten minutes is kept, also on a check without delays");
+}
+
+#[test]
+fn a_projection_continued_in_its_cli_is_not_written_again() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let claude = f.peer();
+    append_native_claude_turn(&claude, "Continue in Claude.", "Continued in Claude.");
+    rewrite_rows(&claude.path, |row| {
+        if row["type"] == "assistant" && row["message"]["content"][0]["text"] == "Continued in Claude." {
+            row["message"]["model"] = json!("claude-opus-5-5");
+        }
+    });
+    set_modified(&claude.path, SystemTime::now() - Duration::from_secs(60));
+    assert!(f.scan().errors.is_empty());
+    age_projection(&f, &claude.path);
+    assert!(f.scan().errors.is_empty());
+    assert!(claude.path.exists(), "a copy holding the CLI's own records is kept");
+    assert_eq!(f.peer().id, claude.id);
+    assert!(f.live().iter().filter(|p| !p.origin).all(|p| p.rendered > 0));
+}
+
+#[test]
+fn a_projection_that_cannot_be_archived_keeps_synchronizing() {
+    let f = Fixture::new(Tool::Claude);
+    let mut history = messages();
+    history.extend(shell_turn(CLAUDE_CALL, CLAUDE_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let codex = f.peer();
+    age_projection(&f, &codex.path);
+    let metadata = |_: &Source, request: Metadata<'_>| -> Result<Option<String>> {
+        ensure!(!matches!(request, Metadata::Archive), "Linked snapshot has descendant histories; preserved for review");
+        Ok(None)
+    };
+    for _ in 0..2 {
+        let status = scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), None, &metadata, |_| {}).unwrap();
+        assert!(status.errors.is_empty(), "{:?}", status.errors);
+        assert!(status.settled.len() == 1, "the conversation stays settled");
+    }
+    assert!(codex.path.exists());
+    assert!(f.live().iter().filter(|p| !p.origin).all(|p| p.rendered > 0));
+}
+
+#[test]
+fn readable_tool_records_keep_every_input_field() {
+    use portable::display;
+    let path = format!("/w/{}/notes.md", "deep/".repeat(20));
+    let shown = display(&format!("[Tool call: Read]\n{}", json!({"file_path": path})));
+    assert!(shown.contains(&path), "{shown}");
+    let shown = display("[Tool call: Bash]\n{\"command\":\"cat <<EOF > a\\nline two\\nEOF\",\"description\":\"Write a\",\"run_in_background\":true}");
+    assert!(shown.contains("line two") && shown.contains("Write a") && shown.contains("run_in_background: true"), "{shown}");
+    let a = text("assistant", "[Tool call: Bash]\n{\"command\":\"cat <<EOF\\none\\nEOF\"}");
+    let b = text("assistant", "[Tool call: Bash]\n{\"command\":\"cat <<EOF\\ntwo\\nEOF\"}");
+    assert!(!hub::same(&a, &b), "different commands are different messages");
+}
+
+#[test]
+fn a_command_result_followed_by_whitespace_is_still_a_shell_record() {
+    let history = shell_turn(CODEX_CALL, &format!("{CODEX_RESULT}\n"));
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("trailing"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
+    assert!(data.iter().any(|r| r["message"]["content"][0]["type"] == "tool_use"));
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
 }

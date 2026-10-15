@@ -48,14 +48,26 @@ synchronized. Claude copies receive the name as a native custom-title record and
 their title sidecar, Codex copies through `thread/name/set`, followed by a metadata read
 that checks persistence.
 
-Shell commands appear as the other CLI's own records. Claude Code shows a command run in
-Codex as a `Bash` tool use with its result. Codex's resume view shows a command run in
-Claude Code as a command cell with its output; Codex's model receives that command as
-text, and a command run in Codex keeps its native code-mode records in another Codex
-account. A pair is converted only when a later answer follows it, and history is never
-re-run. Records from earlier versions keep their form.
+Tool calls appear as the other CLI's own records where it has them:
 
-Other historical tool calls/results use the same labeled, fenced text in both CLIs.
+- Claude Code shows a shell command run in Codex as a `Bash` tool use with its result, and
+  a Codex program that runs several commands as parallel `Bash` calls. Claude Code's
+  built-in tools (Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, TodoWrite, Agent,
+  NotebookEdit) keep their native records in another Claude Code account.
+- Codex's resume view shows a shell command as a command cell and every other tool call as
+  a tool call cell named by the CLI it came from (`claude_code.Read`, `codex.js`). Codex's
+  model receives calls from Claude Code as text; a command run in Codex keeps its native
+  code-mode records in another Codex account.
+- A tool Claude Code does not define (Codex's browser tool, MCP tools) reads as
+  `name(summary)` with its input in a code block and its result after a `⎿` marker.
+
+A call is converted only when its result and a later answer follow it, parallel calls stay
+text, and history is never re-run. Conversations synchronized by earlier versions are
+written again once in the current form: when a Kiln-written copy has been unchanged for ten
+minutes and holds no records its CLI wrote itself, it is archived (recoverable) and its CLI
+receives a new copy. Originals, copies continued in their CLI and copies imported by Codex
+Desktop are never rewritten.
+
 Complete JSON tool results are decoded into fields and multiline output, including
 adjacent JSON responses and nested text blocks. Invalid or truncated JSON stays
 verbatim. Code and angle-bracket text stay inside fences, and source-reference
@@ -155,9 +167,9 @@ The check refers to **completed responses**, not an answer still being generated
   **Claude Code 2.1.296** formats. Identity and content validation still apply to every
   transcript. Changing working directories within the same Claude session does not
   invalidate it.
-- Text messages retain their wording, line breaks, and code blocks. Shell commands
-  are native tool records in the other CLI; other tool calls and results are
-  represented as labeled assistant messages. Historical tools are not executed. Provider instructions, model-specific thinking and
+- Text messages retain their wording, line breaks, and code blocks. Tool calls are
+  native records where the other CLI has a matching tool and readable assistant
+  messages otherwise. Historical tools are not executed. Provider instructions, model-specific thinking and
   signed reasoning and encrypted provider-private collaboration records are not
   transferred. Images embedded in user messages or tool output retain their bytes
   (PNG, JPEG, GIF and WebP); HTTP(S) image references retain their URL. Native image

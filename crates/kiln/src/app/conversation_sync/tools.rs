@@ -1,4 +1,4 @@
-//! Shell commands recognised in the readable tool records of the canonical history, and the
+//! Tool calls recognised in the readable tool records of the canonical history, and the
 //! native records that show them in each CLI.
 use serde_json::{Map, Value, json};
 
@@ -55,14 +55,8 @@ pub(super) fn shell(call: &str, result: &str) -> Option<Shell> {
         }
         "exec" => {
             let (command, cwd) = exec_command(body)?;
-            let split = output.find("Output:\n")? + "Output:\n".len();
-            let (header, rest) = output.split_at(split);
-            if !header.starts_with("Script ") {
-                return None;
-            }
-            let value: Value = serde_json::from_str(rest).ok()?;
-            let exit_code = value.get("exit_code")?.as_i64()?;
-            let shown = value.get("output")?.as_str()?.to_owned();
+            let (header, results) = exec_results(output)?;
+            let [(rest, exit_code, shown)] = <[_; 1]>::try_from(results).ok()?;
             Some(Shell {
                 id: id.into(),
                 command,
@@ -89,32 +83,70 @@ fn claude_exit(content: &str) -> (i64, &str) {
 
 /// `cmd` and `workdir` of a code-mode program that only prints one `tools.exec_command` call.
 fn exec_command(program: &str) -> Option<(String, Option<String>)> {
-    let inner = program
-        .trim()
-        .strip_prefix("text(await tools.exec_command(")?
-        .strip_suffix("));")?;
-    let fields = object(inner)?;
-    if !fields
-        .keys()
-        .all(|k| matches!(k.as_str(), "cmd" | "workdir" | "max_output_tokens" | "yield_time_ms"))
-    {
+    let mut commands = exec_commands(program)?;
+    (commands.len() == 1).then(|| commands.remove(0))
+}
+
+/// `cmd` and `workdir` of each call of a code-mode program that only prints
+/// `tools.exec_command` calls.
+fn exec_commands(program: &str) -> Option<Vec<(String, Option<String>)>> {
+    let mut rest = program.trim();
+    let mut commands = Vec::new();
+    while !rest.is_empty() {
+        let (fields, after) = object(rest.strip_prefix("text(await tools.exec_command(")?)?;
+        rest = after.strip_prefix("));")?.trim_start();
+        if !fields
+            .keys()
+            .all(|k| matches!(k.as_str(), "cmd" | "workdir" | "max_output_tokens" | "yield_time_ms"))
+        {
+            return None;
+        }
+        let cmd = fields.get("cmd")?.as_str()?.to_owned();
+        let workdir = match fields.get("workdir") {
+            None => None,
+            Some(value) => Some(value.as_str()?.to_owned()),
+        };
+        commands.push((cmd, workdir));
+    }
+    (!commands.is_empty()).then_some(commands)
+}
+
+/// The header and each command result of a code-mode program result: the result JSON text,
+/// exit code and output.
+fn exec_results(output: &str) -> Option<(&str, Vec<(&str, i64, String)>)> {
+    let split = output.find("Output:\n")? + "Output:\n".len();
+    let (header, rest) = output.split_at(split);
+    if !header.starts_with("Script ") {
         return None;
     }
-    let cmd = fields.get("cmd")?.as_str()?.to_owned();
-    let workdir = match fields.get("workdir") {
-        None => None,
-        Some(value) => Some(value.as_str()?.to_owned()),
-    };
-    Some((cmd, workdir))
+    let mut results = Vec::new();
+    let mut values = serde_json::Deserializer::from_str(rest).into_iter::<Value>();
+    let mut start = 0;
+    while let Some(value) = values.next() {
+        let value = value.ok()?;
+        let end = values.byte_offset();
+        let code = value.get("exit_code")?.as_i64()?;
+        let shown = value.get("output")?.as_str()?.to_owned();
+        results.push((&rest[start..end], code, shown));
+        start = end;
+    }
+    if !rest[start..].trim().is_empty() || results.is_empty() {
+        return None;
+    }
+    // Whitespace after the last result belongs to its text.
+    let last = results.len() - 1;
+    let begin = rest.len() - rest[start..].len() - results[last].0.len();
+    results[last].0 = &rest[begin..];
+    Some((header, results))
 }
 
 /// A flat JavaScript object literal whose keys are identifiers or strings and whose values
-/// are JSON scalars.
-fn object(text: &str) -> Option<Map<String, Value>> {
-    let mut rest = text.trim().strip_prefix('{')?.trim_start();
+/// are JSON scalars, at the start of `text`, and the text after it.
+fn object(text: &str) -> Option<(Map<String, Value>, &str)> {
+    let mut rest = text.trim_start().strip_prefix('{')?.trim_start();
     let mut fields = Map::new();
     if let Some(after) = rest.strip_prefix('}') {
-        return after.trim().is_empty().then_some(fields);
+        return Some((fields, after));
     }
     loop {
         let (key, after) = if rest.starts_with('"') {
@@ -137,7 +169,7 @@ fn object(text: &str) -> Option<Map<String, Value>> {
             rest = after.trim_start();
             continue;
         }
-        return rest.strip_prefix('}')?.trim().is_empty().then_some(fields);
+        return Some((fields, rest.strip_prefix('}')?));
     }
 }
 
@@ -205,10 +237,181 @@ pub(super) fn same(a: &str, b: &str) -> bool {
     matches!((result_output(a), result_output(b)), (Some(x), Some(y)) if x == y)
 }
 
+/// Claude Code tools other than Bash that every Claude Code session defines.
+const CLAUDE_TOOLS: [&str; 10] = ["Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Agent", "NotebookEdit"];
+
+/// One command of a Codex code-mode program, with its result.
+pub(super) struct Command {
+    pub command: String,
+    pub cwd: Option<String>,
+    pub output: String,
+    pub exit_code: i64,
+}
+
+/// A tool call and its result.
+pub(super) enum Pair {
+    Shell(Shell),
+    /// A Codex code-mode program printing several `tools.exec_command` calls.
+    Commands { id: String, commands: Vec<Command>, program: String, header: String, results: Vec<String> },
+    /// A Claude Code tool other than Bash, as Claude Code recorded it.
+    Claude { id: String, name: String, input: Value, content: String },
+    /// Any other tool, by name, input and output.
+    Other { id: String, name: String, input: Value, output: String, error: bool },
+}
+
+/// The tool call recorded by `call` and its result recorded by `result`.
+pub(super) fn pair(call: &str, result: &str) -> Option<Pair> {
+    if let Some(shell) = shell(call, result) {
+        return Some(Pair::Shell(shell));
+    }
+    let (name, body) = record(call, "[Tool call: ")?;
+    let (id, output) = record(result, "[Tool result: ")?;
+    if name == "exec"
+        && let Some(calls) = exec_commands(body)
+        && let Some((header, results)) = exec_results(output)
+        && calls.len() == results.len()
+    {
+        let commands = calls
+            .into_iter()
+            .zip(&results)
+            .map(|((command, cwd), (_, exit_code, output))| Command { command, cwd, output: output.clone(), exit_code: *exit_code })
+            .collect();
+        return Some(Pair::Commands {
+            id: id.into(),
+            commands,
+            program: body.into(),
+            header: header.into(),
+            results: results.iter().map(|(raw, _, _)| (*raw).to_owned()).collect(),
+        });
+    }
+    let refused = CLAUDE_REFUSALS.iter().any(|refusal| output.starts_with(refusal));
+    let input = serde_json::from_str::<Value>(body).ok().filter(Value::is_object);
+    Some(match input {
+        Some(input) if id.starts_with("toolu_") && !refused && CLAUDE_TOOLS.contains(&name) => {
+            Pair::Claude { id: id.into(), name: name.into(), input, content: output.into() }
+        }
+        input => Pair::Other {
+            id: id.into(),
+            name: name.into(),
+            input: input.unwrap_or_else(|| json!({"input": body})),
+            output: super::portable::result_output(output),
+            error: refused,
+        },
+    })
+}
+
+/// Whether a command with working directory `dir` ran in `cwd`.
+fn runs_in(dir: Option<&str>, cwd: &str) -> bool {
+    dir.is_none_or(|dir| std::path::Path::new(cwd).join(dir) == std::path::Path::new(cwd))
+}
+
+/// Claude Code tool result text for a command's output and exit code.
+fn claude_content(output: &str, exit_code: i64) -> String {
+    if exit_code == 0 { output.to_owned() } else { format!("Exit code {exit_code}\n{output}") }
+}
+
+/// The Codex history item that shows a command and its output, with the working directory
+/// as a file URL.
+fn command_cell(id: &str, command: &str, dir: Option<&str>, cwd: &str, output: &str, exit_code: i64) -> Value {
+    let dir = match dir {
+        Some(dir) => std::path::Path::new(cwd).join(dir),
+        None => std::path::PathBuf::from(cwd),
+    };
+    let dir = url::Url::from_file_path(&dir)
+        .map(String::from)
+        .unwrap_or_else(|()| format!("file://{}", dir.display()));
+    json!({"type": "CommandExecution", "id": id, "command": ["/bin/zsh", "-lc", command],
+        "cwd": dir, "process_id": null, "source": "unified_exec_startup",
+        "status": if exit_code == 0 { "completed" } else { "failed" }, "exit_code": exit_code,
+        "aggregated_output": output, "duration": {"secs": 0, "nanos": 0},
+        "parsed_cmd": [{"type": "unknown", "cmd": command}]})
+}
+
+/// A Codex tool call history item.
+fn mcp_cell(id: &str, server: &str, tool: &str, arguments: &Value, output: &str, error: bool) -> Value {
+    json!({"type": "McpToolCall", "id": id, "server": server, "tool": tool, "arguments": arguments,
+        "result": {"content": [{"type": "text", "text": output}], "isError": error},
+        "status": if error { "failed" } else { "completed" }, "duration": {"secs": 0, "nanos": 0}, "readOnlyHint": false})
+}
+
+impl Pair {
+    /// Claude Code tool use and tool result blocks, and the structured result beside them,
+    /// when Claude Code shows this call natively in `cwd`.
+    pub fn claude(&self, seed: &str, cwd: &str) -> Option<(Vec<Value>, Vec<Value>, Option<Value>)> {
+        match self {
+            Pair::Shell(shell) if shell.runs_in(cwd) => {
+                let (call, result, structured) = shell.claude(&shell.claude_id(seed));
+                Some((vec![call], vec![result], Some(structured)))
+            }
+            Pair::Commands { commands, .. } if commands.iter().all(|c| runs_in(c.cwd.as_deref(), cwd)) => {
+                let ids: Vec<String> = (0..commands.len())
+                    .map(|k| format!("toolu_{}", &super::digest(format!("{seed}:{k}").as_bytes())[..24]))
+                    .collect();
+                Some((
+                    commands
+                        .iter()
+                        .zip(&ids)
+                        .map(|(c, id)| json!({"type": "tool_use", "id": id, "name": "Bash", "input": {"command": c.command}}))
+                        .collect(),
+                    commands
+                        .iter()
+                        .zip(&ids)
+                        .map(|(c, id)| json!({"tool_use_id": id, "type": "tool_result",
+                            "content": claude_content(&c.output, c.exit_code), "is_error": c.exit_code != 0}))
+                        .collect(),
+                    None,
+                ))
+            }
+            Pair::Claude { id, name, input, content } => Some((
+                vec![json!({"type": "tool_use", "id": id, "name": name, "input": input})],
+                vec![json!({"tool_use_id": id, "type": "tool_result", "content": content, "is_error": false})],
+                None,
+            )),
+            _ => None,
+        }
+    }
+    /// Codex call and output response items, for commands Codex recorded.
+    pub fn codex_items(&self) -> Option<(Value, Value)> {
+        match self {
+            Pair::Shell(shell) => shell.codex_items(),
+            Pair::Commands { id, program, header, results, .. } => {
+                let mut output = vec![json!({"type": "input_text", "text": header})];
+                output.extend(results.iter().map(|text| json!({"type": "input_text", "text": text})));
+                Some((
+                    json!({"type": "custom_tool_call", "status": "completed", "call_id": id, "name": "exec", "input": program}),
+                    json!({"type": "custom_tool_call_output", "call_id": id, "output": output}),
+                ))
+            }
+            _ => None,
+        }
+    }
+    /// The Codex history items that show the call and its result.
+    pub fn codex_cells(&self, seed: &str, cwd: &str) -> Vec<Value> {
+        match self {
+            Pair::Shell(shell) => vec![shell.command_execution(&format!("exec-{}", super::stable_id(seed)), cwd)],
+            Pair::Commands { commands, .. } => commands
+                .iter()
+                .enumerate()
+                .map(|(k, c)| {
+                    let id = format!("exec-{}", super::stable_id(&format!("{seed}:{k}")));
+                    command_cell(&id, &c.command, c.cwd.as_deref(), cwd, &c.output, c.exit_code)
+                })
+                .collect(),
+            Pair::Claude { id, name, input, content } => {
+                vec![mcp_cell(id, "claude_code", name, input, &super::portable::result_output(content), false)]
+            }
+            Pair::Other { id, name, input, output, error } => {
+                let server = if id.starts_with("toolu_") { "claude_code" } else { "codex" };
+                vec![mcp_cell(id, server, name, input, output, *error)]
+            }
+        }
+    }
+}
+
 impl Shell {
     /// Whether the command ran in `cwd`.
     pub fn runs_in(&self, cwd: &str) -> bool {
-        self.cwd.as_deref().is_none_or(|dir| std::path::Path::new(cwd).join(dir) == std::path::Path::new(cwd))
+        runs_in(self.cwd.as_deref(), cwd)
     }
     /// The Claude tool-use ID: the original one for a Claude command.
     pub fn claude_id(&self, seed: &str) -> String {
@@ -222,14 +425,7 @@ impl Shell {
     pub fn claude(&self, tool_id: &str) -> (Value, Value, Value) {
         let (input, content) = match &self.native {
             Native::Claude { input, content } => (input.clone(), content.clone()),
-            Native::Codex { .. } => (
-                json!({"command": self.command}),
-                if self.exit_code == 0 {
-                    self.output.clone()
-                } else {
-                    format!("Exit code {}\n{}", self.exit_code, self.output)
-                },
-            ),
+            Native::Codex { .. } => (json!({"command": self.command}), claude_content(&self.output, self.exit_code)),
         };
         (
             json!({"type": "tool_use", "id": tool_id, "name": "Bash", "input": input}),
@@ -248,20 +444,8 @@ impl Shell {
                 "output": [{"type": "input_text", "text": header}, {"type": "input_text", "text": result}]}),
         ))
     }
-    /// The Codex history item that shows the command and its output, with the working directory
-    /// as a file URL.
+    /// The Codex history item that shows the command and its output.
     pub fn command_execution(&self, id: &str, cwd: &str) -> Value {
-        let dir = match &self.cwd {
-            Some(dir) => std::path::Path::new(cwd).join(dir),
-            None => std::path::PathBuf::from(cwd),
-        };
-        let dir = url::Url::from_file_path(&dir)
-            .map(String::from)
-            .unwrap_or_else(|()| format!("file://{}", dir.display()));
-        json!({"type": "CommandExecution", "id": id, "command": ["/bin/zsh", "-lc", self.command],
-            "cwd": dir, "process_id": null, "source": "unified_exec_startup",
-            "status": if self.exit_code == 0 { "completed" } else { "failed" }, "exit_code": self.exit_code,
-            "aggregated_output": self.output, "duration": {"secs": 0, "nanos": 0},
-            "parsed_cmd": [{"type": "unknown", "cmd": self.command}]})
+        command_cell(id, &self.command, self.cwd.as_deref(), cwd, &self.output, self.exit_code)
     }
 }

@@ -199,10 +199,9 @@ fn annotate_tool(row: &mut Value, original: &str) -> Result<()> {
     Ok(())
 }
 
-/// Shell commands rendered as native tool records, by the index of their call message: a
-/// call and its result followed by another assistant message, outside a group of parallel
-/// calls.
-fn shell_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Shell> {
+/// Tool calls rendered as native records, by the index of their call message: a call and its
+/// result followed by another assistant message, outside a group of parallel calls.
+fn tool_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Pair> {
     let mut pairs = HashMap::new();
     let mut i = 0;
     while i + 2 < messages.len() {
@@ -214,8 +213,8 @@ fn shell_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Shell> {
             && result.images.is_empty()
             && !(i > 0 && messages[i - 1].text.starts_with("[Tool call: "))
             && !messages[i + 2].text.starts_with("[Tool result: ");
-        if candidate && let Some(shell) = super::tools::shell(&call.text, &result.text) {
-            pairs.insert(i, shell);
+        if candidate && let Some(pair) = super::tools::pair(&call.text, &result.text) {
+            pairs.insert(i, pair);
             i += 2;
         } else {
             i += 1;
@@ -665,7 +664,7 @@ fn render_messages(
     let mut rows = Vec::new();
     match tool {
         Tool::Claude => {
-            let pairs = shell_pairs(messages);
+            let pairs = tool_pairs(messages);
             let mut parent: Option<String> = None;
             let mut skip = false;
             for (i, m) in messages.iter().enumerate() {
@@ -673,16 +672,19 @@ fn render_messages(
                     continue;
                 }
                 let mid = super::stable_id(&format!("{id}:{i}"));
-                if let Some(shell) = pairs.get(&i).filter(|shell| shell.runs_in(cwd)) {
+                if let Some((call, result, structured)) =
+                    pairs.get(&i).and_then(|pair| pair.claude(&format!("{id}:{i}:tool"), cwd))
+                {
                     let rid = super::stable_id(&format!("{id}:{}", i + 1));
-                    let tool_id = shell.claude_id(&format!("{id}:{i}:tool"));
-                    let (call, result, structured) = shell.claude(&tool_id);
                     let mut row = json!({"type":"assistant","uuid":mid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
-                        "message":{"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":[call],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
+                        "message":{"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":call,"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
                     annotate_tool(&mut row, &m.text)?;
                     rows.push(row);
                     let mut row = json!({"type":"user","uuid":rid,"parentUuid":mid,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
-                        "message":{"role":"user","content":[result]},"toolUseResult":structured,"sourceToolAssistantUUID":mid});
+                        "message":{"role":"user","content":result},"sourceToolAssistantUUID":mid});
+                    if let Some(structured) = structured {
+                        row["toolUseResult"] = structured;
+                    }
                     annotate_tool(&mut row, &messages[i + 1].text)?;
                     rows.push(row);
                     parent = Some(rid);
@@ -714,22 +716,23 @@ fn render_messages(
             rows.push(json!({"timestamp":timestamp,"ordinal":0,"type":"session_meta","payload":{"id":id,"session_id":id,"timestamp":timestamp,"cwd":cwd,"originator":"kiln","cli_version":"0.162.1","source":"cli","model_provider":"openai","history_mode":"paginated"}}));
             let turn = super::stable_id(&format!("{id}:turn"));
             rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"task_started","turn_id":turn,"model_context_window":null,"collaboration_mode_kind":"default"}}));
-            let pairs = shell_pairs(messages);
+            let pairs = tool_pairs(messages);
             for (i, m) in messages.iter().enumerate() {
                 let mid = super::stable_id(&format!("{id}:{i}"));
-                // A shell call and its result: native items when Codex recorded them, and one
-                // command item in place of their two agent messages.
+                // A tool call and its result: native items when Codex recorded them, and one
+                // history item in place of their two agent messages.
                 let pair = pairs
                     .get(&i)
-                    .map(|shell| (shell, true))
-                    .or_else(|| i.checked_sub(1).and_then(|j| pairs.get(&j)).map(|shell| (shell, false)));
-                if let Some((shell, first)) = pair
-                    && let Some((call, output)) = shell.codex_items()
+                    .map(|pair| (pair, true))
+                    .or_else(|| i.checked_sub(1).and_then(|j| pairs.get(&j)).map(|pair| (pair, false)));
+                if let Some((pair, first)) = pair
+                    && let Some((call, output)) = pair.codex_items()
                 {
                     rows.push(json!({"timestamp":timestamp,"type":"response_item","payload":if first { call } else { output }}));
                     if !first {
-                        let exec = format!("exec-{}", super::stable_id(&format!("{id}:{i}:exec")));
-                        rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":shell.command_execution(&exec, cwd),"started_at_ms":0,"completed_at_ms":0}}));
+                        for item in pair.codex_cells(&format!("{id}:{i}:exec"), cwd) {
+                            rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":item,"started_at_ms":0,"completed_at_ms":0}}));
+                        }
                     }
                     continue;
                 }
@@ -753,10 +756,11 @@ fn render_messages(
                 }
                 rows.push(json!({"timestamp":timestamp,"type":"response_item","payload":p,"metadata":{"client_authored":true}}));
                 super::portable::annotate(rows.last_mut().unwrap(), &m.text, &shown);
-                if let Some((shell, first)) = pair {
+                if let Some((pair, first)) = pair {
                     if !first {
-                        let exec = format!("exec-{}", super::stable_id(&format!("{id}:{i}:exec")));
-                        rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":shell.command_execution(&exec, cwd),"started_at_ms":0,"completed_at_ms":0}}));
+                        for item in pair.codex_cells(&format!("{id}:{i}:exec"), cwd) {
+                            rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":item,"started_at_ms":0,"completed_at_ms":0}}));
+                        }
                     }
                     continue;
                 }
