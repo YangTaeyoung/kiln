@@ -3494,3 +3494,39 @@ fn prefix_change_falls_back_to_a_full_parse() {
         assert!(checkpoint::since(&f.source, &cp).unwrap().is_none(), "{tool:?}");
     }
 }
+
+#[test]
+#[ignore]
+fn inspect_live_histories_read_only() {
+    let path = std::env::var_os("KILN_SYNC_INSPECT_STATE").expect("explicit state file");
+    let state: State = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    let mut outcomes: BTreeMap<String, usize> = BTreeMap::new();
+    let (mut total, mut bytes) = (0, 0u64);
+    let started = Instant::now();
+    for (key, entry) in &state.entries {
+        if state.archived.contains_key(key) || !storage::exists(&entry.source) {
+            continue;
+        }
+        total += 1;
+        bytes += storage::metadata(&entry.source).map(|m| m.len()).unwrap_or(0);
+        let outcome = match checkpoint::read(&entry.source, &mut String::new()) {
+            Ok((messages, Some(cp))) => match checkpoint::since(&entry.source, &cp) {
+                Ok(Some((appended, _))) if appended.is_empty() => format!("ok ({:?})", entry.source.tool),
+                Ok(Some(_)) => "checkpoint reads extra messages".into(),
+                Ok(None) => "checkpoint rejected".into(),
+                Err(e) => format!("checkpoint error: {e}"),
+            }
+            .replace("ok", if messages.is_empty() { "ok-empty" } else { "ok" }),
+            Ok((_, None)) => format!("ok without checkpoint ({:?})", entry.source.tool),
+            Err(e) => {
+                let e = e.to_string();
+                format!("error: {}", e.split(':').next().unwrap_or(&e))
+            }
+        };
+        *outcomes.entry(outcome).or_default() += 1;
+    }
+    eprintln!("{total} live histories, {:.1} GB, read in {:?}", bytes as f64 / 1e9, started.elapsed());
+    for (outcome, count) in outcomes {
+        eprintln!("{count:5}  {outcome}");
+    }
+}

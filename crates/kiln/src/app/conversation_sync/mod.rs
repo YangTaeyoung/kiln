@@ -959,11 +959,11 @@ impl Manager {
             let _ = private_dir(path.parent().unwrap()).and_then(|_| replace(path, &bytes));
         }
     }
-    pub(super) fn ignore(&mut self, key: &str, kind: Attention) {
+    fn ignore(&mut self, key: &str, kind: Attention) {
         self.ignored.insert(key.to_owned(), kind);
         self.save_ignored();
     }
-    pub(super) fn unignore(&mut self, key: &str) {
+    fn unignore(&mut self, key: &str) {
         self.ignored.remove(key);
         self.save_ignored();
     }
