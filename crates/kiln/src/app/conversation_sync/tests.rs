@@ -2420,6 +2420,7 @@ fn database_only_native_names_override_text_index_and_renames_do_not_need_new_tu
     let f = Fixture::new(Tool::Codex);
     let mut cache = Cache::new();
     let mut run = |name: &str| {
+        fs::write(f.pair.codex.root.join("state_5.sqlite"), name).unwrap();
         scan_with_metadata(
             &f.config,
             &f.pair,
@@ -2878,7 +2879,7 @@ fn hub_identity_is_stable_and_aliases_resolve() {
     let mut record = hub::Record::new("T", "/w");
     record.projections.push(hub::Projection {
         source: Source { tool: Tool::Codex, root: PathBuf::from("/r"), path: PathBuf::from("/r/x.jsonl"), cwd: "/w".into(), id: "id-a".into() },
-        synced: 0, stamp: None, origin: true, removed: false, title: String::new(), checkpoint: None,
+        synced: 0, stamp: None, origin: true, removed: false, title: String::new(), checkpoint: None, database: None,
     });
     record.aliases.push(alias.clone());
     store.state.conversations.insert(cid.clone(), record);
@@ -3905,4 +3906,63 @@ fn a_scan_level_warning_offers_its_action_and_can_be_ignored() {
     h.run_steps(3);
     assert!(!matches!(h.state().badge_state(&root), Badge::Attention), "the ignored scan warning leaves the badge");
     assert!(h.query_by_label("다시 표시").is_some());
+}
+
+#[test]
+fn codex_checkpoints_keep_only_the_session_fields_their_parser_reads() {
+    let f = Fixture::new(Tool::Codex);
+    rewrite_rows(&f.source.path, |row| {
+        if row["type"] == "session_meta" {
+            row["payload"]["base_instructions"] = json!({"text": "x".repeat(20_000)});
+        }
+    });
+    set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(60));
+    assert!(f.scan().errors.is_empty());
+    assert!(f.live().iter().all(|p| p.checkpoint.is_some()), "every projection has a checkpoint");
+    let state = fs::read(f.config.join("conversation-sync/hub/state.json")).unwrap();
+    assert!(state.len() < 10_000, "hub state holds {} bytes", state.len());
+    let mut extended = messages();
+    extended.extend(turns(&["Continue in Codex.", "Continued in Codex."]));
+    assert!(canonical::update(&f.source, &extended, "", "2026-10-15T00:00:00.000Z").unwrap());
+    set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(30));
+    assert!(f.scan().errors.is_empty());
+    assert_eq!(read_messages(&f.peer()).unwrap(), extended);
+}
+
+#[test]
+fn codex_names_are_read_again_only_after_its_state_database_changes() {
+    let f = Fixture::new(Tool::Codex);
+    let reads = std::cell::Cell::new(0);
+    let name = std::cell::RefCell::new(String::from("Native database title"));
+    let run = || {
+        scan_with_metadata(
+            &f.config,
+            &f.pair,
+            &f.gate,
+            &mut Cache::new(),
+            None,
+            |source, request| {
+                if matches!(request, Metadata::Read) {
+                    reads.set(reads.get() + 1);
+                    if source.path == f.source.path {
+                        return Ok(Some(name.borrow().clone()));
+                    }
+                }
+                Ok(None)
+            },
+            |_| {},
+        )
+        .unwrap()
+    };
+    let database = f.pair.codex.root.join("state_5.sqlite");
+    fs::write(&database, b"first").unwrap();
+    assert!(run().errors.is_empty());
+    reads.set(0);
+    assert!(run().errors.is_empty());
+    assert_eq!(reads.get(), 0, "an unchanged database is not asked again");
+    *name.borrow_mut() = "Renamed in native database".into();
+    fs::write(&database, b"renamed").unwrap();
+    assert!(run().errors.is_empty());
+    assert!(reads.get() > 0);
+    assert_eq!(f.hub().conversations.values().next().unwrap().title, "Renamed in native database");
 }

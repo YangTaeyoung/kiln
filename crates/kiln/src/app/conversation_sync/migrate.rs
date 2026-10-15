@@ -111,6 +111,7 @@ fn migrate_group(
                     removed: false,
                     title: String::new(),
                     checkpoint: None,
+                    database: None,
                 });
             } else {
                 record.pending.push(source.clone());
@@ -174,6 +175,7 @@ fn migrate_group(
             removed: false,
             title: if parsed.is_some() { chosen.title.clone() } else { String::new() },
             checkpoint: None,
+            database: None,
         });
     }
     for native in record

@@ -34,6 +34,9 @@ pub(super) struct Projection {
     /// Parser position after the last completed turn of the native history.
     #[serde(default)]
     pub checkpoint: Option<super::checkpoint::Checkpoint>,
+    /// Codex: state database stamp when the native name was last read.
+    #[serde(default)]
+    pub database: Option<u64>,
 }
 
 /// An archived continuation that lost to the canonical history.

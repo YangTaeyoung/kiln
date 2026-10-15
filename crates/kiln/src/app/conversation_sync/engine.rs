@@ -13,12 +13,34 @@ pub(super) struct Sync<'a, M> {
     metadata: M,
     notify: &'a dyn Fn(&Status),
     workspaces: HashMap<String, Option<PathBuf>>,
+    /// Codex state database stamps by namespace, taken when the scan starts.
+    databases: HashMap<PathBuf, u64>,
 }
 
 /// Native session ID of the projection of `cid` in `root`; each archived projection
 /// in that namespace advances the generation.
 pub(super) fn projection_id(cid: &str, root: &Path, generation: usize) -> String {
     stable_id(&format!("hub:{cid}:{}:{generation}", root.display()))
+}
+
+/// Lengths and modification times of the Codex state database files and title index of a
+/// namespace; a native rename changes them.
+fn database_stamp(root: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut files = Vec::new();
+    for entry in fs::read_dir(root).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let database = name.starts_with("state_") && (name.ends_with(".sqlite") || name.ends_with(".sqlite-wal"));
+        if (database || name == "session_index.jsonl")
+            && let Ok(meta) = entry.metadata()
+        {
+            files.push((name, meta.len(), meta.modified().ok()));
+        }
+    }
+    files.sort();
+    let mut hasher = std::hash::DefaultHasher::new();
+    files.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn stamp(source: &Source) -> Result<(u64, SystemTime)> {
@@ -114,7 +136,12 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         metadata: M,
         notify: &'a dyn Fn(&Status),
     ) -> Self {
-        Self { config, scope, namespaces, gate, cache, status, metadata, notify, workspaces: HashMap::new() }
+        let databases = namespaces
+            .iter()
+            .filter(|(tool, _)| *tool == Tool::Codex)
+            .map(|(_, root)| (root.clone(), database_stamp(root)))
+            .collect();
+        Self { config, scope, namespaces, gate, cache, status, metadata, notify, workspaces: HashMap::new(), databases }
     }
 
     fn workspace(&mut self, cwd: &str) -> Option<PathBuf> {
@@ -342,6 +369,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     removed: false,
                     title: title.clone(),
                     checkpoint,
+                    database: None,
                 });
                 hub.state.conversations.insert(cid.clone(), record);
                 hub.append(&cid, &messages)?;
@@ -398,6 +426,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             removed: false,
             title: String::new(),
             checkpoint: None,
+            database: None,
         });
         Ok(())
     }
@@ -734,18 +763,23 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             }
         }
         // Codex names can change in its database without a transcript change.
-        let codex: Vec<(usize, Source)> = hub.state.conversations[cid]
+        let codex: Vec<(usize, Source, bool)> = hub.state.conversations[cid]
             .projections
             .iter()
             .enumerate()
-            .filter(|(_, p)| {
-                !p.removed && p.source.tool == Tool::Codex && !read_titles.contains(&NativeRef::of(&p.source))
-            })
-            .map(|(i, p)| (i, p.source.clone()))
+            .filter(|(_, p)| !p.removed && p.source.tool == Tool::Codex)
+            .map(|(i, p)| (i, p.source.clone(), read_titles.contains(&NativeRef::of(&p.source))))
             .collect();
-        for (i, source) in codex {
+        for (i, source, read) in codex {
+            let database = self.databases.get(&source.root).copied();
+            let known = hub.state.conversations[cid].projections[i].database;
+            if read || (database.is_some() && known == database) {
+                hub.state.conversations.get_mut(cid).unwrap().projections[i].database = database;
+                continue;
+            }
             let title = self.native_title(&source)?;
             let p = &mut hub.state.conversations.get_mut(cid).unwrap().projections[i];
+            p.database = database;
             if !title.is_empty() && title != p.title {
                 if !p.title.is_empty() || p.origin {
                     renames.push((SystemTime::now(), title.clone()));
@@ -922,6 +956,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             removed: false,
             title,
             checkpoint: written,
+            database: None,
         });
         Ok(())
     }
