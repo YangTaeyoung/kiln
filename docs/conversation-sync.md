@@ -48,7 +48,14 @@ synchronized. Claude copies receive the name as a native custom-title record and
 their title sidecar, Codex copies through `thread/name/set`, followed by a metadata read
 that checks persistence.
 
-Historical tool calls/results use the same labeled, fenced text in both CLIs.
+Shell commands appear as the other CLI's own records. Claude Code shows a command run in
+Codex as a `Bash` tool use with its result. Codex's resume view shows a command run in
+Claude Code as a command cell with its output; Codex's model receives that command as
+text, and a command run in Codex keeps its native code-mode records in another Codex
+account. A pair is converted only when a later answer follows it, and history is never
+re-run. Records from earlier versions keep their form.
+
+Other historical tool calls/results use the same labeled, fenced text in both CLIs.
 Complete JSON tool results are decoded into fields and multiline output, including
 adjacent JSON responses and nested text blocks. Invalid or truncated JSON stays
 verbatim. Code and angle-bracket text stay inside fences, and source-reference
@@ -148,9 +155,9 @@ The check refers to **completed responses**, not an answer still being generated
   **Claude Code 2.1.296** formats. Identity and content validation still apply to every
   transcript. Changing working directories within the same Claude session does not
   invalidate it.
-- Text messages retain their wording, line breaks, and code blocks. Textual tool
-  calls and results are represented as labeled assistant messages; historical
-  tools are not executed. Provider instructions, model-specific thinking and
+- Text messages retain their wording, line breaks, and code blocks. Shell commands
+  are native tool records in the other CLI; other tool calls and results are
+  represented as labeled assistant messages. Historical tools are not executed. Provider instructions, model-specific thinking and
   signed reasoning and encrypted provider-private collaboration records are not
   transferred. Images embedded in user messages or tool output retain their bytes
   (PNG, JPEG, GIF and WebP); HTTP(S) image references retain their URL. Native image
