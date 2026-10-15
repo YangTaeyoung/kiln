@@ -576,11 +576,12 @@ impl RepositoryWorkspace {
             .repos
             .iter()
             .filter(|(path, repo)| {
-                self.inventory
-                    .as_ref()
-                    .is_some_and(|i| i.roots.contains(path))
-                    && repo.status_task.is_none()
+                repo.status_task.is_none()
                     && (repo.status.is_none() || repo.status_dirty)
+                    && self
+                        .inventory
+                        .as_ref()
+                        .is_some_and(|i| i.roots.contains(path))
             })
             .map(|(path, repo)| (repo.status.is_some(), repo.status_at, path.clone()))
             .collect();

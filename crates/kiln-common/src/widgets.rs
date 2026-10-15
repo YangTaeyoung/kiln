@@ -304,10 +304,17 @@ pub fn empty_state(ui: &mut Ui, icon: Icon, text: &str, action: Option<&str>) ->
     clicked
 }
 
+/// 탭·목록 행처럼 고르는 항목의 선택 시점: 주 버튼을 누른 프레임, 또는 키보드·접근성 활성화.
+pub fn selected_on_press(response: &egui::Response) -> bool {
+    let pressed = response.ctx.input(|i| i.pointer.primary_pressed());
+    (pressed && (response.is_pointer_button_down_on() || response.clicked()))
+        || (response.clicked() && !response.clicked_by(egui::PointerButton::Primary))
+}
+
 /// 장식 애니메이션의 다음 프레임 간격. 창이 포커스를 잃으면 느리게 갱신한다.
 pub fn animation_frame(ctx: &egui::Context) -> std::time::Duration {
     if ctx.input(|i| i.focused) {
-        std::time::Duration::from_millis(33)
+        std::time::Duration::from_millis(100)
     } else {
         std::time::Duration::from_millis(250)
     }
@@ -402,4 +409,46 @@ pub fn divider(ui: &mut Ui) {
     let t = Theme::current();
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(r, 0.0, t.border);
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, selections: &mut usize) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(200.0, 100.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            let (_, response) = ui.allocate_exact_size(vec2(100.0, 40.0), Sense::click());
+            if selected_on_press(&response) {
+                *selections += 1;
+            }
+        });
+        output.textures_delta.clear();
+    }
+    fn button(pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: egui::pos2(20.0, 20.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_press_selects_once_before_release_and_a_one_frame_click_selects_once() {
+        let ctx = egui::Context::default();
+        let mut selections = 0;
+        frame(&ctx, vec![egui::Event::PointerMoved(egui::pos2(20.0, 20.0))], &mut selections);
+        frame(&ctx, vec![button(true)], &mut selections);
+        assert_eq!(selections, 1, "selected when pressed");
+        frame(&ctx, vec![], &mut selections);
+        frame(&ctx, vec![button(false)], &mut selections);
+        assert_eq!(selections, 1, "release does not select again");
+        frame(&ctx, vec![button(true), button(false)], &mut selections);
+        assert_eq!(selections, 2, "press and release within one frame select once");
+    }
 }

@@ -663,7 +663,7 @@ impl KilnApp {
                         widgets::focus_ring(ui,&response,5);
                         if i == active {ui.painter().line_segment([response.rect.left_bottom(),response.rect.right_bottom()],Stroke::new(2.0,t.accent));}
                         if i == active && changed { response.scroll_to_me_animation(Some(egui::Align::Center), egui::style::ScrollAnimation::none()); }
-                        if response.clicked() { self.actions.push(Action::SelectPage(i)); }
+                        if widgets::selected_on_press(&response) { self.actions.push(Action::SelectPage(i)); }
                         if response.middle_clicked() { self.actions.push(Action::ClosePage(i, false)); }
                         if i==active {
                             let close_rect=egui::Rect::from_center_size(pos2(rect.right()-13.0,rect.center().y),vec2(22.0,22.0));
@@ -829,7 +829,7 @@ impl KilnApp {
         if let Some((_,memo,status))=task_context { if !memo.is_empty(){tooltip.push_str(&format!("\n{status} · {memo}"));} }
         if let Some((_, _, label)) = sync_badge { tooltip.push_str(&format!("\n{label}")); }
         let resp = resp.on_hover_text(tooltip);
-        if resp.clicked() {
+        if widgets::selected_on_press(&resp) {
             self.actions.push(Action::SelectWorkspace(i));
         }
         if resp.double_clicked() && wide {
@@ -1009,7 +1009,7 @@ impl KilnApp {
                 let hresp = ui.interact(header, ui.id().with(("hdr", *pid)), Sense::click_and_drag());
                 if hresp.drag_started() && layout_enabled && !adaptive { self.start_pane_move(*pid,area); }
                 self.card_header(ui, *pid, header, &info, is_focused, multi, zoomed.is_some());
-                if hresp.clicked() && !is_focused {
+                if widgets::selected_on_press(&hresp) && !is_focused {
                     new_focus = Some(*pid);
                 }
                 hresp.clone().on_hover_text(format!("{}\n{}\n{}",info.name,info.detail,info.right)).context_menu(|ui| {
