@@ -677,11 +677,11 @@ fn render_messages(
                 {
                     let rid = super::stable_id(&format!("{id}:{}", i + 1));
                     let mut row = json!({"type":"assistant","uuid":mid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
-                        "message":{"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":[call],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
+                        "message":{"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":call,"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
                     annotate_tool(&mut row, &m.text)?;
                     rows.push(row);
                     let mut row = json!({"type":"user","uuid":rid,"parentUuid":mid,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
-                        "message":{"role":"user","content":[result]},"sourceToolAssistantUUID":mid});
+                        "message":{"role":"user","content":result},"sourceToolAssistantUUID":mid});
                     if let Some(structured) = structured {
                         row["toolUseResult"] = structured;
                     }
@@ -730,8 +730,9 @@ fn render_messages(
                 {
                     rows.push(json!({"timestamp":timestamp,"type":"response_item","payload":if first { call } else { output }}));
                     if !first {
-                        let exec = format!("exec-{}", super::stable_id(&format!("{id}:{i}:exec")));
-                        rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":pair.codex_cell(&exec, cwd),"started_at_ms":0,"completed_at_ms":0}}));
+                        for item in pair.codex_cells(&format!("{id}:{i}:exec"), cwd) {
+                            rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":item,"started_at_ms":0,"completed_at_ms":0}}));
+                        }
                     }
                     continue;
                 }
@@ -757,8 +758,9 @@ fn render_messages(
                 super::portable::annotate(rows.last_mut().unwrap(), &m.text, &shown);
                 if let Some((pair, first)) = pair {
                     if !first {
-                        let exec = format!("exec-{}", super::stable_id(&format!("{id}:{i}:exec")));
-                        rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":pair.codex_cell(&exec, cwd),"started_at_ms":0,"completed_at_ms":0}}));
+                        for item in pair.codex_cells(&format!("{id}:{i}:exec"), cwd) {
+                            rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":item,"started_at_ms":0,"completed_at_ms":0}}));
+                        }
                     }
                     continue;
                 }

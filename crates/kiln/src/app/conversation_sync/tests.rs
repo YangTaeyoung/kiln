@@ -4287,3 +4287,31 @@ fn projections_without_tool_records_are_kept_by_a_new_renderer() {
     assert_eq!(f.peer().id, old.id);
     assert!(f.live().iter().filter(|p| !p.origin).all(|p| p.rendered > 0));
 }
+
+const CODEX_TWO_CALL: &str = "[Tool call: exec]\ntext(await tools.exec_command({cmd:\"pwd\",\"max_output_tokens\":1000}));\ntext(await tools.exec_command({cmd:\"ls (all)\",\"max_output_tokens\":1000}));\n";
+const CODEX_TWO_RESULT: &str = "[Tool result: call_TwoResultId00000000000000000000]\nScript completed\nWall time 0.2 seconds\nOutput:\n{\"chunk_id\":\"1\",\"wall_time_seconds\":0.1,\"exit_code\":0,\"original_token_count\":1,\"output\":\"/w\"}{\"chunk_id\":\"2\",\"wall_time_seconds\":0.1,\"exit_code\":1,\"original_token_count\":1,\"output\":\"a\\nb\"}";
+
+#[test]
+fn a_codex_program_with_several_commands_is_parallel_bash_in_claude() {
+    let history = shell_turn(CODEX_TWO_CALL, CODEX_TWO_RESULT);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
+    let call = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_use").expect("tool uses");
+    let uses = call["message"]["content"].as_array().unwrap();
+    let commands: Vec<&str> = uses.iter().map(|b| b["input"]["command"].as_str().unwrap()).collect();
+    assert_eq!(commands, ["pwd", "ls (all)"]);
+    let result = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_result").unwrap();
+    let results = result["message"]["content"].as_array().unwrap();
+    assert_eq!(results.iter().map(|b| b["tool_use_id"].clone()).collect::<Vec<_>>(), uses.iter().map(|b| b["id"].clone()).collect::<Vec<_>>());
+    assert_eq!((results[0]["content"].as_str(), results[1]["content"].as_str()), (Some("/w"), Some("Exit code 1\na\nb")));
+    assert_eq!(results[1]["is_error"], true);
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    let data = rows(&format::render_titled(Tool::Codex, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
+    let cells: Vec<&serde_json::Value> = data.iter().filter(|r| r["payload"]["item"]["type"] == "CommandExecution").map(|r| &r["payload"]["item"]).collect();
+    assert_eq!(cells.iter().map(|c| c["command"][2].as_str().unwrap()).collect::<Vec<_>>(), ["pwd", "ls (all)"]);
+    assert_eq!(data.iter().find(|r| r["payload"]["type"] == "custom_tool_call_output").unwrap()["payload"]["output"].as_array().unwrap().len(), 3);
+    assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history);
+    let short = CODEX_TWO_RESULT.split("{\"chunk_id\":\"2\"").next().unwrap();
+    let history = shell_turn(CODEX_TWO_CALL, short);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
+    assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use"), "a result for fewer commands stays text");
+}
