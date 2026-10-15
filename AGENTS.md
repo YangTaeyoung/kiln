@@ -12,6 +12,7 @@ the user's shells, agents, builds, or servers.
 - [Pane layout](docs/pane-layout.md) — accepted movement, boundary scope and snapping behavior.
 - [Remote files and verification](docs/maintainers/remote-files-verification.md) — isolated provider fixtures and explicit coverage boundaries.
 - [Automatic account usage](docs/maintainers/account-usage.md) — background cadence, provider contracts, bounded requests and isolated verification.
+- [0.1.32 release verification](docs/maintainers/0.1.32-status.md) — select on press, low-latency frames, 10 fps activity indicator.
 - [0.1.31 release verification](docs/maintainers/0.1.31-status.md) — immediate click feedback, link groups computed once per scan, diverged conversations shown as kept.
 - [0.1.30 release verification](docs/maintainers/0.1.30-status.md) — failed linked conversations retried only on change, worker results kept across launches.
 - [0.1.29 release verification](docs/maintainers/0.1.29-status.md) — conversation-sync worker process, UI-thread I/O and render costs, linked-prompt fixes.
