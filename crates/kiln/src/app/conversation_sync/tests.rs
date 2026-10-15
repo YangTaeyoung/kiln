@@ -3532,8 +3532,8 @@ fn inspect_live_histories_read_only() {
     }
 }
 
-/// Hub round trip with installed CLIs: `export` writes one original per CLI, each with a
-/// shell command turn, into `claude/` and `codex/` under `KILN_HUB_FIXTURE_DIR` and projects
+/// Hub round trip with installed CLIs: `export` writes one original per CLI, each with
+/// tool call turns, into `claude/` and `codex/` under `KILN_HUB_FIXTURE_DIR` and projects
 /// them; `sync` reads the
 /// CLIs' continuations back and prints the last messages of every projection.
 #[test]
@@ -3560,10 +3560,18 @@ fn hub_cli_round_trip() {
             let path = native_path(tool, &pair.endpoint(tool).root, &work.to_string_lossy(), &id, chrono::Utc::now()).unwrap();
             let source = Source { tool, root: pair.endpoint(tool).root.clone(), path, cwd: work.to_string_lossy().into_owned(), id };
             let mut history = turns(&[&format!("Remember the token started-in-{}.", tool.key()), "Remembered."]);
-            history.extend(match tool {
-                Tool::Claude => shell_turn(CLAUDE_CALL, CLAUDE_RESULT),
-                Tool::Codex => shell_turn(&codex_call_in(&source.cwd), CODEX_RESULT),
-            });
+            match tool {
+                Tool::Claude => {
+                    history.extend(shell_turn(CLAUDE_CALL, CLAUDE_RESULT));
+                    history.extend(shell_turn(READ_CALL, READ_RESULT));
+                    history.extend(shell_turn("[Tool call: mcp__x__y]\n{\"a\":1}", "[Tool result: toolu_01McpResultId0000000000]\nok"));
+                }
+                Tool::Codex => {
+                    history.extend(shell_turn(&codex_call_in(&source.cwd), CODEX_RESULT));
+                    history.extend(shell_turn(JS_CALL, JS_RESULT));
+                    history.extend(shell_turn(CODEX_TWO_CALL, CODEX_TWO_RESULT));
+                }
+            }
             publish(&source.path, &format::render_titled(tool, &source.id, &source.cwd, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true), &history, &format!("Hub fixture from {}", tool.display_name())).unwrap()).unwrap();
             publish(&tracked.join(format!("{}.json", tool.key())), &serde_json::to_vec(&source).unwrap()).unwrap();
         }

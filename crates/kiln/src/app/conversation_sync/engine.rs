@@ -853,6 +853,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             .iter()
             .enumerate()
             .filter(|(_, p)| !p.origin && !p.removed && p.rendered < RENDER && p.synced >= record.events)
+            .filter(|(_, p)| self.namespaces.iter().any(|(tool, root)| *tool == p.source.tool && *root == p.source.root))
             .map(|(i, _)| i)
             .collect();
         if stale.is_empty() || self.refreshed >= REFRESH_LIMIT {
