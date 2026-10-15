@@ -130,7 +130,14 @@ fn exec_results(output: &str) -> Option<(&str, Vec<(&str, i64, String)>)> {
         results.push((&rest[start..end], code, shown));
         start = end;
     }
-    (start == rest.len() && !results.is_empty()).then_some((header, results))
+    if !rest[start..].trim().is_empty() || results.is_empty() {
+        return None;
+    }
+    // Whitespace after the last result belongs to its text.
+    let last = results.len() - 1;
+    let begin = rest.len() - rest[start..].len() - results[last].0.len();
+    results[last].0 = &rest[begin..];
+    Some((header, results))
 }
 
 /// A flat JavaScript object literal whose keys are identifiers or strings and whose values

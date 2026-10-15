@@ -149,7 +149,8 @@ fn short(value: &str) -> String {
     text
 }
 
-/// `name(summary)` followed by the other input fields in a code block.
+/// `name(summary)` followed by the input in a code block: every field except a summary shown
+/// in full.
 fn call_display(name: &str, body: &str) -> String {
     let Ok(Value::Object(fields)) = serde_json::from_str::<Value>(body) else {
         return if body.trim().is_empty() {
@@ -165,10 +166,8 @@ fn call_display(name: &str, body: &str) -> String {
         Some((_, value)) => format!("{name}({})", short(value)),
         None => name.into(),
     };
-    let rest: Vec<(&String, &Value)> = fields
-        .iter()
-        .filter(|(key, _)| Some(key.as_str()) != summary.map(|(k, _)| k) && key.as_str() != "description")
-        .collect();
+    let complete = summary.filter(|(_, value)| short(value) == *value).map(|(key, _)| key);
+    let rest: Vec<(&String, &Value)> = fields.iter().filter(|(key, _)| Some(key.as_str()) != complete).collect();
     let body = match rest.as_slice() {
         [] => return header,
         [(_, Value::String(value))] => value.clone(),

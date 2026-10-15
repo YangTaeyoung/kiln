@@ -124,6 +124,25 @@ fn manifest_path(config: &Path, source: &Source) -> PathBuf {
         .join(format!("{}.json", digest(key.as_bytes())))
 }
 
+/// Whether every conversation record of a native transcript was written by Kiln: no Claude
+/// assistant record from a model and no Codex turn context.
+pub(super) fn kiln_written(source: &Source) -> Result<bool> {
+    use std::io::BufRead;
+    let (input, _) = storage::open_at(&source.root, &storage::physical(source), 0)?;
+    let contains = |line: &[u8], needle: &[u8]| line.windows(needle.len()).any(|w| w == needle);
+    for line in std::io::BufReader::new(input).split(b'\n') {
+        let line = line?;
+        let native = match source.tool {
+            Tool::Claude => contains(&line, b"\"type\":\"assistant\"") && !contains(&line, b"\"model\":\"<synthetic>\""),
+            Tool::Codex => contains(&line, b"\"type\":\"turn_context\""),
+        };
+        if native {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Whether Kiln moved this native transcript into an archive.
 pub(super) fn archived(config: &Path, source: &Source) -> bool {
     bounded(&manifest_path(config, source), 64 * 1024)

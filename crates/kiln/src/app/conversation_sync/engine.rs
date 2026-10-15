@@ -843,9 +843,10 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         Ok(waiting)
     }
 
-    /// Writes a Kiln-written projection made by an earlier renderer again when the canonical
-    /// history holds tool records: the earlier session leaves its resume list and the
-    /// namespace receives a new projection. Other projections are marked current.
+    /// Writes a projection Kiln made with an earlier renderer again when the canonical history
+    /// holds tool records and the projection holds only Kiln's records and has been unchanged
+    /// for `REFRESH_IDLE`: the earlier session leaves its resume list and the namespace
+    /// receives a new projection. Other projections are marked current.
     fn refresh(&mut self, hub: &mut Hub, cid: &str, events: &mut Option<Vec<format::Message>>) -> Result<()> {
         let record = &hub.state.conversations[cid];
         let stale: Vec<usize> = record
@@ -866,29 +867,34 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         let tools = all
             .iter()
             .any(|m| m.text.starts_with("[Tool call: ") || m.text.starts_with("[Tool result: "));
+        let current = |hub: &mut Hub, i: usize| hub.state.conversations.get_mut(cid).unwrap().projections[i].rendered = RENDER;
         let mut rewrite = None;
         for i in stale {
-            let source = hub.state.conversations[cid].projections[i].source.clone();
-            if tools && rewrite.is_none() && discovery::imported(self.config, &source)?.is_some() {
+            let p = &hub.state.conversations[cid].projections[i];
+            let (source, known) = (p.source.clone(), p.stamp);
+            if !tools || discovery::imported(self.config, &source)?.is_none() {
+                current(hub, i);
+                continue;
+            }
+            let stamped = stamp(&source)?;
+            if rewrite.is_some() || known != Some(stamped) || recently_modified(stamped.1, REFRESH_IDLE) {
+                continue;
+            }
+            if canonical::kiln_written(&source)? {
                 rewrite = Some(i);
-            } else if !tools || discovery::imported(self.config, &source)?.is_none() {
-                hub.state.conversations.get_mut(cid).unwrap().projections[i].rendered = RENDER;
+            } else {
+                current(hub, i);
             }
         }
         let Some(i) = rewrite else { return Ok(()) };
-        let (source, known) = {
-            let p = &hub.state.conversations[cid].projections[i];
-            (p.source.clone(), p.stamp)
-        };
-        let current = stamp(&source)?;
-        let idle = self.cache.quiet.is_zero() || !recently_modified(current.1, REFRESH_IDLE);
-        if known != Some(current) || !idle {
-            return Ok(());
-        }
+        let source = hub.state.conversations[cid].projections[i].source.clone();
         match canonical::archive_native(self.config, &source, cid, &mut self.metadata) {
             Ok(_) => {}
             Err(error) if error.to_string().contains("retrying") => return Ok(()),
-            Err(error) => return Err(error),
+            Err(_) => {
+                current(hub, i);
+                return Ok(());
+            }
         }
         let record = hub.state.conversations.get_mut(cid).unwrap();
         record.projections.remove(i);

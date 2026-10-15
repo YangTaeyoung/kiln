@@ -4183,7 +4183,7 @@ fn a_native_shell_record_read_without_its_annotation_keeps_the_conversation_toge
 fn tool_records_read_like_the_cli_tool_display() {
     use portable::display;
     assert_eq!(display("[Tool call: Read]\n{\"file_path\":\"/w/a.rs\"}"), "Read(/w/a.rs)");
-    assert_eq!(display(CLAUDE_CALL), "Bash(ls -la)");
+    assert_eq!(display(CLAUDE_CALL), "Bash(ls -la)\n```text\nList files\n```");
     assert_eq!(
         display("[Tool call: js]\n{\"code\":\"await tab.click();\",\"title\":\"Open the heading\"}"),
         "js(Open the heading)\n```text\nawait tab.click();\n```"
@@ -4197,7 +4197,7 @@ fn tool_records_read_like_the_cli_tool_display() {
         "exec\n```text\ntext(await tools.write_stdin({session_id:1,chars:\"y\"}));\n```"
     );
     let long = format!("[Tool call: Agent]\n{}", json!({"description": "x".repeat(90), "prompt": "Check it"}));
-    assert_eq!(display(&long), format!("Agent({}…)\n```text\nCheck it\n```", "x".repeat(80)));
+    assert_eq!(display(&long), format!("Agent({}…)\n```text\ndescription: {}\nprompt: Check it\n```", "x".repeat(80), "x".repeat(90)));
     assert_eq!(
         display("[Tool result: call_b74e]\nWall time: 2.9 seconds\nOutput: heading clicked"),
         "```text\n⎿  Wall time: 2.9 seconds\n   Output: heading clicked\n```"
@@ -4263,6 +4263,20 @@ fn mark_rendered(f: &Fixture, path: &Path, rendered: u32) {
     store.save().unwrap();
 }
 
+/// Marks a projection as written by an earlier renderer and unchanged for twenty minutes.
+fn age_projection(f: &Fixture, path: &Path) {
+    set_modified(path, SystemTime::now() - Duration::from_secs(20 * 60));
+    let meta = fs::metadata(path).unwrap();
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    for p in store.state.conversations.values_mut().flat_map(|r| r.projections.iter_mut()) {
+        if p.source.path == path {
+            p.rendered = 0;
+            p.stamp = Some((meta.len(), meta.modified().unwrap()));
+        }
+    }
+    store.save().unwrap();
+}
+
 #[test]
 fn projections_written_by_an_earlier_renderer_are_written_again() {
     let f = Fixture::new(Tool::Codex);
@@ -4271,7 +4285,7 @@ fn projections_written_by_an_earlier_renderer_are_written_again() {
     write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
     assert!(f.scan().errors.is_empty());
     let old = f.peer();
-    mark_rendered(&f, &old.path, 0);
+    age_projection(&f, &old.path);
     let status = f.scan();
     assert!(status.errors.is_empty(), "{:?}", status.errors);
     assert!(!old.path.exists(), "the earlier projection leaves the resume list");
@@ -4322,4 +4336,83 @@ fn a_codex_program_with_several_commands_is_parallel_bash_in_claude() {
     let history = shell_turn(CODEX_TWO_CALL, short);
     let data = rows(&format::render_titled(Tool::Claude, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
     assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use"), "a result for fewer commands stays text");
+}
+
+#[test]
+fn a_recently_written_projection_is_not_written_again() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let projection = f.peer();
+    mark_rendered(&f, &projection.path, 0);
+    assert!(f.scan().errors.is_empty());
+    assert!(projection.path.exists(), "a copy written within ten minutes is kept, also on a check without delays");
+}
+
+#[test]
+fn a_projection_continued_in_its_cli_is_not_written_again() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let claude = f.peer();
+    append_native_claude_turn(&claude, "Continue in Claude.", "Continued in Claude.");
+    rewrite_rows(&claude.path, |row| {
+        if row["type"] == "assistant" && row["message"]["content"][0]["text"] == "Continued in Claude." {
+            row["message"]["model"] = json!("claude-opus-5-5");
+        }
+    });
+    set_modified(&claude.path, SystemTime::now() - Duration::from_secs(60));
+    assert!(f.scan().errors.is_empty());
+    age_projection(&f, &claude.path);
+    assert!(f.scan().errors.is_empty());
+    assert!(claude.path.exists(), "a copy holding the CLI's own records is kept");
+    assert_eq!(f.peer().id, claude.id);
+    assert!(f.live().iter().filter(|p| !p.origin).all(|p| p.rendered > 0));
+}
+
+#[test]
+fn a_projection_that_cannot_be_archived_keeps_synchronizing() {
+    let f = Fixture::new(Tool::Claude);
+    let mut history = messages();
+    history.extend(shell_turn(CLAUDE_CALL, CLAUDE_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let codex = f.peer();
+    age_projection(&f, &codex.path);
+    let metadata = |_: &Source, request: Metadata<'_>| -> Result<Option<String>> {
+        ensure!(!matches!(request, Metadata::Archive), "Linked snapshot has descendant histories; preserved for review");
+        Ok(None)
+    };
+    for _ in 0..2 {
+        let status = scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), None, &metadata, |_| {}).unwrap();
+        assert!(status.errors.is_empty(), "{:?}", status.errors);
+        assert!(status.settled.len() == 1, "the conversation stays settled");
+    }
+    assert!(codex.path.exists());
+    assert!(f.live().iter().filter(|p| !p.origin).all(|p| p.rendered > 0));
+}
+
+#[test]
+fn readable_tool_records_keep_every_input_field() {
+    use portable::display;
+    let path = format!("/w/{}/notes.md", "deep/".repeat(20));
+    let shown = display(&format!("[Tool call: Read]\n{}", json!({"file_path": path})));
+    assert!(shown.contains(&path), "{shown}");
+    let shown = display("[Tool call: Bash]\n{\"command\":\"cat <<EOF > a\\nline two\\nEOF\",\"description\":\"Write a\",\"run_in_background\":true}");
+    assert!(shown.contains("line two") && shown.contains("Write a") && shown.contains("run_in_background: true"), "{shown}");
+    let a = text("assistant", "[Tool call: Bash]\n{\"command\":\"cat <<EOF\\none\\nEOF\"}");
+    let b = text("assistant", "[Tool call: Bash]\n{\"command\":\"cat <<EOF\\ntwo\\nEOF\"}");
+    assert!(!hub::same(&a, &b), "different commands are different messages");
+}
+
+#[test]
+fn a_command_result_followed_by_whitespace_is_still_a_shell_record() {
+    let history = shell_turn(CODEX_CALL, &format!("{CODEX_RESULT}\n"));
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("trailing"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
+    assert!(data.iter().any(|r| r["message"]["content"][0]["type"] == "tool_use"));
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
 }
