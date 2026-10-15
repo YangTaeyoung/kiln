@@ -104,6 +104,9 @@ pub(super) struct HubState {
     /// Legacy state files whose copies were migrated into the hub.
     #[serde(default)]
     pub migrated: std::collections::BTreeSet<String>,
+    /// Legacy state files whose last migration attempt left a group unread, and when.
+    #[serde(default)]
+    pub migration_retry: BTreeMap<String, SystemTime>,
 }
 
 #[derive(Serialize, Deserialize)]

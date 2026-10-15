@@ -3668,3 +3668,148 @@ fn a_restored_branch_keeps_the_history_it_continued_after_a_later_rewrite() {
     let events: Vec<String> = store.events(&restored).unwrap().into_iter().map(|m| m.text).collect();
     assert_eq!(events, ["u0", "a0", "u1", "a1", "u2x", "a2x"]);
 }
+
+#[test]
+fn a_failing_restore_or_import_record_leaves_synchronization_running() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.peer();
+    let now = SystemTime::now();
+    let mut older = messages();
+    older.extend(turns(&["claude side", "claude reply"]));
+    let mut newer = messages();
+    newer.extend(turns(&["codex side", "codex reply"]));
+    write_history(&f.source, &older, now + Duration::from_secs(40));
+    write_history(&peer, &newer, now + Duration::from_secs(50));
+    f.scan();
+    let branch = f.hub().conversations.values().next().unwrap().branches[0].id.clone();
+    fs::remove_file(f.config.join("conversation-sync/hub/branches").join(format!("{branch}.jsonl"))).unwrap();
+    hub::request_restore(&f.config, &branch, "Restored fixture").unwrap();
+    fs::write(f.pair.codex.root.join("external_agent_session_imports.json"), b"{not json").unwrap();
+    let mut extended = newer.clone();
+    extended.extend(turns(&["after the failed restore", "still synchronized"]));
+    write_history(&peer, &extended, now + Duration::from_secs(60));
+    let status = scan(&f.config, &f.pair, &f.gate, &mut Cache::new(), |_| {}).expect("the scan completes");
+    assert_eq!(read_messages(&f.projection_in(&f.pair.claude.root)).unwrap(), extended);
+    let failed: Vec<&Conversation> = status.rows.values().filter(|r| r.phase == Phase::Failed).collect();
+    assert_eq!(failed.len(), 2, "the restore and the import record each report their failure: {:?}", status.errors);
+}
+
+fn archiving_into(source: &Source) -> Result<Option<String>> {
+    let physical = storage::physical(source);
+    let path = source.root.join("archived_sessions").join(physical.file_name().unwrap());
+    private_dir(path.parent().unwrap())?;
+    fs::rename(&physical, &path)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[test]
+fn copies_left_by_a_failed_migration_archive_leave_once_archiving_works() {
+    let f = Fixture::new(Tool::Claude);
+    let now = SystemTime::now();
+    let older = legacy_copy(&f, "legacy-a", &messages(), now - Duration::from_secs(600));
+    let mut longer = messages();
+    longer.extend(turns(&["continued in codex", "codex reply"]));
+    let newer = legacy_copy(&f, "legacy-b", &longer, now - Duration::from_secs(60));
+    set_modified(&f.source.path, now - Duration::from_secs(1200));
+    let mut state = State::default();
+    state.entries.insert(key_of(&f.source), legacy_entry(&f.source, false, vec![as_continuation(&older), as_continuation(&newer)]));
+    state.entries.insert(key_of(&older), legacy_entry(&older, true, vec![]));
+    state.entries.insert(key_of(&newer), legacy_entry(&newer, true, vec![]));
+    state.lineage.insert(key_of(&older), key_of(&f.source));
+    state.lineage.insert(key_of(&newer), key_of(&f.source));
+    write_legacy(&f, &state);
+    let available = std::cell::Cell::new(false);
+    let metadata = |source: &Source, request: Metadata<'_>| -> Result<Option<String>> {
+        if matches!(request, Metadata::Archive) {
+            ensure!(available.get(), "Install Codex CLI to register /resume conversations");
+            return archiving_into(source);
+        }
+        Ok(None)
+    };
+    let first = scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), None, &metadata, |_| {}).unwrap();
+    assert!(
+        first.rows.values().any(|r| r.attention() == Some(Attention::CodexCli)),
+        "the copy that could not leave the resume list is reported: {:?}",
+        first.errors
+    );
+    available.set(true);
+    let second = scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), None, &metadata, |_| {}).unwrap();
+    assert!(second.errors.is_empty(), "{:?}", second.errors);
+    assert_eq!(transcripts(&f.pair.codex.root), vec![newer.path.clone()]);
+    assert!(f.hub().conversations.values().next().unwrap().aliases.iter().any(|a| a.id == older.id));
+}
+
+#[test]
+fn a_copy_known_only_to_a_second_legacy_state_leaves_the_resume_list() {
+    let f = Fixture::new(Tool::Claude);
+    let now = SystemTime::now();
+    let first_copy = legacy_copy(&f, "pair-copy", &messages(), now - Duration::from_secs(600));
+    let second_copy = legacy_copy(&f, "workspace-copy", &messages(), now - Duration::from_secs(300));
+    let dir = f.config.join("conversation-sync");
+    let legacy = |copy: &Source| {
+        let mut state = State::default();
+        state.entries.insert(key_of(&f.source), legacy_entry(&f.source, false, vec![as_continuation(copy)]));
+        state.entries.insert(key_of(copy), legacy_entry(copy, true, vec![]));
+        state.lineage.insert(key_of(copy), key_of(&f.source));
+        serde_json::to_vec(&state).unwrap()
+    };
+    let (workspace, pair) = (dir.join("workspace-state.json"), dir.join("pair-state.json"));
+    fs::write(&workspace, legacy(&second_copy)).unwrap();
+    fs::write(&pair, legacy(&first_copy)).unwrap();
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    migrate::run(&mut store, &[workspace, pair], &f.gate).unwrap();
+    store.save().unwrap();
+    assert!(f.scan().errors.is_empty());
+    assert_eq!(transcripts(&f.pair.codex.root).len(), 1, "one Codex session remains for the conversation");
+    let state = f.hub();
+    let record = state.conversations.values().next().unwrap();
+    for copy in [&first_copy, &second_copy] {
+        assert!(
+            record.projections.iter().any(|p| p.source.id == copy.id) || record.aliases.iter().any(|a| a.id == copy.id),
+            "{} belongs to the conversation",
+            copy.id
+        );
+    }
+}
+
+fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                files.push((path.clone(), fs::read(&path).unwrap()));
+            }
+        }
+    }
+    files
+}
+
+#[test]
+fn a_scan_interrupted_before_its_state_save_leaves_a_readable_hub_without_duplicates() {
+    let f = Fixture::new(Tool::Claude);
+    assert!(f.scan().errors.is_empty());
+    let saved = snapshot(&f.config.join("conversation-sync/hub"));
+    let rewound = vec![messages()[0].clone(), text("assistant", "a different answer"), text("user", "next"), text("assistant", "next answer")];
+    write_history(&f.source, &rewound, SystemTime::now() + Duration::from_secs(40));
+    assert!(f.scan().errors.is_empty());
+    // Every file written by that scan stays; the state and the files it replaced are as before.
+    for (path, bytes) in &saved {
+        fs::write(path, bytes).unwrap();
+    }
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let state = f.hub();
+    let (cid, record) = state.conversations.iter().next().unwrap();
+    assert_eq!(hub::Hub::open(&f.config).unwrap().events(cid).unwrap(), rewound);
+    assert!(record.projections.iter().all(|p| !p.removed), "no namespace is given up");
+    let codex = transcripts(&f.pair.codex.root);
+    assert_eq!(codex.len(), 1, "one Codex session: {codex:?}");
+    assert!(record.projections.iter().any(|p| p.source.path == codex[0]));
+    assert_eq!(read_messages(&f.projection_in(&f.pair.codex.root)).unwrap(), rewound);
+    assert_eq!(f.scan().published, 0);
+}

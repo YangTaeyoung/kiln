@@ -742,7 +742,8 @@ fn scan_with_metadata(
         cache.hub.clear();
         cache.build = build;
     }
-    migrate::run(config, &legacy, gate, &mut metadata)?;
+    let mut hub = hub::Hub::open(config)?;
+    migrate::run(&mut hub, &legacy, gate)?;
     let mut status = Status::default();
     let sources: Vec<Source> = if let Some(scope) = scope {
         status.workspaces = scope.workspaces.len();
@@ -780,7 +781,7 @@ fn scan_with_metadata(
             .collect()
     });
     let hub = engine::Sync::new(config, scope, namespaces, gate, cache, &mut status, &mut metadata, &notify)
-        .run(sources)?;
+        .run(hub, sources)?;
     status.errors = status
         .rows
         .values()

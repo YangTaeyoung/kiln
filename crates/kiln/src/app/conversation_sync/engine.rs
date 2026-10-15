@@ -1,6 +1,6 @@
 //! Hub synchronization: adopt native conversations, ingest changed projections, reconcile
 //! divergence and project the canonical history and title into every namespace.
-use super::hub::{Hub, NativeRef, Outcome, Projection, Record, conversation_id, reconcile};
+use super::hub::{Hub, NativeRef, Outcome, Projection, Record, conversation_id, reconcile, shared};
 use super::*;
 
 pub(super) struct Sync<'a, M> {
@@ -42,29 +42,25 @@ fn timestamp() -> String {
 
 const WRITING: &str = "Transcript is being written; retrying";
 
-/// Codex Desktop imports of Kiln-written Claude transcripts: imported thread → source path.
-fn import_ledger(namespaces: &[(Tool, PathBuf)]) -> Result<HashMap<NativeRef, PathBuf>> {
+/// Codex Desktop imports of Kiln-written Claude transcripts in one Codex namespace:
+/// imported thread → source path.
+fn import_ledger(root: &Path) -> Result<HashMap<NativeRef, PathBuf>> {
     let mut ledger = HashMap::new();
-    for (tool, root) in namespaces {
-        if *tool != Tool::Codex {
-            continue;
-        }
-        let path = root.join("external_agent_session_imports.json");
-        if !path.exists() {
-            continue;
-        }
-        safe_path(root, &path)?;
-        let value: serde_json::Value = serde_json::from_slice(&bounded(&path, 8 * 1024 * 1024)?)?;
-        for record in value["records"].as_array().into_iter().flatten() {
-            if let (Some(source), Some(id)) = (
-                record["source_path"].as_str(),
-                record["imported_thread_id"].as_str(),
-            ) {
-                ledger.insert(
-                    NativeRef { tool: Tool::Codex, root: root.clone(), id: id.into() },
-                    PathBuf::from(source),
-                );
-            }
+    let path = root.join("external_agent_session_imports.json");
+    if !path.exists() {
+        return Ok(ledger);
+    }
+    safe_path(root, &path)?;
+    let value: serde_json::Value = serde_json::from_slice(&bounded(&path, 8 * 1024 * 1024)?)?;
+    for record in value["records"].as_array().into_iter().flatten() {
+        if let (Some(source), Some(id)) = (
+            record["source_path"].as_str(),
+            record["imported_thread_id"].as_str(),
+        ) {
+            ledger.insert(
+                NativeRef { tool: Tool::Codex, root: root.to_owned(), id: id.into() },
+                PathBuf::from(source),
+            );
         }
     }
     Ok(ledger)
@@ -135,9 +131,23 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         self.gate.load(Ordering::Acquire)
     }
 
-    pub fn run(&mut self, sources: Vec<Source>) -> Result<Hub> {
-        let mut hub = Hub::open(self.config)?;
-        let ledger = import_ledger(&self.namespaces)?;
+    pub fn run(&mut self, mut hub: Hub, sources: Vec<Source>) -> Result<Hub> {
+        let mut ledger = HashMap::new();
+        for (tool, root) in self.namespaces.clone() {
+            if tool != Tool::Codex {
+                continue;
+            }
+            match import_ledger(&root) {
+                Ok(entries) => ledger.extend(entries),
+                Err(error) => {
+                    let path = root.join("external_agent_session_imports.json");
+                    let source = Source { tool, root, path: path.clone(), cwd: String::new(), id: String::new() };
+                    let mut row = self.unadopted(&source, Phase::Failed, "");
+                    row.title = "external_agent_session_imports.json".into();
+                    self.report(&path.to_string_lossy(), row, &error);
+                }
+            }
+        }
         let mut index: HashMap<NativeRef, String> = HashMap::new();
         let mut paths: HashMap<PathBuf, String> = HashMap::new();
         for (cid, record) in &hub.state.conversations {
@@ -148,22 +158,55 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             for alias in &record.aliases {
                 index.insert(alias.clone(), cid.clone());
             }
+            for source in &record.pending {
+                index.insert(NativeRef::of(source), cid.clone());
+                paths.insert(source.path.clone(), cid.clone());
+            }
         }
         // A conversation adopted from a Codex Desktop import before its ledger existed joins
         // the conversation it was imported from.
+        let mut unmerged = Vec::new();
         for (native, imported_from) in &ledger {
             if let (Some(own), Some(target)) = (index.get(native).cloned(), paths.get(imported_from).cloned())
                 && own != target
-                && self.merge(&mut hub, &own, &target)?
             {
-                for (_, cid) in index.iter_mut().filter(|(_, cid)| **cid == own) {
-                    *cid = target.clone();
+                match self.merge(&mut hub, &own, &target) {
+                    Ok(true) => {
+                        for (_, cid) in index.iter_mut().filter(|(_, cid)| **cid == own) {
+                            *cid = target.clone();
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => unmerged.push((own, error)),
                 }
             }
         }
+        let mut restored = Vec::new();
         for (path, request) in super::hub::restore_requests(self.config) {
-            hub.restore(&request)?;
-            let _ = fs::remove_file(path);
+            let key = format!("restore:{}", request.branch);
+            let fingerprint = Self::fingerprint(&[fs::metadata(&path).ok().and_then(|m| Some((m.len(), m.modified().ok()?)))], 0);
+            if self.deferred(&key, fingerprint) {
+                if let Some(row) = self.cache.rows.get(&key) {
+                    self.status.rows.insert(key, row.clone());
+                }
+                continue;
+            }
+            match hub.restore(&request) {
+                Ok(_) => {
+                    self.cache.hub.remove(&key);
+                    restored.push(path);
+                }
+                Err(error) => {
+                    let owner = hub.state.conversations.values().find(|r| r.branches.iter().any(|b| b.id == request.branch));
+                    let mut row = match owner.cloned() {
+                        Some(record) => self.row(&record, Phase::Failed, String::new()),
+                        None => continue,
+                    };
+                    row.title = request.title.clone();
+                    row.branches.clear();
+                    self.fail(&key, row, &error, fingerprint);
+                }
+            }
         }
         let mut active = Vec::new();
         let cids: Vec<String> = hub.state.conversations.keys().cloned().collect();
@@ -229,7 +272,16 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             self.conversation(&mut hub, &cid);
             (self.notify)(self.status);
         }
+        for (own, error) in unmerged {
+            if let Some(record) = hub.state.conversations.get(&own).cloned() {
+                let row = self.row(&record, Phase::Failed, String::new());
+                self.report(&own, row, &error);
+            }
+        }
         hub.save()?;
+        for path in restored {
+            let _ = fs::remove_file(path);
+        }
         Ok(hub)
     }
 
@@ -312,8 +364,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         }
     }
 
-    /// A native session copied from a projection outside Kiln: an unchanged copy is archived,
-    /// a continued copy becomes its namespace's projection.
+    /// A native session copied from a projection outside Kiln: an unchanged copy leaves the
+    /// resume list, a continued copy becomes its namespace's projection.
     fn join(&mut self, hub: &mut Hub, cid: &str, source: Source) -> Result<()> {
         let native = NativeRef::of(&source);
         if recently_modified(stamp(&source)?.1, self.cache.quiet) {
@@ -321,26 +373,22 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         }
         let messages = read_messages(&source)?;
         let events = hub.events(cid)?;
-        if super::hub::shared(&events, &messages) == messages.len() {
-            canonical::archive_native(self.config, &source, cid, &mut self.metadata)?;
-            let record = hub.state.conversations.get_mut(cid).unwrap();
-            if !record.aliases.contains(&native) {
-                record.aliases.push(native);
+        let record = hub.state.conversations.get_mut(cid).unwrap();
+        if shared(&events, &messages) == messages.len() {
+            if !record.pending.iter().any(|s| s.path == source.path) {
+                record.pending.push(source);
             }
             return Ok(());
         }
-        let existing = hub.state.conversations[cid]
+        if let Some(i) = record
             .projections
             .iter()
-            .position(|p| !p.removed && p.source.tool == source.tool && p.source.root == source.root);
-        if let Some(i) = existing {
-            let old = hub.state.conversations[cid].projections[i].source.clone();
-            canonical::archive_native(self.config, &old, cid, &mut self.metadata)?;
-            let record = hub.state.conversations.get_mut(cid).unwrap();
-            record.projections.remove(i);
-            record.aliases.push(NativeRef::of(&old));
+            .position(|p| !p.removed && p.source.tool == source.tool && p.source.root == source.root)
+        {
+            let old = record.projections.remove(i);
+            record.pending.push(old.source);
         }
-        let record = hub.state.conversations.get_mut(cid).unwrap();
+        record.pending.retain(|s| s.path != source.path);
         record.aliases.retain(|a| *a != native);
         record.projections.push(Projection {
             source,
@@ -354,26 +402,58 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         Ok(())
     }
 
-    /// Merges conversation `own` into `target` when its history is contained in the target's.
+    /// Merges conversation `own` into `target` when its history is contained in the target's;
+    /// its live projections leave their resume lists with the target's next synchronization.
     fn merge(&mut self, hub: &mut Hub, own: &str, target: &str) -> Result<bool> {
         let (own_events, target_events) = (hub.events(own)?, hub.events(target)?);
-        if super::hub::shared(&target_events, &own_events) != own_events.len() {
+        if shared(&target_events, &own_events) != own_events.len() {
             return Ok(false);
         }
-        let record = hub.state.conversations[own].clone();
-        for p in record.projections.iter().filter(|p| !p.removed) {
-            if storage::exists(&p.source) {
-                canonical::archive_native(self.config, &p.source, target, &mut self.metadata)?;
+        let record = hub.state.conversations.remove(own).context("Unknown conversation")?;
+        let target_record = hub.state.conversations.get_mut(target).context("Unknown conversation")?;
+        for p in record.projections {
+            if p.removed {
+                target_record.aliases.push(NativeRef::of(&p.source));
+            } else {
+                target_record.pending.push(p.source);
             }
         }
-        hub.state.conversations.remove(own);
-        let target_record = hub.state.conversations.get_mut(target).unwrap();
-        for p in &record.projections {
-            target_record.aliases.push(NativeRef::of(&p.source));
-        }
         target_record.aliases.extend(record.aliases);
+        target_record.pending.extend(record.pending);
         self.status.rows.remove(own);
         Ok(true)
+    }
+
+    /// Moves native sessions left over from earlier copies out of their resume lists; one that
+    /// continued past the canonical history is kept as a branch.
+    fn archive_pending(&mut self, hub: &mut Hub, cid: &str, events: &mut Option<Vec<format::Message>>) -> Result<()> {
+        let pending = hub.state.conversations[cid].pending.clone();
+        for source in pending {
+            let native = NativeRef::of(&source);
+            if storage::exists(&source) {
+                if recently_modified(stamp(&source)?.1, self.cache.quiet) {
+                    continue;
+                }
+                let messages = read_messages(&source).unwrap_or_default();
+                let archived = canonical::archive_native(self.config, &source, cid, &mut self.metadata)?;
+                if !messages.is_empty() {
+                    if events.is_none() {
+                        *events = Some(hub.events(cid)?);
+                    }
+                    let base = shared(events.as_ref().unwrap(), &messages);
+                    if base < messages.len() {
+                        hub.save_branch(cid, base, &messages[base..], Some(native.clone()), Some(archived))?;
+                    }
+                }
+            }
+            let record = hub.state.conversations.get_mut(cid).unwrap();
+            record.pending.retain(|s| s.path != source.path);
+            if !record.aliases.contains(&native) {
+                record.aliases.push(native);
+            }
+            hub.save()?;
+        }
+        Ok(())
     }
 
     fn fingerprint(stamps: &[Option<(u64, SystemTime)>], events: usize) -> u64 {
@@ -390,14 +470,19 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             *seen == fingerprint && (waited < retry_delay(*failures) || (*settled && waited < FAILED_RECHECK))
         })
     }
-    fn fail(&mut self, key: &str, mut row: Conversation, error: &anyhow::Error, fingerprint: u64) {
+    /// Shows a failure on a row without delaying the next attempt.
+    fn report(&mut self, key: &str, mut row: Conversation, error: &anyhow::Error) {
+        let detail = error.to_string();
+        row.phase = if detail.contains("retrying") { Phase::Waiting } else { Phase::Failed };
+        row.detail = detail;
+        self.status.rows.insert(key.to_owned(), row);
+    }
+    fn fail(&mut self, key: &str, row: Conversation, error: &anyhow::Error, fingerprint: u64) {
         let detail = error.to_string();
         let retrying = detail.contains("retrying");
         // A condition the user can resolve keeps the short retry delays.
         let settled = !retrying && classify(&detail).is_none();
-        row.phase = if retrying { Phase::Waiting } else { Phase::Failed };
-        row.detail = detail;
-        self.status.rows.insert(key.to_owned(), row);
+        self.report(key, row, error);
         let failures = self.cache.hub.get(key).map_or(0, |(_, _, n, _)| *n) + 1;
         self.cache
             .hub
@@ -498,12 +583,18 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         // A projection invalidated by a newer branch is reconciled again in the next pass.
         for _pass in 0..3 {
             let mut changed = Vec::new();
+            let mut moved = Vec::new();
             for p in hub.state.conversations.get_mut(cid).unwrap().projections.iter_mut() {
                 if p.removed {
                     continue;
                 }
                 if !storage::exists(&p.source) {
-                    p.removed = true;
+                    // A projection Kiln archived before its state was saved is an earlier session.
+                    if canonical::archived(self.config, &p.source) {
+                        moved.push(NativeRef::of(&p.source));
+                    } else {
+                        p.removed = true;
+                    }
                     continue;
                 }
                 let current = stamp(&p.source)?;
@@ -515,6 +606,15 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     continue;
                 }
                 changed.push((current.1, NativeRef::of(&p.source), current));
+            }
+            if !moved.is_empty() {
+                let record = hub.state.conversations.get_mut(cid).unwrap();
+                record.projections.retain(|p| !moved.contains(&NativeRef::of(&p.source)));
+                for native in moved {
+                    if !record.aliases.contains(&native) {
+                        record.aliases.push(native);
+                    }
+                }
             }
             if changed.is_empty() {
                 break;
@@ -604,8 +704,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                         record.projections[i].checkpoint = read_checkpoint;
                     }
                     Outcome::NativeWins { base } => {
-                        let replaced = hub.rewrite(cid, base, &native[base..])?;
-                        hub.save_branch(cid, base, &replaced, None, None)?;
+                        hub.save_branch(cid, base, &canonical[base..], None, None)?;
+                        hub.rewrite(cid, base, &native[base..])?;
                         *canonical = native;
                         let record = hub.state.conversations.get_mut(cid).unwrap();
                         record.updated = current.1;
@@ -625,6 +725,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                         let record = hub.state.conversations.get_mut(cid).unwrap();
                         record.projections.remove(i);
                         record.aliases.push(native_ref);
+                        hub.save()?;
                     }
                 }
             }
@@ -687,6 +788,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 }
             }
         }
+        self.archive_pending(hub, cid, &mut events)?;
         Ok(waiting)
     }
 

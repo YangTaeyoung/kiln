@@ -117,6 +117,21 @@ struct Archive {
     canonical_id: String,
 }
 
+fn manifest_path(config: &Path, source: &Source) -> PathBuf {
+    let key = source.path.to_string_lossy().into_owned();
+    config
+        .join("conversation-sync/archives")
+        .join(format!("{}.json", digest(key.as_bytes())))
+}
+
+/// Whether Kiln moved this native transcript into an archive.
+pub(super) fn archived(config: &Path, source: &Source) -> bool {
+    bounded(&manifest_path(config, source), 64 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Archive>(&bytes).ok())
+        .is_some_and(|plan| plan.destination.exists())
+}
+
 /// Moves a whole native transcript out of its CLI's resume list with an integrity manifest
 /// and returns the archived path. Codex uses its native archive; Claude moves into Kiln's archive.
 pub(super) fn archive_native(
@@ -126,9 +141,7 @@ pub(super) fn archive_native(
     metadata: &mut impl FnMut(&Source, Metadata<'_>) -> Result<Option<String>>,
 ) -> Result<PathBuf> {
     let key = source.path.to_string_lossy().into_owned();
-    let manifest = config
-        .join("conversation-sync/archives")
-        .join(format!("{}.json", digest(key.as_bytes())));
+    let manifest = manifest_path(config, source);
     let _guard = handover::write_guard(config, source)?;
     let physical = storage::physical(source);
     safe_path(&source.root, &physical)?;
