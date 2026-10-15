@@ -3530,3 +3530,46 @@ fn inspect_live_histories_read_only() {
         eprintln!("{count:5}  {outcome}");
     }
 }
+
+/// Hub round trip with installed CLIs: `export` writes one original per CLI into
+/// `claude/` and `codex/` under `KILN_HUB_FIXTURE_DIR` and projects them; `sync` reads the
+/// CLIs' continuations back and prints the last messages of every projection.
+#[test]
+#[ignore]
+fn hub_cli_round_trip() {
+    let dir = PathBuf::from(std::env::var_os("KILN_HUB_FIXTURE_DIR").expect("explicit fixture directory"))
+        .canonicalize()
+        .unwrap();
+    let pair = Pair {
+        claude: Endpoint { root: dir.join("claude"), label: "fixture".into() },
+        codex: Endpoint { root: dir.join("codex"), label: "fixture".into() },
+    };
+    let config = dir.join("kiln");
+    let work = dir.join("work");
+    for path in [&pair.claude.root, &pair.codex.root, &config, &work] {
+        private_dir(path).unwrap();
+    }
+    let gate: Gate = Arc::new(AtomicBool::new(true));
+    if std::env::var("KILN_HUB_FIXTURE_STEP").as_deref() == Ok("export") {
+        let tracked = config.join("conversation-sync/tracked");
+        private_dir(&tracked).unwrap();
+        for tool in Tool::ALL {
+            let id = stable_id(&format!("hub-fixture-{}", tool.key()));
+            let path = native_path(tool, &pair.endpoint(tool).root, &work.to_string_lossy(), &id, chrono::Utc::now()).unwrap();
+            let source = Source { tool, root: pair.endpoint(tool).root.clone(), path, cwd: work.to_string_lossy().into_owned(), id };
+            let history = turns(&[&format!("Remember the token started-in-{}.", tool.key()), "Remembered."]);
+            publish(&source.path, &format::render_titled(tool, &source.id, &source.cwd, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true), &history, &format!("Hub fixture from {}", tool.display_name())).unwrap()).unwrap();
+            publish(&tracked.join(format!("{}.json", tool.key())), &serde_json::to_vec(&source).unwrap()).unwrap();
+        }
+    }
+    let status = scan_with_metadata(&config, &pair, &gate, &mut Cache::new(), None, |_, _| Ok(None), |_| {}).unwrap();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let store = hub::Hub::open(&config).unwrap();
+    for (cid, record) in &store.state.conversations {
+        println!("conversation {cid} \"{}\" ({} events)", record.title, record.events);
+        for p in record.projections.iter().filter(|p| !p.removed) {
+            let tail: Vec<String> = read_messages(&p.source).unwrap().iter().rev().take(2).rev().map(|m| format!("{}: {}", m.role, m.text)).collect();
+            println!("  {} {} {} {:?}", p.source.tool.key(), p.source.id, if p.origin { "origin" } else { "projection" }, tail);
+        }
+    }
+}
