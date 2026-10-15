@@ -295,7 +295,7 @@ fn private_dir(path: &Path) -> Result<()> {
 }
 fn safe_path(root: &Path, path: &Path) -> Result<()> {
     ensure!(
-        fs::symlink_metadata(root)?.is_dir(),
+        fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()),
         "Connected account directory is missing or symlinked"
     );
     let relative = path
@@ -424,14 +424,47 @@ struct Conversation {
     detail: String,
     target: Option<Continuation>,
     copies: Vec<Continuation>,
+    /// Archived continuations that can be restored as separate conversations.
+    #[serde(default)]
+    branches: Vec<BranchRow>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct BranchRow {
+    id: String,
+    events: usize,
+    at: SystemTime,
+}
+/// A failure the user can resolve; every other failure is shown as information.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum Attention {
+    /// A connected account directory is missing or unusable.
+    Account,
+    /// Storage is full, read-only or not writable.
+    Storage,
+    /// Codex CLI, needed to register Codex /resume entries, is not installed.
+    CodexCli,
+}
+fn classify(detail: &str) -> Option<Attention> {
+    if detail.contains("Connected account directory is missing") || detail.contains("Transcript outside connected account") {
+        Some(Attention::Account)
+    } else if ["No space left on device", "Permission denied", "Read-only file system", "Disk quota exceeded"]
+        .iter()
+        .any(|m| detail.contains(m))
+    {
+        Some(Attention::Storage)
+    } else if detail.contains("Install Codex CLI") {
+        Some(Attention::CodexCli)
+    } else {
+        None
+    }
 }
 impl Conversation {
     /// A failed row whose linked histories diverged; nothing is left for the user to resolve.
     fn diverged(&self) -> bool {
         self.phase == Phase::Failed && self.detail.contains(DIVERGED)
     }
-    fn needs_attention(&self) -> bool {
-        self.phase == Phase::Failed && !self.diverged()
+    fn attention(&self) -> Option<Attention> {
+        (self.phase == Phase::Failed).then(|| classify(&self.detail)).flatten()
     }
     #[cfg(test)]
     fn from_entry(entry: &Entry, scope: Option<&discovery::Scope>) -> Self {
@@ -447,6 +480,7 @@ impl Conversation {
             detail: String::new(),
             target: entry.copied_to.clone(),
             copies: entry.copies.clone(),
+            branches: Vec::new(),
         }
     }
 }
@@ -770,12 +804,18 @@ enum Event {
 const DIVERGED: &str = "Linked histories diverged; both conversations were preserved";
 fn failure_reason(detail: &str) -> String {
     use kiln_common::i18n::tr;
+    match classify(detail) {
+        Some(Attention::Account) => return tr("연결 계정 폴더를 찾을 수 없습니다. 설정에서 계정을 다시 연결하면 자동으로 이어집니다.").into(),
+        Some(Attention::Storage) => return tr("저장 공간이 부족하거나 쓰기 권한이 없습니다. 공간이나 권한을 확인한 뒤 다시 시도하세요.").into(),
+        Some(Attention::CodexCli) => return tr("Codex /resume 목록에 등록하려면 Codex CLI가 필요합니다. 설치하면 자동으로 다시 시도합니다.").into(),
+        None => {}
+    }
     if detail.contains(DIVERGED) {
         tr("두 CLI에서 각각 이어 써서 하나로 합치지 않았습니다. 두 대화 모두 그대로 있으며 각 CLI의 /resume에서 따로 열 수 있습니다.").into()
+    } else if detail.contains("Unsupported content") || detail.contains("Unsupported Codex item") || detail.contains("Unsupported visible") {
+        tr("Kiln이 아직 모르는 기록 형식이 있어 이 대화를 보류합니다. Kiln이 업데이트되면 자동으로 다시 확인합니다. 원본은 그대로 보관됩니다.").into()
     } else if detail.contains("limit") || detail.contains("MiB") {
         tr("대화 용량이 연동 한도를 넘었습니다. 원본은 그대로 보관됩니다.").into()
-    } else if detail.contains("version") {
-        tr("아직 확인되지 않은 CLI 기록 형식입니다. 원본은 그대로 보관됩니다.").into()
     } else if detail.contains("compacted")
         || detail.contains("chain")
         || detail.contains("inherited")
@@ -829,6 +869,22 @@ pub struct Manager {
     /// The next worker scan clears retry delays / starts from an empty cache.
     expedite_next: bool,
     reset_next: bool,
+    /// Ignored warnings by row key, with the condition that was ignored.
+    ignored: BTreeMap<String, Attention>,
+    /// Where ignored warnings are saved; tests keep them in memory.
+    ignored_path: Option<PathBuf>,
+    /// Asks the app to open the account settings.
+    pub(super) open_accounts: bool,
+    show_ignored: bool,
+}
+/// An action chosen in the status dialog.
+enum RowAction {
+    OpenAccounts,
+    Retry,
+    Ignore(String, Attention),
+    Unignore(String),
+    ToggleIgnored,
+    Restore { branch: String, title: String },
 }
 /// Background scans leave a transcript until it has been unchanged this long.
 const QUIET: Duration = Duration::from_secs(10);
@@ -864,6 +920,17 @@ impl Default for Manager {
             worker_scan: None,
             expedite_next: false,
             reset_next: false,
+            ignored_path: (!cfg!(test)).then(|| kiln_common::paths::config_dir().join("conversation-sync/ignored.json")),
+            ignored: if cfg!(test) {
+                BTreeMap::new()
+            } else {
+                fs::read(kiln_common::paths::config_dir().join("conversation-sync/ignored.json"))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                    .unwrap_or_default()
+            },
+            open_accounts: false,
+            show_ignored: false,
         }
     }
 }
@@ -873,6 +940,51 @@ impl Drop for Manager {
     }
 }
 impl Manager {
+    fn is_ignored(&self, key: &str, row: &Conversation) -> bool {
+        row.attention().is_some_and(|kind| self.ignored.get(key) == Some(&kind))
+    }
+    fn save_ignored(&mut self) {
+        self.revision += 1;
+        if let Some(path) = &self.ignored_path
+            && let Ok(bytes) = serde_json::to_vec(&self.ignored)
+        {
+            let _ = private_dir(path.parent().unwrap()).and_then(|_| replace(path, &bytes));
+        }
+    }
+    pub(super) fn ignore(&mut self, key: &str, kind: Attention) {
+        self.ignored.insert(key.to_owned(), kind);
+        self.save_ignored();
+    }
+    pub(super) fn unignore(&mut self, key: &str) {
+        self.ignored.remove(key);
+        self.save_ignored();
+    }
+    /// The next scan starts now and retries failed conversations without their delay.
+    fn retry_now(&mut self) {
+        self.cache.lock().unwrap().expedite();
+        self.expedite_next = true;
+        self.urgent = true;
+        self.next = Instant::now();
+    }
+    fn apply(&mut self, actions: Vec<RowAction>) {
+        for action in actions {
+            match action {
+                RowAction::OpenAccounts => {
+                    self.open_accounts = true;
+                    self.detail = None;
+                }
+                RowAction::Retry => self.retry_now(),
+                RowAction::Ignore(key, kind) => self.ignore(&key, kind),
+                RowAction::Unignore(key) => self.unignore(&key),
+                RowAction::ToggleIgnored => self.show_ignored = !self.show_ignored,
+                RowAction::Restore { branch, title } => {
+                    if hub::request_restore(&kiln_common::paths::config_dir(), &branch, &title).is_ok() {
+                        self.retry_now();
+                    }
+                }
+            }
+        }
+    }
     pub(super) fn refresh_for_handover(&mut self) -> Option<u64> {
         if self.busy { return None; }
         // Keeps results cached per file length and modification time; clears retry delays.
@@ -1139,7 +1251,9 @@ impl Manager {
             return *badge;
         }
         let status = self.workspace_status(root);
-        let badge = if self.error.is_some() || status.rows.values().any(Conversation::needs_attention) {
+        let badge = if self.error.as_deref().and_then(classify).is_some()
+            || status.rows.iter().any(|(key, row)| row.attention().is_some() && !self.is_ignored(key, row))
+        {
             Badge::Attention
         } else if self.connecting
             || (status.discovering && status.rows.is_empty())
@@ -1193,6 +1307,7 @@ impl Manager {
         let theme = Theme::current();
         let mut close = false;
         let status = self.workspace_status(root);
+        let mut actions = Vec::new();
         let modal = egui::Modal::new(egui::Id::new("workspace-conversation-sync"))
             .frame(egui::Frame::new().fill(theme.bg_panel).stroke(egui::Stroke::new(1.0, theme.border)).corner_radius(14).inner_margin(20))
             .show(ctx, |ui| {
@@ -1212,7 +1327,7 @@ impl Manager {
                 }
                 // A single scroll surface; fixed summary and footer never reflow with polling.
                 let list_height = (ctx.content_rect().height() - 340.0).clamp(120.0, 520.0);
-                self.progress_status_ui(ui, enabled, &status, list_height);
+                actions = self.progress_status_ui(ui, enabled, &status, list_height);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(tr("연동 범위와 지원 형식")).on_hover_text(tr("이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다."))
@@ -1231,10 +1346,14 @@ impl Manager {
         if close || modal.should_close() {
             self.detail = None;
         }
+        self.apply(actions);
     }
     #[cfg(test)]
-    fn progress_ui(&self, ui: &mut egui::Ui, enabled: bool) {
-        self.progress_status_ui(ui, enabled, &self.status, 280.0);
+    fn progress_ui(&mut self, ui: &mut egui::Ui, enabled: bool) {
+        let status = std::mem::take(&mut self.status);
+        let actions = self.progress_status_ui(ui, enabled, &status, 280.0);
+        self.status = status;
+        self.apply(actions);
     }
     fn progress_status_ui(
         &self,
@@ -1242,15 +1361,22 @@ impl Manager {
         enabled: bool,
         status: &Status,
         list_height: f32,
-    ) {
+    ) -> Vec<RowAction> {
         use kiln_common::{
             Theme, fonts,
             i18n::tr,
             icons::{self, Icon},
         };
         let theme = Theme::current();
-        let failed = status.rows.values().filter(|r| r.needs_attention()).count();
-        let diverged = status.rows.values().filter(|r| r.diverged()).count();
+        let mut actions = Vec::new();
+        let active = |key: &String, row: &Conversation| row.attention().is_some() && !self.is_ignored(key, row);
+        let failed = status.rows.iter().filter(|(k, r)| active(k, r)).count();
+        let ignored = status.rows.iter().filter(|(k, r)| self.is_ignored(k, r)).count();
+        let held = status
+            .rows
+            .values()
+            .filter(|r| r.phase == Phase::Failed && r.attention().is_none())
+            .count();
         let waiting = status
             .rows
             .values()
@@ -1260,9 +1386,10 @@ impl Manager {
             .rows
             .values()
             .any(|r| matches!(r.phase, Phase::Reading | Phase::Copying));
+        let scan_attention = self.error.as_deref().and_then(classify).is_some();
         let (icon, color, label) = if !enabled {
             (Icon::Stop, theme.text_dim, tr("동기화 일시 중지"))
-        } else if failed > 0 || self.error.is_some() {
+        } else if failed > 0 || scan_attention {
             (
                 Icon::Warning,
                 theme.orange,
@@ -1310,8 +1437,17 @@ impl Manager {
                     ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code 또는 Codex 대화를 시작하면 자동으로 연결됩니다.")).wrap());
                 }
                 ui.label(kiln_common::trf!("완료 {}개 · 확인 필요 {}개 · 대기 {}개", status.rows.values().filter(|r| r.phase == Phase::Synced).count(), failed, waiting));
-                if diverged > 0 {
-                    ui.label(egui::RichText::new(kiln_common::trf!("따로 이어진 대화 {}개 · 두 기록 모두 보관됨", diverged)).color(theme.text_dim));
+                if held > 0 {
+                    ui.label(egui::RichText::new(kiln_common::trf!("보류된 대화 {}개 · 원본은 그대로 보관됨", held)).color(theme.text_dim));
+                }
+                if ignored > 0 {
+                    let label = if self.show_ignored { tr("무시한 경고 숨기기") } else { tr("무시한 경고 보기") };
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(kiln_common::trf!("무시한 경고 {}개", ignored)).color(theme.text_dim));
+                        if ui.small_button(label).clicked() {
+                            actions.push(RowAction::ToggleIgnored);
+                        }
+                    });
                 }
                 if enabled && status.watched > 0 {
                     let fraction = status.checked as f32 / status.watched as f32;
@@ -1323,7 +1459,8 @@ impl Manager {
                     )));
                 }
                 if let Some(error) = &self.error {
-                    ui.add(egui::Label::new(egui::RichText::new(error).color(theme.orange)).wrap());
+                    let color = if scan_attention { theme.orange } else { theme.text_dim };
+                    ui.add(egui::Label::new(egui::RichText::new(failure_reason(error)).color(color)).wrap());
                 }
                 if !enabled {
                     ui.label(
@@ -1338,6 +1475,11 @@ impl Manager {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (key, row) in &status.rows {
+                            let is_ignored = self.is_ignored(key, row);
+                            if is_ignored && !self.show_ignored {
+                                continue;
+                            }
+                            let attention = row.attention().filter(|_| !is_ignored);
                             ui.push_id(key, |ui| {
                                 ui.add_space(8.0);
                                 kiln_common::widgets::divider(ui);
@@ -1359,12 +1501,16 @@ impl Manager {
                                         Phase::Synced => {
                                             (Icon::Check, theme.green, tr("동기화 완료"))
                                         }
+                                        Phase::Failed if attention.is_some() => {
+                                            (Icon::Warning, theme.orange, tr("동기화 실패"))
+                                        }
+                                        Phase::Failed if is_ignored => {
+                                            (Icon::Info, theme.text_dim, tr("무시됨"))
+                                        }
                                         Phase::Failed if row.diverged() => {
                                             (Icon::Info, theme.text_dim, tr("따로 이어짐"))
                                         }
-                                        Phase::Failed => {
-                                            (Icon::Warning, theme.orange, tr("동기화 실패"))
-                                        }
+                                        Phase::Failed => (Icon::Info, theme.text_dim, tr("보류됨")),
                                     };
                                     if matches!(row.phase, Phase::Reading | Phase::Copying)
                                         && enabled
@@ -1378,20 +1524,40 @@ impl Manager {
                                         icons::paint(ui.painter(), rect, icon, color);
                                     }
                                     ui.label(egui::RichText::new(label).color(color));
-                                    ui.label(format!(
-                                        "{} → {}",
-                                        row.source.tool.display_name(),
-                                        opposite(row.source.tool).display_name()
-                                    ));
+                                    let mut tools = vec![row.source.tool];
+                                    tools.extend(row.copies.iter().map(|c| c.tool));
+                                    tools.dedup();
+                                    tools.sort_by_key(|t| t.key());
+                                    tools.dedup();
+                                    ui.label(tools.iter().map(|t| t.display_name()).collect::<Vec<_>>().join(" · "));
                                 });
                                 if !row.detail.is_empty() {
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(failure_reason(&row.detail))
-                                                .color(if row.diverged() { theme.text_dim } else { theme.orange }),
+                                                .color(if attention.is_some() { theme.orange } else { theme.text_dim }),
                                         )
                                         .wrap(),
                                     );
+                                }
+                                if let Some(kind) = attention {
+                                    ui.horizontal_wrapped(|ui| {
+                                        let label = match kind {
+                                            Attention::Account => tr("계정 설정 열기"),
+                                            Attention::Storage | Attention::CodexCli => tr("다시 시도"),
+                                        };
+                                        if ui.small_button(label).clicked() {
+                                            actions.push(match kind {
+                                                Attention::Account => RowAction::OpenAccounts,
+                                                _ => RowAction::Retry,
+                                            });
+                                        }
+                                        if ui.small_button(tr("무시")).on_hover_text(tr("이 문제는 경고에서 빼고, 다른 문제가 생기면 다시 알립니다.")).clicked() {
+                                            actions.push(RowAction::Ignore(key.clone(), kind));
+                                        }
+                                    });
+                                } else if is_ignored && ui.small_button(tr("다시 표시")).clicked() {
+                                    actions.push(RowAction::Unignore(key.clone()));
                                 }
                                 let title = if row.title.is_empty() {
                                     row.source.id.as_str()
@@ -1405,28 +1571,49 @@ impl Manager {
                                     .truncate(),
                                 )
                                 .on_hover_text(title);
-                                let targets = if row.copies.is_empty() {
-                                    row.target.iter().collect::<Vec<_>>()
-                                } else { row.copies.iter().collect::<Vec<_>>() };
+                                let mut targets = vec![Continuation {
+                                    tool: row.source.tool,
+                                    id: row.source.id.clone(),
+                                    cwd: row.source.cwd.clone(),
+                                    root: row.source.root.clone(),
+                                    revision: PROJECTION_REVISION,
+                                }];
+                                targets.extend(row.copies.iter().cloned());
                                 let account = |target: &Continuation| {
                                     self.configured.as_ref()
                                         .filter(|p| p.endpoint(target.tool).root == target.root)
                                         .map(|p| p.endpoint(target.tool).label.clone())
                                         .unwrap_or_else(|| tr("기본 CLI").to_owned())
                                 };
-                                if row.phase == Phase::Synced
-                                    && let Some(first) = targets.first()
-                                {
-                                    let accounts: Vec<_> = targets.iter().map(|t| account(t)).collect();
+                                if row.phase == Phase::Synced && !row.copies.is_empty() {
+                                    let places: Vec<_> = targets
+                                        .iter()
+                                        .map(|t| format!("{} ({})", t.tool.display_name(), account(t)))
+                                        .collect();
                                     ui.add(egui::Label::new(egui::RichText::new(kiln_common::trf!(
-                                        "{}에서 /resume으로 이어가기 · {}",
-                                        first.tool.display_name(),
-                                        accounts.join(", ")
+                                        "/resume으로 이어가기 · {}",
+                                        places.join(", ")
                                     )).color(theme.text_dim)).wrap());
+                                }
+                                for branch in &row.branches {
+                                    ui.push_id(&branch.id, |ui| {
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.label(egui::RichText::new(kiln_common::trf!("보관된 갈래 · 메시지 {}개", branch.events)).color(theme.text_dim));
+                                            if ui
+                                                .small_button(tr("복구"))
+                                                .on_hover_text(tr("이 갈래를 별도 대화로 되살려 모든 에이전트에 다시 연결합니다."))
+                                                .clicked()
+                                            {
+                                                actions.push(RowAction::Restore {
+                                                    branch: branch.id.clone(),
+                                                    title: format!("{} ({})", title, tr("복구됨")),
+                                                });
+                                            }
+                                        });
+                                    });
                                 }
                                 ui.collapsing(tr("대화 정보"), |ui| {
                                     ui.add(egui::Label::new(&row.source.cwd).wrap());
-                                    ui.label(&row.source.id);
                                     if !row.detail.is_empty() {
                                         ui.add(egui::Label::new(&row.detail).wrap());
                                         if ui.small_button(tr("오류 정보 복사")).clicked() {
@@ -1457,5 +1644,6 @@ impl Manager {
                         }
                     });
             });
+        actions
     }
 }

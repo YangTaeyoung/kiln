@@ -235,7 +235,6 @@ impl Hub {
         }
         Ok(id)
     }
-    #[cfg(test)]
     pub fn branch_events(&self, id: &str) -> Result<Vec<format::Message>> {
         let count = self
             .state
@@ -312,5 +311,58 @@ pub(super) fn reconcile(
         Outcome::NativeWins { base }
     } else {
         Outcome::CanonicalWins { base }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct Restore {
+    pub branch: String,
+    pub title: String,
+}
+fn restore_dir(config: &Path) -> PathBuf {
+    config.join("conversation-sync/hub/restore")
+}
+/// Asks the next scan to restore an archived branch as a separate conversation.
+pub(super) fn request_restore(config: &Path, branch: &str, title: &str) -> Result<()> {
+    private_dir(&restore_dir(config))?;
+    let path = restore_dir(config).join(format!("{}.json", digest(branch.as_bytes())));
+    replace_changed(&path, &serde_json::to_vec(&Restore { branch: branch.into(), title: title.into() })?)
+}
+/// Pending restore requests and the files holding them.
+pub(super) fn restore_requests(config: &Path) -> Vec<(PathBuf, Restore)> {
+    let Ok(entries) = fs::read_dir(restore_dir(config)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            let request = serde_json::from_slice(&bounded(&path, 64 * 1024).ok()?).ok()?;
+            Some((path, request))
+        })
+        .collect()
+}
+impl Hub {
+    /// Creates a conversation from the shared events of a branch and the branch itself.
+    pub fn restore(&mut self, request: &Restore) -> Result<Option<String>> {
+        let Some((cid, base, cwd)) = self.state.conversations.iter().find_map(|(cid, r)| {
+            r.branches
+                .iter()
+                .find(|b| b.id == request.branch && !b.restored)
+                .map(|b| (cid.clone(), b.base, r.cwd.clone()))
+        }) else {
+            return Ok(None);
+        };
+        let mut events = self.events(&cid)?;
+        events.truncate(base);
+        events.extend(self.branch_events(&request.branch)?);
+        let restored = stable_id(&format!("{cid}:restore:{}", request.branch));
+        self.state.conversations.insert(restored.clone(), Record::new(&request.title, &cwd));
+        self.append(&restored, &events)?;
+        let record = self.record(&cid)?;
+        if let Some(branch) = record.branches.iter_mut().find(|b| b.id == request.branch) {
+            branch.restored = true;
+        }
+        Ok(Some(restored))
     }
 }

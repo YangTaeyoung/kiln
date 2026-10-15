@@ -161,6 +161,10 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 }
             }
         }
+        for (path, request) in super::hub::restore_requests(self.config) {
+            hub.restore(&request)?;
+            let _ = fs::remove_file(path);
+        }
         let mut active = Vec::new();
         let cids: Vec<String> = hub.state.conversations.keys().cloned().collect();
         for cid in cids {
@@ -247,6 +251,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             detail: detail.into(),
             target: None,
             copies: Vec::new(),
+            branches: Vec::new(),
         }
     }
 
@@ -386,17 +391,20 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
     fn fail(&mut self, key: &str, mut row: Conversation, error: &anyhow::Error, fingerprint: u64) {
         let detail = error.to_string();
         let retrying = detail.contains("retrying");
+        // A condition the user can resolve keeps the short retry delays.
+        let settled = !retrying && classify(&detail).is_none();
         row.phase = if retrying { Phase::Waiting } else { Phase::Failed };
         row.detail = detail;
         self.status.rows.insert(key.to_owned(), row);
         let failures = self.cache.hub.get(key).map_or(0, |(_, _, n, _)| *n) + 1;
         self.cache
             .hub
-            .insert(key.to_owned(), (fingerprint, SystemTime::now(), failures, !retrying));
+            .insert(key.to_owned(), (fingerprint, SystemTime::now(), failures, settled));
     }
 
     fn row(&mut self, record: &Record, phase: Phase, detail: String) -> Conversation {
         let live: Vec<&Projection> = record.projections.iter().filter(|p| !p.removed).collect();
+        // A conversation whose first projection is still being written shows its namespace.
         let origin = live
             .iter()
             .find(|p| p.origin)
@@ -404,7 +412,10 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             .map(|p| &p.source)
             .or(record.projections.first().map(|p| &p.source))
             .cloned()
-            .expect("conversation with a projection");
+            .unwrap_or_else(|| {
+                let (tool, root) = self.namespaces.first().cloned().unwrap_or((Tool::Claude, PathBuf::new()));
+                Source { tool, root, path: PathBuf::new(), cwd: record.cwd.clone(), id: String::new() }
+            });
         let copies: Vec<Continuation> = live
             .iter()
             .filter(|p| p.source.path != origin.path)
@@ -418,6 +429,12 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             detail,
             target: copies.first().cloned(),
             copies,
+            branches: record
+                .branches
+                .iter()
+                .filter(|b| !b.restored)
+                .map(|b| BranchRow { id: b.id.clone(), events: b.events, at: b.at })
+                .collect(),
         }
     }
     fn copying(&mut self, hub: &Hub, cid: &str) {

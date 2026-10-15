@@ -11079,20 +11079,10 @@
     "ja": "両方の CLI でそれぞれ続けられたため統合していません。どちらの会話もそのまま保持され、各 CLI の /resume から個別に開けます。",
     "zh-CN": "两个 CLI 分别继续了此对话，因此未合并。两个对话都已保留，可在各自 CLI 的 /resume 中分别打开。"
   },
-  "따로 이어진 대화 {}개 · 두 기록 모두 보관됨": {
-    "en": "{} continued separately · both histories kept",
-    "ja": "別々に続いた会話 {}件 · 両方の履歴を保持",
-    "zh-CN": "分别继续的对话 {} 个 · 两份记录均已保留"
-  },
   "따로 이어짐": {
     "en": "Continued separately",
     "ja": "別々に継続",
     "zh-CN": "分别继续"
-  },
-  "{}에서 /resume으로 이어가기 · {}": {
-    "en": "Continue with /resume in {} · {}",
-    "ja": "{} の /resume で続ける · {}",
-    "zh-CN": "在 {} 中用 /resume 继续 · {}"
   },
   "{} 대화 ID 복사": {
     "en": "Copy {} conversation ID",
@@ -11254,11 +11244,6 @@
     "ja": "会話が連携の容量制限を超えています。原本は保持されます。",
     "zh-CN": "对话超出同步大小限制。原始记录保持不变。"
   },
-  "아직 확인되지 않은 CLI 기록 형식입니다. 원본은 그대로 보관됩니다.": {
-    "en": "This CLI transcript format has not been verified. The original is preserved.",
-    "ja": "未検証の CLI 記録形式です。原本は保持されます。",
-    "zh-CN": "此 CLI 记录格式尚未验证。原始记录保持不变。"
-  },
   "전체 원문 연결을 확인할 수 없습니다. 요약본으로 대체하지 않고 연동을 보류합니다.": {
     "en": "The complete original history could not be verified. Sync is deferred without substituting a summary.",
     "ja": "原文全体のつながりを確認できません。要約に置き換えず、連携を保留します。",
@@ -11343,5 +11328,95 @@
     "en": "Open the canonical conversation with /resume in the same folder. Inside Kiln, the previous agent stops before you continue.",
     "ja": "同じフォルダーで /resume を使って正本を開いてください。Kiln 内では以前のエージェントを停止してから続行します。",
     "zh-CN": "在同一文件夹中使用 /resume 打开主会话。在 Kiln 内，继续前会先停止原有代理。"
+  },
+  "연결 계정 폴더를 찾을 수 없습니다. 설정에서 계정을 다시 연결하면 자동으로 이어집니다.": {
+    "en": "The connected account folder is missing. Reconnect the account in Settings and synchronization continues automatically.",
+    "ja": "接続アカウントのフォルダーが見つかりません。設定でアカウントを再接続すると自動的に再開します。",
+    "zh-CN": "找不到已连接账户的文件夹。在设置中重新连接账户后会自动继续。"
+  },
+  "저장 공간이 부족하거나 쓰기 권한이 없습니다. 공간이나 권한을 확인한 뒤 다시 시도하세요.": {
+    "en": "Storage is full or not writable. Check space and permissions, then try again.",
+    "ja": "保存領域が不足しているか、書き込み権限がありません。空き容量と権限を確認してから再試行してください。",
+    "zh-CN": "存储空间不足或没有写入权限。请检查空间和权限后重试。"
+  },
+  "Codex /resume 목록에 등록하려면 Codex CLI가 필요합니다. 설치하면 자동으로 다시 시도합니다.": {
+    "en": "Codex CLI is needed to register conversations in the Codex /resume list. Install it and Kiln retries automatically.",
+    "ja": "Codex の /resume 一覧に登録するには Codex CLI が必要です。インストールすると自動的に再試行します。",
+    "zh-CN": "需要 Codex CLI 才能登记到 Codex 的 /resume 列表。安装后会自动重试。"
+  },
+  "Kiln이 아직 모르는 기록 형식이 있어 이 대화를 보류합니다. Kiln이 업데이트되면 자동으로 다시 확인합니다. 원본은 그대로 보관됩니다.": {
+    "en": "This conversation contains a record format Kiln does not know yet, so it is on hold. Kiln checks it again after an update. The original stays as it is.",
+    "ja": "Kiln がまだ対応していない記録形式があるため、この会話は保留中です。Kiln の更新後に自動で再確認します。元の記録はそのまま保持されます。",
+    "zh-CN": "此对话包含 Kiln 尚不支持的记录格式，已暂缓同步。Kiln 更新后会自动重新检查。原始记录保持不变。"
+  },
+  "보류된 대화 {}개 · 원본은 그대로 보관됨": {
+    "en": "{} on hold · originals kept",
+    "ja": "保留中の会話 {}件 · 元の記録は保持",
+    "zh-CN": "暂缓的对话 {} 个 · 原始记录已保留"
+  },
+  "무시한 경고 숨기기": {
+    "en": "Hide ignored warnings",
+    "ja": "無視した警告を隠す",
+    "zh-CN": "隐藏已忽略的警告"
+  },
+  "무시한 경고 보기": {
+    "en": "Show ignored warnings",
+    "ja": "無視した警告を表示",
+    "zh-CN": "显示已忽略的警告"
+  },
+  "무시한 경고 {}개": {
+    "en": "{} ignored warnings",
+    "ja": "無視した警告 {}件",
+    "zh-CN": "已忽略的警告 {} 个"
+  },
+  "무시됨": {
+    "en": "Ignored",
+    "ja": "無視中",
+    "zh-CN": "已忽略"
+  },
+  "보류됨": {
+    "en": "On hold",
+    "ja": "保留中",
+    "zh-CN": "已暂缓"
+  },
+  "무시": {
+    "en": "Ignore",
+    "ja": "無視",
+    "zh-CN": "忽略"
+  },
+  "이 문제는 경고에서 빼고, 다른 문제가 생기면 다시 알립니다.": {
+    "en": "Stop warning about this problem; a different problem warns again.",
+    "ja": "この問題の警告を止めます。別の問題が起きた場合は再び通知します。",
+    "zh-CN": "不再警告此问题；出现其他问题时会再次提醒。"
+  },
+  "다시 표시": {
+    "en": "Show again",
+    "ja": "再表示",
+    "zh-CN": "重新显示"
+  },
+  "/resume으로 이어가기 · {}": {
+    "en": "Continue with /resume · {}",
+    "ja": "/resume で続ける · {}",
+    "zh-CN": "用 /resume 继续 · {}"
+  },
+  "보관된 갈래 · 메시지 {}개": {
+    "en": "Archived branch · {} messages",
+    "ja": "保管された分岐 · メッセージ {}件",
+    "zh-CN": "已归档的分支 · {} 条消息"
+  },
+  "복구": {
+    "en": "Restore",
+    "ja": "復元",
+    "zh-CN": "恢复"
+  },
+  "이 갈래를 별도 대화로 되살려 모든 에이전트에 다시 연결합니다.": {
+    "en": "Restore this branch as a separate conversation in every agent.",
+    "ja": "この分岐を別の会話として復元し、すべてのエージェントに接続します。",
+    "zh-CN": "将此分支恢复为独立对话，并连接到所有代理。"
+  },
+  "복구됨": {
+    "en": "restored",
+    "ja": "復元",
+    "zh-CN": "已恢复"
   }
 }

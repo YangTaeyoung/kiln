@@ -951,7 +951,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     assert!(
         h.ctx
             .content_rect()
-            .contains_rect(h.get_by_label("Codex에서 /resume으로 이어가기 · 기본 CLI").rect())
+            .contains_rect(h.get_by_label("/resume으로 이어가기 · Claude Code (기본 CLI), Codex (기본 CLI)").rect())
     );
     h.render()
         .unwrap()
@@ -963,7 +963,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     h.state_mut().1 = true;
     let row = h.state_mut().0.status.rows.values_mut().next().unwrap();
     row.phase = Phase::Failed;
-    row.detail = "Unsupported image; original transcript preserved".into();
+    row.detail = "Connected account directory is missing or symlinked".into();
     h.run_steps(2);
     assert!(h.query_by_label("동기화 실패").is_some());
     assert!(h.query_by_label("확인이 필요한 대화가 있습니다").is_some());
@@ -977,7 +977,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     assert!(h.query_by_label("따로 이어짐").is_some());
     assert!(h.query_by_label("동기화 실패").is_none());
     assert!(h.query_by_label("확인이 필요한 대화가 있습니다").is_none());
-    assert!(h.query_by_label("따로 이어진 대화 1개 · 두 기록 모두 보관됨").is_some());
+    assert!(h.query_by_label("보류된 대화 1개 · 원본은 그대로 보관됨").is_some());
     h.render()
         .unwrap()
         .save("/tmp/kiln-sync-progress-diverged.png")
@@ -2148,6 +2148,9 @@ fn workspace_status_and_badges_do_not_mix_other_folders() {
         let mut row = original.clone();
         row.source.cwd = path.into();
         row.phase = phase;
+        if phase == Phase::Failed {
+            row.detail = "Connected account directory is missing or symlinked".into();
+        }
         manager.status.rows.insert(path.into(), row);
     }
     assert_eq!(
@@ -3295,4 +3298,134 @@ fn canonical_title_follows_the_latest_native_rename_in_every_projection() {
     assert_eq!(status.rows.values().next().unwrap().title, "Renamed in Claude");
     assert_eq!(titles::projection(&peer).unwrap().as_deref(), Some("Renamed in Claude"));
     assert_eq!(f.scan().published, 0);
+}
+
+fn attention_row(f: &Fixture, detail: &str) -> Conversation {
+    Conversation {
+        workspace: Some(PathBuf::from(&f.source.cwd)),
+        source: f.source.clone(),
+        title: "Attention fixture".into(),
+        phase: Phase::Failed,
+        detail: detail.into(),
+        target: None,
+        copies: vec![],
+        branches: vec![],
+    }
+}
+
+#[test]
+fn only_resolvable_conditions_raise_the_badge() {
+    let f = Fixture::new(Tool::Claude);
+    let root = PathBuf::from(&f.source.cwd);
+    let mut manager = Manager::default();
+    manager.workspaces = vec![root.clone()];
+    manager.status.rows.insert("info".into(), attention_row(&f, "Unsupported content (hologram); this conversation was not synchronized"));
+    manager.revision += 1;
+    assert!(!matches!(manager.badge_state(&root), Badge::Attention), "a format Kiln cannot read yet is not the user's to fix");
+    manager.status.rows.insert("account".into(), attention_row(&f, "Connected account directory is missing or symlinked"));
+    manager.revision += 1;
+    assert!(matches!(manager.badge_state(&root), Badge::Attention));
+    assert_eq!(classify("No space left on device (os error 28)"), Some(Attention::Storage));
+    assert_eq!(classify("Install Codex CLI to register /resume conversations"), Some(Attention::CodexCli));
+    assert_eq!(classify("Linked histories diverged; both conversations were preserved"), None);
+}
+
+#[test]
+fn ignored_warnings_leave_the_badge_until_a_different_condition() {
+    let f = Fixture::new(Tool::Claude);
+    let root = PathBuf::from(&f.source.cwd);
+    let mut manager = Manager::default();
+    manager.workspaces = vec![root.clone()];
+    manager.status.rows.insert("account".into(), attention_row(&f, "Connected account directory is missing or symlinked"));
+    manager.ignore("account", Attention::Account);
+    manager.revision += 1;
+    assert!(!matches!(manager.badge_state(&root), Badge::Attention));
+    manager.status.rows.insert("account".into(), attention_row(&f, "No space left on device (os error 28)"));
+    manager.revision += 1;
+    assert!(matches!(manager.badge_state(&root), Badge::Attention), "a different problem warns again");
+    manager.unignore("account");
+    manager.status.rows.insert("account".into(), attention_row(&f, "Connected account directory is missing or symlinked"));
+    manager.revision += 1;
+    assert!(matches!(manager.badge_state(&root), Badge::Attention));
+}
+
+#[test]
+fn resolved_conditions_clear_on_the_next_scan() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let mut scope = workspace_scope(&f);
+    let unavailable = PathBuf::from(&f.source.cwd).join("account-not-created");
+    scope.roots.push((Tool::Codex, unavailable.clone()));
+    let mut cache = Cache::new();
+    let first = scan_scoped(&f.config, &f.pair, &f.gate, &mut cache, Some(&scope), |_| {}).unwrap();
+    let row = first.rows.values().next().unwrap();
+    assert_eq!(classify(&row.detail), Some(Attention::Account), "{}", row.detail);
+    private_dir(&unavailable).unwrap();
+    for attempt in cache.hub.values_mut() {
+        attempt.1 = SystemTime::now() - Duration::from_secs(600);
+    }
+    let second = scan_scoped(&f.config, &f.pair, &f.gate, &mut cache, Some(&scope), |_| {}).unwrap();
+    let row = second.rows.values().next().unwrap();
+    assert_eq!(row.phase, Phase::Synced, "{}", row.detail);
+}
+
+#[test]
+fn restoring_a_branch_creates_a_separate_conversation_everywhere() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.peer();
+    let now = SystemTime::now();
+    let mut older = messages();
+    older.extend(turns(&["claude side", "claude reply"]));
+    let mut newer = messages();
+    newer.extend(turns(&["codex side", "codex reply"]));
+    write_history(&f.source, &older, now + Duration::from_secs(40));
+    write_history(&peer, &newer, now + Duration::from_secs(50));
+    f.scan();
+    let branch = f.hub().conversations.values().next().unwrap().branches[0].id.clone();
+    hub::request_restore(&f.config, &branch, "Restored fixture").unwrap();
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let state = f.hub();
+    assert_eq!(state.conversations.len(), 2);
+    let restored = state.conversations.values().find(|r| r.title == "Restored fixture").expect("restored conversation");
+    let live: Vec<_> = restored.projections.iter().filter(|p| !p.removed).collect();
+    assert_eq!(live.len(), 2, "projected into every namespace");
+    for p in live {
+        assert_eq!(read_messages(&p.source).unwrap(), older);
+    }
+    assert!(state.conversations.values().any(|r| r.branches.iter().any(|b| b.id == branch && b.restored)));
+    assert_eq!(f.scan().published, 0);
+}
+
+#[test]
+fn progress_ui_offers_actions_ignore_and_restore() {
+    use egui_kittest::{Harness, kittest::Queryable};
+    let f = Fixture::new(Tool::Claude);
+    let mut manager = Manager::default();
+    manager.status.rows.insert("account".into(), attention_row(&f, "Connected account directory is missing or symlinked"));
+    let mut kept = attention_row(&f, "");
+    kept.phase = Phase::Synced;
+    kept.branches = vec![BranchRow { id: "branch".into(), events: 2, at: SystemTime::now() }];
+    manager.status.rows.insert("kept".into(), kept);
+    manager.status.rows.insert("info".into(), attention_row(&f, "Unsupported content (hologram); this conversation was not synchronized"));
+    let mut initialized = false;
+    let mut h = Harness::builder().with_size([560.0, 700.0]).build_ui_state(
+        |ui, manager: &mut Manager| {
+            if !initialized {
+                kiln_common::fonts::install(ui.ctx());
+                kiln_common::Theme::current().apply(ui.ctx());
+                initialized = true;
+                return;
+            }
+            manager.progress_ui(ui, true);
+        },
+        manager,
+    );
+    h.run_steps(3);
+    assert!(h.query_by_label("계정 설정 열기").is_some());
+    assert!(h.query_by_label("무시").is_some());
+    assert!(h.query_by_label("복구").is_some());
+    assert!(h.query_by_label("보류됨").is_some());
+    h.render().unwrap().save("/tmp/kiln-sync-attention.png").unwrap();
 }
