@@ -11074,10 +11074,35 @@
     "ja": "同期に失敗",
     "zh-CN": "同步失败"
   },
-  "이어갈 대화 ID 복사": {
-    "en": "Copy continuation ID",
-    "ja": "引き継ぎ先の会話IDをコピー",
-    "zh-CN": "复制接续对话 ID"
+  "두 CLI에서 각각 이어 써서 하나로 합치지 않았습니다. 두 대화 모두 그대로 있으며 각 CLI의 /resume에서 따로 열 수 있습니다.": {
+    "en": "Both CLIs continued this conversation separately, so Kiln did not merge them. Both conversations are kept and each opens from its own CLI’s /resume.",
+    "ja": "両方の CLI でそれぞれ続けられたため統合していません。どちらの会話もそのまま保持され、各 CLI の /resume から個別に開けます。",
+    "zh-CN": "两个 CLI 分别继续了此对话，因此未合并。两个对话都已保留，可在各自 CLI 的 /resume 中分别打开。"
+  },
+  "따로 이어진 대화 {}개 · 두 기록 모두 보관됨": {
+    "en": "{} continued separately · both histories kept",
+    "ja": "別々に続いた会話 {}件 · 両方の履歴を保持",
+    "zh-CN": "分别继续的对话 {} 个 · 两份记录均已保留"
+  },
+  "따로 이어짐": {
+    "en": "Continued separately",
+    "ja": "別々に継続",
+    "zh-CN": "分别继续"
+  },
+  "{}에서 /resume으로 이어가기 · {}": {
+    "en": "Continue with /resume in {} · {}",
+    "ja": "{} の /resume で続ける · {}",
+    "zh-CN": "在 {} 中用 /resume 继续 · {}"
+  },
+  "{} 대화 ID 복사": {
+    "en": "Copy {} conversation ID",
+    "ja": "{} の会話IDをコピー",
+    "zh-CN": "复制 {} 对话 ID"
+  },
+  "/resume 목록에서 찾기 어려우면 이 ID로 직접 엽니다.\n{}\n{}": {
+    "en": "If it is hard to find in the /resume list, open it directly with this ID.\n{}\n{}",
+    "ja": "/resume の一覧で見つけにくい場合は、この ID で直接開きます。\n{}\n{}",
+    "zh-CN": "如果在 /resume 列表中不易找到，可用此 ID 直接打开。\n{}\n{}"
   },
   "열린 워크스페이스의 Claude Code · Codex 대화를 자동으로 찾고, 완료된 원문을 상대 CLI의 /resume에 연결합니다.": {
     "en": "Automatically find Claude Code and Codex conversations in open workspaces and make completed transcripts available in the other CLI’s /resume.",
