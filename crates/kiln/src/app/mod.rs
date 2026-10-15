@@ -2280,6 +2280,25 @@ fn normalize_path(p: PathBuf) -> PathBuf {
     }
 }
 
+/// Input other than pointer motion, which can change application state.
+fn changes_state(event: &egui::Event) -> bool {
+    !matches!(event, egui::Event::PointerMoved(_) | egui::Event::MouseMoved(_))
+}
+
+#[cfg(test)]
+mod follow_up_pass_tests {
+    use super::*;
+    #[test]
+    fn clicks_and_keys_change_state_but_pointer_motion_does_not() {
+        let click = egui::Event::PointerButton { pos: egui::Pos2::ZERO, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() };
+        let key = egui::Event::Key { key: egui::Key::D, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        assert!(changes_state(&click));
+        assert!(changes_state(&key));
+        assert!(!changes_state(&egui::Event::PointerMoved(egui::Pos2::ZERO)));
+        assert!(!changes_state(&egui::Event::MouseMoved(egui::Vec2::ZERO)));
+    }
+}
+
 /// `p` relative to the first workspace root that contains it, or `short_path` otherwise.
 /// The root itself is shown with `short_path`.
 pub(crate) fn workspace_path(p: &Path, roots: &[&Path]) -> String {
@@ -2417,6 +2436,10 @@ impl eframe::App for KilnApp {
             }
         }
         let actions = std::mem::take(&mut self.actions);
+        // This pass was drawn before its input and actions took effect; the next pass shows them.
+        if !actions.is_empty() || ctx.input(|i| i.events.iter().any(changes_state)) {
+            ctx.request_repaint();
+        }
         for a in actions {
             self.apply(a, ctx);
         }
