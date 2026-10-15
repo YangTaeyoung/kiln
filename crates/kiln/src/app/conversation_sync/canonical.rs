@@ -60,6 +60,7 @@ impl Links {
         Self { group, members }
     }
     /// Keys linked to `key`, including `key` itself.
+    #[cfg(test)]
     pub(super) fn members(&self, key: &str) -> BTreeSet<String> {
         self.group(key)
             .map(|(_, members)| members.clone())
@@ -71,24 +72,7 @@ impl Links {
     }
 }
 
-pub(super) fn groups(state: &State) -> BTreeMap<String, String> {
-    let links = Links::new(state);
-    let mut groups = BTreeMap::new();
-    for key in state.entries.keys() {
-        if groups.contains_key(key) {
-            continue;
-        }
-        let (_, members) = links.group(key).unwrap();
-        let anchor = members
-            .iter()
-            .min_by_key(|key| (state.entries[*key].imported, *key))
-            .unwrap();
-        for member in members {
-            groups.insert(member.clone(), anchor.clone());
-        }
-    }
-    groups
-}
+
 
 /// UI-only grouping: retain per-endpoint diagnostics and cache state internally.
 pub(super) fn group_rows(
@@ -120,45 +104,10 @@ pub(super) fn group_rows(
     grouped
 }
 
-pub(super) fn members(state: &State, key: &str) -> BTreeSet<String> {
-    Links::new(state).members(key)
-}
 
-pub(super) fn destination(state: &State, key: &str, tool: Tool, root: &Path) -> Option<Source> {
-    destination_in(state, &members(state, key), tool, root)
-}
 
-/// `destination` for a group whose members are already known.
-pub(super) fn destination_in(
-    state: &State,
-    members: &BTreeSet<String>,
-    tool: Tool,
-    root: &Path,
-) -> Option<Source> {
-    let anchor = members
-        .iter()
-        .min_by_key(|key| (state.entries[*key].imported, *key))?;
-    let preferred = state.entries[anchor]
-        .copies
-        .iter()
-        .find(|c| c.tool == tool && c.root == root)
-        .map(|c| &c.id);
-    members
-        .iter()
-        .filter_map(|key| state.entries.get(key))
-        .filter(|entry| {
-            entry.source.tool == tool && entry.source.root == root && storage::exists(&entry.source)
-        })
-        // Keep the original native conversation when returning from the other CLI.
-        .min_by_key(|entry| {
-            (
-                entry.imported,
-                Some(&entry.source.id) != preferred,
-                &entry.source.path,
-            )
-        })
-        .map(|entry| entry.source.clone())
-}
+
+
 
 #[derive(Serialize, Deserialize)]
 struct Archive {
@@ -168,309 +117,209 @@ struct Archive {
     canonical_id: String,
 }
 
-pub(super) fn retire(
+fn manifest_path(config: &Path, source: &Source) -> PathBuf {
+    let key = source.path.to_string_lossy().into_owned();
+    config
+        .join("conversation-sync/archives")
+        .join(format!("{}.json", digest(key.as_bytes())))
+}
+
+/// Whether Kiln moved this native transcript into an archive.
+pub(super) fn archived(config: &Path, source: &Source) -> bool {
+    bounded(&manifest_path(config, source), 64 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Archive>(&bytes).ok())
+        .is_some_and(|plan| plan.destination.exists())
+}
+
+/// Moves a whole native transcript out of its CLI's resume list with an integrity manifest
+/// and returns the archived path. Codex uses its native archive; Claude moves into Kiln's archive.
+pub(super) fn archive_native(
     config: &Path,
-    state_path: &Path,
-    state: &mut State,
-    scope: Option<&discovery::Scope>,
-    gate: &Gate,
-    status: &mut Status,
-    cache: &mut Cache,
+    source: &Source,
+    canonical_id: &str,
     metadata: &mut impl FnMut(&Source, Metadata<'_>) -> Result<Option<String>>,
-) -> Result<()> {
-    let keys: Vec<_> = state.entries.keys().cloned().collect();
-    // Groups and destinations are computed once for the pass; archiving leaves publication
-    // edges unchanged and never moves a destination.
-    let links = Links::new(state);
-    let mut destinations: HashMap<(usize, Tool, PathBuf), Option<Source>> = HashMap::new();
-    for key in keys {
-        if !gate.load(Ordering::Acquire) {
-            break;
-        }
-        let entry = &state.entries[&key];
-        if !entry.imported
-            || state.archived.contains_key(&key)
-            || scope.is_some_and(|s| !s.contains(&entry.source))
-        {
-            continue;
-        }
-        let source = entry.source.clone();
-        let (slot, members) = links.group(&key).unwrap();
-        let Some(target) = destinations
-            .entry((slot, source.tool, source.root.clone()))
-            .or_insert_with(|| destination_in(state, members, source.tool, &source.root))
-            .clone()
-        else {
-            continue;
-        };
-        if source.path == target.path {
-            continue;
-        }
-        let stamps: Vec<_> = [&source, &target]
-            .into_iter()
-            .map(|s| {
-                storage::metadata(s)
-                    .ok()
-                    .and_then(|m| Some((m.len(), m.modified().ok()?)))
-                    .unwrap_or((0, SystemTime::UNIX_EPOCH))
-            })
-            .collect();
-        if let Some((seen, at, failures, settled)) = cache.retirements.get(&key)
-            && *seen == stamps
-            && {
-                let waited = at.elapsed().unwrap_or_default();
-                waited < retry_delay(*failures) || (*settled && waited < FAILED_RECHECK)
-            }
-        {
-            if let Some(row) = cache.rows.get(&key) {
-                status.rows.entry(key.clone()).or_insert_with(|| row.clone());
-            }
-            continue;
-        }
-        let manifest = config
+) -> Result<PathBuf> {
+    let key = source.path.to_string_lossy().into_owned();
+    let manifest = manifest_path(config, source);
+    let _guard = handover::write_guard(config, source)?;
+    let physical = storage::physical(source);
+    safe_path(&source.root, &physical)?;
+    let bytes = bounded(&physical, COPY_LIMIT)?;
+    let destination = if source.tool == Tool::Codex {
+        source
+            .root
+            .join("archived_sessions")
+            .join(physical.file_name().context("Missing source filename")?)
+    } else {
+        config
             .join("conversation-sync/archives")
-            .join(format!("{}.json", digest(key.as_bytes())));
-        let result = (|| -> Result<Option<PathBuf>> {
-            let _guard = handover::write_guard(config, &source)?;
-            if !storage::exists(&source) {
-                if !manifest.exists() {
-                    return Ok(None);
-                }
-                let archived: Archive = serde_json::from_slice(&bounded(&manifest, 32 * 1024)?)?;
-                ensure!(
-                    archived.source.path == source.path && archived.source.id == source.id,
-                    "Archive recovery identity changed"
-                );
-                let archive_root = if source.tool == Tool::Codex {
-                    &source.root
-                } else {
-                    config
-                };
-                safe_path(archive_root, &archived.destination)?;
-                ensure!(
-                    digest(&bounded(&archived.destination, COPY_LIMIT)?) == archived.sha256,
-                    "Archived history integrity check failed"
-                );
-                return Ok(Some(archived.destination));
-            }
-            // A baseline proves Kiln/native-import ownership; it is never permission
-            // to discard a new branch. Compare the actual complete history as well.
-            if discovery::imported(config, &source)?.is_none() {
-                return Ok(None);
-            }
-            let messages = read_messages(&source)?;
-            let current = read_messages(&target)?;
-            if messages.len() > current.len() && messages.starts_with(&current) {
-                anyhow::bail!("Canonical history is catching up; retrying before archive");
-            }
-            // A native importer can retain the displayed text but omit Kiln's
-            // lossless annotation. Proven lineage plus exact visible-prefix
-            // equality permits archival; the raw alias is retained in the archive.
-            let visible_prefix = current.len() >= messages.len()
-                && current.iter().zip(&messages).all(|(a, b)| {
-                    a.role == b.role
-                        && a.images == b.images
-                        && (a.text == b.text
-                            || a.role == "assistant" && portable::display(&a.text) == b.text)
-                });
-            ensure!(visible_prefix, DIVERGED);
-            let physical = storage::physical(&source);
-            safe_path(&source.root, &physical)?;
-            let bytes = bounded(&physical, COPY_LIMIT)?;
-            let destination = if source.tool == Tool::Codex {
-                source
-                    .root
-                    .join("archived_sessions")
-                    .join(physical.file_name().context("Missing source filename")?)
-            } else {
-                config
-                    .join("conversation-sync/archives")
-                    .join(format!("{}.jsonl", digest(key.as_bytes())))
-            };
-            ensure!(
-                !destination.exists(),
-                "Archive destination collision; original preserved"
-            );
-            let plan = Archive {
-                source: source.clone(),
-                destination: destination.clone(),
-                sha256: digest(&bytes),
-                canonical_id: target.id.clone(),
-            };
-            private_dir(manifest.parent().unwrap())?;
-            replace(&manifest, &serde_json::to_vec(&plan)?)?;
-            ensure!(
-                storage::physical(&source) == physical && bounded(&physical, COPY_LIMIT)? == bytes,
-                "Transcript changed before archive; retrying"
-            );
-            if source.tool == Tool::Codex {
-                let actual = metadata(&source, Metadata::Archive)?
-                    .context("Native archive returned no path")?;
-                ensure!(
-                    Path::new(&actual) == destination,
-                    "Native archive returned a different destination"
-                );
-            } else {
-                fs::rename(&source.path, &destination)?;
-                fs::File::open(source.path.parent().unwrap())?.sync_all()?;
-                fs::File::open(destination.parent().unwrap())?.sync_all()?;
-            }
-            ensure!(
-                digest(&bounded(&destination, COPY_LIMIT)?) == plan.sha256,
-                "Archived history integrity check failed"
-            );
-            Ok(Some(destination))
-        })();
-        match &result {
-            Ok(_) => {
-                cache.retirements.remove(&key);
-            }
-            Err(error) => {
-                let failures = cache.retirements.get(&key).map_or(0, |(_, _, n, _)| *n) + 1;
-                // A failure without "retrying" waits for a stamp change or FAILED_RECHECK.
-                let settled = !error.to_string().contains("retrying");
-                cache
-                    .retirements
-                    .insert(key.clone(), (stamps, SystemTime::now(), failures, settled));
-            }
-        }
-        match result {
-            Ok(Some(path)) => {
-                state.archived.insert(key.clone(), path);
-                status.rows.remove(&key);
-                state
-                    .recent
-                    .retain(|c| c.id != source.id || c.root != source.root);
-                replace(state_path, &serde_json::to_vec(state)?)?;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                let row = status.rows.entry(key).or_insert_with(|| {
-                    Conversation::from_entry(
-                        &state.entries[&source.path.to_string_lossy().into_owned()],
-                        scope,
-                    )
-                });
-                row.phase = if error.to_string().contains("retrying") {
-                    Phase::Waiting
-                } else {
-                    Phase::Failed
-                };
-                row.detail = error.to_string();
-            }
-        }
+            .join(format!("{}.jsonl", digest(key.as_bytes())))
+    };
+    ensure!(
+        !destination.exists(),
+        "Archive destination collision; original preserved"
+    );
+    let plan = Archive {
+        source: source.clone(),
+        destination: destination.clone(),
+        sha256: digest(&bytes),
+        canonical_id: canonical_id.into(),
+    };
+    private_dir(manifest.parent().unwrap())?;
+    replace(&manifest, &serde_json::to_vec(&plan)?)?;
+    ensure!(
+        storage::physical(source) == physical && bounded(&physical, COPY_LIMIT)? == bytes,
+        "Transcript changed before archive; retrying"
+    );
+    if source.tool == Tool::Codex {
+        let actual = metadata(source, Metadata::Archive)?
+            .context("Native archive returned no path")?;
+        ensure!(
+            Path::new(&actual) == destination,
+            "Native archive returned a different destination"
+        );
+    } else {
+        fs::rename(&physical, &destination)?;
+        fs::File::open(physical.parent().unwrap())?.sync_all()?;
+        fs::File::open(destination.parent().unwrap())?.sync_all()?;
     }
+    ensure!(
+        digest(&bounded(&destination, COPY_LIMIT)?) == plan.sha256,
+        "Archived history integrity check failed"
+    );
+    Ok(destination)
+}
+
+
+
+/// Appends `suffix` to an uncompressed transcript in place when it still has `length` bytes;
+/// a writer holding the file open keeps appending after it.
+fn append_in_place(source: &Source, physical: &Path, length: u64, modified: Option<SystemTime>, suffix: &[u8]) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new().append(true).custom_flags(libc::O_NOFOLLOW).open(physical)?;
+    let now = file.metadata()?;
+    ensure!(
+        storage::physical(source) == physical
+            && now.is_file()
+            && now.len() == length
+            && modified.is_none_or(|m| now.modified().is_ok_and(|n| n == m)),
+        "Transcript changed before publication; retrying"
+    );
+    file.write_all(suffix)?;
+    file.sync_all()?;
     Ok(())
 }
 
-/// Recover pre-canonical edges by reproducing the old ID formula, not by
-/// equating similar conversation text. Imported baselines are immutable evidence.
-pub(super) fn migrate(
-    config: &Path,
-    state_path: &Path,
-    legacy_path: &Path,
-    state: &mut State,
-    scope: Option<&discovery::Scope>,
-) -> Result<()> {
-    let keys: Vec<_> = state.entries.keys().cloned().collect();
-    for key in &keys {
-        let entry = &state.entries[key];
-        if !entry.imported
-            || state.lineage_checked.contains(key)
-            || scope.is_some_and(|s| !s.contains(&entry.source))
-        {
-            continue;
-        }
-        let Some(fingerprint) = discovery::imported(config, &entry.source)? else {
-            continue;
-        };
-        let mut names = vec![
-            entry.title.clone(),
-            titles::clean(&entry.title),
-            String::new(),
-        ];
-        if storage::exists(&entry.source) {
-            if let Some(raw) = titles::raw_projection(&entry.source)? {
-                names.push(raw.clone());
-                names.push(titles::clean(&raw));
-            }
-        }
-        names.sort();
-        names.dedup();
-        let mut parent = None;
-        'search: for source_key in &keys {
-            let source = &state.entries[source_key].source;
-            if source.tool == entry.source.tool || source.cwd != entry.source.cwd {
-                continue;
-            }
-            for path in [state_path, legacy_path] {
-                let prefix = path.display();
-                let root = entry.source.root.display();
-                let mut ids = vec![
-                    format!("{prefix}:{source_key}:{fingerprint}"),
-                    format!("{prefix}:{source_key}:{fingerprint}:{root}"),
-                    format!("{prefix}:v3:{source_key}:{fingerprint}:{root}"),
-                ];
-                for name in &names {
-                    let hash = digest(name.as_bytes());
-                    ids.push(format!("{prefix}:v4:{source_key}:{fingerprint}:{hash}"));
-                    ids.push(format!(
-                        "{prefix}:v4:{source_key}:{fingerprint}:{hash}:{root}"
-                    ));
-                }
-                if ids
-                    .iter()
-                    .any(|identity| stable_id(identity) == entry.source.id)
-                {
-                    parent = Some(source_key.clone());
-                    break 'search;
-                }
-            }
-        }
-        if let Some(parent) = parent {
-            state.lineage.insert(key.clone(), parent);
-        }
-        state.lineage_checked.insert(key.clone());
+/// Appends `tail` and `title` after a checkpoint without parsing the earlier history: the
+/// existing bytes are kept and the appended records must read back to exactly `tail`.
+/// Returns the next checkpoint, or `None` when only a full update can append safely.
+pub(super) fn append_since(
+    source: &Source,
+    checkpoint: &super::checkpoint::Checkpoint,
+    tail: &[format::Message],
+    title: &str,
+    timestamp: &str,
+) -> Result<Option<super::checkpoint::Checkpoint>> {
+    use super::checkpoint::{Checkpoint, window_of};
+    let physical = storage::physical(source);
+    if storage::compressed(&physical) {
+        return Ok(None);
     }
-    if let Some(scope) = scope {
-        for (tool, root) in &scope.roots {
-            if *tool != Tool::Codex {
-                continue;
-            }
-            let path = root.join("external_agent_session_imports.json");
-            if !path.exists() {
-                continue;
-            }
-            safe_path(root, &path)?;
-            let value: serde_json::Value =
-                serde_json::from_slice(&bounded(&path, 8 * 1024 * 1024)?)?;
-            for record in value["records"].as_array().into_iter().flatten() {
-                let (Some(source), Some(id)) = (
-                    record["source_path"].as_str(),
-                    record["imported_thread_id"].as_str(),
-                ) else {
-                    continue;
-                };
-                if state
-                    .entries
-                    .get(source)
-                    .is_none_or(|e| e.source.tool != Tool::Claude || !scope.contains(&e.source))
-                {
-                    continue;
-                }
-                if let Some((target, _)) = state.entries.iter().find(|(_, e)| {
-                    e.source.tool == Tool::Codex && e.source.root == *root && e.source.id == id
-                }) {
-                    state.lineage.insert(target.clone(), source.into());
-                }
-            }
+    let before = storage::metadata(source)?;
+    let old = storage::bytes(source, COPY_LIMIT)?;
+    ensure!(old.ends_with(b"\n"), "Transcript is being written; retrying");
+    let offset = checkpoint.offset as usize;
+    if old.len() < offset || window_of(&old, checkpoint.offset) != checkpoint.window {
+        return Ok(None);
+    }
+    let parse = |bytes: &[u8]| -> Option<Vec<serde_json::Value>> {
+        bytes
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).ok())
+            .collect()
+    };
+    let Some(trailing) = parse(&old[offset..]) else { return Ok(None) };
+    // Records after the checkpoint may only be metadata, never part of an unfinished turn.
+    let unfinished = trailing.iter().any(|r| match source.tool {
+        Tool::Claude => matches!(r["type"].as_str(), Some("user" | "assistant")),
+        Tool::Codex => r["type"] == "response_item" || r["payload"]["type"] == "user_message" || r["payload"]["type"] == "task_started",
+    });
+    if unfinished {
+        return Ok(None);
+    }
+    let last_ordinal = if source.tool == Tool::Codex {
+        let start = offset.saturating_sub(64 * 1024);
+        let window = &old[start..offset];
+        let window = if start == 0 { window } else { &window[window.iter().position(|b| *b == b'\n').map_or(window.len(), |i| i + 1)..] };
+        let found = parse(window)
+            .into_iter()
+            .flatten()
+            .chain(trailing.iter().cloned())
+            .filter_map(|r| r["ordinal"].as_u64())
+            .max();
+        let Some(found) = found else { return Ok(None) };
+        Some(found)
+    } else {
+        None
+    };
+    let existing = match &checkpoint.leaf {
+        Some(leaf) => vec![serde_json::json!({"type":"assistant","uuid":leaf,"isSidechain":false})],
+        None => Vec::new(),
+    };
+    let seed = format!("{}:{}", old.len(), checkpoint.window);
+    let suffix = format::render_suffix(
+        source.tool,
+        &source.id,
+        &source.cwd,
+        timestamp,
+        tail,
+        title,
+        &existing,
+        &seed,
+        last_ordinal,
+    )?;
+    let Some(rows) = parse(&suffix) else { anyhow::bail!("Appended conversation could not be read back") };
+    let Some((messages, end)) =
+        format::parse_appended(source.tool, checkpoint.leaf.as_deref(), checkpoint.meta.as_ref(), &rows)?
+    else {
+        anyhow::bail!("Appended conversation could not be read back");
+    };
+    ensure!(
+        messages == tail,
+        "Appended conversation did not retain every message and attachment"
+    );
+    let mut ends = Vec::with_capacity(rows.len());
+    let mut position = old.len() as u64;
+    for line in suffix.split_inclusive(|b| *b == b'\n') {
+        position += line.len() as u64;
+        if line != b"\n" {
+            ends.push(position);
         }
     }
-    Ok(())
+    let mut candidate = old;
+    candidate.extend_from_slice(&suffix);
+    ensure!(
+        candidate.len() as u64 <= COPY_LIMIT,
+        "Converted conversation exceeds the 1 GiB sync limit"
+    );
+    let next = match end {
+        Some((index, leaf)) => Checkpoint {
+            offset: ends[index],
+            window: window_of(&candidate, ends[index]),
+            leaf: leaf.or_else(|| checkpoint.leaf.clone()),
+            meta: checkpoint.meta.clone(),
+        },
+        None => checkpoint.clone(),
+    };
+    append_in_place(source, &physical, before.len(), Some(before.modified()?), &suffix)?;
+    Ok(Some(next))
 }
 
 /// Prepare a suffix with native IDs/parent links, preserving the complete original
-/// log (including provider-only records) byte for byte. Publication is atomic.
+/// log (including provider-only records) byte for byte. An uncompressed transcript receives
+/// the suffix in place; a compressed one is replaced atomically.
 pub(super) fn update(
     source: &Source,
     messages: &[format::Message],
@@ -551,10 +400,10 @@ pub(super) fn update(
         );
         packed.as_file().sync_all()?;
         packed.persist(&physical).map_err(|e| e.error)?;
+        fs::File::open(source.path.parent().unwrap())?.sync_all()?;
     } else {
-        tmp.as_file().sync_all()?;
-        tmp.persist(&physical).map_err(|e| e.error)?;
+        drop(tmp);
+        append_in_place(source, &physical, old_len as u64, None, &candidate[old_len..])?;
     }
-    fs::File::open(source.path.parent().unwrap())?.sync_all()?;
     Ok(true)
 }

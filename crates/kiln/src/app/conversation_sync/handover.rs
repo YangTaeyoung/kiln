@@ -107,111 +107,17 @@ pub(crate) fn link<'a>(links: &'a [Link], record: &Record) -> Option<&'a Link> {
             && Some(&link.id) == record.conversation.as_ref()
     })
 }
-pub(super) fn publish_links(
-    config: &Path,
-    state: &State,
-    scope: Option<&discovery::Scope>,
-) -> Result<()> {
-    let mut links = vec![];
-    let groups = canonical::Links::new(state);
-    let mut anchors: HashMap<usize, String> = HashMap::new();
-    let mut targets: HashMap<(usize, Tool, &Path), Option<String>> = HashMap::new();
-    for (key, entry) in &state.entries {
-        if scope.is_some_and(|s| !s.contains(&entry.source)) {
-            continue;
-        }
-        let (slot, members) = groups.group(key).unwrap();
-        if members.len() < 2 {
-            continue;
-        }
-        let Some(target) = targets
-            .entry((slot, entry.source.tool, &entry.source.root))
-            .or_insert_with(|| {
-                canonical::destination_in(state, members, entry.source.tool, &entry.source.root)
-                    .map(|target| target.id)
-            })
-            .clone()
-        else {
-            continue;
-        };
-        let group = anchors.entry(slot).or_insert_with(|| {
-            let anchor = members
-                .iter()
-                .min_by_key(|key| (state.entries[*key].imported, *key))
-                .unwrap();
-            digest(anchor.as_bytes())
-        });
-        links.push(Link {
-            tool: entry.source.tool,
-            root: entry.source.root.clone(),
-            id: entry.source.id.clone(),
-            group: group.clone(),
-            canonical_id: target,
-        });
-    }
+/// Replaces the published native links when they changed.
+pub(super) fn publish(config: &Path, links: &[Link]) -> Result<()> {
     let _lock = lock(config)?;
     let path = config.join("conversation-sync/native-links.json");
-    let bytes = serde_json::to_vec(&links)?;
+    let bytes = serde_json::to_vec(links)?;
     if !path.exists() || bounded(&path, 8 * 1024 * 1024)? != bytes {
         replace(&path, &bytes)?;
     }
     Ok(())
 }
 
-pub(super) fn settled(
-    config: &Path,
-    state: &State,
-    cache: &Cache,
-    status: &Status,
-) -> Result<std::collections::BTreeSet<String>> {
-    let links = links(config)?;
-    // The first entry in key order represents each native identity.
-    let mut identities: HashMap<(Tool, &PathBuf, &String), &Entry> = HashMap::new();
-    for entry in state.entries.values() {
-        identities
-            .entry((entry.source.tool, &entry.source.root, &entry.source.id))
-            .or_insert(entry);
-    }
-    let unsettled: std::collections::HashSet<_> = status
-        .rows
-        .values()
-        .filter(|row| matches!(row.phase, Phase::Failed | Phase::Waiting))
-        .map(|row| (row.source.tool, &row.source.root, &row.source.id))
-        .collect();
-    let blocked: std::collections::HashSet<&str> = links
-        .iter()
-        .filter(|link| unsettled.contains(&(link.tool, &link.root, &link.id)))
-        .map(|link| link.group.as_str())
-        .collect();
-    let mut groups: BTreeMap<String, Vec<&Entry>> = BTreeMap::new();
-    for link in links.iter().filter(|l| l.id == l.canonical_id) {
-        if let Some(entry) = identities.get(&(link.tool, &link.root, &link.id)) {
-            groups.entry(link.group.clone()).or_default().push(entry);
-        }
-    }
-    Ok(groups
-        .into_iter()
-        .filter_map(|(group, entries)| {
-            let first = entries.first()?;
-            (!blocked.contains(group.as_str())
-                && entries.iter().any(|e| e.source.tool != first.source.tool)
-                && !first.seen.is_empty()
-                && entries.iter().all(|entry| {
-                    entry.seen == first.seen
-                        && entry.title == first.title
-                        && cache.messages.get(&entry.source.path).is_some_and(
-                            |(len, modified, fingerprint)| {
-                                fingerprint == &entry.seen
-                                    && storage::metadata(&entry.source).is_ok_and(|m| {
-                                        m.len() == *len && m.modified().ok() == Some(*modified)
-                                    })
-                            },
-                        )
-                }))
-            .then_some(group)
-        })
-        .collect())
-}
 
 /// SessionStart requests a transfer unless it reports compaction of the running session.
 /// UserPromptSubmit waits only while an owner is recorded for the conversation and is

@@ -1,9 +1,13 @@
 //! Opt-in native continuations discovered within open workspace folders.
 mod codex_index;
 mod canonical;
+mod checkpoint;
 mod discovery;
+mod engine;
 mod format;
 pub(super) mod handover;
+mod hub;
+mod migrate;
 mod portable;
 mod reader;
 mod storage;
@@ -51,9 +55,6 @@ impl<'a> Metadata<'a> {
     }
 }
 
-fn has_current_native_projection(source: &Source, title: &str) -> Result<bool> {
-    Ok(titles::raw_projection(source)?.as_deref() == Some(title))
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Endpoint {
@@ -295,7 +296,7 @@ fn private_dir(path: &Path) -> Result<()> {
 }
 fn safe_path(root: &Path, path: &Path) -> Result<()> {
     ensure!(
-        fs::symlink_metadata(root)?.is_dir(),
+        fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()),
         "Connected account directory is missing or symlinked"
     );
     let relative = path
@@ -424,15 +425,49 @@ struct Conversation {
     detail: String,
     target: Option<Continuation>,
     copies: Vec<Continuation>,
+    /// Archived continuations that can be restored as separate conversations.
+    #[serde(default)]
+    branches: Vec<BranchRow>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct BranchRow {
+    id: String,
+    events: usize,
+    at: SystemTime,
+}
+/// A failure the user can resolve; every other failure is shown as information.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum Attention {
+    /// A connected account directory is missing or unusable.
+    Account,
+    /// Storage is full, read-only or not writable.
+    Storage,
+    /// Codex CLI, needed to register Codex /resume entries, is not installed.
+    CodexCli,
+}
+fn classify(detail: &str) -> Option<Attention> {
+    if detail.contains("Connected account directory is missing") || detail.contains("Transcript outside connected account") {
+        Some(Attention::Account)
+    } else if ["No space left on device", "Permission denied", "Read-only file system", "Disk quota exceeded"]
+        .iter()
+        .any(|m| detail.contains(m))
+    {
+        Some(Attention::Storage)
+    } else if detail.contains("Install Codex CLI") {
+        Some(Attention::CodexCli)
+    } else {
+        None
+    }
 }
 impl Conversation {
     /// A failed row whose linked histories diverged; nothing is left for the user to resolve.
     fn diverged(&self) -> bool {
         self.phase == Phase::Failed && self.detail.contains(DIVERGED)
     }
-    fn needs_attention(&self) -> bool {
-        self.phase == Phase::Failed && !self.diverged()
+    fn attention(&self) -> Option<Attention> {
+        (self.phase == Phase::Failed).then(|| classify(&self.detail)).flatten()
     }
+    #[cfg(test)]
     fn from_entry(entry: &Entry, scope: Option<&discovery::Scope>) -> Self {
         Self {
             workspace: scope.and_then(|s| s.workspace(&entry.source.cwd)).cloned(),
@@ -446,6 +481,7 @@ impl Conversation {
             detail: String::new(),
             target: entry.copied_to.clone(),
             copies: entry.copies.clone(),
+            branches: Vec::new(),
         }
     }
 }
@@ -475,12 +511,19 @@ fn read_rows_titled(
     source: &Source,
     title: &mut String,
 ) -> Result<(Vec<serde_json::Value>, Vec<format::Message>)> {
+    read_rows_offsets_titled(source, title).map(|(rows, _, messages)| (rows, messages))
+}
+/// `read_rows_titled` with the byte offset at the end of each row.
+fn read_rows_offsets_titled(
+    source: &Source,
+    title: &mut String,
+) -> Result<(Vec<serde_json::Value>, Vec<u64>, Vec<format::Message>)> {
     let preferred = if title.is_empty() {
         titles::Cache::default().name(source)?.unwrap_or_default()
     } else {
         title.clone()
     };
-    let rows = reader::rows(source, title)?;
+    let (rows, offsets) = reader::rows_from(source, title, 0)?;
     let native_title = titles::from_rows(source, &rows, &preferred);
     if !native_title.is_empty() {
         *title = native_title;
@@ -495,23 +538,6 @@ fn read_rows_titled(
                 meta["payload"]["id"] == source.id && meta["payload"]["cwd"] == source.cwd,
                 "Codex transcript identity changed"
             );
-            ensure!(
-                matches!(
-                    meta["payload"]["cli_version"].as_str(),
-                    Some(
-                        "0.154.0"
-                            | "0.155.0-alpha.9.2"
-                            | "0.155.1"
-                            | "0.160.0"
-                            | "0.160.1"
-                            | "0.161.0"
-                            | "0.162.0-alpha.17.2"
-                            | "0.162.1"
-                    )
-                ),
-                "Unsupported Codex transcript version: {}",
-                meta["payload"]["cli_version"]
-            );
         }
         Tool::Claude => {
             for row in &rows {
@@ -523,23 +549,6 @@ fn read_rows_titled(
                                 .is_some_and(|cwd| Path::new(cwd).is_absolute()),
                         "Claude transcript identity changed"
                     );
-                    ensure!(
-                        matches!(
-                            row["version"].as_str(),
-                            Some(
-                                "2.1.272"
-                                    | "2.1.281"
-                                    | "2.1.289"
-                                    | "2.1.291"
-                                    | "2.1.292"
-                                    | "2.1.295"
-                                    | "2.1.296"
-                                    | "2.1.299"
-                            )
-                        ),
-                        "Unsupported Claude transcript version: {}",
-                        row["version"]
-                    );
                 }
             }
         }
@@ -549,8 +558,9 @@ fn read_rows_titled(
     if title.trim().is_empty() {
         *title = titles::fallback(&messages);
     }
-    Ok((rows, messages))
+    Ok((rows, offsets, messages))
 }
+#[cfg(test)]
 fn destination(
     pair: &Pair,
     source: &Source,
@@ -559,9 +569,25 @@ fn destination(
 ) -> Result<Source> {
     let tool = opposite(source.tool);
     let root = pair.endpoint(tool).root.clone();
+    let path = native_path(tool, &root, &source.cwd, id, date)?;
+    Ok(Source {
+        tool,
+        root,
+        path,
+        cwd: source.cwd.clone(),
+        id: id.into(),
+    })
+}
+/// Native transcript path of a session in a CLI namespace.
+fn native_path(
+    tool: Tool,
+    root: &Path,
+    cwd: &str,
+    id: &str,
+    date: chrono::DateTime<chrono::Utc>,
+) -> Result<PathBuf> {
     let path = if tool == Tool::Claude {
-        let encoded = source
-            .cwd
+        let encoded = cwd
             // Claude's /[^a-zA-Z0-9]/g operates on UTF-16 code units.
             .encode_utf16()
             .map(|c| {
@@ -587,14 +613,8 @@ fn destination(
                 date.format("%Y-%m-%dT%H-%M-%S")
             ))
     };
-    safe_path(&root, &path)?;
-    Ok(Source {
-        tool,
-        root,
-        path,
-        cwd: source.cwd.clone(),
-        id: id.into(),
-    })
+    safe_path(root, &path)?;
+    Ok(path)
 }
 
 /// Cancellation never blocks the UI on filesystem IO. An in-progress atomic publish may finish.
@@ -606,16 +626,13 @@ struct Cache {
     metadata: discovery::MetadataCache,
     titles: titles::Cache,
     rows: BTreeMap<String, Conversation>,
-    attempts: HashMap<PathBuf, (u64, SystemTime, SystemTime)>,
-    /// Consecutive unsettled attempts per unchanged source; selects its retry delay.
-    failures: HashMap<PathBuf, u32>,
-    /// Linked-history stamps recorded after a source's last failed attempt.
+    /// Failed hub conversations keyed by conversation ID: projection fingerprint, attempt
+    /// time, consecutive failures and whether only a changed history can resolve it.
     #[serde(default)]
-    linked: HashMap<PathBuf, u64>,
-    /// Snapshot-retirement attempts keyed by source, stamped with both histories;
-    /// the flag marks a failure that only a changed history can resolve.
+    hub: HashMap<String, (u64, SystemTime, u32, bool)>,
+    /// Kiln build that recorded the failures; another build reads failed conversations again.
     #[serde(default)]
-    retirements: HashMap<String, (Vec<(u64, SystemTime)>, SystemTime, u32, bool)>,
+    build: String,
     /// Sources modified within this window are left until their writer pauses.
     #[serde(skip)]
     quiet: Duration,
@@ -626,10 +643,7 @@ impl Cache {
     }
     /// Retries are immediate on the next scan; cached results of unchanged files are kept.
     fn expedite(&mut self) {
-        self.attempts.clear();
-        self.failures.clear();
-        self.linked.clear();
-        self.retirements.clear();
+        self.hub.clear();
     }
 }
 /// Retry delay for an unchanged source after `failures` consecutive unsettled attempts.
@@ -638,35 +652,6 @@ fn retry_delay(failures: u32) -> Duration {
 }
 /// A failed attempt whose linked histories are all unchanged is retried after this delay.
 const FAILED_RECHECK: Duration = Duration::from_secs(60 * 60);
-/// Fingerprint of the length and modification time of every history in a linked group.
-fn linked_stamp(state: &State, members: &std::collections::BTreeSet<String>) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    for member in members {
-        member.hash(&mut hasher);
-        if let Some(meta) = state.entries.get(member).and_then(|e| storage::metadata(&e.source).ok()) {
-            meta.len().hash(&mut hasher);
-            meta.modified().ok().hash(&mut hasher);
-        }
-    }
-    hasher.finish()
-}
-/// Linked-group fingerprints for retry checks, computed once per scan on first use;
-/// changes later in the same scan are seen by the next scan.
-#[derive(Default)]
-struct LinkedStamps {
-    links: Option<canonical::Links>,
-    stamps: HashMap<usize, u64>,
-}
-impl LinkedStamps {
-    fn get(&mut self, state: &State, key: &str) -> u64 {
-        let links = self.links.get_or_insert_with(|| canonical::Links::new(state));
-        match links.group(key) {
-            Some((slot, members)) => *self.stamps.entry(slot).or_insert_with(|| linked_stamp(state, members)),
-            None => linked_stamp(state, &std::collections::BTreeSet::from([key.to_owned()])),
-        }
-    }
-}
 /// Whether a file was modified within `quiet` of now; future timestamps count as settled.
 fn recently_modified(modified: SystemTime, quiet: Duration) -> bool {
     !quiet.is_zero()
@@ -746,502 +731,57 @@ fn scan_with_metadata(
         .open(lock_path)?;
     lock.try_lock()
         .context("Another Kiln window is synchronizing")?;
-    let state_path = dir.join(if scope.is_some() {
-        "workspace-state.json".into()
+    let pair_state = dir.join(format!("{}.json", digest(&serde_json::to_vec(pair)?)));
+    let legacy = if scope.is_some() {
+        vec![dir.join("workspace-state.json"), pair_state]
     } else {
-        format!("{}.json", digest(&serde_json::to_vec(pair)?))
-    });
-    let legacy_path = dir.join(format!("{}.json", digest(&serde_json::to_vec(pair)?)));
-    let mut state: State = if state_path.exists() {
-        serde_json::from_slice(&bounded(&state_path, 8 * 1024 * 1024)?)?
-    } else {
-        if scope.is_some() && legacy_path.exists() {
-            serde_json::from_slice(&bounded(&legacy_path, 8 * 1024 * 1024)?)?
-        } else {
-            State::default()
-        }
+        vec![pair_state]
     };
-    for entry in state.entries.values().filter(|e| e.imported) {
-        discovery::remember_import(config, &entry.source, &entry.seen)?;
+    let build = kiln_daemon::build_id().to_string();
+    if cache.build != build {
+        cache.hub.clear();
+        cache.build = build;
     }
-    let tracked = dir.join("tracked");
-    if scope.is_none() && tracked.exists() {
-        for (index, entry) in fs::read_dir(tracked)?.enumerate() {
-            ensure!(
-                index < MAX_SOURCES,
-                "Tracked conversation limit reached (4096)"
-            );
-            let path = entry?.path();
-            if path.extension().is_none_or(|x| x != "json") {
-                continue;
-            }
-            let source: Source = serde_json::from_slice(&bounded(&path, 16 * 1024)?)?;
-            if source.root != pair.endpoint(source.tool).root
-                || scope.is_some_and(|s| !s.contains(&source))
-            {
-                continue;
-            }
-            state
-                .entries
-                .entry(source.path.to_string_lossy().into_owned())
-                .or_insert(Entry {
-                    source,
-                    seen: String::new(),
-                    imported: false,
-                    title: String::new(),
-                    copied_to: None,
-                    copies: Vec::new(),
-                });
-        }
-    }
-    let mut discovery_status = Status::default();
-    let mut discovered_paths = std::collections::HashSet::new();
-    if let Some(scope) = scope {
-        discovery_status.workspaces = scope.workspaces.len();
-        discovery_status.discovering = true;
-        notify(&discovery_status);
+    let mut hub = hub::Hub::open(config)?;
+    migrate::run(&mut hub, &legacy, gate)?;
+    let mut status = Status::default();
+    let sources: Vec<Source> = if let Some(scope) = scope {
+        status.workspaces = scope.workspaces.len();
+        status.discovering = true;
+        notify(&status);
         let found = discovery::find(config, scope, gate, &mut cache.metadata)?;
-        discovery_status.discovered = found.len();
-        discovered_paths.extend(found.iter().map(|s| s.path.clone()));
-        for source in found {
-            let key = source.path.to_string_lossy().into_owned();
-            if let Some(entry) = state.entries.get_mut(&key) {
-                if !entry.imported && discovery::imported(config, &source)?.is_some() {
-                    entry.imported = true;
-                }
-            }
-            if !state.entries.contains_key(&key) {
-                // Migration/recovery also recognizes copies created by earlier connections.
-                let imported = discovery::imported(config, &source)?;
-                state.entries.insert(
-                    key,
-                    Entry {
-                        source,
-                        seen: imported.clone().unwrap_or_default(),
-                        imported: imported.is_some(),
-                        title: String::new(),
-                        copied_to: None,
-                        copies: Vec::new(),
-                    },
-                );
-            }
-        }
-        // Persist discoveries even before an incomplete or incompatible response can be copied.
-        replace_changed(&state_path, &serde_json::to_vec(&state)?)?;
-    }
-    canonical::migrate(config, &state_path, &legacy_path, &mut state, scope)?;
-    state.archived.retain(|key, _| state.entries.get(key).is_none_or(|e| !storage::exists(&e.source)));
-    replace_changed(&state_path, &serde_json::to_vec(&state)?)?;
-    let active: BTreeMap<_, _> = state
-        .entries
-        .iter()
-        .filter(|(_, e)| {
-            scope.is_none_or(|s| {
-                s.contains(&e.source)
-                    && (discovered_paths.contains(&e.source.path)
-                        || (!storage::exists(&e.source) && e.copied_to.is_some()))
-            })
-        })
-        .filter(|(key, _)| !state.archived.contains_key(*key))
-        .map(|(k, e)| (k.clone(), e.clone()))
-        .collect();
-    ensure!(
-        active.len() <= MAX_SOURCES,
-        "Sync source limit reached (4096); reconnect with a fresh namespace"
-    );
-    let mut status = Status {
-        groups: canonical::groups(&state),
-        watched: active.len(),
-        workspaces: discovery_status.workspaces,
-        discovered: discovery_status.discovered,
-        recent: state.recent.clone(),
-        rows: active
-            .iter()
-            .filter(|(_, e)| !e.imported || e.copied_to.is_some())
-            .map(|(k, e)| {
-                (
-                    k.clone(),
-                    cache
-                        .rows
-                        .get(k)
-                        .cloned()
-                        .unwrap_or_else(|| Conversation::from_entry(e, scope)),
-                )
-            })
-            .collect(),
-        ..Default::default()
-    };
-    notify(&status);
-    let mut stamps = LinkedStamps::default();
-    for (key, _) in active {
-        // Earlier endpoints in this scan may have updated this exact conversation.
-        let entry = state.entries[&key].clone();
-        if !gate.load(Ordering::Acquire) {
-            break;
-        }
-        status.checked += 1;
-        if !storage::exists(&entry.source) {
-            if let Some(row) = status.rows.get_mut(&key) {
-                // A removed original keeps its published copies; an unwritten one is still awaited.
-                if entry.copied_to.is_some() {
-                    row.phase = Phase::Synced;
-                    row.detail.clear();
-                } else {
-                    row.phase = Phase::Waiting;
-                    row.detail = "Transcript not available yet".into();
-                }
-            }
-            continue;
-        }
-        // Skipped checks keep the source's retry count; completed ones update it.
-        let mut deferred = false;
-        let result = (|| -> Result<()> {
-            safe_path(&entry.source.root, &storage::physical(&entry.source))?;
-            let meta = storage::metadata(&entry.source)?;
-            let stamp = (meta.len(), meta.modified()?, entry.seen.clone());
-            if let Some((len, modified, at)) = cache.attempts.get(&entry.source.path)
-                && *len == stamp.0
-                && *modified == stamp.1
-                && let Some(failures) = cache.failures.get(&entry.source.path)
-                && {
-                    let waited = at.elapsed().unwrap_or_default();
-                    waited < retry_delay(*failures)
-                        || (waited < FAILED_RECHECK
-                            && cache.rows.get(&key).is_some_and(|r| r.phase == Phase::Failed)
-                            && cache.linked.get(&entry.source.path) == Some(&stamps.get(&state, &key)))
-                }
-            {
-                // Imported copies have no initial row; keep their last reported outcome visible.
-                if !status.rows.contains_key(&key)
-                    && let Some(row) = cache.rows.get(&key)
-                {
-                    status.rows.insert(key.clone(), row.clone());
-                }
-                deferred = true;
-                return Ok(());
-            }
-            let destinations = scope
-                .map(|s| s.destinations(pair, entry.source.tool))
-                .unwrap_or_else(|| vec![pair.clone()]);
-            let native_title = if entry.source.tool == Tool::Codex {
-                metadata(&entry.source, Metadata::Read)?.or(cache.titles.name(&entry.source)?)
-            } else {
-                cache.titles.name(&entry.source)?
-            };
-            let renamed = native_title
-                .as_ref()
-                .is_some_and(|name| name != &entry.title);
-            let mut routes_unchanged = !renamed
-                && (entry.imported && entry.copied_to.is_none()
-                    || destinations.iter().all(|p| {
-                        entry.copies.iter().any(|c| {
-                            c.root == p.endpoint(opposite(entry.source.tool)).root
-                                && c.revision == PROJECTION_REVISION
-                        })
-                    }));
-            if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
-                // Only completed synchronization records this exact stamp.
-                if let Some(row) = status.rows.get_mut(&key)
-                    && row.phase != Phase::Synced
-                {
-                    row.phase = Phase::Synced;
-                    row.detail.clear();
-                }
-                return Ok(());
-            }
-            if recently_modified(stamp.1, cache.quiet) {
-                if !status.rows.contains_key(&key)
-                    && let Some(row) = cache.rows.get(&key)
-                {
-                    status.rows.insert(key.clone(), row.clone());
-                }
-                if let Some(row) = status.rows.get_mut(&key) {
-                    row.phase = Phase::Waiting;
-                    row.detail = "Transcript is being written; retrying".into();
-                }
-                deferred = true;
-                return Ok(());
-            }
-            cache.attempts.insert(
-                entry.source.path.clone(),
-                (stamp.0, stamp.1, SystemTime::now()),
-            );
-            if let Some(row) = status.rows.get_mut(&key) {
-                if row.phase == Phase::Queued {
-                    row.phase = Phase::Reading;
-                }
-            }
-            notify(&status);
-            let mut title = native_title.unwrap_or_default();
-            let result = read_messages_titled(&entry.source, &mut title);
-            if let Some(row) = status.rows.get_mut(&key) {
-                if !title.is_empty() {
-                    row.title = title.clone();
-                }
-            }
-            let messages = result?;
-            if title != entry.title {
-                routes_unchanged = false;
-            }
-            if let Some(row) = status.rows.get_mut(&key) {
-                row.detail.clear();
-            }
-            if messages.is_empty() || !messages.iter().any(|m| m.role == "user") {
-                if let Some(row) = status.rows.get_mut(&key) {
-                    row.phase = Phase::Waiting;
-                }
-                return Ok(());
-            }
-            let fingerprint = json_digest(&messages)?;
-            if entry.imported
-                && (entry.title.is_empty() || title == titles::clean(&entry.title))
-                && discovery::imported(config, &entry.source)?.as_deref() == Some(&fingerprint)
-            {
-                // Older parsers could mistake their own projection for a new turn.
-                // The immutable import baseline proves this copy was not continued.
-                // Retire only that bookkeeping; preserve every native session file.
-                if entry.copied_to.is_some() || entry.seen != fingerprint || entry.title.is_empty()
-                {
-                    let saved = state.entries.get_mut(&key).unwrap();
-                    saved.seen = fingerprint;
-                    saved.title = title;
-                    saved.copied_to = None;
-                    saved.copies.clear();
-                    replace(&state_path, &serde_json::to_vec(&state)?)?;
-                }
-                status.rows.remove(&key);
-                cache.messages.insert(entry.source.path.clone(), stamp);
-                return Ok(());
-            }
-            if fingerprint == entry.seen && !routes_unchanged && !entry.copies.is_empty() {
-                let mut verified = Vec::new();
-                for destination in &destinations {
-                    let root = &destination.endpoint(opposite(entry.source.tool)).root;
-                    if let Some(copy) = entry.copies.iter().find(|c| &c.root == root) {
-                        if let Some(target) = state
-                            .entries
-                            .values()
-                            .find(|e| e.source.id == copy.id && e.source.root == copy.root)
-                        {
-                            if has_current_native_projection(&target.source, &title)?
-                                && read_messages(&target.source).is_ok_and(|m| m == messages)
-                            {
-                                metadata(&target.source, Metadata::Name(&title))?;
-                                let mut copy = copy.clone();
-                                copy.revision = PROJECTION_REVISION;
-                                verified.push(copy);
-                            }
-                        }
-                    }
-                }
-                // Adopt intact old copies without duplicating a large history during upgrade.
-                if verified.len() == destinations.len() {
-                    let saved = state.entries.get_mut(&key).unwrap();
-                    saved.title = title.clone();
-                    saved.copied_to = verified.first().cloned();
-                    saved.copies = verified.clone();
-                    replace(&state_path, &serde_json::to_vec(&state)?)?;
-                    if let Some(row) = status.rows.get_mut(&key) {
-                        row.target = verified.first().cloned();
-                        row.copies = verified;
-                    }
-                    routes_unchanged = true;
-                }
-            }
-            if fingerprint == entry.seen && routes_unchanged {
-                if let Some(row) = status.rows.get_mut(&key) {
-                    row.phase = Phase::Synced;
-                }
-                cache.messages.insert(entry.source.path.clone(), stamp);
-                return Ok(());
-            }
-            let row = status
-                .rows
-                .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry, scope));
-            row.title = title.clone();
-            row.phase = Phase::Copying;
-            notify(&status);
-            let mut copies = Vec::new();
-            let mut pending_plans = Vec::new();
-            for destination_pair in destinations {
-                // Include the namespace in workspace mode; both default and connected CLIs
-                // must see a continuation even when the other CLI was opened outside Kiln.
-                let target_root = &destination_pair.endpoint(opposite(entry.source.tool)).root;
-                let existing = canonical::destination(&state, &key, opposite(entry.source.tool), target_root);
-                let id = existing.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| stable_id(&format!(
-                    "{}:canonical:{key}:{}", state_path.display(), target_root.display())));
-                let plan_path = dir.join(format!("pending-{id}.json"));
-                #[derive(Serialize, Deserialize)]
-                struct Plan {
-                    source: Source,
-                    timestamp: String,
-                }
-                let plan: Plan = if let Some(source) = existing {
-                    Plan { source, timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true) }
-                } else if plan_path.exists() {
-                    serde_json::from_slice(&bounded(&plan_path, 16 * 1024)?)?
-                } else {
-                    let now = chrono::Utc::now();
-                    let plan = Plan {
-                        source: destination(&destination_pair, &entry.source, &id, now)?,
-                        timestamp: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                    };
-                    publish(&plan_path, &serde_json::to_vec(&plan)?)?;
-                    plan
-                };
+        status.discovering = false;
+        status.discovered = found.len();
+        found
+    } else {
+        let tracked = dir.join("tracked");
+        let mut sources = Vec::new();
+        if tracked.exists() {
+            for (index, entry) in fs::read_dir(tracked)?.enumerate() {
                 ensure!(
-                    plan.source.root == destination_pair.endpoint(plan.source.tool).root,
-                    "Destination namespace changed"
+                    index < MAX_SOURCES,
+                    "Tracked conversation limit reached (4096)"
                 );
-                safe_path(&plan.source.root, &plan.source.path)?;
-                let existed = storage::exists(&plan.source);
-                // Only an explicit stored edge permits updating an existing native ID.
-                let linked = existed
-                    && state.entries.contains_key(&plan.source.path.to_string_lossy().into_owned());
-                // A linked endpoint is appended and verified by `canonical::update`;
-                // a complete conversion is rendered only for a new copy or a collision check.
-                let bytes = if linked {
-                    Vec::new()
-                } else {
-                    let bytes = format::render_titled(
-                        plan.source.tool,
-                        &id,
-                        &entry.source.cwd,
-                        &plan.timestamp,
-                        &messages,
-                        &title,
-                    )?;
-                    let converted: Vec<serde_json::Value> = bytes
-                        .split(|b| *b == b'\n')
-                        .filter(|b| !b.is_empty())
-                        .map(serde_json::from_slice)
-                        .collect::<std::result::Result<_, _>>()?;
-                    ensure!(
-                        format::parse(plan.source.tool, &converted)? == messages,
-                        "Converted conversation did not retain every message and attachment"
-                    );
-                    drop(converted);
-                    ensure!(
-                        bytes.len() as u64 <= COPY_LIMIT,
-                        "Converted conversation exceeds the 1 GiB sync limit"
-                    );
-                    bytes
-                };
-                if !gate.load(Ordering::Acquire) {
-                    return Ok(());
+                let path = entry?.path();
+                if path.extension().is_none_or(|x| x != "json") {
+                    continue;
                 }
-                if linked {
-                    let _write_guard = handover::write_guard(config, &plan.source)?;
-                    canonical::update(&plan.source, &messages, &title, &plan.timestamp)?;
-                } else if existed {
-                    ensure!(storage::bytes(&plan.source, COPY_LIMIT)?.starts_with(&bytes),
-                        "Continuation collision; existing conversation was preserved");
+                let source: Source = serde_json::from_slice(&bounded(&path, 16 * 1024)?)?;
+                if source.root == pair.endpoint(source.tool).root {
+                    sources.push(source);
                 }
-                // Record the baseline before publication so a crash cannot make discovery echo it.
-                discovery::remember_projection(
-                    config,
-                    &plan.source,
-                    &fingerprint,
-                    Some(&messages),
-                )?;
-                if !existed {
-                    publish(&plan.source.path, &bytes)?;
-                }
-                metadata(&plan.source, Metadata::Name(&title))?;
-                let copied_meta = storage::metadata(&plan.source)?;
-                cache.messages.insert(
-                    plan.source.path.clone(),
-                    (
-                        copied_meta.len(),
-                        copied_meta.modified()?,
-                        fingerprint.clone(),
-                    ),
-                );
-                status.published += 1;
-                let target_entry = state
-                    .entries
-                    .entry(plan.source.path.to_string_lossy().into_owned())
-                    .or_insert(Entry {
-                        source: plan.source.clone(),
-                        seen: fingerprint.clone(),
-                        imported: true,
-                        title: title.clone(),
-                        copied_to: None,
-                        copies: Vec::new(),
-                    });
-                target_entry.seen = fingerprint.clone();
-                target_entry.title = title.clone();
-                state.lineage.entry(plan.source.path.to_string_lossy().into_owned()).or_insert_with(|| key.clone());
-                let continuation = Continuation {
-                    tool: plan.source.tool,
-                    id,
-                    cwd: entry.source.cwd.clone(),
-                    root: plan.source.root.clone(),
-                    revision: PROJECTION_REVISION,
-                };
-                state.recent.retain(|c| c.id != continuation.id || c.root != continuation.root);
-                state.recent.insert(0, continuation.clone());
-                state.recent.truncate(8);
-                copies.push(continuation);
-                replace(&state_path, &serde_json::to_vec(&state)?)?;
-                pending_plans.push(plan_path);
-            }
-            if entry.source.tool == Tool::Codex {
-                metadata(&entry.source, Metadata::Name(&title))?;
-            }
-            titles::pin_claude(&entry.source, &title)?;
-            let saved = state.entries.get_mut(&key).unwrap();
-            saved.seen = fingerprint.clone();
-            saved.title = title;
-            saved.copied_to = copies.first().cloned();
-            saved.copies = copies.clone();
-            replace(&state_path, &serde_json::to_vec(&state)?)?;
-            for path in pending_plans {
-                let _ = fs::remove_file(path);
-            }
-            cache
-                .messages
-                .insert(entry.source.path.clone(), (stamp.0, stamp.1, fingerprint));
-            let row = status.rows.get_mut(&key).unwrap();
-            row.phase = Phase::Synced;
-            row.target = copies.first().cloned();
-            row.copies = copies;
-            Ok(())
-        })();
-        let settled = result.is_ok()
-            && status
-                .rows
-                .get(&key)
-                .is_none_or(|r| !matches!(r.phase, Phase::Failed | Phase::Waiting));
-        if let Err(error) = result {
-            let row = status
-                .rows
-                .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry, scope));
-            row.phase = if error.to_string().contains("retrying") {
-                Phase::Waiting
-            } else {
-                Phase::Failed
-            };
-            row.detail = error.to_string();
-            status.errors.push(format!(
-                "{} {}: {error}",
-                entry.source.tool.display_name(),
-                entry.source.id
-            ));
-        }
-        if !deferred {
-            if settled {
-                cache.failures.remove(&entry.source.path);
-                cache.linked.remove(&entry.source.path);
-            } else {
-                *cache.failures.entry(entry.source.path.clone()).or_default() += 1;
-                cache.linked.insert(entry.source.path.clone(), linked_stamp(&state, &canonical::members(&state, &key)));
             }
         }
-    }
-    canonical::retire(config, &state_path, &mut state, scope, gate, &mut status, cache, &mut metadata)?;
+        sources
+    };
+    let namespaces = scope.map(|s| s.roots.clone()).unwrap_or_else(|| {
+        Tool::ALL
+            .into_iter()
+            .map(|tool| (tool, pair.endpoint(tool).root.clone()))
+            .collect()
+    });
+    let hub = engine::Sync::new(config, scope, namespaces, gate, cache, &mut status, &mut metadata, &notify)
+        .run(hub, sources)?;
     status.errors = status
         .rows
         .values()
@@ -1257,11 +797,9 @@ fn scan_with_metadata(
         .collect();
     cache.rows = status.rows.clone();
     if gate.load(Ordering::Acquire) {
-        handover::publish_links(config, &state, scope)?;
-        status.settled = handover::settled(config, &state, cache, &status)?;
+        handover::publish(config, &engine::links(&hub, scope))?;
     }
-    status.groups = canonical::groups(&state);
-    status.recent = state.recent;
+    status.groups = status.rows.keys().map(|k| (k.clone(), k.clone())).collect();
     notify(&status);
     Ok(status)
 }
@@ -1275,12 +813,18 @@ enum Event {
 const DIVERGED: &str = "Linked histories diverged; both conversations were preserved";
 fn failure_reason(detail: &str) -> String {
     use kiln_common::i18n::tr;
+    match classify(detail) {
+        Some(Attention::Account) => return tr("연결 계정 폴더를 찾을 수 없습니다. 설정에서 계정을 다시 연결하면 자동으로 이어집니다.").into(),
+        Some(Attention::Storage) => return tr("저장 공간이 부족하거나 쓰기 권한이 없습니다. 공간이나 권한을 확인한 뒤 다시 시도하세요.").into(),
+        Some(Attention::CodexCli) => return tr("Codex /resume 목록에 등록하려면 Codex CLI가 필요합니다. 설치하면 자동으로 다시 시도합니다.").into(),
+        None => {}
+    }
     if detail.contains(DIVERGED) {
         tr("두 CLI에서 각각 이어 써서 하나로 합치지 않았습니다. 두 대화 모두 그대로 있으며 각 CLI의 /resume에서 따로 열 수 있습니다.").into()
+    } else if detail.contains("Unsupported content") || detail.contains("Unsupported Codex item") || detail.contains("Unsupported visible") {
+        tr("Kiln이 아직 모르는 기록 형식이 있어 이 대화를 보류합니다. Kiln이 업데이트되면 자동으로 다시 확인합니다. 원본은 그대로 보관됩니다.").into()
     } else if detail.contains("limit") || detail.contains("MiB") {
         tr("대화 용량이 연동 한도를 넘었습니다. 원본은 그대로 보관됩니다.").into()
-    } else if detail.contains("version") {
-        tr("아직 확인되지 않은 CLI 기록 형식입니다. 원본은 그대로 보관됩니다.").into()
     } else if detail.contains("compacted")
         || detail.contains("chain")
         || detail.contains("inherited")
@@ -1334,6 +878,43 @@ pub struct Manager {
     /// The next worker scan clears retry delays / starts from an empty cache.
     expedite_next: bool,
     reset_next: bool,
+    /// Ignored warnings by row key, with the condition that was ignored.
+    ignored: BTreeMap<String, Attention>,
+    /// Where ignored warnings are saved; tests keep them in memory.
+    ignored_path: Option<PathBuf>,
+    /// Asks the app to open the account settings.
+    pub(super) open_accounts: bool,
+    show_ignored: bool,
+}
+/// Ignore key of a failure of the whole scan.
+const SCAN_KEY: &str = "scan";
+/// The resolving action and Ignore button of a warning.
+fn attention_buttons(ui: &mut egui::Ui, key: &str, kind: Attention, actions: &mut Vec<RowAction>) {
+    use kiln_common::i18n::tr;
+    ui.horizontal_wrapped(|ui| {
+        let label = match kind {
+            Attention::Account => tr("계정 설정 열기"),
+            Attention::Storage | Attention::CodexCli => tr("다시 시도"),
+        };
+        if ui.small_button(label).clicked() {
+            actions.push(match kind {
+                Attention::Account => RowAction::OpenAccounts,
+                _ => RowAction::Retry,
+            });
+        }
+        if ui.small_button(tr("무시")).on_hover_text(tr("이 문제는 경고에서 빼고, 다른 문제가 생기면 다시 알립니다.")).clicked() {
+            actions.push(RowAction::Ignore(key.to_owned(), kind));
+        }
+    });
+}
+/// An action chosen in the status dialog.
+enum RowAction {
+    OpenAccounts,
+    Retry,
+    Ignore(String, Attention),
+    Unignore(String),
+    ToggleIgnored,
+    Restore { branch: String, title: String },
 }
 /// Background scans leave a transcript until it has been unchanged this long.
 const QUIET: Duration = Duration::from_secs(10);
@@ -1369,6 +950,17 @@ impl Default for Manager {
             worker_scan: None,
             expedite_next: false,
             reset_next: false,
+            ignored_path: (!cfg!(test)).then(|| kiln_common::paths::config_dir().join("conversation-sync/ignored.json")),
+            ignored: if cfg!(test) {
+                BTreeMap::new()
+            } else {
+                fs::read(kiln_common::paths::config_dir().join("conversation-sync/ignored.json"))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                    .unwrap_or_default()
+            },
+            open_accounts: false,
+            show_ignored: false,
         }
     }
 }
@@ -1378,6 +970,58 @@ impl Drop for Manager {
     }
 }
 impl Manager {
+    fn is_ignored(&self, key: &str, row: &Conversation) -> bool {
+        row.attention().is_some_and(|kind| self.ignored.get(key) == Some(&kind))
+    }
+    /// The resolvable condition of a failed scan, unless it was ignored.
+    fn scan_attention(&self) -> Option<Attention> {
+        self.error
+            .as_deref()
+            .and_then(classify)
+            .filter(|kind| self.ignored.get(SCAN_KEY) != Some(kind))
+    }
+    fn save_ignored(&mut self) {
+        self.revision += 1;
+        if let Some(path) = &self.ignored_path
+            && let Ok(bytes) = serde_json::to_vec(&self.ignored)
+        {
+            let _ = private_dir(path.parent().unwrap()).and_then(|_| replace(path, &bytes));
+        }
+    }
+    fn ignore(&mut self, key: &str, kind: Attention) {
+        self.ignored.insert(key.to_owned(), kind);
+        self.save_ignored();
+    }
+    fn unignore(&mut self, key: &str) {
+        self.ignored.remove(key);
+        self.save_ignored();
+    }
+    /// The next scan starts now and retries failed conversations without their delay.
+    fn retry_now(&mut self) {
+        self.cache.lock().unwrap().expedite();
+        self.expedite_next = true;
+        self.urgent = true;
+        self.next = Instant::now();
+    }
+    fn apply(&mut self, actions: Vec<RowAction>) {
+        for action in actions {
+            match action {
+                RowAction::OpenAccounts => {
+                    self.open_accounts = true;
+                    self.detail = None;
+                }
+                RowAction::Retry => self.retry_now(),
+                RowAction::Ignore(key, kind) => self.ignore(&key, kind),
+                RowAction::Unignore(key) => self.unignore(&key),
+                RowAction::ToggleIgnored => self.show_ignored = !self.show_ignored,
+                RowAction::Restore { branch, title } => {
+                    if hub::request_restore(&kiln_common::paths::config_dir(), &branch, &title).is_ok() {
+                        self.retry_now();
+                    }
+                }
+            }
+        }
+    }
     pub(super) fn refresh_for_handover(&mut self) -> Option<u64> {
         if self.busy { return None; }
         // Keeps results cached per file length and modification time; clears retry delays.
@@ -1644,7 +1288,9 @@ impl Manager {
             return *badge;
         }
         let status = self.workspace_status(root);
-        let badge = if self.error.is_some() || status.rows.values().any(Conversation::needs_attention) {
+        let badge = if self.scan_attention().is_some()
+            || status.rows.iter().any(|(key, row)| row.attention().is_some() && !self.is_ignored(key, row))
+        {
             Badge::Attention
         } else if self.connecting
             || (status.discovering && status.rows.is_empty())
@@ -1698,6 +1344,7 @@ impl Manager {
         let theme = Theme::current();
         let mut close = false;
         let status = self.workspace_status(root);
+        let mut actions = Vec::new();
         let modal = egui::Modal::new(egui::Id::new("workspace-conversation-sync"))
             .frame(egui::Frame::new().fill(theme.bg_panel).stroke(egui::Stroke::new(1.0, theme.border)).corner_radius(14).inner_margin(20))
             .show(ctx, |ui| {
@@ -1717,7 +1364,7 @@ impl Manager {
                 }
                 // A single scroll surface; fixed summary and footer never reflow with polling.
                 let list_height = (ctx.content_rect().height() - 340.0).clamp(120.0, 520.0);
-                self.progress_status_ui(ui, enabled, &status, list_height);
+                actions = self.progress_status_ui(ui, enabled, &status, list_height);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(tr("연동 범위와 지원 형식")).on_hover_text(tr("이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다."))
@@ -1736,10 +1383,14 @@ impl Manager {
         if close || modal.should_close() {
             self.detail = None;
         }
+        self.apply(actions);
     }
     #[cfg(test)]
-    fn progress_ui(&self, ui: &mut egui::Ui, enabled: bool) {
-        self.progress_status_ui(ui, enabled, &self.status, 280.0);
+    fn progress_ui(&mut self, ui: &mut egui::Ui, enabled: bool) {
+        let status = std::mem::take(&mut self.status);
+        let actions = self.progress_status_ui(ui, enabled, &status, 280.0);
+        self.status = status;
+        self.apply(actions);
     }
     fn progress_status_ui(
         &self,
@@ -1747,15 +1398,22 @@ impl Manager {
         enabled: bool,
         status: &Status,
         list_height: f32,
-    ) {
+    ) -> Vec<RowAction> {
         use kiln_common::{
             Theme, fonts,
             i18n::tr,
             icons::{self, Icon},
         };
         let theme = Theme::current();
-        let failed = status.rows.values().filter(|r| r.needs_attention()).count();
-        let diverged = status.rows.values().filter(|r| r.diverged()).count();
+        let mut actions = Vec::new();
+        let active = |key: &String, row: &Conversation| row.attention().is_some() && !self.is_ignored(key, row);
+        let failed = status.rows.iter().filter(|(k, r)| active(k, r)).count();
+        let ignored = status.rows.iter().filter(|(k, r)| self.is_ignored(k, r)).count();
+        let held = status
+            .rows
+            .values()
+            .filter(|r| r.phase == Phase::Failed && r.attention().is_none())
+            .count();
         let waiting = status
             .rows
             .values()
@@ -1765,9 +1423,10 @@ impl Manager {
             .rows
             .values()
             .any(|r| matches!(r.phase, Phase::Reading | Phase::Copying));
+        let scan_attention = self.scan_attention().is_some();
         let (icon, color, label) = if !enabled {
             (Icon::Stop, theme.text_dim, tr("동기화 일시 중지"))
-        } else if failed > 0 || self.error.is_some() {
+        } else if failed > 0 || scan_attention {
             (
                 Icon::Warning,
                 theme.orange,
@@ -1815,8 +1474,17 @@ impl Manager {
                     ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code 또는 Codex 대화를 시작하면 자동으로 연결됩니다.")).wrap());
                 }
                 ui.label(kiln_common::trf!("완료 {}개 · 확인 필요 {}개 · 대기 {}개", status.rows.values().filter(|r| r.phase == Phase::Synced).count(), failed, waiting));
-                if diverged > 0 {
-                    ui.label(egui::RichText::new(kiln_common::trf!("따로 이어진 대화 {}개 · 두 기록 모두 보관됨", diverged)).color(theme.text_dim));
+                if held > 0 {
+                    ui.label(egui::RichText::new(kiln_common::trf!("보류된 대화 {}개 · 원본은 그대로 보관됨", held)).color(theme.text_dim));
+                }
+                if ignored > 0 {
+                    let label = if self.show_ignored { tr("무시한 경고 숨기기") } else { tr("무시한 경고 보기") };
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(kiln_common::trf!("무시한 경고 {}개", ignored)).color(theme.text_dim));
+                        if ui.small_button(label).clicked() {
+                            actions.push(RowAction::ToggleIgnored);
+                        }
+                    });
                 }
                 if enabled && status.watched > 0 {
                     let fraction = status.checked as f32 / status.watched as f32;
@@ -1828,7 +1496,17 @@ impl Manager {
                     )));
                 }
                 if let Some(error) = &self.error {
-                    ui.add(egui::Label::new(egui::RichText::new(error).color(theme.orange)).wrap());
+                    let color = if scan_attention { theme.orange } else { theme.text_dim };
+                    ui.add(egui::Label::new(egui::RichText::new(failure_reason(error)).color(color)).wrap());
+                    match (self.scan_attention(), classify(error)) {
+                        (Some(kind), _) => attention_buttons(ui, SCAN_KEY, kind, &mut actions),
+                        (None, Some(_)) => {
+                            if ui.small_button(tr("다시 표시")).clicked() {
+                                actions.push(RowAction::Unignore(SCAN_KEY.into()));
+                            }
+                        }
+                        (None, None) => {}
+                    }
                 }
                 if !enabled {
                     ui.label(
@@ -1843,6 +1521,11 @@ impl Manager {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (key, row) in &status.rows {
+                            let is_ignored = self.is_ignored(key, row);
+                            if is_ignored && !self.show_ignored {
+                                continue;
+                            }
+                            let attention = row.attention().filter(|_| !is_ignored);
                             ui.push_id(key, |ui| {
                                 ui.add_space(8.0);
                                 kiln_common::widgets::divider(ui);
@@ -1864,12 +1547,16 @@ impl Manager {
                                         Phase::Synced => {
                                             (Icon::Check, theme.green, tr("동기화 완료"))
                                         }
+                                        Phase::Failed if attention.is_some() => {
+                                            (Icon::Warning, theme.orange, tr("동기화 실패"))
+                                        }
+                                        Phase::Failed if is_ignored => {
+                                            (Icon::Info, theme.text_dim, tr("무시됨"))
+                                        }
                                         Phase::Failed if row.diverged() => {
                                             (Icon::Info, theme.text_dim, tr("따로 이어짐"))
                                         }
-                                        Phase::Failed => {
-                                            (Icon::Warning, theme.orange, tr("동기화 실패"))
-                                        }
+                                        Phase::Failed => (Icon::Info, theme.text_dim, tr("보류됨")),
                                     };
                                     if matches!(row.phase, Phase::Reading | Phase::Copying)
                                         && enabled
@@ -1883,20 +1570,26 @@ impl Manager {
                                         icons::paint(ui.painter(), rect, icon, color);
                                     }
                                     ui.label(egui::RichText::new(label).color(color));
-                                    ui.label(format!(
-                                        "{} → {}",
-                                        row.source.tool.display_name(),
-                                        opposite(row.source.tool).display_name()
-                                    ));
+                                    let mut tools = vec![row.source.tool];
+                                    tools.extend(row.copies.iter().map(|c| c.tool));
+                                    tools.dedup();
+                                    tools.sort_by_key(|t| t.key());
+                                    tools.dedup();
+                                    ui.label(tools.iter().map(|t| t.display_name()).collect::<Vec<_>>().join(" · "));
                                 });
                                 if !row.detail.is_empty() {
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(failure_reason(&row.detail))
-                                                .color(if row.diverged() { theme.text_dim } else { theme.orange }),
+                                                .color(if attention.is_some() { theme.orange } else { theme.text_dim }),
                                         )
                                         .wrap(),
                                     );
+                                }
+                                if let Some(kind) = attention {
+                                    attention_buttons(ui, key, kind, &mut actions);
+                                } else if is_ignored && ui.small_button(tr("다시 표시")).clicked() {
+                                    actions.push(RowAction::Unignore(key.clone()));
                                 }
                                 let title = if row.title.is_empty() {
                                     row.source.id.as_str()
@@ -1910,28 +1603,49 @@ impl Manager {
                                     .truncate(),
                                 )
                                 .on_hover_text(title);
-                                let targets = if row.copies.is_empty() {
-                                    row.target.iter().collect::<Vec<_>>()
-                                } else { row.copies.iter().collect::<Vec<_>>() };
+                                let mut targets = vec![Continuation {
+                                    tool: row.source.tool,
+                                    id: row.source.id.clone(),
+                                    cwd: row.source.cwd.clone(),
+                                    root: row.source.root.clone(),
+                                    revision: PROJECTION_REVISION,
+                                }];
+                                targets.extend(row.copies.iter().cloned());
                                 let account = |target: &Continuation| {
                                     self.configured.as_ref()
                                         .filter(|p| p.endpoint(target.tool).root == target.root)
                                         .map(|p| p.endpoint(target.tool).label.clone())
                                         .unwrap_or_else(|| tr("기본 CLI").to_owned())
                                 };
-                                if row.phase == Phase::Synced
-                                    && let Some(first) = targets.first()
-                                {
-                                    let accounts: Vec<_> = targets.iter().map(|t| account(t)).collect();
+                                if row.phase == Phase::Synced && !row.copies.is_empty() {
+                                    let places: Vec<_> = targets
+                                        .iter()
+                                        .map(|t| format!("{} ({})", t.tool.display_name(), account(t)))
+                                        .collect();
                                     ui.add(egui::Label::new(egui::RichText::new(kiln_common::trf!(
-                                        "{}에서 /resume으로 이어가기 · {}",
-                                        first.tool.display_name(),
-                                        accounts.join(", ")
+                                        "/resume으로 이어가기 · {}",
+                                        places.join(", ")
                                     )).color(theme.text_dim)).wrap());
+                                }
+                                for branch in &row.branches {
+                                    ui.push_id(&branch.id, |ui| {
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.label(egui::RichText::new(kiln_common::trf!("보관된 갈래 · 메시지 {}개", branch.events)).color(theme.text_dim));
+                                            if ui
+                                                .small_button(tr("복구"))
+                                                .on_hover_text(tr("이 갈래를 별도 대화로 되살려 모든 에이전트에 다시 연결합니다."))
+                                                .clicked()
+                                            {
+                                                actions.push(RowAction::Restore {
+                                                    branch: branch.id.clone(),
+                                                    title: format!("{} ({})", title, tr("복구됨")),
+                                                });
+                                            }
+                                        });
+                                    });
                                 }
                                 ui.collapsing(tr("대화 정보"), |ui| {
                                     ui.add(egui::Label::new(&row.source.cwd).wrap());
-                                    ui.label(&row.source.id);
                                     if !row.detail.is_empty() {
                                         ui.add(egui::Label::new(&row.detail).wrap());
                                         if ui.small_button(tr("오류 정보 복사")).clicked() {
@@ -1962,5 +1676,6 @@ impl Manager {
                         }
                     });
             });
+        actions
     }
 }

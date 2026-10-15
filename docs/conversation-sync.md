@@ -21,10 +21,11 @@ a different workspace starts that folder's own initial batch. Overlapping folder
 are assigned to the nearest linked workspace, and duplicate workspace paths count once.
 
 Discovery checks both the ordinary CLI directories (`~/.claude`, `~/.codex`, or
-`CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and the two connected account directories.
-Completed transcripts are made available in both opposite-tool locations, so an
-ordinary terminal and a Kiln account panel can each use `/resume`. Equal directories
-are deduplicated. Switching the active account does not redirect the pinned
+`CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and the two connected account directories. Each
+of these four locations is a namespace. Every linked conversation appears exactly once
+in every namespace, with the same title and working directory, so an ordinary terminal
+and a Kiln account panel list the same conversations in `/resume` for both CLIs. Equal
+directories are deduplicated. Switching the active account does not redirect the pinned
 connection. The status dialog identifies the pinned account pair. Sync remains opt-in.
 
 In the other CLI, open the same project and use **`/resume`** to select the newest
@@ -35,14 +36,17 @@ the same folder remain separate; workspace discovery does not merge their histor
 
 ## Matching names and readable history
 
-Kiln uses the source CLI's saved conversation name for both resume pickers. Codex
-names come from its native metadata API, including names present only in its
-database; the append-only text index is a fallback. A
-native rename is detected even when no new response was written. Claude's custom
-name takes precedence over its generated name; unnamed sessions use the first
-prompt. Kiln pins a missing Claude title through its native title sidecar and a missing
-Codex name through its native API, leaving source transcript bodies unchanged. Codex copies receive the same name through
-`thread/name/set`, followed by a metadata read that checks persistence.
+Every copy of a conversation carries one shared name. A rename in any CLI becomes the
+name everywhere; the most recent rename wins. Codex names come from its native metadata
+API, including names present only in its database; the append-only text index is a
+fallback, and a rename is detected even when no new response was written: Kiln asks Codex
+again whenever its state database or title index changed. Claude's newest custom-title
+record takes precedence over its title sidecar and its generated name, as in Claude Code. Unnamed conversations use the
+first prompt with CLI command markup (`<command-name>…`, `<local-command-…>`) and image
+placeholders (`<image …>`, `[Image #n]`) removed; sessions without a real prompt are not
+synchronized. Claude copies receive the name as a native custom-title record and in
+their title sidecar, Codex copies through `thread/name/set`, followed by a metadata read
+that checks persistence.
 
 Historical tool calls/results use the same labeled, fenced text in both CLIs.
 Complete JSON tool results are decoded into fields and multiline output, including
@@ -57,14 +61,40 @@ message ID appear once, including when their reference footers differ.
 The native clients still control typography and terminal layout. This aligns names
 and portable message content, not their entire UI.
 
-## One canonical conversation and exclusive handover
+## One canonical conversation per linked conversation
 
-Each linked conversation keeps one native ID per tool and account namespace.
-Completed continuations append to that existing endpoint; switching back does not
-create another copy. Kiln preserves the existing native log bytes, including its
-provider-private records, and verifies every transferred message and image before
-publishing the appended checkpoint. A conflicting branch remains intact and is
-reported for attention rather than silently merged.
+Kiln keeps the canonical history of each linked conversation in its own configuration
+folder (`conversation-sync/hub`), independent of either CLI's format. Each namespace
+holds one native session of it, called a projection; the conversation's original
+transcript is the projection of its own namespace. A turn completed in any CLI is read
+into the canonical history and appended to every other projection, keeping their
+native IDs. Kiln preserves the existing native log bytes, including provider-private
+records, and reads every appended record back before publishing it. Records are appended
+in place after the existing bytes are verified, so a CLI that keeps its transcript open
+continues writing to the same file; compressed histories are replaced atomically.
+
+When two CLIs continued the same conversation before synchronizing, the side that was
+active most recently becomes the canonical history. The other continuation is kept as
+an archived branch: its native transcript is moved out of the resume list with an
+integrity manifest (Codex through its native archive), its namespace receives a new
+projection of the canonical history, and **Restore** in the status dialog turns the
+branch into a separate conversation in every CLI. A restore that cannot complete is shown
+on its own row and tried again; other conversations keep synchronizing.
+
+Copies created by earlier versions are migrated once: each group of recorded copies
+becomes one conversation, the most recently modified copy defines its history, each
+namespace keeps its most complete matching copy, and the remaining copies are archived.
+Migration only records this; the regular check archives the remaining copies (a copy that
+continued past the canonical history becomes a restorable branch). A copy that cannot be
+archived yet, for example without the Codex CLI, shows the reason on its conversation's
+row and is archived once possible. Unrelated conversations that merely share a title stay
+separate.
+
+The hub writes a rewritten history to a new file and saves its state after every archive.
+After an interrupted check, a projection Kiln had already archived is recognized by its
+archive manifest and is not mistaken for a deleted conversation.
+
+## Exclusive handover
 
 Inside Kiln, opening the same linked conversation requests ownership for the new
 panel. Kiln interrupts the previous managed CLI and the newly opened reader,
@@ -75,12 +105,7 @@ an inactive conversation. Other conversations continue running. If a CLI does
 not exit or history cannot be verified, the new panel stays waiting with a
 visible status; Kiln does not force-kill it or claim that transfer completed.
 
-Old generated snapshots are consolidated only when recorded publication/import
-provenance proves that they belong to this conversation and their full history
-is already present in its canonical endpoint. Superseded snapshots are archived
-with an integrity manifest. Codex snapshots with descendant histories remain
-available for review instead of archiving those descendants implicitly. Original conversations and divergent branches remain
-intact. An old alias opened inside Kiln is redirected to the canonical ID.
+An archived native ID opened inside Kiln is redirected to the current projection.
 
 Exclusive handover applies to managed Kiln agent panels. External terminals and
 other desktop applications do not participate in Kiln's ownership protocol;
@@ -91,10 +116,19 @@ close those readers before continuing the same linked conversation in Kiln.
 Click a workspace's sync icon or choose **View conversation sync status** from its
 context menu. The workspace icon and its status dialog show waiting, working, attention-needed, paused, or a green
 check when all completed conversations have been synchronized. During work it
-shows the number of transcript records checked and new copies created. The list
-shows each source conversation's native title (or first prompt when unnamed), project, direction, status, and a
-button to copy its continuation ID. Copies that have not been continued are
-hidden from the list to avoid displaying both sides of the same transfer.
+shows the number of transcript records checked and copies written. The list shows one
+row per conversation with its shared title, the CLIs holding it, where to continue it
+with `/resume`, and, under **Conversation details**, buttons that copy each native ID.
+
+A warning appears only for a problem you can resolve, with its action: a missing
+connected account folder (**Open account settings**), full or unwritable storage
+(**Try again**), or a missing Codex CLI needed for Codex `/resume` registration.
+**Ignore** removes a warning from the badge and count until a different problem occurs;
+ignored warnings stay listed under *Show ignored warnings*. A check that failed as a whole
+for such a reason offers the same action and **Ignore**. A resolved problem clears on
+its own after the next check. Conditions that need no action — a conversation on hold
+because it contains a record format Kiln does not know yet, an oversized or incomplete
+history, a response still being written — are shown in grey without a badge.
 Codex native import provenance is also checked: importing an unchanged Kiln copy
 through Codex Desktop does not start another transfer loop or consume an initial
 conversation slot. A genuinely continued imported copy remains eligible.
@@ -102,18 +136,18 @@ conversation slot. A genuinely continued imported copy remains eligible.
 The status dialog distinguishes discovery, no conversations found in the open folders, and
 waiting for a completed response. A discovered unsupported transcript stays visible
 with its failure reason; it is not reported as successfully synchronized. A failed item includes its
-reason above its title. Expand **Conversation details** for the original diagnostic or copy it for troubleshooting. A single scrollable list keeps the summary and controls visible. Unchanged background checks retain the last result, row positions, and progress bar; they do not reset completed or failed rows to queued. Unchanged waiting conversations, including continued copies and superseded snapshots, are checked again after 30 seconds, then after 1 and 2 minutes. A failed conversation, such as diverged linked histories, is checked again when it or one of its linked histories changes, and otherwise after an hour. A changed transcript is read once it has been unchanged for 10 seconds, so a response that is still being written is not copied repeatedly. A Kiln handover and **Check again** skip both waits; a handover keeps the results of unchanged files. **Check again** starts a fresh check. Unlinking stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
+reason above its title. Expand **Conversation details** for the original diagnostic or copy it for troubleshooting. A single scrollable list keeps the summary and controls visible. Unchanged background checks retain the last result, row positions, and progress bar; they do not reset completed or failed rows to queued. A conversation whose check failed is checked again when one of its histories changes; otherwise a resolvable problem is retried after 30 seconds, then after 1 and 2 minutes, and other failures after an hour or after Kiln updates. A changed transcript is read once it has been unchanged for 10 seconds, so a response that is still being written is not copied repeatedly. A Kiln handover and **Check again** skip both waits; a handover keeps the results of unchanged files. **Check again** starts a fresh check. Unlinking stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
 The check refers to **completed responses**, not an answer still being generated.
 
 ## Compatibility and boundaries
 
-- New continuations target **Codex CLI 0.162.1** and **Claude Code 2.1.296**.
-  Verified input versions include Codex 0.154.0, 0.155.0-alpha.9.2, 0.155.1,
-  0.160.0, 0.160.1, 0.161.0, 0.162.0-alpha.17.2 and 0.162.1; Claude Code
-  2.1.272, 2.1.281, 2.1.289, 2.1.291, 2.1.292, 2.1.295, 2.1.296 and 2.1.299.
-  Identity and content validation still apply to every transcript. Changing
-  working directories within the same Claude session does not invalidate it.
-  Unknown versions fail visibly; an auto-update may require an adapter update.
+- Kiln reads any Claude Code or Codex version whose records it understands. Records
+  that carry no conversation content are skipped; a conversation containing content
+  Kiln does not know is put on hold and checked again after Kiln updates, while other
+  conversations continue. New copies are written in the **Codex CLI 0.162.1** and
+  **Claude Code 2.1.296** formats. Identity and content validation still apply to every
+  transcript. Changing working directories within the same Claude session does not
+  invalidate it.
 - Text messages retain their wording, line breaks, and code blocks. Textual tool
   calls and results are represented as labeled assistant messages; historical
   tools are not executed. Provider instructions, model-specific thinking and
@@ -143,7 +177,7 @@ The check refers to **completed responses**, not an answer still being generated
   not count toward the retained bound. While a CLI appends records, the reader
   verifies that the captured prefix is unchanged and transfers only complete
   records from that checkpoint. Rewrites and replacements retry. Converted copies are limited to 1 GiB;
-  the tracked-record limit is 4096. Full histories and archived snapshots consume
+  the tracked-record limit is 4096. Full histories and archived branches consume
   disk space; archived contents remain available locally. Context-window limits and provider-side
   compaction still apply when a CLI resumes a long conversation.
 
@@ -155,22 +189,30 @@ exceeded 512 MiB, and when Kiln closes, the worker saves its file-stamped result
 the private `conversation-sync/worker-cache.json`; the next worker loads and removes
 that file, so a restart or update does not read every linked history again. Changing
 the linked workspaces or account pair keeps those results; **Check again** clears them. If the worker cannot start, the scan runs inside
-the GUI process. `app/conversation_sync/discovery.rs` performs bounded metadata discovery with a
+the GUI process. Each projection keeps a checkpoint after its last completed turn, so a
+grown history is read from that point and its new records are appended to the other
+projections without parsing the earlier history; a changed prefix, a Claude branch,
+compaction or interruption, a Codex rollback and compressed histories are read in full.
+`hub.rs` stores canonical conversations and decides divergence, `engine.rs` adopts,
+ingests and projects them, `migrate.rs` converts earlier copies and `checkpoint.rs`
+implements incremental reading. `app/conversation_sync/discovery.rs` performs bounded metadata discovery with a
 file-change cache and persisted initial selections. `format.rs` holds the native
 adapters, `reader.rs` bounds streamed records, and `mod.rs` owns the worker and
 workspace status UI. Managed lifecycle hooks
 remain an additional source of transcript references. Account paths are pinned; no authentication
 files are copied by the synchronizer. Private files, bounded stable reads,
-symlink rejection, a process lock, atomic no-clobber publication and a persisted
-retry plan protect original transcripts. Imported fingerprints suppress loops across both destination namespaces. A durable
-import baseline and per-destination publication plans make partial failures retryable
-without generating another conversation ID. `canonical.rs` validates append-only
-updates and provenance-based snapshot retirement; `handover.rs` stores ownership,
+symlink rejection, a process lock and atomic no-clobber publication protect original
+transcripts. Projection IDs are derived from the conversation and namespace, so an
+interrupted publication is resumed without generating another conversation ID, and
+import baselines keep Kiln-written copies from being adopted as new conversations.
+`canonical.rs` validates append-only updates and archives native transcripts;
+`handover.rs` stores ownership,
 and `agent_handover.rs` coordinates managed PTY exit and restart. Codex endpoints are registered with
 its native metadata index through `codex --no-daemon app-server` and `thread/read`
 (without turns); this prevents an existing `/resume` database from hiding a newly
 written file. This metadata read does not start a model turn. One reader per account
-directory is reused across scans and restarted after a minute. Registration has a
+directory is reused across scans and restarted after a minute; an unchanged account
+directory (state database and title index) is not asked for names again. Registration has a
 bounded deadline, and failure remains visible until a successful retry.
 
 Tests cover full-text round trips, native visible Codex items, bidirectional

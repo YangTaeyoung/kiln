@@ -1349,6 +1349,7 @@ impl KilnApp {
         if let Some(root) = self.conversation_sync.detail.clone() {
             if let Some(workspace) = self.workspaces.iter().find(|w| w.tools.canonical_root() == root) {
                 self.conversation_sync.dialog(ctx, &workspace.name, &root, workspace.conversation_sync, &mut self.settings, &self.rotator.mgr);
+                if std::mem::take(&mut self.conversation_sync.open_accounts) { self.settings_ui.section = 3; self.settings_ui.open = true; }
                 if self.conversation_sync.detail.is_none() { self.focus_terminal = true; }
             } else { self.conversation_sync.detail = None; }
         }

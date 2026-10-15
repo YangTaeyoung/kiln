@@ -12,15 +12,33 @@ pub(super) fn rows_before_validation(
     title: &mut String,
     before_validation: impl FnOnce(),
 ) -> Result<Vec<Value>> {
+    read(source, title, 0, before_validation).map(|(rows, _)| rows)
+}
+
+/// Rows of an uncompressed transcript starting at byte `start`, with the byte offset at
+/// the end of each returned row.
+pub(super) fn rows_from(source: &Source, title: &mut String, start: u64) -> Result<(Vec<Value>, Vec<u64>)> {
+    read(source, title, start, || {})
+}
+
+fn read(
+    source: &Source,
+    title: &mut String,
+    start: u64,
+    before_validation: impl FnOnce(),
+) -> Result<(Vec<Value>, Vec<u64>)> {
     let physical = storage::physical(source);
-    let (file, before) = storage::open(&source.root, &physical)?;
     let compressed = storage::compressed(&physical);
+    ensure!(start == 0 || !compressed, "Compressed transcripts are read from the beginning");
+    let (file, before) = storage::open_at(&source.root, &physical, start)?;
     ensure!(
         before.len() <= 1024 * 1024 * 1024,
         "Transcript exceeds the 1 GiB reading limit"
     );
     let mut reader = BufReader::new(file);
     let mut rows = Vec::new();
+    let mut offsets = Vec::new();
+    let mut position = start;
     let mut line = Vec::new();
     let mut retained = 0;
     let mut decoded = 0u64;
@@ -40,6 +58,7 @@ pub(super) fn rows_before_validation(
             "Transcript row exceeds the 64 MiB reading limit"
         );
         decoded += line.len() as u64;
+        position += line.len() as u64;
         ensure!(decoded <= COPY_LIMIT, "Decoded transcript exceeds the 1 GiB reading limit");
         snapshot_digest.update(&line);
         // A writer can be in the middle of its next record. Only complete records
@@ -139,12 +158,13 @@ pub(super) fn rows_before_validation(
             "Portable conversation exceeds the 512 MiB sync limit"
         );
         rows.push(row);
+        offsets.push(position);
     }
     before_validation();
     ensure!(storage::physical(source) == physical, "Transcript storage changed; retrying");
     if compressed {
         storage::unchanged(source, &physical, &before)?;
-        return Ok(rows);
+        return Ok((rows, offsets));
     }
     let after = storage::metadata(source)?;
     #[cfg(unix)]
@@ -162,7 +182,9 @@ pub(super) fn rows_before_validation(
     if before.len() != after.len() || before.modified()? != after.modified()? {
         // Permit appends only after verifying every byte of the captured prefix.
         // Rewrites/truncations must never be mistaken for a completed checkpoint.
-        let mut check = fs::File::open(&physical)?.take(before.len());
+        let mut check = fs::File::open(&physical)?;
+        std::io::Seek::seek(&mut check, std::io::SeekFrom::Start(start))?;
+        let mut check = check.take(before.len() - start);
         let mut verified = Sha256::new();
         let mut buffer = [0u8; 64 * 1024];
         let mut count = 0;
@@ -175,11 +197,11 @@ pub(super) fn rows_before_validation(
             count += read as u64;
         }
         ensure!(
-            count == before.len() && verified.finalize() == snapshot_digest.finalize(),
+            count == before.len() - start && verified.finalize() == snapshot_digest.finalize(),
             "Transcript changed while reading; retrying"
         );
     }
-    Ok(rows)
+    Ok((rows, offsets))
 }
 
 fn strip_media(content: &mut Value) {
