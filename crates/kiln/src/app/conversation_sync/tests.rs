@@ -2916,14 +2916,19 @@ fn sync_worker_keeps_file_stamped_results_across_scans_and_restarts() {
     assert_eq!(worker.scan(&f, 2).published, 0, "unchanged histories are not copied again");
     drop(worker.gui);
     worker.done.join().unwrap().unwrap();
+    assert!(worker::cache_path(&f.config).exists(), "a closed worker leaves its results for the next launch");
+    let mut relaunched = WorkerFixture::start(&f, u64::MAX);
+    assert_eq!(relaunched.scan(&f, 3).published, 0);
     assert!(!worker::cache_path(&f.config).exists());
+    drop(relaunched.gui);
+    relaunched.done.join().unwrap().unwrap();
 
     let mut extended = messages();
     extended.push(Message { role: "user".into(), text: "A new turn".into(), images: vec![] });
     extended.push(Message { role: "assistant".into(), text: "New answer".into(), images: vec![] });
     let mut recycling = WorkerFixture::start(&f, 0);
     fs::write(&f.source.path, format::render(f.source.tool, &f.source.id, &f.source.cwd, "2026-10-14T00:00:00Z", &extended).unwrap()).unwrap();
-    assert_eq!(recycling.scan(&f, 3).published, 1);
+    assert_eq!(recycling.scan(&f, 30).published, 1);
     assert!(recycling.exiting, "the reply announces the exit");
     assert!(worker::cache_path(&f.config).exists(), "results are saved before the reply");
     recycling.done.join().unwrap().unwrap();
@@ -2988,4 +2993,31 @@ fn a_synchronized_conversation_whose_original_was_deleted_stays_synced() {
     let row = &status.rows[&f.source.path.to_string_lossy().into_owned()];
     assert_eq!(row.phase, Phase::Synced, "its copies remain available");
     assert!(row.target.is_some());
+}
+
+#[test]
+fn a_diverged_conversation_is_rechecked_only_when_a_linked_history_changes() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
+    for source in [&f.source, &peer] {
+        let mut ms = messages();
+        ms.push(Message { role: "user".into(), text: source.tool.key().into(), images: vec![] });
+        ms.push(Message { role: "assistant".into(), text: "Independent reply".into(), images: vec![] });
+        fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &ms).unwrap()).unwrap();
+    }
+    let mut cache = Cache::new();
+    let first = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert!(first.errors.iter().any(|e| e.contains("diverged")), "{:?}", first.errors);
+    let long_ago = SystemTime::now() - Duration::from_secs(600);
+    for attempt in cache.attempts.values_mut() {
+        attempt.2 = long_ago;
+    }
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(cache.attempts[&f.source.path].2, long_ago, "unchanged diverged histories are not read again");
+    let mut continued = rows(&fs::read(&peer.path).unwrap());
+    continued.pop();
+    fs::write(&peer.path, continued.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert!(cache.attempts[&f.source.path].2 > long_ago, "a changed linked history is checked again");
 }

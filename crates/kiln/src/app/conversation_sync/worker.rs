@@ -6,6 +6,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 
 /// After a scan whose peak resident size exceeded this, the worker saves its
 /// file-stamped results and exits; the next scan starts a new worker that loads them.
+/// A worker whose input closes also saves them for the next app launch.
 const RECYCLE_PEAK: u64 = 512 * 1024 * 1024;
 
 /// Native metadata used by worker scans (Codex `/resume` registration in the app).
@@ -189,6 +190,8 @@ pub(super) fn serve_with<M: NativeMetadata>(
             return Ok(());
         }
     }
+    private_dir(saved.parent().context("Missing sync directory")?)?;
+    replace(&saved, &serde_json::to_vec(&cache)?)?;
     Ok(())
 }
 
