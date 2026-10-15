@@ -14,6 +14,7 @@ mod storage;
 #[cfg(test)]
 mod tests;
 mod titles;
+mod tools;
 mod worker;
 
 /// Entry point of the hidden `kiln sync-worker` command.
