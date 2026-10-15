@@ -168,6 +168,67 @@ struct Archive {
     canonical_id: String,
 }
 
+/// Moves a whole native transcript out of its CLI's resume list with an integrity manifest
+/// and returns the archived path. Codex uses its native archive; Claude moves into Kiln's archive.
+pub(super) fn archive_native(
+    config: &Path,
+    source: &Source,
+    canonical_id: &str,
+    metadata: &mut impl FnMut(&Source, Metadata<'_>) -> Result<Option<String>>,
+) -> Result<PathBuf> {
+    let key = source.path.to_string_lossy().into_owned();
+    let manifest = config
+        .join("conversation-sync/archives")
+        .join(format!("{}.json", digest(key.as_bytes())));
+    let _guard = handover::write_guard(config, source)?;
+    let physical = storage::physical(source);
+    safe_path(&source.root, &physical)?;
+    let bytes = bounded(&physical, COPY_LIMIT)?;
+    let destination = if source.tool == Tool::Codex {
+        source
+            .root
+            .join("archived_sessions")
+            .join(physical.file_name().context("Missing source filename")?)
+    } else {
+        config
+            .join("conversation-sync/archives")
+            .join(format!("{}.jsonl", digest(key.as_bytes())))
+    };
+    ensure!(
+        !destination.exists(),
+        "Archive destination collision; original preserved"
+    );
+    let plan = Archive {
+        source: source.clone(),
+        destination: destination.clone(),
+        sha256: digest(&bytes),
+        canonical_id: canonical_id.into(),
+    };
+    private_dir(manifest.parent().unwrap())?;
+    replace(&manifest, &serde_json::to_vec(&plan)?)?;
+    ensure!(
+        storage::physical(source) == physical && bounded(&physical, COPY_LIMIT)? == bytes,
+        "Transcript changed before archive; retrying"
+    );
+    if source.tool == Tool::Codex {
+        let actual = metadata(source, Metadata::Archive)?
+            .context("Native archive returned no path")?;
+        ensure!(
+            Path::new(&actual) == destination,
+            "Native archive returned a different destination"
+        );
+    } else {
+        fs::rename(&physical, &destination)?;
+        fs::File::open(physical.parent().unwrap())?.sync_all()?;
+        fs::File::open(destination.parent().unwrap())?.sync_all()?;
+    }
+    ensure!(
+        digest(&bounded(&destination, COPY_LIMIT)?) == plan.sha256,
+        "Archived history integrity check failed"
+    );
+    Ok(destination)
+}
+
 pub(super) fn retire(
     config: &Path,
     state_path: &Path,

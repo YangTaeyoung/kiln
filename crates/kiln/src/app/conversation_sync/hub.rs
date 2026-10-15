@@ -25,6 +25,12 @@ pub(super) struct Projection {
     pub stamp: Option<(u64, SystemTime)>,
     /// The agent's own original transcript.
     pub origin: bool,
+    /// The native history was deleted or archived outside Kiln; the namespace is not written again.
+    #[serde(default)]
+    pub removed: bool,
+    /// Title last pinned to or read from this native session.
+    #[serde(default)]
+    pub title: String,
 }
 
 /// An archived continuation that lost to the canonical history.
@@ -208,7 +214,12 @@ impl Hub {
             publish(&path, &bytes)?;
         }
         let record = self.record(cid)?;
-        if !record.branches.iter().any(|b| b.id == id) {
+        if let Some(branch) = record.branches.iter_mut().find(|b| b.id == id) {
+            if branch.archived.is_none() {
+                branch.archived = archived;
+                branch.native = native;
+            }
+        } else {
             record.branches.push(Branch {
                 id: id.clone(),
                 base,
@@ -259,13 +270,27 @@ pub(super) enum Outcome {
 /// Compares a projection's native history with the canonical history; `synced` is the
 /// number of canonical events the projection last held and `native_newer` whether its
 /// file changed after the canonical history did.
+/// Whether two messages show the same content; a native rewrite that keeps only the
+/// displayed form of a recorded tool message still matches its original.
+pub(super) fn same(a: &format::Message, b: &format::Message) -> bool {
+    a == b
+        || (a.role == b.role
+            && a.images == b.images
+            && a.role == "assistant"
+            && portable::display(&a.text) == portable::display(&b.text))
+}
+/// Number of leading messages the two histories share.
+pub(super) fn shared(a: &[format::Message], b: &[format::Message]) -> usize {
+    a.iter().zip(b).take_while(|(a, b)| same(a, b)).count()
+}
+
 pub(super) fn reconcile(
     canonical: &[format::Message],
     synced: usize,
     native: &[format::Message],
     native_newer: bool,
 ) -> Outcome {
-    let base = canonical.iter().zip(native).take_while(|(a, b)| a == b).count();
+    let base = shared(canonical, native);
     if base == native.len() {
         return if native.len() == canonical.len() {
             Outcome::Unchanged

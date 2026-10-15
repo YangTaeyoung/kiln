@@ -2,6 +2,7 @@
 mod codex_index;
 mod canonical;
 mod discovery;
+mod engine;
 mod format;
 pub(super) mod handover;
 mod hub;
@@ -560,9 +561,25 @@ fn destination(
 ) -> Result<Source> {
     let tool = opposite(source.tool);
     let root = pair.endpoint(tool).root.clone();
+    let path = native_path(tool, &root, &source.cwd, id, date)?;
+    Ok(Source {
+        tool,
+        root,
+        path,
+        cwd: source.cwd.clone(),
+        id: id.into(),
+    })
+}
+/// Native transcript path of a session in a CLI namespace.
+fn native_path(
+    tool: Tool,
+    root: &Path,
+    cwd: &str,
+    id: &str,
+    date: chrono::DateTime<chrono::Utc>,
+) -> Result<PathBuf> {
     let path = if tool == Tool::Claude {
-        let encoded = source
-            .cwd
+        let encoded = cwd
             // Claude's /[^a-zA-Z0-9]/g operates on UTF-16 code units.
             .encode_utf16()
             .map(|c| {
@@ -588,14 +605,8 @@ fn destination(
                 date.format("%Y-%m-%dT%H-%M-%S")
             ))
     };
-    safe_path(&root, &path)?;
-    Ok(Source {
-        tool,
-        root,
-        path,
-        cwd: source.cwd.clone(),
-        id: id.into(),
-    })
+    safe_path(root, &path)?;
+    Ok(path)
 }
 
 /// Cancellation never blocks the UI on filesystem IO. An in-progress atomic publish may finish.
@@ -617,6 +628,10 @@ struct Cache {
     /// the flag marks a failure that only a changed history can resolve.
     #[serde(default)]
     retirements: HashMap<String, (Vec<(u64, SystemTime)>, SystemTime, u32, bool)>,
+    /// Failed hub conversations keyed by conversation ID: projection fingerprint, attempt
+    /// time, consecutive failures and whether only a changed history can resolve it.
+    #[serde(default)]
+    hub: HashMap<String, (u64, SystemTime, u32, bool)>,
     /// Sources modified within this window are left until their writer pauses.
     #[serde(skip)]
     quiet: Duration,
@@ -631,6 +646,7 @@ impl Cache {
         self.failures.clear();
         self.linked.clear();
         self.retirements.clear();
+        self.hub.clear();
     }
 }
 /// Retry delay for an unchanged source after `failures` consecutive unsettled attempts.
@@ -747,502 +763,44 @@ fn scan_with_metadata(
         .open(lock_path)?;
     lock.try_lock()
         .context("Another Kiln window is synchronizing")?;
-    let state_path = dir.join(if scope.is_some() {
-        "workspace-state.json".into()
-    } else {
-        format!("{}.json", digest(&serde_json::to_vec(pair)?))
-    });
-    let legacy_path = dir.join(format!("{}.json", digest(&serde_json::to_vec(pair)?)));
-    let mut state: State = if state_path.exists() {
-        serde_json::from_slice(&bounded(&state_path, 8 * 1024 * 1024)?)?
-    } else {
-        if scope.is_some() && legacy_path.exists() {
-            serde_json::from_slice(&bounded(&legacy_path, 8 * 1024 * 1024)?)?
-        } else {
-            State::default()
-        }
-    };
-    for entry in state.entries.values().filter(|e| e.imported) {
-        discovery::remember_import(config, &entry.source, &entry.seen)?;
-    }
-    let tracked = dir.join("tracked");
-    if scope.is_none() && tracked.exists() {
-        for (index, entry) in fs::read_dir(tracked)?.enumerate() {
-            ensure!(
-                index < MAX_SOURCES,
-                "Tracked conversation limit reached (4096)"
-            );
-            let path = entry?.path();
-            if path.extension().is_none_or(|x| x != "json") {
-                continue;
-            }
-            let source: Source = serde_json::from_slice(&bounded(&path, 16 * 1024)?)?;
-            if source.root != pair.endpoint(source.tool).root
-                || scope.is_some_and(|s| !s.contains(&source))
-            {
-                continue;
-            }
-            state
-                .entries
-                .entry(source.path.to_string_lossy().into_owned())
-                .or_insert(Entry {
-                    source,
-                    seen: String::new(),
-                    imported: false,
-                    title: String::new(),
-                    copied_to: None,
-                    copies: Vec::new(),
-                });
-        }
-    }
-    let mut discovery_status = Status::default();
-    let mut discovered_paths = std::collections::HashSet::new();
-    if let Some(scope) = scope {
-        discovery_status.workspaces = scope.workspaces.len();
-        discovery_status.discovering = true;
-        notify(&discovery_status);
+    let mut status = Status::default();
+    let sources: Vec<Source> = if let Some(scope) = scope {
+        status.workspaces = scope.workspaces.len();
+        status.discovering = true;
+        notify(&status);
         let found = discovery::find(config, scope, gate, &mut cache.metadata)?;
-        discovery_status.discovered = found.len();
-        discovered_paths.extend(found.iter().map(|s| s.path.clone()));
-        for source in found {
-            let key = source.path.to_string_lossy().into_owned();
-            if let Some(entry) = state.entries.get_mut(&key) {
-                if !entry.imported && discovery::imported(config, &source)?.is_some() {
-                    entry.imported = true;
-                }
-            }
-            if !state.entries.contains_key(&key) {
-                // Migration/recovery also recognizes copies created by earlier connections.
-                let imported = discovery::imported(config, &source)?;
-                state.entries.insert(
-                    key,
-                    Entry {
-                        source,
-                        seen: imported.clone().unwrap_or_default(),
-                        imported: imported.is_some(),
-                        title: String::new(),
-                        copied_to: None,
-                        copies: Vec::new(),
-                    },
-                );
-            }
-        }
-        // Persist discoveries even before an incomplete or incompatible response can be copied.
-        replace_changed(&state_path, &serde_json::to_vec(&state)?)?;
-    }
-    canonical::migrate(config, &state_path, &legacy_path, &mut state, scope)?;
-    state.archived.retain(|key, _| state.entries.get(key).is_none_or(|e| !storage::exists(&e.source)));
-    replace_changed(&state_path, &serde_json::to_vec(&state)?)?;
-    let active: BTreeMap<_, _> = state
-        .entries
-        .iter()
-        .filter(|(_, e)| {
-            scope.is_none_or(|s| {
-                s.contains(&e.source)
-                    && (discovered_paths.contains(&e.source.path)
-                        || (!storage::exists(&e.source) && e.copied_to.is_some()))
-            })
-        })
-        .filter(|(key, _)| !state.archived.contains_key(*key))
-        .map(|(k, e)| (k.clone(), e.clone()))
-        .collect();
-    ensure!(
-        active.len() <= MAX_SOURCES,
-        "Sync source limit reached (4096); reconnect with a fresh namespace"
-    );
-    let mut status = Status {
-        groups: canonical::groups(&state),
-        watched: active.len(),
-        workspaces: discovery_status.workspaces,
-        discovered: discovery_status.discovered,
-        recent: state.recent.clone(),
-        rows: active
-            .iter()
-            .filter(|(_, e)| !e.imported || e.copied_to.is_some())
-            .map(|(k, e)| {
-                (
-                    k.clone(),
-                    cache
-                        .rows
-                        .get(k)
-                        .cloned()
-                        .unwrap_or_else(|| Conversation::from_entry(e, scope)),
-                )
-            })
-            .collect(),
-        ..Default::default()
-    };
-    notify(&status);
-    let mut stamps = LinkedStamps::default();
-    for (key, _) in active {
-        // Earlier endpoints in this scan may have updated this exact conversation.
-        let entry = state.entries[&key].clone();
-        if !gate.load(Ordering::Acquire) {
-            break;
-        }
-        status.checked += 1;
-        if !storage::exists(&entry.source) {
-            if let Some(row) = status.rows.get_mut(&key) {
-                // A removed original keeps its published copies; an unwritten one is still awaited.
-                if entry.copied_to.is_some() {
-                    row.phase = Phase::Synced;
-                    row.detail.clear();
-                } else {
-                    row.phase = Phase::Waiting;
-                    row.detail = "Transcript not available yet".into();
-                }
-            }
-            continue;
-        }
-        // Skipped checks keep the source's retry count; completed ones update it.
-        let mut deferred = false;
-        let result = (|| -> Result<()> {
-            safe_path(&entry.source.root, &storage::physical(&entry.source))?;
-            let meta = storage::metadata(&entry.source)?;
-            let stamp = (meta.len(), meta.modified()?, entry.seen.clone());
-            if let Some((len, modified, at)) = cache.attempts.get(&entry.source.path)
-                && *len == stamp.0
-                && *modified == stamp.1
-                && let Some(failures) = cache.failures.get(&entry.source.path)
-                && {
-                    let waited = at.elapsed().unwrap_or_default();
-                    waited < retry_delay(*failures)
-                        || (waited < FAILED_RECHECK
-                            && cache.rows.get(&key).is_some_and(|r| r.phase == Phase::Failed)
-                            && cache.linked.get(&entry.source.path) == Some(&stamps.get(&state, &key)))
-                }
-            {
-                // Imported copies have no initial row; keep their last reported outcome visible.
-                if !status.rows.contains_key(&key)
-                    && let Some(row) = cache.rows.get(&key)
-                {
-                    status.rows.insert(key.clone(), row.clone());
-                }
-                deferred = true;
-                return Ok(());
-            }
-            let destinations = scope
-                .map(|s| s.destinations(pair, entry.source.tool))
-                .unwrap_or_else(|| vec![pair.clone()]);
-            let native_title = if entry.source.tool == Tool::Codex {
-                metadata(&entry.source, Metadata::Read)?.or(cache.titles.name(&entry.source)?)
-            } else {
-                cache.titles.name(&entry.source)?
-            };
-            let renamed = native_title
-                .as_ref()
-                .is_some_and(|name| name != &entry.title);
-            let mut routes_unchanged = !renamed
-                && (entry.imported && entry.copied_to.is_none()
-                    || destinations.iter().all(|p| {
-                        entry.copies.iter().any(|c| {
-                            c.root == p.endpoint(opposite(entry.source.tool)).root
-                                && c.revision == PROJECTION_REVISION
-                        })
-                    }));
-            if routes_unchanged && cache.messages.get(&entry.source.path) == Some(&stamp) {
-                // Only completed synchronization records this exact stamp.
-                if let Some(row) = status.rows.get_mut(&key)
-                    && row.phase != Phase::Synced
-                {
-                    row.phase = Phase::Synced;
-                    row.detail.clear();
-                }
-                return Ok(());
-            }
-            if recently_modified(stamp.1, cache.quiet) {
-                if !status.rows.contains_key(&key)
-                    && let Some(row) = cache.rows.get(&key)
-                {
-                    status.rows.insert(key.clone(), row.clone());
-                }
-                if let Some(row) = status.rows.get_mut(&key) {
-                    row.phase = Phase::Waiting;
-                    row.detail = "Transcript is being written; retrying".into();
-                }
-                deferred = true;
-                return Ok(());
-            }
-            cache.attempts.insert(
-                entry.source.path.clone(),
-                (stamp.0, stamp.1, SystemTime::now()),
-            );
-            if let Some(row) = status.rows.get_mut(&key) {
-                if row.phase == Phase::Queued {
-                    row.phase = Phase::Reading;
-                }
-            }
-            notify(&status);
-            let mut title = native_title.unwrap_or_default();
-            let result = read_messages_titled(&entry.source, &mut title);
-            if let Some(row) = status.rows.get_mut(&key) {
-                if !title.is_empty() {
-                    row.title = title.clone();
-                }
-            }
-            let messages = result?;
-            if title != entry.title {
-                routes_unchanged = false;
-            }
-            if let Some(row) = status.rows.get_mut(&key) {
-                row.detail.clear();
-            }
-            if messages.is_empty() || !messages.iter().any(|m| m.role == "user") {
-                if let Some(row) = status.rows.get_mut(&key) {
-                    row.phase = Phase::Waiting;
-                }
-                return Ok(());
-            }
-            let fingerprint = json_digest(&messages)?;
-            if entry.imported
-                && (entry.title.is_empty() || title == titles::clean(&entry.title))
-                && discovery::imported(config, &entry.source)?.as_deref() == Some(&fingerprint)
-            {
-                // Older parsers could mistake their own projection for a new turn.
-                // The immutable import baseline proves this copy was not continued.
-                // Retire only that bookkeeping; preserve every native session file.
-                if entry.copied_to.is_some() || entry.seen != fingerprint || entry.title.is_empty()
-                {
-                    let saved = state.entries.get_mut(&key).unwrap();
-                    saved.seen = fingerprint;
-                    saved.title = title;
-                    saved.copied_to = None;
-                    saved.copies.clear();
-                    replace(&state_path, &serde_json::to_vec(&state)?)?;
-                }
-                status.rows.remove(&key);
-                cache.messages.insert(entry.source.path.clone(), stamp);
-                return Ok(());
-            }
-            if fingerprint == entry.seen && !routes_unchanged && !entry.copies.is_empty() {
-                let mut verified = Vec::new();
-                for destination in &destinations {
-                    let root = &destination.endpoint(opposite(entry.source.tool)).root;
-                    if let Some(copy) = entry.copies.iter().find(|c| &c.root == root) {
-                        if let Some(target) = state
-                            .entries
-                            .values()
-                            .find(|e| e.source.id == copy.id && e.source.root == copy.root)
-                        {
-                            if has_current_native_projection(&target.source, &title)?
-                                && read_messages(&target.source).is_ok_and(|m| m == messages)
-                            {
-                                metadata(&target.source, Metadata::Name(&title))?;
-                                let mut copy = copy.clone();
-                                copy.revision = PROJECTION_REVISION;
-                                verified.push(copy);
-                            }
-                        }
-                    }
-                }
-                // Adopt intact old copies without duplicating a large history during upgrade.
-                if verified.len() == destinations.len() {
-                    let saved = state.entries.get_mut(&key).unwrap();
-                    saved.title = title.clone();
-                    saved.copied_to = verified.first().cloned();
-                    saved.copies = verified.clone();
-                    replace(&state_path, &serde_json::to_vec(&state)?)?;
-                    if let Some(row) = status.rows.get_mut(&key) {
-                        row.target = verified.first().cloned();
-                        row.copies = verified;
-                    }
-                    routes_unchanged = true;
-                }
-            }
-            if fingerprint == entry.seen && routes_unchanged {
-                if let Some(row) = status.rows.get_mut(&key) {
-                    row.phase = Phase::Synced;
-                }
-                cache.messages.insert(entry.source.path.clone(), stamp);
-                return Ok(());
-            }
-            let row = status
-                .rows
-                .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry, scope));
-            row.title = title.clone();
-            row.phase = Phase::Copying;
-            notify(&status);
-            let mut copies = Vec::new();
-            let mut pending_plans = Vec::new();
-            for destination_pair in destinations {
-                // Include the namespace in workspace mode; both default and connected CLIs
-                // must see a continuation even when the other CLI was opened outside Kiln.
-                let target_root = &destination_pair.endpoint(opposite(entry.source.tool)).root;
-                let existing = canonical::destination(&state, &key, opposite(entry.source.tool), target_root);
-                let id = existing.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| stable_id(&format!(
-                    "{}:canonical:{key}:{}", state_path.display(), target_root.display())));
-                let plan_path = dir.join(format!("pending-{id}.json"));
-                #[derive(Serialize, Deserialize)]
-                struct Plan {
-                    source: Source,
-                    timestamp: String,
-                }
-                let plan: Plan = if let Some(source) = existing {
-                    Plan { source, timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true) }
-                } else if plan_path.exists() {
-                    serde_json::from_slice(&bounded(&plan_path, 16 * 1024)?)?
-                } else {
-                    let now = chrono::Utc::now();
-                    let plan = Plan {
-                        source: destination(&destination_pair, &entry.source, &id, now)?,
-                        timestamp: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                    };
-                    publish(&plan_path, &serde_json::to_vec(&plan)?)?;
-                    plan
-                };
+        status.discovering = false;
+        status.discovered = found.len();
+        found
+    } else {
+        let tracked = dir.join("tracked");
+        let mut sources = Vec::new();
+        if tracked.exists() {
+            for (index, entry) in fs::read_dir(tracked)?.enumerate() {
                 ensure!(
-                    plan.source.root == destination_pair.endpoint(plan.source.tool).root,
-                    "Destination namespace changed"
+                    index < MAX_SOURCES,
+                    "Tracked conversation limit reached (4096)"
                 );
-                safe_path(&plan.source.root, &plan.source.path)?;
-                let existed = storage::exists(&plan.source);
-                // Only an explicit stored edge permits updating an existing native ID.
-                let linked = existed
-                    && state.entries.contains_key(&plan.source.path.to_string_lossy().into_owned());
-                // A linked endpoint is appended and verified by `canonical::update`;
-                // a complete conversion is rendered only for a new copy or a collision check.
-                let bytes = if linked {
-                    Vec::new()
-                } else {
-                    let bytes = format::render_titled(
-                        plan.source.tool,
-                        &id,
-                        &entry.source.cwd,
-                        &plan.timestamp,
-                        &messages,
-                        &title,
-                    )?;
-                    let converted: Vec<serde_json::Value> = bytes
-                        .split(|b| *b == b'\n')
-                        .filter(|b| !b.is_empty())
-                        .map(serde_json::from_slice)
-                        .collect::<std::result::Result<_, _>>()?;
-                    ensure!(
-                        format::parse(plan.source.tool, &converted)? == messages,
-                        "Converted conversation did not retain every message and attachment"
-                    );
-                    drop(converted);
-                    ensure!(
-                        bytes.len() as u64 <= COPY_LIMIT,
-                        "Converted conversation exceeds the 1 GiB sync limit"
-                    );
-                    bytes
-                };
-                if !gate.load(Ordering::Acquire) {
-                    return Ok(());
+                let path = entry?.path();
+                if path.extension().is_none_or(|x| x != "json") {
+                    continue;
                 }
-                if linked {
-                    let _write_guard = handover::write_guard(config, &plan.source)?;
-                    canonical::update(&plan.source, &messages, &title, &plan.timestamp)?;
-                } else if existed {
-                    ensure!(storage::bytes(&plan.source, COPY_LIMIT)?.starts_with(&bytes),
-                        "Continuation collision; existing conversation was preserved");
+                let source: Source = serde_json::from_slice(&bounded(&path, 16 * 1024)?)?;
+                if source.root == pair.endpoint(source.tool).root {
+                    sources.push(source);
                 }
-                // Record the baseline before publication so a crash cannot make discovery echo it.
-                discovery::remember_projection(
-                    config,
-                    &plan.source,
-                    &fingerprint,
-                    Some(&messages),
-                )?;
-                if !existed {
-                    publish(&plan.source.path, &bytes)?;
-                }
-                metadata(&plan.source, Metadata::Name(&title))?;
-                let copied_meta = storage::metadata(&plan.source)?;
-                cache.messages.insert(
-                    plan.source.path.clone(),
-                    (
-                        copied_meta.len(),
-                        copied_meta.modified()?,
-                        fingerprint.clone(),
-                    ),
-                );
-                status.published += 1;
-                let target_entry = state
-                    .entries
-                    .entry(plan.source.path.to_string_lossy().into_owned())
-                    .or_insert(Entry {
-                        source: plan.source.clone(),
-                        seen: fingerprint.clone(),
-                        imported: true,
-                        title: title.clone(),
-                        copied_to: None,
-                        copies: Vec::new(),
-                    });
-                target_entry.seen = fingerprint.clone();
-                target_entry.title = title.clone();
-                state.lineage.entry(plan.source.path.to_string_lossy().into_owned()).or_insert_with(|| key.clone());
-                let continuation = Continuation {
-                    tool: plan.source.tool,
-                    id,
-                    cwd: entry.source.cwd.clone(),
-                    root: plan.source.root.clone(),
-                    revision: PROJECTION_REVISION,
-                };
-                state.recent.retain(|c| c.id != continuation.id || c.root != continuation.root);
-                state.recent.insert(0, continuation.clone());
-                state.recent.truncate(8);
-                copies.push(continuation);
-                replace(&state_path, &serde_json::to_vec(&state)?)?;
-                pending_plans.push(plan_path);
-            }
-            if entry.source.tool == Tool::Codex {
-                metadata(&entry.source, Metadata::Name(&title))?;
-            }
-            titles::pin_claude(&entry.source, &title)?;
-            let saved = state.entries.get_mut(&key).unwrap();
-            saved.seen = fingerprint.clone();
-            saved.title = title;
-            saved.copied_to = copies.first().cloned();
-            saved.copies = copies.clone();
-            replace(&state_path, &serde_json::to_vec(&state)?)?;
-            for path in pending_plans {
-                let _ = fs::remove_file(path);
-            }
-            cache
-                .messages
-                .insert(entry.source.path.clone(), (stamp.0, stamp.1, fingerprint));
-            let row = status.rows.get_mut(&key).unwrap();
-            row.phase = Phase::Synced;
-            row.target = copies.first().cloned();
-            row.copies = copies;
-            Ok(())
-        })();
-        let settled = result.is_ok()
-            && status
-                .rows
-                .get(&key)
-                .is_none_or(|r| !matches!(r.phase, Phase::Failed | Phase::Waiting));
-        if let Err(error) = result {
-            let row = status
-                .rows
-                .entry(key.clone())
-                .or_insert_with(|| Conversation::from_entry(&entry, scope));
-            row.phase = if error.to_string().contains("retrying") {
-                Phase::Waiting
-            } else {
-                Phase::Failed
-            };
-            row.detail = error.to_string();
-            status.errors.push(format!(
-                "{} {}: {error}",
-                entry.source.tool.display_name(),
-                entry.source.id
-            ));
-        }
-        if !deferred {
-            if settled {
-                cache.failures.remove(&entry.source.path);
-                cache.linked.remove(&entry.source.path);
-            } else {
-                *cache.failures.entry(entry.source.path.clone()).or_default() += 1;
-                cache.linked.insert(entry.source.path.clone(), linked_stamp(&state, &canonical::members(&state, &key)));
             }
         }
-    }
-    canonical::retire(config, &state_path, &mut state, scope, gate, &mut status, cache, &mut metadata)?;
+        sources
+    };
+    let namespaces = scope.map(|s| s.roots.clone()).unwrap_or_else(|| {
+        Tool::ALL
+            .into_iter()
+            .map(|tool| (tool, pair.endpoint(tool).root.clone()))
+            .collect()
+    });
+    let hub = engine::Sync::new(config, scope, namespaces, gate, cache, &mut status, &mut metadata, &notify)
+        .run(sources)?;
     status.errors = status
         .rows
         .values()
@@ -1258,11 +816,9 @@ fn scan_with_metadata(
         .collect();
     cache.rows = status.rows.clone();
     if gate.load(Ordering::Acquire) {
-        handover::publish_links(config, &state, scope)?;
-        status.settled = handover::settled(config, &state, cache, &status)?;
+        handover::publish(config, &engine::links(&hub, scope))?;
     }
-    status.groups = canonical::groups(&state);
-    status.recent = state.recent;
+    status.groups = status.rows.keys().map(|k| (k.clone(), k.clone())).collect();
     notify(&status);
     Ok(status)
 }

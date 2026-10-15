@@ -149,9 +149,13 @@ pub(super) fn publish_links(
             canonical_id: target,
         });
     }
+    publish(config, &links)
+}
+/// Replaces the published native links when they changed.
+pub(super) fn publish(config: &Path, links: &[Link]) -> Result<()> {
     let _lock = lock(config)?;
     let path = config.join("conversation-sync/native-links.json");
-    let bytes = serde_json::to_vec(&links)?;
+    let bytes = serde_json::to_vec(links)?;
     if !path.exists() || bounded(&path, 8 * 1024 * 1024)? != bytes {
         replace(&path, &bytes)?;
     }

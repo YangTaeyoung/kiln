@@ -286,14 +286,15 @@ fn background_poll_keeps_failed_rows_and_does_not_retry_unchanged_files() {
     .unwrap();
     let mut cache = Cache::new();
     let first = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    let at = cache.attempts[&f.source.path].2;
+    let key = f.source.path.to_string_lossy().into_owned();
+    let at = cache.hub[&key].1;
     assert_eq!(first.rows.values().next().unwrap().phase, Phase::Failed);
     let second = scan(&f.config, &f.pair, &f.gate, &mut cache, |s| {
         assert_eq!(s.rows.values().next().unwrap().phase, Phase::Failed);
     })
     .unwrap();
     assert_eq!(first.errors, second.errors);
-    assert_eq!(cache.attempts[&f.source.path].2, at);
+    assert_eq!(cache.hub[&key].1, at);
     // A changed source is retried immediately, without waiting for the backoff.
     fs::write(&f.source.path, original).unwrap();
     assert_eq!(
@@ -467,11 +468,7 @@ impl Fixture {
         .unwrap()
     }
     fn state(&self) -> State {
-        let path = self.config.join("conversation-sync").join(format!(
-            "{}.json",
-            digest(&serde_json::to_vec(&self.pair).unwrap())
-        ));
-        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+        hub_view(&self.config)
     }
 }
 #[test]
@@ -500,67 +497,6 @@ fn native_formats_preserve_text_and_visible_items() {
     }
 }
 #[test]
-fn bidirectional_changes_are_native_and_do_not_echo() {
-    for tool in Tool::ALL {
-        let f = Fixture::new(tool);
-        let first = f.scan();
-        assert!(first.errors.is_empty(), "{:?}", first.errors);
-        assert_eq!(first.published, 1);
-        assert_eq!(f.scan().published, 0);
-        let state = f.state();
-        let imported = state
-            .entries
-            .values()
-            .find(|e| e.source.tool == opposite(tool))
-            .unwrap()
-            .source
-            .clone();
-        assert_eq!(read_messages(&imported).unwrap(), messages());
-        let mut extended = messages();
-        extended.push(Message {
-            images: Vec::new(),
-            role: "user".into(),
-            text: "Continue from the other CLI.".into(),
-        });
-        extended.push(Message {
-            images: Vec::new(),
-            role: "assistant".into(),
-            text: "The exact token is kiln-orchid-731.".into(),
-        });
-        fs::write(
-            &imported.path,
-            format::render(
-                imported.tool,
-                &imported.id,
-                &imported.cwd,
-                "2026-10-13T00:01:00.000Z",
-                &extended,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let second = f.scan();
-        assert!(second.errors.is_empty(), "{:?}", second.errors);
-        assert_eq!(second.published, 1);
-        assert_eq!(f.scan().published, 0);
-        assert_eq!(
-            read_messages(&f.source).unwrap(),
-            extended,
-            "the original native ID receives the continued history"
-        );
-        let state = f.state();
-        let latest = &state.recent[0];
-        assert_eq!(latest.tool, tool);
-        let back = state
-            .entries
-            .values()
-            .find(|e| e.source.id == latest.id)
-            .unwrap();
-        assert_eq!(read_messages(&back.source).unwrap(), extended);
-    }
-}
-
-#[test]
 fn repeated_resume_updates_the_same_two_native_ids_and_preserves_existing_bytes() {
     for tool in Tool::ALL {
         let f = Fixture::new(tool);
@@ -583,50 +519,6 @@ fn repeated_resume_updates_the_same_two_native_ids_and_preserves_existing_bytes(
         }
         assert!(!original.is_empty());
     }
-}
-
-#[test]
-fn divergent_linked_histories_are_preserved_and_report_a_conflict() {
-    let f = Fixture::new(Tool::Claude);
-    f.scan();
-    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
-    for source in [&f.source, &peer] {
-        let mut ms = messages();
-        ms.push(Message { role: "user".into(), text: source.tool.key().into(), images: vec![] });
-        ms.push(Message { role: "assistant".into(), text: "Independent reply".into(), images: vec![] });
-        fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &ms).unwrap()).unwrap();
-    }
-    let before = [fs::read(&f.source.path).unwrap(), fs::read(&peer.path).unwrap()];
-    let status = f.scan();
-    assert!(status.errors.iter().any(|e| e.contains("diverged")), "{:?}", status.errors);
-    assert_eq!(f.state().entries.len(), 2);
-    assert_eq!(fs::read(&f.source.path).unwrap(), before[0]);
-    assert_eq!(fs::read(&peer.path).unwrap(), before[1]);
-}
-
-#[test]
-fn unchanged_conflicting_original_and_continued_copy_wait_for_the_retry_delay() {
-    let f = Fixture::new(Tool::Claude);
-    f.scan();
-    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
-    for source in [&f.source, &peer] {
-        let mut ms = messages();
-        ms.push(Message { role: "user".into(), text: source.tool.key().into(), images: vec![] });
-        ms.push(Message { role: "assistant".into(), text: "Independent reply".into(), images: vec![] });
-        fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &ms).unwrap()).unwrap();
-    }
-    let mut cache = Cache::new();
-    let first = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert_eq!(first.errors.len(), 2, "{:?}", first.errors);
-    let read_at = |cache: &Cache| [&f.source, &peer].map(|s| cache.attempts[&s.path].2);
-    let attempted = read_at(&cache);
-    let second = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert_eq!(read_at(&cache), attempted, "neither history is read again");
-    assert_eq!(second.errors, first.errors, "both conflicts stay reported");
-    assert_eq!(cache.failures[&peer.path], 1);
-    cache.expedite();
-    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert!(read_at(&cache).iter().zip(attempted).all(|(now, before)| *now > before));
 }
 
 #[test]
@@ -719,66 +611,6 @@ fn syncing_one_conversation_does_not_lock_unrelated_native_starts() {
     assert!(handover::event(&f.config,&f.config.join("other.json"),&other,"SessionStart",None).is_ok());
     assert!(handover::write_guard(&f.config,&f.source).is_err(), "same conversation remains locked");
 }
-#[test]
-fn old_snapshot_identity_recovers_lineage_without_matching_unrelated_text() {
-    let f = Fixture::new(Tool::Claude);
-    f.scan();
-    let state_path = f.config.join("conversation-sync").join(format!("{}.json", digest(&serde_json::to_vec(&f.pair).unwrap())));
-    let fingerprint = digest(&serde_json::to_vec(&messages()).unwrap());
-    let title = titles::fallback(&messages());
-    let key = f.source.path.to_string_lossy().into_owned();
-    let old_id = stable_id(&format!("{}:v4:{key}:{fingerprint}:{}", state_path.display(), digest(title.as_bytes())));
-    let old = destination(&f.pair, &f.source, &old_id, chrono::Utc::now()).unwrap();
-    publish(&old.path, &format::render_titled(old.tool, &old.id, &old.cwd, "2026-10-14T00:00:00Z", &messages(), &title).unwrap()).unwrap();
-    discovery::remember_projection(&f.config, &old, &fingerprint, Some(&messages())).unwrap();
-    let mut state = f.state();
-    state.entries.insert(old.path.to_string_lossy().into_owned(), Entry { source:old.clone(), seen:fingerprint, imported:true, title, copied_to:None, copies:vec![] });
-    replace(&state_path, &serde_json::to_vec(&state).unwrap()).unwrap();
-    f.scan();
-    let state = f.state();
-    assert!(canonical::members(&state, &key).contains(&old.path.to_string_lossy().into_owned()), "the exact historical publication hash proves this edge");
-}
-
-#[test]
-fn redundant_projection_is_archived_with_recoverable_bytes_only_after_prefix_verification() {
-    for (diverged, compressed) in [(false, false), (true, false), (false, true), (true, true)] {
-        let f = Fixture::new(Tool::Claude);
-        f.scan();
-        let mut state = f.state();
-        let peer = state.entries.values().find(|e| e.imported).unwrap().source.clone();
-        let alias = destination(&f.pair, &f.source, &stable_id("old-alias"), chrono::Utc::now()).unwrap();
-        let mut ms = messages();
-        if diverged { ms[1].text = "A different branch".into(); }
-        let bytes = format::render(alias.tool, &alias.id, &alias.cwd, "2026-10-14T00:00:00Z", &ms).unwrap();
-        publish(&alias.path, &bytes).unwrap();
-        let physical = if compressed {
-            let path = alias.path.with_extension("jsonl.zst");
-            fs::write(&path, zstd::stream::encode_all(bytes.as_slice(),3).unwrap()).unwrap();
-            fs::remove_file(&alias.path).unwrap();
-            path
-        } else { alias.path.clone() };
-        let archived_bytes = fs::read(&physical).unwrap();
-        let fingerprint = digest(&serde_json::to_vec(&ms).unwrap());
-        discovery::remember_projection(&f.config, &alias, &fingerprint, Some(&ms)).unwrap();
-        let key = alias.path.to_string_lossy().into_owned();
-        state.entries.insert(key.clone(), Entry { source:alias.clone(), seen:fingerprint, imported:true, title:titles::fallback(&ms), copied_to:None, copies:vec![] });
-        state.lineage.insert(key.clone(), f.source.path.to_string_lossy().into_owned());
-        let path = f.config.join("conversation-sync").join(format!("{}.json", digest(&serde_json::to_vec(&f.pair).unwrap())));
-        replace(&path, &serde_json::to_vec(&state).unwrap()).unwrap();
-        f.scan();
-        let state = f.state();
-        assert!(peer.path.exists());
-        if diverged {
-            assert_eq!(fs::read(&physical).unwrap(), archived_bytes);
-            assert!(!state.archived.contains_key(&key));
-        } else {
-            assert!(!storage::exists(&alias), "only the canonical entry should remain in the native picker");
-            assert_eq!(fs::read(&state.archived[&key]).unwrap(), archived_bytes);
-            assert_eq!(f.scan().published, 0);
-        }
-    }
-}
-
 #[test]
 fn native_interruption_keeps_the_unanswered_prompt_and_explicit_abort_event() {
     let f = Fixture::new(Tool::Codex);
@@ -1095,79 +927,6 @@ fn progress_reports_copy_then_durable_completion_and_failure() {
 }
 
 #[test]
-fn branches_and_restart_cache_preserve_every_source() {
-    let f = Fixture::new(Tool::Codex);
-    let mut cache = Cache::new();
-    assert_eq!(
-        scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {})
-            .unwrap()
-            .published,
-        1
-    );
-    assert_eq!(
-        scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {})
-            .unwrap()
-            .published,
-        0
-    );
-    let state = f.state();
-    let imported = state
-        .entries
-        .values()
-        .find(|e| e.source.tool == Tool::Claude)
-        .unwrap()
-        .source
-        .clone();
-    for (source, text) in [(&f.source, "Branch A"), (&imported, "Branch B")] {
-        let mut ms = messages();
-        ms.push(Message {
-            images: Vec::new(),
-            role: "user".into(),
-            text: text.into(),
-        });
-        ms.push(Message {
-            images: Vec::new(),
-            role: "assistant".into(),
-            text: format!("Reply {text}"),
-        });
-        fs::write(
-            &source.path,
-            format::render(
-                source.tool,
-                &source.id,
-                &source.cwd,
-                "2026-10-13T00:00:00.000Z",
-                &ms,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-    }
-    let changed = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert_eq!(changed.published, 0);
-    assert!(changed.errors.iter().all(|e| e.contains("diverged")));
-    assert!(!changed.errors.is_empty());
-    assert_eq!(changed.rows.len(), 2);
-    assert_eq!(f.scan().published, 0);
-    assert!(
-        read_messages(&f.source)
-            .unwrap()
-            .last()
-            .unwrap()
-            .text
-            .contains("Branch A")
-    );
-    assert!(
-        read_messages(&imported)
-            .unwrap()
-            .last()
-            .unwrap()
-            .text
-            .contains("Branch B")
-    );
-}
-
-#[test]
 fn progress_ui_shows_complete_paused_and_failed_states() {
     use egui_kittest::{Harness, kittest::Queryable};
     let f = Fixture::new(Tool::Claude);
@@ -1292,27 +1051,13 @@ fn verify_native_cli_continuations() {
 fn recovery_reuses_publication_plan_and_never_clobbers_a_collision() {
     for collision in [false, true] {
         let f = Fixture::new(Tool::Codex);
-        let dir = f.config.join("conversation-sync");
-        let state_path = dir.join(format!(
-            "{}.json",
-            digest(&serde_json::to_vec(&f.pair).unwrap())
-        ));
-        let key = f.source.path.to_string_lossy();
-        let id = stable_id(&format!(
-            "{}:canonical:{key}:{}",
-            state_path.display(),
-            f.pair.claude.root.display()
-        ));
+        let cid = hub::conversation_id(&hub::NativeRef::of(&f.source));
+        let id = engine::projection_id(&cid, &f.pair.claude.root, 0);
         let date = chrono::DateTime::parse_from_rfc3339("2026-10-12T23:59:59.000Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
         let target = destination(&f.pair, &f.source, &id, date).unwrap();
         let timestamp = date.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        publish(
-            &dir.join(format!("pending-{id}.json")),
-            &serde_json::to_vec(&json!({"source":target,"timestamp":timestamp})).unwrap(),
-        )
-        .unwrap();
         let mut ms = messages();
         ms.push(Message {
             images: Vec::new(),
@@ -1348,9 +1093,11 @@ fn recovery_reuses_publication_plan_and_never_clobbers_a_collision() {
             assert_eq!(status.published, 0);
             assert!(status.errors[0].contains("collision"));
         } else {
-            assert_eq!(status.published, 1);
-            assert_eq!(f.scan().published, 1);
+            assert!(status.errors.is_empty(), "{:?}", status.errors);
+            f.scan();
+            assert_eq!(read_messages(&f.source).unwrap(), ms, "the continued projection reaches the original");
             assert_eq!(f.scan().published, 0);
+            assert!(fs::read(&target.path).unwrap().starts_with(&bytes), "existing native bytes survive");
         }
     }
 }
@@ -1397,10 +1144,36 @@ fn workspace_scan(f: &Fixture, scope: &discovery::Scope) -> Status {
     .unwrap()
 }
 fn workspace_state(f: &Fixture) -> State {
-    serde_json::from_slice(
-        &fs::read(f.config.join("conversation-sync/workspace-state.json")).unwrap(),
-    )
-    .unwrap()
+    hub_view(&f.config)
+}
+/// Hub projections as source entries: originals list their copies, copies are imported.
+fn hub_view(config: &Path) -> State {
+    let store = hub::Hub::open(config).unwrap();
+    let mut state = State::default();
+    for record in store.state.conversations.values() {
+        let live: Vec<_> = record.projections.iter().filter(|p| !p.removed).collect();
+        let key = |p: &hub::Projection| p.source.path.to_string_lossy().into_owned();
+        let origin = live.iter().find(|p| p.origin).map(|p| key(p));
+        for p in &live {
+            let others: Vec<Continuation> = live
+                .iter()
+                .filter(|q| q.source.path != p.source.path)
+                .map(|q| Continuation { tool: q.source.tool, id: q.source.id.clone(), cwd: q.source.cwd.clone(), root: q.source.root.clone(), revision: PROJECTION_REVISION })
+                .collect();
+            state.entries.insert(key(p), Entry {
+                source: p.source.clone(),
+                seen: String::new(),
+                imported: !p.origin,
+                title: record.title.clone(),
+                copied_to: if p.origin { others.first().cloned() } else { None },
+                copies: if p.origin { others } else { Vec::new() },
+            });
+            if !p.origin && let Some(origin) = &origin {
+                state.lineage.insert(key(p), origin.clone());
+            }
+        }
+    }
+    state
 }
 #[test]
 fn existing_sessions_are_discovered_without_hooks_and_without_echo() {
@@ -1466,7 +1239,7 @@ fn native_import_of_a_kiln_copy_does_not_echo_but_new_turns_sync() {
     let again = workspace_scan(&f, &scope);
     assert_eq!(again.published, 0);
     assert_eq!(again.rows.len(), 1);
-    let archived = workspace_state(&f).archived[&external.path.to_string_lossy().into_owned()].clone();
+    let archived = f.pair.codex.root.join("archived_sessions").join(external.path.file_name().unwrap());
     assert_eq!(fs::read(&archived).unwrap(), bytes);
     // A native unarchive restores the old endpoint; new turns still join its group.
     fs::rename(&archived, &external.path).unwrap();
@@ -1495,8 +1268,10 @@ fn native_import_of_a_kiln_copy_does_not_echo_but_new_turns_sync() {
     .unwrap();
     let changed = workspace_scan(&f, &scope);
     assert_eq!(changed.published, 1);
-    assert!(changed.errors.is_empty());
-    assert_eq!(changed.rows.len(), 2);
+    assert!(changed.errors.is_empty(), "{:?}", changed.errors);
+    assert_eq!(changed.rows.len(), 1, "the continued import is the same conversation");
+    assert_eq!(transcripts(&f.pair.codex.root), vec![external.path.clone()], "the continued import is the Codex projection");
+    assert_eq!(read_messages(&f.projection_in(&f.pair.claude.root)).unwrap(), continued);
 }
 
 #[test]
@@ -1590,9 +1365,9 @@ fn default_and_connected_namespaces_receive_copies_and_continued_copies_sync_bac
     .unwrap();
     fs::remove_file(&f.source.path).unwrap();
     let first = workspace_scan(&f, &scope);
-    assert_eq!(first.published, 2);
+    assert_eq!(first.published, 3, "every other namespace, including the same CLI's other account");
     assert_eq!(first.rows.len(), 1);
-    assert_eq!(first.rows.values().next().unwrap().copies.len(), 2);
+    assert_eq!(first.rows.values().next().unwrap().copies.len(), 3);
     assert_eq!(workspace_scan(&f, &scope).published, 0);
     let state = workspace_state(&f);
     let copy = state
@@ -1625,12 +1400,11 @@ fn default_and_connected_namespaces_receive_copies_and_continued_copies_sync_bac
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(workspace_scan(&f, &scope).published, 2);
+    assert_eq!(workspace_scan(&f, &scope).published, 3);
     assert_eq!(workspace_scan(&f, &scope).published, 0);
     let state = workspace_state(&f);
     for root in [&f.pair.claude.root, &default_pair.claude.root] {
-        assert!(state.entries.values().any(|e| e.imported
-            && &e.source.root == root
+        assert!(state.entries.values().any(|e| &e.source.root == root
             && read_messages(&e.source).unwrap() == continued));
     }
 }
@@ -2030,12 +1804,6 @@ fn multiple_destination_retry_retains_the_successful_publication_plan() {
     let first = workspace_scan(&f, &scope);
     assert_eq!(first.published, 1);
     assert_eq!(first.rows.values().next().unwrap().phase, Phase::Failed);
-    let plans: Vec<_> = fs::read_dir(f.config.join("conversation-sync"))
-        .unwrap()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with("pending-"))
-        .collect();
-    assert_eq!(plans.len(), 1);
     let state = workspace_state(&f);
     let successful = state
         .entries
@@ -2050,7 +1818,6 @@ fn multiple_destination_retry_retains_the_successful_publication_plan() {
     assert!(recovered.errors.is_empty());
     assert_eq!(recovered.rows.values().next().unwrap().copies.len(), 2);
     assert_eq!(fs::read(&successful.path).unwrap(), bytes);
-    assert!(!plans[0].path().exists());
     assert_eq!(workspace_scan(&f, &scope).published, 0);
     assert_eq!(
         workspace_state(&f)
@@ -2308,16 +2075,10 @@ fn failed_native_registration_is_not_reported_as_synchronized_and_retries_same_c
     .unwrap();
     assert_eq!(failed.published, 0);
     assert_eq!(failed.rows.values().next().unwrap().phase, Phase::Failed);
-    let plans: Vec<_> = fs::read_dir(f.config.join("conversation-sync"))
-        .unwrap()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with("pending-"))
-        .collect();
-    assert_eq!(plans.len(), 1);
-    let plan: serde_json::Value =
-        serde_json::from_slice(&fs::read(plans[0].path()).unwrap()).unwrap();
-    let target: Source = serde_json::from_value(plan["source"].clone()).unwrap();
-    let original = fs::read(&target.path).unwrap();
+    let written = transcripts(&f.pair.codex.root);
+    assert_eq!(written.len(), 1, "the unregistered copy keeps its native ID for the retry");
+    let target_path = written[0].clone();
+    let original = fs::read(&target_path).unwrap();
     let complete = scan_with_index(
         &f.config,
         &f.pair,
@@ -2325,7 +2086,7 @@ fn failed_native_registration_is_not_reported_as_synchronized_and_retries_same_c
         &mut Cache::new(),
         Some(&scope),
         |source| {
-            assert_eq!(source.path, target.path);
+            assert_eq!(source.path, target_path);
             assert_eq!(fs::read(&source.path).unwrap(), original);
             Ok(())
         },
@@ -2334,7 +2095,7 @@ fn failed_native_registration_is_not_reported_as_synchronized_and_retries_same_c
     .unwrap();
     assert_eq!(complete.published, 1);
     assert_eq!(complete.rows.values().next().unwrap().phase, Phase::Synced);
-    assert!(!plans[0].path().exists());
+    assert_eq!(transcripts(&f.pair.codex.root), vec![target_path]);
 }
 
 #[test]
@@ -2718,11 +2479,9 @@ fn resumed_import_keeps_native_title_even_before_it_has_a_status_row() {
     let status = scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), None,
         |source, request| Ok((source.path == copy.path && request.title().is_none()).then(|| "Shared native name".into())), |_| {}).unwrap();
     assert!(status.errors.is_empty(), "{:?}", status.errors);
-    assert_eq!(status.rows[&copy.path.to_string_lossy().into_owned()].title, "Shared native name");
-    let state = f.state();
-    let target = &state.entries[&copy.path.to_string_lossy().into_owned()].copied_to.as_ref().unwrap();
-    let target = state.entries.values().find(|e| e.source.id == target.id).unwrap();
-    assert_eq!(titles::projection(&target.source).unwrap().as_deref(), Some("Shared native name"));
+    assert_eq!(status.rows.values().next().unwrap().title, "Shared native name");
+    assert_eq!(read_messages(&f.source).unwrap(), continued);
+    assert_eq!(titles::projection(&f.source).unwrap().as_deref(), Some("Shared native name"));
 }
 
 #[test]
@@ -2972,11 +2731,12 @@ fn saved_cache_keeps_retry_delays_for_a_restarted_worker() {
     fs::write(&f.source.path, data.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
     let mut cache = Cache::new();
     scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    let attempted = cache.attempts[&f.source.path];
+    let key = f.source.path.to_string_lossy().into_owned();
+    let attempted = cache.hub[&key];
     let mut restored: Cache = serde_json::from_slice(&serde_json::to_vec(&cache).unwrap()).unwrap();
-    assert_eq!(restored.failures, cache.failures);
+    assert_eq!(restored.hub, cache.hub);
     let second = scan(&f.config, &f.pair, &f.gate, &mut restored, |_| {}).unwrap();
-    assert_eq!(restored.attempts[&f.source.path], attempted, "the failing history is not read again");
+    assert_eq!(restored.hub[&key], attempted, "the failing history is not read again");
     assert_eq!(second.rows.values().next().unwrap().phase, Phase::Failed);
 }
 
@@ -3001,36 +2761,9 @@ fn a_synchronized_conversation_whose_original_was_deleted_stays_synced() {
     assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
     fs::remove_file(&f.source.path).unwrap();
     let status = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    let row = &status.rows[&f.source.path.to_string_lossy().into_owned()];
+    let row = status.rows.values().next().unwrap();
     assert_eq!(row.phase, Phase::Synced, "its copies remain available");
-    assert!(row.target.is_some());
-}
-
-#[test]
-fn a_diverged_conversation_is_rechecked_only_when_a_linked_history_changes() {
-    let f = Fixture::new(Tool::Claude);
-    f.scan();
-    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
-    for source in [&f.source, &peer] {
-        let mut ms = messages();
-        ms.push(Message { role: "user".into(), text: source.tool.key().into(), images: vec![] });
-        ms.push(Message { role: "assistant".into(), text: "Independent reply".into(), images: vec![] });
-        fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &ms).unwrap()).unwrap();
-    }
-    let mut cache = Cache::new();
-    let first = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert!(first.errors.iter().any(|e| e.contains("diverged")), "{:?}", first.errors);
-    let long_ago = SystemTime::now() - Duration::from_secs(600);
-    for attempt in cache.attempts.values_mut() {
-        attempt.2 = long_ago;
-    }
-    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert_eq!(cache.attempts[&f.source.path].2, long_ago, "unchanged diverged histories are not read again");
-    let mut continued = rows(&fs::read(&peer.path).unwrap());
-    continued.pop();
-    fs::write(&peer.path, continued.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
-    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
-    assert!(cache.attempts[&f.source.path].2 > long_ago, "a changed linked history is checked again");
+    assert!(f.live().iter().any(|p| p.source.root != f.source.root && storage::exists(&p.source)));
 }
 
 /// Reference search over publication edges, compared with `canonical::Links`.
@@ -3219,7 +2952,7 @@ fn hub_identity_is_stable_and_aliases_resolve() {
     let mut record = hub::Record::new("T", "/w");
     record.projections.push(hub::Projection {
         source: Source { tool: Tool::Codex, root: PathBuf::from("/r"), path: PathBuf::from("/r/x.jsonl"), cwd: "/w".into(), id: "id-a".into() },
-        synced: 0, stamp: None, origin: true,
+        synced: 0, stamp: None, origin: true, removed: false, title: String::new(),
     });
     record.aliases.push(alias.clone());
     store.state.conversations.insert(cid.clone(), record);
@@ -3292,4 +3025,157 @@ fn reconciled_history_is_always_the_winning_side() {
             assert_eq!(canonical, e, "{outcome:?}");
         }
     }
+}
+
+impl Fixture {
+    fn hub(&self) -> hub::HubState {
+        hub::Hub::open(&self.config).unwrap().state
+    }
+    fn live(&self) -> Vec<hub::Projection> {
+        self.hub().conversations.values().flat_map(|r| r.projections.clone()).filter(|p| !p.removed).collect()
+    }
+    fn peer(&self) -> Source {
+        self.live().into_iter().find(|p| p.source.root != self.source.root).expect("projection in the other namespace").source
+    }
+    fn projection_in(&self, root: &Path) -> Source {
+        self.live().into_iter().find(|p| p.source.root == root).expect("projection in namespace").source
+    }
+}
+fn transcripts(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut pending = vec![root.join("projects"), root.join("sessions")];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|e| e == "jsonl") {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+fn write_history(source: &Source, history: &[Message], modified: SystemTime) {
+    fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", history).unwrap()).unwrap();
+    fs::File::options().write(true).open(&source.path).unwrap().set_modified(modified).unwrap();
+}
+
+#[test]
+fn hub_continuations_reach_the_original_without_echo() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let first = f.scan();
+        assert!(first.errors.is_empty(), "{:?}", first.errors);
+        assert_eq!(first.published, 1);
+        assert_eq!(f.scan().published, 0);
+        assert_eq!(f.hub().conversations.len(), 1);
+        let peer = f.peer();
+        assert_eq!(peer.tool, opposite(tool));
+        assert_eq!(read_messages(&peer).unwrap(), messages());
+        let mut extended = messages();
+        extended.extend(turns(&["Continue from the other CLI.", "The exact token is kiln-orchid-731."]));
+        write_history(&peer, &extended, SystemTime::now() + Duration::from_secs(30));
+        let second = f.scan();
+        assert!(second.errors.is_empty(), "{:?}", second.errors);
+        assert_eq!(second.published, 1);
+        assert_eq!(f.scan().published, 0);
+        assert_eq!(read_messages(&f.source).unwrap(), extended, "the original native ID receives the continuation");
+        assert_eq!(f.live().len(), 2);
+    }
+}
+
+#[test]
+fn diverged_histories_keep_the_newest_branch_and_archive_the_other() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.peer();
+    let now = SystemTime::now();
+    let mut older = messages();
+    older.extend(turns(&["claude side", "claude reply"]));
+    let mut newer = messages();
+    newer.extend(turns(&["codex side", "codex reply"]));
+    write_history(&f.source, &older, now + Duration::from_secs(40));
+    write_history(&peer, &newer, now + Duration::from_secs(50));
+    let original = fs::read(&f.source.path).unwrap();
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert!(!f.source.path.exists(), "the losing native history leaves the resume list");
+    let claude = f.projection_in(&f.pair.claude.root);
+    assert_ne!(claude.id, f.source.id, "the namespace receives a new projection");
+    assert_eq!(read_messages(&claude).unwrap(), newer);
+    assert_eq!(read_messages(&peer).unwrap(), newer);
+    let state = f.hub();
+    let record = state.conversations.values().next().unwrap();
+    assert_eq!(record.branches.len(), 1);
+    let branch = &record.branches[0];
+    assert_eq!(fs::read(branch.archived.as_ref().unwrap()).unwrap(), original, "the archived file keeps its bytes");
+    assert_eq!(hub::Hub::open(&f.config).unwrap().branch_events(&branch.id).unwrap(), turns(&["claude side", "claude reply"]));
+    assert!(record.aliases.iter().any(|a| a.id == f.source.id));
+    assert_eq!(f.scan().published, 0);
+}
+
+#[test]
+fn a_namespace_never_holds_two_live_projections() {
+    let f = Fixture::new(Tool::Codex);
+    f.scan();
+    let mut seed = 0x2b99_2ddf_a232_49d6u64;
+    let mut next = |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    let mut clock = SystemTime::now() + Duration::from_secs(60);
+    for round in 0..16 {
+        let state = f.hub();
+        let cid = state.conversations.keys().next().unwrap().clone();
+        let events = hub::Hub::open(&f.config).unwrap().events(&cid).unwrap();
+        let live = f.live();
+        let writers: Vec<_> = match next(3) {
+            0 => vec![live[next(2) as usize].source.clone()],
+            1 => live.iter().map(|p| p.source.clone()).collect(),
+            _ => vec![],
+        };
+        for (i, writer) in writers.iter().enumerate() {
+            let mut history = events.clone();
+            history.extend(turns(&[&format!("round {round} writer {i}"), "reply"]));
+            clock += Duration::from_secs(1 + next(5));
+            write_history(writer, &history, clock);
+        }
+        let status = f.scan();
+        assert!(status.errors.is_empty(), "round {round}: {:?}", status.errors);
+        for root in [&f.pair.claude.root, &f.pair.codex.root] {
+            assert_eq!(transcripts(root).len(), 1, "round {round}: one live transcript in {}", root.display());
+        }
+        let store = hub::Hub::open(&f.config).unwrap();
+        let canonical = store.events(&cid).unwrap();
+        for p in f.live() {
+            assert_eq!(read_messages(&p.source).unwrap(), canonical, "round {round}");
+        }
+    }
+}
+
+#[test]
+fn projection_modified_within_the_quiet_window_is_not_written() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.peer();
+    let mut cache = Cache::new();
+    cache.quiet = Duration::from_secs(10);
+    let mut continued = messages();
+    continued.extend(turns(&["next question", "next answer"]));
+    write_history(&f.source, &continued, SystemTime::now());
+    let waiting = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(waiting.published, 0, "a transcript being written is not read");
+    let peer_before = fs::read(&peer.path).unwrap();
+    fs::File::options().write(true).open(&f.source.path).unwrap().set_modified(SystemTime::now() - Duration::from_secs(60)).unwrap();
+    fs::File::options().write(true).open(&peer.path).unwrap().set_modified(SystemTime::now()).unwrap();
+    let deferred = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(deferred.published, 0);
+    assert_eq!(fs::read(&peer.path).unwrap(), peer_before, "a projection being written is not appended to");
+    fs::File::options().write(true).open(&peer.path).unwrap().set_modified(SystemTime::now() - Duration::from_secs(60)).unwrap();
+    assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
+    assert_eq!(read_messages(&peer).unwrap(), continued);
 }
