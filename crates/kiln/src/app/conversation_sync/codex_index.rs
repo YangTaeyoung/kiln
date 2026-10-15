@@ -47,6 +47,7 @@ impl Registry {
         }
         self.metadata(source, gate, request.title())
     }
+    #[cfg(test)]
     pub fn ensure(&mut self, source: &Source, gate: &Gate) -> Result<()> {
         let title = titles::projection(source)?;
         self.metadata(source, gate, title.as_deref()).map(|_| ())

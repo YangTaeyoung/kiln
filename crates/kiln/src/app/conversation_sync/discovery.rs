@@ -50,22 +50,6 @@ impl Scope {
     fn matches_cwd(&self, cwd: &str) -> bool {
         self.workspace(cwd).is_some()
     }
-    pub fn destinations(&self, pair: &Pair, source_tool: Tool) -> Vec<Pair> {
-        self.roots
-            .iter()
-            .filter(|(t, _)| *t == opposite(source_tool))
-            .map(|(tool, root)| {
-                let mut target = pair.clone();
-                let endpoint = if *tool == Tool::Claude {
-                    &mut target.claude
-                } else {
-                    &mut target.codex
-                };
-                endpoint.root = root.clone();
-                target
-            })
-            .collect()
-    }
 }
 
 #[derive(Serialize, Deserialize)]

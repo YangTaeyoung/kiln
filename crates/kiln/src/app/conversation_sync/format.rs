@@ -500,6 +500,7 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
 }
 
 /// Emit a new immutable session. Native IDs are derived from the snapshot ID, never reused.
+#[cfg(test)]
 pub fn render(
     tool: Tool,
     id: &str,

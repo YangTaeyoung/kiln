@@ -87,6 +87,9 @@ impl Record {
 #[derive(Default, Serialize, Deserialize)]
 pub(super) struct HubState {
     pub conversations: BTreeMap<String, Record>,
+    /// Legacy state files whose copies were migrated into the hub.
+    #[serde(default)]
+    pub migrated: std::collections::BTreeSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -232,6 +235,7 @@ impl Hub {
         }
         Ok(id)
     }
+    #[cfg(test)]
     pub fn branch_events(&self, id: &str) -> Result<Vec<format::Message>> {
         let count = self
             .state
@@ -244,6 +248,7 @@ impl Hub {
         decode(&self.branch_path(id), count)
     }
     /// The conversation whose projection or alias is this native session.
+    #[cfg(test)]
     pub fn find(&self, native: &NativeRef) -> Option<&str> {
         self.state.conversations.iter().find_map(|(cid, record)| {
             (record.projections.iter().any(|p| NativeRef::of(&p.source) == *native)

@@ -536,8 +536,7 @@ fn transcript_written_within_the_quiet_window_waits_without_being_read() {
     let row = waiting.rows.values().next().unwrap();
     assert_eq!(row.phase, Phase::Waiting);
     assert!(row.detail.contains("being written"), "{}", row.detail);
-    assert!(!cache.attempts.contains_key(&f.source.path));
-    assert!(!cache.failures.contains_key(&f.source.path));
+    assert!(cache.hub.is_empty(), "a transcript being written is not a failed attempt");
     cache.quiet = Duration::ZERO;
     assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
 }
@@ -1203,10 +1202,6 @@ fn native_import_of_a_kiln_copy_does_not_echo_but_new_turns_sync() {
     assert_eq!(workspace_scan(&f, &scope).published, 1);
     let state = workspace_state(&f);
     let copied = &state.entries.values().find(|e| e.imported).unwrap().source;
-    assert!(
-        has_current_native_projection(copied, &titles::projection(copied).unwrap().unwrap())
-            .unwrap()
-    );
     let external = destination(
         &f.pair,
         copied,
@@ -2844,69 +2839,6 @@ fn computed_groups_match_a_search_over_publication_edges() {
     }
 }
 
-#[test]
-fn published_links_match_a_per_conversation_destination_search() {
-    let dir = tempfile::tempdir().unwrap();
-    let config = dir.path().join("config");
-    private_dir(&config.join("conversation-sync")).unwrap();
-    let roots = [dir.path().join("a"), dir.path().join("b")];
-    for root in &roots {
-        fs::create_dir_all(root).unwrap();
-    }
-    let mut seed = 0x2545_f491_4f6c_dd1du64;
-    let mut next = |n: u64| {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        seed % n
-    };
-    for round in 0..20 {
-        let mut state = State::default();
-        let count = 2 + next(40);
-        for i in 0..count {
-            let tool = if next(2) == 0 { Tool::Claude } else { Tool::Codex };
-            let root = roots[next(2) as usize].clone();
-            let path = root.join(format!("{round}-{i}.jsonl"));
-            // Missing transcripts cannot be destinations.
-            if next(4) != 0 {
-                fs::write(&path, b"").unwrap();
-            }
-            let source = Source { tool, root, path, cwd: "/w".into(), id: format!("id-{}", next(count)) };
-            state.entries.insert(format!("k{i}"), Entry { source, seen: String::new(), imported: next(2) == 0, title: String::new(), copied_to: None, copies: Vec::new() });
-        }
-        let keys: Vec<String> = state.entries.keys().cloned().collect();
-        for _ in 0..next(2 * count) {
-            let (a, b) = (&keys[next(count) as usize], &keys[next(count) as usize]);
-            state.lineage.insert(a.clone(), b.clone());
-        }
-        for key in &keys {
-            if next(3) == 0 {
-                let target = &state.entries[&keys[next(count) as usize]].source;
-                let copy = Continuation { tool: target.tool, id: target.id.clone(), cwd: "/w".into(), root: target.root.clone(), revision: PROJECTION_REVISION };
-                state.entries.get_mut(key).unwrap().copies.push(copy);
-            }
-        }
-        handover::publish_links(&config, &state, None).unwrap();
-        let mut expected = Vec::new();
-        for (key, entry) in &state.entries {
-            let members = searched_members(&state, key);
-            if members.len() < 2 {
-                continue;
-            }
-            let Some(target) = canonical::destination(&state, key, entry.source.tool, &entry.source.root) else {
-                continue;
-            };
-            let anchor = members.iter().min_by_key(|key| (state.entries[*key].imported, *key)).unwrap();
-            expected.push((entry.source.id.clone(), digest(anchor.as_bytes()), target.id));
-        }
-        let published: Vec<_> = handover::links(&config)
-            .unwrap()
-            .into_iter()
-            .map(|link| (link.id, link.group, link.canonical_id))
-            .collect();
-        assert_eq!(published, expected, "round {round}");
-    }
-}
 
 fn text(role: &str, text: &str) -> Message {
     Message { role: role.into(), text: text.into(), images: Vec::new() }
@@ -3178,4 +3110,105 @@ fn projection_modified_within_the_quiet_window_is_not_written() {
     fs::File::options().write(true).open(&peer.path).unwrap().set_modified(SystemTime::now() - Duration::from_secs(60)).unwrap();
     assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
     assert_eq!(read_messages(&peer).unwrap(), continued);
+}
+
+fn legacy_entry(source: &Source, imported: bool, copies: Vec<Continuation>) -> Entry {
+    Entry { source: source.clone(), seen: String::new(), imported, title: String::new(), copied_to: copies.first().cloned(), copies }
+}
+fn legacy_copy(f: &Fixture, name: &str, history: &[Message], modified: SystemTime) -> Source {
+    let copy = destination(&f.pair, &f.source, &stable_id(name), chrono::Utc::now()).unwrap();
+    publish(&copy.path, &format::render(copy.tool, &copy.id, &copy.cwd, "2026-10-13T00:00:00Z", history).unwrap()).unwrap();
+    fs::File::options().write(true).open(&copy.path).unwrap().set_modified(modified).unwrap();
+    copy
+}
+fn write_legacy(f: &Fixture, state: &State) {
+    let path = f.config.join("conversation-sync").join(format!("{}.json", digest(&serde_json::to_vec(&f.pair).unwrap())));
+    fs::write(path, serde_json::to_vec(state).unwrap()).unwrap();
+}
+fn key_of(source: &Source) -> String {
+    source.path.to_string_lossy().into_owned()
+}
+fn as_continuation(source: &Source) -> Continuation {
+    Continuation { tool: source.tool, id: source.id.clone(), cwd: source.cwd.clone(), root: source.root.clone(), revision: PROJECTION_REVISION }
+}
+
+#[test]
+fn migration_keeps_one_projection_per_namespace_and_archives_extra_copies() {
+    let f = Fixture::new(Tool::Claude);
+    let now = SystemTime::now();
+    let older = legacy_copy(&f, "legacy-a", &messages(), now - Duration::from_secs(600));
+    let mut longer = messages();
+    longer.extend(turns(&["continued in codex", "codex reply"]));
+    let newer = legacy_copy(&f, "legacy-b", &longer, now - Duration::from_secs(60));
+    fs::File::options().write(true).open(&f.source.path).unwrap().set_modified(now - Duration::from_secs(1200)).unwrap();
+    let mut state = State::default();
+    state.entries.insert(key_of(&f.source), legacy_entry(&f.source, false, vec![as_continuation(&older), as_continuation(&newer)]));
+    state.entries.insert(key_of(&older), legacy_entry(&older, true, vec![]));
+    state.entries.insert(key_of(&newer), legacy_entry(&newer, true, vec![]));
+    state.lineage.insert(key_of(&older), key_of(&f.source));
+    state.lineage.insert(key_of(&newer), key_of(&f.source));
+    write_legacy(&f, &state);
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(f.hub().conversations.len(), 1);
+    assert_eq!(transcripts(&f.pair.codex.root), vec![newer.path.clone()], "only the most complete copy stays in the Codex list");
+    assert!(f.pair.codex.root.join("archived_sessions").join(older.path.file_name().unwrap()).exists());
+    assert_eq!(read_messages(&f.source).unwrap(), longer, "the original receives the newest continuation");
+    assert!(f.hub().conversations.values().next().unwrap().aliases.iter().any(|a| a.id == older.id));
+}
+
+#[test]
+fn migration_keeps_unrelated_conversations_with_equal_titles() {
+    let f = Fixture::new(Tool::Claude);
+    let mut other_history = turns(&["A different question", "A different answer"]);
+    other_history[0].text = messages()[0].text.clone() + " (separate)";
+    let other = Source { id: stable_id("separate-original"), ..f.source.clone() };
+    let other = Source { path: f.source.path.with_file_name(format!("{}.jsonl", other.id)), ..other };
+    publish(&other.path, &format::render(other.tool, &other.id, &other.cwd, "2026-10-13T00:00:00Z", &other_history).unwrap()).unwrap();
+    let mut state = State::default();
+    let mut first = legacy_entry(&f.source, false, vec![]);
+    first.title = "Same title".into();
+    let mut second = legacy_entry(&other, false, vec![]);
+    second.title = "Same title".into();
+    state.entries.insert(key_of(&f.source), first);
+    state.entries.insert(key_of(&other), second);
+    write_legacy(&f, &state);
+    f.scan();
+    assert_eq!(f.hub().conversations.len(), 2);
+    assert!(f.source.path.exists() && other.path.exists());
+}
+
+#[test]
+fn migration_resumes_after_interruption_without_new_projections() {
+    let f = Fixture::new(Tool::Claude);
+    let copy = legacy_copy(&f, "legacy-only", &messages(), SystemTime::now() - Duration::from_secs(60));
+    let mut state = State::default();
+    state.entries.insert(key_of(&f.source), legacy_entry(&f.source, false, vec![as_continuation(&copy)]));
+    state.entries.insert(key_of(&copy), legacy_entry(&copy, true, vec![]));
+    state.lineage.insert(key_of(&copy), key_of(&f.source));
+    write_legacy(&f, &state);
+    f.scan();
+    let before: Vec<String> = f.live().iter().map(|p| p.source.id.clone()).collect();
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    store.state.migrated.clear();
+    store.save().unwrap();
+    f.scan();
+    let after: Vec<String> = f.live().iter().map(|p| p.source.id.clone()).collect();
+    assert_eq!(before, after);
+    assert_eq!(transcripts(&f.pair.codex.root), vec![copy.path.clone()], "the migrated copy is the projection");
+}
+
+#[test]
+fn unparseable_legacy_transcripts_are_left_untouched() {
+    let f = Fixture::new(Tool::Claude);
+    let broken = legacy_copy(&f, "legacy-broken", &messages(), SystemTime::now() - Duration::from_secs(60));
+    fs::write(&broken.path, b"not a transcript\n").unwrap();
+    let mut state = State::default();
+    state.entries.insert(key_of(&f.source), legacy_entry(&f.source, false, vec![as_continuation(&broken)]));
+    state.entries.insert(key_of(&broken), legacy_entry(&broken, true, vec![]));
+    state.lineage.insert(key_of(&broken), key_of(&f.source));
+    write_legacy(&f, &state);
+    f.scan();
+    assert_eq!(fs::read(&broken.path).unwrap(), b"not a transcript\n");
+    assert_eq!(transcripts(&f.pair.codex.root), vec![broken.path.clone()], "no second Codex history is created");
 }

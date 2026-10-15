@@ -6,6 +6,7 @@ mod engine;
 mod format;
 pub(super) mod handover;
 mod hub;
+mod migrate;
 mod portable;
 mod reader;
 mod storage;
@@ -53,9 +54,6 @@ impl<'a> Metadata<'a> {
     }
 }
 
-fn has_current_native_projection(source: &Source, title: &str) -> Result<bool> {
-    Ok(titles::raw_projection(source)?.as_deref() == Some(title))
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Endpoint {
@@ -435,6 +433,7 @@ impl Conversation {
     fn needs_attention(&self) -> bool {
         self.phase == Phase::Failed && !self.diverged()
     }
+    #[cfg(test)]
     fn from_entry(entry: &Entry, scope: Option<&discovery::Scope>) -> Self {
         Self {
             workspace: scope.and_then(|s| s.workspace(&entry.source.cwd)).cloned(),
@@ -553,6 +552,7 @@ fn read_rows_titled(
     }
     Ok((rows, messages))
 }
+#[cfg(test)]
 fn destination(
     pair: &Pair,
     source: &Source,
@@ -618,16 +618,6 @@ struct Cache {
     metadata: discovery::MetadataCache,
     titles: titles::Cache,
     rows: BTreeMap<String, Conversation>,
-    attempts: HashMap<PathBuf, (u64, SystemTime, SystemTime)>,
-    /// Consecutive unsettled attempts per unchanged source; selects its retry delay.
-    failures: HashMap<PathBuf, u32>,
-    /// Linked-history stamps recorded after a source's last failed attempt.
-    #[serde(default)]
-    linked: HashMap<PathBuf, u64>,
-    /// Snapshot-retirement attempts keyed by source, stamped with both histories;
-    /// the flag marks a failure that only a changed history can resolve.
-    #[serde(default)]
-    retirements: HashMap<String, (Vec<(u64, SystemTime)>, SystemTime, u32, bool)>,
     /// Failed hub conversations keyed by conversation ID: projection fingerprint, attempt
     /// time, consecutive failures and whether only a changed history can resolve it.
     #[serde(default)]
@@ -642,10 +632,6 @@ impl Cache {
     }
     /// Retries are immediate on the next scan; cached results of unchanged files are kept.
     fn expedite(&mut self) {
-        self.attempts.clear();
-        self.failures.clear();
-        self.linked.clear();
-        self.retirements.clear();
         self.hub.clear();
     }
 }
@@ -655,35 +641,6 @@ fn retry_delay(failures: u32) -> Duration {
 }
 /// A failed attempt whose linked histories are all unchanged is retried after this delay.
 const FAILED_RECHECK: Duration = Duration::from_secs(60 * 60);
-/// Fingerprint of the length and modification time of every history in a linked group.
-fn linked_stamp(state: &State, members: &std::collections::BTreeSet<String>) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    for member in members {
-        member.hash(&mut hasher);
-        if let Some(meta) = state.entries.get(member).and_then(|e| storage::metadata(&e.source).ok()) {
-            meta.len().hash(&mut hasher);
-            meta.modified().ok().hash(&mut hasher);
-        }
-    }
-    hasher.finish()
-}
-/// Linked-group fingerprints for retry checks, computed once per scan on first use;
-/// changes later in the same scan are seen by the next scan.
-#[derive(Default)]
-struct LinkedStamps {
-    links: Option<canonical::Links>,
-    stamps: HashMap<usize, u64>,
-}
-impl LinkedStamps {
-    fn get(&mut self, state: &State, key: &str) -> u64 {
-        let links = self.links.get_or_insert_with(|| canonical::Links::new(state));
-        match links.group(key) {
-            Some((slot, members)) => *self.stamps.entry(slot).or_insert_with(|| linked_stamp(state, members)),
-            None => linked_stamp(state, &std::collections::BTreeSet::from([key.to_owned()])),
-        }
-    }
-}
 /// Whether a file was modified within `quiet` of now; future timestamps count as settled.
 fn recently_modified(modified: SystemTime, quiet: Duration) -> bool {
     !quiet.is_zero()
@@ -763,6 +720,13 @@ fn scan_with_metadata(
         .open(lock_path)?;
     lock.try_lock()
         .context("Another Kiln window is synchronizing")?;
+    let pair_state = dir.join(format!("{}.json", digest(&serde_json::to_vec(pair)?)));
+    let legacy = if scope.is_some() {
+        vec![dir.join("workspace-state.json"), pair_state]
+    } else {
+        vec![pair_state]
+    };
+    migrate::run(config, &legacy, gate, &mut metadata)?;
     let mut status = Status::default();
     let sources: Vec<Source> = if let Some(scope) = scope {
         status.workspaces = scope.workspaces.len();
