@@ -496,23 +496,6 @@ fn read_rows_titled(
                 meta["payload"]["id"] == source.id && meta["payload"]["cwd"] == source.cwd,
                 "Codex transcript identity changed"
             );
-            ensure!(
-                matches!(
-                    meta["payload"]["cli_version"].as_str(),
-                    Some(
-                        "0.154.0"
-                            | "0.155.0-alpha.9.2"
-                            | "0.155.1"
-                            | "0.160.0"
-                            | "0.160.1"
-                            | "0.161.0"
-                            | "0.162.0-alpha.17.2"
-                            | "0.162.1"
-                    )
-                ),
-                "Unsupported Codex transcript version: {}",
-                meta["payload"]["cli_version"]
-            );
         }
         Tool::Claude => {
             for row in &rows {
@@ -523,23 +506,6 @@ fn read_rows_titled(
                                 .as_str()
                                 .is_some_and(|cwd| Path::new(cwd).is_absolute()),
                         "Claude transcript identity changed"
-                    );
-                    ensure!(
-                        matches!(
-                            row["version"].as_str(),
-                            Some(
-                                "2.1.272"
-                                    | "2.1.281"
-                                    | "2.1.289"
-                                    | "2.1.291"
-                                    | "2.1.292"
-                                    | "2.1.295"
-                                    | "2.1.296"
-                                    | "2.1.299"
-                            )
-                        ),
-                        "Unsupported Claude transcript version: {}",
-                        row["version"]
                     );
                 }
             }
@@ -622,6 +588,9 @@ struct Cache {
     /// time, consecutive failures and whether only a changed history can resolve it.
     #[serde(default)]
     hub: HashMap<String, (u64, SystemTime, u32, bool)>,
+    /// Kiln build that recorded the failures; another build reads failed conversations again.
+    #[serde(default)]
+    build: String,
     /// Sources modified within this window are left until their writer pauses.
     #[serde(skip)]
     quiet: Duration,
@@ -726,6 +695,11 @@ fn scan_with_metadata(
     } else {
         vec![pair_state]
     };
+    let build = kiln_daemon::build_id().to_string();
+    if cache.build != build {
+        cache.hub.clear();
+        cache.build = build;
+    }
     migrate::run(config, &legacy, gate, &mut metadata)?;
     let mut status = Status::default();
     let sources: Vec<Source> = if let Some(scope) = scope {

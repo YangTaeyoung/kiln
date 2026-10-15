@@ -767,12 +767,12 @@ fn partial_writes_attachments_versions_and_disable_are_safe() {
     let mut unknown = rows(&original);
     unknown[0]["version"] = json!("9.0.0");
     fs::write(&f.source.path, serialize(&unknown)).unwrap();
-    assert!(f.scan().errors[0].contains("version"));
-    fs::write(&f.source.path, original).unwrap();
     f.gate.store(false, Ordering::Release);
     assert_eq!(f.scan().published, 0);
     f.gate.store(true, Ordering::Release);
-    assert_eq!(f.scan().published, 1);
+    let accepted = f.scan();
+    assert!(accepted.errors.is_empty(), "an unknown CLI version with known content synchronizes: {:?}", accepted.errors);
+    assert_eq!(accepted.published, 1);
 }
 #[test]
 fn account_isolation_and_symlink_rejection() {
@@ -1825,7 +1825,7 @@ fn multiple_destination_retry_retains_the_successful_publication_plan() {
 }
 
 #[test]
-fn workspace_discovery_skips_symlinks_and_subagents_and_surfaces_bad_versions() {
+fn workspace_discovery_skips_symlinks_and_subagents_and_accepts_unknown_versions() {
     use std::os::unix::fs::symlink;
     let f = Fixture::new(Tool::Codex);
     fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
@@ -1872,18 +1872,9 @@ fn workspace_discovery_skips_symlinks_and_subagents_and_surfaces_bad_versions() 
             .replace("0.162.1", "99.0.0"),
     )
     .unwrap();
-    let failed = workspace_scan(&f, &scope);
-    assert_eq!(failed.rows.len(), 1);
-    assert_eq!(failed.rows.values().next().unwrap().phase, Phase::Failed);
-    assert!(
-        failed
-            .rows
-            .values()
-            .next()
-            .unwrap()
-            .detail
-            .contains("Unsupported Codex transcript version")
-    );
+    let accepted = workspace_scan(&f, &scope);
+    assert_eq!(accepted.rows.len(), 1);
+    assert_eq!(accepted.rows.values().next().unwrap().phase, Phase::Synced, "{:?}", accepted.errors);
 }
 
 #[test]
@@ -3211,4 +3202,70 @@ fn unparseable_legacy_transcripts_are_left_untouched() {
     f.scan();
     assert_eq!(fs::read(&broken.path).unwrap(), b"not a transcript\n");
     assert_eq!(transcripts(&f.pair.codex.root), vec![broken.path.clone()], "no second Codex history is created");
+}
+
+fn rewrite_rows(path: &Path, change: impl Fn(&mut serde_json::Value)) {
+    let mut data = rows(&fs::read(path).unwrap());
+    for row in &mut data {
+        change(row);
+    }
+    fs::write(path, data.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
+}
+
+#[test]
+fn unknown_cli_versions_with_known_content_synchronize() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        rewrite_rows(&f.source.path, |row| {
+            if row["version"].is_string() {
+                row["version"] = json!("9.9.9");
+            }
+            if row["type"] == "session_meta" {
+                row["payload"]["cli_version"] = json!("9.9.9");
+            }
+        });
+        let status = f.scan();
+        assert!(status.errors.is_empty(), "{tool:?}: {:?}", status.errors);
+        assert_eq!(status.published, 1);
+        assert_eq!(read_messages(&f.peer()).unwrap(), messages());
+    }
+}
+
+#[test]
+fn unknown_content_pauses_only_that_conversation() {
+    let f = Fixture::new(Tool::Claude);
+    let other = Source { id: stable_id("unknown-content"), ..f.source.clone() };
+    let other = Source { path: f.source.path.with_file_name(format!("{}.jsonl", other.id)), ..other };
+    publish(&other.path, &format::render(other.tool, &other.id, &other.cwd, "2026-10-13T00:00:00Z", &turns(&["Another question", "Another answer"])).unwrap()).unwrap();
+    rewrite_rows(&other.path, |row| {
+        if row["type"] == "user" {
+            row["message"]["content"] = json!([{"type":"hologram","data":"x"}]);
+        }
+    });
+    publish(&f.config.join("conversation-sync/tracked/other.json"), &serde_json::to_vec(&other).unwrap()).unwrap();
+    let status = f.scan();
+    assert_eq!(status.published, 1, "the readable conversation still synchronizes");
+    let failed: Vec<_> = status.rows.values().filter(|r| r.phase == Phase::Failed).collect();
+    assert_eq!(failed.len(), 1);
+    assert!(failed[0].detail.contains("Unsupported content"), "{}", failed[0].detail);
+    assert_eq!(status.rows.values().filter(|r| r.phase == Phase::Synced).count(), 1);
+}
+
+#[test]
+fn paused_conversations_retry_after_a_build_change() {
+    let f = Fixture::new(Tool::Claude);
+    rewrite_rows(&f.source.path, |row| {
+        if row["type"] == "user" {
+            row["message"]["content"] = json!([{"type":"hologram","data":"x"}]);
+        }
+    });
+    let key = f.source.path.to_string_lossy().into_owned();
+    let mut cache = Cache::new();
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    let first = cache.hub[&key].1;
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(cache.hub[&key].1, first, "an unchanged failure waits");
+    cache.build = "an older build".into();
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert!(cache.hub[&key].1 > first, "a new Kiln build reads the conversation again");
 }

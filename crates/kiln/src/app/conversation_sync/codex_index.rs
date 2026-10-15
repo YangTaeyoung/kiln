@@ -76,10 +76,6 @@ impl Registry {
                 if self.binary.is_none() {
                     let binary = super::super::agent_launch::executable("codex")
                         .context("Install Codex CLI to register /resume conversations")?;
-                    ensure!(
-                        super::super::agent_runtime::probe(&binary)? == "0.162.1",
-                        "Codex /resume registration requires CLI 0.162.1"
-                    );
                     self.binary = Some(binary);
                 }
                 let connection = Connection::start(
