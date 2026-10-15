@@ -353,13 +353,16 @@ pub(super) enum Outcome {
 /// number of canonical events the projection last held and `native_newer` whether its
 /// file changed after the canonical history did.
 /// Whether two messages show the same content: equal, an assistant message with the same
-/// displayed form, or the same shell command or result in either CLI's form.
+/// displayed form in the current or the earlier labeled layout, or the same shell command or
+/// result in either CLI's form.
 pub(super) fn same(a: &format::Message, b: &format::Message) -> bool {
     a == b
         || (a.role == b.role
             && a.images == b.images
             && a.role == "assistant"
-            && (portable::display(&a.text) == portable::display(&b.text) || super::tools::same(&a.text, &b.text)))
+            && (portable::display(&a.text) == portable::display(&b.text)
+                || portable::labeled(&a.text) == portable::labeled(&b.text)
+                || super::tools::same(&a.text, &b.text)))
 }
 /// Number of leading messages the two histories share.
 pub(super) fn shared(a: &[format::Message], b: &[format::Message]) -> usize {

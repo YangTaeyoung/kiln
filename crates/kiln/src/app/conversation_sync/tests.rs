@@ -2255,7 +2255,7 @@ fn readable_tool_records_retain_raw_bytes_and_respect_edits_in_both_clis() {
             &mut row["payload"]["content"][0]["text"]
         };
         let shown = content.as_str().unwrap();
-        assert!(shown.contains("첫째 줄\n둘째 줄 <tag> ``` 코드"));
+        assert!(shown.contains("첫째 줄\n   둘째 줄 <tag> ``` 코드"));
         assert!(shown.contains("결과: 성공"));
         assert!(!shown.contains("\\n"));
         assert!(shown.contains("````text"));
@@ -4169,4 +4169,35 @@ fn a_native_shell_record_read_without_its_annotation_keeps_the_conversation_toge
     let status = f.scan();
     assert!(status.errors.is_empty(), "{:?}", status.errors);
     assert_eq!(read_messages(&claude).unwrap().last().unwrap().text, "Back.");
+}
+
+#[test]
+fn tool_records_read_like_the_cli_tool_display() {
+    use portable::display;
+    assert_eq!(display("[Tool call: Read]\n{\"file_path\":\"/w/a.rs\"}"), "Read(/w/a.rs)");
+    assert_eq!(display(CLAUDE_CALL), "Bash(ls -la)");
+    assert_eq!(
+        display("[Tool call: js]\n{\"code\":\"await tab.click();\",\"title\":\"Open the heading\"}"),
+        "js(Open the heading)\n```text\nawait tab.click();\n```"
+    );
+    assert_eq!(
+        display("[Tool call: Grep]\n{\"output_mode\":\"content\",\"path\":\"/w\",\"pattern\":\"fn main\"}"),
+        "Grep(fn main)\n```text\noutput_mode: content\npath: /w\n```"
+    );
+    assert_eq!(
+        display("[Tool call: exec]\ntext(await tools.write_stdin({session_id:1,chars:\"y\"}));\n"),
+        "exec\n```text\ntext(await tools.write_stdin({session_id:1,chars:\"y\"}));\n```"
+    );
+    let long = format!("[Tool call: Agent]\n{}", json!({"description": "x".repeat(90), "prompt": "Check it"}));
+    assert_eq!(display(&long), format!("Agent({}…)\n```text\nCheck it\n```", "x".repeat(80)));
+    assert_eq!(
+        display("[Tool result: call_b74e]\nWall time: 2.9 seconds\nOutput: heading clicked"),
+        "```text\n⎿  Wall time: 2.9 seconds\n   Output: heading clicked\n```"
+    );
+    assert_eq!(display(CLAUDE_RESULT), "```text\n⎿  first\n   second\n```");
+    assert_eq!(display(CODEX_RESULT), "```text\n⎿  first\n   second\n```");
+    let failed = CODEX_RESULT.replace("\"exit_code\":0", "\"exit_code\":2");
+    assert_eq!(display(&failed), "```text\n⎿  Exit code 2\n   first\n   second\n```");
+    assert_eq!(display("[Tool result: toolu_x]\n"), "```text\n⎿  (No output)\n```");
+    assert_eq!(display("[Tool result: toolu_x]\nhas ``` fence"), "````text\n⎿  has ``` fence\n````");
 }

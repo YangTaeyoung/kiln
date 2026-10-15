@@ -96,6 +96,21 @@ fn readable_value(value: &Value, depth: usize) -> String {
 }
 
 pub(super) fn display(text: &str) -> String {
+    if let Some(rest) = text.strip_prefix("[Tool call: ")
+        && let Some((name, body)) = rest.split_once("]\n")
+    {
+        return call_display(name, body);
+    }
+    if let Some(rest) = text.strip_prefix("[Tool result: ")
+        && let Some((_, body)) = rest.split_once("]\n")
+    {
+        return result_display(body);
+    }
+    citations(text)
+}
+
+/// The labeled layout of tool records written before `display`.
+pub(super) fn labeled(text: &str) -> String {
     for (prefix, label) in [
         ("[Tool call: ", "Recorded tool call"),
         ("[Tool result: ", "Recorded tool result"),
@@ -118,6 +133,98 @@ pub(super) fn display(text: &str) -> String {
             }
         }
     }
+    citations(text)
+}
+
+/// Input fields shown in a tool call header, in order of preference.
+const SUMMARY: [&str; 10] = ["command", "cmd", "pattern", "query", "url", "file_path", "path", "title", "description", "prompt"];
+
+/// The first line of `value`, at most 80 characters, with an ellipsis when shortened.
+fn short(value: &str) -> String {
+    let line = value.lines().next().unwrap_or("");
+    let mut text: String = line.chars().take(80).collect();
+    if line.chars().count() > 80 || value.lines().nth(1).is_some() {
+        text.push('…');
+    }
+    text
+}
+
+/// `name(summary)` followed by the other input fields in a code block.
+fn call_display(name: &str, body: &str) -> String {
+    let Ok(Value::Object(fields)) = serde_json::from_str::<Value>(body) else {
+        return if body.trim().is_empty() {
+            name.into()
+        } else {
+            format!("{name}\n{}", fenced(body.trim_end(), "text"))
+        };
+    };
+    let summary = SUMMARY
+        .iter()
+        .find_map(|key| fields.get(*key).and_then(Value::as_str).map(|value| (*key, value)));
+    let header = match summary {
+        Some((_, value)) => format!("{name}({})", short(value)),
+        None => name.into(),
+    };
+    let rest: Vec<(&String, &Value)> = fields
+        .iter()
+        .filter(|(key, _)| Some(key.as_str()) != summary.map(|(k, _)| k) && key.as_str() != "description")
+        .collect();
+    let body = match rest.as_slice() {
+        [] => return header,
+        [(_, Value::String(value))] => value.clone(),
+        _ => rest
+            .iter()
+            .map(|(key, value)| match value {
+                Value::String(text) if text.contains('\n') => format!("{key}:\n{text}"),
+                Value::String(text) => format!("{key}: {text}"),
+                other => format!("{key}: {other}"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    format!("{header}\n{}", fenced(&body, "text"))
+}
+
+/// The output of a tool result: a Codex code-mode result shows the output (and a non-zero
+/// exit code) of each command it ran.
+fn result_output(body: &str) -> String {
+    if body.starts_with("Script ")
+        && let Some(split) = body.find("Output:\n").map(|i| i + "Output:\n".len())
+        && let Ok(values) = serde_json::Deserializer::from_str(&body[split..])
+            .into_iter::<Value>()
+            .collect::<Result<Vec<_>, _>>()
+        && !values.is_empty()
+    {
+        return values
+            .iter()
+            .map(|value| match (value.get("output").and_then(Value::as_str), value.get("exit_code").and_then(Value::as_i64)) {
+                (Some(output), Some(code)) if code != 0 => format!("Exit code {code}\n{output}"),
+                (Some(output), _) => output.to_owned(),
+                _ => readable_value(value, 1),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+    }
+    if let Some((status, output)) = body.split_once("\nOutput:\n") {
+        return format!("{status}\nOutput:\n{}", json_stream(output, 0).unwrap_or_else(|| output.into()));
+    }
+    json_stream(body, 0).unwrap_or_else(|| body.into())
+}
+
+/// The result output after a `⎿` marker, in a code block.
+fn result_display(body: &str) -> String {
+    let output = result_output(body);
+    let output = output.trim_end_matches('\n');
+    let output = if output.trim().is_empty() { "(No output)" } else { output };
+    let lines: Vec<String> = output
+        .lines()
+        .enumerate()
+        .map(|(i, line)| if i == 0 { format!("⎿  {line}") } else { format!("   {line}") })
+        .collect();
+    fenced(&lines.join("\n"), "text")
+}
+
+fn citations(text: &str) -> String {
     if let Some((answer, citations)) = text.split_once("<oai-mem-citation>") {
         if citations.trim_end().ends_with("</oai-mem-citation>") {
             return format!(
