@@ -3269,3 +3269,30 @@ fn paused_conversations_retry_after_a_build_change() {
     scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
     assert!(cache.hub[&key].1 > first, "a new Kiln build reads the conversation again");
 }
+
+#[test]
+fn fallback_titles_drop_command_tags_and_image_placeholders() {
+    let history = vec![
+        text("user", "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>"),
+        text("assistant", "Model set"),
+        text("user", "<image name=[Image #1] path=\"/tmp/clipboard.png\">\nFix the layout shown here [Image #1]"),
+    ];
+    assert_eq!(titles::fallback(&history), "Fix the layout shown here");
+    assert_eq!(titles::clean("<command-name>/mcp</command-name>"), "");
+    assert_eq!(titles::clean("<local-command-stdout>ok</local-command-stdout> Deploy notes"), "Deploy notes");
+}
+
+#[test]
+fn canonical_title_follows_the_latest_native_rename_in_every_projection() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.peer();
+    let mut file = fs::OpenOptions::new().append(true).open(&f.source.path).unwrap();
+    writeln!(file, "{}", json!({"type":"custom-title","customTitle":"Renamed in Claude","sessionId":f.source.id})).unwrap();
+    drop(file);
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(status.rows.values().next().unwrap().title, "Renamed in Claude");
+    assert_eq!(titles::projection(&peer).unwrap().as_deref(), Some("Renamed in Claude"));
+    assert_eq!(f.scan().published, 0);
+}

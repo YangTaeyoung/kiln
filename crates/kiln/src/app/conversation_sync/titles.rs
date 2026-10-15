@@ -3,8 +3,35 @@ use super::*;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
 
+/// Removes CLI command elements (`<command-…>`, `<local-command-…>`) and image
+/// placeholders (`<image …>`, `[Image #n]`) that are not part of a readable title.
+fn strip_markup(value: &str) -> String {
+    let mut text = value.to_owned();
+    for prefix in ["<command-", "<local-command-"] {
+        while let Some(start) = text.find(prefix) {
+            let name_end = text[start + 1..]
+                .find(|c: char| c == '>' || c.is_whitespace())
+                .map_or(text.len(), |i| start + 1 + i);
+            let close = format!("</{}>", &text[start + 1..name_end]);
+            let end = text[start..]
+                .find(&close)
+                .map(|i| start + i + close.len())
+                .or_else(|| text[start..].find('>').map(|i| start + i + 1))
+                .unwrap_or(text.len());
+            text.replace_range(start..end, " ");
+        }
+    }
+    for (open, close) in [("<image", ">"), ("</image", ">"), ("[Image #", "]")] {
+        while let Some(start) = text.find(open) {
+            let end = text[start..].find(close).map_or(text.len(), |i| start + i + close.len());
+            text.replace_range(start..end, " ");
+        }
+    }
+    text
+}
+
 pub(super) fn clean(value: &str) -> String {
-    value
+    strip_markup(value)
         .trim()
         .chars()
         .filter(|c| !c.is_control())
@@ -17,8 +44,7 @@ pub(super) fn fallback(messages: &[format::Message]) -> String {
     messages
         .iter()
         .filter(|m| m.role == "user")
-        .flat_map(|m| m.text.lines())
-        .map(clean)
+        .flat_map(|m| strip_markup(&m.text).lines().map(clean).collect::<Vec<_>>())
         .find(|s| !s.is_empty())
         .unwrap_or_else(|| "Linked conversation".into())
 }
