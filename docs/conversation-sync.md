@@ -102,7 +102,7 @@ conversation slot. A genuinely continued imported copy remains eligible.
 The status dialog distinguishes discovery, no conversations found in the open folders, and
 waiting for a completed response. A discovered unsupported transcript stays visible
 with its failure reason; it is not reported as successfully synchronized. A failed item includes its
-reason above its title. Expand **Conversation details** for the original diagnostic or copy it for troubleshooting. A single scrollable list keeps the summary and controls visible. Unchanged background checks retain the last result, row positions, and progress bar; they do not reset completed or failed rows to queued. Unchanged failed/waiting conversations, including continued copies and superseded snapshots, are checked again after 30 seconds, then after 1 and 2 minutes. A changed transcript is read once it has been unchanged for 10 seconds, so a response that is still being written is not copied repeatedly. A Kiln handover and **Check again** skip both waits; a handover keeps the results of unchanged files. **Check again** starts a fresh check. Unlinking stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
+reason above its title. Expand **Conversation details** for the original diagnostic or copy it for troubleshooting. A single scrollable list keeps the summary and controls visible. Unchanged background checks retain the last result, row positions, and progress bar; they do not reset completed or failed rows to queued. Unchanged waiting conversations, including continued copies and superseded snapshots, are checked again after 30 seconds, then after 1 and 2 minutes. A failed conversation, such as diverged linked histories, is checked again when it or one of its linked histories changes, and otherwise after an hour. A changed transcript is read once it has been unchanged for 10 seconds, so a response that is still being written is not copied repeatedly. A Kiln handover and **Check again** skip both waits; a handover keeps the results of unchanged files. **Check again** starts a fresh check. Unlinking stops new publication (an atomic write already in progress may finish); existing copies remain available in `/resume`.
 The check refers to **completed responses**, not an answer still being generated.
 
 ## Compatibility and boundaries
@@ -151,9 +151,10 @@ The check refers to **completed responses**, not an answer still being generated
 
 Scans run in a separate `kiln sync-worker` process started by the GUI, so reading
 large transcripts does not grow the GUI's memory. After a scan whose peak memory
-exceeded 512 MiB, the worker saves its file-stamped results to the private
-`conversation-sync/worker-cache.json` and exits; the next scan starts a new worker
-that loads and removes that file. If the worker cannot start, the scan runs inside
+exceeded 512 MiB, and when Kiln closes, the worker saves its file-stamped results to
+the private `conversation-sync/worker-cache.json`; the next worker loads and removes
+that file, so a restart or update does not read every linked history again. Changing
+the linked workspaces or account pair keeps those results; **Check again** clears them. If the worker cannot start, the scan runs inside
 the GUI process. `app/conversation_sync/discovery.rs` performs bounded metadata discovery with a
 file-change cache and persisted initial selections. `format.rs` holds the native
 adapters, `reader.rs` bounds streamed records, and `mod.rs` owns the worker and

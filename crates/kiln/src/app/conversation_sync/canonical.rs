@@ -161,9 +161,12 @@ pub(super) fn retire(
                     .unwrap_or((0, SystemTime::UNIX_EPOCH))
             })
             .collect();
-        if let Some((seen, at, failures)) = cache.retirements.get(&key)
+        if let Some((seen, at, failures, settled)) = cache.retirements.get(&key)
             && *seen == stamps
-            && at.elapsed().unwrap_or_default() < retry_delay(*failures)
+            && {
+                let waited = at.elapsed().unwrap_or_default();
+                waited < retry_delay(*failures) || (*settled && waited < FAILED_RECHECK)
+            }
         {
             if let Some(row) = cache.rows.get(&key) {
                 status.rows.entry(key.clone()).or_insert_with(|| row.clone());
@@ -267,13 +270,18 @@ pub(super) fn retire(
             );
             Ok(Some(destination))
         })();
-        if result.is_ok() {
-            cache.retirements.remove(&key);
-        } else {
-            let failures = cache.retirements.get(&key).map_or(0, |(_, _, n)| *n) + 1;
-            cache
-                .retirements
-                .insert(key.clone(), (stamps, SystemTime::now(), failures));
+        match &result {
+            Ok(_) => {
+                cache.retirements.remove(&key);
+            }
+            Err(error) => {
+                let failures = cache.retirements.get(&key).map_or(0, |(_, _, n, _)| *n) + 1;
+                // A failure without "retrying" waits for a stamp change or FAILED_RECHECK.
+                let settled = !error.to_string().contains("retrying");
+                cache
+                    .retirements
+                    .insert(key.clone(), (stamps, SystemTime::now(), failures, settled));
+            }
         }
         match result {
             Ok(Some(path)) => {

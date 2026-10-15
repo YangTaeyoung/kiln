@@ -602,8 +602,13 @@ struct Cache {
     attempts: HashMap<PathBuf, (u64, SystemTime, SystemTime)>,
     /// Consecutive unsettled attempts per unchanged source; selects its retry delay.
     failures: HashMap<PathBuf, u32>,
-    /// Snapshot-retirement attempts keyed by source, stamped with both histories.
-    retirements: HashMap<String, (Vec<(u64, SystemTime)>, SystemTime, u32)>,
+    /// Linked-history stamps recorded after a source's last failed attempt.
+    #[serde(default)]
+    linked: HashMap<PathBuf, u64>,
+    /// Snapshot-retirement attempts keyed by source, stamped with both histories;
+    /// the flag marks a failure that only a changed history can resolve.
+    #[serde(default)]
+    retirements: HashMap<String, (Vec<(u64, SystemTime)>, SystemTime, u32, bool)>,
     /// Sources modified within this window are left until their writer pauses.
     #[serde(skip)]
     quiet: Duration,
@@ -616,12 +621,28 @@ impl Cache {
     fn expedite(&mut self) {
         self.attempts.clear();
         self.failures.clear();
+        self.linked.clear();
         self.retirements.clear();
     }
 }
 /// Retry delay for an unchanged source after `failures` consecutive unsettled attempts.
 fn retry_delay(failures: u32) -> Duration {
     Duration::from_secs(30 << failures.saturating_sub(1).min(2))
+}
+/// A failed attempt whose linked histories are all unchanged is retried after this delay.
+const FAILED_RECHECK: Duration = Duration::from_secs(60 * 60);
+/// Fingerprint of the length and modification time of every history linked to `key`.
+fn linked_stamp(state: &State, key: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    for member in canonical::members(state, key) {
+        member.hash(&mut hasher);
+        if let Some(meta) = state.entries.get(&member).and_then(|e| storage::metadata(&e.source).ok()) {
+            meta.len().hash(&mut hasher);
+            meta.modified().ok().hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }
 /// Whether a file was modified within `quiet` of now; future timestamps count as settled.
 fn recently_modified(modified: SystemTime, quiet: Duration) -> bool {
@@ -857,10 +878,14 @@ fn scan_with_metadata(
             if let Some((len, modified, at)) = cache.attempts.get(&entry.source.path)
                 && *len == stamp.0
                 && *modified == stamp.1
-                && cache
-                    .failures
-                    .get(&entry.source.path)
-                    .is_some_and(|failures| at.elapsed().unwrap_or_default() < retry_delay(*failures))
+                && let Some(failures) = cache.failures.get(&entry.source.path)
+                && {
+                    let waited = at.elapsed().unwrap_or_default();
+                    waited < retry_delay(*failures)
+                        || (waited < FAILED_RECHECK
+                            && cache.rows.get(&key).is_some_and(|r| r.phase == Phase::Failed)
+                            && cache.linked.get(&entry.source.path) == Some(&linked_stamp(&state, &key)))
+                }
             {
                 // Imported copies have no initial row; keep their last reported outcome visible.
                 if !status.rows.contains_key(&key)
@@ -1185,8 +1210,10 @@ fn scan_with_metadata(
         if !deferred {
             if settled {
                 cache.failures.remove(&entry.source.path);
+                cache.linked.remove(&entry.source.path);
             } else {
                 *cache.failures.entry(entry.source.path.clone()).or_default() += 1;
+                cache.linked.insert(entry.source.path.clone(), linked_stamp(&state, &key));
             }
         }
     }
@@ -1416,7 +1443,6 @@ impl Manager {
             self.status = Status::default();
             self.configured = settings.conversation_sync_pair.clone();
             self.cache = Arc::new(Mutex::new(Cache::new()));
-            self.reset_next = true;
             let registry = std::mem::take(&mut self.registry);
             // Stopping metadata readers waits for their exit off the UI thread.
             std::thread::spawn(move || drop(registry));
