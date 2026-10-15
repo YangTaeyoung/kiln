@@ -3839,3 +3839,39 @@ fn appended_turns_and_later_writes_through_an_open_handle_both_remain() {
         assert!(fs::read(&peer.path).unwrap().ends_with(marker), "{tool:?}: full update");
     }
 }
+
+#[test]
+fn a_continuation_that_kept_only_displayed_tool_text_reaches_a_projection_without_checkpoint() {
+    let raw = "[Tool result: call_fixture]\nScript completed\nOutput:\n{\"exit_code\":0,\"output\":\"done\"}";
+    let mut history = messages();
+    history.insert(1, Message { role: "assistant".into(), text: raw.into(), images: vec![] });
+    let f = Fixture::new(Tool::Claude);
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(60));
+    assert!(f.scan().errors.is_empty());
+    let peer = f.peer();
+    let mut data = rows(&fs::read(&peer.path).unwrap());
+    for row in &mut data {
+        row.as_object_mut().unwrap().remove("kiln_sync");
+    }
+    fs::write(&peer.path, data.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
+    let shown = read_messages(&peer).unwrap();
+    assert_ne!(shown, history, "the native rewrite kept only the displayed tool text");
+    let mut continued = shown.clone();
+    continued.extend(turns(&["Continue after the tool.", "Continued after the tool."]));
+    assert!(canonical::update(&peer, &continued, "", "2026-10-15T00:00:00.000Z").unwrap());
+    set_modified(&peer.path, SystemTime::now() - Duration::from_secs(30));
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    for record in store.state.conversations.values_mut() {
+        for p in &mut record.projections {
+            if p.source.path == f.source.path {
+                p.checkpoint = None;
+            }
+        }
+    }
+    store.save().unwrap();
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let mut expected = history.clone();
+    expected.extend(turns(&["Continue after the tool.", "Continued after the tool."]));
+    assert_eq!(read_messages(&f.source).unwrap(), expected);
+}

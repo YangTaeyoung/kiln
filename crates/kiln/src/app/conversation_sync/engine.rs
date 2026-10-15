@@ -696,7 +696,9 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     }
                     Outcome::Append(count) => {
                         hub.append(cid, &native[canonical.len()..])?;
-                        *canonical = native;
+                        // Shared events keep their canonical form; only the continuation is new.
+                        let start = canonical.len();
+                        canonical.extend_from_slice(&native[start..]);
                         let record = hub.state.conversations.get_mut(cid).unwrap();
                         record.updated = current.1;
                         record.projections[i].synced = count;
@@ -706,7 +708,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     Outcome::NativeWins { base } => {
                         hub.save_branch(cid, base, &canonical[base..], None, None)?;
                         hub.rewrite(cid, base, &native[base..])?;
-                        *canonical = native;
+                        canonical.truncate(base);
+                        canonical.extend_from_slice(&native[base..]);
                         let record = hub.state.conversations.get_mut(cid).unwrap();
                         record.updated = current.1;
                         record.projections[i].synced = canonical.len();
