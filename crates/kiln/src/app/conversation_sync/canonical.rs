@@ -193,6 +193,24 @@ pub(super) fn archive_native(
 
 
 
+/// Appends `suffix` to an uncompressed transcript in place when it still has `length` bytes;
+/// a writer holding the file open keeps appending after it.
+fn append_in_place(source: &Source, physical: &Path, length: u64, modified: Option<SystemTime>, suffix: &[u8]) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new().append(true).custom_flags(libc::O_NOFOLLOW).open(physical)?;
+    let now = file.metadata()?;
+    ensure!(
+        storage::physical(source) == physical
+            && now.is_file()
+            && now.len() == length
+            && modified.is_none_or(|m| now.modified().is_ok_and(|n| n == m)),
+        "Transcript changed before publication; retrying"
+    );
+    file.write_all(suffix)?;
+    file.sync_all()?;
+    Ok(())
+}
+
 /// Appends `tail` and `title` after a checkpoint without parsing the earlier history: the
 /// existing bytes are kept and the appended records must read back to exactly `tail`.
 /// Returns the next checkpoint, or `None` when only a full update can append safely.
@@ -295,23 +313,13 @@ pub(super) fn append_since(
         },
         None => checkpoint.clone(),
     };
-    let mut tmp = tempfile::NamedTempFile::new_in(physical.parent().context("Missing transcript parent")?)?;
-    tmp.write_all(&candidate)?;
-    tmp.as_file().sync_all()?;
-    let now = storage::metadata(source)?;
-    ensure!(
-        storage::physical(source) == physical
-            && now.len() == before.len()
-            && now.modified()? == before.modified()?,
-        "Transcript changed before publication; retrying"
-    );
-    tmp.persist(&physical).map_err(|e| e.error)?;
-    fs::File::open(physical.parent().unwrap())?.sync_all()?;
+    append_in_place(source, &physical, before.len(), Some(before.modified()?), &suffix)?;
     Ok(Some(next))
 }
 
 /// Prepare a suffix with native IDs/parent links, preserving the complete original
-/// log (including provider-only records) byte for byte. Publication is atomic.
+/// log (including provider-only records) byte for byte. An uncompressed transcript receives
+/// the suffix in place; a compressed one is replaced atomically.
 pub(super) fn update(
     source: &Source,
     messages: &[format::Message],
@@ -392,10 +400,10 @@ pub(super) fn update(
         );
         packed.as_file().sync_all()?;
         packed.persist(&physical).map_err(|e| e.error)?;
+        fs::File::open(source.path.parent().unwrap())?.sync_all()?;
     } else {
-        tmp.as_file().sync_all()?;
-        tmp.persist(&physical).map_err(|e| e.error)?;
+        drop(tmp);
+        append_in_place(source, &physical, old_len as u64, None, &candidate[old_len..])?;
     }
-    fs::File::open(source.path.parent().unwrap())?.sync_all()?;
     Ok(true)
 }

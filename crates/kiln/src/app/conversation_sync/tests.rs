@@ -3813,3 +3813,29 @@ fn a_scan_interrupted_before_its_state_save_leaves_a_readable_hub_without_duplic
     assert_eq!(read_messages(&f.projection_in(&f.pair.codex.root)).unwrap(), rewound);
     assert_eq!(f.scan().published, 0);
 }
+
+#[test]
+fn appended_turns_and_later_writes_through_an_open_handle_both_remain() {
+    let marker = b"{\"type\":\"kiln-test-marker\"}\n";
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        assert!(f.scan().errors.is_empty());
+        let peer = f.peer();
+        let mut writer = fs::OpenOptions::new().append(true).open(&f.source.path).unwrap();
+        let mut extended = messages();
+        extended.extend(turns(&["Continue from the other CLI.", "Continued."]));
+        write_history(&peer, &extended, SystemTime::now() + Duration::from_secs(30));
+        let status = f.scan();
+        assert!(status.errors.is_empty(), "{:?}", status.errors);
+        assert_eq!(read_messages(&f.source).unwrap(), extended, "{tool:?}: checkpointed append");
+        writer.write_all(marker).unwrap();
+        assert!(fs::read(&f.source.path).unwrap().ends_with(marker), "{tool:?}: checkpointed append");
+        let mut writer = fs::OpenOptions::new().append(true).open(&peer.path).unwrap();
+        let mut more = extended.clone();
+        more.extend(turns(&["A third question.", "A third answer."]));
+        assert!(canonical::update(&peer, &more, "", "2026-10-15T00:00:00.000Z").unwrap());
+        assert_eq!(read_messages(&peer).unwrap(), more, "{tool:?}: full update");
+        writer.write_all(marker).unwrap();
+        assert!(fs::read(&peer.path).unwrap().ends_with(marker), "{tool:?}: full update");
+    }
+}
