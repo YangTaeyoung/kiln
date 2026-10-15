@@ -3573,3 +3573,98 @@ fn hub_cli_round_trip() {
         }
     }
 }
+
+fn set_modified(path: &Path, modified: SystemTime) {
+    fs::File::options().write(true).open(path).unwrap().set_modified(modified).unwrap();
+}
+/// Appends one user and one assistant record shaped like Claude Code's own, without a title row.
+fn append_native_claude_turn(source: &Source, question: &str, answer: &str) {
+    let all = rows(&fs::read(&source.path).unwrap());
+    let leaf = all.iter().rev().find(|r| r["type"] == "assistant").unwrap()["uuid"].as_str().unwrap().to_owned();
+    let mut user = all.iter().rev().find(|r| r["type"] == "user").unwrap().clone();
+    let mut assistant = all.iter().rev().find(|r| r["type"] == "assistant").unwrap().clone();
+    for row in [&mut user, &mut assistant] {
+        let object = row.as_object_mut().unwrap();
+        for key in ["kiln_projection", "kiln_original", "kiln_text"] {
+            object.remove(key);
+        }
+    }
+    let (uid, aid) = (stable_id(&format!("{question}:u")), stable_id(&format!("{question}:a")));
+    user["uuid"] = json!(uid);
+    user["parentUuid"] = json!(leaf);
+    user["message"] = json!({"role": "user", "content": question});
+    assistant["uuid"] = json!(aid);
+    assistant["parentUuid"] = json!(uid);
+    assistant["message"]["content"] = json!([{"type": "text", "text": answer}]);
+    assistant["message"]["id"] = json!(format!("msg_{aid}"));
+    let mut file = fs::OpenOptions::new().append(true).open(&source.path).unwrap();
+    writeln!(file, "{user}").unwrap();
+    writeln!(file, "{assistant}").unwrap();
+}
+
+#[test]
+fn the_more_recently_continued_side_wins_when_both_are_read_incrementally() {
+    let f = Fixture::new(Tool::Claude);
+    assert!(f.scan().errors.is_empty());
+    let peer = f.peer();
+    let mut older = messages();
+    older.extend(turns(&["claude side", "claude reply"]));
+    let mut newer = messages();
+    newer.extend(turns(&["codex side", "codex reply"]));
+    canonical::update(&f.source, &older, "", "2026-10-15T00:00:00.000Z").unwrap();
+    canonical::update(&peer, &newer, "", "2026-10-15T00:00:00.000Z").unwrap();
+    let now = SystemTime::now();
+    set_modified(&f.source.path, now - Duration::from_secs(30));
+    set_modified(&peer.path, now - Duration::from_secs(20));
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let cid = f.hub().conversations.keys().next().unwrap().clone();
+    assert_eq!(hub::Hub::open(&f.config).unwrap().events(&cid).unwrap(), newer);
+    assert!(!f.source.path.exists(), "the earlier continuation is archived");
+    assert!(peer.path.exists());
+}
+
+#[test]
+fn a_rename_in_codex_survives_later_claude_turns() {
+    let f = Fixture::new(Tool::Codex);
+    assert!(f.scan().errors.is_empty());
+    let claude = f.peer();
+    fs::write(
+        f.pair.codex.root.join("session_index.jsonl"),
+        format!("{}\n", json!({"id": f.source.id, "thread_name": "Renamed in Codex"})),
+    )
+    .unwrap();
+    assert!(f.scan().errors.is_empty());
+    assert_eq!(f.hub().conversations.values().next().unwrap().title, "Renamed in Codex");
+    let sidecar = claude.path.parent().unwrap().join(&claude.id).join("custom-title.json");
+    let pinned: serde_json::Value = serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
+    assert_eq!(pinned["customTitle"], "Renamed in Codex", "the Claude sidecar follows the canonical title");
+    for (i, (question, answer)) in [("first claude question", "first answer"), ("second claude question", "second answer")].into_iter().enumerate() {
+        append_native_claude_turn(&claude, question, answer);
+        set_modified(&claude.path, SystemTime::now() - Duration::from_secs(5 - i as u64));
+        let status = f.scan();
+        assert!(status.errors.is_empty(), "{:?}", status.errors);
+        let state = f.hub();
+        let record = state.conversations.values().next().unwrap();
+        assert_eq!(record.events, 4 + 2 * i, "the continuation was ingested");
+        assert_eq!(record.title, "Renamed in Codex");
+    }
+    assert_eq!(titles::projection(&f.source).unwrap().as_deref(), Some("Renamed in Codex"));
+}
+
+#[test]
+fn a_restored_branch_keeps_the_history_it_continued_after_a_later_rewrite() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("kiln");
+    let cid = hub::conversation_id(&hub::NativeRef { tool: Tool::Claude, root: PathBuf::from("/a"), id: "one".into() });
+    let mut store = hub::Hub::open(&config).unwrap();
+    store.state.conversations.insert(cid.clone(), hub::Record::new("T", "/w"));
+    store.append(&cid, &turns(&["u0", "a0", "u1", "a1"])).unwrap();
+    let branch = store.save_branch(&cid, 4, &turns(&["u2x", "a2x"]), None, None).unwrap();
+    store.rewrite(&cid, 2, &turns(&["u1y", "a1y"])).unwrap();
+    store.save().unwrap();
+    let mut store = hub::Hub::open(&config).unwrap();
+    let restored = store.restore(&hub::Restore { branch, title: "R".into() }).unwrap().unwrap();
+    let events: Vec<String> = store.events(&restored).unwrap().into_iter().map(|m| m.text).collect();
+    assert_eq!(events, ["u0", "a0", "u1", "a1", "u2x", "a2x"]);
+}

@@ -161,19 +161,15 @@ pub(super) fn from_rows(source: &Source, rows: &[Value], preferred: &str) -> Str
     String::new()
 }
 
+/// Writes the title to the Claude sidecar, which Claude Code shows when the end of the
+/// transcript holds no title record.
 pub(super) fn pin_claude(source: &Source, title: &str) -> Result<()> {
     if source.tool != Tool::Claude {
         return Ok(());
     }
     let path = sidecar(source)?;
-    if !path.exists() {
-        match publish(&path, &serde_json::to_vec(&json!({"customTitle":title}))?) {
-            Ok(()) => {}
-            Err(_) if path.exists() => {} // A concurrent native rename wins.
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
+    private_dir(path.parent().context("Missing title directory")?)?;
+    replace_changed(&path, &serde_json::to_vec(&json!({"customTitle":title}))?)
 }
 
 pub(super) fn projection(source: &Source) -> Result<Option<String>> {

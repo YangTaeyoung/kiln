@@ -49,6 +49,9 @@ pub(super) struct Branch {
     pub at: SystemTime,
     #[serde(default)]
     pub restored: bool,
+    /// File holding the branch events when it differs from the branch ID.
+    #[serde(default)]
+    pub file: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,7 +59,7 @@ pub(super) struct Record {
     pub title: String,
     pub cwd: String,
     pub created: SystemTime,
-    /// Time the canonical history last changed.
+    /// Modification time of the native history whose change the canonical history last took.
     pub updated: SystemTime,
     pub projections: Vec<Projection>,
     /// Earlier native sessions of this conversation; opening one redirects to the projection.
@@ -69,6 +72,12 @@ pub(super) struct Record {
     pub events: usize,
     #[serde(default)]
     pub events_bytes: u64,
+    /// Events file generation; each rewrite writes the next one.
+    #[serde(default)]
+    pub generation: u64,
+    /// Native sessions of this conversation that still have to leave their resume list.
+    #[serde(default)]
+    pub pending: Vec<Source>,
 }
 impl Record {
     pub fn new(title: &str, cwd: &str) -> Self {
@@ -83,6 +92,8 @@ impl Record {
             branches: Vec::new(),
             events: 0,
             events_bytes: 0,
+            generation: 0,
+            pending: Vec::new(),
         }
     }
 }
@@ -105,6 +116,8 @@ struct Event {
 pub(super) struct Hub {
     dir: PathBuf,
     pub state: HubState,
+    /// Files replaced since the last save; removed once the state no longer refers to them.
+    obsolete: Vec<PathBuf>,
 }
 
 /// Conversation identity derived from the first native session.
@@ -147,16 +160,30 @@ impl Hub {
         } else {
             HubState::default()
         };
-        Ok(Self { dir, state })
+        Ok(Self { dir, state, obsolete: Vec::new() })
     }
-    pub fn save(&self) -> Result<()> {
-        replace_changed(&self.dir.join("state.json"), &serde_json::to_vec(&self.state)?)
+    pub fn save(&mut self) -> Result<()> {
+        replace_changed(&self.dir.join("state.json"), &serde_json::to_vec(&self.state)?)?;
+        for path in self.obsolete.drain(..) {
+            let _ = fs::remove_file(path);
+        }
+        Ok(())
+    }
+    fn events_file(&self, cid: &str, generation: u64) -> PathBuf {
+        let name = if generation == 0 { format!("{cid}.jsonl") } else { format!("{cid}.{generation}.jsonl") };
+        self.dir.join("events").join(name)
     }
     fn events_path(&self, cid: &str) -> PathBuf {
-        self.dir.join("events").join(format!("{cid}.jsonl"))
+        self.events_file(cid, self.state.conversations.get(cid).map_or(0, |r| r.generation))
     }
     fn branch_path(&self, id: &str) -> PathBuf {
         self.dir.join("branches").join(format!("{id}.jsonl"))
+    }
+    fn branch_file(&self, branch: &Branch) -> PathBuf {
+        match &branch.file {
+            Some(name) => self.dir.join("branches").join(name),
+            None => self.branch_path(&branch.id),
+        }
     }
     fn record(&mut self, cid: &str) -> Result<&mut Record> {
         self.state.conversations.get_mut(cid).context("Unknown conversation")
@@ -207,23 +234,43 @@ impl Hub {
         let record = self.record(cid)?;
         record.events += messages.len();
         record.events_bytes = len + bytes.len() as u64;
-        record.updated = SystemTime::now();
         Ok(())
     }
-    /// Replaces the history after `base` with `tail` and returns the replaced events.
+    /// Replaces the history after `base` with `tail` and returns the replaced events. The new
+    /// history goes to the next events file generation; branches that continued after `base`
+    /// move to files that also hold the replaced events they share.
     pub fn rewrite(&mut self, cid: &str, base: usize, tail: &[format::Message]) -> Result<Vec<format::Message>> {
         let mut events = self.events(cid)?;
         ensure!(base <= events.len(), "Conversation history is shorter than the rewrite base");
         let replaced = events.split_off(base);
         events.extend_from_slice(tail);
+        let record = self.state.conversations.get(cid).context("Unknown conversation")?;
+        let mut moved = Vec::new();
+        for (j, branch) in record.branches.iter().enumerate().filter(|(_, b)| !b.restored && b.base > base) {
+            let shared = branch.base - base;
+            ensure!(shared <= replaced.len(), "Conversation history is shorter than a branch base");
+            let mut kept = replaced[..shared].to_vec();
+            kept.extend(decode(&self.branch_file(branch), branch.events)?);
+            let name = format!("{}.{base}.jsonl", branch.id);
+            replace(&self.dir.join("branches").join(&name), &encode(&kept, 0)?)?;
+            moved.push((j, name, kept.len(), self.branch_file(branch)));
+        }
         let bytes = encode(&events, 0)?;
-        let path = self.events_path(cid);
+        let (old, path) = (self.events_path(cid), self.events_file(cid, record.generation + 1));
         private_dir(path.parent().unwrap())?;
         replace(&path, &bytes)?;
+        self.obsolete.push(old);
         let record = self.record(cid)?;
+        for (j, name, count, _) in &moved {
+            let branch = &mut record.branches[*j];
+            branch.base = base;
+            branch.events = *count;
+            branch.file = Some(name.clone());
+        }
+        record.generation += 1;
         record.events = events.len();
         record.events_bytes = bytes.len() as u64;
-        record.updated = SystemTime::now();
+        self.obsolete.extend(moved.into_iter().map(|(_, _, _, old)| old));
         Ok(replaced)
     }
     /// Stores `tail` (the events after `base`) as an archived branch of the conversation.
@@ -256,20 +303,20 @@ impl Hub {
                 native,
                 at: SystemTime::now(),
                 restored: false,
+                file: None,
             });
         }
         Ok(id)
     }
     pub fn branch_events(&self, id: &str) -> Result<Vec<format::Message>> {
-        let count = self
+        let branch = self
             .state
             .conversations
             .values()
             .flat_map(|r| &r.branches)
             .find(|b| b.id == id)
-            .context("Unknown branch")?
-            .events;
-        decode(&self.branch_path(id), count)
+            .context("Unknown branch")?;
+        decode(&self.branch_file(branch), branch.events)
     }
     /// The conversation whose projection or alias is this native session.
     #[cfg(test)]

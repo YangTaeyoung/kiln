@@ -545,9 +545,14 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     && let Some((appended, renamed, next)) = checkpoint::since_titled(&source, cp)?
                     && (appended.is_empty() || synced == total)
                 {
-                    let title = renamed.unwrap_or(title);
                     let record = hub.state.conversations.get_mut(cid).unwrap();
                     let p = &mut record.projections[i];
+                    // Claude shows the newest title record of the transcript before its sidecar.
+                    let title = match renamed {
+                        Some(renamed) => renamed,
+                        None if source.tool == Tool::Claude && !p.title.is_empty() => p.title.clone(),
+                        None => title,
+                    };
                     if !title.is_empty() && title != p.title {
                         if !p.title.is_empty() || p.origin {
                             renames.push((current.1, title.clone()));
