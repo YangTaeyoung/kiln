@@ -4,7 +4,8 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::mpsc::{Receiver, sync_channel};
 use std::time::{Duration, Instant};
 
 use egui::{
@@ -158,9 +159,13 @@ struct CreateState {
 struct FsWatch {
     watcher: notify::RecommendedWatcher,
     rx: Receiver<notify::Result<notify::Event>>,
+    /// 대기열이 가득 차 버린 이벤트가 있으면 참. 읽어 둔 폴더를 모두 다시 읽는다.
+    overflow: Arc<AtomicBool>,
     recursive: bool,
     watched: HashSet<PathBuf>,
 }
+/// 반영 전까지 쌓아 두는 감시 이벤트 수.
+const WATCH_QUEUE: usize = 4096;
 
 const ROW_H: f32 = 28.0;
 const HEADER_H: f32 = 36.0;
@@ -450,18 +455,26 @@ impl FileTree {
         if self.watch.is_some() || self.watch_failed {
             return;
         }
-        let (tx, rx) = channel();
+        let (tx, rx) = sync_channel(WATCH_QUEUE);
         let shared = self.ctx.clone();
+        let overflow = Arc::new(AtomicBool::new(false));
+        let overflowed = overflow.clone();
         let handler = move |res: notify::Result<notify::Event>| {
-            let _ = tx.send(res);
+            if res.as_ref().is_ok_and(|ev| matches!(ev.kind, notify::EventKind::Access(_))) {
+                return;
+            }
+            if let Err(std::sync::mpsc::TrySendError::Full(_)) = tx.try_send(res) {
+                overflowed.store(true, AtomicOrdering::Release);
+            }
+            // 반영은 조용해진 뒤에 하므로 그 시점에 맞춰 깨운다.
             if let Some(c) = shared.lock().as_ref() {
-                c.request_repaint();
+                c.request_repaint_after(Duration::from_secs_f64(DEBOUNCE_QUIET));
             }
         };
         match notify::recommended_watcher(handler) {
             Ok(watcher) => {
                 let recursive = !cfg!(target_os = "linux");
-                let mut w = FsWatch { watcher, rx, recursive, watched: HashSet::new() };
+                let mut w = FsWatch { watcher, rx, overflow, recursive, watched: HashSet::new() };
                 if recursive {
                     if w.watcher.watch(&self.root, RecursiveMode::Recursive).is_ok() {
                         w.watched.insert(self.root.clone());
@@ -511,14 +524,19 @@ impl FileTree {
     /// 감시 이벤트를 모아 두었다가 조용해지면 영향받은 읽어 둔 폴더만 다시 읽는다.
     fn pump_watcher(&mut self, ctx: &egui::Context) {
         let mut got = Vec::new();
+        let now = ctx.input(|i| i.time);
         if let Some(w) = &self.watch {
             while let Ok(res) = w.rx.try_recv() {
                 if let Ok(ev) = res {
                     got.push(ev);
                 }
             }
+            if w.overflow.swap(false, AtomicOrdering::AcqRel) {
+                self.reload_all_pending = true;
+                self.pending_first.get_or_insert(now);
+                self.pending_last = Some(now);
+            }
         }
-        let now = ctx.input(|i| i.time);
         for ev in got {
             if matches!(ev.kind, notify::EventKind::Access(_)) {
                 continue;
@@ -596,8 +614,13 @@ impl FileTree {
         let now = 0.0;
         let mut got = Vec::new();
         if let Some(w) = &self.watch {
-            while let Ok(Ok(ev)) = w.rx.try_recv() {
-                got.push(ev);
+            while let Ok(res) = w.rx.try_recv() {
+                if let Ok(ev) = res {
+                    got.push(ev);
+                }
+            }
+            if w.overflow.swap(false, AtomicOrdering::AcqRel) {
+                self.reload_all_pending = true;
             }
         }
         for ev in got {

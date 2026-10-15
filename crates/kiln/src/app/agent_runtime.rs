@@ -508,7 +508,7 @@ fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Resu
         let _ = super::conversation_sync::track(config, &record, transcript);
     }
     if let Some(config) = root.parent() {
-        return super::conversation_sync::handover::event(config, path, &record, event["hook_event_name"].as_str().unwrap());
+        return super::conversation_sync::handover::event(config, path, &record, event["hook_event_name"].as_str().unwrap(), event["source"].as_str());
     }
     Ok(None)
 }
@@ -1106,6 +1106,34 @@ mod tests {
         assert!(hook_in(&dir, &records[1].0, "reloaded", event("UserPromptSubmit", &records[1].2).as_bytes()).unwrap().is_none());
         assert!(super::super::conversation_sync::handover::blocked(&config, &records[0].0, &read(&records[0].0).unwrap()));
         assert!(!super::super::conversation_sync::handover::blocked(&config, &records[1].0, &winner));
+    }
+    #[test]
+    fn linked_conversation_without_a_transfer_accepts_prompts_and_compaction() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().canonicalize().unwrap();
+        let dir = config.join("agent-sessions");
+        fs::create_dir_all(&dir).unwrap();
+        let root = config.join("claude");
+        fs::create_dir(&root).unwrap();
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let path = dir.join("claude.json");
+        let record = Record { tool: Tool::Claude, spec: SpawnSpec {
+            cwd: Some(config.to_string_lossy().into_owned()),
+            env: vec![("CLAUDE_CONFIG_DIR".into(), root.to_string_lossy().into_owned())],
+            ..Default::default()
+        }, version: String::new(), conversation: Some(id.into()), generation: "launch".into(), confirmed: true, request_started: false };
+        private_write(&path, &serde_json::to_vec(&record).unwrap()).unwrap();
+        fs::create_dir_all(config.join("conversation-sync")).unwrap();
+        let links = serde_json::json!([{"tool":Tool::Claude,"root":root,"id":id,"group":"linked-fixture","canonical_id":id}]);
+        fs::write(config.join("conversation-sync/native-links.json"), serde_json::to_vec(&links).unwrap()).unwrap();
+        let event = |name: &str, source: &str| serde_json::json!({"hook_event_name":name,"session_id":id,"source":source}).to_string();
+        assert!(hook_in(&dir, &path, "launch", event("UserPromptSubmit", "").as_bytes()).unwrap().is_none(), "a published link alone is not a transfer");
+        assert!(hook_in(&dir, &path, "launch", event("SessionStart", "compact").as_bytes()).unwrap().is_none());
+        assert!(!config.join("conversation-sync/owners.json").exists(), "compaction in the same panel requests no transfer");
+        assert!(hook_in(&dir, &path, "launch", event("UserPromptSubmit", "").as_bytes()).unwrap().is_none());
+        assert!(hook_in(&dir, &path, "launch", event("SessionStart", "resume").as_bytes()).unwrap().is_none());
+        assert!(config.join("conversation-sync/owners.json").exists(), "a resume still requests exclusive ownership");
+        assert_eq!(hook_in(&dir, &path, "launch", event("UserPromptSubmit", "").as_bytes()).unwrap().unwrap()["decision"], "block");
     }
     #[test]
     fn unpinned_account_cannot_restart() {

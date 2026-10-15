@@ -1951,7 +1951,7 @@ while True:
     assert_eq!(starts.len(),2);assert!(starts[0].iter().any(|s|s.contains("fixture task request")));
     assert!(!starts[1].iter().any(|s|s.contains("fixture task request")));assert!(starts[1].contains(a.conversation.as_ref().unwrap()));
     sign_in("fixture-b@example.invalid");h.state_mut().debug_queue_action(Action::DirectAgent{tool,cwd:Some(proj.clone())});
-    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_pane_id()!=Some(pane_a)&&h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
     let sid_b=h.state().debug_focused_session().unwrap();let pane_b=h.state().debug_focused_pane_id().unwrap();let spec_b=h.state().debug_focused_launch_spec().unwrap();let path_b=agent_runtime::record_path(&spec_b).unwrap();let b=agent_runtime::read(&path_b).unwrap();assert!(b.confirmed);assert_ne!(a.conversation,b.conversation);assert_ne!(a.spec.env,b.spec.env);
     h.state_mut().debug_cli_fixture_update(tool,bin.join(tool.key()));
     assert!(pump_until(&mut h,15,|_|agent_runtime::read(&path_a).is_ok_and(|r|r.confirmed&&r.version=="2.1.2")&&agent_runtime::read(&path_b).is_ok_and(|r|r.confirmed&&r.version=="2.1.2")));

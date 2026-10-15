@@ -252,6 +252,25 @@ fn git_panel_stage_all_and_commit_with_keyboard_shortcut() {
 }
 
 #[test]
+fn amend_is_offered_only_when_it_changes_the_last_commit() {
+    let r = panel_repo();
+    let mut h = panel_harness(r.path.clone(), vec2(380.0, 900.0));
+    settle(&mut h, |s| s.panel.is_busy());
+    use egui_kittest::kittest::NodeT;
+    let amend_disabled = |h: &Harness<'_, PanelState>| h.get_by_label("커밋 수정").accesskit_node().is_disabled();
+    assert!(!amend_disabled(&h), "staged changes can be added to the last commit");
+    h.get_by_label("모두 스테이징 취소").click();
+    h.run_steps(1);
+    settle(&mut h, |s| s.panel.is_busy());
+    assert!(amend_disabled(&h), "an amend with nothing staged and no message only rewrites the commit");
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();
+    h.run_steps(1);
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput).type_text("Reworded subject");
+    h.run_steps(2);
+    assert!(!amend_disabled(&h), "a new message rewords the last commit");
+}
+
+#[test]
 fn git_panel_shows_merge_conflicts() {
     let r = Repo::new();
     r.write("config.toml", "value = 1\n");

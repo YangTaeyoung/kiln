@@ -227,8 +227,11 @@ impl DbPanel {
                 ui.set_min_size(ui.available_size());
                 self.header(ui);
                 ui.add_space(6.0);
-                self.filter_box(ui);
-                ui.add_space(8.0);
+                // The table filter is shown when a connection exists or a filter is set.
+                if !self.manager.connections().is_empty() || !self.filter.is_empty() {
+                    self.filter_box(ui);
+                    ui.add_space(8.0);
+                }
                 if let Some(w) = self.manager.keychain_warning() {
                     ui::banner(ui, &w, true);
                     ui.add_space(6.0);

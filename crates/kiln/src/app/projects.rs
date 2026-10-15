@@ -268,14 +268,11 @@ impl Projects {
     pub fn is_open(&self) -> bool {
         self.open
     }
-    pub fn task_context(&self, path: &Path) -> Option<(String, String, &'static str)> {
-        if let Some(task) = self.tasks.iter().find(|task| task.path == path) {
-            return Some((task.name.clone(), task.note.clone(), task.status.label()));
-        }
-        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    /// The task at a workspace root, matched by its path or its already resolved canonical path.
+    pub fn task_context(&self, path: &Path, canonical: &Path) -> Option<(String, String, &'static str)> {
         self.tasks
             .iter()
-            .find(|task| task.path == path)
+            .find(|task| task.path == path || task.path == canonical)
             .map(|task| (task.name.clone(), task.note.clone(), task.status.label()))
     }
     /// A running git operation must finish before application shutdown.

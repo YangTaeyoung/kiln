@@ -676,7 +676,8 @@ impl GitPanel {
         ui.add_space(8.0);
 
         let can_commit = !busy && conflicts == 0 && (staged > 0 || merging) && !self.message.trim().is_empty();
-        let can_amend = !busy && has_head && conflicts == 0;
+        // Amend only when staged changes or a new message would change the last commit.
+        let can_amend = !busy && has_head && conflicts == 0 && (staged > 0 || !self.message.trim().is_empty());
         let row_w = ui.available_width();
         ui.allocate_ui_with_layout(vec2(row_w, 30.0), Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;

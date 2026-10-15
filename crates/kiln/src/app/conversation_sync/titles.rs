@@ -32,7 +32,7 @@ fn sidecar(source: &Source) -> Result<PathBuf> {
     safe_path(&source.root, &path)?;
     Ok(path)
 }
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub(super) struct Cache {
     indexes: HashMap<PathBuf, (u64, SystemTime, HashMap<String, String>)>,
 }

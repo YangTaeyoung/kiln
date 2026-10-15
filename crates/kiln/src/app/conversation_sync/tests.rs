@@ -605,6 +605,65 @@ fn divergent_linked_histories_are_preserved_and_report_a_conflict() {
 }
 
 #[test]
+fn unchanged_conflicting_original_and_continued_copy_wait_for_the_retry_delay() {
+    let f = Fixture::new(Tool::Claude);
+    f.scan();
+    let peer = f.state().entries.values().find(|e| e.imported).unwrap().source.clone();
+    for source in [&f.source, &peer] {
+        let mut ms = messages();
+        ms.push(Message { role: "user".into(), text: source.tool.key().into(), images: vec![] });
+        ms.push(Message { role: "assistant".into(), text: "Independent reply".into(), images: vec![] });
+        fs::write(&source.path, format::render(source.tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &ms).unwrap()).unwrap();
+    }
+    let mut cache = Cache::new();
+    let first = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(first.errors.len(), 2, "{:?}", first.errors);
+    let read_at = |cache: &Cache| [&f.source, &peer].map(|s| cache.attempts[&s.path].2);
+    let attempted = read_at(&cache);
+    let second = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(read_at(&cache), attempted, "neither history is read again");
+    assert_eq!(second.errors, first.errors, "both conflicts stay reported");
+    assert_eq!(cache.failures[&peer.path], 1);
+    cache.expedite();
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert!(read_at(&cache).iter().zip(attempted).all(|(now, before)| *now > before));
+}
+
+#[test]
+fn retry_delay_grows_from_thirty_seconds_to_two_minutes() {
+    assert_eq!([1, 2, 3, 9].map(retry_delay), [30, 60, 120, 120].map(Duration::from_secs));
+}
+
+#[test]
+fn transcript_written_within_the_quiet_window_waits_without_being_read() {
+    let f = Fixture::new(Tool::Claude);
+    let mut cache = Cache::new();
+    cache.quiet = Duration::from_secs(3600);
+    let waiting = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert_eq!(waiting.published, 0);
+    let row = waiting.rows.values().next().unwrap();
+    assert_eq!(row.phase, Phase::Waiting);
+    assert!(row.detail.contains("being written"), "{}", row.detail);
+    assert!(!cache.attempts.contains_key(&f.source.path));
+    assert!(!cache.failures.contains_key(&f.source.path));
+    cache.quiet = Duration::ZERO;
+    assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
+}
+
+#[test]
+fn streamed_hashes_and_lengths_equal_the_encoded_bytes() {
+    assert_eq!(
+        digest(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    let value = json!({"text": "줄\n\"quoted\"", "messages": messages()});
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert_eq!(json_digest(&value).unwrap(), digest(&bytes));
+    assert_eq!(json_len(&value).unwrap(), bytes.len() as u64);
+    assert_eq!(json_digest(&messages()).unwrap(), digest(&serde_json::to_vec(&messages()).unwrap()));
+}
+
+#[test]
 fn open_managed_endpoint_defers_updates_until_the_daemon_exit_lease_releases() {
     let f = Fixture::new(Tool::Codex);
     f.scan();
@@ -634,6 +693,19 @@ fn open_managed_endpoint_defers_updates_until_the_daemon_exit_lease_releases() {
 }
 
 #[test]
+fn prompts_continue_while_their_history_is_being_synchronized() {
+    let f = Fixture::new(Tool::Codex);
+    f.scan();
+    let record = super::super::agent_runtime::Record { tool: Tool::Codex, spec: kiln_proto::SpawnSpec {
+        cwd: Some(f.source.cwd.clone()), env:vec![(env_key(Tool::Codex).into(),f.source.root.to_string_lossy().into_owned())], ..Default::default()
+    }, version:String::new(), generation:"panel".into(), conversation:Some(f.source.id.clone()), confirmed:true, request_started:false };
+    assert!(handover::link(&handover::links(&f.config).unwrap(), &record).is_some());
+    let _syncing = handover::write_guard(&f.config, &f.source).unwrap();
+    let _publishing = handover::lock(&f.config).unwrap();
+    assert!(handover::event(&f.config, &f.config.join("panel.json"), &record, "UserPromptSubmit", None).unwrap().is_none());
+}
+
+#[test]
 fn syncing_one_conversation_does_not_lock_unrelated_native_starts() {
     let f = Fixture::new(Tool::Codex);
     f.scan();
@@ -644,7 +716,7 @@ fn syncing_one_conversation_does_not_lock_unrelated_native_starts() {
     let mut links = handover::links(&f.config).unwrap();
     links.push(handover::Link { tool:Tool::Codex, root:f.source.root.clone(), id:other.conversation.clone().unwrap(), group:"unrelated-group".into(), canonical_id:other.conversation.clone().unwrap() });
     fs::write(f.config.join("conversation-sync/native-links.json"),serde_json::to_vec(&links).unwrap()).unwrap();
-    assert!(handover::event(&f.config,&f.config.join("other.json"),&other,"SessionStart").is_ok());
+    assert!(handover::event(&f.config,&f.config.join("other.json"),&other,"SessionStart",None).is_ok());
     assert!(handover::write_guard(&f.config,&f.source).is_err(), "same conversation remains locked");
 }
 #[test]
@@ -2753,4 +2825,167 @@ fn unnamed_history_normalizes_title_whitespace_without_changing_messages() {
         .unwrap();
         assert_eq!(f.scan().published, 0);
     }
+}
+
+#[test]
+fn streamed_comparison_matches_plain_and_compressed_transcripts_exactly() {
+    let f = Fixture::new(Tool::Codex);
+    let bytes = fs::read(&f.source.path).unwrap();
+    assert!(storage::equals(&f.source, &bytes).unwrap());
+    assert!(!storage::equals(&f.source, &bytes[..bytes.len() - 1]).unwrap());
+    assert!(!storage::equals(&f.source, &[bytes.as_slice(), b"\n"].concat()).unwrap());
+    let mut changed = bytes.clone();
+    changed[0] ^= 1;
+    assert!(!storage::equals(&f.source, &changed).unwrap());
+    let packed = f.source.path.with_extension("jsonl.zst");
+    fs::write(&packed, zstd::encode_all(bytes.as_slice(), 3).unwrap()).unwrap();
+    fs::remove_file(&f.source.path).unwrap();
+    assert!(storage::equals(&f.source, &bytes).unwrap());
+    assert!(!storage::equals(&f.source, &changed).unwrap());
+}
+
+/// Worker tests register no native metadata, like `scan_with_index`.
+#[derive(Default)]
+struct NoNativeMetadata;
+impl worker::NativeMetadata for NoNativeMetadata {
+    fn begin_scan(&mut self) {}
+    fn apply(&mut self, _: &Source, _: &Gate, _: Metadata<'_>) -> Result<Option<String>> {
+        Ok(None)
+    }
+}
+
+#[cfg(unix)]
+struct WorkerFixture {
+    gui: std::os::unix::net::UnixStream,
+    replies: mpsc::Receiver<String>,
+    done: std::thread::JoinHandle<Result<()>>,
+    exiting: bool,
+}
+#[cfg(unix)]
+impl WorkerFixture {
+    fn start(f: &Fixture, recycle_peak: u64) -> Self {
+        struct Lines(mpsc::Sender<String>, Vec<u8>);
+        impl Write for Lines {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.1.extend_from_slice(bytes);
+                while let Some(end) = self.1.iter().position(|b| *b == b'\n') {
+                    let line: Vec<u8> = self.1.drain(..=end).collect();
+                    let _ = self.0.send(String::from_utf8_lossy(&line).trim_end().to_owned());
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (gui, worker_end) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (tx, replies) = mpsc::channel();
+        let (config, roots) = (f.config.clone(), workspace_scope(f).roots);
+        let done = std::thread::spawn(move || {
+            worker::serve_with::<NoNativeMetadata>(std::io::BufReader::new(worker_end), Lines(tx, Vec::new()), &config, recycle_peak, move |_, workspaces| {
+                Ok(discovery::Scope { workspaces, roots: roots.clone() })
+            })
+        });
+        Self { gui, replies, done, exiting: false }
+    }
+    fn send(&mut self, request: &worker::Request) {
+        let mut line = serde_json::to_vec(request).unwrap();
+        line.push(b'\n');
+        self.gui.write_all(&line).unwrap();
+    }
+    fn scan(&mut self, f: &Fixture, id: u64) -> Status {
+        self.send(&worker::Request::Scan { id, pair: f.pair.clone(), workspaces: vec![PathBuf::from(&f.source.cwd)], quiet_ms: 0, expedite: false, reset: false });
+        loop {
+            let line = self.replies.recv_timeout(Duration::from_secs(30)).expect("worker reply");
+            if let worker::Reply::Scanned { id: done, result, exiting } = serde_json::from_str(&line).unwrap() {
+                assert_eq!(done, id);
+                self.exiting = exiting;
+                return result.unwrap();
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_worker_keeps_file_stamped_results_across_scans_and_restarts() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let mut worker = WorkerFixture::start(&f, u64::MAX);
+    assert_eq!(worker.scan(&f, 1).published, 1);
+    assert_eq!(worker.scan(&f, 2).published, 0, "unchanged histories are not copied again");
+    drop(worker.gui);
+    worker.done.join().unwrap().unwrap();
+    assert!(!worker::cache_path(&f.config).exists());
+
+    let mut extended = messages();
+    extended.push(Message { role: "user".into(), text: "A new turn".into(), images: vec![] });
+    extended.push(Message { role: "assistant".into(), text: "New answer".into(), images: vec![] });
+    let mut recycling = WorkerFixture::start(&f, 0);
+    fs::write(&f.source.path, format::render(f.source.tool, &f.source.id, &f.source.cwd, "2026-10-14T00:00:00Z", &extended).unwrap()).unwrap();
+    assert_eq!(recycling.scan(&f, 3).published, 1);
+    assert!(recycling.exiting, "the reply announces the exit");
+    assert!(worker::cache_path(&f.config).exists(), "results are saved before the reply");
+    recycling.done.join().unwrap().unwrap();
+    let mut next = WorkerFixture::start(&f, u64::MAX);
+    assert_eq!(next.scan(&f, 4).published, 0, "the next worker reuses the saved results");
+    assert!(!worker::cache_path(&f.config).exists());
+    drop(next.gui);
+    next.done.join().unwrap().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_worker_reports_a_cancelled_scan_without_publishing() {
+    let f = Fixture::new(Tool::Claude);
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let mut worker = WorkerFixture::start(&f, u64::MAX);
+    worker.send(&worker::Request::Cancel { id: 1 });
+    assert_eq!(worker.scan(&f, 1).published, 0, "a scan cancelled before it starts publishes nothing");
+    assert_eq!(worker.scan(&f, 2).published, 1);
+    drop(worker.gui);
+    worker.done.join().unwrap().unwrap();
+}
+
+#[test]
+fn saved_cache_keeps_retry_delays_for_a_restarted_worker() {
+    let f = Fixture::new(Tool::Claude);
+    let original = fs::read(&f.source.path).unwrap();
+    let mut data = rows(&original);
+    data[0]["message"]["content"] = json!([{"type":"document"}]);
+    fs::write(&f.source.path, data.iter().map(|r| format!("{r}\n")).collect::<String>()).unwrap();
+    let mut cache = Cache::new();
+    scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    let attempted = cache.attempts[&f.source.path];
+    let mut restored: Cache = serde_json::from_slice(&serde_json::to_vec(&cache).unwrap()).unwrap();
+    assert_eq!(restored.failures, cache.failures);
+    let second = scan(&f.config, &f.pair, &f.gate, &mut restored, |_| {}).unwrap();
+    assert_eq!(restored.attempts[&f.source.path], attempted, "the failing history is not read again");
+    assert_eq!(second.rows.values().next().unwrap().phase, Phase::Failed);
+}
+
+#[test]
+fn a_row_left_waiting_is_marked_synced_when_its_unchanged_file_is_cached_as_synced() {
+    let f = Fixture::new(Tool::Claude);
+    let mut cache = Cache::new();
+    assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
+    for row in cache.rows.values_mut() {
+        row.phase = Phase::Waiting;
+        row.detail = "Transcript is being written; retrying".into();
+    }
+    let status = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    assert!(status.rows.values().all(|r| r.phase == Phase::Synced && r.detail.is_empty()));
+    assert_eq!(status.published, 0);
+}
+
+#[test]
+fn a_synchronized_conversation_whose_original_was_deleted_stays_synced() {
+    let f = Fixture::new(Tool::Claude);
+    let mut cache = Cache::new();
+    assert_eq!(scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap().published, 1);
+    fs::remove_file(&f.source.path).unwrap();
+    let status = scan(&f.config, &f.pair, &f.gate, &mut cache, |_| {}).unwrap();
+    let row = &status.rows[&f.source.path.to_string_lossy().into_owned()];
+    assert_eq!(row.phase, Phase::Synced, "its copies remain available");
+    assert!(row.target.is_some());
 }

@@ -297,6 +297,9 @@ pub struct KilnApp {
     notifications: notifications::NotificationCenter,
     last_saved: Option<Persist>,
     last_save_at: Instant,
+    state_writer: state::StateWriter,
+    /// Sequence of the newest save whose result has been applied.
+    saved_sequence: u64,
     focus_terminal: bool,
     restored: bool,
     window_focused: bool,
@@ -304,6 +307,8 @@ pub struct KilnApp {
     theme: Theme,
     pending_input: HashMap<PaneId, String>,
     pending_agent_prompts: HashMap<PaneId, String>,
+    /// Agent launches whose account environment is prepared off the UI thread.
+    preparing_agents: Vec<PreparingAgent>,
     agent_request_view: Option<agent_request::RequestView>,
     db: kiln_db::DbManager,
     rotator: rotation::Rotator,
@@ -341,6 +346,14 @@ mod inspector_state_tests {
         assert_eq!(old.last_inspector,None);
         assert_eq!(restored_inspector(old.last_inspector.as_deref(),old.sheet.as_deref()),Git);
     }
+}
+
+/// An agent launch whose account environment and record are prepared on a worker.
+struct PreparingAgent {
+    /// Id of the workspace the launch was requested from.
+    workspace: u64,
+    task: kiln_common::task::Task<Result<SpawnSpec, String>>,
+    request: Option<(agent_launch::Prepared, String)>,
 }
 
 impl KilnApp {
@@ -392,6 +405,8 @@ impl KilnApp {
             notifications: notifications::NotificationCenter::new(persisted.notifications.clone()),
             last_saved: None,
             last_save_at: Instant::now(),
+            state_writer: state::StateWriter::new(state::path()),
+            saved_sequence: 0,
             focus_terminal: true,
             restored: false,
             window_focused: true,
@@ -399,6 +414,7 @@ impl KilnApp {
             theme,
             pending_input: HashMap::new(),
             pending_agent_prompts: HashMap::new(),
+            preparing_agents: Vec::new(),
             agent_request_view:None,
             db: kiln_db::DbManager::load(),
             rotator: rotation::Rotator::new({
@@ -581,7 +597,11 @@ impl KilnApp {
         Persist { workspaces, active: self.active, settings: self.settings.clone(), sidebar_open: self.sidebar_open, notifications: self.notifications.items.clone(), recent_panes: self.recent_panes.clone(), terminal_launch_drafts:launch_drafts.into_values().collect() }
     }
 
+    /// Unforced saves are written by the state writer thread; forced saves are durable on return.
     fn save_if_changed(&mut self, force: bool) {
+        for (sequence, snapshot, result) in self.state_writer.completed() {
+            self.finish_save(sequence, snapshot, result);
+        }
         if !force && self.last_save_at.elapsed() < Duration::from_millis(500) {
             return;
         }
@@ -589,13 +609,25 @@ impl KilnApp {
         let p = self.persist();
         // Closing requires a durable checkpoint even when the in-memory state
         // is unchanged: the file may have been removed, blocked or corrupted.
-        if force || self.last_saved.as_ref() != Some(&p) {
-            match state::save(&p) {
-                Ok(()) => { self.last_saved = Some(p); self.save_error = None; }
-                Err(error) => {
-                    if self.save_error.as_ref() != Some(&error) { self.toast(kiln_common::i18n::tr("작업 상태 저장 실패"), &error, ToastKind::Error, None); }
-                    self.save_error = Some(error);
-                }
+        if force {
+            let (sequence, result) = self.state_writer.save_now(&p);
+            self.finish_save(sequence, p, result);
+        } else if self.last_saved.as_ref() != Some(&p) {
+            self.state_writer.submit(p);
+        }
+    }
+
+    /// Applies a save result unless a newer save has already been applied.
+    fn finish_save(&mut self, sequence: u64, snapshot: Persist, result: Result<(), String>) {
+        if sequence <= self.saved_sequence {
+            return;
+        }
+        self.saved_sequence = sequence;
+        match result {
+            Ok(()) => { self.last_saved = Some(snapshot); self.save_error = None; }
+            Err(error) => {
+                if self.save_error.as_ref() != Some(&error) { self.toast(kiln_common::i18n::tr("작업 상태 저장 실패"), &error, ToastKind::Error, None); }
+                self.save_error = Some(error);
             }
         }
     }
@@ -630,6 +662,11 @@ impl KilnApp {
             ..Default::default()
         });
         if spec.workspace.is_none() { spec.workspace = ws_info.map(|w| w.1); }
+        // New sessions start at the size of the largest terminal drawn in the latest pass.
+        if let Some((cols, rows)) = self.conn.terminal_grid() {
+            spec.cols = cols;
+            spec.rows = rows;
+        }
         if let Some(req) = self.conn.create(spec) {
             *pending = Some(req);
             self.pending_creates.insert(req, pane);
@@ -793,6 +830,79 @@ impl KilnApp {
                 Duration::from_secs(60)
             },
         );
+    }
+
+    /// Prepares an agent's account environment and launch record on a worker; the page
+    /// opens in the requesting workspace once they are ready.
+    fn prepare_agent(&mut self, tool: kiln_accounts::Tool, cwd: PathBuf, request: Option<(agent_launch::Prepared, String)>, ctx: &egui::Context) {
+        let accounts = self.rotator.mgr.clone();
+        let request_path = request.as_ref().map(|(prepared, _)| prepared.request_path.clone());
+        let task = kiln_common::task::Task::spawn(ctx, move || {
+            let spec = agent_runtime::managed(tool, cwd, &accounts).map_err(|e| e.to_string())?;
+            match request_path {
+                Some(path) => agent_runtime::request_spec(&spec, &path).map_err(|e| e.to_string()),
+                None => Ok(spec),
+            }
+        });
+        let workspace = self.ws().id;
+        self.preparing_agents.push(PreparingAgent { workspace, task, request });
+    }
+
+    fn start_prepared_agents(&mut self, ctx: &egui::Context) {
+        let mut index = 0;
+        while index < self.preparing_agents.len() {
+            if self.preparing_agents[index].task.is_pending() {
+                index += 1;
+                continue;
+            }
+            let PreparingAgent { workspace, mut task, request } = self.preparing_agents.remove(index);
+            let result = task
+                .take()
+                .unwrap_or_else(|| Err(kiln_common::i18n::tr("작업을 시작할 수 없습니다").into()));
+            let target = self.workspaces.iter().position(|w| w.id == workspace);
+            match (result, target) {
+                (Ok(spec), Some(target)) => self.open_agent_page(target, spec, request, ctx),
+                (result, _) => {
+                    if let Some((prepared, _)) = &request {
+                        let _ = std::fs::remove_file(&prepared.request_path);
+                    }
+                    if let Err(error) = result {
+                        self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), error, ToastKind::Error, None);
+                    }
+                }
+            }
+        }
+    }
+
+    fn open_agent_page(&mut self, target: usize, spec: SpawnSpec, request: Option<(agent_launch::Prepared, String)>, ctx: &egui::Context) {
+        let pane = self.new_term_pane(spec.cwd.clone());
+        let pid = self.id();
+        let mut page = Page::new(pid, pane);
+        let reveal = request.is_none();
+        match request {
+            Some((prepared, prompt)) => {
+                page.title = Some(prepared.title);
+                page.agent_request = Some(prepared.request_path);
+                page.agent_request_offset = prepared.request_offset;
+                self.pending_agent_prompts.insert(pane, prompt);
+                let ws = &mut self.workspaces[target];
+                ws.tools.close_agent_task();
+                ws.sheet = None;
+            }
+            // Agent tasks keep following their live CLI title.
+            None => page.title = spec.name.clone().filter(|name| name != "Codex" && name != "Claude Code"),
+        }
+        self.launch_specs.insert(pane, spec);
+        let ws = &mut self.workspaces[target];
+        ws.pages.push(page);
+        ws.active_page = ws.pages.len() - 1;
+        self.spawn_for_pane(pane);
+        if target == self.active {
+            self.focus_terminal = true;
+            if reveal {
+                self.reveal_work_surface(ctx);
+            }
+        }
     }
 
     fn launch_terminal_page(&mut self, spec: SpawnSpec, ctx: &egui::Context) {
@@ -1091,11 +1201,7 @@ impl KilnApp {
             }
             Action::DirectAgent { tool, cwd } => {
                 let cwd = cwd.unwrap_or_else(|| self.ws().root.clone());
-                let spec = match agent_runtime::managed(tool, cwd, &self.rotator.mgr).map_err(|e|e.to_string()) {
-                    Ok(spec) => spec,
-                    Err(error) => { self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), error, ToastKind::Error, None); return; }
-                };
-                self.launch_terminal_page(spec, ctx);
+                self.prepare_agent(tool, cwd, None, ctx);
             }
             Action::OpenSsh { alias, config_path } => {
                 self.apply(Action::OpenSshConnection { alias, config_path, options: Default::default() }, ctx);
@@ -1501,26 +1607,14 @@ impl KilnApp {
                     return;
                 }
                 let tool=match program.as_str() {"claude"=>kiln_accounts::Tool::Claude,"codex"=>kiln_accounts::Tool::Codex,_=>return};
-                let agent_spec=match agent_runtime::managed(tool,cwd.clone(),&self.rotator.mgr) {
-                    Ok(spec)=>spec,
-                    Err(error)=>{self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"),error.to_string(),ToastKind::Error,None);return;}
-                };
+                // One request per workspace is prepared at a time; the composer stays open until it starts.
+                let workspace=self.ws().id;
+                if self.preparing_agents.iter().any(|p|p.request.is_some() && p.workspace==workspace) {return;}
                 let prepared=match agent_launch::prepare(&program,&context,&request) {
                     Ok(prepared)=>prepared,
                     Err(error)=>{self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"),error,ToastKind::Error,None);return;}
                 };
-                let pane=self.new_term_pane(Some(cwd.to_string_lossy().into_owned()));
-                let page_id=self.id();let mut page=Page::new(page_id,pane);page.title=Some(prepared.title);page.agent_request=Some(prepared.request_path);page.agent_request_offset=prepared.request_offset;
-                self.ws().pages.push(page);self.ws().active_page=self.ws().pages.len()-1;
-                let spec=match agent_runtime::request_spec(&agent_spec,self.ws().page().agent_request.as_deref().unwrap()) {
-                    Ok(spec)=>spec,
-                    Err(error)=>{self.retain_terminal_launch(pane,error.to_string());return;}
-                };
-                self.launch_specs.insert(pane,spec);
-                self.pending_agent_prompts.insert(pane,request);
-                self.spawn_for_pane(pane);
-                self.ws().tools.close_agent_task();self.ws().sheet=None;
-                self.focus_terminal=true;
+                self.prepare_agent(tool,cwd,Some((prepared,request)),ctx);
             }
             Action::RunInTerminalAt {cwd, command:cmd} => {
                 let pane = self.new_term_pane(Some(cwd.to_string_lossy().into_owned()));
@@ -2186,6 +2280,30 @@ fn normalize_path(p: PathBuf) -> PathBuf {
     }
 }
 
+/// `p` relative to the first workspace root that contains it, or `short_path` otherwise.
+/// The root itself is shown with `short_path`.
+pub(crate) fn workspace_path(p: &Path, roots: &[&Path]) -> String {
+    roots
+        .iter()
+        .find_map(|root| p.strip_prefix(root).ok())
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(|relative| relative.to_string_lossy().into_owned())
+        .unwrap_or_else(|| short_path(p))
+}
+
+#[cfg(test)]
+mod workspace_path_tests {
+    use super::*;
+    #[test]
+    fn paths_inside_either_workspace_root_are_relative() {
+        let roots = [Path::new("/tmp/work"), Path::new("/private/tmp/work")];
+        assert_eq!(workspace_path(Path::new("/private/tmp/work/src/main.rs"), &roots), "src/main.rs");
+        assert_eq!(workspace_path(Path::new("/tmp/work/api"), &roots), "api");
+        assert_eq!(workspace_path(Path::new("/private/tmp/work"), &roots), "/private/tmp/work");
+        assert_eq!(workspace_path(Path::new("/opt/elsewhere"), &roots), "/opt/elsewhere");
+    }
+}
+
 pub(crate) fn short_path(p: &Path) -> String {
     let s = p.to_string_lossy().into_owned();
     if let Some(home) = std::env::var_os("HOME") {
@@ -2209,7 +2327,7 @@ impl eframe::App for KilnApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
-            ctx.request_repaint_after(Duration::from_millis(250));
+            ctx.request_repaint_after(Duration::from_secs(1));
         }
         self.guard_window_close(ctx);
         // Window controls stay available while a settings or project modal is open.
@@ -2222,6 +2340,7 @@ impl eframe::App for KilnApp {
         #[cfg(target_os="macos")]
         crate::status_bar::publish_unread(self.notifications.unread_count());
         self.conn.pump();
+        self.start_prepared_agents(ctx);
         let focused_now = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         if focused_now && !self.window_focused {
             let ids: Vec<PaneId> = self.workspaces.get(self.active).map(|w| w.all_panes()).unwrap_or_default();

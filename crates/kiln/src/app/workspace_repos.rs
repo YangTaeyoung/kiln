@@ -240,7 +240,11 @@ impl RepositoryWorkspace {
             }
         }
         Some(super::tools::RepoLine {
-            branch: kiln_common::trf!("{}개 저장소", inventory.roots.len()),
+            branch: if inventory.roots.is_empty() {
+                kiln_common::i18n::tr("Git 저장소 없음").into()
+            } else {
+                kiln_common::trf!("{}개 저장소", inventory.roots.len())
+            },
             dirty,
             ahead,
             behind,
@@ -395,34 +399,32 @@ impl RepositoryWorkspace {
         }
         // Share results by gh's host-qualified repository URL, including an in-flight
         // request that began before a second worktree finished resolving its target.
-        let mut github_results = BTreeMap::new();
-        for repo in self.repos.values() {
-            if let (Some(target), Some(result), Some(at)) =
-                (&repo.github_target, &repo.prs, repo.pr_at)
-            {
-                let cached = github_results.entry(target.clone()).or_insert((
-                    at,
-                    result.clone(),
-                    repo.github_refresh_error.clone(),
-                ));
+        // Only repositories behind the newest shared result copy it.
+        let mut newest: BTreeMap<&str, (Instant, &PathBuf)> = BTreeMap::new();
+        for (path, repo) in &self.repos {
+            if let (Some(target), Some(_), Some(at)) = (&repo.github_target, &repo.prs, repo.pr_at) {
+                let cached = newest.entry(target).or_insert((at, path));
                 if at > cached.0 {
-                    *cached = (at, result.clone(), repo.github_refresh_error.clone());
+                    *cached = (at, path);
                 }
             }
         }
-        for repo in self.repos.values_mut() {
-            if let Some((at, result, error)) = repo
-                .github_target
-                .as_ref()
-                .and_then(|target| github_results.get(target))
-            {
-                if repo.pr_at.is_none_or(|old| *at > old) {
-                    repo.pr_at = Some(*at);
-                    repo.prs = Some(result.clone());
-                    repo.github_refresh_error = error.clone();
-                    repo.pr_dirty = false;
-                }
-            }
+        let stale: Vec<(PathBuf, PathBuf)> = self
+            .repos
+            .iter()
+            .filter_map(|(path, repo)| {
+                let (at, source) = newest.get(repo.github_target.as_deref()?)?;
+                repo.pr_at.is_none_or(|old| *at > old).then(|| (path.clone(), (*source).clone()))
+            })
+            .collect();
+        for (path, source) in stale {
+            let source = &self.repos[&source];
+            let (at, result, error) = (source.pr_at, source.prs.clone(), source.github_refresh_error.clone());
+            let repo = self.repos.get_mut(&path).expect("stale repository exists");
+            repo.pr_at = at;
+            repo.prs = result;
+            repo.github_refresh_error = error;
+            repo.pr_dirty = false;
         }
         let jobs = self
             .repos
@@ -1707,6 +1709,11 @@ mod tests {
         assert_eq!(after.ahead, before.ahead);
         assert_eq!(after.behind, before.behind);
         assert_eq!(workspace.decorations().len(), decorations_before);
+    }
+
+    #[test]
+    fn summary_names_a_folder_without_repositories() {
+        assert_eq!(fixture(0).summary().unwrap().branch, "Git 저장소 없음");
     }
 
     #[test]

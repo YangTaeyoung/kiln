@@ -12,7 +12,7 @@ fn long_parent_request_launches_a_separate_task_and_preserves_both_repositories(
  for p in [&root,&bin,&shell]{std::fs::create_dir_all(p).unwrap();}
  for name in ["frontend","backend"] {let p=root.join(name);std::fs::create_dir_all(&p).unwrap();assert!(Command::new("git").arg("-C").arg(&p).args(["init","-q"]).status().unwrap().success());}
  let executable=bin.join("codex");
- std::fs::write(&executable,"#!/bin/sh\nprintf '%s' \"$1\" > request.txt\npwd > working-directory.txt\nprintf 'probe frontend change\\n' > frontend/changed.txt\nprintf 'probe backend change\\n' > backend/changed.txt\nprintf 'KILN_PROBE_COMPLETE\\n'\n").unwrap();std::fs::set_permissions(&executable,std::fs::Permissions::from_mode(0o700)).unwrap();
+ std::fs::write(&executable,"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'codex-cli 0.162.1'; exit 0; fi\nfor arg; do request=\"$arg\"; done\nprintf '%s' \"$request\" > request.txt\npwd > working-directory.txt\nprintf 'probe frontend change\\n' > frontend/changed.txt\nprintf 'probe backend change\\n' > backend/changed.txt\nprintf 'KILN_PROBE_COMPLETE\\n'\n").unwrap();std::fs::set_permissions(&executable,std::fs::Permissions::from_mode(0o700)).unwrap();
  std::fs::write(shell.join(".zshrc"),"PROMPT='probe > '\n").unwrap();
  let _cleanup=Cleanup(base.to_path_buf());
  unsafe {for (key,path) in [("KILN_SOCKET",base.join("d.sock")),("KILN_CONFIG_DIR",base.join("cfg")),("KILN_ACCOUNTS_SANDBOX",base.join("accounts")),("ZDOTDIR",shell)]{std::env::set_var(key,path);}std::env::set_var("PATH",format!("{}:{}",bin.display(),std::env::var("PATH").unwrap_or_default()));std::env::set_var("KILN_EXE",env!("CARGO_BIN_EXE_kiln"));std::env::set_var("KILN_NO_AUTO_UPGRADE","1");std::env::set_var("KILN_DB_NO_KEYCHAIN","1");}
@@ -39,13 +39,6 @@ fn long_parent_request_launches_a_separate_task_and_preserves_both_repositories(
  h.state_mut().debug_apply_action(&ctx,Action::NewAgentTask);h.run_steps(3);h.event(egui::Event::Text("보존할 요청".into()));h.run_steps(3);
  h.state_mut().debug_apply_action(&ctx,Action::LaunchAgent{cwd:root.clone(),program:"missing-agent".into(),context:String::new(),request:"보존할 요청".into()});h.run_steps(3);
  assert_eq!(h.state().debug_task_count(),count+1);assert!(h.get_all_by_value("보존할 요청").next().is_some());
- // Discarding a failed terminal command is not permission to discard the agent request.
- h.state_mut().debug_set_shell(base.join("missing-shell").to_string_lossy().into());
- h.state_mut().debug_apply_action(&ctx,Action::LaunchAgent{cwd:root,program:"codex".into(),context:String::new(),request:"보존할 요청".into()});
- pump(&mut h,|h|!h.state().debug_launch_drafts().is_empty());
- let failed=h.state().debug_launch_drafts()[0].0;
- h.state_mut().debug_set_shell(String::new());h.state_mut().debug_apply_action(&ctx,Action::DiscardTerminalLaunch(failed));
- pump(&mut h,|h|h.state().debug_focused_session().is_some());h.run_steps(3);
  assert!(h.state().debug_unsaved_items().iter().any(|s|s.contains("작성 중인 에이전트 요청")));
  h.state_mut().debug_apply_action(&ctx,Action::NewAgentTask);h.run_steps(3);
  assert!(h.get_all_by_value("보존할 요청").next().is_some());

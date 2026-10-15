@@ -361,6 +361,7 @@ impl TermView {
         // launches an agent command. Keep the last visible output available.
         self.health_ui(ui,conn,ui.available_rect_before_wrap(),&kiln_common::Theme::current());
         if self.inspector {
+            conn.keep_attached(self.session);
             out.clicked = ui.rect_contains_pointer(ui.max_rect()) && ui.input(|i|i.pointer.any_pressed());
             self.inspector_ui(ui, conn, cwd, &mut out);
             return out;
@@ -488,7 +489,11 @@ impl TermView {
             let origin = vec2(inner.min.x, inner.min.y + r as f32 * cell.y);
             for s in &rc.shapes {
                 let mut s = s.clone();
-                s.translate(origin);
+                // 텍스트는 위치만 옮기고 캐시된 galley를 공유한다.
+                match &mut s {
+                    Shape::Text(text) => text.pos += origin,
+                    s => s.translate(origin),
+                }
                 shapes.push(s);
             }
         }
@@ -528,7 +533,11 @@ impl TermView {
             }
         }
 
-        if settings.cursor_blink && focused { ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)); }
+        if settings.cursor_blink && focused && ui.input(|i| i.focused) {
+            // 깜박임 상태가 바뀌는 다음 0.5초 경계에 다시 그린다.
+            let until_toggle = 0.5 - ui.input(|i| i.time).rem_euclid(0.5);
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(until_toggle.max(0.01)));
+        }
         // 커서와 IME 조합 문자열.
         if let Some(c) = screen.cursor {
             let pos = pos2(inner.min.x + c.col as f32 * cell.x, inner.min.y + c.row as f32 * cell.y);
@@ -660,6 +669,8 @@ impl TermView {
     }
 
     fn request_size(&mut self, ctx: &egui::Context, conn: &mut Conn, cols: u16, rows: u16) {
+        // 크기가 안정되기를 기다리는 동안에도 보이는 세션의 화면은 계속 받는다.
+        conn.keep_attached(self.session);
         let now = std::time::Instant::now();
         match self.pending_size {
             Some((sz, _)) if sz == (cols, rows) => {}

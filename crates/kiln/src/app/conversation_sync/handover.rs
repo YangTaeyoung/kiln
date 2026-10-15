@@ -28,7 +28,7 @@ pub(crate) fn pending_matches(owner: &Owner, path: &Path, record: &Record) -> bo
             || !record.confirmed && record.conversation.as_deref() == Some(&owner.canonical_id))
 }
 
-fn lock(config: &Path) -> Result<fs::File> {
+pub(super) fn lock(config: &Path) -> Result<fs::File> {
     let dir = config.join("conversation-sync");
     private_dir(&dir)?;
     let file = fs::OpenOptions::new()
@@ -193,28 +193,43 @@ pub(super) fn settled(
         .collect())
 }
 
-/// SessionStart requests a transfer. UserPromptSubmit can never steal ownership.
+/// SessionStart requests a transfer unless it reports compaction of the running session.
+/// UserPromptSubmit waits only while an owner is recorded for the conversation and is
+/// not this launch; it can never steal ownership.
 /// The UI grants the new launch only after exit, durable sync, and exact-ID reload.
 pub(crate) fn event(
     config: &Path,
     path: &Path,
     record: &Record,
     event: &str,
+    source: Option<&str>,
 ) -> Result<Option<serde_json::Value>> {
     let links = links(config)?;
     let Some(link) = link(&links, record) else {
         return Ok(None);
     };
+    let granted = |owners: &Owners| {
+        owners.get(&link.group).is_some_and(|owner| {
+            owner.record == path
+                && owner.generation == record.generation
+                && Some(&owner.id) == record.conversation.as_ref()
+                && owner.ready
+        })
+    };
+    if event == "UserPromptSubmit" {
+        // Owners are replaced atomically; a prompt decision only reads them.
+        let owners = owners(config)?;
+        if owners.contains_key(&link.group) && !granted(&owners) {
+            return Ok(Some(serde_json::json!({"decision":"block","reason":
+                "Kiln is transferring this conversation. Wait for the linked session to reopen; the other agent must stop and its history must finish syncing first."})));
+        }
+        return Ok(None);
+    }
     let _group_lock = group_lock(config, &link.group)?;
     let _lock = lock(config)?;
     let mut owners = owners(config)?;
-    let granted = owners.get(&link.group).is_some_and(|owner| {
-        owner.record == path
-            && owner.generation == record.generation
-            && Some(&owner.id) == record.conversation.as_ref()
-            && owner.ready
-    });
-    if event == "SessionStart" && !granted {
+    let granted = granted(&owners);
+    if event == "SessionStart" && !granted && source != Some("compact") {
         owners.insert(
             link.group.clone(),
             Owner {
@@ -229,10 +244,6 @@ pub(crate) fn event(
             },
         );
         save(config, &owners)?;
-    }
-    if event == "UserPromptSubmit" && !granted {
-        return Ok(Some(serde_json::json!({"decision":"block","reason":
-            "Kiln is transferring this conversation. Wait for the linked session to reopen; the other agent must stop and its history must finish syncing first."})));
     }
     Ok(None)
 }
