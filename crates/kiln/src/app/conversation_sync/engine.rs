@@ -278,8 +278,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             return Ok(None);
         }
         let mut title = self.native_title(&source)?;
-        match read_messages_titled(&source, &mut title) {
-            Ok(messages) if messages.iter().any(|m| m.role == "user") => {
+        match checkpoint::read(&source, &mut title) {
+            Ok((messages, checkpoint)) if messages.iter().any(|m| m.role == "user") => {
                 let cid = conversation_id(&NativeRef::of(&source));
                 let mut record = Record::new(&title, &source.cwd);
                 record.projections.push(Projection {
@@ -289,6 +289,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     origin: true,
                     removed: false,
                     title: title.clone(),
+                    checkpoint,
                 });
                 hub.state.conversations.insert(cid.clone(), record);
                 hub.append(&cid, &messages)?;
@@ -348,6 +349,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             origin: false,
             removed: false,
             title: String::new(),
+            checkpoint: None,
         });
         Ok(())
     }
@@ -491,6 +493,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         let mut events: Option<Vec<format::Message>> = None;
         let mut renames: Vec<(SystemTime, String)> = Vec::new();
         let mut read_titles = std::collections::HashSet::new();
+        // Events appended by this scan's incremental reads, starting at the given index.
+        let mut fresh: Option<(usize, Vec<format::Message>)> = None;
         // A projection invalidated by a newer branch is reconciled again in the next pass.
         for _pass in 0..3 {
             let mut changed = Vec::new();
@@ -531,15 +535,44 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 let source = hub.state.conversations[cid].projections[i].source.clone();
                 let mut title = self.native_title(&source)?;
                 read_titles.insert(native_ref.clone());
-                let native = read_messages_titled(&source, &mut title)?;
+                let (synced, total, known) = {
+                    let record = &hub.state.conversations[cid];
+                    (record.projections[i].synced, record.events, record.projections[i].checkpoint.clone())
+                };
+                // Records appended after a completed turn are read on their own when the
+                // projection held the whole canonical history.
+                if let Some(cp) = &known
+                    && let Some((appended, renamed, next)) = checkpoint::since_titled(&source, cp)?
+                    && (appended.is_empty() || synced == total)
+                {
+                    let title = renamed.unwrap_or(title);
+                    let record = hub.state.conversations.get_mut(cid).unwrap();
+                    let p = &mut record.projections[i];
+                    if !title.is_empty() && title != p.title {
+                        if !p.title.is_empty() || p.origin {
+                            renames.push((current.1, title.clone()));
+                        }
+                        p.title = title;
+                    }
+                    p.synced += appended.len();
+                    p.stamp = Some(current);
+                    p.checkpoint = Some(next);
+                    if !appended.is_empty() {
+                        record.updated = current.1;
+                        if let Some(canonical) = events.as_mut() {
+                            canonical.extend(appended.iter().cloned());
+                        }
+                        fresh.get_or_insert_with(|| (total, Vec::new())).1.extend(appended.iter().cloned());
+                        hub.append(cid, &appended)?;
+                    }
+                    continue;
+                }
+                let (native, read_checkpoint) = checkpoint::read(&source, &mut title)?;
                 if events.is_none() {
                     events = Some(hub.events(cid)?);
                 }
                 let canonical = events.as_mut().unwrap();
-                let (synced, updated) = {
-                    let record = &hub.state.conversations[cid];
-                    (record.projections[i].synced, record.updated)
-                };
+                let updated = hub.state.conversations[cid].updated;
                 {
                     let p = &mut hub.state.conversations.get_mut(cid).unwrap().projections[i];
                     if !title.is_empty() && title != p.title {
@@ -554,6 +587,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                         let p = &mut hub.state.conversations.get_mut(cid).unwrap().projections[i];
                         p.synced = native.len();
                         p.stamp = Some(current);
+                        p.checkpoint = read_checkpoint;
                     }
                     Outcome::Append(count) => {
                         hub.append(cid, &native[canonical.len()..])?;
@@ -562,6 +596,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                         record.updated = current.1;
                         record.projections[i].synced = count;
                         record.projections[i].stamp = Some(current);
+                        record.projections[i].checkpoint = read_checkpoint;
                     }
                     Outcome::NativeWins { base } => {
                         let replaced = hub.rewrite(cid, base, &native[base..])?;
@@ -571,9 +606,11 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                         record.updated = current.1;
                         record.projections[i].synced = canonical.len();
                         record.projections[i].stamp = Some(current);
+                        record.projections[i].checkpoint = read_checkpoint;
                         for (j, q) in record.projections.iter_mut().enumerate() {
                             if j != i && !q.removed && q.synced > base {
                                 q.stamp = None;
+                                q.checkpoint = None;
                             }
                         }
                     }
@@ -627,10 +664,13 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     if record.projections[i].synced >= record.events
                         && record.projections[i].title == record.title => {}
                 Some(i) => {
-                    if events.is_none() {
-                        events = Some(hub.events(cid)?);
-                    }
-                    if let Some(reason) = self.append(hub, cid, i, events.as_ref().unwrap())? {
+                    let from = record.projections[i].synced.min(record.events);
+                    let tail = match (&events, &fresh) {
+                        (Some(all), _) => all[from..].to_vec(),
+                        (None, Some((start, recent))) if from >= *start => recent[from - start..].to_vec(),
+                        _ => hub.events_from(cid, from)?,
+                    };
+                    if let Some(reason) = self.append(hub, cid, i, &tail, &mut events)? {
                         waiting.get_or_insert(reason);
                     }
                 }
@@ -645,11 +685,20 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         Ok(waiting)
     }
 
-    /// Appends the missing canonical events and title; returns why a busy projection waits.
-    fn append(&mut self, hub: &mut Hub, cid: &str, i: usize, events: &[format::Message]) -> Result<Option<String>> {
-        let (source, known, title) = {
+    /// Appends the missing canonical events (`tail`) and title; returns why a busy projection
+    /// waits. `events` holds the whole canonical history once a full update needs it.
+    fn append(
+        &mut self,
+        hub: &mut Hub,
+        cid: &str,
+        i: usize,
+        tail: &[format::Message],
+        events: &mut Option<Vec<format::Message>>,
+    ) -> Result<Option<String>> {
+        let (source, known, title, checkpoint, total) = {
             let record = &hub.state.conversations[cid];
-            (record.projections[i].source.clone(), record.projections[i].stamp, record.title.clone())
+            let p = &record.projections[i];
+            (p.source.clone(), p.stamp, record.title.clone(), p.checkpoint.clone(), record.events)
         };
         let current = stamp(&source)?;
         if recently_modified(current.1, self.cache.quiet) || known != Some(current) {
@@ -661,16 +710,30 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             Err(error) => return Err(error),
         };
         self.copying(hub, cid);
-        let changed = canonical::update(&source, events, &title, &timestamp())?;
+        let quick = match &checkpoint {
+            Some(cp) => canonical::append_since(&source, cp, tail, &title, &timestamp())?,
+            None => None,
+        };
+        let (changed, next) = match quick {
+            Some(next) => (true, Some(next)),
+            None => {
+                if events.is_none() {
+                    *events = Some(hub.events(cid)?);
+                }
+                let changed = canonical::update(&source, events.as_ref().unwrap(), &title, &timestamp())?;
+                (changed, checkpoint::read(&source, &mut title.clone())?.1)
+            }
+        };
         if source.tool == Tool::Codex {
             (self.metadata)(&source, Metadata::Name(&title))?;
         }
         titles::pin_claude(&source, &title)?;
         drop(guard);
         let p = &mut hub.state.conversations.get_mut(cid).unwrap().projections[i];
-        p.synced = events.len();
+        p.synced = total;
         p.stamp = Some(stamp(&source)?);
         p.title = title;
+        p.checkpoint = next;
         if changed {
             self.status.published += 1;
             self.status.recent.retain(|c| c.id != source.id || c.root != source.root);
@@ -700,15 +763,15 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             id,
         };
         let title = record.title.clone();
-        let (synced, known) = if storage::exists(&source) {
+        let (synced, known, written) = if storage::exists(&source) {
             // A projection published before an interrupted state save is adopted; a history
             // continued since then is ingested on the next pass.
             let collision = || anyhow::anyhow!("Continuation collision; existing conversation was preserved");
             let existing = read_messages(&source).map_err(|_| collision())?;
             if events.starts_with(&existing) {
-                (existing.len(), Some(stamp(&source)?))
+                (existing.len(), Some(stamp(&source)?), None)
             } else if existing.starts_with(events) {
-                (events.len(), None)
+                (events.len(), None, None)
             } else {
                 return Err(collision());
             }
@@ -734,7 +797,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             }
             self.copying(hub, cid);
             publish(&source.path, &bytes)?;
-            (events.len(), Some(stamp(&source)?))
+            (events.len(), Some(stamp(&source)?), checkpoint::of_bytes(tool, &bytes)?)
         };
         (self.metadata)(&source, Metadata::Name(&title))?;
         titles::pin_claude(&source, &title)?;
@@ -748,6 +811,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             origin: false,
             removed: false,
             title,
+            checkpoint: written,
         });
         Ok(())
     }

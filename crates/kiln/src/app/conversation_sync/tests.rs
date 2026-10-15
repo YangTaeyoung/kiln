@@ -2878,7 +2878,7 @@ fn hub_identity_is_stable_and_aliases_resolve() {
     let mut record = hub::Record::new("T", "/w");
     record.projections.push(hub::Projection {
         source: Source { tool: Tool::Codex, root: PathBuf::from("/r"), path: PathBuf::from("/r/x.jsonl"), cwd: "/w".into(), id: "id-a".into() },
-        synced: 0, stamp: None, origin: true, removed: false, title: String::new(),
+        synced: 0, stamp: None, origin: true, removed: false, title: String::new(), checkpoint: None,
     });
     record.aliases.push(alias.clone());
     store.state.conversations.insert(cid.clone(), record);
@@ -3428,4 +3428,69 @@ fn progress_ui_offers_actions_ignore_and_restore() {
     assert!(h.query_by_label("복구").is_some());
     assert!(h.query_by_label("보류됨").is_some());
     h.render().unwrap().save("/tmp/kiln-sync-attention.png").unwrap();
+}
+
+#[test]
+fn incremental_and_full_parsing_agree_under_random_appends() {
+    let mut seed = 0x6c07_8965_3a1f_92d4u64;
+    let mut next = |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let (full, cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
+        let mut expected = messages();
+        assert_eq!(full, expected);
+        let mut cp = cp.expect("a completed turn has a checkpoint");
+        for round in 0..10 {
+            let mut added = Vec::new();
+            for k in 0..1 + next(3) {
+                added.extend(turns(&[&format!("q{round}-{k}"), &format!("a{round}-{k}")]));
+            }
+            expected.extend(added.clone());
+            canonical::update(&f.source, &expected, "Fixture title", "2026-10-15T00:00:00.000Z").unwrap();
+            let (appended, after) = checkpoint::since(&f.source, &cp).unwrap().expect("appended records read on their own");
+            assert_eq!(appended, added, "{tool:?} round {round}");
+            let (full, full_cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
+            assert_eq!(full, expected);
+            assert_eq!(Some(&after), full_cp.as_ref(), "{tool:?} round {round}");
+            cp = after;
+        }
+    }
+}
+
+#[test]
+fn checkpointed_append_matches_a_full_read() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let (_, cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
+        let mut cp = cp.unwrap();
+        let mut expected = messages();
+        for round in 0..6 {
+            let added = turns(&[&format!("appended question {round}"), &format!("appended answer {round}")]);
+            expected.extend(added.clone());
+            let before = fs::read(&f.source.path).unwrap();
+            cp = canonical::append_since(&f.source, &cp, &added, "Fixture title", "2026-10-15T00:00:00.000Z").unwrap().expect("a checkpointed append");
+            assert!(fs::read(&f.source.path).unwrap().starts_with(&before), "existing bytes are kept");
+            let (full, full_cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
+            assert_eq!(full, expected, "{tool:?} round {round}");
+            assert_eq!(Some(&cp), full_cp.as_ref());
+        }
+    }
+}
+
+#[test]
+fn prefix_change_falls_back_to_a_full_parse() {
+    for tool in Tool::ALL {
+        let f = Fixture::new(tool);
+        let (_, cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
+        let cp = cp.unwrap();
+        let mut changed = turns(&["a different opening question", "a different reply"]);
+        changed.extend(turns(&["and more", "and more replies"]));
+        fs::write(&f.source.path, format::render(tool, &f.source.id, &f.source.cwd, "2026-10-14T00:00:00Z", &changed).unwrap()).unwrap();
+        assert!(checkpoint::since(&f.source, &cp).unwrap().is_none(), "{tool:?}");
+    }
 }

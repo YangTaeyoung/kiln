@@ -31,6 +31,9 @@ pub(super) struct Projection {
     /// Title last pinned to or read from this native session.
     #[serde(default)]
     pub title: String,
+    /// Parser position after the last completed turn of the native history.
+    #[serde(default)]
+    pub checkpoint: Option<super::checkpoint::Checkpoint>,
 }
 
 /// An archived continuation that lost to the canonical history.
@@ -161,6 +164,28 @@ impl Hub {
     pub fn events(&self, cid: &str) -> Result<Vec<format::Message>> {
         let record = self.state.conversations.get(cid).context("Unknown conversation")?;
         decode(&self.events_path(cid), record.events)
+    }
+    /// Events from index `from` to the end, decoding only those events.
+    pub fn events_from(&self, cid: &str, from: usize) -> Result<Vec<format::Message>> {
+        let record = self.state.conversations.get(cid).context("Unknown conversation")?;
+        if from >= record.events {
+            return Ok(Vec::new());
+        }
+        let mut reader = BufReader::new(fs::File::open(self.events_path(cid))?);
+        let mut line = Vec::new();
+        for _ in 0..from {
+            line.clear();
+            ensure!(reader.read_until(b'\n', &mut line)? > 0, "Conversation history is incomplete");
+        }
+        let mut events = Vec::with_capacity(record.events - from);
+        while events.len() < record.events - from {
+            line.clear();
+            ensure!(reader.read_until(b'\n', &mut line)? > 0 && line.ends_with(b"\n"), "Conversation history is incomplete");
+            let event: Event = serde_json::from_slice(&line)?;
+            ensure!(event.seq == from + events.len(), "Conversation history is out of order");
+            events.push(event.message);
+        }
+        Ok(events)
     }
     /// Appends after the recorded end; bytes left by an interrupted append are discarded.
     pub fn append(&mut self, cid: &str, messages: &[format::Message]) -> Result<()> {

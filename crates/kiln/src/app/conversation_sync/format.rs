@@ -101,6 +101,59 @@ fn text_blocks(content: &Value, role: &str) -> Result<Vec<Message>> {
     Ok(messages)
 }
 
+/// Where a native history's last completed turn ends: the index of that row and, for
+/// Claude, the UUID of the message that completed it.
+pub(super) fn completion(tool: Tool, rows: &[Value]) -> Result<Option<(usize, Option<String>)>> {
+    match tool {
+        Tool::Claude => Ok(claude_chain(rows, None)?.and_then(|(_, row)| {
+            let row = row?;
+            let index = rows.iter().position(|r| std::ptr::eq(r, row))?;
+            Some((index, row["uuid"].as_str().map(str::to_owned)))
+        })),
+        Tool::Codex => Ok(rows
+            .iter()
+            .rposition(|r| {
+                r["type"] == "event_msg"
+                    && matches!(r["payload"]["type"].as_str(), Some("task_complete" | "turn_complete" | "turn_aborted"))
+            })
+            .map(|index| (index, None))),
+    }
+}
+
+/// Messages of rows appended after a completed turn, given the Claude message that ended it
+/// or the Codex session metadata; `None` when the rows cannot be read on their own.
+pub(super) fn parse_appended(
+    tool: Tool,
+    leaf: Option<&str>,
+    meta: Option<&Value>,
+    rows: &[Value],
+) -> Result<Option<(Vec<Message>, Option<(usize, Option<String>)>)>> {
+    match tool {
+        Tool::Claude => {
+            let Some(leaf) = leaf else { return Ok(None) };
+            let Some((messages, row)) = claude_chain(rows, Some(leaf))? else {
+                return Ok(None);
+            };
+            let end = row.and_then(|row| {
+                let index = rows.iter().position(|r| std::ptr::eq(r, row))?;
+                Some((index, row["uuid"].as_str().map(str::to_owned)))
+            });
+            Ok(Some((messages, end)))
+        }
+        Tool::Codex => {
+            let Some(meta) = meta else { return Ok(None) };
+            if rows.iter().any(|r| r["type"] == "event_msg" && r["payload"]["type"] == "thread_rolled_back") {
+                return Ok(None);
+            }
+            let mut all = Vec::with_capacity(rows.len() + 1);
+            all.push(meta.clone());
+            all.extend_from_slice(rows);
+            let messages = codex(&all)?;
+            Ok(Some((messages, completion(Tool::Codex, rows)?)))
+        }
+    }
+}
+
 pub fn parse(tool: Tool, rows: &[Value]) -> Result<Vec<Message>> {
     match tool {
         Tool::Claude => claude(rows),
@@ -119,6 +172,20 @@ pub(super) fn claude_interruption(row: &Value) -> Option<&str> {
 }
 
 fn claude(rows: &[Value]) -> Result<Vec<Message>> {
+    Ok(claude_chain(rows, None)?.map(|(messages, _)| messages).unwrap_or_default())
+}
+
+/// Messages of the active Claude chain up to its last completed turn, with the row that
+/// completed it. With `stop_at`, `rows` are appended after that message: the chain must
+/// continue from it without compaction or interruption records, otherwise `None`.
+fn claude_chain<'a>(rows: &'a [Value], stop_at: Option<&str>) -> Result<Option<(Vec<Message>, Option<&'a Value>)>> {
+    if stop_at.is_some()
+        && rows.iter().any(|r| {
+            r["subtype"] == "compact_boundary" || r["isCompactSummary"] == true || claude_interruption(r).is_some()
+        })
+    {
+        return Ok(None);
+    }
     let interruptions: HashMap<&str, &Value> = rows.iter().filter(|row| claude_interruption(row).is_some())
         .filter_map(|row| Some((row["promptId"].as_str()?, row))).collect();
     let by_id: HashMap<&str, &Value> = rows
@@ -135,7 +202,7 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
     let Some(mut current) = rows.iter().rev().find(|r| {
         matches!(r["type"].as_str(), Some("user" | "assistant")) && r["isSidechain"] != true
     }) else {
-        return Ok(vec![]);
+        return Ok(Some((vec![], None)));
     };
     let mut chain = Vec::new();
     let mut seen = HashSet::new();
@@ -195,6 +262,13 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
                     .and_then(|row| row["uuid"].as_str()).context("Interrupted Claude prompt is missing")?.into()
             } else { parent }
         };
+        if let Some(stop) = stop_at {
+            match parent {
+                Some(parent) if parent == stop => break,
+                Some(parent) if by_id.contains_key(parent) => {}
+                _ => return Ok(None),
+            }
+        }
         let Some(parent) = parent else {
             break;
         };
@@ -215,7 +289,7 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
                 Some("end_turn" | "stop_sequence")
             )) || r["promptId"].as_str().is_some_and(|id| interruptions.contains_key(id))
     }) else {
-        return Ok(vec![]);
+        return Ok(Some((vec![], None)));
     };
     let mut messages = Vec::new();
     let mut emitted_interruptions = HashSet::new();
@@ -244,7 +318,7 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
         {
             // Preserve the immutable prefix of older Kiln copies so upgrading the
             // renderer cannot look like a user continuation and echo it back.
-            let generated = rows
+            let generated = stop_at.is_none() && rows
                 .iter()
                 .position(|r| std::ptr::eq(r, *row))
                 .is_some_and(|index| {
@@ -268,7 +342,7 @@ fn claude(rows: &[Value]) -> Result<Vec<Message>> {
             messages.push(Message { role:"assistant".into(), text:format!("[Session event: interrupted]\n{}", claude_interruption(interruption).unwrap()), images:vec![] });
         }
     }
-    Ok(messages)
+    Ok(Some((messages, Some(chain[last]))))
 }
 
 fn codex(rows: &[Value]) -> Result<Vec<Message>> {

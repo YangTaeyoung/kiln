@@ -1,6 +1,7 @@
 //! Opt-in native continuations discovered within open workspace folders.
 mod codex_index;
 mod canonical;
+mod checkpoint;
 mod discovery;
 mod engine;
 mod format;
@@ -510,12 +511,19 @@ fn read_rows_titled(
     source: &Source,
     title: &mut String,
 ) -> Result<(Vec<serde_json::Value>, Vec<format::Message>)> {
+    read_rows_offsets_titled(source, title).map(|(rows, _, messages)| (rows, messages))
+}
+/// `read_rows_titled` with the byte offset at the end of each row.
+fn read_rows_offsets_titled(
+    source: &Source,
+    title: &mut String,
+) -> Result<(Vec<serde_json::Value>, Vec<u64>, Vec<format::Message>)> {
     let preferred = if title.is_empty() {
         titles::Cache::default().name(source)?.unwrap_or_default()
     } else {
         title.clone()
     };
-    let rows = reader::rows(source, title)?;
+    let (rows, offsets) = reader::rows_from(source, title, 0)?;
     let native_title = titles::from_rows(source, &rows, &preferred);
     if !native_title.is_empty() {
         *title = native_title;
@@ -550,7 +558,7 @@ fn read_rows_titled(
     if title.trim().is_empty() {
         *title = titles::fallback(&messages);
     }
-    Ok((rows, messages))
+    Ok((rows, offsets, messages))
 }
 #[cfg(test)]
 fn destination(

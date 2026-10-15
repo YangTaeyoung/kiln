@@ -35,14 +35,23 @@ pub(super) fn metadata(source: &Source) -> Result<fs::Metadata> {
     Ok(meta)
 }
 pub(super) fn open(root: &Path, path: &Path) -> Result<(Box<dyn Read>, fs::Metadata)> {
+    open_at(root, path, 0)
+}
+/// Opens a transcript positioned at byte `start` of an uncompressed file.
+pub(super) fn open_at(root: &Path, path: &Path, start: u64) -> Result<(Box<dyn Read>, fs::Metadata)> {
     safe_path(root, path)?;
-    let file = fs::File::open(path)?;
+    let mut file = fs::File::open(path)?;
     let meta = file.metadata()?;
     ensure!(
         meta.is_file() && meta.len() <= COPY_LIMIT,
         "Transcript exceeds the 1 GiB reading limit"
     );
-    let input = file.take(meta.len());
+    ensure!(
+        start == 0 || (!compressed(path) && start <= meta.len()),
+        "Transcript changed while reading; retrying"
+    );
+    std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(start))?;
+    let input = file.take(meta.len() - start);
     let reader: Box<dyn Read> = if compressed(path) {
         let mut decoder = zstd::stream::read::Decoder::new(input)?;
         decoder.window_log_max(27)?;

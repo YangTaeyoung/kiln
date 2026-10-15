@@ -180,6 +180,123 @@ pub(super) fn archive_native(
 
 
 
+/// Appends `tail` and `title` after a checkpoint without parsing the earlier history: the
+/// existing bytes are kept and the appended records must read back to exactly `tail`.
+/// Returns the next checkpoint, or `None` when only a full update can append safely.
+pub(super) fn append_since(
+    source: &Source,
+    checkpoint: &super::checkpoint::Checkpoint,
+    tail: &[format::Message],
+    title: &str,
+    timestamp: &str,
+) -> Result<Option<super::checkpoint::Checkpoint>> {
+    use super::checkpoint::{Checkpoint, window_of};
+    let physical = storage::physical(source);
+    if storage::compressed(&physical) {
+        return Ok(None);
+    }
+    let before = storage::metadata(source)?;
+    let old = storage::bytes(source, COPY_LIMIT)?;
+    ensure!(old.ends_with(b"\n"), "Transcript is being written; retrying");
+    let offset = checkpoint.offset as usize;
+    if old.len() < offset || window_of(&old, checkpoint.offset) != checkpoint.window {
+        return Ok(None);
+    }
+    let parse = |bytes: &[u8]| -> Option<Vec<serde_json::Value>> {
+        bytes
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).ok())
+            .collect()
+    };
+    let Some(trailing) = parse(&old[offset..]) else { return Ok(None) };
+    // Records after the checkpoint may only be metadata, never part of an unfinished turn.
+    let unfinished = trailing.iter().any(|r| match source.tool {
+        Tool::Claude => matches!(r["type"].as_str(), Some("user" | "assistant")),
+        Tool::Codex => r["type"] == "response_item" || r["payload"]["type"] == "user_message" || r["payload"]["type"] == "task_started",
+    });
+    if unfinished {
+        return Ok(None);
+    }
+    let last_ordinal = if source.tool == Tool::Codex {
+        let start = offset.saturating_sub(64 * 1024);
+        let window = &old[start..offset];
+        let window = if start == 0 { window } else { &window[window.iter().position(|b| *b == b'\n').map_or(window.len(), |i| i + 1)..] };
+        let found = parse(window)
+            .into_iter()
+            .flatten()
+            .chain(trailing.iter().cloned())
+            .filter_map(|r| r["ordinal"].as_u64())
+            .max();
+        let Some(found) = found else { return Ok(None) };
+        Some(found)
+    } else {
+        None
+    };
+    let existing = match &checkpoint.leaf {
+        Some(leaf) => vec![serde_json::json!({"type":"assistant","uuid":leaf,"isSidechain":false})],
+        None => Vec::new(),
+    };
+    let seed = format!("{}:{}", old.len(), checkpoint.window);
+    let suffix = format::render_suffix(
+        source.tool,
+        &source.id,
+        &source.cwd,
+        timestamp,
+        tail,
+        title,
+        &existing,
+        &seed,
+        last_ordinal,
+    )?;
+    let Some(rows) = parse(&suffix) else { anyhow::bail!("Appended conversation could not be read back") };
+    let Some((messages, end)) =
+        format::parse_appended(source.tool, checkpoint.leaf.as_deref(), checkpoint.meta.as_ref(), &rows)?
+    else {
+        anyhow::bail!("Appended conversation could not be read back");
+    };
+    ensure!(
+        messages == tail,
+        "Appended conversation did not retain every message and attachment"
+    );
+    let mut ends = Vec::with_capacity(rows.len());
+    let mut position = old.len() as u64;
+    for line in suffix.split_inclusive(|b| *b == b'\n') {
+        position += line.len() as u64;
+        if line != b"\n" {
+            ends.push(position);
+        }
+    }
+    let mut candidate = old;
+    candidate.extend_from_slice(&suffix);
+    ensure!(
+        candidate.len() as u64 <= COPY_LIMIT,
+        "Converted conversation exceeds the 1 GiB sync limit"
+    );
+    let next = match end {
+        Some((index, leaf)) => Checkpoint {
+            offset: ends[index],
+            window: window_of(&candidate, ends[index]),
+            leaf: leaf.or_else(|| checkpoint.leaf.clone()),
+            meta: checkpoint.meta.clone(),
+        },
+        None => checkpoint.clone(),
+    };
+    let mut tmp = tempfile::NamedTempFile::new_in(physical.parent().context("Missing transcript parent")?)?;
+    tmp.write_all(&candidate)?;
+    tmp.as_file().sync_all()?;
+    let now = storage::metadata(source)?;
+    ensure!(
+        storage::physical(source) == physical
+            && now.len() == before.len()
+            && now.modified()? == before.modified()?,
+        "Transcript changed before publication; retrying"
+    );
+    tmp.persist(&physical).map_err(|e| e.error)?;
+    fs::File::open(physical.parent().unwrap())?.sync_all()?;
+    Ok(Some(next))
+}
+
 /// Prepare a suffix with native IDs/parent links, preserving the complete original
 /// log (including provider-only records) byte for byte. Publication is atomic.
 pub(super) fn update(

@@ -140,6 +140,7 @@ fn migrate_group(
             origin: !chosen.entry.imported,
             removed: false,
             title: if parsed.is_some() { chosen.title.clone() } else { String::new() },
+            checkpoint: None,
         });
         extras.extend(
             candidates
