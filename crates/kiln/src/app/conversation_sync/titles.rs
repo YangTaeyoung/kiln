@@ -161,8 +161,7 @@ pub(super) fn from_rows(source: &Source, rows: &[Value], preferred: &str) -> Str
     String::new()
 }
 
-/// Writes the title to the Claude sidecar, which Claude Code shows when the end of the
-/// transcript holds no title record.
+/// Writes the title to the Claude title sidecar.
 pub(super) fn pin_claude(source: &Source, title: &str) -> Result<()> {
     if source.tool != Tool::Claude {
         return Ok(());

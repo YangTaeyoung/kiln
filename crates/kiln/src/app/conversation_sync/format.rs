@@ -171,6 +171,59 @@ pub(super) fn claude_interruption(row: &Value) -> Option<&str> {
     matches!(text, "[Request interrupted by user]" | "[Request interrupted by user for tool use]").then_some(text)
 }
 
+/// The canonical text Kiln recorded beside a native tool record it wrote, while the record
+/// is unchanged.
+fn tool_original(row: &Value) -> Result<Option<&str>> {
+    let metadata = &row["kiln_sync"];
+    if metadata["revision"] != 5 {
+        return Ok(None);
+    }
+    let content = serde_json::to_string(&row["message"]["content"])?;
+    Ok(metadata["original_text"]
+        .as_str()
+        .filter(|_| metadata["content_sha256"].as_str() == Some(super::digest(content.as_bytes()).as_str())))
+}
+
+/// Records the canonical text of a native tool record whose own text differs from it.
+fn annotate_tool(row: &mut Value, original: &str) -> Result<()> {
+    let content = &row["message"]["content"];
+    let own = text_blocks(content, "assistant")?
+        .into_iter()
+        .map(|m| m.text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if own != original {
+        let digest = super::digest(serde_json::to_string(content)?.as_bytes());
+        row["kiln_sync"] = json!({"revision": 5, "original_text": original, "content_sha256": digest});
+    }
+    Ok(())
+}
+
+/// Shell commands rendered as native tool records, by the index of their call message: a
+/// call and its result followed by another assistant message, outside a group of parallel
+/// calls.
+fn shell_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Shell> {
+    let mut pairs = HashMap::new();
+    let mut i = 0;
+    while i + 2 < messages.len() {
+        let (call, result) = (&messages[i], &messages[i + 1]);
+        let candidate = call.role == "assistant"
+            && result.role == "assistant"
+            && messages[i + 2].role == "assistant"
+            && call.images.is_empty()
+            && result.images.is_empty()
+            && !(i > 0 && messages[i - 1].text.starts_with("[Tool call: "))
+            && !messages[i + 2].text.starts_with("[Tool result: ");
+        if candidate && let Some(shell) = super::tools::shell(&call.text, &result.text) {
+            pairs.insert(i, shell);
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    pairs
+}
+
 fn claude(rows: &[Value]) -> Result<Vec<Message>> {
     Ok(claude_chain(rows, None)?.map(|(messages, _)| messages).unwrap_or_default())
 }
@@ -309,6 +362,10 @@ fn claude_chain<'a>(rows: &'a [Value], stop_at: Option<&str>) -> Result<Option<(
             Some("assistant") => "assistant",
             _ => continue,
         };
+        if let Some(original) = tool_original(row)? {
+            messages.push(Message { role: "assistant".into(), text: original.into(), images: vec![] });
+            continue;
+        }
         let content = super::portable::content(row, &row["message"]["content"]);
         // CLI commands and their local output are not user prompts to another provider.
         if role == "user"
@@ -608,9 +665,30 @@ fn render_messages(
     let mut rows = Vec::new();
     match tool {
         Tool::Claude => {
+            let pairs = shell_pairs(messages);
             let mut parent: Option<String> = None;
+            let mut skip = false;
             for (i, m) in messages.iter().enumerate() {
+                if std::mem::take(&mut skip) {
+                    continue;
+                }
                 let mid = super::stable_id(&format!("{id}:{i}"));
+                if let Some(shell) = pairs.get(&i).filter(|shell| shell.runs_in(cwd)) {
+                    let rid = super::stable_id(&format!("{id}:{}", i + 1));
+                    let tool_id = shell.claude_id(&format!("{id}:{i}:tool"));
+                    let (call, result, structured) = shell.claude(&tool_id);
+                    let mut row = json!({"type":"assistant","uuid":mid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
+                        "message":{"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":[call],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
+                    annotate_tool(&mut row, &m.text)?;
+                    rows.push(row);
+                    let mut row = json!({"type":"user","uuid":rid,"parentUuid":mid,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
+                        "message":{"role":"user","content":[result]},"toolUseResult":structured,"sourceToolAssistantUUID":mid});
+                    annotate_tool(&mut row, &messages[i + 1].text)?;
+                    rows.push(row);
+                    parent = Some(rid);
+                    skip = true;
+                    continue;
+                }
                 let shown = if m.role == "assistant" {
                     super::portable::display(&m.text)
                 } else {
@@ -636,8 +714,25 @@ fn render_messages(
             rows.push(json!({"timestamp":timestamp,"ordinal":0,"type":"session_meta","payload":{"id":id,"session_id":id,"timestamp":timestamp,"cwd":cwd,"originator":"kiln","cli_version":"0.162.1","source":"cli","model_provider":"openai","history_mode":"paginated"}}));
             let turn = super::stable_id(&format!("{id}:turn"));
             rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"task_started","turn_id":turn,"model_context_window":null,"collaboration_mode_kind":"default"}}));
+            let pairs = shell_pairs(messages);
             for (i, m) in messages.iter().enumerate() {
                 let mid = super::stable_id(&format!("{id}:{i}"));
+                // A shell call and its result: native items when Codex recorded them, and one
+                // command item in place of their two agent messages.
+                let pair = pairs
+                    .get(&i)
+                    .map(|shell| (shell, true))
+                    .or_else(|| i.checked_sub(1).and_then(|j| pairs.get(&j)).map(|shell| (shell, false)));
+                if let Some((shell, first)) = pair
+                    && let Some((call, output)) = shell.codex_items()
+                {
+                    rows.push(json!({"timestamp":timestamp,"type":"response_item","payload":if first { call } else { output }}));
+                    if !first {
+                        let exec = format!("exec-{}", super::stable_id(&format!("{id}:{i}:exec")));
+                        rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":shell.command_execution(&exec, cwd),"started_at_ms":0,"completed_at_ms":0}}));
+                    }
+                    continue;
+                }
                 let shown = if m.role == "assistant" {
                     super::portable::display(&m.text)
                 } else {
@@ -658,6 +753,13 @@ fn render_messages(
                 }
                 rows.push(json!({"timestamp":timestamp,"type":"response_item","payload":p,"metadata":{"client_authored":true}}));
                 super::portable::annotate(rows.last_mut().unwrap(), &m.text, &shown);
+                if let Some((shell, first)) = pair {
+                    if !first {
+                        let exec = format!("exec-{}", super::stable_id(&format!("{id}:{i}:exec")));
+                        rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":shell.command_execution(&exec, cwd),"started_at_ms":0,"completed_at_ms":0}}));
+                    }
+                    continue;
+                }
                 let item = if m.role == "user" {
                     {
                         let mut content = Vec::new();
