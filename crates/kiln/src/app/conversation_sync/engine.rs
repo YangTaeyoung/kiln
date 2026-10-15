@@ -15,7 +15,16 @@ pub(super) struct Sync<'a, M> {
     workspaces: HashMap<String, Option<PathBuf>>,
     /// Codex state database stamps by namespace, taken when the scan starts.
     databases: HashMap<PathBuf, u64>,
+    /// Projections written again by this scan for the current renderer.
+    refreshed: usize,
 }
+
+/// Revision of the renderer that writes projections.
+pub(super) const RENDER: u32 = 1;
+/// Projections written again for the current renderer in one scan.
+const REFRESH_LIMIT: usize = 4;
+/// A projection is written again for the current renderer after it was unchanged this long.
+const REFRESH_IDLE: Duration = Duration::from_secs(10 * 60);
 
 /// Native session ID of the projection of `cid` in `root`; each archived projection
 /// in that namespace advances the generation.
@@ -141,7 +150,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             .filter(|(tool, _)| *tool == Tool::Codex)
             .map(|(_, root)| (root.clone(), database_stamp(root)))
             .collect();
-        Self { config, scope, namespaces, gate, cache, status, metadata, notify, workspaces: HashMap::new(), databases }
+        Self { config, scope, namespaces, gate, cache, status, metadata, notify, workspaces: HashMap::new(), databases, refreshed: 0 }
     }
 
     fn workspace(&mut self, cwd: &str) -> Option<PathBuf> {
@@ -370,6 +379,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     title: title.clone(),
                     checkpoint,
                     database: None,
+                    rendered: 0,
                 });
                 hub.state.conversations.insert(cid.clone(), record);
                 hub.append(&cid, &messages)?;
@@ -427,6 +437,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             title: String::new(),
             checkpoint: None,
             database: None,
+            rendered: 0,
         });
         Ok(())
     }
@@ -826,7 +837,64 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             }
         }
         self.archive_pending(hub, cid, &mut events)?;
+        if waiting.is_none() {
+            self.refresh(hub, cid, &mut events)?;
+        }
         Ok(waiting)
+    }
+
+    /// Writes a Kiln-written projection made by an earlier renderer again when the canonical
+    /// history holds tool records: the earlier session leaves its resume list and the
+    /// namespace receives a new projection. Other projections are marked current.
+    fn refresh(&mut self, hub: &mut Hub, cid: &str, events: &mut Option<Vec<format::Message>>) -> Result<()> {
+        let record = &hub.state.conversations[cid];
+        let stale: Vec<usize> = record
+            .projections
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !p.origin && !p.removed && p.rendered < RENDER && p.synced >= record.events)
+            .map(|(i, _)| i)
+            .collect();
+        if stale.is_empty() || self.refreshed >= REFRESH_LIMIT {
+            return Ok(());
+        }
+        if events.is_none() {
+            *events = Some(hub.events(cid)?);
+        }
+        let all = events.as_ref().unwrap();
+        let tools = all
+            .iter()
+            .any(|m| m.text.starts_with("[Tool call: ") || m.text.starts_with("[Tool result: "));
+        let mut rewrite = None;
+        for i in stale {
+            let source = hub.state.conversations[cid].projections[i].source.clone();
+            if tools && rewrite.is_none() && discovery::imported(self.config, &source)?.is_some() {
+                rewrite = Some(i);
+            } else if !tools || discovery::imported(self.config, &source)?.is_none() {
+                hub.state.conversations.get_mut(cid).unwrap().projections[i].rendered = RENDER;
+            }
+        }
+        let Some(i) = rewrite else { return Ok(()) };
+        let (source, known) = {
+            let p = &hub.state.conversations[cid].projections[i];
+            (p.source.clone(), p.stamp)
+        };
+        let current = stamp(&source)?;
+        let idle = self.cache.quiet.is_zero() || !recently_modified(current.1, REFRESH_IDLE);
+        if known != Some(current) || !idle {
+            return Ok(());
+        }
+        match canonical::archive_native(self.config, &source, cid, &mut self.metadata) {
+            Ok(_) => {}
+            Err(error) if error.to_string().contains("retrying") => return Ok(()),
+            Err(error) => return Err(error),
+        }
+        let record = hub.state.conversations.get_mut(cid).unwrap();
+        record.projections.remove(i);
+        record.aliases.push(NativeRef::of(&source));
+        hub.save()?;
+        self.refreshed += 1;
+        self.create(hub, cid, source.tool, &source.root, all)
     }
 
     /// Appends the missing canonical events (`tail`) and title; returns why a busy projection
@@ -957,6 +1025,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             title,
             checkpoint: written,
             database: None,
+            rendered: RENDER,
         });
         Ok(())
     }

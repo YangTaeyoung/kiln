@@ -37,6 +37,9 @@ pub(super) struct Projection {
     /// Codex: state database stamp when the native name was last read.
     #[serde(default)]
     pub database: Option<u64>,
+    /// Revision of the renderer that wrote the projection; 0 for an original or an earlier one.
+    #[serde(default)]
+    pub rendered: u32,
 }
 
 /// An archived continuation that lost to the canonical history.

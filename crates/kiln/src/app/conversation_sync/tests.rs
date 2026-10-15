@@ -2879,7 +2879,7 @@ fn hub_identity_is_stable_and_aliases_resolve() {
     let mut record = hub::Record::new("T", "/w");
     record.projections.push(hub::Projection {
         source: Source { tool: Tool::Codex, root: PathBuf::from("/r"), path: PathBuf::from("/r/x.jsonl"), cwd: "/w".into(), id: "id-a".into() },
-        synced: 0, stamp: None, origin: true, removed: false, title: String::new(), checkpoint: None, database: None,
+        synced: 0, stamp: None, origin: true, removed: false, title: String::new(), checkpoint: None, database: None, rendered: 0,
     });
     record.aliases.push(alias.clone());
     store.state.conversations.insert(cid.clone(), record);
@@ -4243,4 +4243,47 @@ fn other_tools_are_codex_tool_call_cells() {
         assert_eq!(items.iter().filter(|i| i["type"] == "AgentMessage").count(), 1, "{call}: only the final answer is an agent message");
         assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history, "{call}");
     }
+}
+
+fn mark_rendered(f: &Fixture, path: &Path, rendered: u32) {
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    for p in store.state.conversations.values_mut().flat_map(|r| r.projections.iter_mut()) {
+        if p.source.path == path {
+            p.rendered = rendered;
+        }
+    }
+    store.save().unwrap();
+}
+
+#[test]
+fn projections_written_by_an_earlier_renderer_are_written_again() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let old = f.peer();
+    mark_rendered(&f, &old.path, 0);
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert!(!old.path.exists(), "the earlier projection leaves the resume list");
+    let new = f.peer();
+    assert_ne!(new.id, old.id);
+    assert_eq!(read_messages(&new).unwrap(), history);
+    assert!(rows(&fs::read(&new.path).unwrap()).iter().any(|r| r["message"]["content"][0]["type"] == "tool_use"));
+    assert!(f.source.path.exists(), "the original is never written again");
+    assert!(f.hub().conversations.values().next().unwrap().aliases.iter().any(|a| a.id == old.id));
+    assert_eq!(f.scan().published, 0);
+}
+
+#[test]
+fn projections_without_tool_records_are_kept_by_a_new_renderer() {
+    let f = Fixture::new(Tool::Codex);
+    assert!(f.scan().errors.is_empty());
+    let old = f.peer();
+    mark_rendered(&f, &old.path, 0);
+    assert!(f.scan().errors.is_empty());
+    assert!(old.path.exists());
+    assert_eq!(f.peer().id, old.id);
+    assert!(f.live().iter().filter(|p| !p.origin).all(|p| p.rendered > 0));
 }
