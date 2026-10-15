@@ -241,3 +241,46 @@ impl Hub {
         })
     }
 }
+
+/// How a native history relates to the canonical history it last received.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Outcome {
+    Unchanged,
+    /// The native history extends the canonical one to this many events.
+    Append(usize),
+    /// The native history lacks later canonical events and only needs them appended.
+    Behind,
+    /// The native side is newer: canonical events after `base` become a branch.
+    NativeWins { base: usize },
+    /// The canonical side is newer or equal: native events after `base` become a branch.
+    CanonicalWins { base: usize },
+}
+
+/// Compares a projection's native history with the canonical history; `synced` is the
+/// number of canonical events the projection last held and `native_newer` whether its
+/// file changed after the canonical history did.
+pub(super) fn reconcile(
+    canonical: &[format::Message],
+    synced: usize,
+    native: &[format::Message],
+    native_newer: bool,
+) -> Outcome {
+    let base = canonical.iter().zip(native).take_while(|(a, b)| a == b).count();
+    if base == native.len() {
+        return if native.len() == canonical.len() {
+            Outcome::Unchanged
+        } else if native_newer && native.len() < synced {
+            Outcome::NativeWins { base }
+        } else {
+            Outcome::Behind
+        };
+    }
+    if base == canonical.len() {
+        return Outcome::Append(native.len());
+    }
+    if native_newer {
+        Outcome::NativeWins { base }
+    } else {
+        Outcome::CanonicalWins { base }
+    }
+}

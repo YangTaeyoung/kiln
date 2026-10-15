@@ -3227,3 +3227,69 @@ fn hub_identity_is_stable_and_aliases_resolve() {
     assert_eq!(store.find(&alias), Some(cid.as_str()));
     assert_eq!(store.find(&hub::NativeRef { id: "missing".into(), ..a }), None);
 }
+
+fn turns(names: &[&str]) -> Vec<Message> {
+    names.iter().enumerate().map(|(i, n)| text(if i % 2 == 0 { "user" } else { "assistant" }, n)).collect()
+}
+
+#[test]
+fn reconcile_classifies_unchanged_append_behind_and_divergence() {
+    use hub::{Outcome, reconcile};
+    let e = turns(&["a", "b", "c", "d"]);
+    assert_eq!(reconcile(&e, 4, &e, true), Outcome::Unchanged);
+    assert_eq!(reconcile(&e[..2], 2, &e, false), Outcome::Append(4));
+    assert_eq!(reconcile(&e, 2, &e[..2], true), Outcome::Behind, "a projection missing later events only needs an append");
+    let rewound = turns(&["a", "b", "x"]);
+    assert_eq!(reconcile(&e, 4, &rewound, true), Outcome::NativeWins { base: 2 });
+    let both = turns(&["a", "b", "x", "y"]);
+    assert_eq!(reconcile(&e, 2, &both, false), Outcome::CanonicalWins { base: 2 }, "ties keep the canonical history");
+    assert_eq!(reconcile(&e, 4, &e[..2], true), Outcome::NativeWins { base: 2 }, "a newer native rollback removes events");
+    assert_eq!(reconcile(&e, 4, &e[..2], false), Outcome::Behind);
+}
+
+#[test]
+fn reconciled_history_is_always_the_winning_side() {
+    use hub::{Outcome, reconcile};
+    let mut seed = 0x51ed_270b_9a3f_c6e1u64;
+    let mut next = |n: u64| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed % n
+    };
+    for _ in 0..500 {
+        let shared = next(5) as usize;
+        let make = |prefix: &str, n: usize| -> Vec<Message> { (0..n).map(|i| text(if i % 2 == 0 { "user" } else { "assistant" }, &format!("{prefix}{i}"))).collect() };
+        let base = make("s", shared);
+        let mut e = base.clone();
+        e.extend(make("c", next(4) as usize).into_iter().skip(0));
+        let mut m = base.clone();
+        let native_tail = make(if next(2) == 0 { "c" } else { "n" }, next(4) as usize);
+        m.extend(native_tail);
+        let synced = next(e.len() as u64 + 1) as usize;
+        let newer = next(2) == 0;
+        let outcome = reconcile(&e, synced, &m, newer);
+        let (canonical, branch): (Vec<Message>, Vec<Message>) = match outcome {
+            Outcome::Unchanged | Outcome::Behind => (e.clone(), vec![]),
+            Outcome::Append(n) => {
+                assert_eq!(n, m.len());
+                (m.clone(), vec![])
+            }
+            Outcome::NativeWins { base } => (m.clone(), e[base..].to_vec()),
+            Outcome::CanonicalWins { base } => (e.clone(), m[base..].to_vec()),
+        };
+        let p = e.iter().zip(&m).take_while(|(a, b)| a == b).count();
+        if !(m.starts_with(&e) || e.starts_with(&m)) {
+            let winner = if newer { &m } else { &e };
+            assert_eq!(&canonical, winner, "{outcome:?}");
+            let loser = if newer { &e } else { &m };
+            assert_eq!(branch, loser[p..].to_vec());
+        } else if m.starts_with(&e) {
+            assert_eq!(canonical, m, "{outcome:?}");
+        } else if newer && synced > m.len() {
+            assert_eq!((canonical, branch), (m.clone(), e[m.len()..].to_vec()), "a newer rollback wins");
+        } else {
+            assert_eq!(canonical, e, "{outcome:?}");
+        }
+    }
+}
