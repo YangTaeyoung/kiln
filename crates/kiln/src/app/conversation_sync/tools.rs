@@ -205,6 +205,87 @@ pub(super) fn same(a: &str, b: &str) -> bool {
     matches!((result_output(a), result_output(b)), (Some(x), Some(y)) if x == y)
 }
 
+/// Claude Code tools other than Bash that every Claude Code session defines.
+const CLAUDE_TOOLS: [&str; 10] = ["Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Agent", "NotebookEdit"];
+
+/// A tool call and its result.
+pub(super) enum Pair {
+    Shell(Shell),
+    /// A Claude Code tool other than Bash, as Claude Code recorded it.
+    Claude { id: String, name: String, input: Value, content: String },
+    /// Any other tool, by name, input and output.
+    Other { id: String, name: String, input: Value, output: String, error: bool },
+}
+
+/// The tool call recorded by `call` and its result recorded by `result`.
+pub(super) fn pair(call: &str, result: &str) -> Option<Pair> {
+    if let Some(shell) = shell(call, result) {
+        return Some(Pair::Shell(shell));
+    }
+    let (name, body) = record(call, "[Tool call: ")?;
+    let (id, output) = record(result, "[Tool result: ")?;
+    let refused = CLAUDE_REFUSALS.iter().any(|refusal| output.starts_with(refusal));
+    let input = serde_json::from_str::<Value>(body).ok().filter(Value::is_object);
+    Some(match input {
+        Some(input) if id.starts_with("toolu_") && !refused && CLAUDE_TOOLS.contains(&name) => {
+            Pair::Claude { id: id.into(), name: name.into(), input, content: output.into() }
+        }
+        input => Pair::Other {
+            id: id.into(),
+            name: name.into(),
+            input: input.unwrap_or_else(|| json!({"input": body})),
+            output: super::portable::result_output(output),
+            error: refused,
+        },
+    })
+}
+
+/// A Codex tool call history item.
+fn mcp_cell(id: &str, server: &str, tool: &str, arguments: &Value, output: &str, error: bool) -> Value {
+    json!({"type": "McpToolCall", "id": id, "server": server, "tool": tool, "arguments": arguments,
+        "result": {"content": [{"type": "text", "text": output}], "isError": error},
+        "status": if error { "failed" } else { "completed" }, "duration": {"secs": 0, "nanos": 0}, "readOnlyHint": false})
+}
+
+impl Pair {
+    /// Claude Code tool use and tool result blocks, and the structured result beside them,
+    /// when Claude Code shows this call natively in `cwd`.
+    pub fn claude(&self, seed: &str, cwd: &str) -> Option<(Value, Value, Option<Value>)> {
+        match self {
+            Pair::Shell(shell) if shell.runs_in(cwd) => {
+                let (call, result, structured) = shell.claude(&shell.claude_id(seed));
+                Some((call, result, Some(structured)))
+            }
+            Pair::Claude { id, name, input, content } => Some((
+                json!({"type": "tool_use", "id": id, "name": name, "input": input}),
+                json!({"tool_use_id": id, "type": "tool_result", "content": content, "is_error": false}),
+                None,
+            )),
+            _ => None,
+        }
+    }
+    /// Codex call and output response items, for a command Codex recorded.
+    pub fn codex_items(&self) -> Option<(Value, Value)> {
+        match self {
+            Pair::Shell(shell) => shell.codex_items(),
+            _ => None,
+        }
+    }
+    /// The Codex history item that shows the call and its result.
+    pub fn codex_cell(&self, exec: &str, cwd: &str) -> Value {
+        match self {
+            Pair::Shell(shell) => shell.command_execution(exec, cwd),
+            Pair::Claude { id, name, input, content } => {
+                mcp_cell(id, "claude_code", name, input, &super::portable::result_output(content), false)
+            }
+            Pair::Other { id, name, input, output, error } => {
+                let server = if id.starts_with("toolu_") { "claude_code" } else { "codex" };
+                mcp_cell(id, server, name, input, output, *error)
+            }
+        }
+    }
+}
+
 impl Shell {
     /// Whether the command ran in `cwd`.
     pub fn runs_in(&self, cwd: &str) -> bool {

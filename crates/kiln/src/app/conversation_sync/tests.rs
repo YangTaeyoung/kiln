@@ -4201,3 +4201,46 @@ fn tool_records_read_like_the_cli_tool_display() {
     assert_eq!(display("[Tool result: toolu_x]\n"), "```text\n⎿  (No output)\n```");
     assert_eq!(display("[Tool result: toolu_x]\nhas ``` fence"), "````text\n⎿  has ``` fence\n````");
 }
+
+const READ_CALL: &str = "[Tool call: Read]\n{\"file_path\":\"/w/notes.md\"}";
+const READ_RESULT: &str = "[Tool result: toolu_01ReadResultId000000000]\n     1\t# Notes\n     2\tfirst line\n";
+const JS_CALL: &str = "[Tool call: js]\n{\"code\":\"await tab.click();\",\"title\":\"Open the heading\"}";
+const JS_RESULT: &str = "[Tool result: call_JsResultId0000000000000000000]\nWall time: 2.9 seconds\nOutput: heading clicked";
+
+#[test]
+fn claude_built_in_tools_are_native_in_another_claude_namespace() {
+    let history = shell_turn(READ_CALL, READ_RESULT);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("builtin"), "/w", "2026-10-15T00:00:00Z", &history, "Read").unwrap());
+    let call = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_use").expect("a Read tool use");
+    assert_eq!(call["message"]["content"][0]["name"], "Read");
+    assert_eq!(call["message"]["content"][0]["input"], json!({"file_path": "/w/notes.md"}));
+    assert_eq!(call["message"]["content"][0]["id"], "toolu_01ReadResultId000000000");
+    let result = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_result").unwrap();
+    assert_eq!(result["message"]["content"][0]["content"], "     1\t# Notes\n     2\tfirst line\n");
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    for (call, result) in [(JS_CALL, JS_RESULT), ("[Tool call: mcp__x__y]\n{\"a\":1}", "[Tool result: toolu_01McpResultId0000000000]\nok")] {
+        let history = shell_turn(call, result);
+        let data = rows(&format::render_titled(Tool::Claude, &stable_id("builtin"), "/w", "2026-10-15T00:00:00Z", &history, "Other").unwrap());
+        assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use"), "{call}: a tool Claude Code does not define stays text");
+        assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    }
+}
+
+#[test]
+fn other_tools_are_codex_tool_call_cells() {
+    for (call, result, server, tool, arguments, output) in [
+        (READ_CALL, READ_RESULT, "claude_code", "Read", json!({"file_path": "/w/notes.md"}), "     1\t# Notes\n     2\tfirst line\n"),
+        (JS_CALL, JS_RESULT, "codex", "js", json!({"code": "await tab.click();", "title": "Open the heading"}), "Wall time: 2.9 seconds\nOutput: heading clicked"),
+        ("[Tool call: apply_patch]\n*** Begin Patch\n*** End Patch", "[Tool result: call_PatchResultId00000000000000000]\nDone", "codex", "apply_patch", json!({"input": "*** Begin Patch\n*** End Patch"}), "Done"),
+    ] {
+        let history = shell_turn(call, result);
+        let data = rows(&format::render_titled(Tool::Codex, &stable_id("cells"), "/w", "2026-10-15T00:00:00Z", &history, "Cells").unwrap());
+        let items: Vec<&serde_json::Value> = data.iter().filter(|r| r["payload"]["type"] == "item_completed").map(|r| &r["payload"]["item"]).collect();
+        let cell = items.iter().find(|i| i["type"] == "McpToolCall").unwrap_or_else(|| panic!("{call}: a tool call cell"));
+        assert_eq!((cell["server"].as_str(), cell["tool"].as_str()), (Some(server), Some(tool)));
+        assert_eq!(cell["arguments"], arguments);
+        assert_eq!(cell["result"]["content"][0]["text"], output);
+        assert_eq!(items.iter().filter(|i| i["type"] == "AgentMessage").count(), 1, "{call}: only the final answer is an agent message");
+        assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history, "{call}");
+    }
+}

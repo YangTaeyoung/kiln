@@ -187,7 +187,7 @@ fn call_display(name: &str, body: &str) -> String {
 
 /// The output of a tool result: a Codex code-mode result shows the output (and a non-zero
 /// exit code) of each command it ran.
-fn result_output(body: &str) -> String {
+pub(super) fn result_output(body: &str) -> String {
     if body.starts_with("Script ")
         && let Some(split) = body.find("Output:\n").map(|i| i + "Output:\n".len())
         && let Ok(values) = serde_json::Deserializer::from_str(&body[split..])
