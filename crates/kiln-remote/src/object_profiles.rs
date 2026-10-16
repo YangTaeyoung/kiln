@@ -70,13 +70,14 @@ impl ProfileFiles {
     pub fn current(provider: ObjectProvider) -> Self {
         let home = kiln_common::paths::home().unwrap_or_default();
         let cwd = std::env::current_dir().unwrap_or_default();
+        let appdata = std::env::var_os("APPDATA").filter(|v| !v.is_empty()).map(PathBuf::from);
         let config = match provider {
             ObjectProvider::Oracle => oracle_config_path(None),
-            ObjectProvider::Google => absolute(
-                &std::env::var_os("CLOUDSDK_CONFIG")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| home.join(".config/gcloud")),
+            ObjectProvider::Google => gcloud_root(
+                &home,
                 &cwd,
+                std::env::var_os("CLOUDSDK_CONFIG").as_deref().map(Path::new),
+                appdata.as_deref(),
             ),
             ObjectProvider::Cloudflare => wrangler_root(
                 &home,
@@ -84,6 +85,7 @@ impl ProfileFiles {
                 std::env::var_os("XDG_CONFIG_HOME")
                     .as_deref()
                     .map(Path::new),
+                appdata.as_deref(),
             ),
         };
         let credentials = (provider == ObjectProvider::Google).then(|| {
@@ -101,7 +103,26 @@ impl ProfileFiles {
         }
     }
 }
-fn wrangler_root(home: &Path, cwd: &Path, xdg: Option<&Path>) -> PathBuf {
+/// The roaming application data folder on Windows (`%APPDATA%`).
+#[cfg(windows)]
+fn roaming(home: &Path, appdata: Option<&Path>) -> PathBuf {
+    appdata.map(Path::to_owned).unwrap_or_else(|| home.join("AppData").join("Roaming"))
+}
+/// gcloud's configuration folder: `CLOUDSDK_CONFIG`, else `%APPDATA%\gcloud` on Windows and
+/// `~/.config/gcloud` elsewhere.
+fn gcloud_root(home: &Path, cwd: &Path, configured: Option<&Path>, appdata: Option<&Path>) -> PathBuf {
+    #[cfg(windows)]
+    let default = roaming(home, appdata).join("gcloud");
+    #[cfg(not(windows))]
+    let default = {
+        let _ = appdata;
+        home.join(".config").join("gcloud")
+    };
+    absolute(&configured.map(Path::to_owned).unwrap_or(default), cwd)
+}
+/// Wrangler's global folder: a legacy `~/.wrangler`, else `.wrangler` under
+/// `XDG_CONFIG_HOME` or the platform default (`%APPDATA%\xdg.config` on Windows).
+fn wrangler_root(home: &Path, cwd: &Path, xdg: Option<&Path>, appdata: Option<&Path>) -> PathBuf {
     let legacy = absolute(&home.join(".wrangler"), cwd);
     if legacy.is_dir() {
         return legacy;
@@ -112,10 +133,16 @@ fn wrangler_root(home: &Path, cwd: &Path, xdg: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| {
             #[cfg(target_os = "macos")]
             {
+                let _ = appdata;
                 home.join("Library/Preferences")
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(windows)]
             {
+                roaming(home, appdata).join("xdg.config")
+            }
+            #[cfg(not(any(target_os = "macos", windows)))]
+            {
+                let _ = appdata;
                 home.join(".config")
             }
         });
@@ -341,25 +368,42 @@ mod tests {
         );
     }
     #[test]
+    fn default_cli_folders_follow_each_cli_on_this_system() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let cwd = d.path().join("cwd");
+        let appdata = d.path().join("roaming");
+        let (gcloud, wrangler) = if cfg!(windows) {
+            (appdata.join("gcloud"), appdata.join("xdg.config").join(".wrangler"))
+        } else if cfg!(target_os = "macos") {
+            (home.join(".config").join("gcloud"), home.join("Library").join("Preferences").join(".wrangler"))
+        } else {
+            (home.join(".config").join("gcloud"), home.join(".config").join(".wrangler"))
+        };
+        assert_eq!(gcloud_root(&home, &cwd, None, Some(&appdata)), gcloud);
+        assert_eq!(wrangler_root(&home, &cwd, None, Some(&appdata)), wrangler);
+        assert_eq!(gcloud_root(&home, &cwd, Some(Path::new("relative")), Some(&appdata)), cwd.join("relative"));
+    }
+    #[test]
     fn wrangler_relative_xdg_and_legacy_sources_preserve_identity() {
         let d = tempfile::tempdir().unwrap();
         let home = d.path().join("home");
         let cwd = d.path().join("cwd");
         assert_eq!(
-            wrangler_root(&home, &cwd, Some(Path::new("relative"))),
+            wrangler_root(&home, &cwd, Some(Path::new("relative")), None),
             cwd.join("relative/.wrangler")
         );
         assert_eq!(
-            wrangler_root(&home, &cwd, Some(Path::new("~/literal"))),
+            wrangler_root(&home, &cwd, Some(Path::new("~/literal")), None),
             cwd.join("~/literal/.wrangler")
         );
         assert_eq!(
-            wrangler_root(&home, &cwd, Some(Path::new(""))),
-            wrangler_root(&home, &cwd, None)
+            wrangler_root(&home, &cwd, Some(Path::new("")), None),
+            wrangler_root(&home, &cwd, None, None)
         );
         std::fs::create_dir_all(home.join(".wrangler")).unwrap();
         assert_eq!(
-            wrangler_root(&home, &cwd, Some(Path::new("relative"))),
+            wrangler_root(&home, &cwd, Some(Path::new("relative")), None),
             home.join(".wrangler")
         );
     }

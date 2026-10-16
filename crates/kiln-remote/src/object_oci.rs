@@ -179,20 +179,19 @@ fn run_with(o: Oci<'_>, op: &Operation) -> Result<RemoteResult> {
         }
         Operation::Download { path, local } => {
             let p = super::object_backend::require_file(path)?;
-            let temp = destination_temp(local)?;
+            let temp = destination_path(local)?;
             o.call(
                 "get",
                 &[
                     format!("--name={p}"),
-                    format!("--file={}", temp.path().to_string_lossy()),
+                    format!("--file={}", temp.to_string_lossy()),
                     "--no-multipart".into(),
                 ],
             )?;
             c.check()?;
-            let size = temp.as_file().metadata()?.len();
+            let size = std::fs::metadata(&temp)?.len();
             c.total(size);
-            temp.as_file().sync_all()?;
-            temp.persist(local).map_err(|e| e.error)?;
+            persist_written(temp, local)?;
             c.advance(size);
             Ok(RemoteResult::Done)
         }

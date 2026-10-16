@@ -19,6 +19,21 @@ pub(crate) fn find(name: &str) -> Option<PathBuf> {
 struct OwnedChild {
     child: Child,
     finished: bool,
+    /// The CLI and the processes it starts, such as the interpreter behind a `.cmd` shim.
+    #[cfg(windows)]
+    tree: Option<kiln_common::process::Job>,
+}
+impl OwnedChild {
+    fn new(child: Child) -> Self {
+        #[cfg(windows)]
+        let tree = kiln_common::process::Job::for_process(child.id(), false);
+        OwnedChild {
+            child,
+            finished: false,
+            #[cfg(windows)]
+            tree,
+        }
+    }
 }
 impl Drop for OwnedChild {
     fn drop(&mut self) {
@@ -28,6 +43,10 @@ impl Drop for OwnedChild {
             #[cfg(unix)]
             unsafe {
                 libc::kill(-(self.child.id() as i32), libc::SIGKILL);
+            }
+            #[cfg(windows)]
+            if let Some(tree) = &self.tree {
+                tree.terminate();
             }
             let _ = self.child.kill();
             let _ = self.child.wait();
@@ -162,12 +181,11 @@ pub(crate) fn execute_at(
 ) -> Result<Vec<u8>> {
     control.check()?;
     let cwd = tempfile::tempdir().context("Cannot prepare provider command")?;
-    let mut child = OwnedChild {
-        child: command(provider, executable, args, env, cwd.path())
+    let mut child = OwnedChild::new(
+        command(provider, executable, args, env, cwd.path())
             .spawn()
             .with_context(|| format!("Cannot start {}", provider.cli()))?,
-        finished: false,
-    };
+    );
     let mut stdout = child
         .child
         .stdout
@@ -369,6 +387,42 @@ mod tests {
                 "Owned CLI descendant survived cancellation"
             );
             std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    fn alive(pid: u32) -> bool {
+        let out = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
+    }
+
+    #[test]
+    fn cancelled_listing_stops_the_cli_tree() {
+        let d = tempfile::tempdir().unwrap();
+        let cli = d.path().join("cli.cmd");
+        std::fs::write(&cli, "@echo off\r\npowershell -NoProfile -Command \"Set-Content -NoNewline -LiteralPath '%~1' $PID; Start-Sleep 30\"\r\n").unwrap();
+        let pid_file = d.path().join("pid");
+        let control = std::sync::Arc::new(Control::default());
+        let (cancel, written) = (control.clone(), pid_file.clone());
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            while !written.exists() && start.elapsed() < Duration::from_secs(20) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+            cancel.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let err = execute_at(ObjectProvider::Google, &cli, &[pid_file.to_string_lossy().into_owned()], &[], &control, Duration::from_secs(60), 1024).unwrap_err();
+        assert!(err.to_string().contains("cancelled"), "{err:#}");
+        let pid: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+        let start = Instant::now();
+        while alive(pid) {
+            assert!(start.elapsed() < Duration::from_secs(5), "the CLI's child survived cancellation");
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 }

@@ -165,17 +165,16 @@ pub fn run(profile: &ConnectionProfile, op: &Operation, c: &Control) -> Result<R
                 bail!("Select a file to download")
             };
             c.total(entry.size);
-            let temp = destination_temp(local)?;
-            let tmp_path = temp.path().to_str().context("Local path is not UTF-8")?;
+            let temp = destination_path(local)?;
+            let tmp_path = temp.to_str().context("Local path is not UTF-8")?;
             batch(
                 profile,
                 &format!("@get {} {}\n", glob_quoted(path)?, quoted(tmp_path)?),
                 c,
-                Some(temp.path()),
+                Some(&temp),
             )?;
             c.check()?;
-            temp.as_file().sync_all()?;
-            temp.persist(local).map_err(|e| e.error)?;
+            persist_written(temp, local)?;
             Ok(RemoteResult::Done)
         }
         Operation::Upload {
@@ -312,19 +311,21 @@ mod tests {
 }
 
 fn parse_listing(line: &str) -> Result<suppaftp::list::File> {
-    // OpenSSH uses '?' for the unsupported hard-link count. Normalize only
-    // that field, then require an actual POSIX metadata parse (no MLSD fallback).
+    // OpenSSH uses '?' for the unsupported hard-link count, and OpenSSH for Windows
+    // masks group and other permissions with '*'. Normalize only those fields, then
+    // require an actual POSIX metadata parse (no MLSD fallback).
     let split = line
         .find(char::is_whitespace)
         .context("Invalid SFTP listing")?;
+    let mode = line[..split].replace('*', "-");
     let rest = line[split..].trim_start();
     let end = rest
         .find(char::is_whitespace)
         .context("Invalid SFTP listing")?;
     let normalized = if &rest[..end] == "?" {
-        format!("{} 1 {}", &line[..split], rest[end..].trim_start())
+        format!("{mode} 1 {}", rest[end..].trim_start())
     } else {
-        line.to_owned()
+        format!("{mode}{}", &line[split..])
     };
     suppaftp::list::ListParser::parse_posix(&normalized)
         .context("SFTP server returned an unsupported directory listing")
@@ -338,6 +339,13 @@ mod metadata_tests {
         assert_eq!(f.size(), 26);
         assert!(f.modified() > std::time::UNIX_EPOCH);
         assert_eq!(leaf(f.name()), "한글 [literal] with spaces.txt");
+    }
+    #[test]
+    fn windows_openssh_masked_permissions_still_parse() {
+        let dir = parse_listing("drwx******    ? alcove   alcove       4096 Oct 16 08:06 /home/alcove/docs/.").unwrap();
+        assert!(dir.is_directory());
+        let file = parse_listing("-rw-******    ? alcove   alcove         18 Oct 16 08:05 /home/alcove/docs/readme.txt").unwrap();
+        assert_eq!((file.size(), leaf(file.name()).as_str()), (18, "readme.txt"));
     }
 }
 
