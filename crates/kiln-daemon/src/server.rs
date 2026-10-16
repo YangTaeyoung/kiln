@@ -337,11 +337,12 @@ impl Daemon {
             };
             if let Some(events) = sync_events {
                 sess.generation.fetch_add(1, Ordering::SeqCst);
-                self.handle_events(&sess, events, &mut osc_events);
+                self.handle_events(&sess, events, &mut osc_events, !reader.replaying());
                 self.wake_attached(sess.id);
             }
             match reader.read_timeout(&mut buf, timeout_ms) {
                 Ok(ReadResult::Data(n)) => {
+                    let answer = !reader.replaying();
                     osc.feed(&buf[..n], &mut osc_events);
                     let filtered=private_osc.feed(&buf[..n]);
                     let data=filtered.as_slice();
@@ -353,11 +354,11 @@ impl Daemon {
                     for seg in img_scan.feed(data) {
                         match seg {
                             Segment::Bytes(a, b) => events.extend(sess.emu.lock().advance(&data[a..b])),
-                            Segment::Image(cmd) => self.handle_image(&sess, cmd),
+                            Segment::Image(cmd) => self.handle_image(&sess, cmd, answer),
                         }
                     }
                     sess.generation.fetch_add(1, Ordering::SeqCst);
-                    self.handle_events(&sess, events, &mut osc_events);
+                    self.handle_events(&sess, events, &mut osc_events, answer);
                     self.wake_attached(sess.id);
                 }
                 Ok(ReadResult::Timeout) => continue,
@@ -396,7 +397,7 @@ impl Daemon {
         let final_events = sess.emu.lock().finish_sync();
         if let Some(events) = final_events {
             sess.generation.fetch_add(1, Ordering::SeqCst);
-            self.handle_events(&sess, events, &mut osc_events);
+            self.handle_events(&sess, events, &mut osc_events, true);
             self.wake_attached(sess.id);
         }
         let mut code = None;
@@ -500,7 +501,8 @@ impl Daemon {
         crate::images::Geometry { cell_w: self.cell_w.load(Ordering::Relaxed), cell_h: self.cell_h.load(Ordering::Relaxed), cols, rows }
     }
 
-    fn handle_image(&self, sess: &Session, cmd: crate::images::ImageCmd) {
+    /// `answer` is false for replayed history, whose queries were already answered.
+    fn handle_image(&self, sess: &Session, cmd: crate::images::ImageCmd, answer: bool) {
         use crate::images::Action;
         let g = self.geometry(sess);
         let action = sess.images.lock().state.handle(cmd, &g);
@@ -513,11 +515,11 @@ impl Daemon {
             Action::None => {}
             Action::Show(d) => show(d),
             Action::Reply(r) => {
-                let _ = sess.input.respond(r);
+                if answer { let _ = sess.input.respond(r); }
             }
             Action::ShowAndReply(d, r) => {
                 show(d);
-                let _ = sess.input.respond(r);
+                if answer { let _ = sess.input.respond(r); }
             }
             Action::DeleteAll => {
                 let mut im = sess.images.lock();
@@ -527,12 +529,13 @@ impl Daemon {
         }
     }
 
-    fn handle_events(&self, sess: &Session, events: Vec<Event>, osc: &mut Vec<OscEvent>) {
+    /// `answer` is false for replayed history, whose queries were already answered.
+    fn handle_events(&self, sess: &Session, events: Vec<Event>, osc: &mut Vec<OscEvent>, answer: bool) {
         let mut updated = false;
         for e in events {
             match e {
                 Event::PtyWrite(s) => {
-                    let _ = sess.input.respond(s.into_bytes());
+                    if answer { let _ = sess.input.respond(s.into_bytes()); }
                 }
                 Event::Title(t) => {
                     let mut info = sess.info.lock();
@@ -558,6 +561,8 @@ impl Daemon {
                 Event::ClipboardStore(_, text) => {
                     self.broadcast(ServerMsg::Clipboard { session: sess.id, text });
                 }
+                Event::TextAreaSizeRequest(_) if !answer => {}
+                Event::ColorRequest(..) if !answer => {}
                 Event::TextAreaSizeRequest(f) => {
                     let (cols, rows) = sess.emu.lock().size();
                     let (cw, ch) = (self.cell_w.load(Ordering::Relaxed) as u16, self.cell_h.load(Ordering::Relaxed) as u16);
@@ -930,7 +935,7 @@ impl Daemon {
             let events=s.emu.try_lock_for(Duration::from_millis(100)).map(|mut e|e.finish_sync().unwrap_or_default());
             let responsive=Instant::now().saturating_duration_since(s.recovery.lock().reader_seen)<=Duration::from_secs(5);
             if let Some(events)=events.filter(|_|responsive) {
-                d.handle_events(&s,events,&mut Vec::new());
+                d.handle_events(&s,events,&mut Vec::new(),true);
                 if d.redraw_terminal(&s).is_ok() {
                     d.refresh_screen(&s);
                     s.recovery.lock().alive(Instant::now());

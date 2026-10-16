@@ -272,6 +272,8 @@ pub struct HostPty {
     pub host_pid: u32,
     exit: Arc<Mutex<Option<i32>>>,
     fg: Arc<AtomicU32>,
+    /// The host sends its whole output history first on this attachment.
+    replay: bool,
 }
 
 impl HostPty {
@@ -339,6 +341,7 @@ impl HostPty {
             host_pid,
             exit: Arc::new(Mutex::new(exited)),
             fg: Arc::new(AtomicU32::new(0)),
+            replay,
         })
     }
 
@@ -350,7 +353,7 @@ impl HostPty {
             input_ready: Arc::new(AtomicBool::new(false)), input_closed: Arc::new(AtomicBool::new(true)),
             framing_valid: Arc::new(AtomicBool::new(false)),
             child_pid, host_pid: 0, exit: Arc::new(Mutex::new(Some(code))),
-            fg: Arc::new(AtomicU32::new(0)) }
+            fg: Arc::new(AtomicU32::new(0)), replay: false }
     }
 
     fn send(&self, m: &ToHost) -> io::Result<()> {
@@ -389,7 +392,7 @@ impl HostPty {
                 if tx.send(message).is_err() { break; }
             }
         })?;
-        Ok(HostReader { messages, decoder: Some(decoder), shutdown: self.shutdown.lock().clone(), exit: self.exit.clone(), fg: self.fg.clone(), input_ready: self.input_ready.clone(), input_closed: self.input_closed.clone(), framing_valid: self.framing_valid.clone(), pending: Vec::new(), pos: 0 })
+        Ok(HostReader { messages, decoder: Some(decoder), shutdown: self.shutdown.lock().clone(), exit: self.exit.clone(), fg: self.fg.clone(), input_ready: self.input_ready.clone(), input_closed: self.input_closed.clone(), framing_valid: self.framing_valid.clone(), pending: Vec::new(), pos: 0, replaying: self.replay })
     }
 
     /// Reattach the same host after interruption, retaining existing input
@@ -547,6 +550,8 @@ pub struct HostReader {
     framing_valid: Arc<AtomicBool>,
     pending: Vec<u8>,
     pos: usize,
+    /// Output is replayed history until the host's foreground baseline, which follows it.
+    replaying: bool,
 }
 
 impl Drop for HostReader {
@@ -583,7 +588,10 @@ impl HostReader {
                     return Ok(ReadResult::Eof);
                 }
                 Ok(FromHost::Detached) => { self.input_ready.store(false, Ordering::SeqCst); return Ok(ReadResult::Detached); },
-                Ok(FromHost::FgPid(p)) => self.fg.store(p, Ordering::Relaxed),
+                Ok(FromHost::FgPid(p)) => {
+                    self.fg.store(p, Ordering::Relaxed);
+                    self.replaying = false;
+                }
                 Ok(FromHost::Hello { .. }) => {}
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => return Ok(ReadResult::Timeout),
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
@@ -671,6 +679,12 @@ pub enum AnyReader {
 }
 
 impl AnyReader {
+    /// Whether the data last read is history the host replays after an attachment, whose
+    /// terminal queries were already answered.
+    pub fn replaying(&self) -> bool {
+        matches!(self, AnyReader::Host(r) if r.replaying)
+    }
+
     pub fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> io::Result<ReadResult> {
         match self {
             AnyReader::Native(r) => r.read_timeout(buf, timeout_ms),
@@ -776,6 +790,7 @@ mod recovery_tests {
             input_ready: Arc::new(AtomicBool::new(true)), input_closed: Arc::new(AtomicBool::new(false)),
             framing_valid: Arc::new(AtomicBool::new(true)),
             child_pid: 0, host_pid: 0, exit: Arc::new(Mutex::new(None)), fg: Arc::new(AtomicU32::new(0)),
+            replay: false,
         };
         let reader = host.reader().unwrap();
         (host, reader, peer)

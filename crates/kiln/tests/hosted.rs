@@ -239,6 +239,13 @@ fn daemon_crash_is_recovered_by_adopting_hosts() {
     let s = create_shell(&c);
     type_line(&c, s, sh::PRINT_PID);
     let shell = wait_value(&c, s, "shellpid=");
+    // A program reads its cursor-position answer; the query in the history must not be
+    // answered again after adoption.
+    #[cfg(unix)]
+    {
+        type_line(&c, s, r#"stty -echo -icanon; printf '\033[6n'; while c=$(dd bs=1 count=1 2>/dev/null) && [ "$c" != R ]; do :; done; stty sane; echo answer-''read"#);
+        wait_for(&c, s, "answer-read");
+    }
     type_line(&c, s, &sh::echo_joined("before-", "crash"));
     wait_for(&c, s, "before-crash");
     drop(c);
