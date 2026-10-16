@@ -456,7 +456,7 @@ mod imp {
         }
 
         pub fn fg_pid(&self) -> Option<u32> {
-            None
+            crate::procinfo::foreground_of(self.pid)
         }
     }
 

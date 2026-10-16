@@ -637,7 +637,8 @@ impl Daemon {
                 self.recover_terminal(&s, false);
                 let fg = s.pty.fg_pid().and_then(procinfo::foreground_pid);
                 let name = fg.and_then(procinfo::display_name);
-                let cwd = fg.and_then(procinfo::cwd).or_else(|| procinfo::cwd(s.pty.pid()));
+                let folder = |pid: u32| (!procinfo::location_from_prompt(pid)).then(|| procinfo::cwd(pid)).flatten();
+                let cwd = fg.and_then(folder).or_else(|| folder(s.pty.pid()));
                 let mut changed = false;
                 {
                     let mut i = s.info.lock();
