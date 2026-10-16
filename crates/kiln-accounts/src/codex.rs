@@ -1,6 +1,5 @@
 //! OpenAI Codex CLI 자격증명(`$CODEX_HOME/auth.json`)과 세션 기록의 사용량.
 
-use kiln_common::paths::Canonical;
 use crate::Usage;
 use base64::Engine;
 use serde_json::Value;
@@ -16,10 +15,11 @@ pub fn auth_path(codex_home: &Path) -> PathBuf {
     codex_home.join("auth.json")
 }
 
-/// Direct Keyring key used by the official CLI (0.162.1 storage.rs).
+/// Direct Keyring key used by the official CLI (0.162.1 storage.rs): the standard library's
+/// canonical form of the home, which on Windows keeps the `\\?\` prefix.
 pub(crate) fn keyring_account(home: &Path) -> String {
     use sha2::{Digest, Sha256};
-    let canonical = home.canonical().unwrap_or_else(|_| home.to_path_buf());
+    let canonical = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
     let hash = format!("{:x}", Sha256::digest(canonical.to_string_lossy().as_bytes()));
     format!("cli|{}", &hash[..16])
 }
@@ -255,6 +255,26 @@ pub fn usage_from_json(body: &Value) -> Option<Usage> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn keyring_key_hashes_the_path_as_the_cli_canonicalizes_it() {
+        use sha2::{Digest, Sha256};
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = std::fs::canonicalize(dir.path()).unwrap();
+        let hash = format!("{:x}", Sha256::digest(canonical.to_string_lossy().as_bytes()));
+        assert_eq!(keyring_account(dir.path()), format!("cli|{}", &hash[..16]));
+    }
+
+    /// `KILN_CODEX_KEYRING_HOME` is a fixture Codex home whose `config.toml` selects the
+    /// keyring store with `secret_auth_storage` off and that Codex itself signed in to.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "reads the Credential Manager entry a fixture Codex sign-in wrote"]
+    fn the_entry_the_cli_writes_is_read_under_its_key() {
+        let home = std::path::PathBuf::from(std::env::var_os("KILN_CODEX_KEYRING_HOME").expect("fixture home"));
+        let secret = read_credentials(&home, &crate::store::KeyringStore).unwrap().expect("Codex Auth entry");
+        assert!(secret.contains("OPENAI_API_KEY"));
+    }
 
     #[test]
     fn usage_json_maps_actual_durations_and_preserves_exhaustion() {

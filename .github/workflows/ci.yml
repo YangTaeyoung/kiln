@@ -104,6 +104,19 @@ jobs:
           cargo test --locked --no-fail-fast -p kiln --lib -- --test-threads=1 || status=1
           cargo test --locked --no-fail-fast -p kiln-remote --lib -- --test-threads=1 || status=1
           exit $status
+      - name: Credential Manager
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          cargo test --locked -p kiln-accounts --lib -- --ignored --exact store::tests::windows_store_keeps_kiln_snapshots_in_files_and_other_entries_in_credential_manager || status=1
+          npm install --global @openai/codex@0.162.1 || status=1
+          home="$RUNNER_TEMP/codex-keyring"
+          mkdir -p "$home"
+          printf 'cli_auth_credentials_store = "keyring"\n[features]\nsecret_auth_storage = false\n' > "$home/config.toml"
+          printf 'ci-fixture-key' | CODEX_HOME="$home" codex login --with-api-key || status=1
+          KILN_CODEX_KEYRING_HOME="$home" cargo test --locked -p kiln-accounts --lib -- --ignored --exact codex::tests::the_entry_the_cli_writes_is_read_under_its_key || status=1
+          CODEX_HOME="$home" codex logout || true
+          exit $status
       - name: Terminal and daemon integration
         if: ${{ !cancelled() }}
         run: |

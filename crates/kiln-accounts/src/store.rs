@@ -185,7 +185,7 @@ impl FileStore {
 
 impl CredentialStore for FileStore {
     fn get(&self, service: &str, account: &str) -> Result<Option<String>> {
-        read_secret(&self.path(service, account)?)
+        read_stored(&self.path(service, account)?)
     }
 
     fn get_by_service(&self, service: &str) -> Result<Option<(String, String)>> {
@@ -196,7 +196,7 @@ impl CredentialStore for FileStore {
         let mut names: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).collect();
         names.sort();
         for n in names {
-            if let Some(v) = read_secret(&dir.join(&n))? {
+            if let Some(v) = read_stored(&dir.join(&n))? {
                 return Ok(Some((v, n)));
             }
         }
@@ -204,7 +204,11 @@ impl CredentialStore for FileStore {
     }
 
     fn set(&self, service: &str, account: &str, value: &str) -> Result<()> {
-        write_secret_atomic(&self.path(service, account)?, value.as_bytes())
+        #[cfg(windows)]
+        let data = dpapi::protect(value.as_bytes())?;
+        #[cfg(not(windows))]
+        let data = value.as_bytes().to_vec();
+        write_secret_atomic(&self.path(service, account)?, &data)
     }
 
     fn delete(&self, service: &str, account: &str) -> Result<bool> {
@@ -213,6 +217,120 @@ impl CredentialStore for FileStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e.into()),
         }
+    }
+}
+
+/// The Windows Credential Manager through `keyring`: one generic credential per entry,
+/// named `<account>.<service>` as the CLIs that keep entries there name them.
+#[cfg(windows)]
+pub struct KeyringStore;
+
+#[cfg(windows)]
+impl CredentialStore for KeyringStore {
+    fn get(&self, service: &str, account: &str) -> Result<Option<String>> {
+        match keyring::Entry::new(service, account)?.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn get_by_service(&self, _service: &str) -> Result<Option<(String, String)>> {
+        bail!("the Credential Manager is read by service and account")
+    }
+
+    fn set(&self, service: &str, account: &str, value: &str) -> Result<()> {
+        Ok(keyring::Entry::new(service, account)?.set_password(value)?)
+    }
+
+    fn delete(&self, service: &str, account: &str) -> Result<bool> {
+        match keyring::Entry::new(service, account)?.delete_credential() {
+            Ok(()) => Ok(true),
+            Err(keyring::Error::NoEntry) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+/// Windows storage: Kiln's account snapshots (services starting with `kiln-accounts-`) in
+/// user-protected files, since they exceed the Credential Manager's 2560-byte limit; every
+/// other entry, such as `Codex Auth`, in the Credential Manager.
+#[cfg(windows)]
+pub struct WindowsStore {
+    pub files: FileStore,
+}
+
+#[cfg(windows)]
+impl WindowsStore {
+    fn route(&self, service: &str) -> &dyn CredentialStore {
+        if service.starts_with("kiln-accounts-") { &self.files } else { &KeyringStore }
+    }
+}
+
+#[cfg(windows)]
+impl CredentialStore for WindowsStore {
+    fn get(&self, service: &str, account: &str) -> Result<Option<String>> {
+        self.route(service).get(service, account)
+    }
+
+    fn get_by_service(&self, service: &str) -> Result<Option<(String, String)>> {
+        self.route(service).get_by_service(service)
+    }
+
+    fn set(&self, service: &str, account: &str, value: &str) -> Result<()> {
+        self.route(service).set(service, account, value)
+    }
+
+    fn delete(&self, service: &str, account: &str) -> Result<bool> {
+        self.route(service).delete(service, account)
+    }
+}
+
+/// A [`FileStore`] entry: plain text, or on Windows data protected with the user's key.
+fn read_stored(path: &Path) -> Result<Option<String>> {
+    #[cfg(windows)]
+    return match std::fs::read(path) {
+        Ok(data) => Ok(Some(String::from_utf8(dpapi::unprotect(&data)?)?)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow::Error::from(e).context(format!("failed to read {}", path.display()))),
+    };
+    #[cfg(not(windows))]
+    read_secret(path)
+}
+
+/// Data protection with the current Windows user's key (`CryptProtectData`).
+#[cfg(windows)]
+mod dpapi {
+    use anyhow::{Result, bail};
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData};
+
+    fn run(data: &[u8], protect: bool) -> Result<Vec<u8>> {
+        let input = CRYPT_INTEGER_BLOB { cbData: u32::try_from(data.len())?, pbData: data.as_ptr() as *mut u8 };
+        let mut output = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
+        // SAFETY: `input` points at `data` for the call; `output` is allocated by the system
+        // and freed with LocalFree after it is copied.
+        unsafe {
+            let ok = if protect {
+                CryptProtectData(&input, std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null(), CRYPTPROTECT_UI_FORBIDDEN, &mut output)
+            } else {
+                CryptUnprotectData(&input, std::ptr::null_mut(), std::ptr::null(), std::ptr::null(), std::ptr::null(), CRYPTPROTECT_UI_FORBIDDEN, &mut output)
+            };
+            if ok == 0 {
+                bail!("data protection failed: {}", std::io::Error::last_os_error());
+            }
+            let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+            LocalFree(output.pbData.cast());
+            Ok(bytes)
+        }
+    }
+
+    pub fn protect(data: &[u8]) -> Result<Vec<u8>> {
+        run(data, true)
+    }
+
+    pub fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
+        run(data, false)
     }
 }
 
@@ -266,12 +384,48 @@ fn set_mode(path: &Path, mode: u32) {
     let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn set_mode(path: &Path, _mode: u32) {
+    let _ = kiln_common::access::restrict_to_user(path);
+}
+
+#[cfg(not(any(unix, windows)))]
 fn set_mode(_path: &Path, _mode: u32) {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn file_secrets_on_windows_are_protected_with_the_user_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore { base_dir: dir.path().join("credentials") };
+        let secret = format!("{{\"tokens\":\"{}\"}}", "x".repeat(6000));
+        store.set("kiln-accounts-codex", "work", &secret).unwrap();
+        let raw = std::fs::read(dir.path().join("credentials").join("kiln-accounts-codex").join("work")).unwrap();
+        assert!(!raw.windows(6).any(|w| w == b"tokens"));
+        assert_eq!(store.get("kiln-accounts-codex", "work").unwrap().as_deref(), Some(secret.as_str()));
+        assert_eq!(store.get_by_service("kiln-accounts-codex").unwrap(), Some((secret, "work".into())));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "writes and deletes a test entry in the Windows Credential Manager"]
+    fn windows_store_keeps_kiln_snapshots_in_files_and_other_entries_in_credential_manager() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WindowsStore { files: FileStore { base_dir: dir.path().join("credentials") } };
+        let snapshot = "y".repeat(6000);
+        store.set("kiln-accounts-claude", "work", &snapshot).unwrap();
+        assert!(dir.path().join("credentials").join("kiln-accounts-claude").join("work").is_file());
+        assert_eq!(store.get("kiln-accounts-claude", "work").unwrap(), Some(snapshot));
+        let service = format!("Kiln Credential Test {}", std::process::id());
+        store.set(&service, "cli|fixture", "entry").unwrap();
+        assert!(!dir.path().join("credentials").join(&service).exists());
+        assert_eq!(store.get(&service, "cli|fixture").unwrap().as_deref(), Some("entry"));
+        assert!(store.delete(&service, "cli|fixture").unwrap());
+        assert_eq!(store.get(&service, "cli|fixture").unwrap(), None);
+    }
 
     #[test]
     #[cfg(unix)]

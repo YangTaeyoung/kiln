@@ -3083,6 +3083,7 @@ dependencies = [
  "chrono",
  "egui",
  "egui_kittest",
+ "keyring",
  "kiln-common",
  "libc",
  "log",
@@ -3092,6 +3093,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
