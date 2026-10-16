@@ -133,9 +133,18 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
     attach(&mut spec, &path, &record)?;
     launch_spec(&path, &record, false, None)
 }
+/// The hook command for `tool`, quoted for the shell that CLI runs hooks with: Codex uses
+/// `%COMSPEC% /C` on Windows; Claude Code uses Git Bash there, and both use `sh` elsewhere.
+fn hook_command(tool: Tool, helper: &Path) -> String {
+    if cfg!(windows) && tool == Tool::Codex {
+        format!("\"{}\" agent-hook", helper.display())
+    } else {
+        format!("{} agent-hook", quote(&helper.to_string_lossy()))
+    }
+}
 fn attach(spec: &mut SpawnSpec, path: &Path, record: &Record) -> Result<()> {
     let helper = helper_exe()?;
-    let command = format!("{} agent-hook", quote(&helper.to_string_lossy()));
+    let command = hook_command(record.tool, &helper);
     let hooks = serde_json::json!([{ "hooks": [{"type":"command","command":command,"timeout":3}]}]);
     match record.tool {
         // CLI override is an additional config layer; never rewrite user/project hooks.
@@ -831,6 +840,19 @@ fn latest_version(tool: Tool, offline: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hook_commands_follow_the_shell_each_cli_uses() {
+        let helper = std::path::Path::new(if cfg!(windows) { r"C:\Program Files\Kiln\bin\kiln.exe" } else { "/Applications/Kiln.app/Contents/MacOS/kiln" });
+        let claude = hook_command(Tool::Claude, helper);
+        assert_eq!(claude, format!("'{}' agent-hook", helper.display()));
+        let codex = hook_command(Tool::Codex, helper);
+        if cfg!(windows) {
+            assert_eq!(codex, format!("\"{}\" agent-hook", helper.display()));
+        } else {
+            assert_eq!(codex, claude);
+        }
+    }
+
 
     #[test]
     fn partial_version_replies_never_trigger_restart_and_completion_triggers_once() {

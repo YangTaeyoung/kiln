@@ -303,25 +303,52 @@ pub fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
 /// Win32_Process.Create 로 창과 콘솔 없이 프로세스를 만든다. 호출자의 잡 객체에 속하지 않는다.
 #[cfg(windows)]
 fn spawn_via_wmi(cmd: &std::process::Command) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::windows::process::CommandExt;
     let quote = |s: &str| if s.contains([' ', '\t', '"']) { format!("\"{}\"", s.replace('"', "\\\"")) } else { s.to_string() };
+    let ps_text = |s: &str| format!("'{}'", s.replace('\'', "''"));
     let mut line = quote(&cmd.get_program().to_string_lossy());
     for a in cmd.get_args() {
         line.push(' ');
         line.push_str(&quote(&a.to_string_lossy()));
     }
+    // Win32_Process.Create starts from the user's default environment, so the caller's
+    // environment and the command's changes are passed explicitly. Names compare case-insensitively.
+    let mut environment: std::collections::BTreeMap<String, (String, String)> = std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .map(|(k, v)| (k.to_uppercase(), (k, v)))
+        .collect();
+    for (key, value) in cmd.get_envs() {
+        let key = key.to_string_lossy().into_owned();
+        match value {
+            Some(value) => { environment.insert(key.to_uppercase(), (key, value.to_string_lossy().into_owned())); }
+            None => { environment.remove(&key.to_uppercase()); }
+        }
+    }
+    let variables: Vec<String> = environment
+        .into_values()
+        .filter(|(k, v)| !k.is_empty() && !k.starts_with('=') && !k.contains('=') && !v.contains(['\r', '\n']))
+        .map(|(k, v)| ps_text(&format!("{k}={v}")))
+        .collect();
+    let directory = cmd.get_current_dir().map(|d| d.to_string_lossy().into_owned());
     // ShowWindow 0 hides the window and CreateFlags 8 (DETACHED_PROCESS) gives no console.
-    let ps = format!(
-        "$s = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{{ShowWindow=[uint16]0; CreateFlags=[uint32]8}}; $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{}'; ProcessStartupInformation=$s}}; exit $r.ReturnValue",
-        line.replace('\'', "''")
+    let script = format!(
+        "$s = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{{ShowWindow=[uint16]0; CreateFlags=[uint32]8; EnvironmentVariables=[string[]]@({})}}; $a = @{{CommandLine={}; ProcessStartupInformation=$s}}; {}$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments $a; exit $r.ReturnValue\n",
+        variables.join(","),
+        ps_text(&line),
+        directory.map(|d| format!("$a.CurrentDirectory = {}; ", ps_text(&d))).unwrap_or_default(),
     );
-    use std::os::windows::process::CommandExt;
-    let status = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
-        .stdin(std::process::Stdio::null())
+    // The script reaches PowerShell on standard input, so environment values never appear in
+    // a command line or a file.
+    let mut child = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", "-"])
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .creation_flags(0x0800_0000)
-        .status()?;
+        .spawn()?;
+    child.stdin.take().ok_or_else(|| std::io::Error::other("no PowerShell input"))?.write_all(script.as_bytes())?;
+    let status = child.wait()?;
     if status.success() { Ok(()) } else { Err(std::io::Error::other("WMI process create failed")) }
 }
 
@@ -332,6 +359,24 @@ mod tests {
     fn touch(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, b"").unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_process_created_through_wmi_keeps_the_callers_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("env.txt");
+        let mut cmd = std::process::Command::new("cmd.exe");
+        assert!(!out.to_string_lossy().contains(' '));
+        cmd.arg("/c").arg(format!("echo %KILN_WMI_PROBE%>{}", out.display())).env("KILN_WMI_PROBE", "kept-123");
+        spawn_via_wmi(&cmd).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !out.exists() {
+            assert!(std::time::Instant::now() < deadline, "the WMI process did not run");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(std::fs::read_to_string(&out).unwrap().trim(), "kept-123");
     }
 
     #[test]
