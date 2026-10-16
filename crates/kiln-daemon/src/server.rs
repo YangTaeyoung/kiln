@@ -538,6 +538,7 @@ impl Daemon {
                     if answer { let _ = sess.input.respond(s.into_bytes()); }
                 }
                 Event::Title(t) => {
+                    let t = if console_default_title(&t) { String::new() } else { t };
                     let mut info = sess.info.lock();
                     if info.title != t {
                         info.title = t;
@@ -1751,5 +1752,39 @@ phase('reset.json',[queries[1],queries[3]])
         assert_eq!(read_phase("override.json"),vec![reply("11",[0x11,0x22,0x33]),reply("4;7",[0,0xaa,0])]);
         assert_eq!(read_phase("reset.json"),vec![reply("11",dark.bg),reply("4;7",dark.ansi[7])]);
         stream.shutdown(std::net::Shutdown::Both).unwrap();drop(stream);server.join().unwrap();
+    }
+}
+
+/// Whether `title` is what a Windows console sets by itself: the path of its program,
+/// optionally after an elevation prefix such as `Administrator: `.
+fn console_default_title(title: &str) -> bool {
+    let is_program_path = |text: &str| {
+        let bytes = text.as_bytes();
+        bytes.len() > 7
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'\\'
+            && text.get(text.len() - 4..).is_some_and(|ext| ext.eq_ignore_ascii_case(".exe"))
+    };
+    is_program_path(title) || title.split_once(": ").is_some_and(|(_, rest)| is_program_path(rest))
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::console_default_title;
+
+    #[test]
+    fn console_executable_titles_are_not_task_titles() {
+        for title in [
+            r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe",
+            r"Administrator: C:\WINDOWS\system32\cmd.exe",
+            r"C:\Program Files\Git\bin\sh.exe",
+            r"관리자: C:\Program Files\PowerShell\7\pwsh.exe",
+        ] {
+            assert!(console_default_title(title), "{title}");
+        }
+        for title in ["API contract review", "vim main.rs", "C:\\work\\notes.txt", "build.exe finished", "/usr/bin/zsh", "C:\\작업 폴더 한글"] {
+            assert!(!console_default_title(title), "{title}");
+        }
     }
 }
