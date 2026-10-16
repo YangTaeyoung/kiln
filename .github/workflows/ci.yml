@@ -67,6 +67,55 @@ jobs:
           python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py scripts/configure-network-privacy.py scripts/prepare-updater-test.py
           python3 scripts/test-network-privacy.py
 
+  windows:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            runner: windows-latest
+          - name: windows-arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        run: |
+          if ! command -v rustup >/dev/null; then
+            arch=$([ "$RUNNER_ARCH" = ARM64 ] && echo aarch64 || echo x86_64)
+            curl -fsSLo rustup-init.exe "https://static.rust-lang.org/rustup/dist/$arch-pc-windows-msvc/rustup-init.exe"
+            ./rustup-init.exe -y --profile minimal --default-toolchain none
+            echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$USERPROFILE/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Check
+        run: cargo check --locked -p kiln --bins
+      - name: Library tests
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --locked -p kiln-common -p kiln-i18n-macros -p kiln-proto -p kiln-daemon -p kiln-accounts -p kiln-db -p kiln-editor -p kiln-git --lib
+          cargo test --locked -p kiln --lib -- --test-threads=1
+          cargo test --locked -p kiln-remote --lib -- --test-threads=1
+      - name: Terminal and daemon integration
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p kiln --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
+      - name: GUI integration
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p kiln --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
+      - name: Editor, Git, database and remote integration
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --locked -p kiln-editor --tests -- --test-threads=1
+          cargo test --locked -p kiln-git --tests -- --test-threads=1
+          cargo test --locked -p kiln-db --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1
+          cargo test --locked -p kiln-remote --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1
+
   database-servers:
     runs-on: ubuntu-latest
     timeout-minutes: 25
