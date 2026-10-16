@@ -11428,5 +11428,10 @@
     "en": "Leave empty to use PowerShell",
     "ja": "空欄の場合は PowerShell を使います",
     "zh-CN": "留空时使用 PowerShell"
+  },
+  "Kiln 실행 파일을 찾지 못했습니다.": {
+    "en": "Kiln's executable was not found.",
+    "ja": "Kiln の実行ファイルが見つかりません。",
+    "zh-CN": "找不到 Kiln 可执行文件。"
   }
 }

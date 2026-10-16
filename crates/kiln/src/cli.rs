@@ -37,10 +37,14 @@ enum Cmd {
     #[cfg(feature = "updater-test")]
     #[command(hide = true)]
     UpdaterTestRoot,
-    /// Internal menu-bar companion; never owns terminal sessions.
-    #[cfg(target_os = "macos")]
+    /// Internal menu-bar or notification-area companion; never owns terminal sessions.
+    #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
-    StatusBar,
+    StatusBar {
+        /// The GUI executable the companion opens (Windows).
+        #[arg(long)]
+        gui: Option<std::path::PathBuf>,
+    },
     /// 세션 데몬을 실행한다.
     Daemon {
         #[arg(long)]
@@ -155,7 +159,9 @@ pub fn main() -> anyhow::Result<()> {
             Ok(())
         }
         #[cfg(target_os = "macos")]
-        Some(Cmd::StatusBar) => crate::status_bar::run(),
+        Some(Cmd::StatusBar { .. }) => crate::status_bar::run(),
+        #[cfg(windows)]
+        Some(Cmd::StatusBar { gui }) => crate::tray_windows::run(gui),
         None => run_gui(cli.path),
         Some(Cmd::Daemon { foreground: _, restore, socket, wait_pid }) => {
             #[cfg(target_os = "macos")]
@@ -165,6 +171,8 @@ pub fn main() -> anyhow::Result<()> {
             let socket = socket.unwrap_or_else(kiln_proto::socket_name);
             #[cfg(target_os = "macos")]
             if socket == kiln_proto::socket_name() { crate::status_bar::ensure_running(); }
+            #[cfg(windows)]
+            if socket == kiln_proto::socket_name() { crate::tray_windows::ensure_running(); }
             // 분리 실행(WMI 등)에서는 표준 에러가 없으므로 로그 파일에 직접 쓴다.
             let log_path = kiln_daemon::client::daemon_log_path(&socket);
             let mut logger = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
@@ -309,6 +317,8 @@ pub fn gui_main() -> anyhow::Result<()> {
 fn run_gui(path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     crate::status_bar::ensure_running();
+    #[cfg(windows)]
+    crate::tray_windows::ensure_running();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     app::run(path)
 }

@@ -218,7 +218,7 @@ pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
 /// Windows 는 실행 중인 exe 를 덮어쓸 수 없으므로 데몬을 빌드별 복사본에서 실행한다.
 /// 설치된 kiln.exe 는 잠기지 않아 업데이트로 교체할 수 있다.
 #[cfg(windows)]
-pub(crate) fn daemon_copy(exe: &Path) -> Option<std::path::PathBuf> {
+pub fn daemon_copy(exe: &Path) -> Option<std::path::PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)?.join("Kiln").join("daemon");
     std::fs::create_dir_all(&base).ok()?;
     let target = base.join(format!("kiln-daemon-{}.exe", crate::exe_build_id(exe)));

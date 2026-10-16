@@ -2432,9 +2432,11 @@ pub(crate) fn short_path(p: &Path) -> String {
 
 impl eframe::App for KilnApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        #[cfg(target_os="macos")]
         {
+            #[cfg(target_os="macos")]
             let menu_request = macos::take_settings_request();
+            #[cfg(not(target_os="macos"))]
+            let menu_request = false;
             let helper_request = crate::native_actions::take_settings_request();
             if menu_request || helper_request {
                 self.settings_ui.open = true;
@@ -2452,8 +2454,7 @@ impl eframe::App for KilnApp {
         if ctx.input_mut(|input|input.consume_shortcut(&fullscreen_shortcut)) {
             self.apply(Action::ToggleFullscreen,ctx);
         }
-        #[cfg(target_os="macos")]
-        crate::status_bar::publish_unread(self.notifications.unread_count());
+        crate::companion::publish_unread(self.notifications.unread_count());
         self.conn.pump();
         self.start_prepared_agents(ctx);
         let focused_now = ctx.input(|i| i.viewport().focused.unwrap_or(true));

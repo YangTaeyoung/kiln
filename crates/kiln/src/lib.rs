@@ -2,10 +2,14 @@
 
 pub mod app;
 pub mod cli;
+pub mod companion;
 pub mod native_actions;
 
 #[cfg(target_os = "macos")]
 pub mod status_bar;
+
+#[cfg(windows)]
+pub mod tray_windows;
 
 #[cfg(target_os = "macos")]
 pub mod local_network;
