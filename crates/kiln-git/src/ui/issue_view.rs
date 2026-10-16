@@ -365,7 +365,7 @@ impl IssueView {
                         let body = self.comment.clone();
                         self.run(ui.ctx(), ActionKind::Comment, move |b, repo| b.comment_issue(repo, n, &body));
                     }
-                    ui.label(faint("⌘ Enter"));
+                    ui.label(faint(kiln_common::widgets::shortcut_text("⌘ Enter")));
                 });
             });
     }

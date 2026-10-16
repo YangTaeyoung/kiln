@@ -1060,7 +1060,7 @@ fn context_menu(
             if ui
                 .add_enabled(
                     has_sel,
-                    egui::Button::new(kiln_common::i18n::tr("행 복제")).shortcut_text("⌘D"),
+                    egui::Button::new(kiln_common::i18n::tr("행 복제")).shortcut_text(kiln_common::widgets::shortcut_text("⌘D")),
                 )
                 .clicked()
             {
@@ -1070,7 +1070,7 @@ fn context_menu(
             if ui
                 .add_enabled(
                     has_sel,
-                    egui::Button::new(kiln_common::i18n::tr("행 삭제")).shortcut_text("⌘⌫"),
+                    egui::Button::new(kiln_common::i18n::tr("행 삭제")).shortcut_text(kiln_common::widgets::shortcut_text("⌘⌫")),
                 )
                 .clicked()
             {
@@ -1111,7 +1111,7 @@ fn context_menu(
     if ui
         .add_enabled(
             has_sel,
-            egui::Button::new(kiln_common::i18n::tr("복사")).shortcut_text("⌘C"),
+            egui::Button::new(kiln_common::i18n::tr("복사")).shortcut_text(kiln_common::widgets::shortcut_text("⌘C")),
         )
         .clicked()
     {

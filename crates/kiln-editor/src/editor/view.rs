@@ -125,7 +125,7 @@ impl Editor {
                             ui.selectable_value(&mut choice,Some(syntax.name.clone()),&syntax.name);
                         }
                     }).response.on_hover_text(kiln_common::i18n::tr("파일 언어 선택"));
-                if ui.small_button(kiln_common::i18n::tr("자동완성")).on_hover_text(kiln_common::i18n::tr("자동완성 (⌃Space · ⌥Esc)")).clicked(){
+                if ui.small_button(kiln_common::i18n::tr("자동완성")).on_hover_text(kiln_common::trf!("자동완성 ({})", kiln_common::widgets::shortcut_text("⌃Space · ⌥Esc"))).clicked(){
                     ui.memory_mut(|m|m.request_focus(self.id()));self.lsp_trigger_completion(None);
                 }
             });

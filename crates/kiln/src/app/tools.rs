@@ -64,16 +64,17 @@ impl ToolKind {
         }
     }
 
-    pub fn shortcut(&self) -> &'static str {
-        match self {
+    pub fn shortcut(&self) -> String {
+        let mac = match self {
             ToolKind::Explorer => "⇧⌘E",
             ToolKind::Search => "⇧⌘F",
             ToolKind::Git => "⇧⌘G",
             ToolKind::PullRequests => "⇧⌘R",
             ToolKind::Database => "⇧⌘B",
-            ToolKind::Remote => "",
+            ToolKind::Remote => return String::new(),
             ToolKind::Problems => "⇧⌘M",
-        }
+        };
+        super::keymap::app_shortcut(mac)
     }
 
     pub fn vicon(&self) -> kiln_common::icons::Icon {

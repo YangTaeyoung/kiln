@@ -1060,7 +1060,7 @@ impl TermView {
                             if widgets::icon_button(ui, Icon::Close, 24.0, false, kiln_common::i18n::tr("닫기 (Esc)")).clicked() || ((te.has_focus() || te.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
                                 close = true;
                             }
-                            if widgets::icon_button(ui, Icon::ArrowDown, 24.0, false, kiln_common::i18n::tr("다음 (⇧↩)")).clicked() {
+                            if widgets::icon_button(ui, Icon::ArrowDown, 24.0, false, &kiln_common::trf!("다음 ({})",kiln_common::widgets::shortcut_text("⇧↩"))).clicked() {
                                 go(false);
                             }
                             let up = widgets::icon_button(ui, Icon::ArrowUp, 24.0, false, kiln_common::i18n::tr("이전 (↩)"));

@@ -2271,12 +2271,71 @@ fn os_notify(title: &str, body: &str) {
         }
         #[cfg(windows)]
         {
-            let _ = (&title, &body);
+            let mut cmd = toast_command(&title, &body, toast_app());
+            let _ = kiln_common::process::hide_window(&mut cmd).output();
         }
     });
 }
 
-/// Windows 확장 경로 접두(`\\?\`)를 떼어 일반 경로로 만든다.
+/// Windows PowerShell showing a toast whose text and app ID travel in environment
+/// variables, so the fixed script never contains either.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn toast_command(title: &str, body: &str, app: &str) -> std::process::Command {
+    use base64::Engine;
+    const SCRIPT: &str = "$ErrorActionPreference = 'Stop'
+[void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$text = $xml.GetElementsByTagName('text')
+[void]$text.Item(0).AppendChild($xml.CreateTextNode($env:KILN_TOAST_TITLE))
+[void]$text.Item(1).AppendChild($xml.CreateTextNode($env:KILN_TOAST_BODY))
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:KILN_TOAST_APP).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
+";
+    let script: Vec<u8> = SCRIPT.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let program = std::env::var_os("SystemRoot")
+        .map(|root| PathBuf::from(root).join("System32").join("WindowsPowerShell").join("v1.0").join("powershell.exe"))
+        .unwrap_or_else(|| PathBuf::from("powershell.exe"));
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &base64::engine::general_purpose::STANDARD.encode(script)])
+        .env("KILN_TOAST_TITLE", title)
+        .env("KILN_TOAST_BODY", body)
+        .env("KILN_TOAST_APP", app);
+    cmd
+}
+
+/// The app ID toasts are shown under: Kiln's when its Start-menu shortcut registers it,
+/// otherwise Windows PowerShell's, since Windows shows toasts only for registered app IDs.
+#[cfg(windows)]
+fn toast_app() -> &'static str {
+    let registered = std::env::var_os("APPDATA")
+        .map(|dir| PathBuf::from(dir).join("Microsoft").join("Windows").join("Start Menu").join("Programs").join("Kiln.lnk").is_file())
+        .unwrap_or(false);
+    if registered { "dev.kiln.app" } else { r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe" }
+}
+
+#[cfg(test)]
+mod toast_tests {
+    use super::*;
+    use base64::Engine;
+
+    #[test]
+    fn toast_text_travels_in_the_environment_not_the_script() {
+        let title = "Build `done' $(rm) \"quoted\"";
+        let body = "한글 본문\n둘째 줄";
+        let cmd = toast_command(title, body, "dev.kiln.app");
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let encoded = args.iter().position(|a| a == "-EncodedCommand").map(|i| args[i + 1].clone()).expect("encoded script");
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let script = String::from_utf16(&units).unwrap();
+        assert!(script.contains("ToastNotificationManager"));
+        assert!(!script.contains("Build") && !script.contains("한글"));
+        let env: std::collections::HashMap<String, Option<String>> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env["KILN_TOAST_TITLE"].as_deref(), Some(title));
+        assert_eq!(env["KILN_TOAST_BODY"].as_deref(), Some(body));
+        assert_eq!(env["KILN_TOAST_APP"].as_deref(), Some("dev.kiln.app"));
+    }
+}
+
 /// The first workspace when none is saved: the launch folder, unless it is a drive or
 /// file-system root or inside the Windows folder.
 fn first_workspace(cwd: Option<PathBuf>, home: PathBuf) -> PathBuf {
@@ -2297,6 +2356,7 @@ fn in_windows_folder(dir: &Path) -> bool {
     }
 }
 
+/// Windows 확장 경로 접두(`\\?\`)를 떼어 일반 경로로 만든다.
 fn normalize_path(p: PathBuf) -> PathBuf {
     kiln_common::paths::simplified(&p).to_path_buf()
 }

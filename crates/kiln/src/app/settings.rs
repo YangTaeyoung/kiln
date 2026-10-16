@@ -247,7 +247,7 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
     }
     ui.add_space(16.0);
     widgets::group(ui, kiln_common::i18n::tr("글꼴"), |ui| {
-        widgets::setting_row(ui, kiln_common::i18n::tr("글꼴 크기"), kiln_common::i18n::tr("⌘= / ⌘- 로도 바꿀 수 있습니다"), |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("글꼴 크기"), &kiln_common::trf!("{} / {} 로도 바꿀 수 있습니다",super::keymap::app_shortcut("⌘="),super::keymap::app_shortcut("⌘-")), |ui| {
             ui.add(egui::Slider::new(&mut s.font_size, 9.0..=24.0).step_by(0.5).suffix(" pt"));
         });
         widgets::divider(ui);
@@ -268,10 +268,11 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
         widgets::setting_toggle(ui, kiln_common::i18n::tr("Option 키를 Meta 로"), kiln_common::i18n::tr("Option+B 같은 조합을 셸 단축키로 보냅니다"), &mut s.option_as_meta);
     });
     widgets::group(ui, kiln_common::i18n::tr("셸"), |ui| {
-        widgets::setting_toggle(ui, kiln_common::i18n::tr("명령어 입력 힌트"), kiln_common::i18n::tr("zsh에서 경로와 명령어 후보를 표시합니다. ⌃Space로 후보를 선택할 수 있습니다."), &mut s.terminal_completion_preview);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("명령어 입력 힌트"), &kiln_common::trf!("zsh에서 경로와 명령어 후보를 표시합니다. {}로 후보를 선택할 수 있습니다.",kiln_common::widgets::shortcut_text("⌃Space")), &mut s.terminal_completion_preview);
         widgets::divider(ui);
-        widgets::setting_row(ui, kiln_common::i18n::tr("기본 셸"), kiln_common::i18n::tr("비워 두면 로그인 셸($SHELL)을 씁니다"), |ui| {
-            ui.add(egui::TextEdit::singleline(&mut s.shell).hint_text("/bin/zsh").desired_width(200.0));
+        let (empty, example) = if cfg!(windows) { (kiln_common::i18n::tr("비워 두면 PowerShell을 씁니다"), "pwsh.exe") } else { (kiln_common::i18n::tr("비워 두면 로그인 셸($SHELL)을 씁니다"), "/bin/zsh") };
+        widgets::setting_row(ui, kiln_common::i18n::tr("기본 셸"), empty, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.shell).hint_text(example).desired_width(200.0));
         });
     });
 }
@@ -305,7 +306,7 @@ fn shortcuts(ui: &mut egui::Ui) {
                     widgets::divider(ui);
                 }
                 widgets::setting_row(ui, label, "", |ui| {
-                    let ks = widgets::split_keys(keys);
+                    let ks = widgets::split_keys(&super::keymap::app_shortcut(keys));
                     let rev: Vec<&str> = ks.iter().rev().map(|s| s.as_str()).collect();
                     widgets::keycaps(ui, &rev);
                 });

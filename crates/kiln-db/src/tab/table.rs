@@ -1169,7 +1169,7 @@ impl TableView {
                         self.add_row();
                     }
                     if tool_button_icon(ui, Some(Icon::Minus), kiln_common::i18n::tr("행 삭제"), editable && has_sel, false)
-                        .on_hover_text(kiln_common::i18n::tr("선택한 행 삭제 (⌘⌫)"))
+                        .on_hover_text(kiln_common::trf!("선택한 행 삭제 ({})", kiln_common::widgets::shortcut_text("⌘⌫")))
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
@@ -1177,7 +1177,7 @@ impl TableView {
                         d.delete_rows(&rows);
                     }
                     if tool_button_icon(ui, Some(Icon::Copy), kiln_common::i18n::tr("복제"), editable && has_sel, false)
-                        .on_hover_text(kiln_common::i18n::tr("선택한 행 복제 (⌘D)"))
+                        .on_hover_text(kiln_common::trf!("선택한 행 복제 ({})", kiln_common::widgets::shortcut_text("⌘D")))
                         .clicked()
                         && let Some(d) = &mut self.data
                     {
@@ -1197,7 +1197,7 @@ impl TableView {
                         pending > 0 && self.submit_job.is_none() && !self.schema_conflict,
                         true,
                     )
-                    .on_hover_text(kiln_common::i18n::tr("모든 변경 사항을 하나의 트랜잭션으로 커밋 (⌘↩)"))
+                    .on_hover_text(kiln_common::trf!("모든 변경 사항을 하나의 트랜잭션으로 커밋 ({})", kiln_common::widgets::shortcut_text("⌘↩")))
                     .clicked()
                     {
                         self.submit(m);
