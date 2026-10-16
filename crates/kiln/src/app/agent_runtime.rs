@@ -1,4 +1,5 @@
 //! Per-launch identity and bounded CLI updates. Never infer identity from the newest transcript.
+use kiln_common::paths::Canonical;
 use super::{agent_launch, remote_terminal};
 use anyhow::{Context, Result, bail, ensure};
 use kiln_accounts::{AccountManager, Tool};
@@ -290,8 +291,8 @@ pub fn run_request(
     ensure!(
         path.parent()
             .context("missing record directory")?
-            .canonicalize()?
-            == directory().canonicalize()?,
+            .canonical()?
+            == directory().canonical()?,
         "invalid record directory"
     );
     let mut record = read(path)?;
@@ -306,10 +307,10 @@ pub fn run_request(
             request
                 .parent()
                 .context("missing request directory")?
-                .canonicalize()?
+                .canonical()?
                 == kiln_common::paths::config_dir()
                     .join("agent-requests")
-                    .canonicalize()?,
+                    .canonical()?,
             "invalid request directory"
         );
         ensure!(
@@ -379,7 +380,7 @@ fn installer(binary: &Path) -> Result<Installer> {
     installer_with(binary, agent_launch::executable)
 }
 fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Result<Installer> {
-    let resolved = binary.canonicalize()?;
+    let resolved = binary.canonical()?;
     let path = resolved.to_string_lossy();
     if path.contains("/Caskroom/codex/") || path.contains("/Cellar/codex/") {
         let brew = resolve("brew").context("Homebrew not found")?;
@@ -387,7 +388,7 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
         cmd.arg("--prefix");
         let prefix =
             PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
-                .canonicalize()?;
+                .canonical()?;
         let cask = path.contains("/Caskroom/codex/");
         ensure!(
             resolved.starts_with(prefix.join(if cask {
@@ -404,9 +405,9 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
         let mut cmd = Command::new(&npm);
         cmd.args(["root", "--global"]);
         let root = PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
-            .canonicalize()?;
+            .canonical()?;
         ensure!(
-            resolved.starts_with(root.join("@openai/codex").canonicalize()?),
+            resolved.starts_with(root.join("@openai/codex").canonical()?),
             "npm global root does not own this Codex executable"
         );
         return Ok(Installer::Npm(npm));
@@ -460,11 +461,11 @@ pub fn hook(path: &Path, generation: &str, input: impl Read) -> Result<()> {
     Ok(())
 }
 fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Result<Option<serde_json::Value>> {
-    let root = root.canonicalize()?;
+    let root = root.canonical()?;
     ensure!(
         path.parent()
             .context("missing record parent")?
-            .canonicalize()?
+            .canonical()?
             == root,
         "record outside Kiln session directory"
     );
@@ -1059,7 +1060,7 @@ mod tests {
     #[test]
     fn linked_resume_requests_handover_without_reclaiming_on_an_old_prompt() {
         let temp = tempfile::tempdir().unwrap();
-        let config = temp.path().canonicalize().unwrap();
+        let config = temp.path().canonical().unwrap();
         let dir = config.join("agent-sessions");
         fs::create_dir_all(&dir).unwrap();
         let mut links = vec![];
@@ -1110,7 +1111,7 @@ mod tests {
     #[test]
     fn linked_conversation_without_a_transfer_accepts_prompts_and_compaction() {
         let temp = tempfile::tempdir().unwrap();
-        let config = temp.path().canonicalize().unwrap();
+        let config = temp.path().canonical().unwrap();
         let dir = config.join("agent-sessions");
         fs::create_dir_all(&dir).unwrap();
         let root = config.join("claude");

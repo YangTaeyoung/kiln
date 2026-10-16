@@ -1,5 +1,6 @@
 //! Real isolated daemon/PTY probes; the agent and SSH executables are fixtures.
 #![cfg(unix)]
+use kiln_common::paths::Canonical;
 use egui_kittest::{Harness, kittest::Queryable};
 use kiln::app::{Action, KilnApp};
 use std::{
@@ -117,7 +118,7 @@ read line
     // spelling and terminal scrollback rendering must not decide this assertion.
     assert_eq!(
         std::fs::read_to_string(&codex_cwd).unwrap().trim_end(),
-        workspace.canonicalize().unwrap().to_str().unwrap(),
+        workspace.canonical().unwrap().to_str().unwrap(),
         "real Codex fixture must start in the workspace root"
     );
     let agent = h.state().debug_focused_launch_spec().unwrap();
@@ -127,7 +128,7 @@ read line
     assert_eq!(agent.args.first().map(String::as_str),Some("agent-run"));
     assert_eq!(
         agent.cwd.as_deref(),
-        workspace.canonicalize().unwrap().to_str()
+        workspace.canonical().unwrap().to_str()
     );
     h.event(egui::Event::Ime(egui::ImeEvent::Preedit {
         text: "한".into(),
@@ -152,7 +153,7 @@ read line
     pump(&mut h, "CLAUDE_READY");
     assert_eq!(
         std::fs::read_to_string(&claude_cwd).unwrap().trim_end(),
-        workspace.canonicalize().unwrap().to_str().unwrap(),
+        workspace.canonical().unwrap().to_str().unwrap(),
         "real Claude fixture must start in the workspace root"
     );
     let claude=h.state().debug_focused_launch_spec().unwrap();

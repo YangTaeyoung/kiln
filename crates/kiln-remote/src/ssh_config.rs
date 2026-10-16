@@ -1,5 +1,6 @@
 //! Read-only SSH host discovery. No command, including `Match exec`, is run.
 //! Metadata is a static hint; OpenSSH evaluates the original config on connect.
+use kiln_common::paths::Canonical;
 use anyhow::{Context, Result, bail};
 use std::{collections::BTreeSet, path::{Path, PathBuf}};
 
@@ -78,7 +79,7 @@ pub fn validate_alias(alias: &str) -> Result<()> {
 }
 
 pub fn default_config_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".ssh/config"))
+    kiln_common::paths::home().map(|home| home.join(".ssh").join("config"))
 }
 
 /// Import literal aliases, including aliases in nested Include files. Wildcard
@@ -128,7 +129,7 @@ fn discover_with_base(path: &Path, base: &Path) -> Result<Vec<SshHost>> {
 type Entry = (String, Vec<String>);
 fn read_entries(path: &Path, base: &Path, stack: &mut Vec<PathBuf>, out: &mut Vec<Entry>, count: &mut usize) -> Result<()> {
     if stack.len() >= 16 || *count >= 512 { bail!("SSH config Include limit exceeded"); }
-    let canonical = path.canonicalize().with_context(|| format!("Cannot read SSH config {}", path.display()))?;
+    let canonical = path.canonical().with_context(|| format!("Cannot read SSH config {}", path.display()))?;
     if stack.contains(&canonical) { bail!("SSH config Include cycle"); }
     let metadata = std::fs::metadata(&canonical)?;
     if metadata.len() > 1024 * 1024 { bail!("SSH config is too large"); }
@@ -156,8 +157,8 @@ fn read_entries(path: &Path, base: &Path, stack: &mut Vec<PathBuf>, out: &mut Ve
 }
 
 fn expand_home(value: &str) -> PathBuf {
-    if let Some(rest) = value.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") { return PathBuf::from(home).join(rest); }
+    if let Some(rest) = kiln_common::paths::tilde_rest(value).filter(|rest| !rest.is_empty()) {
+        if let Some(home) = kiln_common::paths::home() { return home.join(rest); }
     }
     PathBuf::from(value)
 }

@@ -29,10 +29,7 @@ pub struct AwsFiles {
 }
 impl AwsFiles {
     pub fn current() -> Self {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default()
-            .join(".aws");
+        let home = kiln_common::paths::home().unwrap_or_default().join(".aws");
         Self {
             config: std::env::var_os("AWS_CONFIG_FILE")
                 .map(PathBuf::from)

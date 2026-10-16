@@ -1,5 +1,6 @@
 //! Bounded recovery from Codex's structured terminal capacity error.
 //! Read-only transcript observation; never infer errors from rendered user text.
+use kiln_common::paths::Canonical;
 use super::{KilnApp, Pane, PaneKind, agent_runtime, layout::PaneId};
 use anyhow::{Context, Result, ensure};
 use kiln_accounts::Tool;
@@ -95,8 +96,8 @@ fn failure_in(record: &agent_runtime::Record, tracked: &Path) -> Result<Option<F
         .iter()
         .find(|(k, _)| k == "CODEX_HOME")
         .context("unpinned namespace")?;
-    let root = Path::new(&root.1).canonicalize()?;
-    let cwd = Path::new(record.spec.cwd.as_deref().context("missing cwd")?).canonicalize()?;
+    let root = Path::new(&root.1).canonical()?;
+    let cwd = Path::new(record.spec.cwd.as_deref().context("missing cwd")?).canonical()?;
     let entries = match fs::read_dir(tracked) {
         Ok(entries) => entries,
         Err(_) => return Ok(None),
@@ -153,7 +154,7 @@ fn failure_in(record: &agent_runtime::Record, tracked: &Path) -> Result<Option<F
                     .as_str()
                     .context("missing transcript cwd")?
             )
-            .canonicalize()?
+            .canonical()?
                 == cwd,
             "wrong workspace"
         );
@@ -605,7 +606,7 @@ mod tests {
     #[test]
     fn tracked_identity_and_account_scope_are_required() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dir.path().canonical().unwrap();
         let tracked = root.join("tracked");
         fs::create_dir(&tracked).unwrap();
         let path = root.join("rollout.jsonl");

@@ -9,19 +9,10 @@ pub struct Prepared { pub command:String, pub title:String, pub request_path:Pat
 #[cfg(not(windows))]
 fn quote(value:&str)->String {format!("'{}'",value.replace('\'',"'\\''"))}
 pub(super) fn executable(name:&str)->Option<PathBuf>{
-    let mut dirs:Vec<_>=std::env::var_os("PATH").map(|p|std::env::split_paths(&p).collect()).unwrap_or_default();
-    if let Some(home)=std::env::var_os("HOME").or_else(||std::env::var_os("USERPROFILE")) {dirs.push(PathBuf::from(home).join(".local/bin"));}
-    dirs.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);
-    dirs.into_iter().flat_map(|dir| {
-        let mut paths=vec![dir.join(name)];
-        if cfg!(windows){paths.extend([dir.join(format!("{name}.exe")),dir.join(format!("{name}.cmd"))]);}
-        paths
-    }).find(|p|{
-        let Ok(metadata)=p.metadata() else{return false;};
-        if !metadata.is_file(){return false;}
-        #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;metadata.permissions().mode()&0o111!=0}
-        #[cfg(not(unix))]{true}
-    })
+    let mut extra=Vec::new();
+    if let Some(home)=kiln_common::paths::home() {extra.push(home.join(".local").join("bin"));}
+    extra.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);
+    kiln_common::paths::find_executable(name,&extra)
 }
 
 pub fn prepare(program:&str,context:&str,request:&str)->Result<Prepared,String>{

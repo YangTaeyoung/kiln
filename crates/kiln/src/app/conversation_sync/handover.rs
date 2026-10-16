@@ -1,4 +1,5 @@
 //! Durable ownership for native resumes launched inside Kiln.
+use kiln_common::paths::Canonical;
 use super::*;
 use crate::app::agent_runtime::{self, Record};
 
@@ -97,7 +98,7 @@ fn root(record: &Record) -> Option<PathBuf> {
                 })
             })
         })
-        .and_then(|root| root.canonicalize().ok())
+        .and_then(|root| root.canonical().ok())
 }
 pub(crate) fn link<'a>(links: &'a [Link], record: &Record) -> Option<&'a Link> {
     let root = root(record)?;

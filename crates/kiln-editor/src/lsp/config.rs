@@ -158,57 +158,19 @@ pub fn fallbacks(family: &str) -> Vec<ServerSpec> {
 
 fn extra_dirs() -> Vec<PathBuf> {
     let mut v = Vec::new();
-    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        let home = PathBuf::from(home);
-        v.push(home.join(".cargo/bin"));
-        v.push(home.join("go/bin"));
-        v.push(home.join(".local/bin"));
+    if let Some(home) = kiln_common::paths::home() {
+        v.push(home.join(".cargo").join("bin"));
+        v.push(home.join("go").join("bin"));
+        v.push(home.join(".local").join("bin"));
     }
     v.push(PathBuf::from("/opt/homebrew/bin"));
     v.push(PathBuf::from("/usr/local/bin"));
     v
 }
 
-fn is_executable(p: &Path) -> bool {
-    let Ok(m) = std::fs::metadata(p) else { return false };
-    if !m.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        m.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
 /// 명령을 실행 파일 경로로 찾는다. 경로 구분자가 있으면 그대로 확인하고, 아니면 PATH 와 흔한 설치 위치를 본다.
 pub fn find_executable(cmd: &str) -> Option<PathBuf> {
-    if cmd.is_empty() {
-        return None;
-    }
-    let p = Path::new(cmd);
-    if p.components().count() > 1 {
-        return is_executable(p).then(|| p.to_path_buf());
-    }
-    let exts: Vec<String> = if cfg!(windows) {
-        vec![String::new(), ".exe".into(), ".cmd".into(), ".bat".into()]
-    } else {
-        vec![String::new()]
-    };
-    let path_dirs = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
-    for dir in path_dirs.into_iter().chain(extra_dirs()) {
-        for e in &exts {
-            let cand = dir.join(format!("{cmd}{e}"));
-            if is_executable(&cand) {
-                return Some(cand);
-            }
-        }
-    }
-    None
+    kiln_common::paths::find_executable(cmd, &extra_dirs())
 }
 
 /// 파일이 속한 워크스페이스 루트. `root` 아래면 `root`, 아니면 표지 파일이 있는 가장 가까운 조상.
@@ -279,9 +241,10 @@ mod tests {
 
     #[test]
     fn finds_executables_on_path() {
-        assert!(find_executable("sh").is_some());
+        let (name, path) = if cfg!(windows) { ("cmd", r"C:\Windows\System32\cmd.exe") } else { ("sh", "/bin/sh") };
+        assert!(find_executable(name).is_some());
         assert!(find_executable("definitely-not-a-real-binary-kiln").is_none());
-        assert!(find_executable("/bin/sh").is_some());
+        assert!(find_executable(path).is_some());
     }
 }
 

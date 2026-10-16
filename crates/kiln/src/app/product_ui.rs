@@ -1,10 +1,11 @@
+use kiln_common::paths::Canonical;
 use super::*;
 use kiln_common::{fonts,widgets};
 impl KilnApp {
     pub(super) fn ui_product_overlays(&mut self, ctx:&egui::Context) {
         if self.confirm.is_some(){return;}
         if let Some(projects::ProjectAction::Open{path,name,command})=self.projects.ui(ctx) {
-            let path=normalize_path(path.canonicalize().unwrap_or(path));
+            let path=normalize_path(path.canonical().unwrap_or(path));
             let name=name.trim().to_owned();
             if !path.is_dir() { self.toast(kiln_common::i18n::tr("폴더를 열 수 없습니다"),path.display().to_string(),ToastKind::Error,None); return; }
             if let Some(index)=self.workspaces.iter().position(|w|w.tools.canonical_root()==path && w.name==name) {

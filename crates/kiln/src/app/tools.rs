@@ -1,5 +1,6 @@
 //! 사이드 도구 패널(탐색기, 검색, Git, PR, DB)과 중앙 도구 탭.
 
+use kiln_common::paths::Canonical;
 use super::Action;
 use super::state::{ToolP, WorkspaceDrafts};
 use kiln_common::Task;
@@ -640,7 +641,7 @@ impl WorkspaceTools {
             repositories: super::workspace_repos::RepositoryWorkspace::new(root,ctx).with_id_salt(workspace_id),
             root: root.to_path_buf(),
             workspace_id,
-            canonical_root: root.canonicalize().unwrap_or_else(|_| root.to_path_buf()),
+            canonical_root: root.canonical().unwrap_or_else(|_| root.to_path_buf()),
             lsp,
             ctx: ctx.clone(),
             db,

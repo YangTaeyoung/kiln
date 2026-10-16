@@ -493,7 +493,7 @@ impl Editor {
     pub fn save_copy(&self,path:&Path)->anyhow::Result<()> {
         anyhow::ensure!(self.encoding!=Encoding::Binary, "{}", kiln_common::trf!("바이너리 파일은 저장할 수 없습니다"));
         anyhow::ensure!(path!=self.path, "{}", kiln_common::trf!("복사본은 다른 경로에 저장하세요"));
-        if let (Ok(source),Ok(target))=(std::fs::canonicalize(&self.path),std::fs::canonicalize(path)){anyhow::ensure!(source!=target, "{}", kiln_common::trf!("복사본은 원본과 다른 파일에 저장하세요"));}
+        if let (Ok(source),Ok(target))=(kiln_common::paths::canonicalize(&self.path),kiln_common::paths::canonicalize(path)){anyhow::ensure!(source!=target, "{}", kiln_common::trf!("복사본은 원본과 다른 파일에 저장하세요"));}
         kiln_common::safe_file::write(path,&encode(&self.buf.to_text(),self.encoding))?;Ok(())
     }
     fn choose_save_copy(&mut self) {

@@ -34,9 +34,9 @@ impl Draft {
         let raw = self.cwd.trim();
         let cwd = if raw.is_empty() { None } else {
             if raw.len() > 4096 || raw.chars().any(char::is_control) { return Err(kiln_common::i18n::tr("작업 폴더 경로를 확인하세요.").into()); }
-            let path = if raw == "~" || raw.starts_with("~/") {
-                let home = std::env::var_os("HOME").ok_or(kiln_common::i18n::tr("홈 폴더를 찾을 수 없습니다. 전체 경로를 입력하세요."))?;
-                PathBuf::from(home).join(raw.strip_prefix("~/").unwrap_or(""))
+            let path = if let Some(rest) = kiln_common::paths::tilde_rest(raw) {
+                let home = kiln_common::paths::home().ok_or(kiln_common::i18n::tr("홈 폴더를 찾을 수 없습니다. 전체 경로를 입력하세요."))?;
+                home.join(rest)
             } else { PathBuf::from(raw) };
             if !path.is_absolute() { return Err(kiln_common::i18n::tr("작업 폴더는 전체 경로 또는 ~/로 입력하세요.").into()); }
             Some(path)

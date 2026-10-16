@@ -1,4 +1,5 @@
 //! End-to-end navigation and visual proof for the compact development workspace.
+use kiln_common::paths::Canonical;
 use egui_kittest::{Harness,kittest::{Queryable,NodeT}};
 use kiln::app::{Action,KilnApp};
 use std::{path::{Path,PathBuf},time::{Duration,Instant},process::Command};
@@ -32,7 +33,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  assert!(h.query_by_label("기록").is_none());assert!(h.query_by_label("연동").is_none());assert!(h.query_by_label("상태 미확인").is_none());
  let output=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/reviews/2026-09-29-distill");std::fs::create_dir_all(&output).unwrap();
  h.render().unwrap().save(output.join("workspace-1440.png")).unwrap();
- h.query_all_by_label("personal").next().unwrap().click();h.run_steps(3);assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ h.query_all_by_label("personal").next().unwrap().click();h.run_steps(3);assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  // The workspace sidebar only switches work. Inspection is a separate surface.
  assert!(h.query_by_label("워크스페이스 메뉴").is_none());
  assert!(h.query_by_label("데이터베이스").is_none());
@@ -42,7 +43,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  h.get_by_label("변경").click();h.run_steps(5);
  if let Some(expand)=h.query_by_label("web 변경 펼치기") {expand.click();h.run_steps(3);}
  pump(&mut h,|h|h.query_by_label_contains("app.ts").is_some());
- assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  h.render().unwrap().save(output.join("inspector-changes-1440.png")).unwrap();
  // An oversized dock saved by an older build must not squeeze out terminals.
  let dock=egui::Id::new("tools-dock");
@@ -90,7 +91,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
   .find(|node| node.accesskit_node().role()==egui::accesskit::Role::Button && node.rect().top()>42.0 && node.rect().left()<300.)
   .expect("workspace context tools submenu, not titlebar tools").click();h.run_steps(2);
  h.get_by_label("소스 제어").click();h.run_steps(4);
- assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  assert!(h.state().debug_sheet_open(),"explicit workspace menu must open, never toggle closed");
  assert!(h.query_by_label_contains("app.ts").is_some());
  h.get_by_label("도구 닫기").click();h.run_steps(3);
@@ -101,7 +102,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  pump(&mut h,|h|h.state().debug_focused_text().is_some_and(|s|s.contains('>')));
  h.render().unwrap().save(output.join("workspace-duplicate-tabs.png")).unwrap();
  for n in [2,1] {h.state_mut().debug_queue_action(Action::ClosePage(n,true));h.run_steps(3);}
- h.get_by_label("새 작업").click();h.run_steps(2);h.get_by_label("에이전트 요청").click();h.run_steps(4);assert!(h.state().debug_sheet_open());assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ h.get_by_label("새 작업").click();h.run_steps(2);h.get_by_label("에이전트 요청").click();h.run_steps(4);assert!(h.state().debug_sheet_open());assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  h.render().unwrap().save(output.join("agent-task-1440.png")).unwrap();
  h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
  for (w,height,scale,name) in [(720.,440.,1.3,"workspace-minimum-130.png"),(2560.,1440.,1.,"workspace-2560.png")]{

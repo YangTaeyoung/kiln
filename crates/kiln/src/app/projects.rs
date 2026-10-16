@@ -1,6 +1,7 @@
 //! Project/task composer. Git calls run off the UI thread; archiving only hides a
 //! task and never removes its directory, branch, or running sessions.
 //! Reference: https://www.onorca.dev/docs/model/worktrees
+use kiln_common::paths::Canonical;
 use egui::{Color32, CornerRadius, Frame, Margin, RichText, Stroke};
 use kiln_common::{
     Theme, fonts,
@@ -70,20 +71,13 @@ struct Draft {
 }
 // Read-only file discovery: do not execute shell startup files or user-supplied commands.
 fn executable_in(name: &str, directories: &[PathBuf]) -> Option<PathBuf> {
-    for dir in directories.iter().filter(|p|p.is_absolute()).take(64) {
-        let names=if cfg!(windows){vec![format!("{name}.exe"),format!("{name}.cmd"),format!("{name}.bat")]}else{vec![name.to_owned()]};
-        for name in names {let path=dir.join(name);let Ok(meta)=std::fs::metadata(&path) else {continue;};
-            if !meta.is_file(){continue;}
-            #[cfg(unix)] {use std::os::unix::fs::PermissionsExt;if meta.permissions().mode() & 0o111 == 0 {continue;}}
-            return Some(path);
-        }
-    }
-    None
+    let absolute: Vec<PathBuf> = directories.iter().filter(|p| p.is_absolute()).take(64).cloned().collect();
+    kiln_common::paths::find_executable_in(name, &absolute)
 }
 fn detected_agents() -> Vec<(String,Option<PathBuf>)> {
     let mut dirs:Vec<PathBuf>=std::env::var_os("PATH").map(|p|std::env::split_paths(&p).collect()).unwrap_or_default();
     #[cfg(target_os="macos")] dirs.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);
-    if let Some(home)=std::env::var_os("HOME"){dirs.push(PathBuf::from(home).join(".local/bin"));}
+    if let Some(home)=kiln_common::paths::home(){dirs.push(home.join(".local").join("bin"));}
     ["codex","claude","gemini"].into_iter().map(|name|(name.into(),executable_in(name,&dirs))).collect()
 }
 
@@ -102,7 +96,7 @@ impl Draft {
     }
     fn validate(&self) -> Result<(PathBuf, String, Option<String>), String> {
         let path = expand_path(&self.folder)?;
-        let path = path.canonicalize().unwrap_or(path);
+        let path = path.canonical().unwrap_or(path);
         let name = self.name.trim();
         if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
             return Err(kiln_common::i18n::tr("프로젝트 이름을 1~100자로 입력하세요.").into());
@@ -737,9 +731,9 @@ fn expand_path(raw: &str) -> Result<PathBuf, String> {
     if raw.is_empty() || raw.len() > 4096 || raw.chars().any(char::is_control) {
         return Err(kiln_common::i18n::tr("폴더의 전체 경로를 입력하세요.").into());
     }
-    let path = if raw == "~" || raw.starts_with("~/") {
-        PathBuf::from(std::env::var_os("HOME").ok_or(kiln_common::i18n::tr("홈 폴더를 찾지 못했습니다."))?)
-            .join(raw.strip_prefix("~/").unwrap_or(""))
+    let path = if let Some(rest) = kiln_common::paths::tilde_rest(raw) {
+        kiln_common::paths::home().ok_or(kiln_common::i18n::tr("홈 폴더를 찾지 못했습니다."))?
+            .join(rest)
     } else {
         raw.into()
     };
@@ -911,7 +905,7 @@ mod tests {
         p.save_task(saved.clone()).unwrap();
         p.open = true;
         assert_eq!(p.apply(Intent::OpenSaved(saved.clone())), Some(ProjectAction::Open {
-            path: dir.path().canonicalize().unwrap(), name: saved.name.clone(), command: saved.command.clone(),
+            path: dir.path().canonical().unwrap(), name: saved.name.clone(), command: saved.command.clone(),
         }));
         p.open = true;
         p.apply(Intent::Compose);
@@ -957,7 +951,7 @@ mod tests {
         assert_eq!(
             p.apply(Intent::Start),
             Some(ProjectAction::Open {
-                path: d.path().canonicalize().unwrap(),
+                path: d.path().canonical().unwrap(),
                 name: "agent task".into(),
                 command: Some("codex --model example".into())
             })

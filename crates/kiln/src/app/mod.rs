@@ -1,5 +1,6 @@
 //! Kiln GUI: 스페이스(워크스페이스) → 페이지 → 카드(터미널·에디터·DB 등) 분할 트리.
 
+use kiln_common::paths::Canonical;
 pub mod conn;
 mod keys;
 mod launchers;
@@ -442,7 +443,7 @@ impl KilnApp {
             }
         }
         if let Some(p) = open_path {
-            let p = normalize_path(p.canonicalize().unwrap_or(p));
+            let p = normalize_path(p.canonical().unwrap_or(p));
             if let Some(i) = app.workspaces.get(app.active).filter(|w|w.root==p).map(|_|app.active).or_else(||app.workspaces.iter().position(|w| w.root == p)) {
                 app.active = i;
             } else {
@@ -450,9 +451,8 @@ impl KilnApp {
             }
         }
         if app.workspaces.is_empty() {
-            let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-            let cwd = std::env::current_dir().ok().filter(|d| d != Path::new("/")).unwrap_or(home);
-            app.add_workspace(cwd, ctx);
+            let home = kiln_common::paths::home().unwrap_or_else(|| PathBuf::from("."));
+            app.add_workspace(first_workspace(std::env::current_dir().ok(), home), ctx);
         }
         if first_run { let root = app.workspaces[app.active].root.clone(); app.projects.open(&root); }
         app
@@ -927,7 +927,7 @@ impl KilnApp {
     }
 
     fn add_workspace(&mut self, root: PathBuf, ctx: &egui::Context) {
-        let root = normalize_path(root.canonicalize().unwrap_or(root));
+        let root = normalize_path(root.canonical().unwrap_or(root));
         if let Some(index) = self.workspaces.get(self.active).filter(|ws|normalize_path(ws.tools.canonical_root().to_owned())==root).map(|_|self.active).or_else(||self.workspaces.iter().position(|ws| normalize_path(ws.tools.canonical_root().to_owned()) == root)) {
             self.active = index;
             self.focus_terminal = true;
@@ -939,7 +939,7 @@ impl KilnApp {
     }
 
     fn create_workspace(&mut self, root: PathBuf, name: String, ctx: &egui::Context) -> bool {
-        let root=normalize_path(root.canonicalize().unwrap_or(root));
+        let root=normalize_path(root.canonical().unwrap_or(root));
         if !root.is_dir() || !workspace_dialog::valid_name(&name) {
             self.toast(kiln_common::i18n::tr("워크스페이스를 만들 수 없습니다"), root.display().to_string(), ToastKind::Error, None);
             return false;
@@ -1063,7 +1063,7 @@ impl KilnApp {
             Action::OpenFolder => {
                 let root = self.workspaces[self.active].root.clone();
                 if let Some(path) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() {
-                    let canonical=path.canonicalize().unwrap_or(path);
+                    let canonical=path.canonical().unwrap_or(path);
                     if self.workspaces.iter().filter(|ws|ws.tools.canonical_root()==canonical).count()>1 {self.open_workspace_dialog(canonical);}
                     else {self.add_workspace(canonical,ctx);}
                 }
@@ -1170,7 +1170,7 @@ impl KilnApp {
                     }
                     ws.tools.lsp.shutdown();
                     if self.workspaces.is_empty() {
-                        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+                        let home = kiln_common::paths::home().unwrap_or_default();
                         self.add_workspace(home, ctx);
                     }
                     self.active = self.active.min(self.workspaces.len() - 1);
@@ -1188,7 +1188,7 @@ impl KilnApp {
             Action::OpenAgentFolder(tool) => {
                 let root = self.ws().root.clone();
                 let Some(cwd) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() else { return; };
-                let cwd = normalize_path(cwd.canonicalize().unwrap_or(cwd));
+                let cwd = normalize_path(cwd.canonical().unwrap_or(cwd));
                 let spec = match agent_runtime::managed(tool, cwd.clone(), &self.rotator.mgr).map_err(|e|e.to_string()) {
                     Ok(spec) => spec,
                     Err(error) => { self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), error, ToastKind::Error, None); return; }
@@ -2277,12 +2277,28 @@ fn os_notify(title: &str, body: &str) {
 }
 
 /// Windows 확장 경로 접두(`\\?\`)를 떼어 일반 경로로 만든다.
-fn normalize_path(p: PathBuf) -> PathBuf {
-    let s = p.to_string_lossy();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
-        _ => p,
+/// The first workspace when none is saved: the launch folder, unless it is a drive or
+/// file-system root or inside the Windows folder.
+fn first_workspace(cwd: Option<PathBuf>, home: PathBuf) -> PathBuf {
+    cwd.filter(|dir| dir.parent().is_some() && !in_windows_folder(dir)).unwrap_or(home)
+}
+
+fn in_windows_folder(dir: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let Some(root) = std::env::var_os("SystemRoot").map(PathBuf::from) else { return false; };
+        let lower = |p: &Path| p.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect::<Vec<_>>();
+        lower(dir).starts_with(&lower(&root))
     }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
+        false
+    }
+}
+
+fn normalize_path(p: PathBuf) -> PathBuf {
+    kiln_common::paths::simplified(&p).to_path_buf()
 }
 
 /// Input other than pointer motion, which can change application state.
@@ -2293,6 +2309,21 @@ fn changes_state(event: &egui::Event) -> bool {
 #[cfg(test)]
 mod follow_up_pass_tests {
     use super::*;
+    #[test]
+    fn first_workspace_avoids_roots_and_the_windows_folder() {
+        let home = std::env::temp_dir().join("home");
+        let project = std::env::temp_dir().join("project");
+        assert_eq!(first_workspace(Some(project.clone()), home.clone()), project);
+        assert_eq!(first_workspace(None, home.clone()), home);
+        let root = project.ancestors().last().unwrap().to_path_buf();
+        assert_eq!(first_workspace(Some(root), home.clone()), home);
+        #[cfg(windows)]
+        {
+            let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+            let shouted = PathBuf::from(system.to_string_lossy().to_uppercase());
+            assert_eq!(first_workspace(Some(shouted), home.clone()), home);
+        }
+    }
     #[test]
     fn clicks_and_keys_change_state_but_pointer_motion_does_not() {
         let click = egui::Event::PointerButton { pos: egui::Pos2::ZERO, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() };
@@ -2330,7 +2361,7 @@ mod workspace_path_tests {
 
 pub(crate) fn short_path(p: &Path) -> String {
     let s = p.to_string_lossy().into_owned();
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = kiln_common::paths::home() {
         let h = home.to_string_lossy();
         if let Some(rest) = s.strip_prefix(h.as_ref()) {
             return format!("~{rest}");

@@ -1,4 +1,5 @@
 //! Stop both in-memory readers, settle native history, then reopen only the winner.
+use kiln_common::paths::Canonical;
 use super::*;
 use conversation_sync::handover;
 use std::fs::File;
@@ -150,7 +151,7 @@ impl KilnApp {
                 w.conversation_sync
                     && winner_record.spec.cwd.as_ref().is_some_and(|cwd| {
                         Path::new(cwd)
-                            .canonicalize()
+                            .canonical()
                             .is_ok_and(|cwd| cwd.starts_with(w.tools.canonical_root()))
                     })
             }) {

@@ -29,7 +29,7 @@ fn command(profile: &ConnectionProfile) -> Result<Command> {
         unreachable!()
     };
     ssh_config::validate_alias(alias)?;
-    let mut cmd = Command::new("/usr/bin/sftp");
+    let mut cmd = Command::new(sftp_program());
     cmd.args([
         "-q",
         "-b",
@@ -299,7 +299,7 @@ mod tests {
             },
         };
         let c = command(&p).unwrap();
-        assert_eq!(c.get_program(), "/usr/bin/sftp");
+        assert_eq!(c.get_program(), sftp_program().as_os_str());
         let args = c
             .get_args()
             .map(|v| v.to_string_lossy())
@@ -337,5 +337,22 @@ mod metadata_tests {
         assert_eq!(f.size(), 26);
         assert!(f.modified() > std::time::UNIX_EPOCH);
         assert_eq!(leaf(f.name()), "한글 [literal] with spaces.txt");
+    }
+}
+
+/// The system `sftp`: `/usr/bin/sftp` on Unix, Windows OpenSSH's `sftp.exe` on Windows.
+fn sftp_program() -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let system = std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into());
+        let bundled = system.join("System32").join("OpenSSH").join("sftp.exe");
+        if bundled.is_file() {
+            return bundled;
+        }
+        kiln_common::paths::find_executable("sftp", &[]).unwrap_or(bundled)
+    }
+    #[cfg(not(windows))]
+    {
+        "/usr/bin/sftp".into()
     }
 }

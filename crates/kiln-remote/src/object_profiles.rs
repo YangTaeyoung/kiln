@@ -60,9 +60,7 @@ fn resolve_oracle(home: &Path, cwd: &Path, cli: Option<&Path>, sdk: Option<&Path
     if legacy.is_file() { legacy } else { path }
 }
 pub(crate) fn oracle_config_path(selected: Option<&Path>) -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
+    let home = kiln_common::paths::home().unwrap_or_default();
     let cwd = std::env::current_dir().unwrap_or_default();
     let cli = std::env::var_os("OCI_CLI_CONFIG_FILE").map(PathBuf::from);
     let sdk = std::env::var_os("OCI_CONFIG_FILE").map(PathBuf::from);
@@ -70,9 +68,7 @@ pub(crate) fn oracle_config_path(selected: Option<&Path>) -> PathBuf {
 }
 impl ProfileFiles {
     pub fn current(provider: ObjectProvider) -> Self {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default();
+        let home = kiln_common::paths::home().unwrap_or_default();
         let cwd = std::env::current_dir().unwrap_or_default();
         let config = match provider {
             ObjectProvider::Oracle => oracle_config_path(None),

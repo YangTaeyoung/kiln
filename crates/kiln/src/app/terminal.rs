@@ -1141,8 +1141,8 @@ pub fn find_link(text: &str, col: usize, cwd: Option<&str>) -> Option<(usize, us
         if !file_part.contains('/') && !file_part.contains('.') {
             return None;
         }
-        let expanded = if let Some(rest) = file_part.strip_prefix("~/") {
-            std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(rest)).ok()?
+        let expanded = if let Some(rest) = kiln_common::paths::tilde_rest(file_part).filter(|rest| !rest.is_empty()) {
+            kiln_common::paths::home()?.join(rest)
         } else {
             let p = std::path::PathBuf::from(file_part);
             if p.is_absolute() { p } else { std::path::PathBuf::from(cwd?).join(p) }

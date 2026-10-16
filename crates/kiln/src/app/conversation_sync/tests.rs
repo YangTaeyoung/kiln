@@ -1,3 +1,4 @@
+use kiln_common::paths::Canonical;
 use super::*;
 use format::Message;
 use serde_json::json;
@@ -415,7 +416,7 @@ struct Fixture {
 impl Fixture {
     fn new(tool: Tool) -> Self {
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
+        let root = temp.path().canonical().unwrap();
         let config = root.join("kiln");
         private_dir(&config).unwrap();
         let pair = Pair {
@@ -828,7 +829,7 @@ fn export_native_cli_fixtures() {
         std::env::var_os("KILN_SYNC_FIXTURE_DIR").expect("explicit fixture directory"),
     );
     assert!(dir.join("owned-fixture").is_file());
-    let dir = dir.canonicalize().unwrap();
+    let dir = dir.canonical().unwrap();
     let pair = Pair {
         claude: Endpoint {
             root: dir.join("claude"),
@@ -1422,7 +1423,7 @@ fn workspace_filter_includes_children_excludes_neighbors_and_pauses_closed_folde
         fs::create_dir_all(path).unwrap();
     }
     let mut scope = workspace_scope(&f);
-    scope.workspaces = vec![project.canonicalize().unwrap()];
+    scope.workspaces = vec![project.canonical().unwrap()];
     for (index, cwd) in [&project, &child, &neighbor].into_iter().enumerate() {
         let seed = Source {
             tool: Tool::Claude,
@@ -1676,7 +1677,7 @@ fn synchronize_explicitly_authorized_workspaces() {
                 .workspaces
                 .iter()
                 .any(|w| w.conversation_sync
-                    && w.root.canonicalize().ok() == root.canonicalize().ok()),
+                    && w.root.canonical().ok() == root.canonical().ok()),
             "workspace must already be opted in"
         );
     }
@@ -1893,7 +1894,7 @@ fn workspace_discovery_skips_symlinks_and_subagents_and_accepts_unknown_versions
 fn export_discovered_workspace_fixtures() {
     export_native_cli_fixtures();
     let dir = PathBuf::from(std::env::var_os("KILN_SYNC_FIXTURE_DIR").unwrap())
-        .canonicalize()
+        .canonical()
         .unwrap();
     let pair = Pair {
         claude: Endpoint {
@@ -2000,7 +2001,7 @@ fn verify_discovered_workspace_cli_continuations() {
     let dir = PathBuf::from(
         std::env::var_os("KILN_SYNC_FIXTURE_DIR").expect("explicit fixture directory"),
     )
-    .canonicalize()
+    .canonical()
     .unwrap();
     assert!(dir.join("owned-fixture").is_file());
     let sources: Vec<Source> =
@@ -3551,7 +3552,7 @@ fn inspect_live_histories_read_only() {
 #[ignore]
 fn hub_cli_round_trip() {
     let dir = PathBuf::from(std::env::var_os("KILN_HUB_FIXTURE_DIR").expect("explicit fixture directory"))
-        .canonicalize()
+        .canonical()
         .unwrap();
     let pair = Pair {
         claude: Endpoint { root: dir.join("claude"), label: "fixture".into() },

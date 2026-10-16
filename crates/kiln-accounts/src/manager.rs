@@ -34,10 +34,7 @@ pub struct Env {
 impl Env {
     /// 실제 홈 디렉토리·키체인(macOS) 또는 0600 파일(그 밖)·`kiln_common` 설정 경로.
     pub fn real() -> Self {
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
+        let home = kiln_common::paths::home().unwrap_or_else(std::env::temp_dir);
         let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
         let codex_env = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
         let codex_home = codex::codex_home(&home, codex_env.as_deref());

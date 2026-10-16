@@ -1,4 +1,5 @@
 //! Opt-in native continuations discovered within open workspace folders.
+use kiln_common::paths::Canonical;
 mod codex_index;
 mod canonical;
 mod checkpoint;
@@ -106,7 +107,7 @@ impl Pair {
                 .map(|p| p.label)
                 .unwrap_or_else(|| "Default CLI".into());
             Ok(Endpoint {
-                root: root.canonicalize()?,
+                root: root.canonical()?,
                 label,
             })
         };
@@ -224,7 +225,7 @@ pub(super) fn track(
                     ".codex"
                 })
         })
-        .canonicalize()?;
+        .canonical()?;
     let path = storage::logical(record.tool, Path::new(transcript));
     safe_path(&root, &path)?;
     let id = record
@@ -245,7 +246,7 @@ pub(super) fn track(
             .as_deref()
             .context("Missing working directory")?,
     )
-    .canonicalize()?
+    .canonical()?
     .to_string_lossy()
     .into_owned();
     let source = Source {
@@ -616,7 +617,9 @@ fn native_path(
             .join(format!("{id}.jsonl"))
     } else {
         root.join("sessions")
-            .join(date.format("%Y/%m/%d").to_string())
+            .join(date.format("%Y").to_string())
+            .join(date.format("%m").to_string())
+            .join(date.format("%d").to_string())
             .join(format!(
                 "rollout-{}-{id}.jsonl",
                 date.format("%Y-%m-%dT%H-%M-%S")

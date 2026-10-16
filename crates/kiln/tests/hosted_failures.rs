@@ -2,6 +2,7 @@
 //! No global environment or installed/user daemon is accessed.
 #![cfg(unix)]
 
+use kiln_common::paths::Canonical;
 use kiln_daemon::client::Client;
 use kiln_proto::{ClientMsg, ServerMsg, SessionId, SessionInfo, SpawnSpec};
 use std::path::{Path, PathBuf};
@@ -76,7 +77,7 @@ impl Drop for Fixture {
         // A failing control-path regression must not strand its owned shell.
         // Verify the unique private cwd before signaling a recorded Create PID,
         // rather than trusting a PID that might have been reused after exit.
-        let owned_root = self.dir.path().canonicalize().unwrap();
+        let owned_root = self.dir.path().canonical().unwrap();
         for &pid in &self.children {
             if kiln_daemon::procinfo::cwd(pid).is_some_and(|cwd| Path::new(&cwd).starts_with(&owned_root)) {
                 unsafe { libc::kill(pid as i32, libc::SIGHUP); }
@@ -283,7 +284,7 @@ fn assert_resumed_monitor_and_input(fixture: &Fixture, client: &Client, session:
     std::fs::create_dir(&after).unwrap();
     input(client, session, &format!("cd '{}'; printf '\\nROLLBACK_%s_OK\\n' INPUT; sleep 4", after.display()));
     wait_text(client, session, "ROLLBACK_INPUT_OK");
-    let expected_cwd = after.canonicalize().unwrap().to_string_lossy().into_owned();
+    let expected_cwd = after.canonical().unwrap().to_string_lossy().into_owned();
     let running = wait_info(client, session, |s| s.fg_process.as_deref() == Some("sleep") && s.cwd.as_deref() == Some(expected_cwd.as_str()));
     assert_eq!(running.pid, shell, "rollback replaced the shell");
     wait_info(client, session, |s| s.fg_process.as_deref() == Some("sh"));

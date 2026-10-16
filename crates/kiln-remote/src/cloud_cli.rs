@@ -9,38 +9,12 @@ use std::{
 };
 
 pub(crate) fn find(name: &str) -> Option<PathBuf> {
-    let mut dirs = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-        .unwrap_or_default();
-    if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".local/bin"));
+    let mut extra = Vec::new();
+    if let Some(home) = kiln_common::paths::home() {
+        extra.push(home.join(".local").join("bin"));
     }
-    dirs.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ]);
-    let cwd = std::env::current_dir().ok();
-    dirs.into_iter()
-        .filter_map(|d| {
-            if d.is_absolute() {
-                Some(d)
-            } else {
-                cwd.as_ref().map(|p| p.join(d))
-            }
-        })
-        .map(|d| d.join(name))
-        .find(|p| {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                p.metadata()
-                    .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            }
-            #[cfg(not(unix))]
-            {
-                p.is_file()
-            }
-        })
+    extra.extend([PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")]);
+    kiln_common::paths::find_executable(name, &extra)
 }
 struct OwnedChild {
     child: Child,

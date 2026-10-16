@@ -1,5 +1,6 @@
 //! GUI 를 헤드리스로 띄워 실제 데몬과 연결된 상태에서 입력·분할·스냅샷을 검증한다.
 
+use kiln_common::paths::Canonical;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use kiln::app::KilnApp;
@@ -970,7 +971,7 @@ fn closing_other_projects_preserves_the_active_project() {
             h.state_mut().debug_queue_action(kiln::app::Action::CloseWorkspaceConfirmed(closed));
             h.run_steps(2);
             let expected=if active!=closed {&roots[active]} else {&roots[if closed==2 {1} else {closed+1}]};
-            assert_eq!(h.state().debug_active_workspace_root().canonicalize().unwrap(),expected.canonicalize().unwrap(),"active={active}, closed={closed}");
+            assert_eq!(h.state().debug_active_workspace_root().canonical().unwrap(),expected.canonical().unwrap(),"active={active}, closed={closed}");
             shutdown(&base);
         }
     }
@@ -1190,7 +1191,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
     h.state_mut().debug_queue_action(Action::ToggleZoom(None));
     h.run_steps(3);
     h.state_mut().debug_queue_action(Action::NewWorkspace(Some(other.clone())));
-    assert!(pump_until(&mut h, 10, |h| h.state().debug_active_workspace_root().canonicalize().ok() == other.canonicalize().ok() && h.state().debug_focused_session().is_some_and(|session| session != first && session != second)));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_active_workspace_root().canonical().ok() == other.canonical().ok() && h.state().debug_focused_session().is_some_and(|session| session != first && session != second)));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
     let third = h.state().debug_focused_session().unwrap();
     report(third, "API tests complete", "done");
@@ -1200,7 +1201,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
     // split hidden by that page's existing zoom, without creating another PTY.
     h.get_by_label("API contract review · 입력 대기").click();
     assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_session() == Some(first) && h.state().debug_focused_is_visible()));
-    assert_eq!(h.state().debug_active_workspace_root().canonicalize().unwrap(), proj.canonicalize().unwrap());
+    assert_eq!(h.state().debug_active_workspace_root().canonical().unwrap(), proj.canonical().unwrap());
     h.get_by_label("Frontend authentication · 작업 중").click();
     assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_session() == Some(second) && h.state().debug_focused_is_visible()));
     assert_eq!(sessions().len(), 3);
@@ -1264,7 +1265,7 @@ fn check_closing_last_work_surface(close_page: bool) {
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some_and(|session| session != original && session != retained)));
     let replacement = h.state().debug_focused_session().unwrap();
     assert_eq!(h.state().debug_workspace_count(), 2);
-    assert_eq!(h.state().debug_active_workspace_root().canonicalize().unwrap(), proj.canonicalize().unwrap());
+    assert_eq!(h.state().debug_active_workspace_root().canonical().unwrap(), proj.canonical().unwrap());
     assert_eq!(h.state().debug_task_count(), 1);
     assert_eq!(h.state().debug_pane_count(), 1);
     assert_ne!(h.state().debug_focused_pane_id(), Some(original_pane));
@@ -1281,7 +1282,7 @@ fn check_closing_last_work_surface(close_page: bool) {
     assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_session() == Some(retained)));
     client.send(kiln_proto::ClientMsg::Input { session: retained, data: b"printf 'other-workspace-%s\\n' alive\r".to_vec() });
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| text.contains("other-workspace-alive"))));
-    assert_eq!(h.state().debug_active_workspace_root().canonicalize().unwrap(), other.canonicalize().unwrap());
+    assert_eq!(h.state().debug_active_workspace_root().canonical().unwrap(), other.canonical().unwrap());
 }
 
 #[test]
@@ -1786,7 +1787,7 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     assert_eq!(h.state().debug_active_workspace_name(),"Documentation review","rename must not create a duplicate name within the folder");
     h.state_mut().debug_queue_action(Action::RenameWorkspace(1,"bad\nname".into()));h.run_steps(3);
     assert_eq!(h.state().debug_active_workspace_name(),"Documentation review");
-    assert_eq!(h.state().debug_active_workspace_root(),proj.canonicalize().unwrap());
+    assert_eq!(h.state().debug_active_workspace_root(),proj.canonical().unwrap());
     h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
     h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("Write separate documentation".into()));h.run_steps(3);
     assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently","Write separate documentation"]);
@@ -2122,8 +2123,8 @@ int main(int argc,char **argv) {
     } else {
     assert_ne!(h.state().debug_focused_session().unwrap(),original);
     let observed:serde_json::Value=serde_json::from_slice(&std::fs::read(root.join("resumed.json")).unwrap()).unwrap();
-    assert_eq!(observed["id"].as_str(),record.conversation.as_deref());assert_eq!(observed["cwd"].as_str(),proj.canonicalize().unwrap().to_str());
-    assert_eq!(observed["root"].as_str(),root.canonicalize().unwrap().to_str());
+    assert_eq!(observed["id"].as_str(),record.conversation.as_deref());assert_eq!(observed["cwd"].as_str(),proj.canonical().unwrap().to_str());
+    assert_eq!(observed["root"].as_str(),root.canonical().unwrap().to_str());
     assert!(observed["args"].as_array().unwrap().iter().any(|v|v.as_str().is_some_and(|s|s.starts_with("Continue the interrupted task"))));
     assert!(!observed["args"].as_array().unwrap().iter().any(|v|v=="--last"));
     }

@@ -1,5 +1,6 @@
 //! OpenAI Codex CLI 자격증명(`$CODEX_HOME/auth.json`)과 세션 기록의 사용량.
 
+use kiln_common::paths::Canonical;
 use crate::Usage;
 use base64::Engine;
 use serde_json::Value;
@@ -18,7 +19,7 @@ pub fn auth_path(codex_home: &Path) -> PathBuf {
 /// Direct Keyring key used by the official CLI (0.162.1 storage.rs).
 pub(crate) fn keyring_account(home: &Path) -> String {
     use sha2::{Digest, Sha256};
-    let canonical = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let canonical = home.canonical().unwrap_or_else(|_| home.to_path_buf());
     let hash = format!("{:x}", Sha256::digest(canonical.to_string_lossy().as_bytes()));
     format!("cli|{}", &hash[..16])
 }
