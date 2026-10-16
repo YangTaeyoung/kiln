@@ -4428,3 +4428,47 @@ fn a_command_result_followed_by_whitespace_is_still_a_shell_record() {
     assert!(data.iter().any(|r| r["message"]["content"][0]["type"] == "tool_use"));
     assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
 }
+
+#[test]
+fn hook_transcript_paths_match_canonical_roots() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    let root = real.join("Claude Home");
+    let work = dir.path().join("work");
+    fs::create_dir_all(root.join("projects").join("work")).unwrap();
+    fs::create_dir_all(&work).unwrap();
+    let id = "0199a0a0-0000-7000-8000-000000000001";
+    let canonical = root.canonical().unwrap().join("projects").join("work").join(format!("{id}.jsonl"));
+    let mut forms = Vec::new();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&real, dir.path().join("alias")).unwrap();
+        forms.push(dir.path().join("alias/Claude Home/projects/work").join(format!("{id}.jsonl")).to_string_lossy().into_owned());
+    }
+    #[cfg(windows)]
+    {
+        let text = canonical.to_string_lossy().into_owned();
+        forms.extend([text.to_lowercase(), text.replace('\\', "/"), format!(r"\\?\{text}")]);
+    }
+    let record = super::super::agent_runtime::Record {
+        tool: Tool::Claude,
+        spec: kiln_proto::SpawnSpec {
+            cwd: Some(work.to_string_lossy().into_owned()),
+            env: vec![(env_key(Tool::Claude).into(), root.to_string_lossy().into_owned())],
+            ..Default::default()
+        },
+        version: "fixture".into(),
+        conversation: Some(id.into()),
+        generation: "fixture".into(),
+        confirmed: true,
+        request_started: false,
+    };
+    for (index, raw) in forms.iter().enumerate() {
+        let config = dir.path().join(format!("config-{index}"));
+        track(&config, &record, raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
+        let tracked: Vec<_> = fs::read_dir(config.join("conversation-sync/tracked")).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(tracked.len(), 1);
+        let source: Source = serde_json::from_slice(&fs::read(&tracked[0]).unwrap()).unwrap();
+        assert_eq!(source.path, canonical, "{raw}");
+    }
+}

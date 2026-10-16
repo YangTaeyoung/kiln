@@ -226,7 +226,7 @@ pub(super) fn track(
                 })
         })
         .canonical()?;
-    let path = storage::logical(record.tool, Path::new(transcript));
+    let path = storage::logical(record.tool, &under_root(&root, Path::new(transcript)));
     safe_path(&root, &path)?;
     let id = record
         .conversation
@@ -269,6 +269,15 @@ pub(super) fn track(
     Ok(())
 }
 
+/// `path` restated under `root` when one of its folders is `root` spelled another way:
+/// letter case, short names, separators, a verbatim prefix or a symbolic link above it.
+fn under_root(root: &Path, path: &Path) -> PathBuf {
+    path.ancestors()
+        .find(|folder| folder.canonical().is_ok_and(|folder| folder == root))
+        .and_then(|folder| path.strip_prefix(folder).ok())
+        .map_or_else(|| path.to_path_buf(), |relative| root.join(relative))
+}
+
 fn private_dir(path: &Path) -> Result<()> {
     if path.exists() {
         ensure!(
@@ -290,6 +299,8 @@ fn private_dir(path: &Path) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     }
+    #[cfg(windows)]
+    kiln_common::access::restrict_to_user(path)?;
     ensure!(
         fs::symlink_metadata(path)?.is_dir(),
         "Unsafe sync directory"

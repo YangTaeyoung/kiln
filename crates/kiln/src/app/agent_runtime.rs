@@ -422,12 +422,24 @@ pub fn run_request(
         use std::os::unix::process::CommandExt;
         return Err(cmd.exec().into());
     }
-    #[cfg(not(unix))]
-    {
-        let status = cmd.status()?;
-        ensure!(status.success(), "agent exited with error");
-        Ok(())
+    #[cfg(windows)]
+    std::process::exit(run_contained(cmd)?);
+}
+
+/// Runs the agent in a job that ends with this launcher and returns the agent's exit code.
+/// Ctrl+C and Ctrl+Break reach the agent through the shared console while the launcher
+/// keeps waiting for it.
+#[cfg(windows)]
+fn run_contained(mut cmd: Command) -> Result<i32> {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    unsafe extern "system" fn keep_waiting(_event: u32) -> i32 {
+        1
     }
+    // SAFETY: the handler only reports the event as handled.
+    unsafe { SetConsoleCtrlHandler(Some(keep_waiting), 1) };
+    let mut child = cmd.spawn()?;
+    let _job = kiln_common::process::Job::for_process(child.id(), true);
+    Ok(child.wait()?.code().unwrap_or(1))
 }
 #[derive(Debug, PartialEq)]
 enum Installer {
@@ -437,10 +449,23 @@ enum Installer {
 fn installer(binary: &Path) -> Result<Installer> {
     installer_with(binary, agent_launch::executable)
 }
+/// The npm package folder behind a Windows npm launcher (`codex.cmd` or `codex.ps1` next to
+/// `node_modules`).
+fn npm_launcher_package(binary: &Path) -> Option<PathBuf> {
+    let extension = binary.extension()?.to_string_lossy().to_ascii_lowercase();
+    if extension != "cmd" && extension != "ps1" {
+        return None;
+    }
+    binary.parent()?.join("node_modules").join("@openai").join("codex").canonical().ok()
+}
 fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Result<Installer> {
-    let resolved = binary.canonical()?;
-    let path = resolved.to_string_lossy();
-    if path.contains("/Caskroom/codex/") || path.contains("/Cellar/codex/") {
+    let resolved = match npm_launcher_package(binary) {
+        Some(package) => package,
+        None => binary.canonical()?,
+    };
+    let names: Vec<_> = resolved.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let contains = |run: &[&str]| names.windows(run.len()).any(|window| window.iter().zip(run).all(|(name, part)| name == part));
+    if contains(&["Caskroom", "codex"]) || contains(&["Cellar", "codex"]) {
         let brew = resolve("brew").context("Homebrew not found")?;
         let mut cmd = Command::new(&brew);
         kiln_common::process::hide_window(&mut cmd);
@@ -448,18 +473,14 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
         let prefix =
             PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
                 .canonical()?;
-        let cask = path.contains("/Caskroom/codex/");
+        let cask = contains(&["Caskroom", "codex"]);
         ensure!(
-            resolved.starts_with(prefix.join(if cask {
-                "Caskroom/codex"
-            } else {
-                "Cellar/codex"
-            })),
+            resolved.starts_with(prefix.join(if cask { "Caskroom" } else { "Cellar" }).join("codex")),
             "Homebrew prefix does not own this Codex executable"
         );
         return Ok(Installer::Brew(brew, cask));
     }
-    if path.contains("/node_modules/@openai/codex/") {
+    if contains(&["node_modules", "@openai", "codex"]) {
         let npm = resolve("npm").context("npm not found")?;
         let mut cmd = Command::new(&npm);
         kiln_common::process::hide_window(&mut cmd);
@@ -467,7 +488,7 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
         let root = PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
             .canonical()?;
         ensure!(
-            resolved.starts_with(root.join("@openai/codex").canonical()?),
+            resolved.starts_with(root.join("@openai").join("codex").canonical()?),
             "npm global root does not own this Codex executable"
         );
         return Ok(Installer::Npm(npm));
@@ -1317,6 +1338,35 @@ mod tests {
             installer_with(&binary, |_| Some(brew.clone())).unwrap(),
             Installer::Brew(brew, true)
         );
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_contained_agent_reports_its_exit_code() {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", "exit 3"]);
+        assert_eq!(run_contained(cmd).unwrap(), 3);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn npm_installation_is_found_from_the_windows_launcher() {
+        let d = tempfile::tempdir().unwrap();
+        let prefix = d.path().join("npm");
+        let package = prefix.join("node_modules").join("@openai").join("codex");
+        fs::create_dir_all(package.join("vendor")).unwrap();
+        let launcher = prefix.join("codex.cmd");
+        fs::write(&launcher, b"@echo off\r\n").unwrap();
+        let native = package.join("vendor").join("codex.exe");
+        fs::write(&native, b"fixture").unwrap();
+        let npm = |name: &str, root: &Path| {
+            let path = d.path().join(name);
+            fs::write(&path, format!("@echo {}\r\n", root.display())).unwrap();
+            path
+        };
+        let other = npm("other-npm.cmd", &d.path().join("elsewhere"));
+        assert!(installer_with(&launcher, |_| Some(other.clone())).is_err());
+        let owner = npm("npm.cmd", &prefix.join("node_modules"));
+        assert_eq!(installer_with(&launcher, |_| Some(owner.clone())).unwrap(), Installer::Npm(owner.clone()));
+        assert_eq!(installer_with(&native, |_| Some(owner.clone())).unwrap(), Installer::Npm(owner));
     }
     #[test]
     fn update_and_immediate_restart_options_are_independent_and_persist() {
