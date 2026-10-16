@@ -318,10 +318,30 @@ impl HostPty {
             let shutdown: transport::Shutdown = Arc::new(move || { let _ = cancel.shutdown(std::net::Shutdown::Both); });
             (transport::split(stream)?, Some(shutdown), handshake)
         };
+        #[cfg(unix)]
+        let hello: FromHost = {
+            write_msg(&mut writer, &ToHost::Attach { replay })?;
+            read_msg(&mut reader)?.ok_or_else(|| io::Error::other("host closed"))?
+        };
+        // Recovery must not wait forever for Hello. Named pipes have no read deadline,
+        // so the handshake runs on a thread that is abandoned when the host does not answer.
         #[cfg(not(unix))]
-        let (Conn { mut reader, mut writer }, shutdown) = transport::connect_with_shutdown(endpoint)?;
-        write_msg(&mut writer, &ToHost::Attach { replay })?;
-        let hello: FromHost = read_msg(&mut reader)?.ok_or_else(|| io::Error::other("host closed"))?;
+        let (Conn { reader, writer }, shutdown, hello) = {
+            let endpoint = endpoint.to_string();
+            let (sent, answer) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let handshake = (|| {
+                    let (Conn { mut reader, mut writer }, shutdown) = transport::connect_with_shutdown(&endpoint)?;
+                    write_msg(&mut writer, &ToHost::Attach { replay })?;
+                    let hello: FromHost = read_msg(&mut reader)?.ok_or_else(|| io::Error::other("host closed"))?;
+                    Ok::<_, io::Error>((Conn { reader, writer }, shutdown, hello))
+                })();
+                let _ = sent.send(handshake);
+            });
+            answer
+                .recv_timeout(Duration::from_secs(1))
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "terminal host did not answer"))??
+        };
         let FromHost::Hello { child_pid, host_pid, exited, .. } = hello else {
             return Err(io::Error::other("unexpected host hello"));
         };
@@ -1130,5 +1150,27 @@ mod recovery_tests {
         let ReadResult::Data(n) = reader.read_timeout(&mut buf, 2000).unwrap() else { panic!("handshake timeout leaked into output decoder") };
         assert_eq!(&buf[..n], b"still alive");
         peer.join().unwrap();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn attach_to_an_unresponsive_host_times_out() {
+        let name = format!("kiln-unresponsive-host-{}", std::process::id());
+        let listener = transport::Listener::bind(&name).unwrap();
+        let (accepted, held) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok(connection) = listener.accept() {
+                let _ = accepted.send(connection);
+            }
+        });
+        let started = Instant::now();
+        let error = HostPty::attach(&name, false).err().expect("an unresponsive host must not attach");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(held);
     }
 }
