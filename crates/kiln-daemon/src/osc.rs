@@ -147,8 +147,14 @@ impl OscScanner {
 
 fn parse_file_url(url: &str) -> Option<String> {
     let rest = url.strip_prefix("file://")?;
-    let path = &rest[rest.find('/')?..];
-    Some(percent_decode(path))
+    let path = percent_decode(&rest[rest.find('/')?..]);
+    // `/C:/x` names a Windows drive path.
+    let bytes = path.as_bytes();
+    if cfg!(windows) && bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
+        let drive = path[1..].replace('/', "\\");
+        return Some(if drive.len() == 2 { format!("{drive}\\") } else { drive });
+    }
+    Some(path)
 }
 
 fn percent_decode(s: &str) -> String {
@@ -205,5 +211,17 @@ mod tests {
     #[test]
     fn title_osc_is_not_reported() {
         assert!(scan(&[b"\x1b]0;title\x07\x1b]2;x\x1b\\"]).is_empty());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn file_url_with_a_drive_letter_is_a_windows_path() {
+        assert_eq!(parse_file_url("file://host/C:/Users/a%20b").as_deref(), Some(r"C:\Users\a b"));
+        assert_eq!(parse_file_url(r"file://localhost/D:\work\proj").as_deref(), Some(r"D:\work\proj"));
+        assert_eq!(parse_file_url("file://localhost/C:/").as_deref(), Some(r"C:\"));
     }
 }

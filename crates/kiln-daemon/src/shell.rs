@@ -110,6 +110,56 @@ pub fn configure_zsh(cmd: &mut std::process::Command, program: &str, spec: &kiln
     Ok(())
 }
 
+/// The PowerShell integration script.
+#[cfg(windows)]
+pub const POWERSHELL_INTEGRATION: &str = include_str!("shell-integration.ps1");
+
+#[cfg(windows)]
+fn integration_disabled(spec: &kiln_proto::SpawnSpec) -> bool {
+    std::env::var("KILN_SHELL_INTEGRATION").as_deref() == Ok("0")
+        || spec.env.iter().any(|(k, v)| k == "KILN_SHELL_INTEGRATION" && v == "0")
+}
+
+#[cfg(windows)]
+fn program_stem(program: &str) -> String {
+    std::path::Path::new(program).file_stem().map(|s| s.to_string_lossy().to_ascii_lowercase()).unwrap_or_default()
+}
+
+/// Arguments that load the integration into a new interactive PowerShell without arguments.
+/// The user's profile loads first; the script is read as text, so the execution policy for
+/// script files does not apply. `KILN_SHELL_INTEGRATION=0` disables it.
+#[cfg(windows)]
+pub fn powershell_args(program: &str, spec: &kiln_proto::SpawnSpec) -> Option<Vec<String>> {
+    if !matches!(program_stem(program).as_str(), "pwsh" | "powershell") || !spec.args.is_empty() || integration_disabled(spec) {
+        return None;
+    }
+    let dir = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("Kiln").join("shell-integration-v1");
+    let path = dir.join("integration.ps1");
+    static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(POWERSHELL_INTEGRATION) {
+        std::fs::create_dir_all(&dir).ok()?;
+        let temporary = dir.join(format!("integration.ps1.{}.tmp", std::process::id()));
+        std::fs::write(&temporary, POWERSHELL_INTEGRATION).ok()?;
+        std::fs::rename(&temporary, &path).ok()?;
+    }
+    let quoted = path.to_string_lossy().replace('\'', "''");
+    Some(vec!["-NoExit".into(), "-Command".into(), format!("Invoke-Expression ([System.IO.File]::ReadAllText('{quoted}'))")])
+}
+
+/// The `PROMPT` for a new interactive cmd.exe: OSC 7 with the current folder and the prompt
+/// mark before the user's prompt (`$P$G` when none is set).
+#[cfg(windows)]
+pub fn cmd_prompt(program: &str, spec: &kiln_proto::SpawnSpec) -> Option<String> {
+    if program_stem(program) != "cmd" || !spec.args.is_empty() || integration_disabled(spec) {
+        return None;
+    }
+    let user = spec.env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PROMPT")).map(|(_, v)| v.clone())
+        .or_else(|| std::env::var("PROMPT").ok())
+        .unwrap_or_else(|| "$P$G".into());
+    Some(format!("$E]7;file://localhost/$P$E\\$E]133;A$E\\{user}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,4 +219,43 @@ mod tests {
         assert!(tracker.output(command.id).unwrap().0.contains("rc=yes"));
     }
 
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    fn run_powershell(script: &str) -> String {
+        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", script]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn powershell_integration_wraps_an_existing_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("integration.ps1");
+        std::fs::write(&script, POWERSHELL_INTEGRATION).unwrap();
+        let out = run_powershell(&format!(
+            "function prompt {{ 'CUSTOM> ' }}; Set-Location -LiteralPath '{}'; Invoke-Expression ([IO.File]::ReadAllText('{}')); [Console]::Out.Write((prompt))",
+            dir.path().display(),
+            script.display()
+        ));
+        assert!(out.ends_with("CUSTOM> "), "{out:?}");
+        assert!(out.contains("\x1b]133;A\x07"), "{out:?}");
+        let location = format!("\x1b]7;file://localhost/{}", dir.path().to_string_lossy().replace('\\', "/").replace(':', "%3A"));
+        assert!(out.contains(&location), "{out:?}");
+    }
+
+    #[test]
+    fn powershell_integration_is_offered_only_to_plain_interactive_powershell() {
+        let spec = |program: &str, args: &[&str]| kiln_proto::SpawnSpec { program: Some(program.into()), args: args.iter().map(|a| a.to_string()).collect(), ..Default::default() };
+        assert!(powershell_args("pwsh.exe", &spec("pwsh.exe", &[])).is_some());
+        assert!(powershell_args(r"C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe", &spec("powershell", &[])).is_some());
+        assert!(powershell_args("pwsh.exe", &spec("pwsh.exe", &["-Command", "dir"])).is_none());
+        assert!(powershell_args("cmd.exe", &spec("cmd.exe", &[])).is_none());
+        let mut off = spec("pwsh.exe", &[]);
+        off.env.push(("KILN_SHELL_INTEGRATION".into(), "0".into()));
+        assert!(powershell_args("pwsh.exe", &off).is_none());
+    }
 }

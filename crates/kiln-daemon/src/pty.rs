@@ -393,8 +393,11 @@ mod imp {
             let sys = native_pty_system();
             let pair = sys.openpty(size(spec.cols, spec.rows)).map_err(io::Error::other)?;
             let program = spec.program.clone().filter(|p| !p.is_empty()).unwrap_or_else(default_shell);
-            let mut cmd = CommandBuilder::new(program);
-            cmd.args(&spec.args);
+            let mut cmd = CommandBuilder::new(&program);
+            match crate::shell::powershell_args(&program, spec) {
+                Some(args) => cmd.args(&args),
+                None => cmd.args(&spec.args),
+            }
             let cwd = spec.cwd.clone().filter(|c| std::path::Path::new(c).is_dir())
                 .or_else(|| std::env::var("USERPROFILE").ok());
             if let Some(cwd) = cwd {
@@ -408,6 +411,9 @@ mod imp {
             }
             for (k, v) in &spec.env {
                 cmd.env(k, v);
+            }
+            if let Some(prompt) = crate::shell::cmd_prompt(&program, spec) {
+                cmd.env("PROMPT", prompt);
             }
             let child = pair.slave.spawn_command(cmd).map_err(io::Error::other)?;
             drop(pair.slave);

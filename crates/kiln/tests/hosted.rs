@@ -301,3 +301,56 @@ fn killed_session_leaves_no_descendants() {
     }
 }
 
+/// Waits until `ready` holds for the session's telemetry or its information.
+#[cfg(windows)]
+fn wait_for_session(c: &Client, s: SessionId, what: &str, ready: impl Fn(&kiln_proto::SessionTelemetry, &kiln_proto::SessionInfo) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (mut telemetry, mut info) = (kiln_proto::SessionTelemetry::default(), kiln_proto::SessionInfo::default());
+    loop {
+        if let Ok(m) = c.rx.recv_timeout(Duration::from_millis(200)) {
+            match m {
+                ServerMsg::SessionTelemetry { session, telemetry: t } if session == s => telemetry = t,
+                ServerMsg::SessionUpdated(i) if i.id == s => info = i,
+                _ => {}
+            }
+        }
+        if ready(&telemetry, &info) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{what}: telemetry {telemetry:?} info {info:?}");
+    }
+}
+
+#[cfg(windows)]
+fn same_folder(a: Option<&str>, b: &std::path::Path) -> bool {
+    a.and_then(|a| std::path::Path::new(a).canonicalize().ok()) == b.canonicalize().ok()
+}
+
+#[cfg(windows)]
+#[test]
+fn powershell_integration_reports_commands_exit_codes_and_location() {
+    let d = Daemon::start("ps-integration");
+    let c = d.client();
+    let s = create(&c, "powershell.exe", &[]);
+    let target = std::env::temp_dir().join(format!("kiln-ps-location-{}", std::process::id()));
+    std::fs::create_dir_all(&target).unwrap();
+    wait_for_session(&c, s, "integration loads", |t, _| t.shell_integration);
+    type_line(&c, s, &format!("Set-Location -LiteralPath '{}'; cmd /c exit 3", target.display()));
+    wait_for_session(&c, s, "command record and location", |t, i| {
+        t.commands.last().is_some_and(|r| r.command.contains("cmd /c exit 3") && r.exit_code == Some(3) && r.finished_unix.is_some())
+            && same_folder(i.cwd.as_deref(), &target)
+    });
+}
+
+#[cfg(windows)]
+#[test]
+fn cmd_prompt_reports_location() {
+    let d = Daemon::start("cmd-integration");
+    let c = d.client();
+    let s = create(&c, "cmd.exe", &[]);
+    let target = std::env::temp_dir().join(format!("kiln-cmd-location-{}", std::process::id()));
+    std::fs::create_dir_all(&target).unwrap();
+    type_line(&c, s, &format!("cd /d \"{}\"", target.display()));
+    wait_for_session(&c, s, "location", |_, i| same_folder(i.cwd.as_deref(), &target));
+}
+
