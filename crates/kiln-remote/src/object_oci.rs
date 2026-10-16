@@ -320,6 +320,7 @@ mod tests {
         assert_eq!(page.next_cursor.as_deref(), Some("folder/next"));
         assert!(page.entries[0].is_dir);
         assert_eq!(page.entries[1].size, 9);
+        let config = PathBuf::from(if cfg!(windows) { r"C:\private\config" } else { "/private/config" });
         let profile = ConnectionProfile {
             id: "test".into(),
             name: "test".into(),
@@ -329,7 +330,7 @@ mod tests {
                 prefix: "".into(),
                 authentication: ObjectAuthentication::Cli {
                     profile: "TEAM".into(),
-                    config_path: Some(PathBuf::from("/private/config")),
+                    config_path: Some(config.clone()),
                 },
                 region: None,
                 namespace: None,
@@ -345,7 +346,7 @@ mod tests {
         .args("get", &["--name=-x;rm -rf fake".into()])
         .unwrap();
         assert!(args.contains(&"--profile=TEAM".into()));
-        assert!(args.contains(&"--config-file=/private/config".into()));
+        assert!(args.contains(&format!("--config-file={}", config.display())));
         assert_eq!(args.last().unwrap(), "--name=-x;rm -rf fake");
         assert!(!args.iter().any(|a| a.starts_with("--namespace")));
     }

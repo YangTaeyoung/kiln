@@ -1243,6 +1243,13 @@ mod tests {
         }
         std::fs::remove_file(dir.join("auth.json")).unwrap();
         std::fs::write(dir.join("config.toml"), "cli_auth_credentials_store = 'keyring'\n").unwrap();
+        if cfg!(windows) {
+            // The CLI keeps keyring secrets in its encrypted store by default on Windows.
+            m.check_profile_credentials();
+            assert!(!m.login_required(Tool::Codex, &p.id));
+            assert!(m.usage_secret(Tool::Codex, &p.id).is_err());
+            std::fs::write(dir.join("config.toml"), "cli_auth_credentials_store = 'keyring'\n[features]\nsecret_auth_storage = false\n").unwrap();
+        }
         store.set("Codex Auth", &codex::keyring_account(&dir), &fake_auth("work@example.test", "fresh")).unwrap();
         m.check_profile_credentials();
         assert!(!m.login_required(Tool::Codex, &p.id));
