@@ -85,6 +85,7 @@ fn shutdown(base: &std::path::Path) {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn linked_resume_stops_the_old_agent_flushes_history_and_reopens_only_the_winner() {
     use std::os::unix::fs::PermissionsExt;
@@ -168,6 +169,7 @@ fn pump_until(h: &mut Harness<'_, KilnApp>, secs: u64, mut f: impl FnMut(&mut Ha
 
 /// A cold-start child reads OSC 10/11 just as a palette-aware TUI does. Its
 /// shaded composer must follow the persisted theme before the first query.
+#[cfg(unix)]
 #[test]
 fn terminal_color_probe_matches_saved_theme_changes_and_reconnect() {
     use std::os::unix::fs::PermissionsExt;
@@ -236,7 +238,7 @@ while os.read(0, 1): query()
         let image = h.render().unwrap();
         assert!(image.pixels().filter(|p| p.0[..3] == fill).count() > 1000, "{name}: composer fill missing", name=theme.name);
         assert!(image.pixels().filter(|p| p.0[..3] == [13,123,67]).count() > 1000, "explicit RGB was recolored");
-        image.save(format!("/tmp/kiln-osc-composer-{}.png", theme.name)).unwrap();
+        image.save(std::env::temp_dir().join(format!("kiln-osc-composer-{}.png", theme.name))).unwrap();
     }
     // A new GUI connection must publish the selected theme even when the daemon
     // is already alive with another palette; reattaching must preserve the PTY.
@@ -621,7 +623,7 @@ fn database_inspector_tab_is_bounded_localized_and_restores_selection() {
             }
             h.get_by_label(i18n::tr("데이터베이스")).click();h.run_steps(3);
             h.get_by_label(i18n::tr("데이터베이스에 연결하세요"));
-            h.render().unwrap().save(format!("/tmp/kiln-db-inspector-{theme}-{}.png",language.code())).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-db-inspector-{theme}-{}.png",language.code()))).unwrap();
             h.state_mut().debug_queue_action(Action::ToggleInspector);h.run_steps(3);
             assert!(!h.state().debug_sheet_open());
             h.state_mut().debug_queue_action(Action::ToggleInspector);h.run_steps(3);
@@ -1431,7 +1433,7 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
             assert!(arcs.iter().all(|actual|**actual==egui::epaint::ColorMode::Solid(color)),"agent colors must agree across all surfaces");
         } else {assert!(arcs.is_empty(),"idle must stop animating");}
         if frame=='◑' || frame=='⠼' {
-            h.render().unwrap().save(format!("/tmp/kiln-agent-color-{}.png",if frame=='◑'{"claude"}else{"codex"})).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-agent-color-{}.png",if frame=='◑'{"claude"}else{"codex"}))).unwrap();
         }
         assert_eq!(h.state().debug_focused_session(),Some(session));
     }
@@ -1561,7 +1563,7 @@ fn adaptive_long_titles_keep_controls_bounded_and_switch_restore_grid_working() 
         assert_eq!(h.state().debug_pane_rects().len(),3);
         assert!(h.query_by_label("분할로 복원").is_none());
         h.state_mut().debug_queue_action(Action::ToggleAutoFocus);h.run_steps(3);
-        h.render().unwrap().save(format!("/tmp/kiln-adaptive-long-title-{scale}.png")).unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-adaptive-long-title-{scale}.png"))).unwrap();
         if scale==1.3 {
             h.get_by_label("격자로 배치").click();h.run_steps(3);
             assert_eq!(h.state().debug_pane_count(),3,"grid action must preserve all sessions");
@@ -1620,7 +1622,7 @@ fn direct_panel_actions_target_the_clicked_split_and_stay_inside_narrow_headers(
         assert!(!controls.is_empty());
         for node in &controls {assert!(pane.contains_rect(node.rect()),"target {target}: button {:?} outside {pane:?}",node.rect());assert!(node.rect().width()>=24.0);}
         for pair in controls.windows(2){assert!(!pair[0].rect().intersects(pair[1].rect()));}
-        h.render().unwrap().save(format!("/tmp/kiln-panel-toolbar-{target:.0}.png")).unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-panel-toolbar-{target:.0}.png"))).unwrap();
     }
     // Closing the last idle pane creates an empty terminal, never closes the app.
     for (id,_) in h.state().debug_pane_rects(){h.state_mut().debug_queue_action(Action::ClosePane(id,false));}h.run_steps(5);
@@ -1650,7 +1652,7 @@ fn running_close_opt_out_persists_only_on_confirmation_and_keeps_unsaved_guards(
                 let rect=h.get_by_label(i18n::tr(key)).rect();
                 assert!(h.ctx.content_rect().contains_rect(rect),"{language:?}/{key}: {rect:?}");
             }
-            h.render().unwrap().save(format!("/tmp/kiln-close-opt-out-{}.png",language.code())).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-close-opt-out-{}.png",language.code()))).unwrap();
             h.get_by_label(i18n::tr("다시 묻지 않기")).click();h.run_steps(2);
             h.get_by_label(i18n::tr("취소")).click();h.run_steps(3);
             assert!(h.state().debug_busy_process(pane).is_some());
@@ -1774,7 +1776,7 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     h.get_by_label("새 워크스페이스").click();h.run_steps(4);
     let input=h.query_all_by_label("워크스페이스 이름").find(|n|n.accesskit_node().role()==egui::accesskit::Role::TextInput).expect("name input");
     input.focus();h.run_steps(2);h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::A);h.run_steps(2);h.event(egui::Event::Text("Documentation review".into()));h.run_steps(3);
-    h.render().unwrap().save("/tmp/kiln015-new-workspace.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln015-new-workspace.png")).unwrap();
     assert!(h.ctx.content_rect().contains_rect(h.get_by_label("만들기").rect()));
     h.get_by_label("만들기").click();
     assert!(pump_until(&mut h,10,|h|h.state().debug_workspace_count()==2 && h.state().debug_focused_session().is_some_and(|s|s!=original)));
@@ -1848,7 +1850,7 @@ fn named_workspace_dialog_fits_long_names_in_four_languages_at_minimum_size() {
             for node in h.get_all_by_role(egui::accesskit::Role::TextInput){assert!(viewport.contains_rect(node.rect()));}
             let long=h.query_all_by_label(&long_name).find(|n|n.accesskit_node().role()==egui::accesskit::Role::Button && n.rect().left()>80.).expect("long existing workspace button");
             assert!(viewport.contains_rect(long.rect()),"long name must truncate inside dialog");
-            h.render().unwrap().save(format!("/tmp/kiln015-workspace-{language:?}-{theme}-minimum.png")).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln015-workspace-{language:?}-{theme}-minimum.png"))).unwrap();
             h.get_by_label(tr("취소")).click();h.run_steps(3);
         }
     }
@@ -1878,10 +1880,12 @@ fn submitted_database_write_blocks_forced_close_and_quit_until_complete() {
 }
 
 /// Owned fake CLI: exercises the real GUI -> PTY -> hook -> updater -> exact resume path.
+#[cfg(unix)]
 #[test]
 fn cli_update_restarts_each_exact_conversation_and_account() {
     for tool in kiln_accounts::Tool::ALL {cli_update_fixture(tool);}
 }
+#[cfg(unix)]
 fn cli_update_fixture(tool: kiln_accounts::Tool) {
     use kiln::app::{Action,agent_runtime};
     use kiln_accounts::Tool;
@@ -2011,7 +2015,7 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     let panes_before = h.state().debug_pane_count();
     h.key_press_modifiers(primary(), egui::Key::D); h.run_steps(3);
     assert_eq!(h.state().debug_pane_count(), panes_before, "status dialog must block underlying workspace shortcuts");
-    h.render().unwrap().save("/tmp/kiln-workspace-link-dialog.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-workspace-link-dialog.png")).unwrap();
     h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);
     let other = base.join("other"); std::fs::create_dir_all(&other).unwrap();
     h.state_mut().debug_queue_action(Action::CreateWorkspace { root: other, name: "Unlinked workspace".into() }); h.run_steps(3);
@@ -2026,7 +2030,7 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);
     h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
     assert!(h.query_by_label("대화 연동 해제").is_some());
-    h.render().unwrap().save("/tmp/kiln-workspace-link-menu.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-workspace-link-menu.png")).unwrap();
     h.get_by_label("대화 연동 해제").click(); h.run_steps(2);
     h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
     assert!(h.query_by_label("대화 연동 해제").is_none());
@@ -2034,11 +2038,13 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
 }
 
 /// No provider calls: a native PTY child emits a structured capacity failure and exits.
+#[cfg(unix)]
 #[test]
 fn capacity_failure_resumes_exact_session_once_and_cancel_stops_the_countdown() {
     capacity_recovery_fixture(false);
     capacity_recovery_fixture(true);
 }
+#[cfg(unix)]
 fn capacity_recovery_fixture(idle: bool) {
     use kiln::app::{Action,agent_runtime};
     use kiln_accounts::Tool;
@@ -2108,7 +2114,7 @@ int main(int argc,char **argv) {
     let original=h.state().debug_focused_session().unwrap();
     let spec=h.state().debug_focused_launch_spec().unwrap();let record=agent_runtime::read(&agent_runtime::record_path(&spec).unwrap()).unwrap();
     let root=PathBuf::from(&record.spec.env.iter().find(|(k,_)|k=="CODEX_HOME").unwrap().1);
-    h.render().unwrap().save("/tmp/kiln-capacity-countdown.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-capacity-countdown.png")).unwrap();
     assert!(pump_until(&mut h,30,|h|h.state().debug_focused_text().is_some_and(|s|s.contains("CAPACITY_FIXTURE_RECOVERED"))));
     if idle {
         assert_eq!(h.state().debug_focused_session().unwrap(),original);

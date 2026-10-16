@@ -1667,6 +1667,6 @@ mod narrow_filter_tests {
         h.run_steps(4);
         for label in ["WHERE","ORDER BY","적용"]{assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}");}
         assert!(h.get_by_label("ORDER BY").rect().top()>h.get_by_label("WHERE").rect().bottom());
-        h.render().unwrap().save("/tmp/kiln-db-filter-320.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-db-filter-320.png")).unwrap();
     }
 }

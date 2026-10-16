@@ -12,7 +12,7 @@ fn local_completion_language_override_ime_and_narrow_bounds(){
     h.state_mut().goto(2,4);let id=h.state().id();h.ctx.memory_mut(|m|m.request_focus(id));h.run_steps(2);
     h.key_press_modifiers(Modifiers::CTRL,Key::Space);h.run_steps(3);
     let item=h.get_by_label("return · 언어 제안");assert!(h.ctx.content_rect().contains_rect(item.rect()));
-    h.render().unwrap().save("/tmp/kiln-editor-completion-narrow.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-editor-completion-narrow.png")).unwrap();
     h.key_press(Key::Enter);h.run_steps(3);assert_eq!(h.state().text(),"result_document_word\nreturn");
     h.key_press_modifiers(Modifiers::COMMAND,Key::Z);h.run_steps(3);assert_eq!(h.state().text(),"result_document_word\nret");
     h.key_press_modifiers(Modifiers::ALT,Key::Escape);h.run_steps(3);assert!(h.query_by_label("return · 언어 제안").is_some());
@@ -20,7 +20,7 @@ fn local_completion_language_override_ime_and_narrow_bounds(){
     h.event(Event::Ime(egui::ImeEvent::Commit("한".into())));h.run_steps(3);assert!(h.state().text().ends_with("ret한"));
     h.state_mut().set_language_override(Some("JavaScript".into()));h.run_steps(3);assert_eq!(h.state().status().language,"JavaScript");
     h.state_mut().set_language_override(None);h.run_steps(3);assert_eq!(h.state().status().language,"Python");
-    h.ctx.set_zoom_factor(1.3);h.run_steps(3);h.render().unwrap().save("/tmp/kiln-editor-language-130.png").unwrap();
+    h.ctx.set_zoom_factor(1.3);h.run_steps(3);h.render().unwrap().save(std::env::temp_dir().join("kiln-editor-language-130.png")).unwrap();
 }
 #[test]
 fn short_completion_popup_keeps_keyboard_selection_visible_before_accepting(){
@@ -37,7 +37,7 @@ fn short_completion_popup_keeps_keyboard_selection_visible_before_accepting(){
         let candidate=h.get_by_label(&label);
         assert!(h.ctx.content_rect().contains_rect(candidate.rect()),"candidate {selected} outside viewport");
     }
-    h.render().unwrap().save("/tmp/kiln-editor-completion-short.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-editor-completion-short.png")).unwrap();
     h.key_press(Key::Enter);h.run_steps(3);assert!(h.state().text().ends_with("\nalpha9"));
     h.key_press_modifiers(Modifiers::COMMAND,Key::Z);h.run_steps(3);assert_eq!(h.state().text(),text);
     h.key_press_modifiers(Modifiers::CTRL,Key::Space);h.run_steps(3);

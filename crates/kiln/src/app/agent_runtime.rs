@@ -997,7 +997,7 @@ mod tests {
                 }
                 h.render()
                     .unwrap()
-                    .save(format!("/tmp/kiln022-cli-cards-{language:?}.png"))
+                    .save(std::env::temp_dir().join(format!("kiln022-cli-cards-{language:?}.png")))
                     .unwrap();
             });
         }

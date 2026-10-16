@@ -364,7 +364,7 @@ mod keybinding_layout_tests {
         h.get_by_label("관리").click();h.run_steps(2);
         assert!(h.query_by_label("기본값 복원").is_some());
         h.key_press(egui::Key::Escape);h.run_steps(2);
-        h.render().unwrap().save("/tmp/kiln-keybindings-fixed-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-fixed-small.png")).unwrap();
         h.state_mut().2.error=Some("중복된 단축키입니다. 다른 키를 입력하세요.".into());
         h.run_steps(3);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("단축키 저장").rect()));
@@ -374,7 +374,7 @@ mod keybinding_layout_tests {
         h.run_steps(5);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("단축키 저장").rect()));
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("중복된 단축키입니다. 다른 키를 입력하세요.").rect()));
-        h.render().unwrap().save("/tmp/kiln-keybindings-error-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-error-small.png")).unwrap();
         let corrupt=dir.path().join("keybindings.json");
         std::fs::write(&corrupt,b"broken").unwrap();
         h.state_mut().2=super::super::keymap::Keymap::load_path(&corrupt);
@@ -382,7 +382,7 @@ mod keybinding_layout_tests {
         for label in ["원본 백업 후 기본값 복구","다시 읽기"] {
             assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}");
         }
-        h.render().unwrap().save("/tmp/kiln-keybindings-recovery-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-recovery-small.png")).unwrap();
     }
 }
 

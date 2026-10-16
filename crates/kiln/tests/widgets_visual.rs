@@ -37,6 +37,6 @@ fn control_states_across_four_themes() {
             }
         });
         h.run_steps(4);
-        h.render().unwrap().save(format!("/tmp/kiln-controls-{}.png",theme.name)).unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-controls-{}.png",theme.name))).unwrap();
     }
 }

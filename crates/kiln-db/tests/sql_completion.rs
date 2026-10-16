@@ -27,7 +27,7 @@ fn until(h: &mut Harness<'_, DbTab>, label: &str) {
         if Instant::now() >= end {
             h.render()
                 .unwrap()
-                .save("/tmp/kiln-sql-failure.png")
+                .save(std::env::temp_dir().join("kiln-sql-failure.png"))
                 .unwrap();
             panic!(
                 "no suggestion {label}; SQL={:?}; focus={:?}",
@@ -254,10 +254,10 @@ fn sql_completion_popup_is_bounded_in_four_languages_themes_and_small_panes() {
                 }
                 h.render()
                     .unwrap()
-                    .save(format!(
-                        "/tmp/kiln-sql-completion-{theme}-{}-{width}.png",
+                    .save(std::env::temp_dir().join(format!(
+                        "kiln-sql-completion-{theme}-{}-{width}.png",
                         language.code()
-                    ))
+                    )))
                     .unwrap();
                 h.key_press(Key::Escape);
                 h.run_steps(2);
@@ -377,7 +377,7 @@ fn sql_completion_long_column_names_can_be_distinguished_before_insertion() {
     until(&mut h, &format!("{} · 컬럼", names[0]));
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sql-completion-long-columns.png")
+        .save(std::env::temp_dir().join("kiln-sql-completion-long-columns.png"))
         .unwrap();
     for name in names {
         let label = format!("{name} · 컬럼");
@@ -387,7 +387,7 @@ fn sql_completion_long_column_names_can_be_distinguished_before_insertion() {
         h.run_steps(40);
         h.render()
             .unwrap()
-            .save("/tmp/kiln-sql-completion-long-tooltip.png")
+            .save(std::env::temp_dir().join("kiln-sql-completion-long-tooltip.png"))
             .unwrap();
         assert!(
             h.query_by_label_contains(&format!("{name}\n컬럼"))
@@ -397,6 +397,6 @@ fn sql_completion_long_column_names_can_be_distinguished_before_insertion() {
     }
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sql-completion-long-tooltip.png")
+        .save(std::env::temp_dir().join("kiln-sql-completion-long-tooltip.png"))
         .unwrap();
 }

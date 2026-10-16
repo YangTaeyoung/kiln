@@ -352,7 +352,15 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
     tmp.persist_noclobber(path).map_err(|e| e.error)?;
-    fs::File::open(parent)?.sync_all()?;
+    sync_dir(parent)?;
+    Ok(())
+}
+/// Flushes the entries of `dir` to disk on Unix; does nothing on Windows.
+fn sync_dir(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
+    #[cfg(windows)]
+    let _ = dir;
     Ok(())
 }
 /// `replace`, skipped when the file already holds exactly these bytes.
@@ -370,7 +378,7 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
-    fs::File::open(parent)?.sync_all()?;
+    sync_dir(parent)?;
     Ok(())
 }
 

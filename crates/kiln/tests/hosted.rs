@@ -25,10 +25,17 @@ struct Daemon {
 impl Daemon {
     fn start(tag: &str) -> Daemon {
         init();
+        #[cfg(unix)]
         let dir = PathBuf::from(format!("/tmp/kh-{}-{tag}", std::process::id()));
+        #[cfg(windows)]
+        let dir = std::env::temp_dir().join(format!("kh-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        Daemon { socket: dir.join("d.sock").to_string_lossy().into_owned(), dir }
+        #[cfg(unix)]
+        let socket = dir.join("d.sock").to_string_lossy().into_owned();
+        #[cfg(windows)]
+        let socket = format!("kiln-hosted-test-{}-{tag}", std::process::id());
+        Daemon { socket, dir }
     }
 
     fn client(&self) -> Client {
@@ -65,15 +72,54 @@ impl Drop for Daemon {
     }
 }
 
+/// The kiln executable; `KILN_TEST_EXE` names it when the tests run on another machine.
 fn exe() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_kiln"))
+    std::env::var_os("KILN_TEST_EXE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_kiln")))
+}
+
+/// The platform shell and the commands the tests type into it.
+#[cfg(unix)]
+mod sh {
+    pub const PROGRAM: &str = "/bin/sh";
+    pub const ARGS: &[&str] = &[];
+    pub const PRINT_PID: &str = "echo shellpid=$$";
+    pub const EXIT_3_LATER: &[&str] = &["-c", "sleep 0.2; exit 3"];
+    /// Prints `head` and `tail` joined, without the joined text in the typed line.
+    pub fn echo_joined(head: &str, tail: &str) -> String {
+        format!("echo {head}''{tail}")
+    }
+    /// Prints the joined text 300 ms later while the shell keeps reading input.
+    pub fn echo_joined_later(head: &str, tail: &str) -> String {
+        format!("(sleep 0.3; {}) &", echo_joined(head, tail))
+    }
+    pub const PRINT_42: &str = "echo after-$((6*7))";
+}
+#[cfg(windows)]
+mod sh {
+    pub const PROGRAM: &str = "powershell.exe";
+    pub const ARGS: &[&str] = &["-NoLogo", "-NoProfile"];
+    pub const PRINT_PID: &str = "echo \"shellpid=$PID\"";
+    pub const EXIT_3_LATER: &[&str] = &["-NoLogo", "-NoProfile", "-Command", "Start-Sleep -Milliseconds 200; exit 3"];
+    /// Prints `head` and `tail` joined, without the joined text in the typed line.
+    pub fn echo_joined(head: &str, tail: &str) -> String {
+        format!("echo \"{head}$('{tail}')\"")
+    }
+    /// Prints the joined text 300 ms later; the shell reads the next input afterwards.
+    pub fn echo_joined_later(head: &str, tail: &str) -> String {
+        format!("Start-Sleep -Milliseconds 300; {}", echo_joined(head, tail))
+    }
+    pub const PRINT_42: &str = "echo \"after-$(6*7)\"";
+}
+
+fn create_shell(c: &Client) -> SessionId {
+    create(c, sh::PROGRAM, sh::ARGS)
 }
 
 fn create(c: &Client, program: &str, args: &[&str]) -> SessionId {
     let spec = SpawnSpec {
         program: Some(program.into()),
         args: args.iter().map(|s| s.to_string()).collect(),
-        cwd: Some("/tmp".into()),
+        cwd: Some(std::env::temp_dir().to_string_lossy().into_owned()),
         cols: 80,
         rows: 24,
         env: vec![("PS1".into(), "$ ".into())],
@@ -108,13 +154,59 @@ fn type_line(c: &Client, s: SessionId, line: &str) {
     c.send(ClientMsg::Input { session: s, data: format!("{line}\r").into_bytes() });
 }
 
+#[cfg(unix)]
 fn alive(pid: u32) -> bool {
     // SAFETY: 시그널 0 은 존재 여부만 확인한다.
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
-fn value(text: &str, key: &str) -> u32 {
-    text.lines().filter_map(|l| l.trim().strip_prefix(key)).filter_map(|v| v.trim().parse().ok()).next_back().expect(key)
+#[cfg(windows)]
+fn alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: the handle is checked before use and closed once.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code = 0u32;
+        let queried = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        queried && code == STILL_ACTIVE as u32
+    }
+}
+
+/// Ends a process the test started, without letting it clean up.
+fn kill_hard(pid: u32) {
+    #[cfg(unix)]
+    // SAFETY: 테스트가 띄운 데몬을 강제 종료한다.
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    // SAFETY: the handle is checked before use and closed once.
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        assert!(!handle.is_null(), "cannot open process {pid}");
+        TerminateProcess(handle, 1);
+        CloseHandle(handle);
+    }
+}
+
+/// Waits for an output line `key<number>` and returns the number.
+fn wait_value(c: &Client, s: SessionId, key: &str) -> u32 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let text = read(c, s);
+        if let Some(value) = text.lines().filter_map(|l| l.trim().strip_prefix(key)).filter_map(|v| v.trim().parse().ok()).next_back() {
+            return value;
+        }
+        assert!(Instant::now() < deadline, "timeout waiting for {key:?}; screen:\n{text}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[test]
@@ -122,11 +214,11 @@ fn hosted_upgrade_keeps_sessions_and_output_produced_during_handover() {
     let d = Daemon::start("upgrade");
     let c = d.client();
     let old_daemon = c.server_pid;
-    let s = create(&c, "/bin/sh", &[]);
-    type_line(&c, s, "echo shellpid=$$");
-    let shell = value(&wait_for(&c, s, "shellpid="), "shellpid=");
+    let s = create_shell(&c);
+    type_line(&c, s, sh::PRINT_PID);
+    let shell = wait_value(&c, s, "shellpid=");
     // 교체 도중(데몬이 없는 순간)에 나올 출력.
-    type_line(&c, s, "(sleep 0.3; echo during-handover) &");
+    type_line(&c, s, &sh::echo_joined_later("during-hand", "over"));
     std::thread::sleep(Duration::from_millis(100));
     c.send(ClientMsg::Upgrade { req: 1, exe: exe().to_string_lossy().into_owned() });
     upgrade::disconnected(&c, 1);
@@ -135,7 +227,7 @@ fn hosted_upgrade_keeps_sessions_and_output_produced_during_handover() {
     assert!(alive(shell));
     wait_for(&c2, s, "during-handover");
     assert!(read(&c2, s).contains("shellpid="), "화면이 복원되어야 한다");
-    type_line(&c2, s, "echo after-$((6*7))");
+    type_line(&c2, s, sh::PRINT_42);
     wait_for(&c2, s, "after-42");
 }
 
@@ -144,12 +236,13 @@ fn daemon_crash_is_recovered_by_adopting_hosts() {
     let d = Daemon::start("crash");
     let c = d.client();
     let daemon_pid = c.server_pid;
-    let s = create(&c, "/bin/sh", &[]);
-    type_line(&c, s, "echo shellpid=$$; echo before-crash");
-    let shell = value(&wait_for(&c, s, "before-crash"), "shellpid=");
+    let s = create_shell(&c);
+    type_line(&c, s, sh::PRINT_PID);
+    let shell = wait_value(&c, s, "shellpid=");
+    type_line(&c, s, &sh::echo_joined("before-", "crash"));
+    wait_for(&c, s, "before-crash");
     drop(c);
-    // SAFETY: 테스트가 띄운 데몬을 강제 종료한다.
-    unsafe { libc::kill(daemon_pid as i32, libc::SIGKILL) };
+    kill_hard(daemon_pid);
     std::thread::sleep(Duration::from_millis(300));
     assert!(alive(shell), "데몬이 죽어도 셸은 산다");
     let c2 = d.reconnect();
@@ -160,17 +253,17 @@ fn daemon_crash_is_recovered_by_adopting_hosts() {
     };
     assert!(list.iter().any(|i| i.id == s && i.pid == shell), "{list:?}");
     wait_for(&c2, s, "before-crash");
-    type_line(&c2, s, "echo adopted-ok");
+    type_line(&c2, s, &sh::echo_joined("adopted-", "ok"));
     wait_for(&c2, s, "adopted-ok");
     // 새 세션 id 는 입양한 id 와 겹치지 않는다.
-    assert!(create(&c2, "/bin/sh", &[]) > s);
+    assert!(create_shell(&c2) > s);
 }
 
 #[test]
 fn hosted_exit_code_is_reported() {
     let d = Daemon::start("exit");
     let c = d.client();
-    let s = create(&c, "/bin/sh", &["-c", "sleep 0.2; exit 3"]);
+    let s = create(&c, sh::PROGRAM, sh::EXIT_3_LATER);
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Ok(ServerMsg::SessionExited { session, code }) = c.rx.recv_timeout(Duration::from_millis(200)) {

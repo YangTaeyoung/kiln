@@ -273,6 +273,7 @@ impl Drop for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     #[test]
     fn metadata_reader_is_bounded_cancellable_and_never_starts_a_turn() {
         use std::os::unix::fs::PermissionsExt;
@@ -330,6 +331,7 @@ for line in sys.stdin:
                 .contains("paused")
         );
     }
+    #[cfg(unix)]
     #[test]
     fn native_archive_preserves_descendant_histories() {
         use std::os::unix::fs::PermissionsExt;

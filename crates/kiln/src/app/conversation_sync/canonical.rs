@@ -200,8 +200,8 @@ pub(super) fn archive_native(
         );
     } else {
         fs::rename(&physical, &destination)?;
-        fs::File::open(physical.parent().unwrap())?.sync_all()?;
-        fs::File::open(destination.parent().unwrap())?.sync_all()?;
+        sync_dir(physical.parent().unwrap())?;
+        sync_dir(destination.parent().unwrap())?;
     }
     ensure!(
         digest(&bounded(&destination, COPY_LIMIT)?) == plan.sha256,
@@ -215,8 +215,20 @@ pub(super) fn archive_native(
 /// Appends `suffix` in place to an uncompressed transcript that still has `length` bytes and,
 /// when given, the modification time `modified`.
 fn append_in_place(source: &Source, physical: &Path, length: u64, modified: Option<SystemTime>, suffix: &[u8]) -> Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = fs::OpenOptions::new().append(true).custom_flags(libc::O_NOFOLLOW).open(physical)?;
+    let mut options = fs::OpenOptions::new();
+    options.append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    // Opens a link itself; its metadata then fails the regular-file check below.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let mut file = options.open(physical)?;
     let now = file.metadata()?;
     ensure!(
         storage::physical(source) == physical
@@ -425,10 +437,33 @@ pub(super) fn update(
         );
         packed.as_file().sync_all()?;
         packed.persist(&physical).map_err(|e| e.error)?;
-        fs::File::open(source.path.parent().unwrap())?.sync_all()?;
+        sync_dir(source.path.parent().unwrap())?;
     } else {
         drop(tmp);
         append_in_place(source, &physical, old_len as u64, None, &candidate[old_len..])?;
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn in_place_append_refuses_a_symlinked_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.jsonl");
+        fs::write(&target, b"{}\n").unwrap();
+        let link = dir.path().join("link.jsonl");
+        super::super::tests::symlink_file(&target, &link).unwrap();
+        let source = Source {
+            tool: Tool::Claude,
+            root: dir.path().into(),
+            path: link.clone(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            id: "linked".into(),
+        };
+        assert!(append_in_place(&source, &link, 3, None, b"{}\n").is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"{}\n");
+    }
 }

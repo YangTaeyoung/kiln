@@ -401,7 +401,7 @@ mod tests {
         assert!(matches!(h.state().0.screen, Screen::Preview(0)));
         assert!(h.state().1.is_none(), "selecting a result must never run it");
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("새 터미널에서 실행").rect()));
-        h.render().unwrap().save("/tmp/kiln-launcher-preview-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-launcher-preview-small.png")).unwrap();
         h.key_press(Key::Enter); h.run_steps(2);
         assert_eq!(h.state().1.as_ref().unwrap().command, "echo hello");
     }
@@ -420,7 +420,7 @@ mod tests {
         }, launcher);
         h.run_steps(3);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("명령 저장").rect()));
-        h.render().unwrap().save("/tmp/kiln-launcher-edit-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-launcher-edit-small.png")).unwrap();
         h.key_press(Key::Escape); h.run_steps(3);
         assert!(matches!(h.state().screen, Screen::Discard { .. }));
         h.get_by_label("계속 편집").click(); h.run_steps(3);
@@ -481,7 +481,7 @@ mod tests {
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("명령 이름을 입력하세요.").rect()));
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("명령 저장").rect()));
         assert!(h.state().has_unsaved_edits());
-        h.render().unwrap().save("/tmp/kiln-launcher-error-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-launcher-error-small.png")).unwrap();
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
             }, launcher);
             h.run_steps(4);
             assert!(h.ctx.content_rect().contains_rect(h.get_by_label("새 명령").rect()));
-            let path = if populated { "/tmp/kiln-launcher-list-small.png" } else { "/tmp/kiln-launcher-empty-small.png" };
+            let path = if populated { std::env::temp_dir().join("kiln-launcher-list-small.png") } else { std::env::temp_dir().join("kiln-launcher-empty-small.png") };
             h.render().unwrap().save(path).unwrap();
         }
     }

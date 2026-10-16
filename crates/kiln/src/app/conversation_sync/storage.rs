@@ -34,14 +34,59 @@ pub(super) fn metadata(source: &Source) -> Result<fs::Metadata> {
     ensure!(meta.is_file(), "Transcript is not a regular file");
     Ok(meta)
 }
-pub(super) fn open(root: &Path, path: &Path) -> Result<(Box<dyn Read>, fs::Metadata)> {
+/// Metadata of an opened transcript and the identity of the file it was opened from.
+pub(super) struct Stamp {
+    meta: fs::Metadata,
+    id: FileId,
+}
+impl std::ops::Deref for Stamp {
+    type Target = fs::Metadata;
+    fn deref(&self) -> &fs::Metadata {
+        &self.meta
+    }
+}
+impl Stamp {
+    fn of(file: &fs::File) -> Result<Self> {
+        Ok(Self { meta: file.metadata()?, id: file_id(file)? })
+    }
+}
+/// Device and inode on Unix; volume serial number and file index on Windows.
+type FileId = (u64, u64);
+fn file_id(file: &fs::File) -> Result<FileId> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let meta = file.metadata()?;
+        Ok((meta.dev(), meta.ino()))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+        // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid value of the plain struct.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: the handle belongs to `file`, which outlives the call.
+        let read = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
+        ensure!(read != 0, "Cannot read the transcript file identity: {}", std::io::Error::last_os_error());
+        Ok((u64::from(info.dwVolumeSerialNumber), u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow)))
+    }
+}
+/// Fails when `path` no longer names the file `before` was opened from.
+pub(super) fn same_file(path: &Path, before: &Stamp) -> Result<()> {
+    ensure!(
+        file_id(&fs::File::open(path)?)? == before.id,
+        "Transcript changed while reading; retrying"
+    );
+    Ok(())
+}
+pub(super) fn open(root: &Path, path: &Path) -> Result<(Box<dyn Read>, Stamp)> {
     open_at(root, path, 0)
 }
 /// Opens a transcript positioned at byte `start` of an uncompressed file.
-pub(super) fn open_at(root: &Path, path: &Path, start: u64) -> Result<(Box<dyn Read>, fs::Metadata)> {
+pub(super) fn open_at(root: &Path, path: &Path, start: u64) -> Result<(Box<dyn Read>, Stamp)> {
     safe_path(root, path)?;
     let mut file = fs::File::open(path)?;
-    let meta = file.metadata()?;
+    let meta = Stamp::of(&file)?;
     ensure!(
         meta.is_file() && meta.len() <= COPY_LIMIT,
         "Transcript exceeds the 1 GiB reading limit"
@@ -61,20 +106,13 @@ pub(super) fn open_at(root: &Path, path: &Path, start: u64) -> Result<(Box<dyn R
     };
     Ok((reader, meta))
 }
-pub(super) fn unchanged(source: &Source, path: &Path, before: &fs::Metadata) -> Result<()> {
+pub(super) fn unchanged(source: &Source, path: &Path, before: &Stamp) -> Result<()> {
     ensure!(
         physical(source) == path,
         "Transcript storage changed; retrying"
     );
     let after = metadata(source)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        ensure!(
-            before.dev() == after.dev() && before.ino() == after.ino(),
-            "Transcript changed while reading; retrying"
-        );
-    }
+    same_file(path, before)?;
     ensure!(
         before.len() == after.len() && before.modified()? == after.modified()?,
         "Transcript changed while reading; retrying"
@@ -118,7 +156,7 @@ pub(super) fn tail(source: &Source, count: usize) -> Result<Vec<u8>> {
     if !compressed(&path) {
         safe_path(&source.root, &path)?;
         let mut file = fs::File::open(&path)?;
-        let before = file.metadata()?;
+        let before = Stamp::of(&file)?;
         file.seek(SeekFrom::Start(before.len().saturating_sub(count as u64)))?;
         let mut bytes = Vec::new();
         file.take(count as u64).read_to_end(&mut bytes)?;

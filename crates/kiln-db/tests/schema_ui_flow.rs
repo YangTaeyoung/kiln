@@ -194,7 +194,7 @@ fn reviewed_gui_schema_changes_reach_sqlite_and_refresh_the_table() {
         );
         h.render()
             .unwrap()
-            .save("/tmp/kiln-schema-live-sql-preview.png")
+            .save(std::env::temp_dir().join("kiln-schema-live-sql-preview.png"))
             .unwrap();
         apply(&mut h);
         wait(&mut h, "refreshed column", |h| {
@@ -321,7 +321,7 @@ fn reviewed_gui_schema_changes_reach_sqlite_and_refresh_the_table() {
         }
         h.render()
             .unwrap()
-            .save("/tmp/kiln-schema-drop-confirm-420-130.png")
+            .save(std::env::temp_dir().join("kiln-schema-drop-confirm-420-130.png"))
             .unwrap();
         h.set_size(egui::vec2(1000.0, 1000.0));
         h.run_steps(4);

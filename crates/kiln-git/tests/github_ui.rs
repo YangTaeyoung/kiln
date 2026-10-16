@@ -551,7 +551,7 @@ fn issue_creation_long_repository_fits_360_points() {
     panel.restore_creation_draft(&kiln_git::IssueCreate {title:"긴 이슈 제목long-title".repeat(12),..Default::default()});
     let mut h=Harness::builder().with_size(vec2(360.0,720.0)).wgpu().build_ui_state(|ui,p:&mut IssuePanel|{if theme(ui){p.ui(ui);}},panel);
     settle(&mut h,|p|p.is_loading());
-    h.render().unwrap().save("/tmp/kiln-issue-create-360.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-issue-create-360.png")).unwrap();
     for label in ["초안 버리기…","초안 보관하고 닫기","생성"] {
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}: {:?}",h.get_by_label(label).rect());
     }

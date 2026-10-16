@@ -3054,6 +3054,7 @@ dependencies = [
  "tempfile",
  "unicode-width",
  "url",
+ "windows-sys 0.61.2",
  "winit",
  "zstd",
 ]

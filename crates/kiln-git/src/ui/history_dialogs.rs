@@ -1082,7 +1082,7 @@ mod guarded_review_tests {
         }
         h.key_press(Key::Enter);h.run_steps(2);assert!(!h.state().1);
         h.get_by_label("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다").click();h.run_steps(2);
-        h.render().unwrap().save("/tmp/kiln-history-review-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-history-review-small.png")).unwrap();
         h.get_by_label("스쿼시").click();h.run_steps(2);assert!(h.state().1);
         assert_eq!(review_remote_label_full("https://secret@example.com/owner/repo.git"),"https://example.com/owner/repo.git");
     }

@@ -604,7 +604,7 @@ mod popup_tests {
                 if explicit && with_rows {
                     h.render()
                         .unwrap()
-                        .save(format!("/tmp/kiln-shell-completion-{theme_name}.png"))
+                        .save(std::env::temp_dir().join(format!("kiln-shell-completion-{theme_name}.png")))
                         .unwrap();
                 }
                 h.event(egui::Event::Key {
@@ -712,10 +712,10 @@ mod short_popup_tests {
                 );
                 h.render()
                     .unwrap()
-                    .save(format!(
-                        "/tmp/kiln-shell-completion-short-{theme_name}-{}.png",
+                    .save(std::env::temp_dir().join(format!(
+                        "kiln-shell-completion-short-{theme_name}-{}.png",
                         height as u32
-                    ))
+                    )))
                     .unwrap();
             }
         }

@@ -31,10 +31,25 @@ fn writer_may_be_running(exited: Option<bool>, pid: Option<u32>) -> bool {
         return unsafe { libc::kill(pid, 0) } == 0
             || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
     }
-    #[cfg(not(unix))]
+    // Only an unknown process ID or a recorded exit code proves exit; access errors stay locked.
+    #[cfg(windows)]
     {
-        let _ = pid;
-        true
+        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        let Some(pid) = pid.filter(|pid| *pid > 4) else {
+            return true;
+        };
+        // SAFETY: the handle is checked before use and closed once.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return GetLastError() != ERROR_INVALID_PARAMETER;
+            }
+            let mut code = 0u32;
+            let queried = GetExitCodeProcess(handle, &mut code) != 0;
+            CloseHandle(handle);
+            !queried || code == STILL_ACTIVE as u32
+        }
     }
 }
 
@@ -285,8 +300,14 @@ mod tests {
     use super::*;
     #[test]
     fn closing_a_pane_does_not_release_a_live_native_writer() {
+        #[cfg(unix)]
         let mut writer = std::process::Command::new("/bin/sleep")
             .arg("30")
+            .spawn()
+            .unwrap();
+        #[cfg(windows)]
+        let mut writer = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Start-Sleep 30"])
             .spawn()
             .unwrap();
         let pid = writer.id();

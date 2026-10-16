@@ -1355,7 +1355,7 @@ mod tests {
                     for label in [tr("터미널 연결이 멈췄습니다"),tr("연결 다시 복구")] {
                         assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{language:?}: {label} overflows terminal");
                     }
-                    h.render().unwrap().save(format!("/tmp/kiln-terminal-health-banner-{}-{}.png",language.code(),theme.name)).unwrap();
+                    h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-terminal-health-banner-{}-{}.png",language.code(),theme.name))).unwrap();
                     h.get_by_label(tr("연결 다시 복구")).click();h.run_steps(3);
                     assert_eq!(h.state().1.terminal_health[&1].state,TerminalState::Recovering);
                     h.get_by_label(tr("터미널 연결 복구 중"));
@@ -1428,7 +1428,7 @@ mod tests {
         h.state_mut().2=true;h.run_steps(2);
         assert!(h.state().0.preedit.is_empty(),"returning to a hidden tab must not resurrect old composition");
         assert!(!h.output().shapes.iter().any(|shape|matches!(&shape.shape,Shape::Text(t) if t.galley.job.text.contains('한') || t.galley.job.text.contains('ㅇ'))));
-        h.render().unwrap().save("/tmp/kiln-ime-clean-placeholder.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-ime-clean-placeholder.png")).unwrap();
     }
 
     #[test]
@@ -1459,7 +1459,7 @@ mod tests {
         h.event(egui::Event::Ime(egui::ImeEvent::Preedit{text:"한".into(),active_range_chars:Some(0..1)}));h.run_steps(2);
         let glyph=h.output().shapes.iter().find_map(|shape|match &shape.shape {Shape::Text(t) if t.galley.job.text=="한"=>Some(t),_=>None}).unwrap();
         assert_eq!(glyph.galley.job.sections[0].format.color,h.state().0.palette.fg,"composition must not inherit dim placeholder text");
-        h.render().unwrap().save("/tmp/kiln-ime-active-composition.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-ime-active-composition.png")).unwrap();
         h.state_mut().0.open_search();h.run_steps(2);
         assert!(h.state().0.preedit.is_empty(),"opening search cancels the terminal overlay");
     }
@@ -1500,7 +1500,7 @@ mod tests {
                 assert!((b.pos.y - a.pos.y - cell.y).abs() < 0.01);
             }
             if size == 18.0 {
-                h.render().unwrap().save("/tmp/kiln-ime-composition-2x.png").unwrap();
+                h.render().unwrap().save(std::env::temp_dir().join("kiln-ime-composition-2x.png")).unwrap();
             }
             h.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: String::new(), active_range_chars: None }));
             h.run_steps(2);
@@ -1514,7 +1514,7 @@ mod tests {
             assert_eq!(a.galley.size(), b.galley.size());
             assert_eq!(a.pos, b.pos, "block cursor must not move or resize its underlying glyph");
             if size == 24.0 {
-                h.render().unwrap().save("/tmp/kiln-ime-cursor-130.png").unwrap();
+                h.render().unwrap().save(std::env::temp_dir().join("kiln-ime-cursor-130.png")).unwrap();
             }
             h.state_mut().1.screens.get_mut(&1).unwrap().cursor.as_mut().unwrap().row = 1;
         }
@@ -1668,7 +1668,7 @@ mod tests {
         h.run_steps(3);
         assert!(h.state().2.command_to_run.is_none());
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("← 터미널").rect()));
-        h.render().unwrap().save("/tmp/kiln-command-inspector-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-command-inspector-small.png")).unwrap();
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("새 터미널에서 실행").rect()));
         // The execution action remains visible outside the scrollable editor.
         h.get_by_label("새 터미널에서 실행").click();
@@ -1745,7 +1745,7 @@ mod tests {
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("← 터미널").rect()));
         h.get_by_label("zsh 연결 명령 복사").click();h.run_steps(2);
         assert!(h.state().2.command_to_run.is_none());
-        h.render().unwrap().save("/tmp/kiln-terminal-integration-help-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-terminal-integration-help-small.png")).unwrap();
     }
 
     #[test]

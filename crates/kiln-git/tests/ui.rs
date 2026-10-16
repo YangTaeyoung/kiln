@@ -115,7 +115,7 @@ fn commit_history_expand_is_available_even_when_history_is_collapsed() {
     button.click();h.run_steps(2);
     assert!(h.state().events.contains(&GitEvent::OpenHistory));
     assert_eq!(r.git(&["rev-parse", "HEAD"]),original_head);
-    h.render().unwrap().save("/tmp/kiln-git-history-entry-280.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-git-history-entry-280.png")).unwrap();
 }
 
 fn inline_repo()->Repo {
@@ -137,7 +137,7 @@ fn inline_history_context_actions_and_drag_need_no_edit_mode() {
     assert!(h.query_by_label("기록 편집").is_none());
     h.get_by_label("Commit 3").click_secondary();h.run_steps(3);
     for label in ["메시지 수정…","커밋 삭제","체리픽"] {h.get_by_label(label);}
-    h.render().unwrap().save("/tmp/kiln-inline-history-menu.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-inline-history-menu.png")).unwrap();
     h.get_by_label("메시지 수정…").click();settle(&mut h,|s|s.panel.is_busy());
     h.get_by_label("커밋 메시지 수정");
     h.get_by_label("취소").click();h.run_steps(3);
@@ -687,7 +687,7 @@ fn pr_creation_long_branches_fit_360_points() {
     let mut panel=PrPanel::with_backend(backend);panel.restore_creation_draft(&draft);
     let mut h=Harness::builder().with_size(vec2(360.0,720.0)).wgpu().build_ui_state(|ui,p:&mut PrPanel| {if theme(ui){p.ui(ui);}},panel);
     settle(&mut h,|p|p.is_loading());
-    h.render().unwrap().save("/tmp/kiln-pr-create-360.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-pr-create-360.png")).unwrap();
     for label in ["초안 버리기…","초안 보관하고 닫기","풀 리퀘스트 만들기"] {
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}: {:?}",h.get_by_label(label).rect());
     }

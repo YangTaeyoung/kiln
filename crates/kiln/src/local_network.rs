@@ -352,7 +352,7 @@ mod tests {
                                 });
                             h.ctx.set_zoom_factor(1.3);
                             h.run_steps(4);
-                            h.render().unwrap().save(format!("/tmp/kiln-012-network-{language:?}-{theme}-{width}-{notice:?}.png")).unwrap();
+                            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-012-network-{language:?}-{theme}-{width}-{notice:?}.png"))).unwrap();
                         }
                     }
                 }

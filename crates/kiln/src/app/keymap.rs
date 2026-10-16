@@ -200,14 +200,14 @@ fn validate(bindings:&BTreeMap<String,String>)->Result<(),String> {
         let first=h.get_by_label("명령 검색").rect();let second=h.get_by_label("최근 작업").rect();
         assert!(second.top()-first.top()<40.0,"fields should occupy one row each");
         assert!(h.ctx.content_rect().contains_rect(first));
-        h.render().unwrap().save("/tmp/kiln-keybindings-320.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-320.png")).unwrap();
     }
     #[test] fn expanded_actions_keep_defaults_and_reserve_each_others_original_chords(){
         assert_eq!(ENTRIES.len(),15);
         let defaults:BTreeMap<String,String>=ENTRIES.iter().map(|(id,_,value)|((*id).into(),(*value).into())).collect();
         validate(&defaults).unwrap();
         for (id,_,value) in &ENTRIES[6..] {
-            let mut changed=defaults.clone();changed.insert((*id).into(),"Cmd+F6".into());
+            let mut changed=defaults.clone();changed.insert((*id).into(),if cfg!(target_os="macos"){"Cmd+F6"}else{"Ctrl+Shift+F6"}.into());
             validate(&changed).unwrap();
             changed.insert("recent".into(),(*value).into());
             assert!(validate(&changed).is_err(),"original binding of {id} must stay reserved");

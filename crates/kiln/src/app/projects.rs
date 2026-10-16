@@ -828,10 +828,10 @@ mod tests {
         },p);
         h.run_steps(3);
         for label in ["원본 백업 후 빈 목록 복구","새 프로젝트"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}");}
-        h.render().unwrap().save("/tmp/kiln-project-record-recovery-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-project-record-recovery-small.png")).unwrap();
         h.get_by_label("새 프로젝트").click();h.run_steps(3);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("기록 저장 없이 열기").rect()));
-        h.render().unwrap().save("/tmp/kiln-project-record-fallback-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-project-record-fallback-small.png")).unwrap();
     }
 
     #[cfg(unix)]
@@ -1029,7 +1029,7 @@ mod tests {
         );
         h.render()
             .unwrap()
-            .save("/tmp/kiln-project-composer-small.png")
+            .save(std::env::temp_dir().join("kiln-project-composer-small.png"))
             .unwrap();
     }
     #[test]
@@ -1155,7 +1155,7 @@ mod tests {
             );
             h.render()
                 .unwrap()
-                .save(format!("/tmp/kiln-project-{screen}-small.png"))
+                .save(std::env::temp_dir().join(format!("kiln-project-{screen}-small.png")))
                 .unwrap();
         }
     }

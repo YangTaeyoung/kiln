@@ -2,6 +2,14 @@ use super::*;
 use format::Message;
 use serde_json::json;
 
+/// Creates a symbolic link to a file on Unix and Windows.
+pub(super) fn symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(target, link);
+    #[cfg(windows)]
+    return std::os::windows::fs::symlink_file(target, link);
+}
+
 fn messages() -> Vec<Message> {
     vec![
         Message {
@@ -62,7 +70,7 @@ fn historical_versions_directory_changes_and_tool_references_preserve_identity()
     let mut data = rows(&fs::read(&f.source.path).unwrap());
     data[0]["version"] = json!("2.1.289");
     data[1]["version"] = json!("2.1.299");
-    data[1]["cwd"] = json!("/tmp/changed-directory");
+    data[1]["cwd"] = json!(std::env::temp_dir().join("changed-directory"));
     data[1]["message"]["content"]
         .as_array_mut()
         .unwrap()
@@ -258,7 +266,7 @@ fn sync_dialog_keeps_error_visible_and_identical_across_idle_polls() {
     assert!(h.ctx.content_rect().contains_rect(footer));
     h.render()
         .unwrap()
-        .save("/tmp/kiln-0125-sync-dialog.png")
+        .save(std::env::temp_dir().join("kiln-0125-sync-dialog.png"))
         .unwrap();
     for busy in [true, false, true, false] {
         h.state_mut().busy = busy;
@@ -955,7 +963,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     );
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sync-progress-complete.png")
+        .save(std::env::temp_dir().join("kiln-sync-progress-complete.png"))
         .unwrap();
     h.state_mut().1 = false;
     h.run_steps(2);
@@ -969,7 +977,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     assert!(h.query_by_label("확인이 필요한 대화가 있습니다").is_some());
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sync-progress-failed.png")
+        .save(std::env::temp_dir().join("kiln-sync-progress-failed.png"))
         .unwrap();
     let row = h.state_mut().0.status.rows.values_mut().next().unwrap();
     row.detail = DIVERGED.into();
@@ -980,7 +988,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     assert!(h.query_by_label("보류된 대화 1개 · 원본은 그대로 보관됨").is_some());
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sync-progress-diverged.png")
+        .save(std::env::temp_dir().join("kiln-sync-progress-diverged.png"))
         .unwrap();
 }
 
@@ -1482,7 +1490,9 @@ fn initial_sync_is_latest_twenty_per_workspace_then_only_new_or_changed_sessions
             .unwrap(),
         )
         .unwrap();
-        fs::File::open(&source.path)
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&source.path)
             .unwrap()
             .set_times(
                 fs::FileTimes::new()
@@ -1504,7 +1514,9 @@ fn initial_sync_is_latest_twenty_per_workspace_then_only_new_or_changed_sessions
     fs::remove_file(&sources[26].path).unwrap();
     assert_eq!(workspace_scan(&f, &scope).published, 0);
     // An older already-open session is picked up as soon as it saves another update.
-    fs::File::open(&sources[0].path)
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&sources[0].path)
         .unwrap()
         .set_times(fs::FileTimes::new().set_modified(SystemTime::now()))
         .unwrap();
@@ -1826,7 +1838,6 @@ fn multiple_destination_retry_retains_the_successful_publication_plan() {
 
 #[test]
 fn workspace_discovery_skips_symlinks_and_subagents_and_accepts_unknown_versions() {
-    use std::os::unix::fs::symlink;
     let f = Fixture::new(Tool::Codex);
     fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
     let scope = workspace_scope(&f);
@@ -1837,7 +1848,7 @@ fn workspace_discovery_skips_symlinks_and_subagents_and_accepts_unknown_versions
         .parent()
         .unwrap()
         .join(format!("rollout-link-{}.jsonl", f.source.id));
-    symlink(&f.source.path, &linked).unwrap();
+    symlink_file(&f.source.path, &linked).unwrap();
     let subagent = destination(
         &f.pair,
         &Source {
@@ -1958,7 +1969,7 @@ fn workspace_progress_distinguishes_discovery_empty_and_completed_batches() {
     assert!(h.query_by_label("완료된 대화 모두 동기화됨").is_some());
     h.render()
         .unwrap()
-        .save("/tmp/kiln-workspace-sync-complete.png")
+        .save(std::env::temp_dir().join("kiln-workspace-sync-complete.png"))
         .unwrap();
     h.state_mut().status.discovering = true;
     h.run_steps(2);
@@ -1979,7 +1990,7 @@ fn workspace_progress_distinguishes_discovery_empty_and_completed_batches() {
     );
     h.render()
         .unwrap()
-        .save("/tmp/kiln-workspace-sync-empty.png")
+        .save(std::env::temp_dir().join("kiln-workspace-sync-empty.png"))
         .unwrap();
 }
 
@@ -3428,7 +3439,7 @@ fn progress_ui_offers_actions_ignore_and_restore() {
     assert!(h.query_by_label("무시").is_some());
     assert!(h.query_by_label("복구").is_some());
     assert!(h.query_by_label("보류됨").is_some());
-    h.render().unwrap().save("/tmp/kiln-sync-attention.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-sync-attention.png")).unwrap();
 }
 
 #[test]

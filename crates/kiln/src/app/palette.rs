@@ -287,7 +287,7 @@ mod responsive_tests {
         },palette);
         h.run_steps(4);h.get_by_value("전체").click();h.run_steps(3);
         let row=h.get_by_label(&project).rect();assert!(h.ctx.content_rect().contains_rect(row),"{row:?}");
-        h.render().unwrap().save("/tmp/kiln-project-filter-minimum.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-project-filter-minimum.png")).unwrap();
         h.get_by_label(&project).click();h.run_steps(2);
         h.state_mut().query="does-not-match".into();h.run_steps(3);
         h.get_by_label("검색 초기화").click();h.run_steps(3);

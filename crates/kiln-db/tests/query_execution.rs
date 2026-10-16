@@ -145,10 +145,10 @@ fn select_result_can_be_edited_and_applied_from_the_grid() {
         h.run_steps(3);
         h.key_press(Key::F2);
         h.run_steps(3);
-        std::fs::create_dir_all("/tmp/kiln-db-captures").unwrap();
+        std::fs::create_dir_all(std::env::temp_dir().join("kiln-db-captures")).unwrap();
         h.render()
             .unwrap()
-            .save(format!("/tmp/kiln-db-captures/after-double-{expected}.png"))
+            .save(std::env::temp_dir().join(format!("kiln-db-captures/after-double-{expected}.png")))
             .unwrap();
         let current = if expected == "first@kiln.dev" {
             "ada@example.com"
@@ -171,10 +171,10 @@ fn select_result_can_be_edited_and_applied_from_the_grid() {
             h.query_by_label("변경 1개 반영").is_some(),
             "email edit was not staged"
         );
-        std::fs::create_dir_all("/tmp/kiln-db-captures").unwrap();
+        std::fs::create_dir_all(std::env::temp_dir().join("kiln-db-captures")).unwrap();
         h.render()
             .unwrap()
-            .save(format!("/tmp/kiln-db-captures/before-run-{expected}.png"))
+            .save(std::env::temp_dir().join(format!("kiln-db-captures/before-run-{expected}.png")))
             .unwrap();
         let run_rect = h.get_by_label("실행").rect();
         // Running new SQL must preserve the pending edit.
@@ -182,7 +182,7 @@ fn select_result_can_be_edited_and_applied_from_the_grid() {
         h.run_steps(2);
         h.render()
             .unwrap()
-            .save(format!("/tmp/kiln-db-captures/after-run-{expected}.png"))
+            .save(std::env::temp_dir().join(format!("kiln-db-captures/after-run-{expected}.png")))
             .unwrap();
         assert_eq!(
             h.state().pending_changes(),
@@ -207,8 +207,8 @@ fn select_result_can_be_edited_and_applied_from_the_grid() {
         assert_eq!(result.result.scalar_string().as_deref(), Some(expected));
         h.run_steps(3);
     }
-    let output = std::path::Path::new("/tmp/kiln-db-captures");
-    std::fs::create_dir_all(output).unwrap();
+    let output = std::env::temp_dir().join("kiln-db-captures");
+    std::fs::create_dir_all(&output).unwrap();
     h.render()
         .unwrap()
         .save(output.join("select-result-edit.png"))

@@ -1599,7 +1599,7 @@ mod dialog_regressions {
             for label in ["연결 테스트","취소","저장"] {
                 assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{theme} {label}");
             }
-            h.render().unwrap().save(format!("/tmp/kiln-db-connection-minimum-{theme}.png")).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-db-connection-minimum-{theme}.png"))).unwrap();
         }
         Theme::set_current("kiln-dark");
     }

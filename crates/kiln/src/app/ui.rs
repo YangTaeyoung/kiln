@@ -294,7 +294,7 @@ mod tab_tests {
             assert_eq!(path.points.len(),33);
             assert!(path.points.iter().all(|p|egui::Rect::from_center_size(egui::pos2(24.0,30.0),egui::vec2(14.0,14.0)).contains(*p)));
             frames.push(path.points.clone());
-            h.render().unwrap().save(format!("/tmp/kiln-running-{i}.png")).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-running-{i}.png"))).unwrap();
         }
         assert_ne!(frames[0],frames[1]);
         assert_ne!(frames[1],frames[2]);

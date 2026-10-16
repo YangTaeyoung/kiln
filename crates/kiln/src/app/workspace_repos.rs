@@ -2739,7 +2739,7 @@ mod tests {
         assert!(h.get_by_label("작업 시작").rect().bottom() < 338.);
         h.render()
             .unwrap()
-            .save("/tmp/kiln-workspace-multi-minimum.png")
+            .save(std::env::temp_dir().join("kiln-workspace-multi-minimum.png"))
             .unwrap();
     }
 }
