@@ -112,7 +112,8 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
   h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point=Some(1.0);
   h.ctx.set_zoom_factor(scale);h.run_steps(3);h.set_size(egui::vec2(w/scale,height/scale));h.run_steps(4);
   let size=h.ctx.content_rect().size();assert!((size.x-w/scale).abs()<1.0 && (size.y-height/scale).abs()<1.0,"expected {}x{} got {size:?}",w/scale,height/scale);
-  for label in ["도구","새 작업","설정 (⌘,)","알림 센터"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} outside viewport");}
+  let settings=format!("설정 ({})",kiln::app::app_shortcut("⌘,"));
+  for label in ["도구","새 작업",settings.as_str(),"알림 센터"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} outside viewport");}
   assert!(h.query_by_label("워크스페이스 메뉴").is_none());
   let img=h.render().unwrap();assert_eq!(img.dimensions(),(w as u32,height as u32));img.save(output.join(name)).unwrap();
   if scale>1.0 {
@@ -129,6 +130,6 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  let ctx=h.ctx.clone();h.state_mut().debug_set_theme(&ctx,"kiln-light");h.run_steps(4);
  h.render().unwrap().save(output.join("workspace-light-2560.png")).unwrap();
  h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().fullscreen=Some(true);h.run_steps(4);
- assert!(h.get_by_label("워크스페이스 사이드바 (⌘B)").rect().left()<20.0);
+ assert!(h.get_by_label(&format!("워크스페이스 사이드바 ({})",kiln::app::app_shortcut("⌘B"))).rect().left()<20.0);
  h.render().unwrap().save(output.join("workspace-fullscreen-light.png")).unwrap();
 }

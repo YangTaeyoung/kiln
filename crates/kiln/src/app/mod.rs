@@ -7,6 +7,7 @@ mod launchers;
 pub mod projects;
 mod product_ui;
 mod keymap;
+pub use keymap::app_shortcut;
 mod quick;
 #[cfg(target_os = "macos")]
 mod macos;

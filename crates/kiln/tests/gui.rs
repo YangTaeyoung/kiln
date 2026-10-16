@@ -655,7 +655,8 @@ fn database_inspector_tab_is_bounded_localized_and_restores_selection() {
             let panel=egui::containers::PanelState::load(&h.ctx,panel_id).unwrap();
             assert!((panel.size().x-300.0).abs()<1.0,"minimum dock width changed");
             let inner=panel.outer_rect.shrink(10.0);
-            for label in [i18n::tr("파일"),i18n::tr("변경"),"GitHub",i18n::tr("데이터베이스"),i18n::tr("파일 작업"),i18n::tr("파일 내용 검색 (⇧⌘F)")] {
+            let search=i18n::tr("파일 내용 검색 ({})").replace("{}",&kiln::app::app_shortcut("⇧⌘F"));
+            for label in [i18n::tr("파일"),i18n::tr("변경"),"GitHub",i18n::tr("데이터베이스"),i18n::tr("파일 작업"),search.as_str()] {
                 assert!(inner.contains_rect(h.get_by_label(label).rect()),"{language:?}: {label} is outside the dock");
             }
             h.get_by_label(i18n::tr("데이터베이스")).click();h.run_steps(3);
