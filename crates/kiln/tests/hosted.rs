@@ -275,3 +275,22 @@ fn hosted_exit_code_is_reported() {
         assert!(Instant::now() < deadline);
     }
 }
+
+/// A killed session takes the processes its shell started with it.
+#[cfg(windows)]
+#[test]
+fn killed_session_leaves_no_descendants() {
+    let d = Daemon::start("tree");
+    let c = d.client();
+    let s = create_shell(&c);
+    type_line(&c, s, "$p = Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep 60' -WindowStyle Hidden -PassThru; echo \"childpid=$($p.Id)\"");
+    let child = wait_value(&c, s, "childpid=");
+    assert!(alive(child));
+    c.send(ClientMsg::Kill { session: s });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while alive(child) {
+        assert!(Instant::now() < deadline, "the shell's child {child} outlived its killed session");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+

@@ -312,11 +312,76 @@ mod imp {
     use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
     use std::io::Read;
 
+    /// The pseudoconsole is closed (set to `None`) once the child exits, which ends the
+    /// output stream after its last bytes.
     pub struct Pty {
-        master: Mutex<Box<dyn MasterPty + Send>>,
+        master: std::sync::Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
         child: Mutex<Box<dyn Child + Send + Sync>>,
         writer: Mutex<Option<Box<dyn io::Write + Send>>>,
         pid: u32,
+        job: Option<Job>,
+    }
+
+    /// A Job Object holding the child and every process it starts.
+    struct Job(windows_sys::Win32::Foundation::HANDLE);
+    // SAFETY: a job handle may be used and closed from any thread.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    impl Job {
+        fn for_process(pid: u32) -> Option<Job> {
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+            // SAFETY: every handle is checked before use and closed once.
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job.is_null() {
+                    return None;
+                }
+                let job = Job(job);
+                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                if process.is_null() {
+                    return None;
+                }
+                let assigned = AssignProcessToJobObject(job.0, process) != 0;
+                CloseHandle(process);
+                assigned.then_some(job)
+            }
+        }
+
+        fn terminate(&self) {
+            // SAFETY: the job handle is open for the lifetime of `self`.
+            unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) };
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            // SAFETY: the handle is owned by `self` and closed once.
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+        }
+    }
+
+    /// Closes the pseudoconsole after the process `pid` exits.
+    fn close_after_exit(pid: u32, master: std::sync::Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+        // SAFETY: the handle is checked before use and closed once.
+        let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        if process.is_null() {
+            return;
+        }
+        let process = process as usize;
+        std::thread::spawn(move || {
+            let process = process as windows_sys::Win32::Foundation::HANDLE;
+            // SAFETY: `process` stays open until CloseHandle below.
+            unsafe {
+                WaitForSingleObject(process, INFINITE);
+                CloseHandle(process);
+            }
+            drop(master.lock().take());
+        });
     }
 
     fn size(cols: u16, rows: u16) -> PtySize {
@@ -345,13 +410,19 @@ mod imp {
                 cmd.env(k, v);
             }
             let child = pair.slave.spawn_command(cmd).map_err(io::Error::other)?;
+            drop(pair.slave);
             let pid = child.process_id().unwrap_or(0);
+            let job = Job::for_process(pid);
             let writer = pair.master.take_writer().map_err(io::Error::other)?;
-            Ok(Pty { master: Mutex::new(pair.master), child: Mutex::new(child), writer: Mutex::new(Some(writer)), pid })
+            let master = std::sync::Arc::new(Mutex::new(Some(pair.master)));
+            close_after_exit(pid, master.clone());
+            Ok(Pty { master, child: Mutex::new(child), writer: Mutex::new(Some(writer)), pid, job })
         }
 
         pub fn reader(&self) -> io::Result<PtyReader> {
-            Ok(PtyReader { inner: self.master.lock().try_clone_reader().map_err(io::Error::other)? })
+            let master = self.master.lock();
+            let master = master.as_ref().ok_or_else(|| io::Error::other("terminal closed"))?;
+            Ok(PtyReader { inner: master.try_clone_reader().map_err(io::Error::other)? })
         }
 
         pub fn writer(&self) -> io::Result<Box<dyn io::Write + Send>> {
@@ -359,7 +430,10 @@ mod imp {
         }
 
         pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
-            self.master.lock().resize(size(cols, rows)).map_err(io::Error::other)
+            match self.master.lock().as_ref() {
+                Some(master) => master.resize(size(cols, rows)).map_err(io::Error::other),
+                None => Ok(()),
+            }
         }
 
         pub fn pid(&self) -> u32 {
@@ -375,6 +449,9 @@ mod imp {
         }
 
         pub fn kill(&self) {
+            if let Some(job) = &self.job {
+                job.terminate();
+            }
             let _ = self.child.lock().kill();
         }
 
@@ -400,3 +477,51 @@ mod imp {
 }
 
 pub use imp::*;
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::io::Write;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn child_exit_closes_output_and_reports_its_code() {
+        let spec = SpawnSpec {
+            program: Some("cmd.exe".into()),
+            args: vec!["/c".into(), "echo done& exit 3".into()],
+            cols: 80,
+            rows: 24,
+            ..Default::default()
+        };
+        let pty = Pty::spawn(&spec, 1).unwrap();
+        let mut reader = pty.reader().unwrap();
+        let mut writer = pty.writer().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let mut out = Vec::new();
+            loop {
+                match reader.read_timeout(&mut buf, 200) {
+                    Ok(ReadResult::Data(n)) => {
+                        // ConPTY asks for the cursor position before the child starts, as a terminal would answer.
+                        if buf[..n].windows(4).any(|w| w == b"\x1b[6n") {
+                            let _ = writer.write_all(b"\x1b[1;1R");
+                        }
+                        out.extend_from_slice(&buf[..n]);
+                    }
+                    Ok(ReadResult::Timeout) => {}
+                    _ => break,
+                }
+            }
+            let _ = tx.send(out);
+        });
+        let out = rx.recv_timeout(Duration::from_secs(10)).expect("output reaches EOF after the child exits");
+        assert!(String::from_utf8_lossy(&out).contains("done"));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pty.try_wait().is_none() {
+            assert!(Instant::now() < deadline, "exit code was not reported");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(pty.try_wait(), Some(3));
+    }
+}
