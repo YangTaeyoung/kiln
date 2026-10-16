@@ -15,7 +15,10 @@ struct Daemon {
 
 impl Daemon {
     fn start(tag: &str) -> Daemon {
+        #[cfg(unix)]
         let dir = PathBuf::from(format!("/tmp/kt-{}-{tag}", std::process::id()));
+        #[cfg(windows)]
+        let dir = std::env::temp_dir().join(format!("kt-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let socket = dir.join("d.sock").to_string_lossy().into_owned();
@@ -37,15 +40,56 @@ impl Drop for Daemon {
     }
 }
 
+/// The kiln executable; `KILN_TEST_EXE` names it when the tests run on another machine.
 fn exe() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_kiln"))
+    std::env::var_os("KILN_TEST_EXE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_kiln")))
+}
+
+/// The platform shell and the commands the tests run in it.
+#[cfg(unix)]
+mod sh {
+    pub const PROGRAM: &str = "/bin/sh";
+    pub const RUN: &str = "-c";
+    /// Prints `label` followed by `a + b`, computed by the shell.
+    pub fn echo_sum(label: &str, a: u32, b: u32) -> String {
+        format!("echo {label}$(({a}+{b}))")
+    }
+    pub const NOTIFY_LATER: &str = "sleep 0.3; printf '\\033]777;notify;Claude;needs input\\007'; sleep 5";
+    pub const EXIT_7_ON_TRIGGER: &str = "IFS= read -r trigger; [ \"$trigger\" = kiln-exit ] || exit 99; exit 7";
+    pub const SIXTY_ROWS: &str = "i=0; while [ $i -lt 60 ]; do echo row-$i; i=$((i+1)); done; sleep 30";
+    pub const MARKERS: &str = "echo marker=[$CLAUDECODE$CLAUDE_CODE_CHILD_SESSION] kiln=[$KILN_SESSION]; sleep 5";
+}
+#[cfg(windows)]
+mod sh {
+    pub const PROGRAM: &str = "powershell.exe";
+    pub const RUN: &str = "-Command";
+    /// Prints `label` followed by `a + b`, computed by the shell.
+    pub fn echo_sum(label: &str, a: u32, b: u32) -> String {
+        format!("echo \"{label}$({a}+{b})\"")
+    }
+    pub const NOTIFY_LATER: &str = "Start-Sleep -Milliseconds 300; [Console]::Write([char]27 + ']777;notify;Claude;needs input' + [char]7); Start-Sleep 5";
+    pub const EXIT_7_ON_TRIGGER: &str = "$trigger = Read-Host; if ($trigger -ne 'kiln-exit') { exit 99 }; exit 7";
+    pub const SIXTY_ROWS: &str = "0..59 | ForEach-Object { \"row-$_\" }; Start-Sleep 30";
+    pub const MARKERS: &str = "echo \"marker=[$env:CLAUDECODE$env:CLAUDE_CODE_CHILD_SESSION] kiln=[$env:KILN_SESSION]\"; Start-Sleep 5";
+}
+
+fn create_shell(c: &Client) -> SessionId {
+    create(c, sh::PROGRAM, &[])
+}
+
+/// A session that runs `script` in the platform shell and then exits.
+fn create_script(c: &Client, script: &str) -> SessionId {
+    #[cfg(windows)]
+    return create(c, sh::PROGRAM, &["-NoProfile", sh::RUN, script]);
+    #[cfg(unix)]
+    return create(c, sh::PROGRAM, &[sh::RUN, script]);
 }
 
 fn create(c: &Client, program: &str, args: &[&str]) -> SessionId {
     let spec = SpawnSpec {
         program: Some(program.into()),
         args: args.iter().map(|s| s.to_string()).collect(),
-        cwd: Some("/tmp".into()),
+        cwd: Some(std::env::temp_dir().to_string_lossy().into_owned()),
         cols: 80,
         rows: 24,
         env: vec![("PS1".into(), "$ ".into())],
@@ -94,8 +138,8 @@ fn alive(pid: u32) -> bool {
 fn session_survives_client_disconnect() {
     let d = Daemon::start("persist");
     let c = d.client();
-    let s = create(&c, "/bin/sh", &[]);
-    type_line(&c, s, "echo hello-$((40+2))");
+    let s = create_shell(&c);
+    type_line(&c, s, &sh::echo_sum("hello-", 40, 2));
     wait_for(&c, s, "hello-42");
     drop(c);
 
@@ -108,7 +152,7 @@ fn session_survives_client_disconnect() {
     };
     assert!(list.iter().any(|i| i.id == s && i.exited.is_none()));
     assert!(read(&c2, s).contains("hello-42"));
-    type_line(&c2, s, "echo again-$((1+1))");
+    type_line(&c2, s, &sh::echo_sum("again-", 1, 1));
     wait_for(&c2, s, "again-2");
 }
 
@@ -157,7 +201,7 @@ fn hot_upgrade_keeps_processes_screen_and_io() {
 fn osc_notification_sets_attention_and_is_broadcast() {
     let d = Daemon::start("notify");
     let c = d.client();
-    let s = create(&c, "/bin/sh", &["-c", "sleep 0.3; printf '\\033]777;notify;Claude;needs input\\007'; sleep 5"]);
+    let s = create_script(&c, sh::NOTIFY_LATER);
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut got = false;
     while Instant::now() < deadline && !got {
@@ -183,7 +227,7 @@ fn osc_notification_sets_attention_and_is_broadcast() {
 fn frames_are_incremental_after_first_full_frame() {
     let d = Daemon::start("frames");
     let c = d.client();
-    let s = create(&c, "/bin/sh", &[]);
+    let s = create_shell(&c);
     c.send(ClientMsg::Attach { session: s, cols: 80, rows: 24 });
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -217,14 +261,7 @@ fn exit_code_is_reported() {
     // Client::request is a CLI helper that discards unrelated broadcasts.
     // An immediate exit can be consumed while it awaits Created. Hold the
     // owned child until that response arrives, then observe the exit event.
-    let s = create(
-        &c,
-        "/bin/sh",
-        &[
-            "-c",
-            "IFS= read -r trigger; [ \"$trigger\" = kiln-exit ] || exit 99; exit 7",
-        ],
-    );
+    let s = create_script(&c, sh::EXIT_7_ON_TRIGGER);
     type_line(&c, s, "kiln-exit");
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -237,6 +274,7 @@ fn exit_code_is_reported() {
     }
 }
 
+#[cfg(unix)]
 fn png_b64(w: u32, h: u32) -> String {
     use base64::Engine;
     let img = image::RgbaImage::from_pixel(w, h, image::Rgba([0, 200, 0, 255]));
@@ -305,7 +343,7 @@ fn inline_image_is_sent_once_and_placed_in_frames_across_upgrade() {
 fn read_range_returns_scrollback_text() {
     let d = Daemon::start("range");
     let c = d.client();
-    let s = create(&c, "/bin/sh", &["-c", "i=0; while [ $i -lt 60 ]; do echo row-$i; i=$((i+1)); done; sleep 30"]);
+    let s = create_script(&c, sh::SIXTY_ROWS);
     wait_for(&c, s, "row-59");
     let text = match c.request(|req| ClientMsg::ReadRange { req, session: s, start: (-30, 0), end: (-20, 79) }, Duration::from_secs(5)).unwrap() {
         ServerMsg::Text { text, .. } => text,
@@ -324,7 +362,7 @@ fn launcher_session_markers_do_not_leak_into_shells() {
     }
     let d = Daemon::start("scrub");
     let c = d.client();
-    let s = create(&c, "/bin/sh", &["-c", "echo marker=[$CLAUDECODE$CLAUDE_CODE_CHILD_SESSION] kiln=[$KILN_SESSION]; sleep 5"]);
+    let s = create_script(&c, sh::MARKERS);
     let t = wait_for(&c, s, "marker=");
     assert!(t.contains("marker=[]"), "{t}");
     assert!(!t.contains("kiln=[]"), "{t}");

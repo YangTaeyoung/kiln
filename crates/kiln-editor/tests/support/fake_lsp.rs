@@ -106,13 +106,23 @@ fn uri_to_path(uri: &str) -> PathBuf {
         out.push(bytes[i]);
         i += 1;
     }
-    PathBuf::from(String::from_utf8_lossy(&out).into_owned())
+    let path = String::from_utf8_lossy(&out).into_owned();
+    // `/C:/x` is a Windows drive path.
+    let b = path.as_bytes();
+    if cfg!(windows) && b.len() >= 3 && b[0] == b'/' && b[2] == b':' {
+        return PathBuf::from(&path[1..]);
+    }
+    PathBuf::from(path)
 }
 
 fn path_to_uri(p: &std::path::Path) -> String {
     let mut s = String::from("file://");
-    for b in p.to_string_lossy().bytes() {
-        if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
+    let text = p.to_string_lossy().replace('\\', "/");
+    if !text.starts_with('/') {
+        s.push('/');
+    }
+    for b in text.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-_.~:".contains(&b) {
             s.push(b as char);
         } else {
             s.push_str(&format!("%{b:02X}"));

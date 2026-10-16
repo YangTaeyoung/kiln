@@ -99,22 +99,32 @@ jobs:
       - name: Library tests
         if: ${{ !cancelled() }}
         run: |
-          cargo test --locked -p kiln-common -p kiln-i18n-macros -p kiln-proto -p kiln-daemon -p kiln-accounts -p kiln-db -p kiln-editor -p kiln-git --lib
-          cargo test --locked -p kiln --lib -- --test-threads=1
-          cargo test --locked -p kiln-remote --lib -- --test-threads=1
+          status=0
+          cargo test --locked --no-fail-fast -p kiln-common -p kiln-i18n-macros -p kiln-proto -p kiln-daemon -p kiln-accounts -p kiln-db -p kiln-editor -p kiln-git --lib || status=1
+          cargo test --locked --no-fail-fast -p kiln --lib -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast -p kiln-remote --lib -- --test-threads=1 || status=1
+          exit $status
       - name: Terminal and daemon integration
         if: ${{ !cancelled() }}
-        run: cargo test --locked -p kiln --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
+        run: |
+          status=0
+          cargo test --locked --no-fail-fast -p kiln --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1 || status=1
+          exit $status
       - name: GUI integration
         if: ${{ !cancelled() }}
-        run: cargo test --locked -p kiln --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
+        run: |
+          status=0
+          cargo test --locked --no-fail-fast -p kiln --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1 || status=1
+          exit $status
       - name: Editor, Git, database and remote integration
         if: ${{ !cancelled() }}
         run: |
-          cargo test --locked -p kiln-editor --tests -- --test-threads=1
-          cargo test --locked -p kiln-git --tests -- --test-threads=1
-          cargo test --locked -p kiln-db --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1
-          cargo test --locked -p kiln-remote --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1
+          status=0
+          cargo test --locked --no-fail-fast -p kiln-editor --tests -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast -p kiln-git --tests -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast -p kiln-db --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast -p kiln-remote --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1 || status=1
+          exit $status
 
   database-servers:
     runs-on: ubuntu-latest

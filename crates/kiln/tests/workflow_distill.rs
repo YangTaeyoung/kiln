@@ -11,7 +11,10 @@ impl Drop for Cleanup {fn drop(&mut self){if let Ok(c)=kiln_daemon::client::Clie
 fn pump(h:&mut Harness<'_,KilnApp>,mut f:impl FnMut(&Harness<'_,KilnApp>)->bool){let until=Instant::now()+Duration::from_secs(12);loop{h.step();if f(h){return;}assert!(Instant::now()<until,"workflow timed out");std::thread::sleep(Duration::from_millis(25));}}
 #[test]
 fn parent_main_worktree_navigation_and_quiet_chrome(){
+ #[cfg(unix)]
  let base=PathBuf::from(format!("/tmp/kiln-distill-{}",std::process::id()));
+ #[cfg(windows)]
+ let base=std::env::temp_dir().join(format!("kiln-distill-{}",std::process::id()));
  std::fs::create_dir_all(base.join("cfg")).unwrap();let _cleanup=Cleanup(base.clone());
  let parent=base.join("personal");let repo=parent.join("product");let wt=base.join("login-ui");std::fs::create_dir_all(&repo).unwrap();
  git(&repo,&["init","-q","-b","main"]);git(&repo,&["commit","--allow-empty","-qm","init"]);git(&repo,&["worktree","add","-qb","feature/login",wt.to_str().unwrap()]);

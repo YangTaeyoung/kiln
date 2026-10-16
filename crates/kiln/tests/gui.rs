@@ -19,7 +19,7 @@ fn public_workspace_preview() {
     struct Cleanup(PathBuf);
     impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);}}
     let _cleanup=Cleanup(base.clone());
-    unsafe {std::env::set_var("SHELL","/bin/sh");}
+    use_posix_shell(&base);
     let mut h=Harness::builder().with_size([1440.0,860.0]).wgpu().build_eframe(|cc|{
         let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));app.debug_set_sidebar_width(248.0);app
     });
@@ -32,7 +32,7 @@ fn public_workspace_preview() {
         ("Review the integration tests","waiting","\x1b[1;36mINTEGRATION REVIEW\x1b[0m\n\nChecked the checkout flow across both repositories.\n\n\x1b[32mPASS\x1b[0m  successful payment\n\x1b[32mPASS\x1b[0m  invalid card details\n\x1b[32mPASS\x1b[0m  network retry\n\x1b[32mPASS\x1b[0m  duplicate submission\n\n\x1b[90m24 tests passed · 0 failed\x1b[0m\n\nThe API and frontend agree on the error response.\n\n\x1b[33mOne decision needs your input\x1b[0m\nShould a timed-out payment retry automatically,\nor ask the customer to try again?\n\n")
     ];
     for (i,(title,state,body)) in samples.iter().enumerate() {
-        if i>0 {h.key_press_modifiers(primary(),egui::Key::D);assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2&&h.state().debug_focused_session().is_some()));}
+        if i>0 {h.key_press_modifiers(cmd(),egui::Key::D);assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2&&h.state().debug_focused_session().is_some()));}
         let sid=h.state().debug_focused_session().unwrap();
         let path=base.join(format!("demo-{i}.sh"));
         let text=format!("\x1b[2J\x1b[H\x1b]0;{title}\x07\x1b]777;kiln-agent;{state}\x07{body}");
@@ -45,8 +45,42 @@ fn public_workspace_preview() {
     h.render().unwrap().save(out.join("workspace.png")).unwrap();
 }
 
+/// A POSIX shell for terminal fixtures: `/bin/<name>` on Unix and Git for Windows'
+/// `bin\\<name>.exe` on Windows.
+fn posix_shell(name: &str) -> String {
+    #[cfg(unix)]
+    return format!("/bin/{name}");
+    #[cfg(windows)]
+    {
+        let git = kiln_common::paths::find_executable("git", &[]).expect("Git for Windows");
+        let root = git.parent().and_then(|dir| dir.parent()).expect("Git installation folder");
+        root.join("bin").join(format!("{name}.exe")).to_string_lossy().into_owned()
+    }
+}
+
+/// Makes `posix_shell("sh")` the terminal shell for apps created with this configuration.
+fn use_posix_shell(base: &std::path::Path) {
+    #[cfg(windows)]
+    std::fs::write(base.join("cfg/state.json"), serde_json::json!({"settings": {"shell": posix_shell("sh")}}).to_string()).unwrap();
+    #[cfg(unix)]
+    {
+        let _ = base;
+        // SAFETY: tests that change the shell hold the SERIAL lock.
+        unsafe { std::env::set_var("SHELL", "/bin/sh") };
+    }
+}
+
+/// A command that keeps running in `posix_shell` and the process name it shows: Windows
+/// uses a native program because MSYS programs are not descendants of the shell there.
+fn long_running(seconds: u32) -> (String, &'static str) {
+    if cfg!(windows) { (format!("ping -n {seconds} 127.0.0.1 >/dev/null"), "ping") } else { (format!("sleep {seconds}"), "sleep") }
+}
+
 fn setup(tag: &str) -> (PathBuf, PathBuf) {
+    #[cfg(unix)]
     let base = PathBuf::from(format!("/tmp/kg-{}-{tag}", std::process::id()));
+    #[cfg(windows)]
+    let base = std::env::temp_dir().join(format!("kg-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(base.join("cfg")).unwrap();
     std::fs::create_dir_all(base.join("proj/src")).unwrap();
@@ -459,6 +493,7 @@ fn notification_inbox_and_narrow_settings_are_operable() {
 fn reading_inbox_acknowledges_daemon_attention() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (base, proj) = setup("attention");
+    use_posix_shell(&base);
     let mut h = Harness::builder().with_size([1280.0, 800.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| !t.trim().is_empty())));
     let client = kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(), None).unwrap();
@@ -745,6 +780,7 @@ fn recent_work_search_reopens_editor_across_workspaces_and_restores_input() {
 fn saved_command_requires_preview_then_runs_once_in_selected_directory() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (base, proj) = setup("saved-command");
+    use_posix_shell(&base);
     let cwd = base.join("folder with spaces");
     std::fs::create_dir_all(&cwd).unwrap();
     std::fs::create_dir_all(base.join("cfg")).unwrap();
@@ -871,7 +907,7 @@ fn opening_existing_file_and_terminal_commands_reveal_targets_from_zoom() {
     let _cleanup=Cleanup(base.clone());
     let mut h=Harness::builder().with_size([1200.0,800.0]).build_eframe(|cc| {
         let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));
-        app.debug_set_shell("/bin/sh".into());
+        app.debug_set_shell(posix_shell("sh"));
         app
     });
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some() && h.state().debug_focused_text().is_some_and(|text|!text.trim().is_empty())), "initial shell must be ready before testing zoom navigation");
@@ -897,6 +933,7 @@ fn opening_existing_file_and_terminal_commands_reveal_targets_from_zoom() {
 }
 
 
+#[cfg(unix)]
 #[test]
 fn command_purpose_titles_survive_foreign_shell_markers_across_split_terminals() {
     let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
@@ -1005,16 +1042,16 @@ fn detached_and_existing_sessions_reveal_canvas_behind_wide_sidebar() {
     });
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     let sid=h.state().debug_focused_session().unwrap();
-    h.key_press_modifiers(if cfg!(target_os="macos"){egui::Modifiers::MAC_CMD|egui::Modifiers::SHIFT}else{egui::Modifiers::CTRL|egui::Modifiers::SHIFT},egui::Key::E);h.run_steps(3);
+    h.key_press_modifiers(cmd_shift(),egui::Key::E);h.run_steps(3);
     assert!(h.state().debug_sheet_open());
     h.state_mut().debug_queue_action(Action::RevealSession(sid));h.run_steps(3);
     assert!(!h.state().debug_sheet_open(),"1000 - 320 is exclusive even though 1000 - 232 is not");
-    h.key_press_modifiers(if cfg!(target_os="macos"){egui::Modifiers::MAC_CMD|egui::Modifiers::SHIFT}else{egui::Modifiers::CTRL|egui::Modifiers::SHIFT},egui::Key::E);h.run_steps(3);
+    h.key_press_modifiers(cmd_shift(),egui::Key::E);h.run_steps(3);
     assert!(h.state().debug_sheet_open());
     h.state_mut().debug_queue_action(Action::AttachSession(sid));h.run_steps(3);
     assert!(!h.state().debug_sheet_open(),"attaching from an inbox must reveal the destination");
     assert_eq!(h.state().debug_focused_session(),Some(sid));
-    h.key_press_modifiers(if cfg!(target_os="macos"){egui::Modifiers::MAC_CMD|egui::Modifiers::SHIFT}else{egui::Modifiers::CTRL|egui::Modifiers::SHIFT},egui::Key::E);h.run_steps(3);
+    h.key_press_modifiers(cmd_shift(),egui::Key::E);h.run_steps(3);
     assert!(h.state().debug_sheet_open());
     h.state_mut().debug_queue_action(Action::OpenProjects);h.run_steps(3);
     h.get_by_label("새 프로젝트").click();h.run_steps(3);
@@ -1063,6 +1100,7 @@ fn minimum_quit_confirmation_keeps_all_draft_actions_visible() {
     shutdown(&base);
 }
 
+#[cfg(unix)]
 #[test]
 fn terminal_focus_reporting_tracks_search_tabs_and_modal_with_real_pty() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -1109,6 +1147,7 @@ with open('focus-events', 'ab', buffering=0) as events:
     assert!(pump_until(&mut h, 5, |_| contains(b"\x1b[O")), "settings modal blurs the application even without typing");
 }
 
+#[cfg(unix)]
 #[test]
 fn quick_terminal_owns_session_size_when_its_main_tab_is_visible() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -1166,7 +1205,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
         .build_eframe(|cc| {
             let mut app = KilnApp::new(&cc.egui_ctx, Some(proj.clone()));
             app.debug_set_sidebar_width(320.);
-            app.debug_set_shell("/bin/sh".into());
+            app.debug_set_shell(posix_shell("sh"));
             app
         });
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
@@ -1182,7 +1221,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
     let first = h.state().debug_focused_session().unwrap();
     report(first, "API contract review", "waiting");
     assert!(pump_until(&mut h, 8, |h| h.query_by_label("API contract review · 입력 대기").is_some()));
-    h.key_press_modifiers(primary(), egui::Key::D);
+    h.key_press_modifiers(cmd(), egui::Key::D);
     assert!(pump_until(&mut h, 10, |h| h.state().debug_pane_count() == 2 && h.state().debug_focused_session().is_some_and(|session| session != first)));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
     let second = h.state().debug_focused_session().unwrap();
@@ -1239,6 +1278,7 @@ fn check_closing_last_work_surface(close_page: bool) {
     use kiln::app::Action;
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (base, proj) = setup(if close_page { "close-last-page" } else { "close-last-pane" });
+    use_posix_shell(&base);
     struct Cleanup(PathBuf);
     impl Drop for Cleanup {
         fn drop(&mut self) { shutdown(&self.0); }
@@ -1365,6 +1405,7 @@ fn menu_bar_settings_request_reveals_existing_gui() {
     assert!(!kiln::native_actions::take_settings_request());
 }
 
+#[cfg(unix)]
 #[test]
 fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
     use kiln::app::Action;
@@ -1375,7 +1416,7 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
     let _cleanup=Cleanup(base.clone());
     let mut h=Harness::builder().with_size([1280.0,800.0]).build_eframe(|cc| {
         let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));
-        app.debug_set_shell("/bin/bash".into());app
+        app.debug_set_shell(posix_shell("bash"));app
     });
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     let original=h.state().debug_focused_session().unwrap();
@@ -1458,6 +1499,7 @@ fn agent_title_animation_reports_activity_and_agent_colors_without_hooks() {
 
 }
 
+#[cfg(unix)]
 #[test]
 fn ime_commits_reach_only_the_focused_pty_once_and_cancellation_sends_nothing() {
     use kiln::app::Action;
@@ -1480,7 +1522,7 @@ finally:
     termios.tcsetattr(0, termios.TCSANOW, old)
 "#).unwrap();
     let mut h=Harness::builder().with_size([1280.0,800.0]).build_eframe(|cc| {
-        let mut app=KilnApp::new(&cc.egui_ctx,Some(proj));app.debug_set_shell("/bin/sh".into());app
+        let mut app=KilnApp::new(&cc.egui_ctx,Some(proj));app.debug_set_shell(posix_shell("sh"));app
     });
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
     let first=h.state().debug_focused_session().unwrap();
@@ -1530,7 +1572,7 @@ fn adaptive_long_titles_keep_controls_bounded_and_switch_restore_grid_working() 
     let _cleanup=Cleanup(base.clone());
     let mut h=Harness::builder().with_size([1100.0,700.0]).build_eframe(|cc|{
         let mut app=KilnApp::new(&cc.egui_ctx,Some(proj.clone()));
-        app.debug_set_shell("/bin/bash".into());app
+        app.debug_set_shell(posix_shell("bash"));app
     });
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
@@ -1538,12 +1580,13 @@ fn adaptive_long_titles_keep_controls_bounded_and_switch_restore_grid_working() 
     let mut panes=Vec::new();
     for (index,title) in titles.iter().enumerate() {
         if index>0 {
-            h.key_press_modifiers(primary(),egui::Key::D);
+            h.key_press_modifiers(cmd(),egui::Key::D);
             assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==index+1&&h.state().debug_focused_session().is_some()));
         }
         panes.push(h.state().debug_focused_pane_id().unwrap());
-        client.send(kiln_proto::ClientMsg::Input{session:h.state().debug_focused_session().unwrap(),data:format!("printf '\\033]0;{title}\\007'; sleep 120\r").into_bytes()});
-        assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(panes[index]).is_some_and(|name|name.contains("sleep"))));
+        let (busy,busy_name)=long_running(120);
+        client.send(kiln_proto::ClientMsg::Input{session:h.state().debug_focused_session().unwrap(),data:format!("printf '\\033]0;{title}\\007'; {busy}\r").into_bytes()});
+        assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(panes[index]).is_some_and(|name|name.contains(busy_name))));
     }
     h.run_steps(3);
     for scale in [1.0,1.3] {
@@ -1584,7 +1627,7 @@ fn direct_panel_actions_target_the_clicked_split_and_stay_inside_narrow_headers(
     let (base,proj)=setup("panel-toolbar");
     struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){shutdown(&self.0);}}
     let _cleanup=Cleanup(base.clone());
-    unsafe {std::env::set_var("SHELL","/bin/sh");}
+    use_posix_shell(&base);
     let mut h=Harness::builder().with_size([1100.0,700.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     h.get_by_label("오른쪽으로 나누기").click();
@@ -1639,13 +1682,14 @@ fn running_close_opt_out_persists_only_on_confirmation_and_keeps_unsaved_guards(
     let (base,proj)=setup("close-opt-out");
     struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){shutdown(&self.0);i18n::set_language(Language::Korean);}}
     let _cleanup=Cleanup(base.clone());
-    unsafe{std::env::set_var("SHELL","/bin/sh");}
+    use_posix_shell(&base);
     let mut h=Harness::builder().with_size([720.0/1.3,440.0/1.3]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
     h.run_steps(3);
     let pane=h.state().debug_focused_pane_id().unwrap();
-    h.event(egui::Event::Text("sleep 90".into()));h.key_press(egui::Key::Enter);
-    assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(pane).is_some_and(|p|p.contains("sleep"))));
+    let (busy,busy_name)=long_running(90);
+    h.event(egui::Event::Text(busy));h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(pane).is_some_and(|p|p.contains(busy_name))));
     for language in Language::ALL {
         i18n::with_language(language,||{
             h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(3);
@@ -1683,7 +1727,7 @@ fn running_close_opt_out_persists_only_on_confirmation_and_keeps_unsaved_guards(
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
     h.run_steps(3);
     let pane=h.state().debug_focused_pane_id().unwrap();
-    h.event(egui::Event::Text("sleep 90".into()));h.key_press(egui::Key::Enter);
+    h.event(egui::Event::Text(long_running(90).0));h.key_press(egui::Key::Enter);
     assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(pane).is_some()));
     h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(5);
     assert!(h.query_by_label("실행 중인 프로세스를 종료할까요?").is_none());
@@ -1702,7 +1746,7 @@ fn running_close_opt_out_persists_only_on_confirmation_and_keeps_unsaved_guards(
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|s|!s.trim().is_empty())));
     h.run_steps(3);
     let pane=h.state().debug_focused_pane_id().unwrap();
-    h.event(egui::Event::Text("sleep 90".into()));h.key_press(egui::Key::Enter);
+    h.event(egui::Event::Text(long_running(90).0));h.key_press(egui::Key::Enter);
     assert!(pump_until(&mut h,10,|h|h.state().debug_busy_process(pane).is_some()));
     h.state_mut().debug_queue_action(Action::ClosePane(pane,false));h.run_steps(3);
     assert!(h.query_by_label("실행 중인 프로세스를 종료할까요?").is_some());
@@ -1766,7 +1810,7 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     struct Cleanup(PathBuf);
     impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);}}
     let _cleanup=Cleanup(base.clone());
-    unsafe {std::env::set_var("SHELL","/bin/sh");}
+    use_posix_shell(&base);
     let mut h=Harness::builder().with_size([1100.,760.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     let original=h.state().debug_focused_session().unwrap();
@@ -2014,7 +2058,7 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     assert!(pump_until(&mut h, 10, |h| h.query_by_label("연결됨 · 해당 폴더에서 대화를 찾지 못함").is_some()));
     assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
     let panes_before = h.state().debug_pane_count();
-    h.key_press_modifiers(primary(), egui::Key::D); h.run_steps(3);
+    h.key_press_modifiers(cmd(), egui::Key::D); h.run_steps(3);
     assert_eq!(h.state().debug_pane_count(), panes_before, "status dialog must block underlying workspace shortcuts");
     h.render().unwrap().save(std::env::temp_dir().join("kiln-workspace-link-dialog.png")).unwrap();
     h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);

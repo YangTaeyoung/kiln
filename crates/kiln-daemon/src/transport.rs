@@ -135,3 +135,25 @@ mod imp {
 }
 
 pub use imp::*;
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn a_path_like_socket_name_is_a_valid_pipe() {
+        let name = std::env::temp_dir().join(format!("kiln-path-socket-{}", std::process::id())).join("d.sock");
+        let name = name.to_string_lossy().into_owned();
+        let listener = Listener::bind(&name).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut conn = listener.accept().unwrap();
+            let mut byte = [0u8; 1];
+            conn.reader.read_exact(&mut byte).unwrap();
+            byte[0]
+        });
+        let mut client = connect(&name).unwrap();
+        client.writer.write_all(&[42]).unwrap();
+        client.writer.flush().unwrap();
+        assert_eq!(server.join().unwrap(), 42);
+    }
+}
