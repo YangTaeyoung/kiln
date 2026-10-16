@@ -170,17 +170,26 @@ fn parse_line(line: &str) -> Option<Entry> {
     if key.is_empty() || key.starts_with('#') { return None; }
     let rest = line[key_end..].trim_start().strip_prefix('=').unwrap_or(line[key_end..].trim_start()).trim_start();
     let mut values = Vec::new();
-    let (mut value, mut quoted, mut escaped, mut started) = (String::new(), false, false, false);
-    for c in rest.chars() {
-        if escaped { value.push(c); escaped = false; started = true; continue; }
-        if c == '\\' { escaped = true; started = true; continue; }
+    let (mut value, mut quoted, mut started) = (String::new(), false, false);
+    let mut chars = rest.chars().peekable();
+    while let Some(c) = chars.next() {
+        // A backslash escapes a quote, a backslash or an unquoted space, as OpenSSH's
+        // argv_split does; before any other character it is literal.
+        if c == '\\' {
+            let next = chars.peek().copied();
+            if matches!(next, Some('\'' | '"' | '\\')) || (!quoted && next == Some(' ')) {
+                chars.next();
+                value.push(next.unwrap_or(c));
+            } else { value.push(c); }
+            started = true;
+            continue;
+        }
         if c == '"' { quoted = !quoted; started = true; continue; }
         if c == '#' && !quoted { break; }
         if c.is_whitespace() && !quoted {
             if started { values.push(std::mem::take(&mut value)); started = false; }
         } else { value.push(c); started = true; }
     }
-    if escaped { value.push('\\'); }
     if started { values.push(value); }
     Some((key, values))
 }
@@ -253,6 +262,11 @@ mod tests {
         assert_eq!(hosts[0].identity_files, [PathBuf::from("/keys/private key")]);
         assert_eq!((hosts[1].user.as_deref(), hosts[1].port), (Some("fallback"), 22));
         assert_eq!(hosts[2].user.as_deref(), Some("stage"));
+    }
+    #[test]
+    fn backslashes_escape_only_quotes_backslashes_and_unquoted_spaces() {
+        let (_, values) = parse_line(r#"IdentityFile C:\Users\me\.ssh\id_ed25519 "C:\Program Files\k" a\ b \"q\" two\\"#).unwrap();
+        assert_eq!(values, [r"C:\Users\me\.ssh\id_ed25519", r"C:\Program Files\k", "a b", "\"q\"", r"two\"]);
     }
     #[test]
     fn match_exec_is_never_run_or_used_as_metadata() {

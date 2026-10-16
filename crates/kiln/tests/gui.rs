@@ -46,15 +46,16 @@ fn public_workspace_preview() {
 }
 
 /// A POSIX shell for terminal fixtures: `/bin/<name>` on Unix and Git for Windows'
-/// `bin\\<name>.exe` on Windows.
+/// `bin\\<name>.exe` on Windows, found from the `git` on PATH (`cmd\\git.exe`, or
+/// `mingw64\\bin\\git.exe` and the like inside Git Bash).
 fn posix_shell(name: &str) -> String {
     #[cfg(unix)]
     return format!("/bin/{name}");
     #[cfg(windows)]
     {
         let git = kiln_common::paths::find_executable("git", &[]).expect("Git for Windows");
-        let root = git.parent().and_then(|dir| dir.parent()).expect("Git installation folder");
-        root.join("bin").join(format!("{name}.exe")).to_string_lossy().into_owned()
+        let shell = git.ancestors().skip(1).map(|dir| dir.join("bin").join(format!("{name}.exe"))).find(|path| path.is_file());
+        shell.expect("Git for Windows bin folder").to_string_lossy().into_owned()
     }
 }
 
@@ -1219,14 +1220,15 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
         client.send(kiln_proto::ClientMsg::Input { session, data: command.into_bytes() });
     };
     let first = h.state().debug_focused_session().unwrap();
+    // The sidebar row and the page tab of the active page share the accessible name.
     report(first, "API contract review", "waiting");
-    assert!(pump_until(&mut h, 8, |h| h.query_by_label("API contract review · 입력 대기").is_some()));
+    assert!(pump_until(&mut h, 8, |h| h.query_all_by_label("API contract review · 입력 대기").next().is_some()));
     h.key_press_modifiers(cmd(), egui::Key::D);
     assert!(pump_until(&mut h, 10, |h| h.state().debug_pane_count() == 2 && h.state().debug_focused_session().is_some_and(|session| session != first)));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
     let second = h.state().debug_focused_session().unwrap();
     report(second, "Frontend authentication", "running");
-    assert!(pump_until(&mut h, 8, |h| h.query_by_label("Frontend authentication · 작업 중").is_some()));
+    assert!(pump_until(&mut h, 8, |h| h.query_all_by_label("Frontend authentication · 작업 중").next().is_some()));
     h.state_mut().debug_queue_action(Action::ToggleZoom(None));
     h.run_steps(3);
     h.state_mut().debug_queue_action(Action::NewWorkspace(Some(other.clone())));
@@ -1234,7 +1236,7 @@ fn workspace_task_rows_reveal_other_workspace_zoomed_split_and_quick_terminal() 
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())));
     let third = h.state().debug_focused_session().unwrap();
     report(third, "API tests complete", "done");
-    assert!(pump_until(&mut h, 8, |h| h.query_by_label("API tests complete · 완료").is_some()));
+    assert!(pump_until(&mut h, 8, |h| h.query_all_by_label("API tests complete · 완료").next().is_some()));
 
     // A click in a nonactive workspace must reveal the exact split, including a
     // split hidden by that page's existing zoom, without creating another PTY.
