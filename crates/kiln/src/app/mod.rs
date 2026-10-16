@@ -12,6 +12,8 @@ mod quick;
 mod macos;
 #[cfg(target_os = "macos")]
 mod updater;
+#[cfg(any(windows, test))]
+mod updater_windows;
 mod notifications;
 mod layout;
 mod palette;
@@ -72,6 +74,13 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
         macos::install_quit_guard(&cc.egui_ctx);
         #[cfg(target_os = "macos")]
         updater::install();
+        #[cfg(windows)]
+        {
+            if let Some(dir) = updater_windows::installed_dir() {
+                updater_windows::remove_old_copies(&dir);
+            }
+            updater_windows::check_daily();
+        }
         let mut app = KilnApp::new(&cc.egui_ctx, path);
         app.quick.register(&cc.egui_ctx);
         if let Some(error)=app.quick.error.clone(){app.toast(kiln_common::i18n::tr("빠른 터미널"),error,ToastKind::Error,None);}
@@ -288,6 +297,8 @@ pub struct KilnApp {
     toasts: Vec<Toast>,
     confirm: Option<Confirm>,
     quit_confirmed: bool,
+    /// An installed update starts the new GUI once this one exits.
+    relaunch_after_update: bool,
     palette: palette::Palette,
     recent_panes: Vec<PaneId>,
     launchers: launchers::Launcher,
@@ -396,6 +407,7 @@ impl KilnApp {
             toasts: Vec::new(),
             confirm: None,
             quit_confirmed: false,
+            relaunch_after_update: false,
             palette: palette::Palette::default(),
             recent_panes: persisted.recent_panes.clone(),
             launchers: launchers::Launcher::default(),
@@ -2455,6 +2467,16 @@ impl eframe::App for KilnApp {
             self.apply(Action::ToggleFullscreen,ctx);
         }
         crate::companion::publish_unread(self.notifications.unread_count());
+        #[cfg(windows)]
+        {
+            if let Some(version) = updater_windows::take_announcement() {
+                self.toast(kiln_common::trf!("Kiln {version} 업데이트"), kiln_common::i18n::tr("설정 → 앱 정보에서 설치할 수 있습니다."), ToastKind::Info, None);
+            }
+            if !self.relaunch_after_update && matches!(updater_windows::state(), updater_windows::State::Installed(_)) {
+                self.relaunch_after_update = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
         self.conn.pump();
         self.start_prepared_agents(ctx);
         let focused_now = ctx.input(|i| i.viewport().focused.unwrap_or(true));
@@ -2556,5 +2578,11 @@ impl eframe::App for KilnApp {
         }
         #[cfg(target_os = "macos")]
         macos::reply_to_termination(true);
+        #[cfg(windows)]
+        if self.relaunch_after_update {
+            if let Some(dir) = updater_windows::installed_dir() {
+                let _ = std::process::Command::new(dir.join("Kiln.exe")).spawn();
+            }
+        }
     }
 }

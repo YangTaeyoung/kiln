@@ -3063,6 +3063,8 @@ dependencies = [
  "postcard",
  "regex",
  "rfd",
+ "ring",
+ "roxmltree",
  "serde",
  "serde_json",
  "sha2 0.11.0",

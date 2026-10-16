@@ -19,6 +19,7 @@ jobs:
         run: |
           python3 scripts/test-check-localizations.py
           python3 scripts/check-localizations.py
+          python3 scripts/test-make-appcast.py
           cargo test --locked -p kiln-common -p kiln-i18n-macros
       - name: Native IME cancellation regression
         run: cargo test --locked -p egui-winit --lib kiln_ime_tests

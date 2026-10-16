@@ -11433,5 +11433,55 @@
     "en": "Kiln's executable was not found.",
     "ja": "Kiln の実行ファイルが見つかりません。",
     "zh-CN": "找不到 Kiln 可执行文件。"
+  },
+  "자동 업데이트는 설치된 Windows 배포판에서 제공됩니다.": {
+    "en": "Automatic updates are available in the installed Windows release.",
+    "ja": "自動アップデートはインストールされた Windows 版で利用できます。",
+    "zh-CN": "自动更新适用于已安装的 Windows 版本。"
+  },
+  "업데이트를 확인하는 중…": {
+    "en": "Checking for updates…",
+    "ja": "アップデートを確認しています…",
+    "zh-CN": "正在检查更新…"
+  },
+  "최신 버전입니다": {
+    "en": "Kiln is up to date",
+    "ja": "最新バージョンです",
+    "zh-CN": "已是最新版本"
+  },
+  "Kiln {} 업데이트를 설치할 수 있습니다": {
+    "en": "Kiln {} is ready to install",
+    "ja": "Kiln {} をインストールできます",
+    "zh-CN": "可以安装 Kiln {}"
+  },
+  "설치하고 다시 시작": {
+    "en": "Install and Restart",
+    "ja": "インストールして再起動",
+    "zh-CN": "安装并重新启动"
+  },
+  "Kiln {version} 설치 중…": {
+    "en": "Installing Kiln {version}…",
+    "ja": "Kiln {version} をインストールしています…",
+    "zh-CN": "正在安装 Kiln {version}…"
+  },
+  "Kiln {version} 설치됨 · 다시 시작하는 중…": {
+    "en": "Kiln {version} installed · Restarting…",
+    "ja": "Kiln {version} をインストールしました · 再起動しています…",
+    "zh-CN": "已安装 Kiln {version} · 正在重新启动…"
+  },
+  "업데이트 실패: {error}": {
+    "en": "Update failed: {error}",
+    "ja": "アップデートに失敗しました: {error}",
+    "zh-CN": "更新失败：{error}"
+  },
+  "Kiln {version} 업데이트": {
+    "en": "Kiln {version} update",
+    "ja": "Kiln {version} アップデート",
+    "zh-CN": "Kiln {version} 更新"
+  },
+  "설정 → 앱 정보에서 설치할 수 있습니다.": {
+    "en": "Install it from Settings → About.",
+    "ja": "設定 → アプリ情報 からインストールできます。",
+    "zh-CN": "可在“设置 → 应用信息”中安装。"
   }
 }

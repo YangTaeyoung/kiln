@@ -335,6 +335,8 @@ fn about_page(ui: &mut egui::Ui, about: &AboutInfo, acts: &mut Vec<Action>) {
         widgets::setting_row(ui, kiln_common::i18n::tr("버전"), &kiln_common::trf!("Kiln {} · 빌드 {}", env!("CARGO_PKG_VERSION"), kiln_daemon::build_id()), |_| {});
         #[cfg(target_os = "macos")]
         { widgets::divider(ui); super::updater::settings(ui); }
+        #[cfg(windows)]
+        { widgets::divider(ui); super::updater_windows::settings(ui); }
         widgets::divider(ui);
         widgets::setting_row(ui, kiln_common::i18n::tr("설정 폴더"), &kiln_common::paths::config_dir().display().to_string(), |ui| {
             if widgets::button(ui, kiln_common::i18n::tr("열기"), ButtonKind::Secondary).clicked() {
