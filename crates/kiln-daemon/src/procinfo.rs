@@ -4,7 +4,7 @@
 #[path = "procinfo_windows.rs"]
 mod windows;
 #[cfg(windows)]
-pub use windows::{cmdline, cwd, foreground_of, name};
+pub use windows::{cmdline, cwd, foreground_of, name, parent_of};
 
 /// Resolve the actual foreground job through Kiro's nested PTY. tcgetpgrp
 /// reports the outer bridge's process group, not its inner shell's job.

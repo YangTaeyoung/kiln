@@ -133,14 +133,63 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
     attach(&mut spec, &path, &record)?;
     launch_spec(&path, &record, false, None)
 }
-/// The hook command for `tool`, quoted for the shell that CLI runs hooks with: Codex uses
-/// `%COMSPEC% /C` on Windows; Claude Code uses Git Bash there, and both use `sh` elsewhere.
-fn hook_command(tool: Tool, helper: &Path) -> String {
-    if cfg!(windows) && tool == Tool::Codex {
-        format!("\"{}\" agent-hook", helper.display())
-    } else {
-        format!("{} agent-hook", quote(&helper.to_string_lossy()))
+/// The launch record and generation in a `kiln agent-run --record <path> --generation <id>`
+/// command line.
+#[cfg(any(windows, test))]
+fn launch_in_command_line(args: &[String]) -> Option<(PathBuf, String)> {
+    let program = args.first()?.rsplit(['/', '\\']).next()?;
+    let program = program.strip_suffix(".exe").or_else(|| program.strip_suffix(".EXE")).unwrap_or(program);
+    if !program.eq_ignore_ascii_case("kiln") || args.get(1).map(String::as_str) != Some("agent-run") {
+        return None;
     }
+    let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    Some((PathBuf::from(value("--record")?), value("--generation")?))
+}
+
+/// The launch of the nearest `kiln agent-run` ancestor of this process. Codex on Windows starts
+/// hooks with an empty environment, so its hooks find their launch this way.
+#[cfg(windows)]
+pub fn launch_from_ancestors() -> Option<(PathBuf, String)> {
+    let mut pid = std::process::id();
+    for _ in 0..8 {
+        pid = kiln_daemon::procinfo::parent_of(pid)?;
+        if let Some(launch) = kiln_daemon::procinfo::cmdline(pid).as_deref().and_then(launch_in_command_line) {
+            return Some(launch);
+        }
+    }
+    None
+}
+
+/// The hook command for `tool` in the shell that CLI runs hooks with. Codex on Windows uses the
+/// session's shell (PowerShell by default, or cmd), so the helper is a plain path, shortened to
+/// its 8.3 form when that removes spaces, or else PowerShell's `& '...'`. Claude Code runs hooks
+/// with Git Bash on Windows and `sh` elsewhere.
+fn hook_command(tool: Tool, helper: &Path) -> String {
+    #[cfg(windows)]
+    if tool == Tool::Codex {
+        let plain = |text: &str| text.chars().all(|c| c.is_ascii_alphanumeric() || "\\:._-~".contains(c));
+        let short = short_path(helper).unwrap_or_else(|| helper.to_path_buf());
+        let text = short.to_string_lossy();
+        return if plain(&text) {
+            format!("{text} agent-hook")
+        } else {
+            format!("& '{}' agent-hook", helper.to_string_lossy().replace('\'', "''"))
+        };
+    }
+    let _ = tool;
+    format!("{} agent-hook", quote(&helper.to_string_lossy()))
+}
+
+/// The 8.3 form of an existing path, when the volume keeps short names.
+#[cfg(windows)]
+fn short_path(path: &Path) -> Option<PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 1024];
+    // SAFETY: `wide` is NUL-terminated and `buf` holds `buf.len()` units.
+    let len = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+    (len > 0 && len < buf.len()).then(|| PathBuf::from(std::ffi::OsString::from_wide(&buf[..len])))
 }
 fn attach(spec: &mut SpawnSpec, path: &Path, record: &Record) -> Result<()> {
     let helper = helper_exe()?;
@@ -841,13 +890,30 @@ fn latest_version(tool: Tool, offline: bool) -> Option<String> {
 mod tests {
     use super::*;
     #[test]
+    fn a_launch_is_found_in_the_agent_run_command_line() {
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let launch = args(&[r"C:\Kiln\bin\kiln.exe", "agent-run", "--record", r"C:\cfg\agent-sessions\9-1.json", "--generation", "9-1", "--resume"]);
+        assert_eq!(launch_in_command_line(&launch), Some((PathBuf::from(r"C:\cfg\agent-sessions\9-1.json"), "9-1".to_string())));
+        assert_eq!(launch_in_command_line(&args(&["/usr/local/bin/kiln", "agent-run", "--record", "/c/agent-sessions/1-2.json", "--generation", "1-2"])).map(|l| l.1), Some("1-2".into()));
+        assert_eq!(launch_in_command_line(&args(&["node.exe", "agent-run", "--record", "x", "--generation", "1"])), None);
+        assert_eq!(launch_in_command_line(&args(&["kiln.exe", "agent-hook"])), None);
+        assert_eq!(launch_in_command_line(&args(&["kiln.exe", "agent-run", "--record", "x"])), None);
+    }
+
+    #[test]
     fn hook_commands_follow_the_shell_each_cli_uses() {
         let helper = std::path::Path::new(if cfg!(windows) { r"C:\Program Files\Kiln\bin\kiln.exe" } else { "/Applications/Kiln.app/Contents/MacOS/kiln" });
         let claude = hook_command(Tool::Claude, helper);
         assert_eq!(claude, format!("'{}' agent-hook", helper.display()));
         let codex = hook_command(Tool::Codex, helper);
         if cfg!(windows) {
-            assert_eq!(codex, format!("\"{}\" agent-hook", helper.display()));
+            // PowerShell (Codex's default) and cmd both run an unquoted plain path; other
+            // paths use PowerShell's call operator.
+            assert_eq!(codex, format!("& '{}' agent-hook", helper.display()));
+            let plain = std::path::Path::new(r"C:\Kiln\bin\kiln.exe");
+            assert_eq!(hook_command(Tool::Codex, plain), r"C:\Kiln\bin\kiln.exe agent-hook");
+            let quote = std::path::Path::new(r"C:\Users\o'brien\kiln.exe");
+            assert_eq!(hook_command(Tool::Codex, quote), r"& 'C:\Users\o''brien\kiln.exe' agent-hook");
         } else {
             assert_eq!(codex, claude);
         }

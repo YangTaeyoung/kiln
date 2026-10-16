@@ -190,6 +190,14 @@ fn snapshot() -> Vec<Entry> {
     out
 }
 
+/// The parent process ID recorded for `pid`, when that parent is older than `pid` (a newer
+/// process with that ID is an unrelated reuse).
+pub fn parent_of(pid: u32) -> Option<u32> {
+    let parent = snapshot().into_iter().find(|e| e.pid == pid)?.parent;
+    let created = |pid: u32| Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION).and_then(|p| p.created());
+    (parent != 0 && created(parent)? <= created(pid)?).then_some(parent)
+}
+
 fn is_agent(pid: u32) -> bool {
     matches!(super::display_name(pid).map(|n| n.to_ascii_lowercase()).as_deref(), Some("codex" | "claude"))
 }

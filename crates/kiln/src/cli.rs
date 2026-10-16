@@ -129,6 +129,20 @@ pub fn main() -> anyhow::Result<()> {
     }
     match cli.cmd {
         Some(Cmd::AgentHook) => {
+            #[cfg(windows)]
+            if std::env::var_os("KILN_AGENT_RECORD").is_none() {
+                if let Some((record, generation)) = app::agent_runtime::launch_from_ancestors() {
+                    // SAFETY: set before any other thread starts; the hook reads them below.
+                    unsafe {
+                        if std::env::var_os("KILN_CONFIG_DIR").is_none()
+                            && let Some(config) = record.parent().filter(|d| d.file_name().is_some_and(|n| n == "agent-sessions")).and_then(|d| d.parent()) {
+                            std::env::set_var("KILN_CONFIG_DIR", config);
+                        }
+                        std::env::set_var("KILN_AGENT_RECORD", &record);
+                        std::env::set_var("KILN_AGENT_GENERATION", generation);
+                    }
+                }
+            }
             let record=std::env::var_os("KILN_AGENT_RECORD").context("missing session record")?;
             let generation=std::env::var("KILN_AGENT_GENERATION").context("missing session generation")?;
             app::agent_runtime::hook(std::path::Path::new(&record), &generation, std::io::stdin().lock())
