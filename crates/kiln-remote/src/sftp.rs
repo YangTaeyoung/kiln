@@ -30,6 +30,7 @@ fn command(profile: &ConnectionProfile) -> Result<Command> {
     };
     ssh_config::validate_alias(alias)?;
     let mut cmd = Command::new(sftp_program());
+    kiln_common::process::hide_window(&mut cmd);
     cmd.args([
         "-q",
         "-b",

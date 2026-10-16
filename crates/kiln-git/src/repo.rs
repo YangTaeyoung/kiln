@@ -508,7 +508,7 @@ pub fn apply_hunk(root: &Path, file: &FileDiff, hunk_index: usize, action: HunkA
 
 /// git 이 설치돼 있는지 확인한다.
 pub fn git_available() -> bool {
-    std::process::Command::new("git")
+    kiln_common::process::hide_window(&mut std::process::Command::new("git"))
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

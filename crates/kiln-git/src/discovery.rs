@@ -77,7 +77,7 @@ mod tests {
     use std::process::Command;
     fn git(root: &Path, args: &[&str]) {
         assert!(
-            Command::new("git")
+            kiln_common::process::hide_window(&mut Command::new("git"))
                 .args([
                     "-c",
                     "commit.gpgsign=false",

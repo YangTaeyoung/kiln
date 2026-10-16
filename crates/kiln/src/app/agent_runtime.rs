@@ -33,7 +33,7 @@ fn helper_exe() -> Result<PathBuf> {
     if std::env::var_os("KILN_ACCOUNTS_SANDBOX").is_some() {
         Ok(super::conn::daemon_exe())
     } else {
-        Ok(std::env::current_exe()?)
+        Ok(kiln_daemon::client::cli_executable(&std::env::current_exe()?))
     }
 }
 fn directory() -> PathBuf {
@@ -385,6 +385,7 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
     if path.contains("/Caskroom/codex/") || path.contains("/Cellar/codex/") {
         let brew = resolve("brew").context("Homebrew not found")?;
         let mut cmd = Command::new(&brew);
+        kiln_common::process::hide_window(&mut cmd);
         cmd.arg("--prefix");
         let prefix =
             PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
@@ -403,6 +404,7 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
     if path.contains("/node_modules/@openai/codex/") {
         let npm = resolve("npm").context("npm not found")?;
         let mut cmd = Command::new(&npm);
+        kiln_common::process::hide_window(&mut cmd);
         cmd.args(["root", "--global"]);
         let root = PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
             .canonical()?;
@@ -419,6 +421,7 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
 fn update_command(tool: Tool, binary: &Path) -> Result<Command> {
     if tool == Tool::Claude {
         let mut cmd = Command::new(binary);
+        kiln_common::process::hide_window(&mut cmd);
         cmd.arg("update");
         return Ok(cmd);
     }
@@ -426,6 +429,7 @@ fn update_command(tool: Tool, binary: &Path) -> Result<Command> {
     match installer(binary)? {
         Installer::Brew(brew, cask) => {
             let mut cmd = Command::new(brew);
+            kiln_common::process::hide_window(&mut cmd);
             cmd.args([
                 "upgrade",
                 if cask { "--cask" } else { "--formula" },
@@ -436,6 +440,7 @@ fn update_command(tool: Tool, binary: &Path) -> Result<Command> {
         }
         Installer::Npm(npm) => {
             let mut cmd = Command::new(npm);
+            kiln_common::process::hide_window(&mut cmd);
             cmd.args(["install", "--global", "@openai/codex@latest"]);
             Ok(cmd)
         }
@@ -560,6 +565,7 @@ fn parse_version(bytes: &[u8]) -> Result<String> {
 }
 pub(super) fn probe(binary: &Path) -> Result<String> {
     let mut cmd = Command::new(binary);
+    kiln_common::process::hide_window(&mut cmd);
     cmd.arg("--version");
     parse_version(&bounded(cmd, Duration::from_secs(5))?)
 }
@@ -800,6 +806,7 @@ fn latest_version(tool: Tool, offline: bool) -> Option<String> {
         Tool::Claude => "@anthropic-ai/claude-code",
     };
     let mut cmd = Command::new("curl");
+    kiln_common::process::hide_window(&mut cmd);
     cmd.args([
         "-q",
         "--fail",

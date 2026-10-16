@@ -250,6 +250,7 @@ fn resolve_with(
             let cli =
                 cli.ok_or_else(|| anyhow::anyhow!(tr("이 AWS 프로필은 AWS CLI v2가 필요합니다")))?;
             let mut cmd = Command::new(cli);
+            kiln_common::process::hide_window(&mut cmd);
             cmd.args([
                 "configure",
                 "export-credentials",

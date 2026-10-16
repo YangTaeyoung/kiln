@@ -84,6 +84,7 @@ fn command(
     cwd: &Path,
 ) -> Command {
     let mut cmd = Command::new(executable);
+    kiln_common::process::hide_window(&mut cmd);
     cmd.args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())

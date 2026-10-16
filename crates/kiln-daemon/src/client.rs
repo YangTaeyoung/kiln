@@ -173,6 +173,24 @@ pub fn daemon_log_path(socket: &str) -> std::path::PathBuf {
     }
 }
 
+/// The console `kiln` executable that runs the CLI, the daemon and other helpers for the
+/// executable at `current`: `bin/kiln` under an installed GUI, a sibling `kiln` in a build
+/// folder, or `current` itself.
+pub fn cli_executable(current: &Path) -> std::path::PathBuf {
+    let name = format!("kiln{}", std::env::consts::EXE_SUFFIX);
+    let Some(dir) = current.parent() else { return current.to_path_buf() };
+    let installed = dir.join("bin").join(&name);
+    if installed.is_file() {
+        return installed;
+    }
+    let is_cli = current.file_name().is_some_and(|file| file.to_string_lossy().eq_ignore_ascii_case(&name));
+    let sibling = dir.join(&name);
+    if !is_cli && sibling.is_file() {
+        return sibling;
+    }
+    current.to_path_buf()
+}
+
 /// `exe daemon` 을 현재 프로세스와 분리해 실행한다.
 pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
     #[cfg(windows)]
@@ -282,7 +300,7 @@ pub fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
     }
 }
 
-/// Win32_Process.Create 로 프로세스를 만든다. 호출자의 잡 객체에 속하지 않는다.
+/// Win32_Process.Create 로 창과 콘솔 없이 프로세스를 만든다. 호출자의 잡 객체에 속하지 않는다.
 #[cfg(windows)]
 fn spawn_via_wmi(cmd: &std::process::Command) -> std::io::Result<()> {
     let quote = |s: &str| if s.contains([' ', '\t', '"']) { format!("\"{}\"", s.replace('"', "\\\"")) } else { s.to_string() };
@@ -291,8 +309,9 @@ fn spawn_via_wmi(cmd: &std::process::Command) -> std::io::Result<()> {
         line.push(' ');
         line.push_str(&quote(&a.to_string_lossy()));
     }
+    // ShowWindow 0 hides the window and CreateFlags 8 (DETACHED_PROCESS) gives no console.
     let ps = format!(
-        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{}'}}; exit $r.ReturnValue",
+        "$s = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{{ShowWindow=[uint16]0; CreateFlags=[uint32]8}}; $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{}'; ProcessStartupInformation=$s}}; exit $r.ReturnValue",
         line.replace('\'', "''")
     );
     use std::os::windows::process::CommandExt;
@@ -304,4 +323,39 @@ fn spawn_via_wmi(cmd: &std::process::Command) -> std::io::Result<()> {
         .creation_flags(0x0800_0000)
         .status()?;
     if status.success() { Ok(()) } else { Err(std::io::Error::other("WMI process create failed")) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn touch(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"").unwrap();
+    }
+
+    #[test]
+    fn cli_executable_finds_the_console_binary_beside_or_under_the_gui() {
+        let ext = std::env::consts::EXE_SUFFIX;
+        let installed = tempfile::tempdir().unwrap();
+        let gui = installed.path().join(format!("Kiln{ext}"));
+        let cli = installed.path().join("bin").join(format!("kiln{ext}"));
+        touch(&gui);
+        touch(&cli);
+        assert_eq!(cli_executable(&gui), cli);
+        assert_eq!(cli_executable(&cli), cli);
+
+        let build = tempfile::tempdir().unwrap();
+        let app = build.path().join(format!("kiln-app{ext}"));
+        let sibling = build.path().join(format!("kiln{ext}"));
+        touch(&app);
+        touch(&sibling);
+        assert_eq!(cli_executable(&app), sibling);
+        assert_eq!(cli_executable(&sibling), sibling);
+
+        let alone = tempfile::tempdir().unwrap();
+        let only = alone.path().join(format!("kiln-app{ext}"));
+        touch(&only);
+        assert_eq!(cli_executable(&only), only);
+    }
 }

@@ -162,6 +162,7 @@ struct Connection {
 impl Connection {
     fn start(binary: &Path, root: &Path, gate: &Gate, timeout: Duration) -> Result<Self> {
         let mut command = Command::new(binary);
+        kiln_common::process::hide_window(&mut command);
         command
             .args(["--no-daemon", "app-server"])
             .env("CODEX_HOME", root)

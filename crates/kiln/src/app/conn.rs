@@ -619,9 +619,9 @@ impl Conn {
     }
 }
 
-/// 데몬을 실행할 파일. `KILN_EXE` 가 있으면 그 경로를 쓴다.
+/// 데몬과 보조 프로세스를 실행할 콘솔 `kiln` 파일. `KILN_EXE` 가 있으면 그 경로를 쓴다.
 pub fn daemon_exe() -> std::path::PathBuf {
-    std::env::var_os("KILN_EXE").map(std::path::PathBuf::from).unwrap_or_else(|| std::env::current_exe().unwrap_or_default())
+    std::env::var_os("KILN_EXE").map(std::path::PathBuf::from).unwrap_or_else(|| kiln_daemon::client::cli_executable(&std::env::current_exe().unwrap_or_default()))
 }
 
 #[cfg(test)]

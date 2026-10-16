@@ -316,7 +316,7 @@ impl Supervisor {
     }
 
     fn start(&mut self) -> Result<Proc, String> {
-        let mut child = Command::new(&self.exe)
+        let mut child = kiln_common::process::hide_window(&mut Command::new(&self.exe))
             .env("PATH", super::config::child_path(&self.exe))
             .args(&self.args)
             .current_dir(&self.key.0)

@@ -24,7 +24,7 @@ fn get_impl(url: &str, headers: &str, protocol: &str) -> Result<serde_json::Valu
     // NamedTempFile permissions are 0600. Bound responses; suppress curl diagnostics
     // and provider bodies, which can contain private account information.
     let dump = tempfile::NamedTempFile::new()?;
-    let mut child = Command::new("curl")
+    let mut child = kiln_common::process::hide_window(&mut Command::new("curl"))
         .args(["-q", "-sS", "--max-time", "15", "--connect-timeout", "5", "--max-filesize", "262144", "--proto", protocol, "-H", "@-", "-D"])
         .arg(dump.path()).arg(url)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("usage request could not start")?;
