@@ -64,7 +64,7 @@ a terminal or a task with Codex or Claude. Prefer a download? Get the app from
 [Releases](https://github.com/YangTaeyoung/kiln/releases/latest). Already installed? Use
 **Kiln → Check for Updates** on macOS or **Settings → About → Check for Updates** on Windows.
 
-Requires macOS 11+ on Apple Silicon, or Windows 10 1809+/Windows 11 on x64 or ARM64.
+Requires macOS 11+ on Apple Silicon, or Windows 11 on x64 or ARM64.
 Windows builds are not code-signed yet; a downloaded archive may show a SmartScreen
 prompt. Codex, Claude, and `gh` are external tools; install and authenticate the ones
 you use. The app UI supports Korean, English, Japanese and Simplified Chinese.

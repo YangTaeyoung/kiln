@@ -26,7 +26,7 @@ It downloads the latest x64 or ARM64 archive, checks the release checksum and th
 archive's paths and version, installs into `%LOCALAPPDATA%\Programs\Kiln`, adds a
 **Kiln** Start-menu shortcut and puts `bin` on your user `PATH` for the `kiln` command.
 Set `KILN_INSTALL_DIR` to choose another folder. An existing installation is left in
-place. Windows 10 1809 or later, or Windows 11, is required.
+place. Kiln is tested on Windows 11; Windows 10 is not tested.
 
 Windows builds are not code-signed yet. The installer's download does not carry a
 web mark, but an archive downloaded with a browser may show a SmartScreen prompt;
@@ -40,7 +40,7 @@ Terminals start in PowerShell (PowerShell 7 when installed); choose `cmd.exe`, G
 Bash or a WSL distribution in **Settings → Terminal**. Codex and Claude Code run as
 native Windows programs with their homes in `%USERPROFILE%\.codex` and
 `%USERPROFILE%\.claude`. The notification-area icon keeps sessions reachable after
-the window closes. See [Windows support](windows-parity.md) for details.
+the window closes, and starting Kiln again opens the folder in the running window. See [Windows support](windows-parity.md) for details.
 
 ## Open a workspace
 
