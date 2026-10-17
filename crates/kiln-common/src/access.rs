@@ -61,8 +61,26 @@ fn user_sid() -> io::Result<String> {
 mod tests {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::LocalFree;
-    use windows_sys::Win32::Security::Authorization::{ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1};
-    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, GetFileSecurityW};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, GetFileSecurityW, PSECURITY_DESCRIPTOR};
+
+    /// The DACL of `descriptor` in SDDL, with well-known accounts by their aliases.
+    ///
+    /// # Safety
+    /// `descriptor` points to a valid security descriptor.
+    unsafe fn sddl_of(descriptor: PSECURITY_DESCRIPTOR) -> String {
+        let mut text = std::ptr::null_mut();
+        // SAFETY: the caller passes a valid descriptor; the returned string is freed with LocalFree.
+        unsafe {
+            assert!(ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &mut text, std::ptr::null_mut()) != 0);
+            let len = (0..).take_while(|&n| *text.add(n) != 0).count();
+            let out = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+            LocalFree(text.cast());
+            out
+        }
+    }
 
     fn dacl_text(path: &std::path::Path) -> String {
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
@@ -70,14 +88,23 @@ mod tests {
         // SAFETY: a zero-length query only reports the required size.
         unsafe { GetFileSecurityW(wide.as_ptr(), DACL_SECURITY_INFORMATION, std::ptr::null_mut(), 0, &mut needed) };
         let mut buf = vec![0u64; (needed as usize).div_ceil(8)];
-        let mut text = std::ptr::null_mut();
-        // SAFETY: `buf` holds `needed` bytes; the returned string is freed with LocalFree.
+        // SAFETY: `buf` holds `needed` bytes of the descriptor the query fills.
         unsafe {
             assert!(GetFileSecurityW(wide.as_ptr(), DACL_SECURITY_INFORMATION, buf.as_mut_ptr().cast(), needed, &mut needed) != 0);
-            assert!(ConvertSecurityDescriptorToStringSecurityDescriptorW(buf.as_mut_ptr().cast(), SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &mut text, std::ptr::null_mut()) != 0);
-            let len = (0..).take_while(|&n| *text.add(n) != 0).count();
-            let out = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
-            LocalFree(text.cast());
+            sddl_of(buf.as_mut_ptr().cast())
+        }
+    }
+
+    /// `sddl` as Windows writes it back, so an account with an alias (such as `LA` for the
+    /// built-in Administrator) reads the same as in `dacl_text`.
+    fn normalized(sddl: &str) -> String {
+        let wide: Vec<u16> = sddl.encode_utf16().chain([0]).collect();
+        let mut descriptor = std::ptr::null_mut();
+        // SAFETY: the string is NUL-terminated; the descriptor is freed with LocalFree.
+        unsafe {
+            assert!(ConvertStringSecurityDescriptorToSecurityDescriptorW(wide.as_ptr(), SDDL_REVISION_1, &mut descriptor, std::ptr::null_mut()) != 0);
+            let out = sddl_of(descriptor);
+            LocalFree(descriptor);
             out
         }
     }
@@ -88,14 +115,15 @@ mod tests {
         let folder = dir.path().join("private");
         std::fs::create_dir(&folder).unwrap();
         super::restrict_to_user(&folder).unwrap();
-        let user = super::user_sid().unwrap();
+        let entry = normalized(&format!("D:(A;OICI;FA;;;{})", super::user_sid().unwrap()))["D:".len()..].to_owned();
+        let account = entry.trim_end_matches(')').rsplit(';').next().unwrap().to_owned();
         let text = dacl_text(&folder);
         assert!(text.starts_with("D:P"), "{text}");
         assert_eq!(text.matches('(').count(), 1, "{text}");
-        assert!(text.contains(&format!("(A;OICI;FA;;;{user})")), "{text}");
+        assert!(text.contains(&entry), "{text} lacks {entry}");
         std::fs::create_dir(folder.join("child")).unwrap();
         let child = dacl_text(&folder.join("child"));
         assert_eq!(child.matches('(').count(), 1, "{child}");
-        assert!(child.contains(&user), "{child}");
+        assert!(child.contains(&format!(";{account})")), "{child} lacks {account}");
     }
 }

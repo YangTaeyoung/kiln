@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
+/// How long a test waits for the shells it starts to print, report or exit.
+const SHELL_WAIT: Duration = Duration::from_secs(if cfg!(windows) { 120 } else { 10 });
+
 #[path = "support/upgrade.rs"]
 mod upgrade;
 
@@ -139,7 +142,7 @@ fn read(c: &Client, s: SessionId) -> String {
 }
 
 fn wait_for(c: &Client, s: SessionId, needle: &str) -> String {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + SHELL_WAIT;
     loop {
         let t = read(c, s);
         if t.contains(needle) {
@@ -198,7 +201,7 @@ fn kill_hard(pid: u32) {
 
 /// Waits for an output line `key<number>` and returns the number.
 fn wait_value(c: &Client, s: SessionId, key: &str) -> u32 {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + SHELL_WAIT;
     loop {
         let text = read(c, s);
         if let Some(value) = text.lines().filter_map(|l| l.trim().strip_prefix(key)).filter_map(|v| v.trim().parse().ok()).next_back() {
@@ -271,7 +274,7 @@ fn hosted_exit_code_is_reported() {
     let d = Daemon::start("exit");
     let c = d.client();
     let s = create(&c, sh::PROGRAM, sh::EXIT_3_LATER);
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + SHELL_WAIT;
     loop {
         if let Ok(ServerMsg::SessionExited { session, code }) = c.rx.recv_timeout(Duration::from_millis(200)) {
             if session == s {
@@ -320,7 +323,7 @@ fn killing_a_session_spares_window_applications_it_started() {
 /// Waits until `ready` holds for the session's telemetry or its information.
 #[cfg(windows)]
 fn wait_for_session(c: &Client, s: SessionId, what: &str, ready: impl Fn(&kiln_proto::SessionTelemetry, &kiln_proto::SessionInfo) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + SHELL_WAIT;
     let (mut telemetry, mut info) = (kiln_proto::SessionTelemetry::default(), kiln_proto::SessionInfo::default());
     loop {
         if let Ok(m) = c.rx.recv_timeout(Duration::from_millis(200)) {

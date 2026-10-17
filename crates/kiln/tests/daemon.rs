@@ -5,6 +5,9 @@ use kiln_proto::{ClientMsg, ServerMsg, SessionId, SpawnSpec};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// How long a test waits for the shells it starts to print, report or exit.
+const SHELL_WAIT: Duration = Duration::from_secs(if cfg!(windows) { 120 } else { 10 });
+
 #[path = "support/upgrade.rs"]
 mod upgrade;
 
@@ -111,7 +114,7 @@ fn read(c: &Client, s: SessionId) -> String {
 
 #[track_caller]
 fn wait_for(c: &Client, s: SessionId, needle: &str) -> String {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + SHELL_WAIT;
     loop {
         let t = read(c, s);
         if t.contains(needle) {
@@ -202,7 +205,7 @@ fn osc_notification_sets_attention_and_is_broadcast() {
     let d = Daemon::start("notify");
     let c = d.client();
     let s = create_script(&c, sh::NOTIFY_LATER);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + SHELL_WAIT;
     let mut got = false;
     while Instant::now() < deadline && !got {
         if let Ok(m) = c.rx.recv_timeout(Duration::from_millis(200))
@@ -229,7 +232,7 @@ fn frames_are_incremental_after_first_full_frame() {
     let c = d.client();
     let s = create_shell(&c);
     c.send(ClientMsg::Attach { session: s, cols: 80, rows: 24 });
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + SHELL_WAIT;
     loop {
         if let Ok(ServerMsg::Frame(f)) = c.rx.recv_timeout(Duration::from_millis(200))
             && f.session == s {
@@ -242,7 +245,7 @@ fn frames_are_incremental_after_first_full_frame() {
     // Input sent before the first frame can be coalesced into that full frame.
     // Trigger the update only after observing the attachment baseline.
     type_line(&c, s, "echo x");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + SHELL_WAIT;
     loop {
         if let Ok(ServerMsg::Frame(f)) = c.rx.recv_timeout(Duration::from_millis(200))
             && f.session == s && !f.full {
@@ -263,7 +266,7 @@ fn exit_code_is_reported() {
     // owned child until that response arrives, then observe the exit event.
     let s = create_script(&c, sh::EXIT_7_ON_TRIGGER);
     type_line(&c, s, "kiln-exit");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + SHELL_WAIT;
     loop {
         if let Ok(ServerMsg::SessionExited { session, code }) = c.rx.recv_timeout(Duration::from_millis(200))
             && session == s {

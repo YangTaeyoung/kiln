@@ -243,7 +243,12 @@ mod windows_tests {
         ));
         assert!(out.ends_with("CUSTOM> "), "{out:?}");
         assert!(out.contains("\x1b]133;A\x07"), "{out:?}");
-        let location = format!("\x1b]7;file://localhost/{}", dir.path().to_string_lossy().replace('\\', "/").replace(':', "%3A"));
+        let folder = std::fs::canonicalize(dir.path()).unwrap().to_string_lossy().trim_start_matches(r"\\?\").to_owned();
+        let segments: Vec<String> = folder
+            .split('\\')
+            .map(|segment| segment.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { char::from(b).to_string() } else { format!("%{b:02X}") }).collect())
+            .collect();
+        let location = format!("\x1b]7;file://localhost/{}", segments.join("/"));
         assert!(out.contains(&location), "{out:?}");
     }
 
