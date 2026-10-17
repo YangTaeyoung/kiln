@@ -1,8 +1,8 @@
 # Kiln shell integration for Windows PowerShell 5.1 and PowerShell 7.
 # Emits the sequences of shell-integration.zsh: the command record and start before a command,
 # its exit code and the prompt mark at the next prompt, and OSC 7 with the current location.
-# The user's prompt function and profile stay in effect; this script defines only globals
-# prefixed with `__Kiln` and the `kiln-agent-status` command.
+# The user's prompt and line-reading functions and profile stay in effect; this script defines
+# only globals prefixed with `__Kiln` and the `kiln-agent-status` command.
 if ($global:__KilnIntegration) { return }
 $global:__KilnIntegration = $true
 $global:__KilnCommandRan = $false
@@ -35,15 +35,20 @@ function global:prompt {
         $marks += "$esc]7;file://localhost/$($segments -join '/')$bel"
     }
     $marks += "$esc]133;A$bel"
+    # The original prompt reads the last command's status from $?, which the lines above reset.
+    if (-not $succeeded) { Write-Error -Message 'failed' -ErrorAction Ignore }
     $text = & $global:__KilnPrompt
     $global:LASTEXITCODE = $code
     return $marks + $text
 }
 
-if (Get-Module -Name PSReadLine) {
+# PSReadLine, or a tool that wraps it, defines PSConsoleHostReadLine; it keeps reading the line
+# and reads $? first, so it is called before anything else runs.
+if (Test-Path Function:\PSConsoleHostReadLine) {
+    $global:__KilnReadLine = $function:PSConsoleHostReadLine
     function global:PSConsoleHostReadLine {
-        $line = [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($Host.Runspace, $ExecutionContext)
-        if ($line.Trim().Length -gt 0) {
+        $line = & $global:__KilnReadLine
+        if ($line -and $line.Trim().Length -gt 0) {
             [Console]::Write("$([char]27)]777;kiln-command;$(__KilnHex $line)$([char]7)$([char]27)]133;C$([char]7)")
             $global:__KilnCommandRan = $true
         }

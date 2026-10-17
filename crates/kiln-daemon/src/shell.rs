@@ -248,6 +248,31 @@ mod windows_tests {
     }
 
     #[test]
+    fn the_original_prompt_still_sees_the_last_command_fail() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("integration.ps1");
+        std::fs::write(&script, POWERSHELL_INTEGRATION).unwrap();
+        let out = run_powershell(&format!(
+            "function prompt {{ \"ok=$($?)> \" }}; Invoke-Expression ([IO.File]::ReadAllText('{}')); Write-Error 'boom' -ErrorAction SilentlyContinue; [Console]::Out.Write((prompt))",
+            script.display()
+        ));
+        assert!(out.ends_with("ok=False> "), "{out:?}");
+    }
+
+    #[test]
+    fn an_existing_read_line_function_is_chained() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("integration.ps1");
+        std::fs::write(&script, POWERSHELL_INTEGRATION).unwrap();
+        let out = run_powershell(&format!(
+            "function global:PSConsoleHostReadLine {{ 'from-original' }}; Invoke-Expression ([IO.File]::ReadAllText('{}')); [Console]::Out.Write('line=' + (PSConsoleHostReadLine))",
+            script.display()
+        ));
+        assert!(out.ends_with("line=from-original"), "{out:?}");
+        assert!(out.contains("\x1b]133;C\x07"), "{out:?}");
+    }
+
+    #[test]
     fn powershell_integration_is_offered_only_to_plain_interactive_powershell() {
         let spec = |program: &str, args: &[&str]| kiln_proto::SpawnSpec { program: Some(program.into()), args: args.iter().map(|a| a.to_string()).collect(), ..Default::default() };
         assert!(powershell_args("pwsh.exe", &spec("pwsh.exe", &[])).is_some());
