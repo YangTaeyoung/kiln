@@ -412,8 +412,9 @@ pub fn run_request(
         ensure!(&failure.turn == turn, "capacity retry superseded by another turn");
         spec.args.push(super::capacity_recovery::CONTINUE.into());
     }
-    let mut cmd = Command::new(spec.program.context("missing CLI executable")?);
-    cmd.args(&spec.args).envs(spec.env).env_remove("KILN_CAPACITY_RETRY_TURN");
+    let (program, lead) = agent_launch::launcher(Path::new(&spec.program.context("missing CLI executable")?));
+    let mut cmd = Command::new(program);
+    cmd.args(lead).args(&spec.args).envs(spec.env).env_remove("KILN_CAPACITY_RETRY_TURN");
     if !resumed && let Some(payload) = payload {
         cmd.arg(payload);
     }
@@ -426,9 +427,8 @@ pub fn run_request(
     std::process::exit(run_contained(cmd)?);
 }
 
-/// Runs the agent in a job that ends with this launcher and returns the agent's exit code.
-/// Ctrl+C and Ctrl+Break reach the agent through the shared console while the launcher
-/// keeps waiting for it.
+/// Runs the agent and returns its exit code. Ctrl+C and Ctrl+Break reach the agent through the
+/// shared console while the launcher keeps waiting for it; the terminal's job ends both.
 #[cfg(windows)]
 fn run_contained(mut cmd: Command) -> Result<i32> {
     use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
@@ -437,9 +437,7 @@ fn run_contained(mut cmd: Command) -> Result<i32> {
     }
     // SAFETY: the handler only reports the event as handled.
     unsafe { SetConsoleCtrlHandler(Some(keep_waiting), 1) };
-    let mut child = cmd.spawn()?;
-    let _job = kiln_common::process::Job::for_process(child.id(), true);
-    Ok(child.wait()?.code().unwrap_or(1))
+    Ok(cmd.status()?.code().unwrap_or(1))
 }
 #[derive(Debug, PartialEq)]
 enum Installer {
