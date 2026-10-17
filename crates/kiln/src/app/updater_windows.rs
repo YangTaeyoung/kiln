@@ -33,6 +33,10 @@ pub(super) fn parse_appcast(xml: &str, arch: &str) -> Result<Release> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .context("The update feed lists no version")?;
+    // The feed's text is not covered by the archive signature; only a plain release number
+    // is accepted.
+    let plain = version.split('.').count() == 3 && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    ensure!(plain, "The update feed lists an invalid version");
     let enclosure = item
         .children()
         .filter(|n| n.has_tag_name("enclosure"))
@@ -78,12 +82,12 @@ fn system_tool(name: &str) -> PathBuf {
 /// which Windows allows for running executables; a failed move restores the previous files.
 #[cfg(windows)]
 pub(super) fn install(archive: &Path, dir: &Path, version: &str, check: impl Fn(&Path) -> Result<String>) -> Result<()> {
-    let staging = dir.join(format!(".update-{version}"));
-    let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging)?;
+    // A fresh folder whose name does not come from the feed; it is removed when dropped.
+    let folder = tempfile::Builder::new().prefix(".update-").tempdir_in(dir)?;
+    let staging = folder.path();
     let result = (|| {
         let mut tar = Command::new(system_tool("tar.exe"));
-        kiln_common::process::hide_window(&mut tar).arg("-xf").arg(archive).arg("-C").arg(&staging);
+        kiln_common::process::hide_window(&mut tar).arg("-xf").arg(archive).arg("-C").arg(staging);
         let out = tar.output().context("The update archive could not be extracted")?;
         ensure!(out.status.success(), "The update archive could not be extracted: {}", String::from_utf8_lossy(&out.stderr).trim());
         for required in [Path::new("Kiln.exe").to_path_buf(), Path::new("bin").join("kiln.exe")] {
@@ -92,10 +96,10 @@ pub(super) fn install(archive: &Path, dir: &Path, version: &str, check: impl Fn(
         let reported = check(&staging.join("bin").join("kiln.exe"))?;
         ensure!(reported.split_whitespace().any(|word| word == version), "The update archive holds {}, not Kiln {version}", reported.trim());
         let mut files = Vec::new();
-        staged_files(&staging, Path::new(""), &mut files)?;
-        replace(dir, &staging, &files)
+        staged_files(staging, Path::new(""), &mut files)?;
+        replace(dir, staging, &files)
     })();
-    let _ = std::fs::remove_dir_all(&staging);
+    drop(folder);
     result
 }
 
@@ -430,7 +434,7 @@ mod tests {
         let read = |path: &[&str]| std::fs::read(path.iter().fold(installed.clone(), |p, part| p.join(part))).unwrap();
         assert_eq!((read(&["Kiln.exe"]), read(&["bin", "kiln.exe"])), (b"new gui".to_vec(), b"new cli".to_vec()));
         assert_eq!((read(&["Kiln.exe.old"]), read(&["bin", "kiln.exe.old"])), (b"old gui".to_vec(), b"old cli".to_vec()));
-        assert!(!installed.join(".update-0.2.0").exists());
+        assert!(!std::fs::read_dir(&installed).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".update-")));
         remove_old_copies(&installed);
         assert!(!installed.join("Kiln.exe.old").exists() && !installed.join("bin").join("kiln.exe.old").exists());
     }
@@ -444,7 +448,8 @@ mod tests {
         let archive = zipped(dir.path());
         assert!(install(&archive, &installed, "0.2.0", |_| Ok("kiln 0.1.9".into())).is_err());
         assert_eq!(std::fs::read(installed.join("Kiln.exe")).unwrap(), b"old gui");
-        assert!(!installed.join("Kiln.exe.old").exists() && !installed.join(".update-0.2.0").exists());
+        assert!(!installed.join("Kiln.exe.old").exists());
+        assert!(!std::fs::read_dir(&installed).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".update-")));
     }
 
     const APPCAST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -476,6 +481,14 @@ mod tests {
         assert_eq!(parse_appcast(APPCAST, "x64").unwrap().signature, vec![0, 1, 2]);
         assert!(parse_appcast(APPCAST, "riscv").is_err());
         assert!(parse_appcast(&APPCAST.replace("sparkle:os=\"windows\"", "sparkle:os=\"macos\""), "x64").is_err());
+    }
+
+    #[test]
+    fn a_feed_version_that_is_not_a_plain_release_number_is_refused() {
+        for version in ["9.9.9/../../Users/me/Documents", "1.2", "1.2.3-beta", "1.2.3\\x", "1..3"] {
+            let feed = APPCAST.replace("<sparkle:version>0.2.0</sparkle:version>", &format!("<sparkle:version>{version}</sparkle:version>"));
+            assert!(parse_appcast(&feed, "x64").is_err(), "{version}");
+        }
     }
 
     #[test]
