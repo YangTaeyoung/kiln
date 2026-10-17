@@ -122,7 +122,7 @@ pub fn main() -> anyhow::Result<()> {
     #[cfg(all(feature = "updater-test", target_os = "macos"))]
     crate::isolate_updater_fixture()?;
     let cli = Cli::parse();
-    #[cfg(feature = "updater-test")]
+    #[cfg(all(feature = "updater-test", target_os = "macos"))]
     match &cli.cmd {
         Some(Cmd::Daemon { socket: Some(socket), .. }) => anyhow::ensure!(
             socket == &kiln_proto::socket_name(), "fixture daemon socket must stay isolated"),
