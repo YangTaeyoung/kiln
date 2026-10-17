@@ -205,7 +205,7 @@ pub(super) struct Worker {
 }
 impl Worker {
     pub fn start(exe: &Path, events: mpsc::SyncSender<Event>, ctx: egui::Context) -> Result<Self> {
-        let mut child = Command::new(exe)
+        let mut child = kiln_common::process::hide_window(&mut Command::new(exe))
             .arg("sync-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

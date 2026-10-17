@@ -5,7 +5,7 @@
 Download the Apple Silicon archive from [GitHub Releases](https://github.com/YangTaeyoung/kiln/releases/latest),
 extract it, and move **Kiln.app** into **Applications** before opening it.
 The macOS release requires macOS 11 or later and an Apple Silicon Mac.
-Intel, Windows and Linux release artifacts are not currently provided.
+Intel Mac and Linux release artifacts are not currently provided.
 
 The official build checks for updates automatically. Use **Kiln → Check for
 Updates** (shown as **업데이트 확인…** in the current Korean interface), or the
@@ -13,6 +13,34 @@ update control in **Settings → About**, to check manually. Installation uses
 Sparkle's update dialog. Automatic checks can be disabled in Settings.
 
 The app UI supports English, Korean, Japanese and Simplified Chinese. Documentation is in English.
+
+## Install on Windows
+
+Run the installer in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.ps1 | iex
+```
+
+It downloads the latest x64 or ARM64 archive, checks the release checksum and the
+archive's paths and version, installs into `%LOCALAPPDATA%\Programs\Kiln`, adds a
+**Kiln** Start-menu shortcut and puts `bin` on your user `PATH` for the `kiln` command.
+Set `KILN_INSTALL_DIR` to choose another folder. An existing installation is left in
+place. Kiln is tested on Windows 11; Windows 10 is not tested.
+
+Windows builds are not code-signed yet. The installer's download does not carry a
+web mark, but an archive downloaded with a browser may show a SmartScreen prompt;
+choose **More info → Run anyway** only for archives from the Releases page.
+
+Kiln checks for updates once a day. Use **Settings → About → Check for Updates** to
+check manually and **Install and Restart** to update; the archive must match the
+release signing key before it replaces anything, and running terminals keep running.
+
+Terminals start in PowerShell (PowerShell 7 when installed); choose `cmd.exe`, Git
+Bash or a WSL distribution in **Settings → Terminal**. Codex and Claude Code run as
+native Windows programs with their homes in `%USERPROFILE%\.codex` and
+`%USERPROFILE%\.claude`. The notification-area icon keeps sessions reachable after
+the window closes, and starting Kiln again opens the folder in the running window. See [Windows support](windows-parity.md) for details.
 
 ## Open a workspace
 

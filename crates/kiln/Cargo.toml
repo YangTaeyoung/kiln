@@ -14,6 +14,10 @@ name = "kiln"
 path = "src/main.rs"
 
 [[bin]]
+name = "kiln-app"
+path = "src/bin/kiln-app.rs"
+
+[[bin]]
 name = "kiln-status"
 path = "src/bin/kiln-status.rs"
 
@@ -37,6 +41,8 @@ parking_lot.workspace = true
 crossbeam-channel.workspace = true
 clap = { version = "4", features = ["derive"] }
 base64 = "0.22"
+ring = "0.17"
+roxmltree = "0.21"
 postcard.workspace = true
 arboard = "3"
 regex = "1"
@@ -53,6 +59,12 @@ url = "2.5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+embed-resource = "3"
 
 [dev-dependencies]
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }

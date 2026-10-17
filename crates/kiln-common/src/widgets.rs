@@ -115,8 +115,46 @@ pub fn keycaps(ui: &mut Ui, keys: &[&str]) {
     }
 }
 
-/// 단축키 문자열("⇧⌘P")을 키캡 단위로 나눈다.
+/// A shortcut written with macOS symbols ("⌘↩", "⇧⌘P", "⌃Space · ⌥Esc") as the running
+/// system names it: unchanged on macOS, and "Ctrl+Enter"-style names elsewhere, where ⌘
+/// stands for Ctrl as egui's command modifier does.
+pub fn shortcut_text(mac: &str) -> String {
+    shortcut_text_for(mac, cfg!(target_os = "macos"))
+}
+
+/// [`shortcut_text`] for macOS when `macos` is true and for other systems otherwise.
+pub fn shortcut_text_for(mac: &str, macos: bool) -> String {
+    if macos {
+        return mac.to_owned();
+    }
+    let name = |one: &str| {
+        let (mut ctrl, mut shift, mut alt) = (false, false, false);
+        let mut key = String::new();
+        for c in one.chars() {
+            match c {
+                '⌘' | '⌃' => ctrl = true,
+                '⇧' => shift = true,
+                '⌥' => alt = true,
+                _ => key.push(c),
+            }
+        }
+        let key = match key.trim() {
+            "↩" => "Enter",
+            "⌫" => "Backspace",
+            other => other,
+        };
+        let mut parts: Vec<&str> = [(ctrl, "Ctrl"), (shift, "Shift"), (alt, "Alt")].into_iter().filter(|(on, _)| *on).map(|(_, n)| n).collect();
+        parts.push(key);
+        parts.join("+")
+    };
+    mac.split(" · ").map(name).collect::<Vec<_>>().join(" · ")
+}
+
+/// 단축키 문자열("⇧⌘P", "Ctrl+Shift+P")을 키캡 단위로 나눈다.
 pub fn split_keys(s: &str) -> Vec<String> {
+    if !s.contains(|c| "⌘⇧⌥⌃".contains(c)) && s.len() > 1 && s.contains('+') {
+        return s.split('+').map(str::to_owned).collect();
+    }
     let mut out = Vec::new();
     let mut cur = String::new();
     for c in s.chars() {
@@ -409,6 +447,29 @@ pub fn divider(ui: &mut Ui) {
     let t = Theme::current();
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(r, 0.0, t.border);
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn shortcut_names_follow_the_platform() {
+        let cases = [
+            ("⌘↩", "Ctrl+Enter"),
+            ("⌘⌥↩", "Ctrl+Alt+Enter"),
+            ("⌃Space · ⌥Esc", "Ctrl+Space · Alt+Esc"),
+            ("⇧↩", "Shift+Enter"),
+            ("⌘⌫", "Ctrl+Backspace"),
+            ("⌘ Enter", "Ctrl+Enter"),
+        ];
+        for (mac, other) in cases {
+            assert_eq!(shortcut_text_for(mac, true), mac);
+            assert_eq!(shortcut_text_for(mac, false), other);
+        }
+        assert_eq!(split_keys("⇧⌘P"), ["⇧", "⌘", "P"]);
+        assert_eq!(split_keys("Ctrl+Shift+P"), ["Ctrl", "Shift", "P"]);
+    }
 }
 
 #[cfg(test)]

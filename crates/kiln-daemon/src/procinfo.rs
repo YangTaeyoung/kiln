@@ -1,5 +1,11 @@
 //! 프로세스 이름과 작업 디렉토리 조회.
 
+#[cfg(windows)]
+#[path = "procinfo_windows.rs"]
+mod windows;
+#[cfg(windows)]
+pub use windows::{cmdline, cwd, foreground_of, is_window_application, name, parent_of};
+
 /// Resolve the actual foreground job through Kiro's nested PTY. tcgetpgrp
 /// reports the outer bridge's process group, not its inner shell's job.
 /// This is read-only metadata: never use this PID for PTY ownership or signals.
@@ -91,9 +97,27 @@ mod mac_foreground {
 
 
 /// 사용자에게 보여줄 프로세스 이름. argv[0] 의 파일 이름을 쓰고(심볼릭 링크로 실행된 `claude` 처럼
-/// 실제 파일 이름이 버전 번호인 경우 대비), 인터프리터면 스크립트 이름을 쓴다.
+/// 실제 파일 이름이 버전 번호인 경우 대비), 인터프리터면 스크립트 이름을 쓴다. Windows 에서는 `.exe` 를 빼고
+/// 소문자로 쓴다.
 pub fn display_name(pid: u32) -> Option<String> {
-    let base = |s: &str| std::path::Path::new(s).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| s.to_string());
+    let name = raw_display_name(pid);
+    if cfg!(windows) { name.map(|n| n.to_lowercase()) } else { name }
+}
+
+/// Whether the shell `pid` reports its location only through its prompt (OSC 7): PowerShell
+/// keeps its process folder unchanged when the location changes.
+pub fn location_from_prompt(pid: u32) -> bool {
+    cfg!(windows) && name(pid).is_some_and(|n| n.eq_ignore_ascii_case("pwsh") || n.eq_ignore_ascii_case("powershell"))
+}
+
+fn raw_display_name(pid: u32) -> Option<String> {
+    let base = |s: &str| {
+        let file = std::path::Path::new(s).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| s.to_string());
+        match file.len().checked_sub(4) {
+            Some(cut) if cfg!(windows) && file.is_char_boundary(cut) && file[cut..].eq_ignore_ascii_case(".exe") => file[..cut].to_string(),
+            _ => file,
+        }
+    };
     if let Some(args) = cmdline(pid) {
         if let Some(a0) = args.first() {
             let n = base(a0.trim_start_matches('-'));
@@ -151,10 +175,6 @@ pub fn cmdline(pid: u32) -> Option<Vec<String>> {
     if args.is_empty() { None } else { Some(args) }
 }
 
-#[cfg(windows)]
-pub fn cmdline(_pid: u32) -> Option<Vec<String>> {
-    None
-}
 
 #[cfg(target_os = "macos")]
 pub fn name(pid: u32) -> Option<String> {
@@ -193,15 +213,7 @@ pub fn cwd(pid: u32) -> Option<String> {
     std::fs::read_link(format!("/proc/{pid}/cwd")).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
-#[cfg(windows)]
-pub fn name(_pid: u32) -> Option<String> {
-    None
-}
 
-#[cfg(windows)]
-pub fn cwd(_pid: u32) -> Option<String> {
-    None
-}
 
 #[cfg(test)]
 mod tests {
@@ -279,5 +291,85 @@ mod tests {
         let n = super::display_name(child.id());
         let _ = child.kill();
         assert_eq!(n.as_deref(), Some("claude"));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    fn same_dir(a: &str, b: &Path) -> bool {
+        Path::new(a).canonicalize().ok() == b.canonicalize().ok()
+    }
+
+    fn stop(pid: u32) {
+        let _ = Command::new("taskkill.exe").args(["/F", "/T", "/PID", &pid.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    }
+
+    #[test]
+    fn name_command_line_and_folder_of_this_process() {
+        let me = std::process::id();
+        let exe = std::env::current_exe().unwrap();
+        assert!(name(me).unwrap().eq_ignore_ascii_case(&exe.file_stem().unwrap().to_string_lossy()));
+        assert_eq!(cmdline(me).unwrap(), std::env::args().collect::<Vec<_>>());
+        assert!(same_dir(&cwd(me).unwrap(), &std::env::current_dir().unwrap()));
+    }
+
+    #[test]
+    fn folder_of_a_child_is_its_start_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = Command::new("ping.exe").args(["-n", "30", "127.0.0.1"]).current_dir(dir.path()).stdout(Stdio::null()).spawn().unwrap();
+        let found = cwd(child.id());
+        stop(child.id());
+        assert!(found.as_deref().is_some_and(|p| same_dir(p, dir.path())), "{found:?}");
+    }
+
+    #[test]
+    fn window_applications_are_not_the_foreground() {
+        let shell = Command::new("powershell.exe").args(["-NoProfile", "-Command", "Start-Process winver.exe; Start-Sleep 30"]).stdout(Stdio::null()).spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut window = None;
+        while Instant::now() < deadline && window.is_none() {
+            let procs = snapshot_names(shell.id());
+            window = procs.into_iter().find(|n| n.eq_ignore_ascii_case("winver.exe"));
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let foreground = foreground_of(shell.id());
+        stop(shell.id());
+        assert!(window.is_some(), "winver started");
+        assert_eq!(foreground, Some(shell.id()));
+    }
+
+    /// Executable names of the direct children of `parent`.
+    fn snapshot_names(parent: u32) -> Vec<String> {
+        let out = Command::new("powershell.exe").args(["-NoProfile", "-Command", &format!("Get-CimInstance Win32_Process -Filter 'ParentProcessId={parent}' | ForEach-Object Name")]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn foreground_is_the_newest_descendant_and_prefers_an_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let system = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+        let agent = dir.path().join("codex.exe");
+        std::fs::copy(system.join("cmd.exe"), &agent).unwrap();
+        let shell = Command::new("cmd.exe").args(["/c", "ping -n 30 127.0.0.1 >nul"]).stdout(Stdio::null()).spawn().unwrap();
+        let busy = {
+            use std::os::windows::process::CommandExt;
+            Command::new("cmd.exe").raw_arg(format!("/c \"\"{}\" /c ping -n 30 127.0.0.1 >nul\"", agent.display())).stdout(Stdio::null()).spawn().unwrap()
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (mut plain, mut agent_seen) = (None, None);
+        while Instant::now() < deadline && (plain.is_none() || agent_seen.is_none()) {
+            plain = foreground_of(shell.id()).and_then(name).filter(|n| n.eq_ignore_ascii_case("ping"));
+            agent_seen = foreground_of(busy.id()).and_then(name).filter(|n| n.eq_ignore_ascii_case("codex"));
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        stop(shell.id());
+        stop(busy.id());
+        assert!(plain.is_some(), "a shell's newest descendant is in the foreground");
+        assert!(agent_seen.is_some(), "an agent stays in the foreground while it runs a command");
     }
 }

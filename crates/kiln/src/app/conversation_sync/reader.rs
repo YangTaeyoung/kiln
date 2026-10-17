@@ -167,14 +167,7 @@ fn read(
         return Ok((rows, offsets));
     }
     let after = storage::metadata(source)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        ensure!(
-            before.dev() == after.dev() && before.ino() == after.ino(),
-            "Transcript changed while reading; retrying"
-        );
-    }
+    storage::same_file(&physical, &before)?;
     ensure!(
         after.len() >= before.len(),
         "Transcript changed while reading; retrying"

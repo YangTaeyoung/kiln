@@ -31,22 +31,25 @@ pub struct Env {
     pub username: String,
 }
 
+/// The credential store outside macOS: protected files and the Credential Manager on
+/// Windows, owner-only files elsewhere.
+fn platform_store(files: FileStore) -> Arc<dyn CredentialStore> {
+    #[cfg(windows)]
+    return Arc::new(crate::store::WindowsStore { files });
+    #[cfg(not(windows))]
+    Arc::new(files)
+}
+
 impl Env {
     /// 실제 홈 디렉토리·키체인(macOS) 또는 0600 파일(그 밖)·`kiln_common` 설정 경로.
     pub fn real() -> Self {
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
+        let home = kiln_common::paths::home().unwrap_or_else(std::env::temp_dir);
         let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
         let codex_env = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
         let codex_home = codex::codex_home(&home, codex_env.as_deref());
         let macos = cfg!(target_os = "macos");
-        let store: Arc<dyn CredentialStore> = if macos {
-            Arc::new(SecurityCli)
-        } else {
-            Arc::new(FileStore { base_dir: kiln_common::paths::config_file("accounts-credentials") })
-        };
+        let files = FileStore { base_dir: kiln_common::paths::config_file("accounts-credentials") };
+        let store: Arc<dyn CredentialStore> = if macos { Arc::new(SecurityCli) } else { platform_store(files) };
         Env {
             home,
             claude_config_dir,
@@ -1246,6 +1249,13 @@ mod tests {
         }
         std::fs::remove_file(dir.join("auth.json")).unwrap();
         std::fs::write(dir.join("config.toml"), "cli_auth_credentials_store = 'keyring'\n").unwrap();
+        if cfg!(windows) {
+            // The CLI keeps keyring secrets in its encrypted store by default on Windows.
+            m.check_profile_credentials();
+            assert!(!m.login_required(Tool::Codex, &p.id));
+            assert!(m.usage_secret(Tool::Codex, &p.id).is_err());
+            std::fs::write(dir.join("config.toml"), "cli_auth_credentials_store = 'keyring'\n[features]\nsecret_auth_storage = false\n").unwrap();
+        }
         store.set("Codex Auth", &codex::keyring_account(&dir), &fake_auth("work@example.test", "fresh")).unwrap();
         m.check_profile_credentials();
         assert!(!m.login_required(Tool::Codex, &p.id));

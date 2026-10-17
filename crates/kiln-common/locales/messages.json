@@ -84,10 +84,10 @@
     "ja": "• プロジェクト — 編集中の作業情報",
     "zh-CN": "• 项目 — 正在编辑的任务信息"
   },
-  "⌘= / ⌘- 로도 바꿀 수 있습니다": {
-    "en": "Also adjustable with ⌘= / ⌘-",
-    "ja": "⌘= / ⌘- でも変更できます",
-    "zh-CN": "也可使用 ⌘= / ⌘- 调整"
+  "{} / {} 로도 바꿀 수 있습니다": {
+    "en": "Also adjustable with {} / {}",
+    "ja": "{} / {} でも変更できます",
+    "zh-CN": "也可使用 {} / {} 调整"
   },
   "검색": {
     "en": "Search",
@@ -2174,10 +2174,10 @@
     "ja": "再読み込み",
     "zh-CN": "重新加载"
   },
-  "다음 (⇧↩)": {
-    "en": "Next (⇧↩)",
-    "ja": "次へ (⇧↩)",
-    "zh-CN": "下一个（⇧↩）"
+  "다음 ({})": {
+    "en": "Next ({})",
+    "ja": "次へ ({})",
+    "zh-CN": "下一个（{}）"
   },
   "다음 명령": {
     "en": "Next Command",
@@ -2593,11 +2593,6 @@
     "en": "Selected Command Output · Read Only",
     "ja": "選択したコマンドの出力 · 読み取り専用",
     "zh-CN": "所选命令输出 · 只读"
-  },
-  "설정 (⌘,)": {
-    "en": "Settings (⌘,)",
-    "ja": "設定 (⌘,)",
-    "zh-CN": "设置（⌘,）"
   },
   "설정 → 계정에서 {} 계정을 더 등록하세요": {
     "en": "Add more {} accounts in Settings → Accounts",
@@ -3509,10 +3504,10 @@
     "ja": "テスト後、エージェントの状態が「入力が必要」に変わり、通知に表示されます。kiln activity unknown でリセットできます。",
     "zh-CN": "测试后，代理状态会变为“需要输入”并显示在通知中。可使用 kiln activity unknown 重置。"
   },
-  "파일 내용 검색 (⇧⌘F)": {
-    "en": "Search File Contents (⇧⌘F)",
-    "ja": "ファイル内容を検索 (⇧⌘F)",
-    "zh-CN": "搜索文件内容（⇧⌘F）"
+  "파일 내용 검색 ({})": {
+    "en": "Search File Contents ({})",
+    "ja": "ファイル内容を検索 ({})",
+    "zh-CN": "搜索文件内容（{}）"
   },
   "파일 작업": {
     "en": "File Actions",
@@ -4894,10 +4889,10 @@
     "ja": "#{} · エラー",
     "zh-CN": "#{} · 错误"
   },
-  "-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⌥↩는 전체를 실행합니다.": {
-    "en": "-- Write SQL here. ⌘↩ runs the statement at the cursor; ⌘⌥↩ runs all statements.",
-    "ja": "-- ここにSQLを入力してください。⌘↩でカーソル位置の文を、⌘⌥↩ですべての文を実行します。",
-    "zh-CN": "-- 在此编写 SQL。⌘↩ 执行光标所在语句，⌘⌥↩ 执行全部语句。"
+  "-- 여기에 SQL을 작성하세요. {}는 커서 위치의 문을, {}는 전체를 실행합니다.": {
+    "en": "-- Write SQL here. {} runs the statement at the cursor; {} runs all statements.",
+    "ja": "-- ここにSQLを入力してください。{}でカーソル位置の文を、{}ですべての文を実行します。",
+    "zh-CN": "-- 在此编写 SQL。{} 执行光标所在语句，{} 执行全部语句。"
   },
   "0행": {
     "en": "0 rows",
@@ -5244,15 +5239,15 @@
     "ja": "すべて実行",
     "zh-CN": "全部执行"
   },
-  "모든 문 실행 (⌘⌥↩)": {
-    "en": "Run all statements (⌘⌥↩)",
-    "ja": "すべての文を実行 (⌘⌥↩)",
-    "zh-CN": "执行全部语句 (⌘⌥↩)"
+  "모든 문 실행 ({})": {
+    "en": "Run all statements ({})",
+    "ja": "すべての文を実行 ({})",
+    "zh-CN": "执行全部语句 ({})"
   },
-  "모든 변경 사항을 하나의 트랜잭션으로 커밋 (⌘↩)": {
-    "en": "Commit all changes in one transaction (⌘↩)",
-    "ja": "すべての変更を1つのトランザクションでコミット (⌘↩)",
-    "zh-CN": "将全部更改作为一个事务提交 (⌘↩)"
+  "모든 변경 사항을 하나의 트랜잭션으로 커밋 ({})": {
+    "en": "Commit all changes in one transaction ({})",
+    "ja": "すべての変更を1つのトランザクションでコミット ({})",
+    "zh-CN": "将全部更改作为一个事务提交 ({})"
   },
   "모든 파일": {
     "en": "All files",
@@ -5374,15 +5369,15 @@
     "ja": "選択した接続で新しいコンソールを開く",
     "zh-CN": "为所选连接打开新控制台"
   },
-  "선택한 행 복제 (⌘D)": {
-    "en": "Duplicate selected rows (⌘D)",
-    "ja": "選択した行を複製 (⌘D)",
-    "zh-CN": "复制所选行 (⌘D)"
+  "선택한 행 복제 ({})": {
+    "en": "Duplicate selected rows ({})",
+    "ja": "選択した行を複製 ({})",
+    "zh-CN": "复制所选行 ({})"
   },
-  "선택한 행 삭제 (⌘⌫)": {
-    "en": "Delete selected rows (⌘⌫)",
-    "ja": "選択した行を削除 (⌘⌫)",
-    "zh-CN": "删除所选行 (⌘⌫)"
+  "선택한 행 삭제 ({})": {
+    "en": "Delete selected rows ({})",
+    "ja": "選択した行を削除 ({})",
+    "zh-CN": "删除所选行 ({})"
   },
   "선택한 행을 정리했습니다. 최신 DB와 다시 비교한 뒤 제출하세요.": {
     "en": "Selected rows have been resolved. Compare with the latest database again before submitting.",
@@ -5689,10 +5684,10 @@
     "ja": "コミット済み · {n} 行に影響",
     "zh-CN": "已提交 · 影响 {n} 行"
   },
-  "커서 위치 또는 선택 영역의 문 실행 (⌘↩)": {
-    "en": "Run the statement at the cursor or in the selection (⌘↩)",
-    "ja": "カーソル位置または選択範囲の文を実行 (⌘↩)",
-    "zh-CN": "执行光标所在或选中区域中的语句 (⌘↩)"
+  "커서 위치 또는 선택 영역의 문 실행 ({})": {
+    "en": "Run the statement at the cursor or in the selection ({})",
+    "ja": "カーソル位置または選択範囲の文を実行 ({})",
+    "zh-CN": "执行光标所在或选中区域中的语句 ({})"
   },
   "컬럼": {
     "en": "Columns",
@@ -8864,10 +8859,10 @@
     "ja": "補完用メタデータを更新",
     "zh-CN": "刷新自动补全元数据"
   },
-  "SQL 자동완성 (⌃Space · ⌥Esc)": {
-    "en": "SQL completion (⌃Space · ⌥Esc)",
-    "ja": "SQL 補完 (⌃Space · ⌥Esc)",
-    "zh-CN": "SQL 自动补全 (⌃Space · ⌥Esc)"
+  "SQL 자동완성 ({})": {
+    "en": "SQL completion ({})",
+    "ja": "SQL 補完 ({})",
+    "zh-CN": "SQL 自动补全 ({})"
   },
   "DB에 적용": {
     "en": "Apply to database",
@@ -9194,10 +9189,10 @@
     "ja": "補完",
     "zh-CN": "补全"
   },
-  "자동완성 (⌃Space · ⌥Esc)": {
-    "en": "Complete (⌃Space · ⌥Esc)",
-    "ja": "補完 (⌃Space · ⌥Esc)",
-    "zh-CN": "补全 (⌃Space · ⌥Esc)"
+  "자동완성 ({})": {
+    "en": "Complete ({})",
+    "ja": "補完 ({})",
+    "zh-CN": "补全 ({})"
   },
   "제거": {
     "en": "Remove",
@@ -10294,10 +10289,10 @@
     "ja": "npmのヘルプを開く",
     "zh-CN": "打开 npm 帮助"
   },
-  "zsh에서 경로와 명령어 후보를 표시합니다. ⌃Space로 후보를 선택할 수 있습니다.": {
-    "en": "Show path and command suggestions in zsh. Use ⌃Space to choose a suggestion.",
-    "ja": "zsh でパスとコマンドの候補を表示します。⌃Space で選択できます。",
-    "zh-CN": "在 zsh 中显示路径和命令建议，使用 ⌃Space 选择候选项。"
+  "zsh에서 경로와 명령어 후보를 표시합니다. {}로 후보를 선택할 수 있습니다.": {
+    "en": "Show path and command suggestions in zsh. Use {} to choose a suggestion.",
+    "ja": "zsh でパスとコマンドの候補を表示します。{} で選択できます。",
+    "zh-CN": "在 zsh 中显示路径和命令建议，使用 {} 选择候选项。"
   },
   "{count}행 변경을 반영했습니다": {
     "en": "Saved changes to {count} rows",
@@ -11418,5 +11413,75 @@
     "en": "restored",
     "ja": "復元",
     "zh-CN": "已恢复"
+  },
+  "파일 탐색기에서 열기": {
+    "en": "Open in File Explorer",
+    "ja": "エクスプローラーで開く",
+    "zh-CN": "在文件资源管理器中打开"
+  },
+  "파일 관리자에서 열기": {
+    "en": "Open in File Manager",
+    "ja": "ファイルマネージャーで開く",
+    "zh-CN": "在文件管理器中打开"
+  },
+  "비워 두면 PowerShell을 씁니다": {
+    "en": "Leave empty to use PowerShell",
+    "ja": "空欄の場合は PowerShell を使います",
+    "zh-CN": "留空时使用 PowerShell"
+  },
+  "Kiln 실행 파일을 찾지 못했습니다.": {
+    "en": "Kiln's executable was not found.",
+    "ja": "Kiln の実行ファイルが見つかりません。",
+    "zh-CN": "找不到 Kiln 可执行文件。"
+  },
+  "자동 업데이트는 설치된 Windows 배포판에서 제공됩니다.": {
+    "en": "Automatic updates are available in the installed Windows release.",
+    "ja": "自動アップデートはインストールされた Windows 版で利用できます。",
+    "zh-CN": "自动更新适用于已安装的 Windows 版本。"
+  },
+  "업데이트를 확인하는 중…": {
+    "en": "Checking for updates…",
+    "ja": "アップデートを確認しています…",
+    "zh-CN": "正在检查更新…"
+  },
+  "최신 버전입니다": {
+    "en": "Kiln is up to date",
+    "ja": "最新バージョンです",
+    "zh-CN": "已是最新版本"
+  },
+  "Kiln {} 업데이트를 설치할 수 있습니다": {
+    "en": "Kiln {} is ready to install",
+    "ja": "Kiln {} をインストールできます",
+    "zh-CN": "可以安装 Kiln {}"
+  },
+  "설치하고 다시 시작": {
+    "en": "Install and Restart",
+    "ja": "インストールして再起動",
+    "zh-CN": "安装并重新启动"
+  },
+  "Kiln {version} 설치 중…": {
+    "en": "Installing Kiln {version}…",
+    "ja": "Kiln {version} をインストールしています…",
+    "zh-CN": "正在安装 Kiln {version}…"
+  },
+  "Kiln {version} 설치됨 · 다시 시작하는 중…": {
+    "en": "Kiln {version} installed · Restarting…",
+    "ja": "Kiln {version} をインストールしました · 再起動しています…",
+    "zh-CN": "已安装 Kiln {version} · 正在重新启动…"
+  },
+  "업데이트 실패: {error}": {
+    "en": "Update failed: {error}",
+    "ja": "アップデートに失敗しました: {error}",
+    "zh-CN": "更新失败：{error}"
+  },
+  "Kiln {version} 업데이트": {
+    "en": "Kiln {version} update",
+    "ja": "Kiln {version} アップデート",
+    "zh-CN": "Kiln {version} 更新"
+  },
+  "설정 → 앱 정보에서 설치할 수 있습니다.": {
+    "en": "Install it from Settings → About.",
+    "ja": "設定 → アプリ情報 からインストールできます。",
+    "zh-CN": "可在“设置 → 应用信息”中安装。"
   }
 }

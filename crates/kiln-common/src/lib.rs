@@ -3,6 +3,8 @@
 pub mod fonts;
 pub mod icons;
 pub mod paths;
+pub mod access;
+pub mod process;
 pub mod store;
 pub mod safe_file;
 pub mod task;

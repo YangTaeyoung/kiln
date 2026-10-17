@@ -1,4 +1,5 @@
 //! End-to-end navigation and visual proof for the compact development workspace.
+use kiln_common::paths::Canonical;
 use egui_kittest::{Harness,kittest::{Queryable,NodeT}};
 use kiln::app::{Action,KilnApp};
 use std::{path::{Path,PathBuf},time::{Duration,Instant},process::Command};
@@ -10,7 +11,10 @@ impl Drop for Cleanup {fn drop(&mut self){if let Ok(c)=kiln_daemon::client::Clie
 fn pump(h:&mut Harness<'_,KilnApp>,mut f:impl FnMut(&Harness<'_,KilnApp>)->bool){let until=Instant::now()+Duration::from_secs(12);loop{h.step();if f(h){return;}assert!(Instant::now()<until,"workflow timed out");std::thread::sleep(Duration::from_millis(25));}}
 #[test]
 fn parent_main_worktree_navigation_and_quiet_chrome(){
+ #[cfg(unix)]
  let base=PathBuf::from(format!("/tmp/kiln-distill-{}",std::process::id()));
+ #[cfg(windows)]
+ let base=std::env::temp_dir().join(format!("kiln-distill-{}",std::process::id()));
  std::fs::create_dir_all(base.join("cfg")).unwrap();let _cleanup=Cleanup(base.clone());
  let parent=base.join("personal");let repo=parent.join("product");let wt=base.join("login-ui");std::fs::create_dir_all(&repo).unwrap();
  git(&repo,&["init","-q","-b","main"]);git(&repo,&["commit","--allow-empty","-qm","init"]);git(&repo,&["worktree","add","-qb","feature/login",wt.to_str().unwrap()]);
@@ -32,7 +36,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  assert!(h.query_by_label("기록").is_none());assert!(h.query_by_label("연동").is_none());assert!(h.query_by_label("상태 미확인").is_none());
  let output=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/reviews/2026-09-29-distill");std::fs::create_dir_all(&output).unwrap();
  h.render().unwrap().save(output.join("workspace-1440.png")).unwrap();
- h.query_all_by_label("personal").next().unwrap().click();h.run_steps(3);assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ h.query_all_by_label("personal").next().unwrap().click();h.run_steps(3);assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  // The workspace sidebar only switches work. Inspection is a separate surface.
  assert!(h.query_by_label("워크스페이스 메뉴").is_none());
  assert!(h.query_by_label("데이터베이스").is_none());
@@ -42,7 +46,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  h.get_by_label("변경").click();h.run_steps(5);
  if let Some(expand)=h.query_by_label("web 변경 펼치기") {expand.click();h.run_steps(3);}
  pump(&mut h,|h|h.query_by_label_contains("app.ts").is_some());
- assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  h.render().unwrap().save(output.join("inspector-changes-1440.png")).unwrap();
  // An oversized dock saved by an older build must not squeeze out terminals.
  let dock=egui::Id::new("tools-dock");
@@ -90,7 +94,7 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
   .find(|node| node.accesskit_node().role()==egui::accesskit::Role::Button && node.rect().top()>42.0 && node.rect().left()<300.)
   .expect("workspace context tools submenu, not titlebar tools").click();h.run_steps(2);
  h.get_by_label("소스 제어").click();h.run_steps(4);
- assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  assert!(h.state().debug_sheet_open(),"explicit workspace menu must open, never toggle closed");
  assert!(h.query_by_label_contains("app.ts").is_some());
  h.get_by_label("도구 닫기").click();h.run_steps(3);
@@ -101,14 +105,15 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  pump(&mut h,|h|h.state().debug_focused_text().is_some_and(|s|s.contains('>')));
  h.render().unwrap().save(output.join("workspace-duplicate-tabs.png")).unwrap();
  for n in [2,1] {h.state_mut().debug_queue_action(Action::ClosePage(n,true));h.run_steps(3);}
- h.get_by_label("새 작업").click();h.run_steps(2);h.get_by_label("에이전트 요청").click();h.run_steps(4);assert!(h.state().debug_sheet_open());assert_eq!(h.state().debug_active_workspace_root(),parent.canonicalize().unwrap());
+ h.get_by_label("새 작업").click();h.run_steps(2);h.get_by_label("에이전트 요청").click();h.run_steps(4);assert!(h.state().debug_sheet_open());assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  h.render().unwrap().save(output.join("agent-task-1440.png")).unwrap();
  h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
  for (w,height,scale,name) in [(720.,440.,1.3,"workspace-minimum-130.png"),(2560.,1440.,1.,"workspace-2560.png")]{
   h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point=Some(1.0);
   h.ctx.set_zoom_factor(scale);h.run_steps(3);h.set_size(egui::vec2(w/scale,height/scale));h.run_steps(4);
   let size=h.ctx.content_rect().size();assert!((size.x-w/scale).abs()<1.0 && (size.y-height/scale).abs()<1.0,"expected {}x{} got {size:?}",w/scale,height/scale);
-  for label in ["도구","새 작업","설정 (⌘,)","알림 센터"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} outside viewport");}
+  let settings=format!("설정 ({})",kiln::app::app_shortcut("⌘,"));
+  for label in ["도구","새 작업",settings.as_str(),"알림 센터"] {assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label} outside viewport");}
   assert!(h.query_by_label("워크스페이스 메뉴").is_none());
   let img=h.render().unwrap();assert_eq!(img.dimensions(),(w as u32,height as u32));img.save(output.join(name)).unwrap();
   if scale>1.0 {
@@ -125,6 +130,6 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  let ctx=h.ctx.clone();h.state_mut().debug_set_theme(&ctx,"kiln-light");h.run_steps(4);
  h.render().unwrap().save(output.join("workspace-light-2560.png")).unwrap();
  h.input_mut().viewports.get_mut(&egui::ViewportId::ROOT).unwrap().fullscreen=Some(true);h.run_steps(4);
- assert!(h.get_by_label("워크스페이스 사이드바 (⌘B)").rect().left()<20.0);
+ assert!(h.get_by_label(&format!("워크스페이스 사이드바 ({})",kiln::app::app_shortcut("⌘B"))).rect().left()<20.0);
  h.render().unwrap().save(output.join("workspace-fullscreen-light.png")).unwrap();
 }

@@ -1,5 +1,6 @@
 //! A deterministic CLI probe exercises the real daemon/PTY without calling an AI service.
 #![cfg(unix)]
+use kiln_common::paths::Canonical;
 use egui_kittest::{Harness,kittest::Queryable};
 use kiln::app::{Action,KilnApp};
 use std::{path::PathBuf,process::Command,time::{Duration,Instant},os::unix::fs::PermissionsExt};
@@ -27,9 +28,9 @@ fn long_parent_request_launches_a_separate_task_and_preserves_both_repositories(
  pump(&mut h, |_|root.join("backend/changed.txt").exists());h.run_steps(4);
  let delivered=std::fs::read_to_string(root.join("request.txt")).unwrap();
  assert!(delivered.contains(&request));assert!(delivered.contains("frontend"));assert!(delivered.contains("backend"));
- assert_eq!(std::fs::read_to_string(root.join("working-directory.txt")).unwrap().trim(),root.canonicalize().unwrap().to_str().unwrap());
+ assert_eq!(std::fs::read_to_string(root.join("working-directory.txt")).unwrap().trim(),root.canonical().unwrap().to_str().unwrap());
  assert!(!root.join("PWNED").exists());assert_eq!(h.state().debug_task_count(),count+1);assert_ne!(h.state().debug_focused_session(),original);
- assert_eq!(h.state().debug_active_workspace_root(),root.canonicalize().unwrap());
+ assert_eq!(h.state().debug_active_workspace_root(),root.canonical().unwrap());
  assert!(!h.state().debug_unsaved_items().iter().any(|s|s.contains("작성 중인 에이전트 요청")));
  h.state_mut().debug_apply_action(&ctx,Action::ToggleInspector);h.run_steps(3);h.get_by_label("변경").click();
  pump(&mut h,|h|h.query_by_label("frontend 변경 펼치기").is_some()&&h.query_by_label("backend 변경 펼치기").is_some());

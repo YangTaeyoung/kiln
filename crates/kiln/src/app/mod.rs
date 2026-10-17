@@ -1,16 +1,20 @@
 //! Kiln GUI: 스페이스(워크스페이스) → 페이지 → 카드(터미널·에디터·DB 등) 분할 트리.
 
+use kiln_common::paths::Canonical;
 pub mod conn;
 mod keys;
 mod launchers;
 pub mod projects;
 mod product_ui;
 mod keymap;
+pub use keymap::app_shortcut;
 mod quick;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
 mod updater;
+#[cfg(any(windows, test))]
+mod updater_windows;
 mod notifications;
 mod layout;
 mod palette;
@@ -71,6 +75,13 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
         macos::install_quit_guard(&cc.egui_ctx);
         #[cfg(target_os = "macos")]
         updater::install();
+        #[cfg(windows)]
+        {
+            if let Some(dir) = updater_windows::installed_dir() {
+                updater_windows::remove_old_copies(&dir);
+            }
+            updater_windows::check_daily();
+        }
         let mut app = KilnApp::new(&cc.egui_ctx, path);
         app.quick.register(&cc.egui_ctx);
         if let Some(error)=app.quick.error.clone(){app.toast(kiln_common::i18n::tr("빠른 터미널"),error,ToastKind::Error,None);}
@@ -287,6 +298,9 @@ pub struct KilnApp {
     toasts: Vec<Toast>,
     confirm: Option<Confirm>,
     quit_confirmed: bool,
+    /// An installed update starts the new GUI once this one exits.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    relaunch_after_update: bool,
     palette: palette::Palette,
     recent_panes: Vec<PaneId>,
     launchers: launchers::Launcher,
@@ -395,6 +409,7 @@ impl KilnApp {
             toasts: Vec::new(),
             confirm: None,
             quit_confirmed: false,
+            relaunch_after_update: false,
             palette: palette::Palette::default(),
             recent_panes: persisted.recent_panes.clone(),
             launchers: launchers::Launcher::default(),
@@ -442,7 +457,7 @@ impl KilnApp {
             }
         }
         if let Some(p) = open_path {
-            let p = normalize_path(p.canonicalize().unwrap_or(p));
+            let p = normalize_path(p.canonical().unwrap_or(p));
             if let Some(i) = app.workspaces.get(app.active).filter(|w|w.root==p).map(|_|app.active).or_else(||app.workspaces.iter().position(|w| w.root == p)) {
                 app.active = i;
             } else {
@@ -450,9 +465,8 @@ impl KilnApp {
             }
         }
         if app.workspaces.is_empty() {
-            let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-            let cwd = std::env::current_dir().ok().filter(|d| d != Path::new("/")).unwrap_or(home);
-            app.add_workspace(cwd, ctx);
+            let home = kiln_common::paths::home().unwrap_or_else(|| PathBuf::from("."));
+            app.add_workspace(first_workspace(std::env::current_dir().ok(), home), ctx);
         }
         if first_run { let root = app.workspaces[app.active].root.clone(); app.projects.open(&root); }
         app
@@ -927,7 +941,7 @@ impl KilnApp {
     }
 
     fn add_workspace(&mut self, root: PathBuf, ctx: &egui::Context) {
-        let root = normalize_path(root.canonicalize().unwrap_or(root));
+        let root = normalize_path(root.canonical().unwrap_or(root));
         if let Some(index) = self.workspaces.get(self.active).filter(|ws|normalize_path(ws.tools.canonical_root().to_owned())==root).map(|_|self.active).or_else(||self.workspaces.iter().position(|ws| normalize_path(ws.tools.canonical_root().to_owned()) == root)) {
             self.active = index;
             self.focus_terminal = true;
@@ -939,7 +953,7 @@ impl KilnApp {
     }
 
     fn create_workspace(&mut self, root: PathBuf, name: String, ctx: &egui::Context) -> bool {
-        let root=normalize_path(root.canonicalize().unwrap_or(root));
+        let root=normalize_path(root.canonical().unwrap_or(root));
         if !root.is_dir() || !workspace_dialog::valid_name(&name) {
             self.toast(kiln_common::i18n::tr("워크스페이스를 만들 수 없습니다"), root.display().to_string(), ToastKind::Error, None);
             return false;
@@ -1063,7 +1077,7 @@ impl KilnApp {
             Action::OpenFolder => {
                 let root = self.workspaces[self.active].root.clone();
                 if let Some(path) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() {
-                    let canonical=path.canonicalize().unwrap_or(path);
+                    let canonical=path.canonical().unwrap_or(path);
                     if self.workspaces.iter().filter(|ws|ws.tools.canonical_root()==canonical).count()>1 {self.open_workspace_dialog(canonical);}
                     else {self.add_workspace(canonical,ctx);}
                 }
@@ -1170,7 +1184,7 @@ impl KilnApp {
                     }
                     ws.tools.lsp.shutdown();
                     if self.workspaces.is_empty() {
-                        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+                        let home = kiln_common::paths::home().unwrap_or_default();
                         self.add_workspace(home, ctx);
                     }
                     self.active = self.active.min(self.workspaces.len() - 1);
@@ -1188,7 +1202,7 @@ impl KilnApp {
             Action::OpenAgentFolder(tool) => {
                 let root = self.ws().root.clone();
                 let Some(cwd) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() else { return; };
-                let cwd = normalize_path(cwd.canonicalize().unwrap_or(cwd));
+                let cwd = normalize_path(cwd.canonical().unwrap_or(cwd));
                 let spec = match agent_runtime::managed(tool, cwd.clone(), &self.rotator.mgr).map_err(|e|e.to_string()) {
                     Ok(spec) => spec,
                     Err(error) => { self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), error, ToastKind::Error, None); return; }
@@ -2271,18 +2285,94 @@ fn os_notify(title: &str, body: &str) {
         }
         #[cfg(windows)]
         {
-            let _ = (&title, &body);
+            let mut cmd = toast_command(&title, &body, toast_app());
+            let _ = kiln_common::process::hide_window(&mut cmd).output();
         }
     });
 }
 
+/// Windows PowerShell showing a toast whose text and app ID travel in environment
+/// variables, so the fixed script never contains either.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn toast_command(title: &str, body: &str, app: &str) -> std::process::Command {
+    use base64::Engine;
+    const SCRIPT: &str = "$ErrorActionPreference = 'Stop'
+[void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$text = $xml.GetElementsByTagName('text')
+[void]$text.Item(0).AppendChild($xml.CreateTextNode($env:KILN_TOAST_TITLE))
+[void]$text.Item(1).AppendChild($xml.CreateTextNode($env:KILN_TOAST_BODY))
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:KILN_TOAST_APP).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
+";
+    let script: Vec<u8> = SCRIPT.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let program = std::env::var_os("SystemRoot")
+        .map(|root| PathBuf::from(root).join("System32").join("WindowsPowerShell").join("v1.0").join("powershell.exe"))
+        .unwrap_or_else(|| PathBuf::from("powershell.exe"));
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &base64::engine::general_purpose::STANDARD.encode(script)])
+        .env("KILN_TOAST_TITLE", title)
+        .env("KILN_TOAST_BODY", body)
+        .env("KILN_TOAST_APP", app);
+    cmd
+}
+
+/// The app ID toasts are shown under: Kiln's when its Start-menu shortcut registers it,
+/// otherwise Windows PowerShell's, since Windows shows toasts only for registered app IDs.
+#[cfg(windows)]
+fn toast_app() -> &'static str {
+    let registered = std::env::var_os("APPDATA")
+        .map(|dir| PathBuf::from(dir).join("Microsoft").join("Windows").join("Start Menu").join("Programs").join("Kiln.lnk").is_file())
+        .unwrap_or(false);
+    if registered { "dev.kiln.app" } else { r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe" }
+}
+
+#[cfg(test)]
+mod toast_tests {
+    use super::*;
+    use base64::Engine;
+
+    #[test]
+    fn toast_text_travels_in_the_environment_not_the_script() {
+        let title = "Build `done' $(rm) \"quoted\"";
+        let body = "한글 본문\n둘째 줄";
+        let cmd = toast_command(title, body, "dev.kiln.app");
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let encoded = args.iter().position(|a| a == "-EncodedCommand").map(|i| args[i + 1].clone()).expect("encoded script");
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let script = String::from_utf16(&units).unwrap();
+        assert!(script.contains("ToastNotificationManager"));
+        assert!(!script.contains("Build") && !script.contains("한글"));
+        let env: std::collections::HashMap<String, Option<String>> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env["KILN_TOAST_TITLE"].as_deref(), Some(title));
+        assert_eq!(env["KILN_TOAST_BODY"].as_deref(), Some(body));
+        assert_eq!(env["KILN_TOAST_APP"].as_deref(), Some("dev.kiln.app"));
+    }
+}
+
+/// The first workspace when none is saved: the launch folder, unless it is a drive or
+/// file-system root or inside the Windows folder.
+fn first_workspace(cwd: Option<PathBuf>, home: PathBuf) -> PathBuf {
+    cwd.filter(|dir| dir.parent().is_some() && !in_windows_folder(dir)).unwrap_or(home)
+}
+
+fn in_windows_folder(dir: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let Some(root) = std::env::var_os("SystemRoot").map(PathBuf::from) else { return false; };
+        let lower = |p: &Path| p.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect::<Vec<_>>();
+        lower(dir).starts_with(&lower(&root))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
+        false
+    }
+}
+
 /// Windows 확장 경로 접두(`\\?\`)를 떼어 일반 경로로 만든다.
 fn normalize_path(p: PathBuf) -> PathBuf {
-    let s = p.to_string_lossy();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
-        _ => p,
-    }
+    kiln_common::paths::simplified(&p).to_path_buf()
 }
 
 /// Input other than pointer motion, which can change application state.
@@ -2293,6 +2383,21 @@ fn changes_state(event: &egui::Event) -> bool {
 #[cfg(test)]
 mod follow_up_pass_tests {
     use super::*;
+    #[test]
+    fn first_workspace_avoids_roots_and_the_windows_folder() {
+        let home = std::env::temp_dir().join("home");
+        let project = std::env::temp_dir().join("project");
+        assert_eq!(first_workspace(Some(project.clone()), home.clone()), project);
+        assert_eq!(first_workspace(None, home.clone()), home);
+        let root = project.ancestors().last().unwrap().to_path_buf();
+        assert_eq!(first_workspace(Some(root), home.clone()), home);
+        #[cfg(windows)]
+        {
+            let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+            let shouted = PathBuf::from(system.to_string_lossy().to_uppercase());
+            assert_eq!(first_workspace(Some(shouted), home.clone()), home);
+        }
+    }
     #[test]
     fn clicks_and_keys_change_state_but_pointer_motion_does_not() {
         let click = egui::Event::PointerButton { pos: egui::Pos2::ZERO, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() };
@@ -2330,7 +2435,7 @@ mod workspace_path_tests {
 
 pub(crate) fn short_path(p: &Path) -> String {
     let s = p.to_string_lossy().into_owned();
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = kiln_common::paths::home() {
         let h = home.to_string_lossy();
         if let Some(rest) = s.strip_prefix(h.as_ref()) {
             return format!("~{rest}");
@@ -2341,15 +2446,21 @@ pub(crate) fn short_path(p: &Path) -> String {
 
 impl eframe::App for KilnApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        #[cfg(target_os="macos")]
         {
+            #[cfg(target_os="macos")]
             let menu_request = macos::take_settings_request();
+            #[cfg(not(target_os="macos"))]
+            let menu_request = false;
             let helper_request = crate::native_actions::take_settings_request();
             if menu_request || helper_request {
                 self.settings_ui.open = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            #[cfg(windows)]
+            if let Some(folder) = crate::native_actions::take_folder_request() {
+                self.apply(Action::NewWorkspace(Some(folder)), ctx);
             }
             ctx.request_repaint_after(Duration::from_secs(1));
         }
@@ -2361,8 +2472,17 @@ impl eframe::App for KilnApp {
         if ctx.input_mut(|input|input.consume_shortcut(&fullscreen_shortcut)) {
             self.apply(Action::ToggleFullscreen,ctx);
         }
-        #[cfg(target_os="macos")]
-        crate::status_bar::publish_unread(self.notifications.unread_count());
+        crate::companion::publish_unread(self.notifications.unread_count());
+        #[cfg(windows)]
+        {
+            if let Some(version) = updater_windows::take_announcement() {
+                self.toast(kiln_common::trf!("Kiln {version} 업데이트"), kiln_common::i18n::tr("설정 → 앱 정보에서 설치할 수 있습니다."), ToastKind::Info, None);
+            }
+            if !self.relaunch_after_update && matches!(updater_windows::state(), updater_windows::State::Installed(_)) {
+                self.relaunch_after_update = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
         self.conn.pump();
         self.start_prepared_agents(ctx);
         let focused_now = ctx.input(|i| i.viewport().focused.unwrap_or(true));
@@ -2464,5 +2584,11 @@ impl eframe::App for KilnApp {
         }
         #[cfg(target_os = "macos")]
         macos::reply_to_termination(true);
+        #[cfg(windows)]
+        if self.relaunch_after_update {
+            if let Some(dir) = updater_windows::installed_dir() {
+                let _ = std::process::Command::new(dir.join("Kiln.exe")).spawn();
+            }
+        }
     }
 }

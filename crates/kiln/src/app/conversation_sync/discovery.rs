@@ -1,4 +1,5 @@
 //! Bounded metadata discovery; never reads credentials or modifies source sessions.
+use kiln_common::paths::Canonical;
 use super::*;
 use std::io::{BufRead, BufReader};
 
@@ -23,7 +24,7 @@ impl Scope {
             // Both CLIs see the same workspace history in their ordinary /resume picker.
             for root in [default, pair.endpoint(tool).root.clone()] {
                 private_dir(&root)?;
-                let root = root.canonicalize()?;
+                let root = root.canonical()?;
                 if !roots.contains(&(tool, root.clone())) {
                     roots.push((tool, root));
                 }
@@ -31,7 +32,7 @@ impl Scope {
         }
         let mut workspaces: Vec<_> = workspaces
             .into_iter()
-            .filter_map(|p| p.canonicalize().ok())
+            .filter_map(|p| p.canonical().ok())
             .collect();
         workspaces.sort();
         workspaces.dedup();
@@ -41,7 +42,7 @@ impl Scope {
         self.roots.contains(&(source.tool, source.root.clone())) && self.matches_cwd(&source.cwd)
     }
     pub(super) fn workspace(&self, cwd: &str) -> Option<&PathBuf> {
-        let cwd = Path::new(cwd).canonicalize().ok()?;
+        let cwd = Path::new(cwd).canonical().ok()?;
         self.workspaces
             .iter()
             .filter(|w| cwd.starts_with(w))

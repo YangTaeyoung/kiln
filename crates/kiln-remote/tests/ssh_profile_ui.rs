@@ -110,7 +110,7 @@ fn config_dropdown_prefills_saves_reedits_and_direct_hosts_need_no_alias() {
     }
     h.render()
         .expect("render")
-        .save("/tmp/kiln-015-sftp-prefill.png")
+        .save(std::env::temp_dir().join("kiln-015-sftp-prefill.png"))
         .unwrap();
     replace(&mut h, "2202", "2300");
     h.get_by_label("연결 저장").click();

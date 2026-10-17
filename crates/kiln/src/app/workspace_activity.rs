@@ -242,7 +242,7 @@ mod tests {
                 assert!(h.ctx.content_rect().contains_rect(row.rect()));
                 row.click();h.run_steps(2);assert_eq!(*h.state(),Some(1));
                 h.get_by_label("코드 검토 · Claude Code · 연결 복구 중");
-                h.render().unwrap().save(format!("/tmp/kiln-terminal-health-rows-{}-{}.png",theme.name,width as u32)).unwrap();
+                h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-terminal-health-rows-{}-{}.png",theme.name,width as u32))).unwrap();
             }
         }
     }
@@ -266,7 +266,7 @@ mod tests {
                 h.get_by_label("용량 정리 · Claude Code · 세션 열림");
                 h.get_by_label("API 연결 · Codex · 세션 열림");
                 h.get_by_label("변경 승인 · Claude Code · 입력 대기");
-                h.render().unwrap().save(format!("/tmp/kiln-agent-rows-{}-{}.png",theme.name,width as u32)).unwrap();
+                h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-agent-rows-{}-{}.png",theme.name,width as u32))).unwrap();
             }
         }
     }
@@ -300,7 +300,7 @@ mod tests {
             task_rows(ui,&tasks,Some(1001),&Theme::current());
         });
         h.run_steps(3);h.get_by_label("작업 4개 모두 보기").click();h.run_steps(2);
-        h.render().unwrap().save("/tmp/kiln-readable-task-names-180.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-readable-task-names-180.png")).unwrap();
     }
 
     #[test]
@@ -365,7 +365,7 @@ mod tests {
             h.get_by_label("작업 4개 모두 보기").click();h.run_steps(2);
             let last=h.get_by_label("아주 긴 최근 작업 제목이 좁은 워크스페이스 목록을 밀어내면 안 됩니다 · 세션 열림");
             assert!(h.ctx.content_rect().contains_rect(last.rect()));last.click();h.run_steps(2);assert_eq!(*h.state(),Some(14));
-            h.render().unwrap().save(format!("/tmp/kiln-workspace-tasks-{}.png",width as u32)).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-workspace-tasks-{}.png",width as u32))).unwrap();
         }
     }
 }

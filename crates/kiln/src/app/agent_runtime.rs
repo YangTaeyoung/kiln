@@ -1,4 +1,5 @@
 //! Per-launch identity and bounded CLI updates. Never infer identity from the newest transcript.
+use kiln_common::paths::Canonical;
 use super::{agent_launch, remote_terminal};
 use anyhow::{Context, Result, bail, ensure};
 use kiln_accounts::{AccountManager, Tool};
@@ -32,7 +33,7 @@ fn helper_exe() -> Result<PathBuf> {
     if std::env::var_os("KILN_ACCOUNTS_SANDBOX").is_some() {
         Ok(super::conn::daemon_exe())
     } else {
-        Ok(std::env::current_exe()?)
+        Ok(kiln_daemon::client::cli_executable(&std::env::current_exe()?))
     }
 }
 fn directory() -> PathBuf {
@@ -132,9 +133,67 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
     attach(&mut spec, &path, &record)?;
     launch_spec(&path, &record, false, None)
 }
+/// The launch record and generation in a `kiln agent-run --record <path> --generation <id>`
+/// command line.
+#[cfg(any(windows, test))]
+fn launch_in_command_line(args: &[String]) -> Option<(PathBuf, String)> {
+    let program = args.first()?.rsplit(['/', '\\']).next()?;
+    let program = program.strip_suffix(".exe").or_else(|| program.strip_suffix(".EXE")).unwrap_or(program);
+    if !program.eq_ignore_ascii_case("kiln") || args.get(1).map(String::as_str) != Some("agent-run") {
+        return None;
+    }
+    let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    Some((PathBuf::from(value("--record")?), value("--generation")?))
+}
+
+/// The launch of the nearest `kiln agent-run` ancestor of this process. Codex on Windows starts
+/// hooks with an empty environment, so its hooks find their launch this way.
+#[cfg(windows)]
+pub fn launch_from_ancestors() -> Option<(PathBuf, String)> {
+    let mut pid = std::process::id();
+    for _ in 0..8 {
+        pid = kiln_daemon::procinfo::parent_of(pid)?;
+        if let Some(launch) = kiln_daemon::procinfo::cmdline(pid).as_deref().and_then(launch_in_command_line) {
+            return Some(launch);
+        }
+    }
+    None
+}
+
+/// The hook command for `tool` in the shell that CLI runs hooks with. Codex on Windows uses the
+/// session's shell (PowerShell by default, or cmd), so the helper is a plain path, shortened to
+/// its 8.3 form when that removes spaces, or else PowerShell's `& '...'`. Claude Code runs hooks
+/// with Git Bash on Windows and `sh` elsewhere.
+fn hook_command(tool: Tool, helper: &Path) -> String {
+    #[cfg(windows)]
+    if tool == Tool::Codex {
+        let plain = |text: &str| text.chars().all(|c| c.is_ascii_alphanumeric() || "\\:._-~".contains(c));
+        let short = short_path(helper).unwrap_or_else(|| helper.to_path_buf());
+        let text = short.to_string_lossy();
+        return if plain(&text) {
+            format!("{text} agent-hook")
+        } else {
+            format!("& '{}' agent-hook", helper.to_string_lossy().replace('\'', "''"))
+        };
+    }
+    let _ = tool;
+    format!("{} agent-hook", quote(&helper.to_string_lossy()))
+}
+
+/// The 8.3 form of an existing path, when the volume keeps short names.
+#[cfg(windows)]
+fn short_path(path: &Path) -> Option<PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 1024];
+    // SAFETY: `wide` is NUL-terminated and `buf` holds `buf.len()` units.
+    let len = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+    (len > 0 && len < buf.len()).then(|| PathBuf::from(std::ffi::OsString::from_wide(&buf[..len])))
+}
 fn attach(spec: &mut SpawnSpec, path: &Path, record: &Record) -> Result<()> {
     let helper = helper_exe()?;
-    let command = format!("{} agent-hook", quote(&helper.to_string_lossy()));
+    let command = hook_command(record.tool, &helper);
     let hooks = serde_json::json!([{ "hooks": [{"type":"command","command":command,"timeout":3}]}]);
     match record.tool {
         // CLI override is an additional config layer; never rewrite user/project hooks.
@@ -290,8 +349,8 @@ pub fn run_request(
     ensure!(
         path.parent()
             .context("missing record directory")?
-            .canonicalize()?
-            == directory().canonicalize()?,
+            .canonical()?
+            == directory().canonical()?,
         "invalid record directory"
     );
     let mut record = read(path)?;
@@ -306,10 +365,10 @@ pub fn run_request(
             request
                 .parent()
                 .context("missing request directory")?
-                .canonicalize()?
+                .canonical()?
                 == kiln_common::paths::config_dir()
                     .join("agent-requests")
-                    .canonicalize()?,
+                    .canonical()?,
             "invalid request directory"
         );
         ensure!(
@@ -353,8 +412,9 @@ pub fn run_request(
         ensure!(&failure.turn == turn, "capacity retry superseded by another turn");
         spec.args.push(super::capacity_recovery::CONTINUE.into());
     }
-    let mut cmd = Command::new(spec.program.context("missing CLI executable")?);
-    cmd.args(&spec.args).envs(spec.env).env_remove("KILN_CAPACITY_RETRY_TURN");
+    let (program, lead) = agent_launch::launcher(Path::new(&spec.program.context("missing CLI executable")?));
+    let mut cmd = Command::new(program);
+    cmd.args(lead).args(&spec.args).envs(spec.env).env_remove("KILN_CAPACITY_RETRY_TURN");
     if !resumed && let Some(payload) = payload {
         cmd.arg(payload);
     }
@@ -363,12 +423,21 @@ pub fn run_request(
         use std::os::unix::process::CommandExt;
         return Err(cmd.exec().into());
     }
-    #[cfg(not(unix))]
-    {
-        let status = cmd.status()?;
-        ensure!(status.success(), "agent exited with error");
-        Ok(())
+    #[cfg(windows)]
+    std::process::exit(run_contained(cmd)?);
+}
+
+/// Runs the agent and returns its exit code. Ctrl+C and Ctrl+Break reach the agent through the
+/// shared console while the launcher keeps waiting for it; the terminal's job ends both.
+#[cfg(windows)]
+fn run_contained(mut cmd: Command) -> Result<i32> {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    unsafe extern "system" fn keep_waiting(_event: u32) -> i32 {
+        1
     }
+    // SAFETY: the handler only reports the event as handled.
+    unsafe { SetConsoleCtrlHandler(Some(keep_waiting), 1) };
+    Ok(cmd.status()?.code().unwrap_or(1))
 }
 #[derive(Debug, PartialEq)]
 enum Installer {
@@ -378,35 +447,46 @@ enum Installer {
 fn installer(binary: &Path) -> Result<Installer> {
     installer_with(binary, agent_launch::executable)
 }
+/// The npm package folder behind a Windows npm launcher (`codex.cmd` or `codex.ps1` next to
+/// `node_modules`).
+fn npm_launcher_package(binary: &Path) -> Option<PathBuf> {
+    let extension = binary.extension()?.to_string_lossy().to_ascii_lowercase();
+    if extension != "cmd" && extension != "ps1" {
+        return None;
+    }
+    binary.parent()?.join("node_modules").join("@openai").join("codex").canonical().ok()
+}
 fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Result<Installer> {
-    let resolved = binary.canonicalize()?;
-    let path = resolved.to_string_lossy();
-    if path.contains("/Caskroom/codex/") || path.contains("/Cellar/codex/") {
+    let resolved = match npm_launcher_package(binary) {
+        Some(package) => package,
+        None => binary.canonical()?,
+    };
+    let names: Vec<_> = resolved.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let contains = |run: &[&str]| names.windows(run.len()).any(|window| window.iter().zip(run).all(|(name, part)| name == part));
+    if contains(&["Caskroom", "codex"]) || contains(&["Cellar", "codex"]) {
         let brew = resolve("brew").context("Homebrew not found")?;
         let mut cmd = Command::new(&brew);
+        kiln_common::process::hide_window(&mut cmd);
         cmd.arg("--prefix");
         let prefix =
             PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
-                .canonicalize()?;
-        let cask = path.contains("/Caskroom/codex/");
+                .canonical()?;
+        let cask = contains(&["Caskroom", "codex"]);
         ensure!(
-            resolved.starts_with(prefix.join(if cask {
-                "Caskroom/codex"
-            } else {
-                "Cellar/codex"
-            })),
+            resolved.starts_with(prefix.join(if cask { "Caskroom" } else { "Cellar" }).join("codex")),
             "Homebrew prefix does not own this Codex executable"
         );
         return Ok(Installer::Brew(brew, cask));
     }
-    if path.contains("/node_modules/@openai/codex/") {
+    if contains(&["node_modules", "@openai", "codex"]) {
         let npm = resolve("npm").context("npm not found")?;
         let mut cmd = Command::new(&npm);
+        kiln_common::process::hide_window(&mut cmd);
         cmd.args(["root", "--global"]);
         let root = PathBuf::from(String::from_utf8(bounded(cmd, Duration::from_secs(5))?)?.trim())
-            .canonicalize()?;
+            .canonical()?;
         ensure!(
-            resolved.starts_with(root.join("@openai/codex").canonicalize()?),
+            resolved.starts_with(root.join("@openai").join("codex").canonical()?),
             "npm global root does not own this Codex executable"
         );
         return Ok(Installer::Npm(npm));
@@ -418,6 +498,7 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
 fn update_command(tool: Tool, binary: &Path) -> Result<Command> {
     if tool == Tool::Claude {
         let mut cmd = Command::new(binary);
+        kiln_common::process::hide_window(&mut cmd);
         cmd.arg("update");
         return Ok(cmd);
     }
@@ -425,6 +506,7 @@ fn update_command(tool: Tool, binary: &Path) -> Result<Command> {
     match installer(binary)? {
         Installer::Brew(brew, cask) => {
             let mut cmd = Command::new(brew);
+            kiln_common::process::hide_window(&mut cmd);
             cmd.args([
                 "upgrade",
                 if cask { "--cask" } else { "--formula" },
@@ -435,6 +517,7 @@ fn update_command(tool: Tool, binary: &Path) -> Result<Command> {
         }
         Installer::Npm(npm) => {
             let mut cmd = Command::new(npm);
+            kiln_common::process::hide_window(&mut cmd);
             cmd.args(["install", "--global", "@openai/codex@latest"]);
             Ok(cmd)
         }
@@ -460,11 +543,11 @@ pub fn hook(path: &Path, generation: &str, input: impl Read) -> Result<()> {
     Ok(())
 }
 fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Result<Option<serde_json::Value>> {
-    let root = root.canonicalize()?;
+    let root = root.canonical()?;
     ensure!(
         path.parent()
             .context("missing record parent")?
-            .canonicalize()?
+            .canonical()?
             == root,
         "record outside Kiln session directory"
     );
@@ -559,6 +642,7 @@ fn parse_version(bytes: &[u8]) -> Result<String> {
 }
 pub(super) fn probe(binary: &Path) -> Result<String> {
     let mut cmd = Command::new(binary);
+    kiln_common::process::hide_window(&mut cmd);
     cmd.arg("--version");
     parse_version(&bounded(cmd, Duration::from_secs(5))?)
 }
@@ -799,6 +883,7 @@ fn latest_version(tool: Tool, offline: bool) -> Option<String> {
         Tool::Claude => "@anthropic-ai/claude-code",
     };
     let mut cmd = Command::new("curl");
+    kiln_common::process::hide_window(&mut cmd);
     cmd.args([
         "-q",
         "--fail",
@@ -823,6 +908,36 @@ fn latest_version(tool: Tool, offline: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_launch_is_found_in_the_agent_run_command_line() {
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let launch = args(&[r"C:\Kiln\bin\kiln.exe", "agent-run", "--record", r"C:\cfg\agent-sessions\9-1.json", "--generation", "9-1", "--resume"]);
+        assert_eq!(launch_in_command_line(&launch), Some((PathBuf::from(r"C:\cfg\agent-sessions\9-1.json"), "9-1".to_string())));
+        assert_eq!(launch_in_command_line(&args(&["/usr/local/bin/kiln", "agent-run", "--record", "/c/agent-sessions/1-2.json", "--generation", "1-2"])).map(|l| l.1), Some("1-2".into()));
+        assert_eq!(launch_in_command_line(&args(&["node.exe", "agent-run", "--record", "x", "--generation", "1"])), None);
+        assert_eq!(launch_in_command_line(&args(&["kiln.exe", "agent-hook"])), None);
+        assert_eq!(launch_in_command_line(&args(&["kiln.exe", "agent-run", "--record", "x"])), None);
+    }
+
+    #[test]
+    fn hook_commands_follow_the_shell_each_cli_uses() {
+        let helper = std::path::Path::new(if cfg!(windows) { r"C:\Program Files\Kiln\bin\kiln.exe" } else { "/Applications/Kiln.app/Contents/MacOS/kiln" });
+        let claude = hook_command(Tool::Claude, helper);
+        assert_eq!(claude, format!("'{}' agent-hook", helper.display()));
+        let codex = hook_command(Tool::Codex, helper);
+        if cfg!(windows) {
+            // PowerShell (Codex's default) and cmd both run an unquoted plain path; other
+            // paths use PowerShell's call operator.
+            assert_eq!(codex, format!("& '{}' agent-hook", helper.display()));
+            let plain = std::path::Path::new(r"C:\Kiln\bin\kiln.exe");
+            assert_eq!(hook_command(Tool::Codex, plain), r"C:\Kiln\bin\kiln.exe agent-hook");
+            let quote = std::path::Path::new(r"C:\Users\o'brien\kiln.exe");
+            assert_eq!(hook_command(Tool::Codex, quote), r"& 'C:\Users\o''brien\kiln.exe' agent-hook");
+        } else {
+            assert_eq!(codex, claude);
+        }
+    }
+
 
     #[test]
     fn partial_version_replies_never_trigger_restart_and_completion_triggers_once() {
@@ -997,7 +1112,7 @@ mod tests {
                 }
                 h.render()
                     .unwrap()
-                    .save(format!("/tmp/kiln022-cli-cards-{language:?}.png"))
+                    .save(std::env::temp_dir().join(format!("kiln022-cli-cards-{language:?}.png")))
                     .unwrap();
             });
         }
@@ -1059,7 +1174,7 @@ mod tests {
     #[test]
     fn linked_resume_requests_handover_without_reclaiming_on_an_old_prompt() {
         let temp = tempfile::tempdir().unwrap();
-        let config = temp.path().canonicalize().unwrap();
+        let config = temp.path().canonical().unwrap();
         let dir = config.join("agent-sessions");
         fs::create_dir_all(&dir).unwrap();
         let mut links = vec![];
@@ -1110,7 +1225,7 @@ mod tests {
     #[test]
     fn linked_conversation_without_a_transfer_accepts_prompts_and_compaction() {
         let temp = tempfile::tempdir().unwrap();
-        let config = temp.path().canonicalize().unwrap();
+        let config = temp.path().canonical().unwrap();
         let dir = config.join("agent-sessions");
         fs::create_dir_all(&dir).unwrap();
         let root = config.join("claude");
@@ -1221,6 +1336,35 @@ mod tests {
             installer_with(&binary, |_| Some(brew.clone())).unwrap(),
             Installer::Brew(brew, true)
         );
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_contained_agent_reports_its_exit_code() {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", "exit 3"]);
+        assert_eq!(run_contained(cmd).unwrap(), 3);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn npm_installation_is_found_from_the_windows_launcher() {
+        let d = tempfile::tempdir().unwrap();
+        let prefix = d.path().join("npm");
+        let package = prefix.join("node_modules").join("@openai").join("codex");
+        fs::create_dir_all(package.join("vendor")).unwrap();
+        let launcher = prefix.join("codex.cmd");
+        fs::write(&launcher, b"@echo off\r\n").unwrap();
+        let native = package.join("vendor").join("codex.exe");
+        fs::write(&native, b"fixture").unwrap();
+        let npm = |name: &str, root: &Path| {
+            let path = d.path().join(name);
+            fs::write(&path, format!("@echo {}\r\n", root.display())).unwrap();
+            path
+        };
+        let other = npm("other-npm.cmd", &d.path().join("elsewhere"));
+        assert!(installer_with(&launcher, |_| Some(other.clone())).is_err());
+        let owner = npm("npm.cmd", &prefix.join("node_modules"));
+        assert_eq!(installer_with(&launcher, |_| Some(owner.clone())).unwrap(), Installer::Npm(owner.clone()));
+        assert_eq!(installer_with(&native, |_| Some(owner.clone())).unwrap(), Installer::Npm(owner));
     }
     #[test]
     fn update_and_immediate_restart_options_are_independent_and_persist() {

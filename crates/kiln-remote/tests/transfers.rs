@@ -174,19 +174,22 @@ fn ftp_round_trip() {
 #[ignore = "Requires isolated loopback OpenSSH fixture"]
 fn sftp_round_trip() {
     assert_eq!(std::env::var("KILN_REMOTE_FIXTURES").as_deref(), Ok("1"));
+    // `KILN_REMOTE_SSH_CONFIG` and `KILN_REMOTE_SFTP_ROOT` point at another host's fixture.
+    let config = std::env::var_os("KILN_REMOTE_SSH_CONFIG").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp/kiln-remote-fixture/ssh/config"));
+    let root = std::env::var("KILN_REMOTE_SFTP_ROOT").unwrap_or_else(|_| "/files".into());
     exercise(
         ConnectionProfile {
             id: "fixture-sftp".into(),
             name: "SFTP fixture".into(),
             endpoint: RemoteEndpoint::Sftp {
                 alias: "kiln-remote-fixture".into(),
-                config_path: Some(PathBuf::from("/tmp/kiln-remote-fixture/ssh/config")),
-                root: "/files".into(),
+                config_path: Some(config),
+                root: root.clone(),
                 options: Default::default(),
             },
         },
         Secrets::default(),
-        "/files",
+        &root,
     );
 }
 #[test]

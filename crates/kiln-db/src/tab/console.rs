@@ -724,15 +724,16 @@ impl ConsoleView {
                         !running,
                         true,
                     )
-                    .on_hover_text(kiln_common::i18n::tr(
-                        "커서 위치 또는 선택 영역의 문 실행 (⌘↩)",
+                    .on_hover_text(kiln_common::trf!(
+                        "커서 위치 또는 선택 영역의 문 실행 ({})",
+                        kiln_common::widgets::shortcut_text("⌘↩")
                     ))
                     .clicked()
                     {
                         self.execution_requested = Some((false, false));
                     }
                     if ui::secondary_button(ui, None, kiln_common::i18n::tr("모두 실행"), !running)
-                        .on_hover_text(kiln_common::i18n::tr("모든 문 실행 (⌘⌥↩)"))
+                        .on_hover_text(kiln_common::trf!("모든 문 실행 ({})", kiln_common::widgets::shortcut_text("⌘⌥↩")))
                         .clicked()
                     {
                         self.execution_requested = Some((true, false));
@@ -763,7 +764,7 @@ impl ConsoleView {
                     if crate::ui::icon_button(
                         ui,
                         Icon::Code,
-                        kiln_common::i18n::tr("SQL 자동완성 (⌃Space · ⌥Esc)"),
+                        &kiln_common::trf!("SQL 자동완성 ({})", kiln_common::widgets::shortcut_text("⌃Space · ⌥Esc")),
                     )
                     .clicked()
                     {
@@ -889,7 +890,7 @@ impl ConsoleView {
                         vertical_arrows: true,
                         escape: self.completion.is_some(),
                     })
-                    .hint_text(RichText::new(kiln_common::i18n::tr("-- 여기에 SQL을 작성하세요. ⌘↩는 커서 위치의 문을, ⌘⌥↩는 전체를 실행합니다.")).monospace().color(theme.text_faint))
+                    .hint_text(RichText::new(kiln_common::trf!("-- 여기에 SQL을 작성하세요. {}는 커서 위치의 문을, {}는 전체를 실행합니다.", kiln_common::widgets::shortcut_text("⌘↩"), kiln_common::widgets::shortcut_text("⌘⌥↩"))).monospace().color(theme.text_faint))
                     .layouter(&mut layouter)
                     .show(ui);
                 if std::mem::take(&mut self.focus_pending) { out.response.request_focus(); }

@@ -260,7 +260,7 @@ fn tools_wrench_actual_button_and_small_marks_remain_distinct() {
             }
         }
         image
-            .save(format!("/tmp/kiln-tools-button-small-{}.png", theme.name))
+            .save(std::env::temp_dir().join(format!("kiln-tools-button-small-{}.png", theme.name)))
             .unwrap();
     }
 }

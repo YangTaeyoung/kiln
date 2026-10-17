@@ -1,4 +1,5 @@
 //! 디자인 검토용 화면 렌더링(비교하지 않고 PNG 로 저장).
+#![cfg(target_os = "macos")]
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -113,7 +114,6 @@ fn type_line(h: &mut Harness<'_, KilnApp>, s: &str) {
 }
 
 #[test]
-#[cfg(target_os = "macos")]
 fn design_review_screens() {
     let (base, proj) = setup();
     let mut h = Harness::builder().with_size([1440.0, 900.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));

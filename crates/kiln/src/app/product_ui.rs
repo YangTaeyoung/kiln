@@ -1,10 +1,11 @@
+use kiln_common::paths::Canonical;
 use super::*;
 use kiln_common::{fonts,widgets};
 impl KilnApp {
     pub(super) fn ui_product_overlays(&mut self, ctx:&egui::Context) {
         if self.confirm.is_some(){return;}
         if let Some(projects::ProjectAction::Open{path,name,command})=self.projects.ui(ctx) {
-            let path=normalize_path(path.canonicalize().unwrap_or(path));
+            let path=normalize_path(path.canonical().unwrap_or(path));
             let name=name.trim().to_owned();
             if !path.is_dir() { self.toast(kiln_common::i18n::tr("폴더를 열 수 없습니다"),path.display().to_string(),ToastKind::Error,None); return; }
             if let Some(index)=self.workspaces.iter().position(|w|w.tools.canonical_root()==path && w.name==name) {
@@ -174,7 +175,7 @@ mod narrow_quick_header_tests {
         });
         h.run_steps(4);
         for label in ["빠른 터미널","프로젝트에서 보기","숨기기","명령 기록","터미널 출력 영역"]{assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}");}
-        h.render().unwrap().save("/tmp/kiln-quick-header-minimum.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-quick-header-minimum.png")).unwrap();
     }
 }
 
@@ -210,7 +211,7 @@ mod rename_regressions {
         },("  ".to_string(),false));
         h.run_steps(3);h.key_press(Key::Enter);h.run_steps(2);
         assert!(!h.state().1);assert!(h.query_by_label("작업 이름을 입력하세요").is_some());
-        h.render().unwrap().save("/tmp/kiln-rename-invalid.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-rename-invalid.png")).unwrap();
         h.state_mut().0="버그 조사".into();h.key_press(Key::Enter);h.run_steps(2);assert!(h.state().1);
     }
 }

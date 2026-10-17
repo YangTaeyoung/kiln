@@ -1,5 +1,6 @@
 //! The real daemon/protocol/ZLE bridge, isolated from the user's daemon and rc files.
 #![cfg(unix)]
+use kiln_common::paths::Canonical;
 use kiln_daemon::client::Client;
 use kiln_proto::{ClientMsg, ServerMsg, SessionId, ShellCompletion, SpawnSpec};
 use std::{
@@ -152,8 +153,8 @@ fn daemon_completion_roundtrip_never_executes_and_rejects_stale_or_non_shell_met
     input(&c, session, b"\0");
     let first = completion(&c, session, "git st", true);
     assert_eq!(
-        Path::new(&first.cwd).canonicalize().unwrap(),
-        root.canonicalize().unwrap()
+        Path::new(&first.cwd).canonical().unwrap(),
+        root.canonical().unwrap()
     );
     apply(&c, session, first.revision, "git status");
     // This redraw snapshot proves the daemon staged the response and ZLE applied it.

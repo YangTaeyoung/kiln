@@ -1,9 +1,10 @@
 //! A single menu-bar companion survives GUI closure while the daemon is alive.
 //! AppKit status items must live on the main run loop; the daemon stays headless.
 //! https://developer.apple.com/documentation/appkit/nsstatusitem
+use crate::companion::{self, Status};
 use kiln_daemon::client::Client;
 use kiln_common::i18n::{self, tr};
-use kiln_proto::{ClientMsg, ServerMsg, SessionInfo, SessionId};
+use kiln_proto::SessionInfo;
 use objc2::{
     ClassType, msg_send_id,
     rc::Retained,
@@ -26,49 +27,8 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Status {
-    Connecting,
-    Connected { running: usize, attention: usize },
-    Disconnected,
-}
-impl Status {
-    fn title(&self) -> String {
-        let attention = matches!(self, Self::Connected {attention,..} if *attention>0);
-        badge_title(attention, persisted_unread())
-    }
-    fn description(&self) -> String {
-        match self {
-            Self::Connecting => tr("Kiln에 연결하는 중…").into(),
-            Self::Connected {
-                running: 0,
-                attention: 0,
-            } => tr("Kiln 실행 중 · 활성 세션 없음").into(),
-            Self::Connected {
-                running: 0,
-                attention,
-            } => kiln_common::trf!("활성 세션 없음 · 확인 필요 {attention}개"),
-            Self::Connected {
-                running,
-                attention: 0,
-            } => kiln_common::trf!("백그라운드 세션 {running}개 실행 중"),
-            Self::Connected { running, attention } => {
-                kiln_common::trf!("세션 {running}개 실행 중 · 확인 필요 {attention}개")
-            }
-            Self::Disconnected => tr("Kiln 연결이 끊겼습니다").into(),
-        }
-    }
-}
-fn badge_title(attention: bool, unread: usize) -> String {
-    if attention || unread > 0 {
-        "●".into()
-    } else {
-        String::new()
-    }
-}
 fn menu_title(icon_loaded: bool, badge: &str) -> String {
     match (icon_loaded, badge.is_empty()) {
         (true, _) => badge.into(),
@@ -120,28 +80,6 @@ struct MenuState {
     status: Arc<Mutex<Status>>,
 }
 thread_local! { static MENU:RefCell<Option<MenuState>> = const { RefCell::new(None) }; }
-
-/// A tiny shared badge record contains only the unread count, never notification text.
-pub fn publish_unread(count: usize) {
-    static LAST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
-    if LAST.load(Ordering::Relaxed) == count {
-        return;
-    }
-    let path = kiln_common::paths::config_file("menu-bar-unread");
-    let temp = path.with_extension("tmp");
-    if std::fs::write(&temp, count.to_string())
-        .and_then(|_| std::fs::rename(&temp, &path))
-        .is_ok()
-    {
-        LAST.store(count, Ordering::Relaxed);
-    }
-}
-fn persisted_unread() -> usize {
-    std::fs::read_to_string(kiln_common::paths::config_file("menu-bar-unread"))
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0)
-}
 
 /// Test fixtures and alternate sockets must not litter the user's system menu.
 pub fn ensure_running() {
@@ -255,47 +193,13 @@ thread_local! {
 }
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
-fn list_sessions(client: &Client) -> anyhow::Result<Vec<SessionInfo>> {
-    match client.request(|req| ClientMsg::ListSessions { req }, Duration::from_secs(3))? {
-        ServerMsg::Sessions { sessions, .. } => Ok(sessions),
-        _ => anyhow::bail!("{}", tr("세션 목록을 확인하지 못했습니다. 다시 시도하세요.")),
-    }
-}
-
 extern "C" fn stop_sessions(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {
     if STOPPING.swap(true, Ordering::SeqCst) { return; }
     let (tx, rx) = std::sync::mpsc::channel();
     STOP_RESULT.with(|state| *state.borrow_mut() = Some(rx));
     std::thread::spawn(move || {
-        let result = (|| {
-            // Connecting never starts, upgrades, or shuts down a daemon.
-            let client = Client::connect(&kiln_proto::socket_name(), None)?;
-            let sessions = list_sessions(&client)?.into_iter().filter(|s| s.exited.is_none()).collect();
-            Ok((client, sessions))
-        })();
-        let _ = tx.send(StopResult::Snapshot(result));
+        let _ = tx.send(StopResult::Snapshot(companion::running_sessions()));
     });
-}
-
-fn reviewed_session_ids(reviewed: &[SessionInfo], current: &[SessionInfo]) -> Vec<SessionId> {
-    reviewed.iter().filter(|old| current.iter().any(|now|
-        now.exited.is_none() && now.id == old.id && now.pid == old.pid && now.created_unix == old.created_unix
-    )).map(|s| s.id).collect()
-}
-
-fn finish_stop(client: Client, reviewed: Vec<SessionInfo>) -> anyhow::Result<()> {
-    stop_reviewed(&client, &reviewed)
-}
-
-fn stop_reviewed(client: &Client, reviewed: &[SessionInfo]) -> anyhow::Result<()> {
-    // Use the original connection; never reconnect to a restarted daemon whose
-    // IDs could be reused. New sessions created during confirmation are excluded.
-    let ids = reviewed_session_ids(reviewed, &list_sessions(client)?);
-    for &session in &ids { client.send(ClientMsg::Kill { session }); }
-    let remaining = list_sessions(client)?;
-    anyhow::ensure!(!remaining.iter().any(|s| ids.contains(&s.id) && s.exited.is_none()),
-        "{}", tr("일부 세션의 종료를 확인하지 못했습니다. 세션 목록을 확인하세요."));
-    Ok(())
 }
 
 fn poll_stop_result() {
@@ -308,7 +212,7 @@ fn poll_stop_result() {
             if confirm_stop(&sessions) {
                 let (tx, rx) = std::sync::mpsc::channel();
                 STOP_RESULT.with(|s| *s.borrow_mut() = Some(rx));
-                std::thread::spawn(move || { let _ = tx.send(StopResult::Finished(finish_stop(client, sessions))); });
+                std::thread::spawn(move || { let _ = tx.send(StopResult::Finished(companion::stop_reviewed(&client, &sessions))); });
                 return;
             }
         }
@@ -322,17 +226,11 @@ fn poll_stop_result() {
 
 fn confirm_stop(sessions: &[SessionInfo]) -> bool {
     let Some(mt) = MainThreadMarker::new() else { return false; };
-    let names = sessions.iter().take(8).map(|s| {
-        let label = s.name.as_deref().filter(|s| !s.is_empty()).unwrap_or(&s.title);
-        let label: String = label.chars().filter(|c| !c.is_control()).take(80).collect();
-        format!("• #{} {}", s.id, label)
-    }).collect::<Vec<_>>().join("\n");
-    let extra = if sessions.len() > 8 { kiln_common::trf!("\n외 {}개", sessions.len() - 8) } else { String::new() };
-    let message = kiln_common::trf!("모든 워크스페이스의 터미널 세션 {}개를 종료합니다. 현재 창에 표시된 세션도 포함됩니다. 실행 중인 셸, 에이전트, 빌드와 서버가 중단되며 저장하지 않은 터미널 작업은 사라질 수 있습니다.\n\n{}{}\n\nKiln 창과 세션 서비스는 계속 실행됩니다.", sessions.len(), names, extra);
+    let (title, message) = companion::stop_message(sessions);
     unsafe {
         let alert = NSAlert::new(mt);
         alert.setAlertStyle(NSAlertStyle::Warning);
-        alert.setMessageText(&NSString::from_str(&kiln_common::trf!("백그라운드 세션 {}개를 종료할까요?", sessions.len())));
+        alert.setMessageText(&NSString::from_str(&title));
         alert.setInformativeText(&NSString::from_str(&message));
         // Return cancels; the destructive action has no key equivalent.
         let cancel = alert.addButtonWithTitle(&NSString::from_str(tr("취소")));
@@ -372,7 +270,7 @@ extern "C" fn tick(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {
                         button.setToolTip(Some(&NSString::from_str(&kiln_common::trf!(
                             "{} · 읽지 않은 알림 {}개",
                             status.description(),
-                            persisted_unread()
+                            companion::persisted_unread()
                         ))));
                     }
                 }
@@ -382,7 +280,7 @@ extern "C" fn tick(_: *mut AnyObject, _: Sel, _: *mut AnyObject) {
                 menu.settings.setTitle(&NSString::from_str(tr("설정…")));
                 menu.hint.setTitle(&NSString::from_str(tr("창을 닫아도 세션은 유지됩니다")));
                 let busy = STOPPING.load(Ordering::SeqCst);
-                menu.stop.setEnabled(!busy && matches!(status, Status::Connected { running, .. } if running > 0));
+                menu.stop.setEnabled(!busy && status.running() > 0);
                 menu.stop.setTitle(&NSString::from_str(if busy { tr("세션 확인 중…") } else { tr("백그라운드 세션 종료…") }));
             }
         }
@@ -414,41 +312,7 @@ pub fn run() -> anyhow::Result<()> {
     }
     let status = Arc::new(Mutex::new(Status::Connecting));
     let background = status.clone();
-    std::thread::spawn(move || {
-        let mut failures = 0;
-        let mut client: Option<Client> = None;
-        loop {
-            if client.is_none() {
-                client = Client::connect(&socket, None).ok();
-            }
-            let snapshot = client.as_ref().and_then(|c| {
-                c.request(
-                    |req| ClientMsg::ListSessions { req },
-                    Duration::from_secs(2),
-                )
-                .ok()
-            });
-            if let Some(ServerMsg::Sessions { sessions, .. }) = snapshot {
-                failures = 0;
-                let running = sessions.iter().filter(|s| s.exited.is_none()).count();
-                let attention = sessions.iter().filter(|s| s.attention).count();
-                *background.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Status::Connected { running, attention };
-            } else {
-                client = None;
-                failures += 1;
-                *background.lock().unwrap_or_else(|e| e.into_inner()) = if failures >= 10 {
-                    Status::Disconnected
-                } else {
-                    Status::Connecting
-                };
-                if failures >= 10 {
-                    break;
-                }
-            }
-            std::thread::sleep(Duration::from_secs(2));
-        }
-    });
+    std::thread::spawn(move || companion::watch(socket, background));
     let mt = MainThreadMarker::new().expect("menu bar runs on the main thread");
     let app = NSApplication::sharedApplication(mt);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
@@ -587,54 +451,6 @@ mod tests {
     }
 
     use super::*;
-    fn session(id: u64) -> SessionInfo {
-        SessionInfo { id, pid: id as u32 + 100, created_unix: id + 1000, ..Default::default() }
-    }
-    #[test]
-    fn termination_excludes_new_exited_and_reused_sessions() {
-        let reviewed = vec![session(1), session(2), session(3), session(4)];
-        let mut exited = session(2); exited.exited = Some(0);
-        let mut reused = session(3); reused.created_unix += 1;
-        let mut changed_pid = session(4); changed_pid.pid += 1;
-        assert_eq!(reviewed_session_ids(&reviewed, &[session(1), exited, reused, changed_pid, session(5)]), vec![1]);
-    }
-    #[test]
-    fn confirmed_stop_sends_only_reviewed_kills_and_keeps_connection_alive() {
-        use kiln_proto::{read_msg, write_msg, PROTO_VERSION};
-        use std::os::unix::net::UnixListener;
-        let dir = tempfile::Builder::new().prefix("kiln-menu-test-").tempdir_in("/tmp").unwrap();
-        let socket = dir.path().join("d.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            assert!(matches!(read_msg::<_, ClientMsg>(&mut stream).unwrap(), Some(ClientMsg::Hello { .. })));
-            write_msg(&mut stream, &ServerMsg::Hello { proto: PROTO_VERSION, build: "test".into(), pid: 1, can_upgrade: false }).unwrap();
-            let mut sessions = vec![session(1), session(2)];
-            let mut killed = vec![];
-            loop {
-                match read_msg::<_, ClientMsg>(&mut stream).unwrap().unwrap() {
-                    ClientMsg::ListSessions { req } => write_msg(&mut stream, &ServerMsg::Sessions { req, sessions: sessions.clone() }).unwrap(),
-                    ClientMsg::Kill { session } => {
-                        killed.push(session);
-                        sessions.retain(|s| s.id != session);
-                    }
-                    ClientMsg::Ping { req } => {
-                        write_msg(&mut stream, &ServerMsg::Pong { req }).unwrap();
-                        assert_eq!(killed, vec![1]);
-                        assert_eq!(sessions, vec![session(2)]);
-                        break;
-                    }
-                    unexpected => panic!("must not shut down or create sessions: {unexpected:?}"),
-                }
-            }
-        });
-        let client = Client::connect(socket.to_str().unwrap(), None).unwrap();
-        // This fixture is a protocol peer only; no real daemon or PTY exists.
-        stop_reviewed(&client, &[session(1)]).unwrap();
-        assert!(matches!(client.request(|req| ClientMsg::Ping { req }, Duration::from_secs(3)).unwrap(), ServerMsg::Pong { .. }));
-        server.join().unwrap();
-    }
     #[test]
     fn helper_identity_changes_after_atomic_bundle_replacement() {
         let dir=tempfile::tempdir().unwrap();
@@ -650,38 +466,10 @@ mod tests {
         assert_eq!(executable_identity(&path),None);
     }
     #[test]
-    fn menu_distinguishes_connecting_idle_running_and_attention() {
-        assert_eq!(Status::Connecting.description(), "Kiln에 연결하는 중…");
-        assert_eq!(
-            Status::Connected {
-                running: 0,
-                attention: 0
-            }
-            .description(),
-            "Kiln 실행 중 · 활성 세션 없음"
-        );
-        assert_eq!(
-            Status::Connected {
-                running: 0,
-                attention: 2
-            }
-            .description(),
-            "활성 세션 없음 · 확인 필요 2개"
-        );
+    fn menu_title_falls_back_to_the_app_name_without_an_icon() {
         assert_eq!(menu_title(true, ""), "");
         assert_eq!(menu_title(true, "●"), "●");
         assert_eq!(menu_title(false, ""), "Kiln");
         assert_eq!(menu_title(false, "●"), "Kiln ●");
-        assert_eq!(badge_title(false, 0), "");
-        assert_eq!(badge_title(true, 0), "●");
-        assert_eq!(badge_title(false, 1), "●");
-        assert_eq!(
-            Status::Connected {
-                running: 2,
-                attention: 1
-            }
-            .description(),
-            "세션 2개 실행 중 · 확인 필요 1개"
-        );
     }
 }

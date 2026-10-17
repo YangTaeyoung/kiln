@@ -903,11 +903,11 @@ mod tests {
                         harness
                             .render()
                             .unwrap()
-                            .save(format!(
-                                "/tmp/kiln-schema-form-{}-{theme}-{}.png",
+                            .save(std::env::temp_dir().join(format!(
+                                "kiln-schema-form-{}-{theme}-{}.png",
                                 language.code(),
                                 width as u32
-                            ))
+                            )))
                             .unwrap();
                     }
                 });
@@ -962,9 +962,9 @@ mod tests {
                 harness
                     .render()
                     .unwrap()
-                    .save(format!(
-                        "/tmp/kiln-schema-inspector-{section:?}-{theme}-420.png"
-                    ))
+                    .save(std::env::temp_dir().join(format!(
+                        "kiln-schema-inspector-{section:?}-{theme}-420.png"
+                    )))
                     .unwrap();
             }
         }
@@ -1016,7 +1016,7 @@ mod tests {
                             assert!(h.ctx.content_rect().contains_rect(h.get_by_label(tr("컬럼 수정…")).rect()));
                             assert!(h.query_by_label(tr("수정")).is_none(), "a column action must not use a file-status translation");
                         }
-                        h.render().unwrap().save(format!("/tmp/kiln-table-editor-{}-{theme}-{section}-420.png", language.code())).unwrap();
+                        h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-table-editor-{}-{theme}-{section}-420.png", language.code()))).unwrap();
                     }
                     h.get_by_role_and_label(egui::accesskit::Role::Button, tr("컬럼")).click();
                     h.run_steps(3);

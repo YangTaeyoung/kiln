@@ -1,10 +1,18 @@
 //! Kiln 앱 라이브러리(GUI). 실행 파일은 `main.rs`.
 
 pub mod app;
+pub mod cli;
+pub mod companion;
 pub mod native_actions;
 
 #[cfg(target_os = "macos")]
 pub mod status_bar;
+
+#[cfg(windows)]
+pub mod tray_windows;
+
+#[cfg(windows)]
+pub mod gui_instance;
 
 #[cfg(target_os = "macos")]
 pub mod local_network;
@@ -23,7 +31,7 @@ pub fn updater_fixture_event(event: &str) {
 
 /// Sparkle relaunches through Launch Services without our launch environment.
 /// Compile the fixture root into test builds so every child/relaunch stays isolated.
-#[cfg(feature = "updater-test")]
+#[cfg(all(feature = "updater-test", target_os = "macos"))]
 pub fn isolate_updater_fixture() -> anyhow::Result<()> {
     use std::path::Path;
     let root = option_env!("KILN_UPDATER_TEST_ROOT")

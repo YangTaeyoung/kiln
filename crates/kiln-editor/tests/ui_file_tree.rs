@@ -159,11 +159,11 @@ fn ignored_badges_fit_narrow_views_in_all_languages() {
                 }
             }
             assert_eq!(badges, 3, "environment file, log and generated folder each expose status");
-            h.render().unwrap().save(format!("/tmp/kiln022-explorer-{language:?}.png")).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln022-explorer-{language:?}.png"))).unwrap();
             h.get_by_label("target").click(); h.run();
             assert!(h.state().tree.is_expanded(&root.join("target")));
             h.get_by_label("debug").click(); h.run();
-            h.render().unwrap().save(format!("/tmp/kiln022-explorer-nested-{language:?}.png")).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln022-explorer-nested-{language:?}.png"))).unwrap();
             h.get_by_label("kiln").click(); h.run();
             assert_eq!(take_events(&mut h), vec![EditorEvent::OpenFile(root.join("target/debug/kiln"))]);
         });

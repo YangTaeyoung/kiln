@@ -411,6 +411,17 @@ pub(crate) fn destination_temp(local: &Path) -> Result<tempfile::NamedTempFile> 
         .unwrap_or_else(|| Path::new("."));
     tempfile::NamedTempFile::new_in(parent).context("Cannot create local download file")
 }
+/// A temporary file next to `local` with no handle open, for a program that writes it
+/// itself (Windows refuses a second writer while Kiln holds the file).
+pub(crate) fn destination_path(local: &Path) -> Result<tempfile::TempPath> {
+    Ok(destination_temp(local)?.into_temp_path())
+}
+/// Flushes the file another program wrote at `temp` and moves it to `local`.
+pub(crate) fn persist_written(temp: tempfile::TempPath, local: &Path) -> Result<()> {
+    std::fs::OpenOptions::new().write(true).open(&temp)?.sync_all()?;
+    temp.persist(local).map_err(|e| e.error)?;
+    Ok(())
+}
 pub(crate) fn temporary_remote(path: &str) -> String {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

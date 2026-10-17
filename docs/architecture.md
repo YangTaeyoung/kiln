@@ -12,7 +12,7 @@ attribution, existing-panel limitations and isolated verification.
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/kiln` | GUI, workspaces, task navigation, macOS integration |
+| `crates/kiln` | GUI, workspaces, task navigation, macOS and Windows integration |
 | `crates/kiln-daemon` | PTY ownership, terminal emulation, session lifecycle |
 | `crates/kiln-proto` | Client/daemon messages |
 | `crates/kiln-common` | Theme, typography, widgets, paths |
@@ -25,6 +25,16 @@ attribution, existing-panel limitations and isolated verification.
 On macOS, a separate menu-bar companion reports background sessions. It does not
 own their PTYs. Official app bundles embed Sparkle; only the GUI initializes its updater.
 CLI commands, daemons and isolated tests must not initialize it.
+
+On Windows, the installed layout is `Kiln.exe` (GUI, windows subsystem) beside
+`bin\kiln.exe` (CLI and daemon, console subsystem). The daemon and the
+notification-area companion run from a per-build copy under
+`%LOCALAPPDATA%\Kiln\daemon`, so updates can replace the installed files; an update
+renames the running files to `.old` and moves the verified archive's files in.
+Terminals use ConPTY inside a Job Object, PowerShell and cmd report commands and
+locations through shell integration, and agent hooks find their launch record from
+the process tree. Kiln's account snapshots are DPAPI-protected files; other CLIs'
+Credential Manager entries are read in place. See [Windows support](windows-parity.md).
 
 The native termination guard routes quit requests through the GUI's draft/save
 handling. Keep it intact when changing the updater or application delegate.

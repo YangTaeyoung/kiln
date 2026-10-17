@@ -1,6 +1,31 @@
 //! User key bindings. Invalid/colliding bindings never replace a working map.
 use egui::{Key, Modifiers, KeyboardShortcut};
 use std::collections::BTreeMap;
+/// An app-wide shortcut written with macOS symbols, as the running system names it. Outside
+/// macOS app shortcuts add Shift to Ctrl so terminal programs keep plain Ctrl chords: ⌘K is
+/// Ctrl+Shift+K, ⇧⌘E is Ctrl+Shift+Alt+E, ⌥⌘← is Ctrl+Alt+← and ⌥⌘1 is Alt+1.
+pub fn app_shortcut(mac: &str) -> String {
+    app_shortcut_for(mac, cfg!(target_os = "macos"))
+}
+
+fn app_shortcut_for(mac: &str, macos: bool) -> String {
+    if macos || !mac.contains('⌘') {
+        return kiln_common::widgets::shortcut_text_for(mac, macos);
+    }
+    let key: String = mac.chars().filter(|c| !"⌘⇧⌥⌃".contains(*c)).collect();
+    let digit = key.len() == 1 && key.chars().all(|c| c.is_ascii_digit());
+    let symbols = if mac.contains('⌥') && digit {
+        "⌥"
+    } else if mac.contains('⇧') {
+        "⌃⇧⌥"
+    } else if mac.contains('⌥') {
+        "⌃⌥"
+    } else {
+        "⌃⇧"
+    };
+    kiln_common::widgets::shortcut_text_for(&format!("{symbols}{key}"), macos)
+}
+
 #[derive(Default)]
 pub struct Keymap { bindings: BTreeMap<String,String>, draft: BTreeMap<String,String>, pub error: Option<String>, saved: bool, source: Option<Vec<u8>>, load_failed: bool, reload_confirm: bool, backup: Option<std::path::PathBuf> }
 impl Keymap {
@@ -64,7 +89,7 @@ impl Keymap {
     pub fn has_unsaved_edits(&self)->bool {
         ENTRIES.iter().any(|(id,_,default)| self.draft.get(*id).map(String::as_str).unwrap_or(default) != self.bindings.get(*id).map(String::as_str).unwrap_or(default))
     }
-    pub fn label(&self,id:&str,default:&str)->String{self.bindings.get(id).cloned().unwrap_or_else(||default.into())}
+    pub fn label(&self,id:&str,default:&str)->String{self.bindings.get(id).cloned().unwrap_or_else(||app_shortcut(default))}
     pub fn resolve(&self, id:&str, default:KeyboardShortcut)->KeyboardShortcut { self.bindings.get(id).and_then(|s|parse(s).ok()).unwrap_or(default) }
     pub fn fields_ui(&mut self, ui:&mut egui::Ui) {
         ui.label(if cfg!(target_os="macos") { kiln_common::i18n::tr("예: Cmd+Shift+J") } else { kiln_common::i18n::tr("예: Ctrl+Shift+J") })
@@ -189,6 +214,15 @@ fn validate(bindings:&BTreeMap<String,String>)->Result<(),String> {
 #[cfg(test)] mod tests {
     use super::*;
     #[test]
+    fn app_shortcut_names_match_the_chords_each_platform_binds() {
+        let cases = [("⌘K", "Ctrl+Shift+K"), ("⇧⌘E", "Ctrl+Shift+Alt+E"), ("⌥⌘←", "Ctrl+Alt+←"), ("⌥⌘1", "Alt+1"), ("⌘1", "Ctrl+Shift+1"), ("⇧⌘↩", "Ctrl+Shift+Alt+Enter"), ("F11", "F11")];
+        for (mac, other) in cases {
+            assert_eq!(app_shortcut_for(mac, true), mac);
+            assert_eq!(app_shortcut_for(mac, false), other);
+        }
+        assert_eq!(super::super::tools::ToolKind::Explorer.shortcut(), app_shortcut("⇧⌘E"));
+    }
+    #[test]
     fn narrow_320px_editor_uses_two_columns() {
         use egui_kittest::{Harness,kittest::Queryable};
         let mut installed=false;
@@ -200,14 +234,14 @@ fn validate(bindings:&BTreeMap<String,String>)->Result<(),String> {
         let first=h.get_by_label("명령 검색").rect();let second=h.get_by_label("최근 작업").rect();
         assert!(second.top()-first.top()<40.0,"fields should occupy one row each");
         assert!(h.ctx.content_rect().contains_rect(first));
-        h.render().unwrap().save("/tmp/kiln-keybindings-320.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-320.png")).unwrap();
     }
     #[test] fn expanded_actions_keep_defaults_and_reserve_each_others_original_chords(){
         assert_eq!(ENTRIES.len(),15);
         let defaults:BTreeMap<String,String>=ENTRIES.iter().map(|(id,_,value)|((*id).into(),(*value).into())).collect();
         validate(&defaults).unwrap();
         for (id,_,value) in &ENTRIES[6..] {
-            let mut changed=defaults.clone();changed.insert((*id).into(),"Cmd+F6".into());
+            let mut changed=defaults.clone();changed.insert((*id).into(),if cfg!(target_os="macos"){"Cmd+F6"}else{"Ctrl+Shift+F6"}.into());
             validate(&changed).unwrap();
             changed.insert("recent".into(),(*value).into());
             assert!(validate(&changed).is_err(),"original binding of {id} must stay reserved");

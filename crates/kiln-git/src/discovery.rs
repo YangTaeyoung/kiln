@@ -73,10 +73,11 @@ pub fn discover(root: &Path) -> Inventory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kiln_common::paths::Canonical;
     use std::process::Command;
     fn git(root: &Path, args: &[&str]) {
         assert!(
-            Command::new("git")
+            kiln_common::process::hide_window(&mut Command::new("git"))
                 .args([
                     "-c",
                     "commit.gpgsign=false",
@@ -101,8 +102,8 @@ mod tests {
         git(&nested, &["init", "-q"]);
         let found = discover(&selected);
         assert_eq!(found.roots.len(), 2);
-        assert!(found.roots.contains(&dir.path().canonicalize().unwrap()));
-        assert!(found.roots.contains(&nested.canonicalize().unwrap()));
+        assert!(found.roots.contains(&dir.path().canonical().unwrap()));
+        assert!(found.roots.contains(&nested.canonical().unwrap()));
     }
     #[test]
     fn parent_discovers_siblings_nested_and_linked_worktrees_without_cache_or_symlink_recursion() {
@@ -138,8 +139,8 @@ mod tests {
         std::os::unix::fs::symlink(d.path(), d.path().join("loop")).unwrap();
         let found = discover(d.path());
         assert_eq!(found.roots.len(), 3);
-        assert!(found.roots.contains(&a.canonicalize().unwrap()));
-        assert!(found.roots.contains(&b.canonicalize().unwrap()));
-        assert!(found.roots.contains(&w.canonicalize().unwrap()));
+        assert!(found.roots.contains(&a.canonical().unwrap()));
+        assert!(found.roots.contains(&b.canonical().unwrap()));
+        assert!(found.roots.contains(&w.canonical().unwrap()));
     }
 }

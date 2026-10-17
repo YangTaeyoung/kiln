@@ -179,20 +179,19 @@ fn run_with(o: Oci<'_>, op: &Operation) -> Result<RemoteResult> {
         }
         Operation::Download { path, local } => {
             let p = super::object_backend::require_file(path)?;
-            let temp = destination_temp(local)?;
+            let temp = destination_path(local)?;
             o.call(
                 "get",
                 &[
                     format!("--name={p}"),
-                    format!("--file={}", temp.path().to_string_lossy()),
+                    format!("--file={}", temp.to_string_lossy()),
                     "--no-multipart".into(),
                 ],
             )?;
             c.check()?;
-            let size = temp.as_file().metadata()?.len();
+            let size = std::fs::metadata(&temp)?.len();
             c.total(size);
-            temp.as_file().sync_all()?;
-            temp.persist(local).map_err(|e| e.error)?;
+            persist_written(temp, local)?;
             c.advance(size);
             Ok(RemoteResult::Done)
         }
@@ -320,6 +319,7 @@ mod tests {
         assert_eq!(page.next_cursor.as_deref(), Some("folder/next"));
         assert!(page.entries[0].is_dir);
         assert_eq!(page.entries[1].size, 9);
+        let config = PathBuf::from(if cfg!(windows) { r"C:\private\config" } else { "/private/config" });
         let profile = ConnectionProfile {
             id: "test".into(),
             name: "test".into(),
@@ -329,7 +329,7 @@ mod tests {
                 prefix: "".into(),
                 authentication: ObjectAuthentication::Cli {
                     profile: "TEAM".into(),
-                    config_path: Some(PathBuf::from("/private/config")),
+                    config_path: Some(config.clone()),
                 },
                 region: None,
                 namespace: None,
@@ -345,7 +345,7 @@ mod tests {
         .args("get", &["--name=-x;rm -rf fake".into()])
         .unwrap();
         assert!(args.contains(&"--profile=TEAM".into()));
-        assert!(args.contains(&"--config-file=/private/config".into()));
+        assert!(args.contains(&format!("--config-file={}", config.display())));
         assert_eq!(args.last().unwrap(), "--name=-x;rm -rf fake");
         assert!(!args.iter().any(|a| a.starts_with("--namespace")));
     }

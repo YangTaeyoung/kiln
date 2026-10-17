@@ -1,6 +1,15 @@
+use kiln_common::paths::Canonical;
 use super::*;
 use format::Message;
 use serde_json::json;
+
+/// Creates a symbolic link to a file on Unix and Windows.
+pub(super) fn symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(target, link);
+    #[cfg(windows)]
+    return std::os::windows::fs::symlink_file(target, link);
+}
 
 fn messages() -> Vec<Message> {
     vec![
@@ -62,7 +71,7 @@ fn historical_versions_directory_changes_and_tool_references_preserve_identity()
     let mut data = rows(&fs::read(&f.source.path).unwrap());
     data[0]["version"] = json!("2.1.289");
     data[1]["version"] = json!("2.1.299");
-    data[1]["cwd"] = json!("/tmp/changed-directory");
+    data[1]["cwd"] = json!(std::env::temp_dir().join("changed-directory"));
     data[1]["message"]["content"]
         .as_array_mut()
         .unwrap()
@@ -258,7 +267,7 @@ fn sync_dialog_keeps_error_visible_and_identical_across_idle_polls() {
     assert!(h.ctx.content_rect().contains_rect(footer));
     h.render()
         .unwrap()
-        .save("/tmp/kiln-0125-sync-dialog.png")
+        .save(std::env::temp_dir().join("kiln-0125-sync-dialog.png"))
         .unwrap();
     for busy in [true, false, true, false] {
         h.state_mut().busy = busy;
@@ -407,7 +416,7 @@ struct Fixture {
 impl Fixture {
     fn new(tool: Tool) -> Self {
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
+        let root = temp.path().canonical().unwrap();
         let config = root.join("kiln");
         private_dir(&config).unwrap();
         let pair = Pair {
@@ -820,7 +829,7 @@ fn export_native_cli_fixtures() {
         std::env::var_os("KILN_SYNC_FIXTURE_DIR").expect("explicit fixture directory"),
     );
     assert!(dir.join("owned-fixture").is_file());
-    let dir = dir.canonicalize().unwrap();
+    let dir = dir.canonical().unwrap();
     let pair = Pair {
         claude: Endpoint {
             root: dir.join("claude"),
@@ -955,7 +964,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     );
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sync-progress-complete.png")
+        .save(std::env::temp_dir().join("kiln-sync-progress-complete.png"))
         .unwrap();
     h.state_mut().1 = false;
     h.run_steps(2);
@@ -969,7 +978,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     assert!(h.query_by_label("확인이 필요한 대화가 있습니다").is_some());
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sync-progress-failed.png")
+        .save(std::env::temp_dir().join("kiln-sync-progress-failed.png"))
         .unwrap();
     let row = h.state_mut().0.status.rows.values_mut().next().unwrap();
     row.detail = DIVERGED.into();
@@ -980,7 +989,7 @@ fn progress_ui_shows_complete_paused_and_failed_states() {
     assert!(h.query_by_label("보류된 대화 1개 · 원본은 그대로 보관됨").is_some());
     h.render()
         .unwrap()
-        .save("/tmp/kiln-sync-progress-diverged.png")
+        .save(std::env::temp_dir().join("kiln-sync-progress-diverged.png"))
         .unwrap();
 }
 
@@ -1414,7 +1423,7 @@ fn workspace_filter_includes_children_excludes_neighbors_and_pauses_closed_folde
         fs::create_dir_all(path).unwrap();
     }
     let mut scope = workspace_scope(&f);
-    scope.workspaces = vec![project.canonicalize().unwrap()];
+    scope.workspaces = vec![project.canonical().unwrap()];
     for (index, cwd) in [&project, &child, &neighbor].into_iter().enumerate() {
         let seed = Source {
             tool: Tool::Claude,
@@ -1482,7 +1491,9 @@ fn initial_sync_is_latest_twenty_per_workspace_then_only_new_or_changed_sessions
             .unwrap(),
         )
         .unwrap();
-        fs::File::open(&source.path)
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&source.path)
             .unwrap()
             .set_times(
                 fs::FileTimes::new()
@@ -1504,7 +1515,9 @@ fn initial_sync_is_latest_twenty_per_workspace_then_only_new_or_changed_sessions
     fs::remove_file(&sources[26].path).unwrap();
     assert_eq!(workspace_scan(&f, &scope).published, 0);
     // An older already-open session is picked up as soon as it saves another update.
-    fs::File::open(&sources[0].path)
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&sources[0].path)
         .unwrap()
         .set_times(fs::FileTimes::new().set_modified(SystemTime::now()))
         .unwrap();
@@ -1664,7 +1677,7 @@ fn synchronize_explicitly_authorized_workspaces() {
                 .workspaces
                 .iter()
                 .any(|w| w.conversation_sync
-                    && w.root.canonicalize().ok() == root.canonicalize().ok()),
+                    && w.root.canonical().ok() == root.canonical().ok()),
             "workspace must already be opted in"
         );
     }
@@ -1826,7 +1839,6 @@ fn multiple_destination_retry_retains_the_successful_publication_plan() {
 
 #[test]
 fn workspace_discovery_skips_symlinks_and_subagents_and_accepts_unknown_versions() {
-    use std::os::unix::fs::symlink;
     let f = Fixture::new(Tool::Codex);
     fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
     let scope = workspace_scope(&f);
@@ -1837,7 +1849,7 @@ fn workspace_discovery_skips_symlinks_and_subagents_and_accepts_unknown_versions
         .parent()
         .unwrap()
         .join(format!("rollout-link-{}.jsonl", f.source.id));
-    symlink(&f.source.path, &linked).unwrap();
+    symlink_file(&f.source.path, &linked).unwrap();
     let subagent = destination(
         &f.pair,
         &Source {
@@ -1882,7 +1894,7 @@ fn workspace_discovery_skips_symlinks_and_subagents_and_accepts_unknown_versions
 fn export_discovered_workspace_fixtures() {
     export_native_cli_fixtures();
     let dir = PathBuf::from(std::env::var_os("KILN_SYNC_FIXTURE_DIR").unwrap())
-        .canonicalize()
+        .canonical()
         .unwrap();
     let pair = Pair {
         claude: Endpoint {
@@ -1958,7 +1970,7 @@ fn workspace_progress_distinguishes_discovery_empty_and_completed_batches() {
     assert!(h.query_by_label("완료된 대화 모두 동기화됨").is_some());
     h.render()
         .unwrap()
-        .save("/tmp/kiln-workspace-sync-complete.png")
+        .save(std::env::temp_dir().join("kiln-workspace-sync-complete.png"))
         .unwrap();
     h.state_mut().status.discovering = true;
     h.run_steps(2);
@@ -1979,7 +1991,7 @@ fn workspace_progress_distinguishes_discovery_empty_and_completed_batches() {
     );
     h.render()
         .unwrap()
-        .save("/tmp/kiln-workspace-sync-empty.png")
+        .save(std::env::temp_dir().join("kiln-workspace-sync-empty.png"))
         .unwrap();
 }
 
@@ -1989,7 +2001,7 @@ fn verify_discovered_workspace_cli_continuations() {
     let dir = PathBuf::from(
         std::env::var_os("KILN_SYNC_FIXTURE_DIR").expect("explicit fixture directory"),
     )
-    .canonicalize()
+    .canonical()
     .unwrap();
     assert!(dir.join("owned-fixture").is_file());
     let sources: Vec<Source> =
@@ -3428,7 +3440,7 @@ fn progress_ui_offers_actions_ignore_and_restore() {
     assert!(h.query_by_label("무시").is_some());
     assert!(h.query_by_label("복구").is_some());
     assert!(h.query_by_label("보류됨").is_some());
-    h.render().unwrap().save("/tmp/kiln-sync-attention.png").unwrap();
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-sync-attention.png")).unwrap();
 }
 
 #[test]
@@ -3540,7 +3552,7 @@ fn inspect_live_histories_read_only() {
 #[ignore]
 fn hub_cli_round_trip() {
     let dir = PathBuf::from(std::env::var_os("KILN_HUB_FIXTURE_DIR").expect("explicit fixture directory"))
-        .canonicalize()
+        .canonical()
         .unwrap();
     let pair = Pair {
         claude: Endpoint { root: dir.join("claude"), label: "fixture".into() },
@@ -4415,4 +4427,48 @@ fn a_command_result_followed_by_whitespace_is_still_a_shell_record() {
     let data = rows(&format::render_titled(Tool::Claude, &stable_id("trailing"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
     assert!(data.iter().any(|r| r["message"]["content"][0]["type"] == "tool_use"));
     assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+}
+
+#[test]
+fn hook_transcript_paths_match_canonical_roots() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    let root = real.join("Claude Home");
+    let work = dir.path().join("work");
+    fs::create_dir_all(root.join("projects").join("work")).unwrap();
+    fs::create_dir_all(&work).unwrap();
+    let id = "0199a0a0-0000-7000-8000-000000000001";
+    let canonical = root.canonical().unwrap().join("projects").join("work").join(format!("{id}.jsonl"));
+    let mut forms = Vec::new();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&real, dir.path().join("alias")).unwrap();
+        forms.push(dir.path().join("alias/Claude Home/projects/work").join(format!("{id}.jsonl")).to_string_lossy().into_owned());
+    }
+    #[cfg(windows)]
+    {
+        let text = canonical.to_string_lossy().into_owned();
+        forms.extend([text.to_lowercase(), text.replace('\\', "/"), format!(r"\\?\{text}")]);
+    }
+    let record = super::super::agent_runtime::Record {
+        tool: Tool::Claude,
+        spec: kiln_proto::SpawnSpec {
+            cwd: Some(work.to_string_lossy().into_owned()),
+            env: vec![(env_key(Tool::Claude).into(), root.to_string_lossy().into_owned())],
+            ..Default::default()
+        },
+        version: "fixture".into(),
+        conversation: Some(id.into()),
+        generation: "fixture".into(),
+        confirmed: true,
+        request_started: false,
+    };
+    for (index, raw) in forms.iter().enumerate() {
+        let config = dir.path().join(format!("config-{index}"));
+        track(&config, &record, raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
+        let tracked: Vec<_> = fs::read_dir(config.join("conversation-sync/tracked")).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(tracked.len(), 1);
+        let source: Source = serde_json::from_slice(&fs::read(&tracked[0]).unwrap()).unwrap();
+        assert_eq!(source.path, canonical, "{raw}");
+    }
 }

@@ -52,17 +52,26 @@ fn symbol_candidates() -> Vec<PathBuf> {
 }
 
 fn find_nerd_font() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let windows = std::env::var_os("WINDIR").map(PathBuf::from);
+    nerd_font_dirs(home.as_deref(), windows.as_deref()).into_iter().find_map(|d| scan_for(&d, 2))
+}
+
+/// Folders searched for a Nerd Font: the user's font folders, then the system's.
+fn nerd_font_dirs(home: Option<&Path>, windows: Option<&Path>) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        let home = PathBuf::from(home);
+    if let Some(home) = home {
         dirs.push(home.join("Library/Fonts"));
         dirs.push(home.join(".local/share/fonts"));
         dirs.push(home.join(".fonts"));
         dirs.push(home.join("AppData/Local/Microsoft/Windows/Fonts"));
     }
+    if let Some(windows) = windows {
+        dirs.push(windows.join("Fonts"));
+    }
     dirs.push("/Library/Fonts".into());
     dirs.push("/usr/share/fonts".into());
-    dirs.into_iter().find_map(|d| scan_for(&d, 2))
+    dirs
 }
 
 fn scan_for(dir: &Path, depth: u32) -> Option<PathBuf> {
@@ -232,5 +241,17 @@ mod tests {
             });
             output.textures_delta.clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod nerd_font_tests {
+    use super::*;
+
+    #[test]
+    fn nerd_font_search_includes_the_windows_font_folders() {
+        let dirs = nerd_font_dirs(Some(Path::new("home")), Some(Path::new("windows")));
+        assert!(dirs.contains(&Path::new("home").join("AppData/Local/Microsoft/Windows/Fonts")));
+        assert!(dirs.contains(&Path::new("windows").join("Fonts")));
     }
 }

@@ -118,9 +118,10 @@ mod tests {
     use super::*;
     #[test]
     fn malformed_request_is_not_a_command() {
-        assert!(parse("1;0;zz;2f;2f;").is_none());
-        assert!(parse("1;9;61;2f;2f;").is_none());
-        assert!(parse("1;1;61;2f;2f;").is_some());
+        let root: String = (if cfg!(windows) { "C:\\" } else { "/" }).bytes().map(|b| format!("{b:02x}")).collect();
+        assert!(parse(&format!("1;0;zz;{root};{root};")).is_none());
+        assert!(parse(&format!("1;9;61;{root};{root};")).is_none());
+        assert!(parse(&format!("1;1;61;{root};{root};")).is_some());
     }
     #[test]
     #[cfg(unix)]

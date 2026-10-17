@@ -162,6 +162,7 @@ struct Connection {
 impl Connection {
     fn start(binary: &Path, root: &Path, gate: &Gate, timeout: Duration) -> Result<Self> {
         let mut command = Command::new(binary);
+        kiln_common::process::hide_window(&mut command);
         command
             .args(["--no-daemon", "app-server"])
             .env("CODEX_HOME", root)
@@ -273,6 +274,8 @@ impl Drop for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kiln_common::paths::Canonical;
+    #[cfg(unix)]
     #[test]
     fn metadata_reader_is_bounded_cancellable_and_never_starts_a_turn() {
         use std::os::unix::fs::PermissionsExt;
@@ -330,11 +333,12 @@ for line in sys.stdin:
                 .contains("paused")
         );
     }
+    #[cfg(unix)]
     #[test]
     fn native_archive_preserves_descendant_histories() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dir.path().canonical().unwrap();
         let script = root.join("codex-fixture");
         fs::write(&script, r#"#!/usr/bin/env python3
 import json,sys
@@ -368,7 +372,7 @@ for line in sys.stdin:
         let dir = PathBuf::from(
             std::env::var_os("KILN_SYNC_FIXTURE_DIR").expect("explicit fixture directory"),
         )
-        .canonicalize()
+        .canonical()
         .unwrap();
         assert!(dir.join("owned-fixture").is_file());
         let root = dir.join("codex");

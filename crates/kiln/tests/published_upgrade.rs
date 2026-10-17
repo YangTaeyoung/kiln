@@ -2,6 +2,7 @@
 //! executable. Only disposable sockets, configuration and shell processes are used.
 #[cfg(unix)]
 mod unix {
+    use kiln_common::paths::Canonical;
     use kiln_daemon::client::Client;
     use kiln_proto::{ClientMsg, ServerMsg, SessionInfo, SpawnSpec, read_msg, write_msg};
     use std::{
@@ -232,10 +233,10 @@ mod unix {
             return;
         };
         let old = PathBuf::from(old)
-            .canonicalize()
+            .canonical()
             .expect("explicit old executable must exist");
         let new = PathBuf::from(env!("CARGO_BIN_EXE_kiln"))
-            .canonicalize()
+            .canonical()
             .unwrap();
         assert_ne!(
             old, new,

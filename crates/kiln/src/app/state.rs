@@ -2,7 +2,7 @@
 
 use super::layout::{Node, PaneId};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 #[serde(default)]
@@ -202,6 +202,20 @@ pub struct LoadReport {
     pub quarantined: Option<PathBuf>,
 }
 
+impl Persist {
+    /// Saved Windows workspace and terminal folders without the `\\?\` prefix.
+    fn simplify_paths(&mut self) {
+        let plain = |text: &mut String| *text = kiln_common::paths::simplified(Path::new(text.as_str())).to_string_lossy().into_owned();
+        for workspace in &mut self.workspaces {
+            workspace.root = kiln_common::paths::simplified(&workspace.root).into_owned();
+            for pane in workspace.pages.iter_mut().flat_map(|page| page.panes.iter_mut()) {
+                if let Some(cwd) = &mut pane.cwd { plain(cwd); }
+                if let Some(cwd) = pane.launch.as_mut().and_then(|spec| spec.cwd.as_mut()) { plain(cwd); }
+            }
+        }
+    }
+}
+
 pub fn load_with_report() -> LoadReport { load_path(&path()) }
 
 pub fn load() -> Persist { load_with_report().state }
@@ -210,7 +224,10 @@ fn load_path(path: &std::path::Path) -> LoadReport {
     let mut report = LoadReport { state: Persist::default(), warning: None, quarantined: None };
     match std::fs::read(path) {
         Ok(bytes) => match serde_json::from_slice::<Persist>(&bytes) {
-            Ok(state) => report.state = state,
+            Ok(mut state) => {
+                state.simplify_paths();
+                report.state = state;
+            }
             Err(error) => {
                 let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
                 let backup = path.with_file_name(format!("state.corrupt-{stamp}-{}.json", std::process::id()));
@@ -344,6 +361,20 @@ fn save_path(path: &std::path::Path, p: &Persist) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn saved_verbatim_windows_folders_load_in_their_plain_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        std::fs::write(&path, serde_json::json!({
+            "workspaces": [{"name": "kiln", "root": r"\\?\C:\kiln", "pages": [{"root": {"Leaf": 1}, "focused": 1,
+                "panes": [{"id": 1, "session": null, "cwd": r"\\?\C:\kiln\src"}], "title": null}]}],
+        }).to_string()).unwrap();
+        let state = load_path(&path).state;
+        assert_eq!(state.workspaces[0].root, std::path::PathBuf::from(r"C:\kiln"));
+        assert_eq!(state.workspaces[0].pages[0].panes[0].cwd.as_deref(), Some(r"C:\kiln\src"));
+    }
+
 
     #[test]
     fn state_writer_keeps_the_newest_snapshot_and_forced_saves_win() {

@@ -1,4 +1,5 @@
 //! Opt-in native continuations discovered within open workspace folders.
+use kiln_common::paths::Canonical;
 mod codex_index;
 mod canonical;
 mod checkpoint;
@@ -106,7 +107,7 @@ impl Pair {
                 .map(|p| p.label)
                 .unwrap_or_else(|| "Default CLI".into());
             Ok(Endpoint {
-                root: root.canonicalize()?,
+                root: root.canonical()?,
                 label,
             })
         };
@@ -224,8 +225,8 @@ pub(super) fn track(
                     ".codex"
                 })
         })
-        .canonicalize()?;
-    let path = storage::logical(record.tool, Path::new(transcript));
+        .canonical()?;
+    let path = storage::logical(record.tool, &under_root(&root, Path::new(transcript)));
     safe_path(&root, &path)?;
     let id = record
         .conversation
@@ -245,7 +246,7 @@ pub(super) fn track(
             .as_deref()
             .context("Missing working directory")?,
     )
-    .canonicalize()?
+    .canonical()?
     .to_string_lossy()
     .into_owned();
     let source = Source {
@@ -266,6 +267,15 @@ pub(super) fn track(
         publish(&path, &serde_json::to_vec(&source)?)?;
     }
     Ok(())
+}
+
+/// `path` restated under `root` when one of its folders is `root` spelled another way:
+/// letter case, short names, separators, a verbatim prefix or a symbolic link above it.
+fn under_root(root: &Path, path: &Path) -> PathBuf {
+    path.ancestors()
+        .find(|folder| folder.canonical().is_ok_and(|folder| folder == root))
+        .and_then(|folder| path.strip_prefix(folder).ok())
+        .map_or_else(|| path.to_path_buf(), |relative| root.join(relative))
 }
 
 fn private_dir(path: &Path) -> Result<()> {
@@ -289,6 +299,8 @@ fn private_dir(path: &Path) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     }
+    #[cfg(windows)]
+    kiln_common::access::restrict_to_user(path)?;
     ensure!(
         fs::symlink_metadata(path)?.is_dir(),
         "Unsafe sync directory"
@@ -352,7 +364,15 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
     tmp.persist_noclobber(path).map_err(|e| e.error)?;
-    fs::File::open(parent)?.sync_all()?;
+    sync_dir(parent)?;
+    Ok(())
+}
+/// Flushes the entries of `dir` to disk on Unix; does nothing on Windows.
+fn sync_dir(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
+    #[cfg(windows)]
+    let _ = dir;
     Ok(())
 }
 /// `replace`, skipped when the file already holds exactly these bytes.
@@ -370,7 +390,7 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
-    fs::File::open(parent)?.sync_all()?;
+    sync_dir(parent)?;
     Ok(())
 }
 
@@ -608,7 +628,9 @@ fn native_path(
             .join(format!("{id}.jsonl"))
     } else {
         root.join("sessions")
-            .join(date.format("%Y/%m/%d").to_string())
+            .join(date.format("%Y").to_string())
+            .join(date.format("%m").to_string())
+            .join(date.format("%d").to_string())
             .join(format!(
                 "rollout-{}-{id}.jsonl",
                 date.format("%Y-%m-%dT%H-%M-%S")

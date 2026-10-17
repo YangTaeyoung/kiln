@@ -616,7 +616,7 @@ mod tests {
                             assert!(rect.top() > account_rect.bottom());
                             if target == 0 { assert!(rect.bottom() < h.get_by_label("Work").rect().top(), "{label} rendered under the wrong account"); }
                         }
-                        if waiting { h.render().unwrap().save(format!("/tmp/kiln022-reauth-{language:?}-{target}.png")).unwrap(); }
+                        if waiting { h.render().unwrap().save(std::env::temp_dir().join(format!("kiln022-reauth-{language:?}-{target}.png"))).unwrap(); }
                     }
                 }
             });
@@ -721,7 +721,7 @@ mod tests {
                 for label in ["자동 갱신 · 5분마다", "방금 확인"] {
                     assert!(harness.ctx.content_rect().contains_rect(harness.get_by_label(kiln_common::i18n::tr(label)).rect()), "{language:?}: {label} clipped");
                 }
-                harness.render().unwrap().save(format!("/tmp/kiln020-usage-card-{language:?}.png")).unwrap();
+                harness.render().unwrap().save(std::env::temp_dir().join(format!("kiln020-usage-card-{language:?}.png"))).unwrap();
             });
         }
     }
@@ -753,12 +753,12 @@ mod tests {
                 for label in ["로그인 필요", "다시 로그인"] {
                     assert!(harness.ctx.content_rect().contains_rect(harness.get_by_label(kiln_common::i18n::tr(label)).rect()), "{language:?}: {label} clipped in full card");
                 }
-                harness.render().unwrap().save(format!("/tmp/kiln019-reauth-row-{language:?}.png")).unwrap();
+                harness.render().unwrap().save(std::env::temp_dir().join(format!("kiln019-reauth-row-{language:?}.png"))).unwrap();
                 harness.get_by_label(kiln_common::i18n::tr("다시 로그인")).click();
                 for _ in 0..4 { harness.step(); }
                 let button = harness.get_by_label(kiln_common::i18n::tr("브라우저에서 로그인"));
                 assert!(harness.ctx.content_rect().contains_rect(button.rect()));
-                harness.render().unwrap().save(format!("/tmp/kiln019-reauth-form-{language:?}.png")).unwrap();
+                harness.render().unwrap().save(std::env::temp_dir().join(format!("kiln019-reauth-form-{language:?}.png"))).unwrap();
                 assert_eq!(manager.ui_state().relogin, Some((Tool::Codex, profile.id.clone())));
                 harness.get_by_label(kiln_common::i18n::tr("취소")).click();
                 for _ in 0..4 { harness.step(); }
@@ -891,7 +891,7 @@ mod tests {
                         harness.ctx.set_zoom_factor(1.3);
                         for _ in 0..4 { harness.step(); }
                         let image = harness.render().expect("login waiting state must render");
-                        image.save(format!("/tmp/kiln-account-login-{language:?}-{theme}-{tool:?}-420.png")).unwrap();
+                        image.save(std::env::temp_dir().join(format!("kiln-account-login-{language:?}-{theme}-{tool:?}-420.png"))).unwrap();
                     }
                 }
             });

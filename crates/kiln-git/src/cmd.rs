@@ -221,6 +221,7 @@ fn gh_stdin_with_path(
         return Err(GitError::NotARepo);
     }
     let mut c = Command::new("gh");
+    kiln_common::process::hide_window(&mut c);
     if let Some(path) = gh_search_path(path) {
         c.env("PATH", path);
     } else {

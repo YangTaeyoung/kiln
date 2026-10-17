@@ -469,13 +469,6 @@ mod tests {
 }
 
 pub(crate) fn find_cli(home: &Path, tool: Tool) -> Option<PathBuf> {
-    let name = if cfg!(windows) { format!("{}.exe", tool.key()) } else { tool.key().to_string() };
-    let mut roots = std::env::var_os("PATH").map(|v| std::env::split_paths(&v).collect::<Vec<_>>()).unwrap_or_default();
-    roots.extend([home.join(".local/bin"), home.join(".cargo/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")]);
-    roots.into_iter().map(|r| r.join(&name)).find(|path| {
-        let Ok(metadata) = path.metadata() else { return false; };
-        if !metadata.is_file() { return false; }
-        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; metadata.permissions().mode() & 0o111 != 0 }
-        #[cfg(not(unix))] { true }
-    })
+    let extra = [home.join(".local").join("bin"), home.join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")];
+    kiln_common::paths::find_executable(tool.key(), &extra)
 }

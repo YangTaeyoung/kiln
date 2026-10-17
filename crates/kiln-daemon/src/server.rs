@@ -337,11 +337,12 @@ impl Daemon {
             };
             if let Some(events) = sync_events {
                 sess.generation.fetch_add(1, Ordering::SeqCst);
-                self.handle_events(&sess, events, &mut osc_events);
+                self.handle_events(&sess, events, &mut osc_events, !reader.replaying());
                 self.wake_attached(sess.id);
             }
             match reader.read_timeout(&mut buf, timeout_ms) {
                 Ok(ReadResult::Data(n)) => {
+                    let answer = !reader.replaying();
                     osc.feed(&buf[..n], &mut osc_events);
                     let filtered=private_osc.feed(&buf[..n]);
                     let data=filtered.as_slice();
@@ -353,11 +354,11 @@ impl Daemon {
                     for seg in img_scan.feed(data) {
                         match seg {
                             Segment::Bytes(a, b) => events.extend(sess.emu.lock().advance(&data[a..b])),
-                            Segment::Image(cmd) => self.handle_image(&sess, cmd),
+                            Segment::Image(cmd) => self.handle_image(&sess, cmd, answer),
                         }
                     }
                     sess.generation.fetch_add(1, Ordering::SeqCst);
-                    self.handle_events(&sess, events, &mut osc_events);
+                    self.handle_events(&sess, events, &mut osc_events, answer);
                     self.wake_attached(sess.id);
                 }
                 Ok(ReadResult::Timeout) => continue,
@@ -396,7 +397,7 @@ impl Daemon {
         let final_events = sess.emu.lock().finish_sync();
         if let Some(events) = final_events {
             sess.generation.fetch_add(1, Ordering::SeqCst);
-            self.handle_events(&sess, events, &mut osc_events);
+            self.handle_events(&sess, events, &mut osc_events, true);
             self.wake_attached(sess.id);
         }
         let mut code = None;
@@ -500,7 +501,8 @@ impl Daemon {
         crate::images::Geometry { cell_w: self.cell_w.load(Ordering::Relaxed), cell_h: self.cell_h.load(Ordering::Relaxed), cols, rows }
     }
 
-    fn handle_image(&self, sess: &Session, cmd: crate::images::ImageCmd) {
+    /// `answer` is false for replayed history, whose queries were already answered.
+    fn handle_image(&self, sess: &Session, cmd: crate::images::ImageCmd, answer: bool) {
         use crate::images::Action;
         let g = self.geometry(sess);
         let action = sess.images.lock().state.handle(cmd, &g);
@@ -513,11 +515,11 @@ impl Daemon {
             Action::None => {}
             Action::Show(d) => show(d),
             Action::Reply(r) => {
-                let _ = sess.input.respond(r);
+                if answer { let _ = sess.input.respond(r); }
             }
             Action::ShowAndReply(d, r) => {
                 show(d);
-                let _ = sess.input.respond(r);
+                if answer { let _ = sess.input.respond(r); }
             }
             Action::DeleteAll => {
                 let mut im = sess.images.lock();
@@ -527,14 +529,16 @@ impl Daemon {
         }
     }
 
-    fn handle_events(&self, sess: &Session, events: Vec<Event>, osc: &mut Vec<OscEvent>) {
+    /// `answer` is false for replayed history, whose queries were already answered.
+    fn handle_events(&self, sess: &Session, events: Vec<Event>, osc: &mut Vec<OscEvent>, answer: bool) {
         let mut updated = false;
         for e in events {
             match e {
                 Event::PtyWrite(s) => {
-                    let _ = sess.input.respond(s.into_bytes());
+                    if answer { let _ = sess.input.respond(s.into_bytes()); }
                 }
                 Event::Title(t) => {
+                    let t = if console_default_title(&t) { String::new() } else { t };
                     let mut info = sess.info.lock();
                     if info.title != t {
                         info.title = t;
@@ -558,6 +562,8 @@ impl Daemon {
                 Event::ClipboardStore(_, text) => {
                     self.broadcast(ServerMsg::Clipboard { session: sess.id, text });
                 }
+                Event::TextAreaSizeRequest(_) if !answer => {}
+                Event::ColorRequest(..) if !answer => {}
                 Event::TextAreaSizeRequest(f) => {
                     let (cols, rows) = sess.emu.lock().size();
                     let (cw, ch) = (self.cell_w.load(Ordering::Relaxed) as u16, self.cell_h.load(Ordering::Relaxed) as u16);
@@ -632,7 +638,8 @@ impl Daemon {
                 self.recover_terminal(&s, false);
                 let fg = s.pty.fg_pid().and_then(procinfo::foreground_pid);
                 let name = fg.and_then(procinfo::display_name);
-                let cwd = fg.and_then(procinfo::cwd).or_else(|| procinfo::cwd(s.pty.pid()));
+                let folder = |pid: u32| (!procinfo::location_from_prompt(pid)).then(|| procinfo::cwd(pid)).flatten();
+                let cwd = fg.and_then(folder).or_else(|| folder(s.pty.pid()));
                 let mut changed = false;
                 {
                     let mut i = s.info.lock();
@@ -930,7 +937,7 @@ impl Daemon {
             let events=s.emu.try_lock_for(Duration::from_millis(100)).map(|mut e|e.finish_sync().unwrap_or_default());
             let responsive=Instant::now().saturating_duration_since(s.recovery.lock().reader_seen)<=Duration::from_secs(5);
             if let Some(events)=events.filter(|_|responsive) {
-                d.handle_events(&s,events,&mut Vec::new());
+                d.handle_events(&s,events,&mut Vec::new(),true);
                 if d.redraw_terminal(&s).is_ok() {
                     d.refresh_screen(&s);
                     s.recovery.lock().alive(Instant::now());
@@ -1745,5 +1752,39 @@ phase('reset.json',[queries[1],queries[3]])
         assert_eq!(read_phase("override.json"),vec![reply("11",[0x11,0x22,0x33]),reply("4;7",[0,0xaa,0])]);
         assert_eq!(read_phase("reset.json"),vec![reply("11",dark.bg),reply("4;7",dark.ansi[7])]);
         stream.shutdown(std::net::Shutdown::Both).unwrap();drop(stream);server.join().unwrap();
+    }
+}
+
+/// Whether `title` is what a Windows console sets by itself: the path of its program,
+/// optionally after an elevation prefix such as `Administrator: `.
+fn console_default_title(title: &str) -> bool {
+    let is_program_path = |text: &str| {
+        let bytes = text.as_bytes();
+        bytes.len() > 7
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'\\'
+            && text.get(text.len() - 4..).is_some_and(|ext| ext.eq_ignore_ascii_case(".exe"))
+    };
+    is_program_path(title) || title.split_once(": ").is_some_and(|(_, rest)| is_program_path(rest))
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::console_default_title;
+
+    #[test]
+    fn console_executable_titles_are_not_task_titles() {
+        for title in [
+            r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe",
+            r"Administrator: C:\WINDOWS\system32\cmd.exe",
+            r"C:\Program Files\Git\bin\sh.exe",
+            r"관리자: C:\Program Files\PowerShell\7\pwsh.exe",
+        ] {
+            assert!(console_default_title(title), "{title}");
+        }
+        for title in ["API contract review", "vim main.rs", "C:\\work\\notes.txt", "build.exe finished", "/usr/bin/zsh", "C:\\작업 폴더 한글"] {
+            assert!(!console_default_title(title), "{title}");
+        }
     }
 }

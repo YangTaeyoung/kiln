@@ -1,6 +1,7 @@
 //! 실제 rust-analyzer 로 hover·definition 을 확인한다. 설치되어 있어야 하며 기본으로는 건너뛴다.
 //! `cargo test -p kiln-editor --test lsp_rust_analyzer -- --ignored` 로 실행한다.
 
+use kiln_common::paths::Canonical;
 use std::time::{Duration, Instant};
 
 use kiln_editor::lsp::{LspConfig, LspManager, Position};
@@ -9,7 +10,7 @@ use kiln_editor::lsp::{LspConfig, LspManager, Position};
 #[ignore]
 fn rust_analyzer_hover_and_definition() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = dir.path().canonical().unwrap();
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"ra_probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
     let src = "fn helper(x: i32) -> i32 {\n    x + 1\n}\n\nfn main() {\n    let 값 = helper(2);\n    println!(\"{값}\");\n}\n";
@@ -58,7 +59,7 @@ fn rust_analyzer_hover_and_definition() {
 fn rust_analyzer_through_editor_reports_diagnostics() {
     use kiln_editor::{Editor, Pos, Selection};
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = dir.path().canonical().unwrap();
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"ra_editor\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
     let main = root.join("src/main.rs");

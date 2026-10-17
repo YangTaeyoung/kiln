@@ -59,7 +59,7 @@ fn rect(h: &Harness<'_, KilnApp>, id: u64) -> Rect {
 fn screenshot(h: &mut Harness<'_, KilnApp>, label: &str) {
     h.render()
         .unwrap()
-        .save(format!("/tmp/kiln-pane-layout-native-{label}.png"))
+        .save(std::env::temp_dir().join(format!("kiln-pane-layout-native-{label}.png")))
         .unwrap();
 }
 

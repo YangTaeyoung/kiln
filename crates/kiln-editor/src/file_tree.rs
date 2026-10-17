@@ -77,7 +77,7 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
 /// List one folder, directories first. Ignore rules decorate entries by default;
 /// callers can explicitly filter them. Internal filesystem metadata stays hidden.
 pub fn list_dir(dir: &Path, show_ignored: bool) -> std::io::Result<Vec<DirEntry>> {
-    let directory = std::fs::canonicalize(dir)?;
+    let directory = kiln_common::paths::canonicalize(dir)?;
     // Path matchers preserve excluded ancestors without traversing any sibling
     // directories. A walker rooted at `dir` instead bypasses that root's rules.
     let anchor = directory.ancestors().last().unwrap();
@@ -218,7 +218,7 @@ impl FileTree {
 
     pub fn new(root: PathBuf) -> Self {
         crate::syntax::prewarm();
-        let canon_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        let canon_root = kiln_common::paths::canonicalize(&root).unwrap_or_else(|_| root.clone());
         let mut t = Self {
             id: Id::new(("kiln-file-tree", root.clone())),
             root,

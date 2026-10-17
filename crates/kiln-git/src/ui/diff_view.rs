@@ -1,5 +1,6 @@
 //! diff 뷰어(DiffView): 파일/커밋/패치 diff 를 통합·좌우 분할 모드로 그린다.
 
+use kiln_common::paths::Canonical;
 use std::path::{Path, PathBuf};
 
 use egui::{
@@ -649,9 +650,9 @@ fn repo_relative(root: &Path, top: &Path, prefix: &str, path: &Path) -> String {
         if let Ok(r) = path.strip_prefix(top) {
             return to_slash(r);
         }
-        let croot = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let croot = root.canonical().unwrap_or_else(|_| root.to_path_buf());
         if let Some(parent) = path.parent()
-            && let Ok(cp) = parent.canonicalize()
+            && let Ok(cp) = parent.canonical()
         {
             let full = cp.join(path.file_name().unwrap_or_default());
             if let Ok(r) = full.strip_prefix(&croot) {

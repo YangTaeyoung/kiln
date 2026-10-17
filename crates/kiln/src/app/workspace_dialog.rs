@@ -1,4 +1,5 @@
 //! Named workspaces share a directory, never terminal/pane identities.
+use kiln_common::paths::Canonical;
 use super::*;
 use egui::{Frame, Margin, RichText, Stroke};
 use kiln_common::icons::Icon;
@@ -16,15 +17,12 @@ pub(super) struct WorkspaceDialog {
 
 fn folder_path(folder: &str) -> PathBuf {
     let folder = folder.trim();
-    let path = if folder == "~" || folder.starts_with("~/") {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default()
-            .join(folder.strip_prefix("~/").unwrap_or(""))
+    let path = if let Some(rest) = kiln_common::paths::tilde_rest(folder) {
+        kiln_common::paths::home().unwrap_or_default().join(rest)
     } else {
         PathBuf::from(folder)
     };
-    normalize_path(path.canonicalize().unwrap_or(path))
+    normalize_path(path.canonical().unwrap_or(path))
 }
 
 pub(super) fn valid_name(name: &str) -> bool {
@@ -34,7 +32,7 @@ pub(super) fn valid_name(name: &str) -> bool {
 
 impl KilnApp {
     pub(super) fn open_workspace_dialog(&mut self, root: PathBuf) {
-        let root = normalize_path(root.canonicalize().unwrap_or(root));
+        let root = normalize_path(root.canonical().unwrap_or(root));
         let base = root
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())

@@ -6,21 +6,13 @@ const MAX_PAYLOAD_BYTES:usize=120_000;
 static SEQUENCE:AtomicU64=AtomicU64::new(0);
 
 pub struct Prepared { pub command:String, pub title:String, pub request_path:PathBuf, pub request_offset:usize }
+#[cfg(not(windows))]
 fn quote(value:&str)->String {format!("'{}'",value.replace('\'',"'\\''"))}
 pub(super) fn executable(name:&str)->Option<PathBuf>{
-    let mut dirs:Vec<_>=std::env::var_os("PATH").map(|p|std::env::split_paths(&p).collect()).unwrap_or_default();
-    if let Some(home)=std::env::var_os("HOME").or_else(||std::env::var_os("USERPROFILE")) {dirs.push(PathBuf::from(home).join(".local/bin"));}
-    dirs.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);
-    dirs.into_iter().flat_map(|dir| {
-        let mut paths=vec![dir.join(name)];
-        if cfg!(windows){paths.extend([dir.join(format!("{name}.exe")),dir.join(format!("{name}.cmd"))]);}
-        paths
-    }).find(|p|{
-        let Ok(metadata)=p.metadata() else{return false;};
-        if !metadata.is_file(){return false;}
-        #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;metadata.permissions().mode()&0o111!=0}
-        #[cfg(not(unix))]{true}
-    })
+    let mut extra=Vec::new();
+    if let Some(home)=kiln_common::paths::home() {extra.push(home.join(".local").join("bin"));}
+    extra.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);
+    kiln_common::paths::find_executable(name,&extra)
 }
 
 pub fn prepare(program:&str,context:&str,request:&str)->Result<Prepared,String>{
@@ -59,6 +51,68 @@ fn prepare_in(dir:&Path,binary:&Path,context:&str,request:&str)->Result<Prepared
     let line=request.lines().find(|line|!line.trim().is_empty()).unwrap_or(request).trim();
     let mut title:String=line.chars().take(40).collect();if line.chars().count()>40{title.push('…');}
     Ok(Prepared{command,title,request_path:path,request_offset:context.len()+"\n## 사용자 요청\n".len()})
+}
+
+/// The program and leading arguments that run the agent CLI `binary`. On Windows an npm
+/// `.cmd` launcher is replaced by what it starts (Node with the package script, or a native
+/// executable), since batch files refuse arguments that span lines.
+pub(super) fn launcher(binary:&Path)->(PathBuf,Vec<std::ffi::OsString>){
+    #[cfg(windows)]
+    if let Some(found)=npm_launcher(binary){return found;}
+    (binary.to_path_buf(),Vec::new())
+}
+
+#[cfg(windows)]
+fn npm_launcher(binary:&Path)->Option<(PathBuf,Vec<std::ffi::OsString>)>{
+    let extension=binary.extension()?.to_string_lossy().to_ascii_lowercase();
+    if extension!="cmd" && extension!="bat" {return None;}
+    let folder=binary.parent()?;
+    let target=npm_target(&std::fs::read_to_string(binary).ok()?,folder).filter(|t|t.is_file())?;
+    if target.extension().is_some_and(|e|e.eq_ignore_ascii_case("exe")) {return Some((target,Vec::new()));}
+    let node=Some(folder.join("node.exe")).filter(|p|p.is_file()).or_else(||kiln_common::paths::find_executable("node",&[]))?;
+    Some((node,vec![target.into_os_string()]))
+}
+
+/// The file an npm `.cmd` launcher starts: the last `"%dp0%\<path>"` in its text, a path
+/// inside the launcher's folder.
+#[cfg(any(windows,test))]
+fn npm_target(text:&str,folder:&Path)->Option<PathBuf>{
+    const MARK:&str="\"%dp0%\\";
+    let rest=&text[text.rfind(MARK)?+MARK.len()..];
+    let relative=&rest[..rest.find('"')?];
+    if relative.split('\\').any(|part|part.is_empty()||part==".."||part.contains(':')) {return None;}
+    Some(relative.split('\\').fold(folder.to_path_buf(),|path,part|path.join(part)))
+}
+
+#[cfg(test)]
+mod launcher_tests{
+    use super::*;
+
+    const NPM_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n";
+
+    #[test]
+    fn an_npm_launcher_names_the_script_it_starts() {
+        let folder = Path::new("npm");
+        assert_eq!(npm_target(NPM_SHIM, folder), Some(folder.join("node_modules").join("@openai").join("codex").join("bin").join("codex.js")));
+        assert_eq!(npm_target("@echo off\r\necho hi\r\n", folder), None);
+        assert_eq!(npm_target("\"%dp0%\\..\\evil.js\" %*", folder), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_npm_launcher_runs_its_script_with_node_so_requests_can_span_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("node_modules").join("@openai").join("codex").join("bin");
+        std::fs::create_dir_all(&script).unwrap();
+        std::fs::write(script.join("codex.js"), b"").unwrap();
+        std::fs::write(dir.path().join("node.exe"), b"").unwrap();
+        std::fs::write(dir.path().join("codex.cmd"), NPM_SHIM).unwrap();
+        let (program, lead) = launcher(&dir.path().join("codex.cmd"));
+        assert_eq!(program, dir.path().join("node.exe"));
+        assert_eq!(lead, vec![std::ffi::OsString::from(script.join("codex.js"))]);
+        let native = dir.path().join("claude.exe");
+        assert_eq!(launcher(&native), (native.clone(), vec![]));
+    }
 }
 
 #[cfg(all(test,unix))]

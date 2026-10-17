@@ -1,5 +1,6 @@
 //! Non-destructive worktree management. All functions block; call from a worker.
 //! https://git-scm.com/docs/git-worktree
+use kiln_common::paths::Canonical;
 use crate::cmd::{self, GitError, GitResult, Mode};
 use std::path::{Path, PathBuf};
 
@@ -20,7 +21,7 @@ pub struct WorktreeIdentity {
 }
 
 pub fn identity(root: &Path) -> GitResult<Option<WorktreeIdentity>> {
-    let root = match root.canonicalize() {
+    let root = match root.canonical() {
         Ok(root) => root,
         Err(_) => return Ok(None),
     };
@@ -31,9 +32,9 @@ pub fn identity(root: &Path) -> GitResult<Option<WorktreeIdentity>> {
     };
     // Git documents the main worktree as the first entry, including bare roots.
     let Some(main) = trees.first() else { return Ok(None); };
-    let main_root = main.path.canonicalize().unwrap_or_else(|_| main.path.clone());
+    let main_root = main.path.canonical().unwrap_or_else(|_| main.path.clone());
     let Some(tree) = trees.iter().find(|tree| {
-        tree.path.canonicalize().unwrap_or_else(|_| tree.path.clone()) == root
+        tree.path.canonical().unwrap_or_else(|_| tree.path.clone()) == root
     }) else { return Ok(None); };
     if tree.bare { return Ok(None); }
     Ok(Some(WorktreeIdentity {
@@ -185,7 +186,7 @@ pub fn create(root: &Path, request: &Create) -> GitResult<Worktree> {
     Ok(Worktree {
         path: request
             .path
-            .canonicalize()
+            .canonical()
             .unwrap_or_else(|_| request.path.clone()),
         branch: Some(branch.into()),
         locked: false,
@@ -232,9 +233,9 @@ mod tests {
         let parent = tempfile::tempdir().unwrap();
         let linked = parent.path().join("same-looking-name");
         create(main.path(), &Create { path: linked.clone(), branch: "feature/work".into(), base: "main".into(), existing_branch: false }).unwrap();
-        let main_root = main.path().canonicalize().unwrap();
+        let main_root = main.path().canonical().unwrap();
         assert_eq!(identity(main.path()).unwrap(), Some(WorktreeIdentity { main_root: main_root.clone(), root: main_root.clone(), branch: Some("main".into()), linked: false }));
-        assert_eq!(identity(&linked).unwrap(), Some(WorktreeIdentity { main_root, root: linked.canonicalize().unwrap(), branch: Some("feature/work".into()), linked: true }));
+        assert_eq!(identity(&linked).unwrap(), Some(WorktreeIdentity { main_root, root: linked.canonical().unwrap(), branch: Some("feature/work".into()), linked: true }));
         let child = linked.join("nested");
         std::fs::create_dir(&child).unwrap();
         assert_eq!(identity(&child).unwrap(), None);

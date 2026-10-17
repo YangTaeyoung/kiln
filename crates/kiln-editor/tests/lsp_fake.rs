@@ -231,11 +231,21 @@ fn requests_before_ready_are_queued() {
 fn dropping_last_manager_stops_server_process() {
     let dir = tempfile::tempdir().unwrap();
     let tag = format!("kiln-drop-{}-{}", std::process::id(), dir.path().file_name().unwrap().to_string_lossy());
+    #[cfg(unix)]
     let running = || {
         std::process::Command::new("pgrep")
             .args(["-f", &tag])
             .output()
             .map(|o| !o.stdout.is_empty())
+            .unwrap_or(false)
+    };
+    #[cfg(windows)]
+    let running = || {
+        let query = format!("@(Get-CimInstance Win32_Process | Where-Object {{ $_.Name -like 'kiln-fake-lsp*' -and $_.CommandLine -like '*{tag}*' }}).Count");
+        std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", &query])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim() != "0")
             .unwrap_or(false)
     };
     let (m, _p) = open(dir.path(), "a.rs", "fn a() {}\n", &["--tag", &tag]);

@@ -247,7 +247,7 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
     }
     ui.add_space(16.0);
     widgets::group(ui, kiln_common::i18n::tr("글꼴"), |ui| {
-        widgets::setting_row(ui, kiln_common::i18n::tr("글꼴 크기"), kiln_common::i18n::tr("⌘= / ⌘- 로도 바꿀 수 있습니다"), |ui| {
+        widgets::setting_row(ui, kiln_common::i18n::tr("글꼴 크기"), &kiln_common::trf!("{} / {} 로도 바꿀 수 있습니다",super::keymap::app_shortcut("⌘="),super::keymap::app_shortcut("⌘-")), |ui| {
             ui.add(egui::Slider::new(&mut s.font_size, 9.0..=24.0).step_by(0.5).suffix(" pt"));
         });
         widgets::divider(ui);
@@ -268,10 +268,11 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
         widgets::setting_toggle(ui, kiln_common::i18n::tr("Option 키를 Meta 로"), kiln_common::i18n::tr("Option+B 같은 조합을 셸 단축키로 보냅니다"), &mut s.option_as_meta);
     });
     widgets::group(ui, kiln_common::i18n::tr("셸"), |ui| {
-        widgets::setting_toggle(ui, kiln_common::i18n::tr("명령어 입력 힌트"), kiln_common::i18n::tr("zsh에서 경로와 명령어 후보를 표시합니다. ⌃Space로 후보를 선택할 수 있습니다."), &mut s.terminal_completion_preview);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("명령어 입력 힌트"), &kiln_common::trf!("zsh에서 경로와 명령어 후보를 표시합니다. {}로 후보를 선택할 수 있습니다.",kiln_common::widgets::shortcut_text("⌃Space")), &mut s.terminal_completion_preview);
         widgets::divider(ui);
-        widgets::setting_row(ui, kiln_common::i18n::tr("기본 셸"), kiln_common::i18n::tr("비워 두면 로그인 셸($SHELL)을 씁니다"), |ui| {
-            ui.add(egui::TextEdit::singleline(&mut s.shell).hint_text("/bin/zsh").desired_width(200.0));
+        let (empty, example) = if cfg!(windows) { (kiln_common::i18n::tr("비워 두면 PowerShell을 씁니다"), "pwsh.exe") } else { (kiln_common::i18n::tr("비워 두면 로그인 셸($SHELL)을 씁니다"), "/bin/zsh") };
+        widgets::setting_row(ui, kiln_common::i18n::tr("기본 셸"), empty, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut s.shell).hint_text(example).desired_width(200.0));
         });
     });
 }
@@ -305,7 +306,7 @@ fn shortcuts(ui: &mut egui::Ui) {
                     widgets::divider(ui);
                 }
                 widgets::setting_row(ui, label, "", |ui| {
-                    let ks = widgets::split_keys(keys);
+                    let ks = widgets::split_keys(&super::keymap::app_shortcut(keys));
                     let rev: Vec<&str> = ks.iter().rev().map(|s| s.as_str()).collect();
                     widgets::keycaps(ui, &rev);
                 });
@@ -334,6 +335,8 @@ fn about_page(ui: &mut egui::Ui, about: &AboutInfo, acts: &mut Vec<Action>) {
         widgets::setting_row(ui, kiln_common::i18n::tr("버전"), &kiln_common::trf!("Kiln {} · 빌드 {}", env!("CARGO_PKG_VERSION"), kiln_daemon::build_id()), |_| {});
         #[cfg(target_os = "macos")]
         { widgets::divider(ui); super::updater::settings(ui); }
+        #[cfg(windows)]
+        { widgets::divider(ui); super::updater_windows::settings(ui); }
         widgets::divider(ui);
         widgets::setting_row(ui, kiln_common::i18n::tr("설정 폴더"), &kiln_common::paths::config_dir().display().to_string(), |ui| {
             if widgets::button(ui, kiln_common::i18n::tr("열기"), ButtonKind::Secondary).clicked() {
@@ -364,7 +367,7 @@ mod keybinding_layout_tests {
         h.get_by_label("관리").click();h.run_steps(2);
         assert!(h.query_by_label("기본값 복원").is_some());
         h.key_press(egui::Key::Escape);h.run_steps(2);
-        h.render().unwrap().save("/tmp/kiln-keybindings-fixed-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-fixed-small.png")).unwrap();
         h.state_mut().2.error=Some("중복된 단축키입니다. 다른 키를 입력하세요.".into());
         h.run_steps(3);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("단축키 저장").rect()));
@@ -374,7 +377,7 @@ mod keybinding_layout_tests {
         h.run_steps(5);
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("단축키 저장").rect()));
         assert!(h.ctx.content_rect().contains_rect(h.get_by_label("중복된 단축키입니다. 다른 키를 입력하세요.").rect()));
-        h.render().unwrap().save("/tmp/kiln-keybindings-error-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-error-small.png")).unwrap();
         let corrupt=dir.path().join("keybindings.json");
         std::fs::write(&corrupt,b"broken").unwrap();
         h.state_mut().2=super::super::keymap::Keymap::load_path(&corrupt);
@@ -382,7 +385,7 @@ mod keybinding_layout_tests {
         for label in ["원본 백업 후 기본값 복구","다시 읽기"] {
             assert!(h.ctx.content_rect().contains_rect(h.get_by_label(label).rect()),"{label}");
         }
-        h.render().unwrap().save("/tmp/kiln-keybindings-recovery-small.png").unwrap();
+        h.render().unwrap().save(std::env::temp_dir().join("kiln-keybindings-recovery-small.png")).unwrap();
     }
 }
 

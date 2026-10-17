@@ -1603,6 +1603,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "embed-resource"
+version = "3.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6168487b5e7eb2673e6efe1200b1848016e436a6ca0b8031bf04bd9d493a249f"
+dependencies = [
+ "cc",
+ "memchr",
+ "rustc_version",
+ "toml",
+ "vswhom",
+ "winreg 0.56.0",
+]
+
+[[package]]
 name = "embedded-io"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3015,7 +3029,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kiln"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3027,6 +3041,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_kittest",
+ "embed-resource",
  "env_logger",
  "global-hotkey",
  "image",
@@ -3048,25 +3063,29 @@ dependencies = [
  "postcard",
  "regex",
  "rfd",
+ "ring",
+ "roxmltree",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
  "unicode-width",
  "url",
+ "windows-sys 0.61.2",
  "winit",
  "zstd",
 ]
 
 [[package]]
 name = "kiln-accounts"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
  "egui",
  "egui_kittest",
+ "keyring",
  "kiln-common",
  "libc",
  "log",
@@ -3076,24 +3095,28 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "kiln-common"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "directories",
+ "dunce",
  "egui",
  "kiln-i18n-macros",
  "resvg",
  "serde",
  "serde_json",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "kiln-daemon"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -3118,7 +3141,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-db"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3143,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-editor"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "egui",
@@ -3170,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-git"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "egui",
@@ -3185,7 +3208,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-i18n-macros"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3195,7 +3218,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-proto"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -3205,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-remote"
-version = "0.1.35"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4439,7 +4462,7 @@ dependencies = [
  "shared_library",
  "shell-words",
  "winapi",
- "winreg",
+ "winreg 0.10.1",
 ]
 
 [[package]]
@@ -6341,6 +6364,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vswhom"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be979b7f07507105799e854203b470ff7c78a1639e330a58f183b5fea574608b"
+dependencies = [
+ "libc",
+ "vswhom-sys",
+]
+
+[[package]]
+name = "vswhom-sys"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb067e4cbd1ff067d1df46c9194b5de0e98efd2810bbc95c5d5e5f25a3231150"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "vte"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7294,6 +7337,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "winreg"
+version = "0.56.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -173,6 +173,24 @@ pub fn daemon_log_path(socket: &str) -> std::path::PathBuf {
     }
 }
 
+/// The console `kiln` executable that runs the CLI, the daemon and other helpers for the
+/// executable at `current`: `bin/kiln` under an installed GUI, a sibling `kiln` in a build
+/// folder, or `current` itself.
+pub fn cli_executable(current: &Path) -> std::path::PathBuf {
+    let name = format!("kiln{}", std::env::consts::EXE_SUFFIX);
+    let Some(dir) = current.parent() else { return current.to_path_buf() };
+    let installed = dir.join("bin").join(&name);
+    if installed.is_file() {
+        return installed;
+    }
+    let is_cli = current.file_name().is_some_and(|file| file.to_string_lossy().eq_ignore_ascii_case(&name));
+    let sibling = dir.join(&name);
+    if !is_cli && sibling.is_file() {
+        return sibling;
+    }
+    current.to_path_buf()
+}
+
 /// `exe daemon` 을 현재 프로세스와 분리해 실행한다.
 pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
     #[cfg(windows)]
@@ -200,7 +218,7 @@ pub fn spawn_daemon(exe: &Path, socket: &str) -> std::io::Result<()> {
 /// Windows 는 실행 중인 exe 를 덮어쓸 수 없으므로 데몬을 빌드별 복사본에서 실행한다.
 /// 설치된 kiln.exe 는 잠기지 않아 업데이트로 교체할 수 있다.
 #[cfg(windows)]
-pub(crate) fn daemon_copy(exe: &Path) -> Option<std::path::PathBuf> {
+pub fn daemon_copy(exe: &Path) -> Option<std::path::PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)?.join("Kiln").join("daemon");
     std::fs::create_dir_all(&base).ok()?;
     let target = base.join(format!("kiln-daemon-{}.exe", crate::exe_build_id(exe)));
@@ -282,26 +300,107 @@ pub fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
     }
 }
 
-/// Win32_Process.Create 로 프로세스를 만든다. 호출자의 잡 객체에 속하지 않는다.
+/// Win32_Process.Create 로 창과 콘솔 없이 프로세스를 만든다. 호출자의 잡 객체에 속하지 않는다.
 #[cfg(windows)]
 fn spawn_via_wmi(cmd: &std::process::Command) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::windows::process::CommandExt;
     let quote = |s: &str| if s.contains([' ', '\t', '"']) { format!("\"{}\"", s.replace('"', "\\\"")) } else { s.to_string() };
+    let ps_text = |s: &str| format!("'{}'", s.replace('\'', "''"));
     let mut line = quote(&cmd.get_program().to_string_lossy());
     for a in cmd.get_args() {
         line.push(' ');
         line.push_str(&quote(&a.to_string_lossy()));
     }
-    let ps = format!(
-        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{}'}}; exit $r.ReturnValue",
-        line.replace('\'', "''")
+    // Win32_Process.Create starts from the user's default environment, so the caller's
+    // environment and the command's changes are passed explicitly. Names compare case-insensitively.
+    let mut environment: std::collections::BTreeMap<String, (String, String)> = std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .map(|(k, v)| (k.to_uppercase(), (k, v)))
+        .collect();
+    for (key, value) in cmd.get_envs() {
+        let key = key.to_string_lossy().into_owned();
+        match value {
+            Some(value) => { environment.insert(key.to_uppercase(), (key, value.to_string_lossy().into_owned())); }
+            None => { environment.remove(&key.to_uppercase()); }
+        }
+    }
+    let variables: Vec<String> = environment
+        .into_values()
+        .filter(|(k, v)| !k.is_empty() && !k.starts_with('=') && !k.contains('=') && !v.contains(['\r', '\n']))
+        .map(|(k, v)| ps_text(&format!("{k}={v}")))
+        .collect();
+    let directory = cmd.get_current_dir().map(|d| d.to_string_lossy().into_owned());
+    // ShowWindow 0 hides the window and CreateFlags 8 (DETACHED_PROCESS) gives no console.
+    let script = format!(
+        "$s = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{{ShowWindow=[uint16]0; CreateFlags=[uint32]8; EnvironmentVariables=[string[]]@({})}}; $a = @{{CommandLine={}; ProcessStartupInformation=$s}}; {}$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments $a; exit $r.ReturnValue\n",
+        variables.join(","),
+        ps_text(&line),
+        directory.map(|d| format!("$a.CurrentDirectory = {}; ", ps_text(&d))).unwrap_or_default(),
     );
-    use std::os::windows::process::CommandExt;
-    let status = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
-        .stdin(std::process::Stdio::null())
+    // The script reaches PowerShell on standard input, so environment values never appear in
+    // a command line or a file.
+    let mut child = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", "-"])
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .creation_flags(0x0800_0000)
-        .status()?;
+        .spawn()?;
+    child.stdin.take().ok_or_else(|| std::io::Error::other("no PowerShell input"))?.write_all(script.as_bytes())?;
+    let status = child.wait()?;
     if status.success() { Ok(()) } else { Err(std::io::Error::other("WMI process create failed")) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn touch(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"").unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_process_created_through_wmi_keeps_the_callers_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("env.txt");
+        let mut cmd = std::process::Command::new("cmd.exe");
+        assert!(!out.to_string_lossy().contains(' '));
+        cmd.arg("/c").arg(format!("echo %KILN_WMI_PROBE%>{}", out.display())).env("KILN_WMI_PROBE", "kept-123");
+        spawn_via_wmi(&cmd).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !out.exists() {
+            assert!(std::time::Instant::now() < deadline, "the WMI process did not run");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(std::fs::read_to_string(&out).unwrap().trim(), "kept-123");
+    }
+
+    #[test]
+    fn cli_executable_finds_the_console_binary_beside_or_under_the_gui() {
+        let ext = std::env::consts::EXE_SUFFIX;
+        let installed = tempfile::tempdir().unwrap();
+        let gui = installed.path().join(format!("Kiln{ext}"));
+        let cli = installed.path().join("bin").join(format!("kiln{ext}"));
+        touch(&gui);
+        touch(&cli);
+        assert_eq!(cli_executable(&gui), cli);
+        assert_eq!(cli_executable(&cli), cli);
+
+        let build = tempfile::tempdir().unwrap();
+        let app = build.path().join(format!("kiln-app{ext}"));
+        let sibling = build.path().join(format!("kiln{ext}"));
+        touch(&app);
+        touch(&sibling);
+        assert_eq!(cli_executable(&app), sibling);
+        assert_eq!(cli_executable(&sibling), sibling);
+
+        let alone = tempfile::tempdir().unwrap();
+        let only = alone.path().join(format!("kiln-app{ext}"));
+        touch(&only);
+        assert_eq!(cli_executable(&only), only);
+    }
 }

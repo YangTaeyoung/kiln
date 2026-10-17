@@ -294,7 +294,7 @@ mod tab_tests {
             assert_eq!(path.points.len(),33);
             assert!(path.points.iter().all(|p|egui::Rect::from_center_size(egui::pos2(24.0,30.0),egui::vec2(14.0,14.0)).contains(*p)));
             frames.push(path.points.clone());
-            h.render().unwrap().save(format!("/tmp/kiln-running-{i}.png")).unwrap();
+            h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-running-{i}.png"))).unwrap();
         }
         assert_ne!(frames[0],frames[1]);
         assert_ne!(frames[1],frames[2]);
@@ -576,7 +576,7 @@ impl KilnApp {
             let right = egui::Rect::from_min_max(pos2(bar.right() - tools_width, cy - 15.0), pos2(bar.right() - 12.0, cy + 15.0));
             let mut rui = ui.new_child(UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
             rui.spacing_mut().item_spacing.x = 4.0;
-            if widgets::icon_button(&mut rui, Icon::Gear, 30.0, self.settings_ui.open, kiln_common::i18n::tr("설정 (⌘,)")).clicked() {
+            if widgets::icon_button(&mut rui, Icon::Gear, 30.0, self.settings_ui.open, &kiln_common::trf!("설정 ({})",super::keymap::app_shortcut("⌘,"))).clicked() {
                 self.actions.push(Action::OpenSettings);
             }
             let unread = self.notifications.unread_count();
@@ -843,7 +843,8 @@ impl KilnApp {
                 self.workspaces[i].renaming = Some(name.clone());
                 ui.close();
             }
-            if ui.button(kiln_common::i18n::tr("Finder 에서 열기")).clicked() {
+            let reveal = if cfg!(target_os = "macos") { kiln_common::i18n::tr("Finder 에서 열기") } else if cfg!(windows) { kiln_common::i18n::tr("파일 탐색기에서 열기") } else { kiln_common::i18n::tr("파일 관리자에서 열기") };
+            if ui.button(reveal).clicked() {
                 let _ = open::that_detached(&root_path);
                 ui.close();
             }
@@ -1295,7 +1296,7 @@ impl KilnApp {
                                         acts.extend(self.workspaces[ws_idx].tools.file_menu_ui(ui));
                                     });
                                 }
-                                if widgets::icon_button(ui, Icon::Search, 28.0, kind == tools::ToolKind::Search, kiln_common::i18n::tr("파일 내용 검색 (⇧⌘F)")).clicked() {
+                                if widgets::icon_button(ui, Icon::Search, 28.0, kind == tools::ToolKind::Search, &kiln_common::trf!("파일 내용 검색 ({})",super::keymap::app_shortcut("⇧⌘F"))).clicked() {
                                     acts.push(Action::OpenSheet(if kind == tools::ToolKind::Search { tools::ToolKind::Explorer } else { tools::ToolKind::Search }));
                                 }
                             });
@@ -1552,7 +1553,7 @@ impl KilnApp {
         let mut add = |group: Group, icon: Icon, label: String, hint: &str, a: Action| {
             let (key,project)=match &a {Action::RevealPane(id)=>(format!("pane:{id}"),self.workspaces.iter().find(|w|w.all_panes().contains(id)).map(|w|format!("{} · {}",w.name,short_path(&w.root))).unwrap_or_default()),_=>(format!("{:?}:{label}",group),String::new())};
             let binding=match &a{Action::OpenRecent=>Some("recent"),Action::OpenLaunchers=>Some("launchers"),Action::NewWorkspace(None)=>Some("projects"),Action::QuickOpen=>Some("files"),Action::ToggleSidebar=>Some("sidebar"),Action::OpenPalette=>Some("palette"),Action::NewPage=>Some("new_task"),Action::Split(layout::Dir::Horizontal)=>Some("split_right"),Action::Split(layout::Dir::Vertical)=>Some("split_down"),Action::CloseActive=>Some("close_panel"),Action::ToggleZoom(_)=>Some("focus_panel"),Action::Equalize=>Some("equalize"),Action::NextPage(1)=>Some("next_task"),Action::NextPage(-1)=>Some("previous_task"),Action::JumpUnread=>Some("unread"),_=>None};
-            let hint=binding.map(|id|self.keymap.label(id,hint)).unwrap_or_else(||hint.into());
+            let hint=binding.map(|id|self.keymap.label(id,hint)).unwrap_or_else(||super::keymap::app_shortcut(hint));
             let (label, detail) = label.split_once('\n').map(|(title,context)|(title.to_owned(),context.to_owned())).unwrap_or((label,String::new()));
             items.push(palette::Item { key, project, group, icon, label, hint, detail, action: a });
         };
@@ -1618,7 +1619,7 @@ impl KilnApp {
         add(Group::Commands, Icon::Bell, kiln_common::i18n::tr("알림 센터 열기").into(), "", Action::ToggleNotifications);
         add(Group::Commands, Icon::Bell, kiln_common::i18n::tr("읽지 않은 알림으로 이동").into(), "⇧⌘U", Action::JumpUnread);
         for k in tools::ToolKind::ALL {
-            add(Group::Tools, k.vicon(), k.label().into(), k.shortcut(), Action::OpenSheet(k));
+            add(Group::Tools, k.vicon(), k.label().into(), &k.shortcut(), Action::OpenSheet(k));
         }
         for (i, w) in self.workspaces.iter().enumerate() {
             add(Group::Spaces, Icon::Folder, w.name.clone(), &format!("⌘{}", i + 1), Action::SelectWorkspace(i));

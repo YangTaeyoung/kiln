@@ -20,7 +20,7 @@ fn manager(root: &Path) -> LspManager {
 /// 임시 워크스페이스(정규화한 경로)에 `main.rs` 를 만들고 언어 서버를 붙여 연다.
 fn setup(text: &str) -> (tempfile::TempDir, PathBuf, Harness<'static, Editor>) {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = kiln_common::paths::canonicalize(dir.path()).unwrap();
     let p = root.join("main.rs");
     std::fs::write(&p, text).unwrap();
     let ed = Editor::open_with_lsp(&p, Some(manager(&root))).unwrap();
@@ -227,7 +227,7 @@ fn rename_edits_open_buffer_and_closed_file_then_format() {
 #[test]
 fn editor_without_server_shows_injected_diagnostics() {
     let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = kiln_common::paths::canonicalize(dir.path()).unwrap();
     let p = root.join("notes.txt");
     std::fs::write(&p, "첫 줄 텍스트\n두 번째 줄에 문제가 있음\n").unwrap();
     let m = LspManager::with_config(root.clone(), LspConfig::default());
