@@ -1,4 +1,5 @@
 # Install the latest Kiln release for Windows (x64 or ARM64). Existing installations update in Kiln.
+# The script is ASCII so Windows PowerShell reads it the same in any code page.
 # irm https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.ps1 | iex
 # The body runs in its own scope, so piping it to Invoke-Expression leaves the shell's settings alone.
 & {
@@ -11,7 +12,7 @@
     $arch = switch ($machine) { 'AMD64' { 'x64' } 'ARM64' { 'arm64' } default { Fail "Kiln supports x64 and ARM64 Windows, not $machine." } }
     $installDir = if ($env:KILN_INSTALL_DIR) { $env:KILN_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\Kiln' }
     if (Test-Path -LiteralPath (Join-Path $installDir 'Kiln.exe')) {
-        Write-Host 'Kiln is already installed. Open Kiln → Settings → About → Check for Updates to update safely.'
+        Write-Host 'Kiln is already installed. Open Kiln, then Settings > About > Check for Updates to update safely.'
         return
     }
 
@@ -33,7 +34,7 @@
     $work = Join-Path ([IO.Path]::GetTempPath()) ("kiln-install-" + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $work | Out-Null
     try {
-        Write-Host "Downloading Kiln $version for Windows $arch…"
+        Write-Host "Downloading Kiln $version for Windows $arch..."
         Fetch @('-o', (Join-Path $work $archive), "$base/$archive")
         Fetch @('-o', (Join-Path $work 'SHA256SUMS.txt'), "$base/SHA256SUMS.txt")
         $expected = Get-Content -LiteralPath (Join-Path $work 'SHA256SUMS.txt') |
