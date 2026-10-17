@@ -16,8 +16,32 @@ pub fn config_file(name: &str) -> PathBuf {
 
 /// `std::fs::canonicalize` without the `\\?\` prefix on Windows drive and UNC paths.
 pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    let path = path.as_ref();
     let canonical = std::fs::canonicalize(path)?;
+    #[cfg(windows)]
+    if let Some(kept) = drive_form(path, &canonical) {
+        return Ok(kept);
+    }
     Ok(simplified(&canonical).into_owned())
+}
+
+/// `path` made absolute when it is on a drive letter that `canonical` resolved to a network
+/// share (a mapped drive), since cmd and many tools cannot start in a share folder.
+#[cfg(windows)]
+fn drive_form(path: &Path, canonical: &Path) -> Option<PathBuf> {
+    use std::path::{Component, Prefix};
+    fn prefix(p: &Path) -> Option<Prefix<'_>> {
+        match p.components().next() {
+            Some(Component::Prefix(prefix)) => Some(prefix.kind()),
+            _ => None,
+        }
+    }
+    let on_drive = matches!(prefix(path), Some(Prefix::Disk(_) | Prefix::VerbatimDisk(_)));
+    let on_share = matches!(prefix(canonical), Some(Prefix::UNC(..) | Prefix::VerbatimUNC(..)));
+    if !(on_drive && on_share) {
+        return None;
+    }
+    Some(simplified(&std::path::absolute(path).ok()?).into_owned())
 }
 
 /// [`canonicalize`] as a method of paths.
@@ -160,6 +184,14 @@ fn runnable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn a_mapped_drive_keeps_its_letter() {
+        assert_eq!(drive_form(Path::new(r"Z:\proj\..\work"), Path::new(r"\\?\UNC\server\share\work")), Some(PathBuf::from(r"Z:\work")));
+        assert_eq!(drive_form(Path::new(r"C:\work"), Path::new(r"\\?\C:\work")), None);
+        assert_eq!(drive_form(Path::new(r"\\server\share\work"), Path::new(r"\\?\UNC\server\share\work")), None);
+    }
 
     #[test]
     fn canonical_paths_have_no_verbatim_prefix() {

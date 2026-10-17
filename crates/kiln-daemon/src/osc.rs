@@ -147,12 +147,24 @@ impl OscScanner {
 
 fn parse_file_url(url: &str) -> Option<String> {
     let rest = url.strip_prefix("file://")?;
-    let path = percent_decode(&rest[rest.find('/')?..]);
-    // `/C:/x` names a Windows drive path.
-    let bytes = path.as_bytes();
-    if cfg!(windows) && bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
-        let drive = path[1..].replace('/', "\\");
-        return Some(if drive.len() == 2 { format!("{drive}\\") } else { drive });
+    let slash = rest.find('/')?;
+    let path = percent_decode(&rest[slash..]);
+    if cfg!(windows) {
+        // `/C:/x` names a drive path; `///server/share` or a host other than this computer
+        // names a network share.
+        let bytes = path.as_bytes();
+        if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
+            let drive = path[1..].replace('/', "\\");
+            return Some(if drive.len() == 2 { format!("{drive}\\") } else { drive });
+        }
+        if path.starts_with("//") {
+            return Some(format!("\\\\{}", path.trim_start_matches('/').replace('/', "\\")));
+        }
+        let host = &rest[..slash];
+        let local = host.is_empty() || host.eq_ignore_ascii_case("localhost") || std::env::var("COMPUTERNAME").is_ok_and(|me| host.eq_ignore_ascii_case(&me));
+        if !local {
+            return Some(format!("\\\\{host}{}", path.replace('/', "\\")));
+        }
     }
     Some(path)
 }
@@ -205,7 +217,23 @@ mod tests {
 
     #[test]
     fn osc7_cwd_decodes_percent() {
-        assert_eq!(scan(&[b"\x1b]7;file://host/Users/me/my%20dir\x07"]), vec![OscEvent::Cwd("/Users/me/my dir".into())]);
+        assert_eq!(scan(&[b"\x1b]7;file://localhost/Users/me/my%20dir\x07"]), vec![OscEvent::Cwd("/Users/me/my dir".into())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn osc7_on_unix_ignores_the_host() {
+        assert_eq!(parse_file_url("file://my-mac.local/Users/me"), Some("/Users/me".into()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn osc7_on_windows_names_drive_and_share_folders() {
+        assert_eq!(parse_file_url("file://localhost/C:/Users/me"), Some(r"C:\Users\me".into()));
+        assert_eq!(parse_file_url("file://localhost///fileserver/team/proj%20x"), Some(r"\\fileserver\team\proj x".into()));
+        assert_eq!(parse_file_url("file://fileserver/team/proj"), Some(r"\\fileserver\team\proj".into()));
+        let me = std::env::var("COMPUTERNAME").unwrap();
+        assert_eq!(parse_file_url(&format!("file://{me}/C:/x")), Some(r"C:\x".into()));
     }
 
     #[test]
