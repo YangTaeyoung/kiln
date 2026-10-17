@@ -25,11 +25,11 @@ use windows_sys::Win32::{
     UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW},
     UI::WindowsAndMessaging::{
         AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, EnumWindows,
-        GetCursorPos, GetIconInfo, GetMessageW, GetSystemMetrics, GetWindowTextLengthW, GetWindowThreadProcessId, HICON, HWND_MESSAGE, ICONINFO,
+        GetCursorPos, GetIconInfo, GetMessageW, GetSystemMetrics, GetWindowTextLengthW, GetWindowThreadProcessId, HICON, ICONINFO,
         IDI_APPLICATION, IDOK, IMAGE_ICON, IsIconic, LoadIconW, IsWindowVisible, LR_DEFAULTCOLOR, LoadImageW, MB_DEFBUTTON2, MB_ICONWARNING, MB_OK, MB_OKCANCEL, MB_SETFOREGROUND,
         MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON,
         SM_CYSMICON, SW_RESTORE, SetForegroundWindow, SetTimer, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
-        WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_NULL, WM_TIMER, WNDCLASSW,
+        WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_NULL, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
     },
 };
 
@@ -475,6 +475,21 @@ fn claim(socket: &str) -> bool {
     }
 }
 
+/// The companion's window, which owns the notification-area icon and runs on this thread.
+fn create_window() -> HWND {
+    let class = wide("KilnTrayWindow");
+    // SAFETY: the class is registered once per process (a second registration fails
+    // harmlessly) and the window is created on the calling thread.
+    unsafe {
+        let instance = GetModuleHandleW(std::ptr::null());
+        let wc = WNDCLASSW { lpfnWndProc: Some(window_proc), hInstance: instance, lpszClassName: class.as_ptr(), ..std::mem::zeroed() };
+        RegisterClassW(&wc);
+        // A hidden top-level tool window: it hears the TaskbarCreated broadcast that a
+        // message-only window would miss, and never appears on the taskbar.
+        CreateWindowExW(WS_EX_TOOLWINDOW, class.as_ptr(), wide("Kiln").as_ptr(), WS_POPUP, 0, 0, 0, 0, std::ptr::null_mut(), std::ptr::null_mut(), instance, std::ptr::null())
+    }
+}
+
 pub fn run(gui: Option<PathBuf>) -> anyhow::Result<()> {
     i18n::set_language(i18n::load_language());
     let socket = kiln_proto::socket_name();
@@ -484,14 +499,7 @@ pub fn run(gui: Option<PathBuf>) -> anyhow::Result<()> {
     let status = Arc::new(Mutex::new(Status::Connecting));
     let background = status.clone();
     std::thread::spawn(move || companion::watch(socket, background));
-    let class = wide("KilnTrayWindow");
-    // SAFETY: the class and window are created once on this thread, which runs their loop.
-    let window = unsafe {
-        let instance = GetModuleHandleW(std::ptr::null());
-        let wc = WNDCLASSW { lpfnWndProc: Some(window_proc), hInstance: instance, lpszClassName: class.as_ptr(), ..std::mem::zeroed() };
-        RegisterClassW(&wc);
-        CreateWindowExW(0, class.as_ptr(), wide("Kiln").as_ptr(), 0, 0, 0, 0, 0, HWND_MESSAGE, std::ptr::null_mut(), instance, std::ptr::null())
-    };
+    let window = create_window();
     anyhow::ensure!(!window.is_null(), "notification-area window: {}", std::io::Error::last_os_error());
     let normal = app_icon();
     let mut tray = Tray {
@@ -530,6 +538,19 @@ mod tests {
         assert!(!normal.is_null());
         let dotted = with_dot(normal);
         assert!(!dotted.is_null() && dotted != normal);
+    }
+
+    #[test]
+    fn the_companion_window_is_a_top_level_window_that_hears_broadcasts() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GA_PARENT, GetAncestor, GetDesktopWindow, IsWindowVisible};
+        let window = create_window();
+        assert!(!window.is_null());
+        // SAFETY: `window` was just created on this thread.
+        unsafe {
+            assert_eq!(GetAncestor(window, GA_PARENT), GetDesktopWindow(), "message-only windows miss TaskbarCreated");
+            assert_eq!(IsWindowVisible(window), 0);
+            DestroyWindow(window);
+        }
     }
 
     #[test]
