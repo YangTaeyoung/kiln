@@ -354,6 +354,39 @@ mod imp {
             // SAFETY: the job handle is open for the lifetime of `self`.
             unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) };
         }
+
+        /// Ends the console programs in the job and leaves window applications started from
+        /// the terminal running, as a closed macOS terminal leaves apps opened from it.
+        fn end_console_programs(&self) {
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::JobObjects::{JobObjectBasicProcessIdList, QueryInformationJobObject};
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
+            // JOBOBJECT_BASIC_PROCESS_ID_LIST: two u32 counts, then pointer-sized process IDs.
+            let mut list = vec![0u64; 1 + 4096];
+            // SAFETY: the buffer is writable for the length passed.
+            let listed = unsafe {
+                QueryInformationJobObject(self.0, JobObjectBasicProcessIdList, list.as_mut_ptr().cast(), (list.len() * 8) as u32, std::ptr::null_mut())
+            } != 0;
+            if !listed {
+                self.terminate();
+                return;
+            }
+            let count = ((list[0] >> 32) as usize).min(list.len() - 1);
+            for &id in &list[1..=count] {
+                let pid = id as u32;
+                if crate::procinfo::is_window_application(pid) {
+                    continue;
+                }
+                // SAFETY: the handle is checked and closed once.
+                unsafe {
+                    let process = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                    if !process.is_null() {
+                        TerminateProcess(process, 1);
+                        CloseHandle(process);
+                    }
+                }
+            }
+        }
     }
 
     impl Drop for Job {
@@ -456,7 +489,7 @@ mod imp {
 
         pub fn kill(&self) {
             if let Some(job) = &self.job {
-                job.terminate();
+                job.end_console_programs();
             }
             let _ = self.child.lock().kill();
         }

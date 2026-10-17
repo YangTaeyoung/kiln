@@ -87,6 +87,33 @@ pub fn name(pid: u32) -> Option<String> {
     Some(image.file_stem()?.to_string_lossy().into_owned())
 }
 
+/// Whether `pid` runs a window (GUI-subsystem) application rather than a console program.
+pub fn is_window_application(pid: u32) -> bool {
+    Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION).and_then(|p| p.image()).and_then(|image| image_subsystem(&image)) == Some(2)
+}
+
+/// The `Subsystem` field of an executable's PE optional header: 2 for a window application,
+/// 3 for a console program.
+fn image_subsystem(path: &std::path::Path) -> Option<u16> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut dos = [0u8; 64];
+    file.read_exact(&mut dos).ok()?;
+    if &dos[..2] != b"MZ" {
+        return None;
+    }
+    let pe = u64::from(u32::from_le_bytes(dos[60..64].try_into().ok()?));
+    // The 4-byte signature and the 20-byte file header precede the optional header, whose
+    // Subsystem field is at offset 68 in both PE32 and PE32+.
+    let mut header = [0u8; 24 + 70];
+    file.seek(SeekFrom::Start(pe)).ok()?;
+    file.read_exact(&mut header).ok()?;
+    if &header[..4] != b"PE\0\0" {
+        return None;
+    }
+    Some(u16::from_le_bytes([header[24 + 68], header[24 + 69]]))
+}
+
 /// The process's arguments, split as `CommandLineToArgvW` splits them.
 pub fn cmdline(pid: u32) -> Option<Vec<String>> {
     use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
@@ -204,8 +231,9 @@ fn is_agent(pid: u32) -> bool {
 
 /// The process in the foreground of the console whose shell is `shell`: the single agent
 /// (`codex`, `claude`) among its descendants, otherwise its newest descendant followed down
-/// to the newest leaf, otherwise the shell itself. Console hosts are ignored, and a child
-/// older than its recorded parent is a reused process ID and is ignored too.
+/// to the newest leaf, otherwise the shell itself. Console hosts and window applications (with
+/// what they start) are ignored, and a child older than its recorded parent is a reused
+/// process ID and is ignored too.
 pub fn foreground_of(shell: u32) -> Option<u32> {
     let procs = snapshot();
     let created = |pid: u32| Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION).and_then(|p| p.created());
@@ -215,7 +243,7 @@ pub fn foreground_of(shell: u32) -> Option<u32> {
     while let Some((parent, parent_created)) = frontier.pop() {
         for entry in procs.iter().filter(|e| e.parent == parent && e.pid != parent) {
             let lower = entry.name.to_ascii_lowercase();
-            if lower == "conhost.exe" || lower == "openconsole.exe" {
+            if lower == "conhost.exe" || lower == "openconsole.exe" || is_window_application(entry.pid) {
                 continue;
             }
             let Some(when) = created(entry.pid).filter(|&t| t >= parent_created) else { continue };

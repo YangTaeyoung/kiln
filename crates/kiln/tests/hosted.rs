@@ -301,6 +301,22 @@ fn killed_session_leaves_no_descendants() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn killing_a_session_spares_window_applications_it_started() {
+    let d = Daemon::start("window-app");
+    let c = d.client();
+    let s = create_shell(&c);
+    type_line(&c, s, "$w = Start-Process winver.exe -PassThru; echo \"windowpid=$($w.Id)\"");
+    let window = wait_value(&c, s, "windowpid=");
+    assert!(alive(window));
+    c.send(ClientMsg::Kill { session: s });
+    std::thread::sleep(Duration::from_secs(2));
+    let survived = alive(window);
+    kill_hard(window);
+    assert!(survived, "a window application started from the terminal outlived its session, as on macOS");
+}
+
 /// Waits until `ready` holds for the session's telemetry or its information.
 #[cfg(windows)]
 fn wait_for_session(c: &Client, s: SessionId, what: &str, ready: impl Fn(&kiln_proto::SessionTelemetry, &kiln_proto::SessionInfo) -> bool) {

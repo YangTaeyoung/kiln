@@ -4,7 +4,7 @@
 #[path = "procinfo_windows.rs"]
 mod windows;
 #[cfg(windows)]
-pub use windows::{cmdline, cwd, foreground_of, name, parent_of};
+pub use windows::{cmdline, cwd, foreground_of, is_window_application, name, parent_of};
 
 /// Resolve the actual foreground job through Kiro's nested PTY. tcgetpgrp
 /// reports the outer bridge's process group, not its inner shell's job.
@@ -325,6 +325,28 @@ mod windows_tests {
         let found = cwd(child.id());
         stop(child.id());
         assert!(found.as_deref().is_some_and(|p| same_dir(p, dir.path())), "{found:?}");
+    }
+
+    #[test]
+    fn window_applications_are_not_the_foreground() {
+        let shell = Command::new("powershell.exe").args(["-NoProfile", "-Command", "Start-Process winver.exe; Start-Sleep 30"]).stdout(Stdio::null()).spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut window = None;
+        while Instant::now() < deadline && window.is_none() {
+            let procs = snapshot_names(shell.id());
+            window = procs.into_iter().find(|n| n.eq_ignore_ascii_case("winver.exe"));
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let foreground = foreground_of(shell.id());
+        stop(shell.id());
+        assert!(window.is_some(), "winver started");
+        assert_eq!(foreground, Some(shell.id()));
+    }
+
+    /// Executable names of the direct children of `parent`.
+    fn snapshot_names(parent: u32) -> Vec<String> {
+        let out = Command::new("powershell.exe").args(["-NoProfile", "-Command", &format!("Get-CimInstance Win32_Process -Filter 'ParentProcessId={parent}' | ForEach-Object Name")]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect()
     }
 
     #[test]
