@@ -72,16 +72,39 @@ fn request_and_launch(
     Ok(())
 }
 
-fn take_request(path: &Path, now: SystemTime) -> bool {
-    // Rename claims the exact published request before reading. Concurrent GUI
-    // instances cannot both consume it, and a subsequent click is not deleted.
+/// Claims the published request and returns its text; concurrent consumers cannot both
+/// claim it, and a later click is not deleted.
+#[cfg(not(windows))]
+fn claim(path: &Path) -> Option<String> {
+    // Rename moves the exact published request out of the way before reading.
     let claimed = path.with_extension(format!("{}.claimed", unique_suffix()));
-    if fs::rename(path, &claimed).is_err() {
-        return false;
-    }
+    fs::rename(path, &claimed).ok()?;
     let request = fs::read_to_string(&claimed).ok();
     let _ = fs::remove_file(&claimed);
     request
+}
+
+#[cfg(windows)]
+fn claim(path: &Path) -> Option<String> {
+    use std::io::Read;
+    use std::os::windows::fs::OpenOptionsExt;
+    // A handle with no sharing is the only one open; the file goes when it closes.
+    const DELETE: u32 = 0x0001_0000;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x0400_0000;
+    let mut file = fs::OpenOptions::new()
+        .access_mode(GENERIC_READ | DELETE)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
+        .open(path)
+        .ok()?;
+    let mut text = String::new();
+    file.read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+fn take_request(path: &Path, now: SystemTime) -> bool {
+    claim(path)
         .and_then(|s| s.parse::<u64>().ok())
         .and_then(|ms| UNIX_EPOCH.checked_add(Duration::from_millis(ms)))
         .and_then(|sent| now.duration_since(sent).ok())

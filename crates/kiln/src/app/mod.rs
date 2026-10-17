@@ -299,6 +299,7 @@ pub struct KilnApp {
     confirm: Option<Confirm>,
     quit_confirmed: bool,
     /// An installed update starts the new GUI once this one exits.
+    #[cfg_attr(not(windows), allow(dead_code))]
     relaunch_after_update: bool,
     palette: palette::Palette,
     recent_panes: Vec<PaneId>,
