@@ -28,7 +28,7 @@ pub fn updater_fixture_event(event: &str) {
 
 /// Sparkle relaunches through Launch Services without our launch environment.
 /// Compile the fixture root into test builds so every child/relaunch stays isolated.
-#[cfg(feature = "updater-test")]
+#[cfg(all(feature = "updater-test", target_os = "macos"))]
 pub fn isolate_updater_fixture() -> anyhow::Result<()> {
     use std::path::Path;
     let root = option_env!("KILN_UPDATER_TEST_ROOT")

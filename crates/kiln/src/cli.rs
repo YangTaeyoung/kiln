@@ -119,7 +119,7 @@ fn connect() -> anyhow::Result<Client> {
 /// The `kiln` command line: the GUI without a subcommand, otherwise the CLI and the
 /// internal helpers.
 pub fn main() -> anyhow::Result<()> {
-    #[cfg(feature = "updater-test")]
+    #[cfg(all(feature = "updater-test", target_os = "macos"))]
     crate::isolate_updater_fixture()?;
     let cli = Cli::parse();
     #[cfg(feature = "updater-test")]
