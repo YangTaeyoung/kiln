@@ -44,6 +44,11 @@ fn unique_suffix() -> String {
 }
 
 fn write_request(path: &Path, now: SystemTime) -> io::Result<()> {
+    write_payload(path, now, "")
+}
+
+/// Publishes a request: its timestamp, then `payload` on the next line when there is one.
+fn write_payload(path: &Path, now: SystemTime, payload: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -52,11 +57,21 @@ fn write_request(path: &Path, now: SystemTime) -> io::Result<()> {
         .duration_since(UNIX_EPOCH)
         .map_err(io::Error::other)?
         .as_millis();
-    let result = fs::write(&temp, timestamp.to_string()).and_then(|_| fs::rename(&temp, path));
+    let text = if payload.is_empty() { timestamp.to_string() } else { format!("{timestamp}\n{payload}") };
+    let result = fs::write(&temp, text).and_then(|_| fs::rename(&temp, path));
     if result.is_err() {
         let _ = fs::remove_file(temp);
     }
     result
+}
+
+fn write_folder_request(path: &Path, now: SystemTime, folder: &Path) -> io::Result<()> {
+    let folder = folder.to_str().ok_or_else(|| io::Error::other("folder is not Unicode"))?;
+    write_payload(path, now, folder)
+}
+
+fn take_folder_request_at(path: &Path, now: SystemTime) -> Option<std::path::PathBuf> {
+    take_payload(path, now).filter(|folder| !folder.is_empty()).map(std::path::PathBuf::from)
 }
 
 fn request_and_launch(
@@ -104,16 +119,44 @@ fn claim(path: &Path) -> Option<String> {
 }
 
 fn take_request(path: &Path, now: SystemTime) -> bool {
-    claim(path)
-        .and_then(|s| s.parse::<u64>().ok())
-        .and_then(|ms| UNIX_EPOCH.checked_add(Duration::from_millis(ms)))
-        .and_then(|sent| now.duration_since(sent).ok())
-        .is_some_and(|age| age <= MAX_AGE)
+    take_payload(path, now).is_some()
+}
+
+/// The payload of a fresh request, claimed once; stale, future and malformed requests are
+/// dropped.
+fn take_payload(path: &Path, now: SystemTime) -> Option<String> {
+    let text = claim(path)?;
+    let (stamp, payload) = text.split_once('\n').unwrap_or((text.as_str(), ""));
+    let sent = UNIX_EPOCH.checked_add(Duration::from_millis(stamp.parse::<u64>().ok()?))?;
+    let age = now.duration_since(sent).ok()?;
+    (age <= MAX_AGE).then(|| payload.to_owned())
+}
+
+/// Asks the running GUI to open `folder`.
+pub fn request_folder(folder: &Path) -> io::Result<()> {
+    write_folder_request(&kiln_common::paths::config_file("open-folder"), SystemTime::now(), folder)
+}
+
+/// The folder a later start asked the running GUI to open, once.
+pub fn take_folder_request() -> Option<std::path::PathBuf> {
+    take_folder_request_at(&kiln_common::paths::config_file("open-folder"), SystemTime::now())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_folder_request_carries_its_path_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("open-folder");
+        let now = UNIX_EPOCH + Duration::from_secs(1000);
+        let folder = Path::new("C:/작업 공간/kiln");
+        write_folder_request(&path, now, folder).unwrap();
+        assert_eq!(take_folder_request_at(&path, now + Duration::from_secs(5)).as_deref(), Some(folder));
+        assert_eq!(take_folder_request_at(&path, now + Duration::from_secs(6)), None);
+        write_folder_request(&path, now, folder).unwrap();
+        assert_eq!(take_folder_request_at(&path, now + Duration::from_secs(61)), None);
+    }
     #[test]
     fn request_survives_launch_but_is_consumed_only_once() {
         let dir = tempfile::tempdir().unwrap();

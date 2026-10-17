@@ -318,6 +318,10 @@ fn run_gui(path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     crate::status_bar::ensure_running();
     #[cfg(windows)]
+    if crate::gui_instance::hand_off(path.as_deref()) {
+        return Ok(());
+    }
+    #[cfg(windows)]
     crate::tray_windows::ensure_running();
     #[cfg(windows)]
     {

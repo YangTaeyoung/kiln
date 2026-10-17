@@ -2458,6 +2458,10 @@ impl eframe::App for KilnApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
+            #[cfg(windows)]
+            if let Some(folder) = crate::native_actions::take_folder_request() {
+                self.apply(Action::NewWorkspace(Some(folder)), ctx);
+            }
             ctx.request_repaint_after(Duration::from_secs(1));
         }
         self.guard_window_close(ctx);

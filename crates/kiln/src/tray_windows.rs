@@ -246,7 +246,7 @@ fn image_of(pid: u32) -> Option<PathBuf> {
 }
 
 /// A visible, titled top-level window of the Kiln GUI, if one is open.
-fn gui_window(gui: Option<&Path>) -> Option<HWND> {
+pub(crate) fn gui_window(gui: Option<&Path>) -> Option<HWND> {
     struct Search<'a> {
         gui: Option<&'a Path>,
         found: HWND,
@@ -278,19 +278,24 @@ fn gui_window(gui: Option<&Path>) -> Option<HWND> {
     (!search.found.is_null()).then_some(search.found)
 }
 
+/// Restores `window` if minimized and brings it to the foreground. The caller must hold the
+/// foreground (after its own menu or dialog, or as a process the user just started).
+pub(crate) fn activate(window: HWND) {
+    // SAFETY: `window` is a live top-level window.
+    unsafe {
+        if IsIconic(window) != 0 {
+            ShowWindow(window, SW_RESTORE);
+        }
+        SetForegroundWindow(window);
+    }
+}
+
 static GUI_LAUNCHING: AtomicBool = AtomicBool::new(false);
 
 fn show_window() -> std::io::Result<()> {
     let gui = TRAY.with(|t| t.borrow().as_ref().and_then(|t| t.gui.clone()));
     if let Some(window) = gui_window(gui.as_deref()) {
-        // SAFETY: `window` is a live top-level window; the companion is in the foreground
-        // after its own menu or dialog, so it may hand the foreground on.
-        unsafe {
-            if IsIconic(window) != 0 {
-                ShowWindow(window, SW_RESTORE);
-            }
-            SetForegroundWindow(window);
-        }
+        activate(window);
         return Ok(());
     }
     let gui = gui.ok_or_else(|| std::io::Error::other(tr("Kiln 실행 파일을 찾지 못했습니다.")))?;

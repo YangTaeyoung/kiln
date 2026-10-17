@@ -11,6 +11,9 @@ pub mod status_bar;
 #[cfg(windows)]
 pub mod tray_windows;
 
+#[cfg(windows)]
+pub mod gui_instance;
+
 #[cfg(target_os = "macos")]
 pub mod local_network;
 

@@ -75,6 +75,7 @@ fn npm_launcher(binary:&Path)->Option<(PathBuf,Vec<std::ffi::OsString>)>{
 
 /// The file an npm `.cmd` launcher starts: the last `"%dp0%\<path>"` in its text, a path
 /// inside the launcher's folder.
+#[cfg(any(windows,test))]
 fn npm_target(text:&str,folder:&Path)->Option<PathBuf>{
     const MARK:&str="\"%dp0%\\";
     let rest=&text[text.rfind(MARK)?+MARK.len()..];
