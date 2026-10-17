@@ -7,7 +7,7 @@
 <p align="center">A terminal workspace for agents, code, and the work between repositories.</p>
 
 <p align="center">
-  <a href="https://github.com/YangTaeyoung/kiln/releases/latest">Download for macOS</a> ·
+  <a href="https://github.com/YangTaeyoung/kiln/releases/latest">Download for macOS and Windows</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="https://github.com/YangTaeyoung/kiln/issues">Report an issue</a>
 </p>
@@ -15,6 +15,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue" /></a>
   <img alt="macOS on Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-24292f" />
+  <img alt="Windows x64 and ARM64" src="https://img.shields.io/badge/Windows-x64%20%7C%20ARM64-0078d4" />
   <img alt="Built with Rust and egui" src="https://img.shields.io/badge/built%20with-Rust%20%2B%20egui-b7410e" />
 </p>
 
@@ -46,19 +47,27 @@ libraries—and keep the whole task in view.
 
 ### Start in a minute
 
-Install the latest notarized build with one command:
+Install the latest notarized build on macOS with one command:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | sh
 ```
 
-Open **Kiln** from Applications, choose your project folder, and start a terminal
-or a task with Codex or Claude. Prefer a download? Get the app from
-[Releases](https://github.com/YangTaeyoung/kiln/releases/latest) and move it to Applications.
-Already installed? Use **Kiln → Check for Updates**.
+On Windows, run this in PowerShell:
 
-Requires macOS 11+ on Apple Silicon. Codex, Claude, and `gh` are external tools;
-install and authenticate the ones you use. The app UI supports Korean, English, Japanese and Simplified Chinese.
+```powershell
+irm https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.ps1 | iex
+```
+
+Open **Kiln** from Applications or the Start menu, choose your project folder, and start
+a terminal or a task with Codex or Claude. Prefer a download? Get the app from
+[Releases](https://github.com/YangTaeyoung/kiln/releases/latest). Already installed? Use
+**Kiln → Check for Updates** on macOS or **Settings → About → Check for Updates** on Windows.
+
+Requires macOS 11+ on Apple Silicon, or Windows 10 1809+/Windows 11 on x64 or ARM64.
+Windows builds are not code-signed yet; a downloaded archive may show a SmartScreen
+prompt. Codex, Claude, and `gh` are external tools; install and authenticate the ones
+you use. The app UI supports Korean, English, Japanese and Simplified Chinese.
 
 [Installation and updates →](docs/getting-started.md)
 

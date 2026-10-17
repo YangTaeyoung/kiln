@@ -5,6 +5,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | Guide | What you will find |
 | --- | --- |
 | [Getting started](getting-started.md) | Install, open a workspace, run your first task |
+| [Windows support](windows-parity.md) | Windows behavior of each feature and how it is checked |
 | [Workspaces and agents](workspaces.md) | Named workspaces, shared folders, multiple repositories, split sessions |
 | [Pane layout](pane-layout.md) | Drag panes, resize local or linked boundaries, snap and cancel |
 | [Remote files and SSH](remote-files.md) | S3/OCI/GCS/R2, CLI profiles, FTP/SFTP, file transfers and SSH terminals |

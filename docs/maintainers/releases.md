@@ -2,7 +2,8 @@
 
 This is the entry point for any maintainer or agent preparing a Kiln release.
 Read [signing setup](signing.md) first. Do not confuse local builds with notarized
-public distribution. The current release target is **macOS Apple Silicon**.
+public distribution. Release targets are **macOS Apple Silicon** and **Windows x64 and
+ARM64** (section 6).
 Use Python 3.11+, stable Rust, Xcode command-line tools and an authenticated `gh`.
 Signing keys and notarization credentials must already be available on the build Mac;
 the repository's CI validates source but does not hold credentials or publish releases.
@@ -137,10 +138,14 @@ initialize a second README or license commit over the existing source history.
 ```sh
 git tag vVERSION
 git push origin HEAD vVERSION
+# Build, sign and verify the Windows archives (section 6) before creating the draft.
 gh release create vVERSION --repo YangTaeyoung/kiln --verify-tag --draft \
   --title 'Kiln VERSION' --notes-file docs/releases/VERSION.md \
   target/distribution/VERSION/Kiln-VERSION-macos-arm64.zip \
+  target/distribution/VERSION/Kiln-VERSION-windows-x64.zip \
+  target/distribution/VERSION/Kiln-VERSION-windows-arm64.zip \
   target/distribution/VERSION/appcast.xml \
+  target/distribution/VERSION/appcast-windows.xml \
   target/distribution/VERSION/SHA256SUMS.txt
 gh release edit vVERSION --repo YangTaeyoung/kiln --draft=false --latest
 ```
@@ -174,6 +179,40 @@ When replacing a local app, record `kiln ls --json` before and after. Close the 
 through its save/quit flow; preserve the daemon and PTYs. Verify the helper is current,
 the workspace restores and all original shell PIDs remain alive. Remove only your
 temporary fixtures and duplicate build bundles, never the active app or credentials.
+
+## 6. Windows archives
+
+`.github/workflows/release-windows.yml` builds the x64 and ARM64 archives from the
+pushed tag on GitHub's Windows runners. The archives hold `Kiln.exe`, `bin\kiln.exe`
+and the license texts. Their executables are not Authenticode-signed until the
+SignPath Foundation application is approved (the workflow keeps the signing step
+ready); the update signature and `SHA256SUMS.txt` protect delivery. Sign the archives
+on the Mac with the same Sparkle key; never copy that key to CI.
+
+```sh
+release_version=VERSION
+release_dir="target/distribution/$release_version"
+gh workflow run release-windows.yml --repo YangTaeyoung/kiln -f ref="v$release_version"
+run_id=$(gh run list --repo YangTaeyoung/kiln --workflow release-windows.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch "$run_id" --repo YangTaeyoung/kiln --exit-status
+gh run download "$run_id" --repo YangTaeyoung/kiln -D "$release_dir/windows"
+for arch in x64 arm64; do
+  zip="Kiln-$release_version-windows-$arch.zip"
+  mv "$release_dir/windows/kiln-windows-$arch/$zip" "$release_dir/"
+  target/vendor/sparkle/bin/sign_update --account dev.kiln.app "$release_dir/$zip" > "$release_dir/windows-$arch-signature.txt"
+done
+python3 scripts/make-appcast.py --windows "$release_version" \
+  "$release_dir/Kiln-$release_version-windows-x64.zip" "$release_dir/windows-x64-signature.txt" \
+  "$release_dir/Kiln-$release_version-windows-arm64.zip" "$release_dir/windows-arm64-signature.txt"
+(cd "$release_dir" && shasum -a 256 "Kiln-$release_version-windows-x64.zip" "Kiln-$release_version-windows-arm64.zip" >> SHA256SUMS.txt && shasum -a 256 -c SHA256SUMS.txt)
+```
+
+Before uploading, run the [Windows scenarios](../windows-parity.md) on both archives in
+the Windows VM: `install.ps1` against a local mirror of the draft layout (twice; the
+second run must change nothing), the in-app update from the previous release with an
+`updater-test` build and a test key, and the feature checks. Upload both archives,
+`appcast-windows.xml` and the extended `SHA256SUMS.txt` with the macOS assets. The
+Windows feed resolves to `releases/latest/download/appcast-windows.xml`.
 
 ## Failure and recovery
 

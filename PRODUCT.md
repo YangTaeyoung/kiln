@@ -2,7 +2,7 @@
 <!-- impeccable:product-schema 1 -->
 
 ## Platform
-Desktop native application, Rust + egui. macOS is the current validation platform; existing Windows and Linux support is preserved.
+Desktop native application, Rust + egui. macOS (Apple Silicon) and Windows (x64, ARM64) are release and validation platforms with the same UI and features; existing Linux support is preserved.
 
 ## Users
 Developers working with multiple AI agents and terminal sessions, and developers editing code and using Git and databases. Both workflows have equal priority.

@@ -319,6 +319,14 @@ fn run_gui(path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     crate::status_bar::ensure_running();
     #[cfg(windows)]
     crate::tray_windows::ensure_running();
+    #[cfg(windows)]
+    {
+        // The Start-menu shortcut carries the same app ID, so its pin, the running windows
+        // and Kiln's notifications share one taskbar identity.
+        let id: Vec<u16> = "dev.kiln.app".encode_utf16().chain([0]).collect();
+        // SAFETY: the ID is NUL-terminated and outlives the call.
+        unsafe { windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     app::run(path)
 }
