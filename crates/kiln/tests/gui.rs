@@ -1868,7 +1868,7 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently"]);
     let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
     client.send(kiln_proto::ClientMsg::Input{session:original,data:b"printf 'original-workspace-%s\\n' alive\r".to_vec()});
-    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|t|t.contains("original-workspace-alive"))));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|t|t.contains("original-workspace-alive"))),"focused terminal: {:?}",h.state().debug_focused_text());
     let sessions=match client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(2)).unwrap(){kiln_proto::ServerMsg::Sessions{sessions,..}=>sessions,r=>panic!("{r:?}")};
     assert!(sessions.iter().find(|s|s.id==second).is_none_or(|s|s.exited.is_some()));
 }

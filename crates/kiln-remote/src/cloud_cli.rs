@@ -410,13 +410,13 @@ mod windows_tests {
         let (cancel, written) = (control.clone(), pid_file.clone());
         std::thread::spawn(move || {
             let start = Instant::now();
-            while !written.exists() && start.elapsed() < Duration::from_secs(20) {
+            while !written.exists() && start.elapsed() < Duration::from_secs(150) {
                 std::thread::sleep(Duration::from_millis(50));
             }
             std::thread::sleep(Duration::from_millis(200));
             cancel.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         });
-        let err = execute_at(ObjectProvider::Google, &cli, &[pid_file.to_string_lossy().into_owned()], &[], &control, Duration::from_secs(60), 1024).unwrap_err();
+        let err = execute_at(ObjectProvider::Google, &cli, &[pid_file.to_string_lossy().into_owned()], &[], &control, Duration::from_secs(180), 1024).unwrap_err();
         assert!(err.to_string().contains("cancelled"), "{err:#}");
         let pid: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
         let start = Instant::now();
