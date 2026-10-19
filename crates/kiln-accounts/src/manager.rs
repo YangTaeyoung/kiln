@@ -27,6 +27,7 @@ pub struct Env {
     pub probe: UsageProbe,
     /// None keeps the offline rollout reader available in isolated fixtures.
     pub codex_probe: Option<UsageProbe>,
+    pub codex_native_probe: Option<Arc<dyn Fn(&Path, &str) -> Result<Usage> + Send + Sync>>,
     /// 키체인 account 속성을 모를 때 쓰는 사용자 이름.
     pub username: String,
 }
@@ -59,6 +60,7 @@ impl Env {
             settings_path: kiln_common::paths::config_file("accounts.json"),
             probe: Arc::new(|token: &str| claude::probe_usage(token)),
             codex_probe: Some(Arc::new(codex::probe_usage)),
+            codex_native_probe: Some(Arc::new(codex::probe_native)),
             username: std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default(),
         }
     }
@@ -76,6 +78,7 @@ impl Env {
             settings_path: root.join("config/accounts.json"),
             probe: Arc::new(|_: &str| Err(anyhow!("probe disabled"))),
             codex_probe: None,
+            codex_native_probe: None,
             username: "tester".into(),
         };
         (env, store)
@@ -174,6 +177,7 @@ fn idx(t: Tool) -> usize {
 #[derive(Default)]
 pub(crate) struct State {
     usage_poll: HashMap<(Tool, String), UsagePoll>,
+    settings_visible: bool,
     settings: Settings,
     usage: HashMap<(Tool, String), Usage>,
     limited_at: HashMap<(Tool, String), i64>,
@@ -353,6 +357,7 @@ impl AccountManager {
             true
         });
         if !started { return; }
+        self.repaint();
         let m = self.clone();
         std::thread::spawn(move || { m.check_profile_credentials(); m.repaint(); });
     }
@@ -1030,6 +1035,18 @@ impl AccountManager {
         self.with_state(|s| s.settings.tool(tool).profiles.iter().find(|p| p.profile.id == id).and_then(|p| p.last_usage_at))
     }
 
+    /// Opening settings refreshes both providers before cached usage is rendered.
+    pub fn settings_visibility(&self, visible: bool) {
+        let opened = self.with_state(|s| {
+            let opened = visible && !s.settings_visible;
+            s.settings_visible = visible;
+            opened
+        });
+        if opened {
+            for tool in Tool::ALL { self.refresh_usage(tool); }
+        }
+    }
+
     /// Refresh all saved accounts; concurrent requests and provider backoff are respected.
     pub fn refresh_usage(&self, tool: Tool) { self.refresh_usage_impl(tool, true); }
 
@@ -1038,12 +1055,17 @@ impl AccountManager {
         if self.inner.shutting_down.load(Ordering::Relaxed) || self.profiles(tool).is_empty() { return; }
         let started = self.with_state(|s| !std::mem::replace(&mut s.refreshing[idx(tool)], true));
         if !started { return; }
+        self.repaint();
         let m = self.clone();
         std::thread::spawn(move || {
-            m.check_profile_credentials();
-            if tool == Tool::Codex && m.inner.env.codex_probe.is_none() {
-                m.refresh_codex_logs();
-            } else { m.refresh_profiles(tool, manual); }
+            if tool == Tool::Codex && m.inner.env.codex_native_probe.is_some() {
+                m.refresh_native_codex(manual);
+            } else {
+                m.check_profile_credentials();
+                if tool == Tool::Codex && m.inner.env.codex_probe.is_none() {
+                    m.refresh_codex_logs();
+                } else { m.refresh_profiles(tool, manual); }
+            }
             m.with_state(|s| s.refreshing[idx(tool)] = false);
             m.persist_logged();
             m.repaint();
@@ -1054,6 +1076,33 @@ impl AccountManager {
     pub fn refresh_usage_blocking(&self, tool: Tool) {
         self.refresh_usage(tool);
         while self.is_refreshing(tool) { std::thread::sleep(std::time::Duration::from_millis(5)); }
+    }
+
+    fn refresh_native_codex(&self, manual: bool) {
+        for profile in self.profiles(Tool::Codex) {
+            if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
+            if self.pending_login(Tool::Codex, &profile.id) { continue; }
+            let now = now_unix();
+            let due = self.with_state(|s| {
+                let poll = s.usage_poll.entry((Tool::Codex, profile.id.clone())).or_default();
+                now >= poll.blocked_until && (manual || now >= poll.next_at)
+            });
+            if !due { continue; }
+            let runtime = self.runtime_dir(Tool::Codex, &profile.id);
+            let home = if runtime.is_dir() { &runtime } else { &self.inner.env.codex_home };
+            let result = profile.email.as_deref().context("account identity unavailable").and_then(|email| {
+                self.inner.env.codex_native_probe.as_ref().unwrap()(home, email)
+            });
+            let _op = self.inner.op.lock();
+            if self.pending_login(Tool::Codex, &profile.id) || !self.profiles(Tool::Codex).iter().any(|p| p.id == profile.id && p.email == profile.email) { continue; }
+            self.with_state(|s| {
+                let poll = s.usage_poll.entry((Tool::Codex, profile.id.clone())).or_default();
+                poll.next_at = now_unix() + 300;
+                poll.blocked_until = if result.is_err() { poll.next_at } else { 0 };
+            });
+            self.set_usage(Tool::Codex, &profile.id, result.unwrap_or_else(Usage::unavailable));
+            self.repaint();
+        }
     }
 
     fn usage_secret(&self, tool: Tool, id: &str) -> Result<Option<String>> {
@@ -1204,6 +1253,53 @@ fn new_id(tool: Tool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_codex_usage_does_not_parse_cli_owned_encrypted_credentials() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        std::fs::create_dir_all(&env.codex_home).unwrap();
+        std::fs::write(env.codex_home.join("auth.json"), codex::tests::fake_auth("fixture@example.test", "fixture")).unwrap();
+        env.codex_native_probe = Some(Arc::new(|home, email| {
+            assert_eq!(email, "fixture@example.test");
+            assert_eq!(std::fs::read_to_string(home.join("auth.json")).unwrap(), "encrypted-fixture");
+            Ok(Usage { five_hour: Some((0.42, None)), status: "allowed".into(), ..Default::default() })
+        }));
+        let manager = AccountManager::with_env(env);
+        let profile = manager.save_current(Tool::Codex, "Fixture").unwrap();
+        let runtime = manager.runtime_dir(Tool::Codex, &profile.id);
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join("auth.json"), "encrypted-fixture").unwrap();
+        manager.refresh_usage_blocking(Tool::Codex);
+        assert_eq!(manager.usage(Tool::Codex, &profile.id).unwrap().five_hour.unwrap().0, 0.42);
+    }
+
+    #[test]
+    fn settings_open_fetches_once_and_reopening_fetches_again() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        env.probe = Arc::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok(Usage { five_hour: Some((0.3, None)), status: "allowed".into(), ..Default::default() })
+        });
+        login_claude(&env, &store, "fixture@example.test", "fixture");
+        let manager = AccountManager::with_env(env);
+        manager.save_current(Tool::Claude, "Fixture").unwrap();
+        for expected in [1, 2] {
+            manager.settings_visibility(true);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while manager.is_refreshing(Tool::Claude) {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            manager.settings_visibility(true);
+            assert_eq!(calls.load(Ordering::SeqCst), expected);
+            manager.settings_visibility(false);
+        }
+    }
 
     #[test]
     fn two_claude_accounts_use_fresh_keychain_tokens_and_cli_config_metadata() {

@@ -20,8 +20,10 @@ fallback. A namespaced legacy `.config.json` is authoritative when it exists;
 `.claude.json` remains the default. A locked or inaccessible Keychain is an
 unknown local state, not proof that the account logged out.
 Backoff is held per profile and credential fingerprint in memory. Successful
-values and check timestamps are persisted without secrets. Failure preserves
-previous bars and their original successful timestamp. The refresh action cannot
+values and check timestamps are persisted without secrets. Failure preserves the last successful sample for internal account decisions,
+but settings hides failed or expired samples. Opening settings triggers a fresh
+request for both providers. While a request is running, each account shows a
+spinner instead of cached bars. Repeated frames do not trigger more requests. The refresh action cannot
 bypass provider backoff. The scheduler exists only in the GUI, not the daemon.
 Test environments never start real provider polling automatically.
 
@@ -35,12 +37,15 @@ from a missing `auth.json`. Managed file-backed namespaces retain their file pin
 
 ## Observed provider contracts
 
-- Codex: read-only `GET https://chatgpt.com/backend-api/wham/usage`, Bearer and
-  `ChatGPT-Account-Id` headers, matching the
-  [official 0.162.1 backend client](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/backend-client/src/client/rate_limit_resets.rs#L64).
-  The [window conversion](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/backend-client/src/client.rs#L741)
-  uses `used_percent`, `limit_window_seconds` and `reset_at`. Kiln does not opt
-  into Reserve or consume reset credits.
+- Codex: a bounded, private `codex --no-daemon app-server` reader uses
+  `account/read` and `account/rateLimits/read`. The official CLI owns credential
+  decryption and refresh, including encrypted `auth.json` formats. Account email
+  is checked before and after reading quotas. No model turn is started and no
+  authentication tokens cross the subprocess boundary. The response uses
+  `usedPercent`, `windowDurationMins`, and `resetsAt`, as defined by the
+  [official account protocol](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/account.rs).
+  The reader has a 20-second deadline and a one-megabyte response-line bound.
+  Failed requests wait five minutes before retrying, including manual refresh.
 - Claude: the installed official 2.1.296 CLI's embedded JavaScript reads
   `GET https://api.anthropic.com/api/oauth/usage`, Bearer and
   `anthropic-beta: oauth-2025-04-20` headers. `five_hour` and `seven_day` contain
@@ -51,15 +56,15 @@ from a missing `auth.json`. Managed file-backed namespaces retain their file pin
   The [official usage guide](https://code.claude.com/docs/en/costs#when-the-usage-request-fails)
   confirms last-known bars and their age after failed requests.
 
-The transport uses HTTPS GET without redirects or request bodies. Tokens are
+The Claude transport uses HTTPS GET without redirects or request bodies. Tokens are
 passed to curl through stdin, never process arguments. Curl configuration files
 are disabled; response bodies are bounded while streaming, including older curl
 versions and chunked responses. Private temporary headers are removed on return.
 Provider response bodies and curl diagnostics are never displayed or logged.
 HTTP 429/403 observe bounded Retry-After; 401 pauses one hour. Safe HTTP status
 labels distinguish authorization, access and rate-limit errors without showing
-provider bodies. Stale bars retain their fetched percentages; a passed reset
-time after a failed fetch does not establish a fresh 0% reading. Keychain
+provider bodies. Settings never invents a fresh 0% reading from a passed reset time, and hides
+failed samples and samples older than five minutes. Keychain
 subprocesses have a three-second bound and owned children are reaped. Token refresh
 remains the responsibility of each official CLI.
 
