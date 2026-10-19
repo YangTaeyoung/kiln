@@ -468,14 +468,21 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
     /// continued past the canonical history is kept as a branch.
     fn archive_pending(&mut self, hub: &mut Hub, cid: &str, events: &mut Option<Vec<format::Message>>) -> Result<()> {
         let pending = hub.state.conversations[cid].pending.clone();
+        let mut failure = None;
         for source in pending {
             let native = NativeRef::of(&source);
             if storage::exists(&source) {
                 if recently_modified(stamp(&source)?.1, self.cache.quiet) {
                     continue;
                 }
-                let messages = read_messages(&source).unwrap_or_default();
-                let archived = canonical::archive_native(self.config, &source, cid, &mut self.metadata)?;
+                let messages = match read_messages(&source) {
+                    Ok(messages) => messages,
+                    Err(error) => { failure.get_or_insert(error); continue; }
+                };
+                let archived = match canonical::archive_native(self.config, &source, cid, &mut self.metadata) {
+                    Ok(archived) => archived,
+                    Err(error) => { failure.get_or_insert(error); continue; }
+                };
                 if !messages.is_empty() {
                     if events.is_none() {
                         *events = Some(hub.events(cid)?);
@@ -493,7 +500,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             }
             hub.save()?;
         }
-        Ok(())
+        match failure { Some(error) => Err(error), None => Ok(()) }
     }
 
     fn fingerprint(stamps: &[Option<(u64, SystemTime)>], events: usize) -> u64 {

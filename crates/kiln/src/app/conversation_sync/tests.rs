@@ -4472,3 +4472,29 @@ fn hook_transcript_paths_match_canonical_roots() {
         assert_eq!(source.path, canonical, "{raw}");
     }
 }
+
+#[test]
+fn one_protected_copy_does_not_block_retiring_other_copies() {
+    let f = Fixture::new(Tool::Claude);
+    assert!(f.scan().errors.is_empty());
+    let older = legacy_copy(&f, "protected-copy", &messages(), SystemTime::now() - Duration::from_secs(600));
+    let other = legacy_copy(&f, "retirable-copy", &messages(), SystemTime::now() - Duration::from_secs(600));
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    store.state.conversations.values_mut().next().unwrap().pending.extend([older.clone(), other.clone()]);
+    store.save().unwrap();
+    let metadata = |source: &Source, request: Metadata<'_>| -> Result<Option<String>> {
+        if matches!(request, Metadata::Archive) {
+            ensure!(source.id != older.id, "Linked snapshot has descendant histories; preserved for review");
+            return archiving_into(source);
+        }
+        Ok(None)
+    };
+    let status = scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), None, metadata, |_| {}).unwrap();
+    assert!(!status.errors.is_empty());
+    assert!(older.path.exists());
+    assert!(!other.path.exists());
+    let state = f.hub();
+    let record = state.conversations.values().next().unwrap();
+    assert!(record.pending.iter().any(|s| s.id == older.id));
+    assert!(!record.pending.iter().any(|s| s.id == other.id));
+}

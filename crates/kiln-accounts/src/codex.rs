@@ -238,6 +238,87 @@ pub fn probe_usage(auth: &str) -> anyhow::Result<Usage> {
     usage_from_json(&body).ok_or_else(|| anyhow::anyhow!("usage windows unavailable"))
 }
 
+/// The CLI owns credential decryption and refresh; only account metadata and quotas cross this boundary.
+pub(crate) fn probe_native(home: &Path, expected_email: &str) -> anyhow::Result<Usage> {
+    use anyhow::Context;
+    let mut extra = vec![PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
+    if let Some(home) = kiln_common::paths::home() { extra.insert(0, home.join(".local/bin")); }
+    let binary = kiln_common::paths::find_executable("codex", &extra).context("Codex CLI unavailable")?;
+    probe_native_with(&binary, home, expected_email, std::time::Duration::from_secs(20))
+}
+
+fn probe_native_with(binary: &Path, home: &Path, expected_email: &str, timeout: std::time::Duration) -> anyhow::Result<Usage> {
+    use anyhow::{Context, ensure};
+    use std::io::{BufRead, Write};
+    use std::process::{Command, Stdio};
+    let mut command = Command::new(binary);
+    #[cfg(unix)]
+    { use std::os::unix::process::CommandExt; command.process_group(0); }
+    kiln_common::process::hide_window(&mut command);
+    let mut child = command.args(["--no-daemon", "app-server"]).env("CODEX_HOME", home)
+        .current_dir(home).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("Cannot start Codex usage reader")?;
+    #[cfg(windows)]
+    let job = kiln_common::process::Job::for_process(child.id(), true);
+    let mut input = child.stdin.take().context("Codex input unavailable")?;
+    let output = child.stdout.take().context("Codex output unavailable")?;
+    let (tx, rx) = std::sync::mpsc::sync_channel(8);
+    let reader = std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(output);
+        loop {
+            let mut line = Vec::new();
+            match reader.by_ref().take(1024 * 1024 + 1).read_until(b'\n', &mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) if line.len() > 1024 * 1024 => break,
+                Ok(_) => if tx.send(serde_json::from_slice::<Value>(&line).ok()).is_err() { break; },
+            }
+        }
+    });
+    let result = (|| {
+        let deadline = std::time::Instant::now() + timeout;
+        let mut request = |id: u64, method: &str, params: Value| -> anyhow::Result<Value> {
+            writeln!(input, "{}", serde_json::json!({"id":id,"method":method,"params":params}))?;
+            input.flush()?;
+            loop {
+                ensure!(std::time::Instant::now() < deadline, "Codex usage request timed out");
+                let reply = rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).context("Codex usage request timed out")?.context("Invalid Codex reply")?;
+                if reply["id"].as_u64() != Some(id) { continue; }
+                ensure!(reply.get("error").is_none(), "Codex usage request failed; check CLI sign-in");
+                if id == 1 { writeln!(input, "{{\"method\":\"initialized\"}}")?; input.flush()?; }
+                return reply.get("result").cloned().context("Missing Codex result");
+            }
+        };
+        request(1, "initialize", serde_json::json!({"clientInfo":{"name":"kiln_usage","version":env!("CARGO_PKG_VERSION")}}))?;
+        let account = request(2, "account/read", serde_json::json!({"refreshToken":true}))?;
+        ensure!(account.pointer("/account/email").and_then(Value::as_str).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account does not match saved profile");
+        let limits = request(3, "account/rateLimits/read", serde_json::json!({"excludeResetCreditDetails":true}))?;
+        let account = request(4, "account/read", serde_json::json!({"refreshToken":false}))?;
+        ensure!(account.pointer("/account/email").and_then(Value::as_str).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account changed during usage request");
+        usage_from_native(&limits).context("Codex usage windows unavailable")
+    })();
+    #[cfg(unix)]
+    // SAFETY: this process group was created for this owned reader and its children.
+    unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL); }
+    #[cfg(windows)]
+    drop(job);
+    let _ = child.kill();
+    let _ = child.wait();
+    drop(rx);
+    let _ = reader.join();
+    result
+}
+
+fn usage_from_native(body: &Value) -> Option<Usage> {
+    let limits = body.get("rateLimits")?;
+    let window = |minutes| {
+        let value = ["primary", "secondary"].into_iter().filter_map(|key| limits.get(key)).find(|v| v["windowDurationMins"].as_i64() == Some(minutes))?;
+        let percent = value["usedPercent"].as_f64()?;
+        if !percent.is_finite() || percent < 0.0 { return None; }
+        Some(((percent / 100.0).min(1.0) as f32, value["resetsAt"].as_i64()))
+    };
+    let (five_hour, seven_day) = (window(300), window(10080));
+    (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day, status: "allowed".into() })
+}
+
 pub fn usage_from_json(body: &Value) -> Option<Usage> {
     let limits = body.get("rate_limit")?;
     let window = |seconds: i64| {
@@ -255,6 +336,38 @@ pub fn usage_from_json(body: &Value) -> Option<Usage> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn native_usage_checks_identity_and_redacts_provider_errors() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("codex-fixture");
+        std::fs::write(&script, r#"#!/usr/bin/env python3
+import json,sys
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ if r['method']=='initialize': result={}
+ elif r['method']=='account/read': result={'account':{'type':'chatgpt','email':'fixture@example.test'}}
+ elif r['method']=='account/rateLimits/read': result={'rateLimits':{'primary':{'usedPercent':42,'windowDurationMins':300,'resetsAt':4200000000}}}
+ else: raise RuntimeError('unexpected request')
+ print(json.dumps({'id':r['id'],'result':result}),flush=True)
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let timeout = std::time::Duration::from_secs(3);
+        assert_eq!(probe_native_with(&script, dir.path(), "fixture@example.test", timeout).unwrap().five_hour.unwrap().0, 0.42);
+        assert!(probe_native_with(&script, dir.path(), "other@example.test", timeout).unwrap_err().to_string().contains("does not match"));
+        let source = std::fs::read_to_string(&script).unwrap().replace("'result':result", "'error':{'message':'PRIVATE PROVIDER BODY'}");
+        std::fs::write(&script, source).unwrap();
+        let error = probe_native_with(&script, dir.path(), "fixture@example.test", timeout).unwrap_err().to_string();
+        assert!(error.contains("request failed"));
+        assert!(!error.contains("PRIVATE"));
+        std::fs::write(&script, "#!/usr/bin/env python3\nimport time\ntime.sleep(10)\n").unwrap();
+        let started = std::time::Instant::now();
+        assert!(probe_native_with(&script, dir.path(), "fixture@example.test", std::time::Duration::from_millis(100)).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
 
     #[test]
     fn keyring_key_hashes_the_path_as_the_cli_canonicalizes_it() {

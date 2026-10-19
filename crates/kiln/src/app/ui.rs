@@ -1354,11 +1354,13 @@ impl KilnApp {
                 if self.conversation_sync.detail.is_none() { self.focus_terminal = true; }
             } else { self.conversation_sync.detail = None; }
         }
+        self.rotator.mgr.settings_visibility(self.settings_ui.open);
         if self.settings_ui.open {
             let info = settings::AboutInfo { daemon_pid: self.conn.daemon_pid, daemon_build: self.conn.daemon_build.clone(), connected: self.conn.is_connected() };
             let acts = self.settings_ui.ui(ctx, &mut self.settings, &info, &self.rotator.mgr, &mut self.keymap, &mut self.cli_updates);
             self.actions.extend(acts);
             if !self.settings_ui.open {
+                self.rotator.mgr.settings_visibility(false);
                 self.focus_terminal = true;
             }
         }

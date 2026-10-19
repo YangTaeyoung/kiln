@@ -333,10 +333,8 @@ fn usage_color(u: f32) -> Color32 {
 }
 
 /// "5시간 ▓▓░ 43% 2시간 후" 한 줄.
-fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64, stale: bool) {
+fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64) {
     let t = Theme::current();
-    // A failed request cannot prove the new window is at zero.
-    let w = if stale { w } else { Usage::effective(w, now) };
     let (rect, response) = ui.allocate_exact_size(vec2(236.0, 16.0), Sense::hover());
     let p = ui.painter();
     let label = p.layout_no_wrap(label.to_string(), fonts::medium(11.0), t.text_faint);
@@ -379,7 +377,7 @@ fn usage_failure_label(usage: &Usage) -> &'static str {
         else { "사용량 확인 불가" })
 }
 
-fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<i64>) {
+fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<i64>, refreshing: bool) {
     let t = Theme::current();
     ui.allocate_ui_with_layout(vec2(236.0, 36.0), Layout::top_down(Align::Min), |ui| {
         ui.set_min_size(vec2(236.0, 36.0));
@@ -395,16 +393,20 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<
             })
             .inner
         };
+        if refreshing {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().size(14.0));
+                ui.label(kiln_common::i18n::tr("확인 중…"));
+            });
+            return;
+        }
         match usage {
-            Some(u) if u.five_hour.is_some() || u.seven_day.is_some() => {
-                usage_line(ui, kiln_common::i18n::tr("5시간"), u.five_hour, now, u.is_unavailable());
-                usage_line(ui, kiln_common::i18n::tr("7일"), u.seven_day, now, u.is_unavailable());
+            Some(u) if !u.is_unavailable() && fetched_at.is_some_and(|at| now.saturating_sub(at) < 300) && (u.five_hour.is_some() || u.seven_day.is_some()) => {
+                usage_line(ui, kiln_common::i18n::tr("5시간"), u.five_hour, now);
+                usage_line(ui, kiln_common::i18n::tr("7일"), u.seven_day, now);
                 if let Some(at) = fetched_at {
                     let age = now.saturating_sub(at).max(0) / 60;
                     ui.label(RichText::new(if age == 0 { kiln_common::i18n::tr("방금 확인").to_string() } else { kiln_common::trf!("{}분 전 확인", age) }).font(fonts::regular(10.5)).color(t.text_faint));
-                }
-                if u.is_unavailable() {
-                    ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("갱신 실패 · 마지막으로 확인한 사용량")).font(fonts::regular(10.5)).color(t.text_faint)).wrap()).on_hover_text(usage_failure_label(u));
                 }
             }
             Some(u) if u.is_unavailable() => {
@@ -424,7 +426,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
     let login_required = mgr.login_required(tool, &p.id);
     let compact = ui.available_width() < 600.0;
     let identity_width = (ui.available_width() - 166.0 - if compact || login_required { 0.0 } else { 252.0 }).max(64.0);
-    let exhausted = usage.as_ref().is_some_and(|u| u.exhausted_at(now));
+    let exhausted = !mgr.is_refreshing(tool) && mgr.usage_fetched_at(tool, &p.id).is_some_and(|at| now.saturating_sub(at) < 300) && usage.as_ref().is_some_and(|u| !u.is_unavailable() && u.exhausted_at(now));
     let renaming = mgr.ui_state().renaming.as_ref().filter(|(rt, id, _)| *rt == tool && *id == p.id).map(|r| r.2.clone());
     let confirming = mgr.ui_state().confirm_delete.as_ref().is_some_and(|(ct, id)| *ct == tool && *id == p.id);
 
@@ -537,10 +539,10 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 }
             });
             ui.add_space(8.0);
-            if !login_required && !compact { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id)); }
+            if !login_required && !compact { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
         });
     });
-    if compact && !login_required { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id)); }
+    if compact && !login_required { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
     if login_required {
         ui.add_space(8.0);
         ui.indent(("login-recovery", &p.id), |ui| { ui.horizontal_wrapped(|ui| {
@@ -583,6 +585,22 @@ mod tests {
         ui.ctx().data_mut(|data| data.insert_temp(id, true));
         ui.ctx().set_fonts(kiln_common::fonts::definitions(false));
         false
+    }
+
+    #[test]
+    fn usage_card_hides_cached_numbers_during_refresh_failure_and_expiry() {
+        use egui_kittest::kittest::Queryable;
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            for (refreshing, failed, age) in [(true, false, 0), (false, true, 0), (false, false, 301), (false, false, 0)] {
+                let usage = Usage { five_hour: Some((0.73, None)), seven_day: None, status: if failed { "unavailable: HTTP 429" } else { "allowed" }.into() };
+                let mut harness = egui_kittest::Harness::builder().with_size(vec2(400.0, 150.0)).build_ui(move |ui| {
+                    if test_fonts(ui) { usage_block(ui, Some(&usage), 1000, Some(1000-age), refreshing); }
+                });
+                for _ in 0..4 { harness.step(); }
+                assert_eq!(harness.query_all_by_label("확인 중…").count(), usize::from(refreshing));
+                assert_eq!(harness.query_all_by_label("방금 확인").count(), usize::from(!refreshing && !failed && age == 0));
+            }
+        });
     }
 
     #[test]

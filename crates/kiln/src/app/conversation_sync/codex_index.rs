@@ -367,6 +367,28 @@ for line in sys.stdin:
         assert!(!root.join("unexpected-archive").exists());
     }
     #[test]
+    #[ignore = "requires an explicitly selected local Codex executable"]
+    fn native_archive_of_an_isolated_projection() {
+        let binary = PathBuf::from(std::env::var_os("KILN_TEST_CODEX_BINARY").unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonical().unwrap();
+        fs::write(root.join("config.toml"), "cli_auth_credentials_store = \"file\"\n").unwrap();
+        let id = stable_id("isolated-native-archive");
+        let cwd = root.to_string_lossy().into_owned();
+        let path = native_path(Tool::Codex, &root, &cwd, &id, chrono::Utc::now()).unwrap();
+        let source = Source { tool: Tool::Codex, root: root.clone(), path, cwd, id };
+        let messages = vec![format::Message { role: "user".into(), text: "Fixture question".into(), images: vec![] }, format::Message { role: "assistant".into(), text: "Fixture answer".into(), images: vec![] }];
+        publish(&source.path, &format::render(Tool::Codex, &source.id, &source.cwd, &chrono::Utc::now().to_rfc3339(), &messages).unwrap()).unwrap();
+        let gate = Arc::new(AtomicBool::new(true));
+        let mut registry = Registry::default();
+        registry.binary = Some(binary.clone());
+        registry.connections.insert(root.clone(), Connection::start(&binary, &root, &gate, Duration::from_secs(10)).unwrap());
+        let result = registry.apply(&source, &gate, Metadata::Archive).unwrap();
+        assert!(Path::new(&result.unwrap()).exists());
+        assert!(!source.path.exists());
+    }
+
+    #[test]
     #[ignore]
     fn native_read_registers_a_new_copy_in_an_existing_session_index() {
         let dir = PathBuf::from(
