@@ -66,7 +66,7 @@ pub fn access_token(cred_json: &str) -> Result<String> {
     let scope = doc.get("claudeAiOauth").unwrap_or(&doc);
     match scope.get("accessToken").and_then(Value::as_str) {
         Some(t) if !t.is_empty() => Ok(t.to_string()),
-        _ => bail!("accessToken field not found"),
+        _ => bail!("authentication required"),
     }
 }
 

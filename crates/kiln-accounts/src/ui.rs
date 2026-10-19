@@ -373,7 +373,7 @@ fn usage_failure_label(usage: &Usage) -> &'static str {
     let reason = &usage.status;
     kiln_common::i18n::tr(if reason.contains("HTTP 429") { "사용량 조회 제한 · 자동 재시도 대기" }
         else if reason.contains("HTTP 403") { "사용량 조회 권한 확인 필요" }
-        else if reason.contains("HTTP 401") { "사용량 인증 확인 필요" }
+        else if reason.contains("HTTP 401") || reason.contains("authentication required") { "사용량 인증 확인 필요" }
         else { "사용량 확인 불가" })
 }
 

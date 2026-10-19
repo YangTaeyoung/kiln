@@ -99,9 +99,15 @@ impl Env {
     /// Match the CLI's Keychain primary / private-file fallback. An inaccessible
     /// primary is not evidence that a historical file token is current.
     pub(crate) fn claude_secret(&self, config: Option<&Path>) -> Result<Option<(String, Option<String>)>> {
-        if self.claude_live_in_store
-            && let Some((secret, account)) = self.store.get_by_service(&crate::login::claude_service(config))?
-        { return Ok(Some((secret, Some(account)))); }
+        if self.claude_live_in_store {
+            let service = crate::login::claude_service(config);
+            if let Some(secret) = self.store.get(&service, &self.username)? {
+                return Ok(Some((secret, Some(self.username.clone()))));
+            }
+            if let Some((secret, account)) = self.store.get_by_service(&service)? {
+                return Ok(Some((secret, Some(account))));
+            }
+        }
         Ok(read_secret(&claude::credentials_path(&self.home, config))?.map(|secret| (secret, None)))
     }
 }
@@ -1088,11 +1094,7 @@ impl AccountManager {
                 now >= poll.blocked_until && (manual || now >= poll.next_at)
             });
             if !due { continue; }
-            let runtime = self.runtime_dir(Tool::Codex, &profile.id);
-            let home = if runtime.is_dir() { &runtime } else { &self.inner.env.codex_home };
-            let result = profile.email.as_deref().context("account identity unavailable").and_then(|email| {
-                self.inner.env.codex_native_probe.as_ref().unwrap()(home, email)
-            });
+            let result = self.probe_codex_profile(&profile);
             let _op = self.inner.op.lock();
             if self.pending_login(Tool::Codex, &profile.id) || !self.profiles(Tool::Codex).iter().any(|p| p.id == profile.id && p.email == profile.email) { continue; }
             self.with_state(|s| {
@@ -1103,6 +1105,23 @@ impl AccountManager {
             self.set_usage(Tool::Codex, &profile.id, result.unwrap_or_else(Usage::unavailable));
             self.repaint();
         }
+    }
+
+    fn probe_codex_profile(&self, profile: &Profile) -> Result<Usage> {
+        let runtime = self.runtime_dir(Tool::Codex, &profile.id);
+        let home = if runtime.is_dir() { &runtime } else { &self.inner.env.codex_home };
+        profile.email.as_deref().context("account identity unavailable").and_then(|email| {
+            let probe = self.inner.env.codex_native_probe.as_ref().unwrap();
+            probe(home, email).or_else(|error| {
+                if error.to_string() == "authentication required"
+                    && home != &self.inner.env.codex_home
+                    && self.active(Tool::Codex).as_deref() == Some(&profile.id)
+                {
+                    // The native reader checks this profile's identity before returning quotas.
+                    probe(&self.inner.env.codex_home, email)
+                } else { Err(error) }
+            })
+        })
     }
 
     fn usage_secret(&self, tool: Tool, id: &str) -> Result<Option<String>> {
@@ -1253,6 +1272,60 @@ fn new_id(tool: Tool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires explicit owner authorization and real Keychain opt-in"]
+    fn live_saved_account_usage_without_persisting_settings() {
+        let tool = match std::env::var("KILN_VERIFY_TOOL").as_deref() {
+            Ok("claude") => Tool::Claude,
+            Ok("codex") => Tool::Codex,
+            _ => panic!("explicit tool required"),
+        };
+        let index: usize = std::env::var("KILN_VERIFY_PROFILE_INDEX").expect("explicit profile ordinal").parse().unwrap();
+        let manager = AccountManager::with_env(Env::real());
+        let profile = manager.profiles(tool).into_iter().nth(index).expect("saved profile");
+        let usage = if tool == Tool::Codex {
+            manager.probe_codex_profile(&profile).expect("live Codex quota request")
+        } else {
+            let secret = manager.usage_secret(tool, &profile.id).unwrap().expect("profile credentials");
+            let token = claude::access_token(&secret).expect("subscription authentication");
+            (manager.inner.env.probe)(&token).expect("live Claude quota request")
+        };
+        assert!(!usage.is_unavailable());
+        assert!(usage.five_hour.is_some() || usage.seven_day.is_some());
+    }
+
+    #[test]
+    fn active_codex_uses_matching_live_credentials_when_runtime_auth_is_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        std::fs::create_dir_all(&env.codex_home).unwrap();
+        std::fs::write(env.codex_home.join("auth.json"), codex::tests::fake_auth("fixture@example.test", "fixture")).unwrap();
+        let live = env.codex_home.clone();
+        env.codex_native_probe = Some(Arc::new(move |home, email| {
+            assert_eq!(email, "fixture@example.test");
+            if home != live { anyhow::bail!("authentication required"); }
+            Ok(Usage { five_hour: Some((0.42, None)), status: "allowed".into(), ..Default::default() })
+        }));
+        let manager = AccountManager::with_env(env);
+        let profile = manager.save_current(Tool::Codex, "Fixture").unwrap();
+        std::fs::create_dir_all(manager.runtime_dir(Tool::Codex, &profile.id)).unwrap();
+        manager.refresh_usage_blocking(Tool::Codex);
+        assert_eq!(manager.usage(Tool::Codex, &profile.id).unwrap().five_hour.unwrap().0, 0.42);
+        manager.with_state(|s| s.settings.codex.active = None);
+        assert_eq!(manager.probe_codex_profile(&profile).unwrap_err().to_string(), "authentication required");
+    }
+
+    #[test]
+    fn claude_credentials_prefer_the_current_user_keychain_item() {
+        let root = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(root.path(), true);
+        store.set(claude::CLAUDE_SERVICE, "another-user", r#"{"mcpOAuth":{}}"#).unwrap();
+        store.set(claude::CLAUDE_SERVICE, &env.username, &claude_cred("current-token")).unwrap();
+        let (secret, account) = env.claude_secret(None).unwrap().unwrap();
+        assert_eq!(secret, claude_cred("current-token"));
+        assert_eq!(account.as_deref(), Some(env.username.as_str()));
+    }
 
     #[test]
     fn native_codex_usage_does_not_parse_cli_owned_encrypted_credentials() {

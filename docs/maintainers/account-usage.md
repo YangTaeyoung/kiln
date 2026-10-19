@@ -15,8 +15,10 @@ and newly saved accounts. Missing credentials postpone that profile's next
 deadline by five minutes instead of causing repeated per-second checks.
 
 Latest per-profile runtime credentials take precedence over imported snapshots.
-Claude follows the official CLI’s Keychain-first selection and private-file
-fallback. A namespaced legacy `.config.json` is authoritative when it exists;
+Claude selects the current operating-system user’s Keychain item before a
+service-only legacy lookup and private-file fallback. Credential JSON rendered
+as hexadecimal by `security -w` is decoded before use; arbitrary passwords are
+not decoded. A namespaced legacy `.config.json` is authoritative when it exists;
 `.claude.json` remains the default. A locked or inaccessible Keychain is an
 unknown local state, not proof that the account logged out.
 Backoff is held per profile and credential fingerprint in memory. Successful
@@ -40,7 +42,11 @@ from a missing `auth.json`. Managed file-backed namespaces retain their file pin
 - Codex: a bounded, private `codex --no-daemon app-server` reader uses
   `account/read` and `account/rateLimits/read`. The official CLI owns credential
   decryption and refresh, including encrypted `auth.json` formats. Account email
-  is checked before and after reading quotas. No model turn is started and no
+  is checked before and after reading quotas. The reader does not proactively rotate refresh tokens on each poll. An active
+  profile whose runtime login is unavailable can use the default CLI home only
+  after the native reader verifies the same saved identity. Hex-rendered JSON
+  files are repaired only when their account matches the selected profile.
+  No model turn is started and no
   authentication tokens cross the subprocess boundary. The response uses
   `usedPercent`, `windowDurationMins`, and `resetsAt`, as defined by the
   [official account protocol](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/account.rs).
@@ -75,10 +81,16 @@ both tools, active and inactive profiles, repeated cycles without settings UI,
 shutdown, backoff, stale bars and deletion during a slow response. Real loopback
 HTTP fixtures check GET/no body, redirects, response bounds, Retry-After and
 private-response redaction. Four-language GPU captures cover the account card
-at 420px and 130% scale. Do not query real accounts to make a test pass.
+at 420px and 130% scale. Real account checks require explicit owner authorization and the ignored
+`live_saved_account_usage_without_persisting_settings` test with
+`KILN_ACCOUNTS_REAL_KEYCHAIN=1`, `KILN_VERIFY_TOOL` and
+`KILN_VERIFY_PROFILE_INDEX`. It queries quotas without persisting settings,
+copying credentials, or starting model turns.
 
-Real provider responses and expired-token refresh must be observed by the owner
-without exposing credentials. Fixture success is not live-provider validity.
+Before publishing a usage fix, verify the authorized local accounts with the
+actual implementation. Ask the owner to reauthenticate only accounts for which
+the correct CLI credential source still fails authentication. Record live
+verification separately from fixture results; never record credential values.
 
 The 0.1.22 regression includes two simultaneous Claude runtime accounts with
 fresh Keychain tokens and stale files, legacy metadata precedence, Codex optional
