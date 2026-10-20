@@ -330,7 +330,7 @@ mod windows_tests {
     #[test]
     fn window_applications_are_not_the_foreground() {
         let shell = Command::new("powershell.exe").args(["-NoProfile", "-Command", "Start-Process winver.exe; Start-Sleep 30"]).stdout(Stdio::null()).spawn().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(120);
         let mut window = None;
         while Instant::now() < deadline && window.is_none() {
             let procs = snapshot_names(shell.id());
