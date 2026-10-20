@@ -1,0 +1,8 @@
+[profile.ci]
+fail-fast = false
+final-status-level = "slow"
+
+# Tests that assert on elapsed time run alone.
+[[profile.default.overrides]]
+filter = 'binary(perf) | binary(ui_perf) | binary(render_perf)'
+threads-required = "num-test-threads"

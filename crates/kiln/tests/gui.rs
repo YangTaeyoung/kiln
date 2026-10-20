@@ -2090,6 +2090,11 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
 #[test]
 fn capacity_failure_resumes_exact_session_once_and_cancel_stops_the_countdown() {
     capacity_recovery_fixture(false);
+}
+/// No provider calls: a native PTY child emits a structured capacity failure and keeps reading input.
+#[cfg(unix)]
+#[test]
+fn capacity_failure_in_an_open_agent_continues_in_the_same_session_and_cancel_stops_the_countdown() {
     capacity_recovery_fixture(true);
 }
 #[cfg(unix)]
