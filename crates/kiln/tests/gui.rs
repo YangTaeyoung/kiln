@@ -992,6 +992,67 @@ fn failed_discard_checkpoint_keeps_app_open_and_drafts_recoverable() {
     shutdown(&base);
 }
 
+/// The sidebar row of the workspace named `name`: the leftmost node with that label.
+fn workspace_row(h: &Harness<'_, KilnApp>, name: &str) -> egui::Rect {
+    h.query_all_by_label(name).map(|node| node.rect()).min_by(|a, b| a.left().total_cmp(&b.left())).expect("workspace row")
+}
+
+/// Drags the row labelled `from` onto the upper or lower half of the row labelled `to`.
+fn drag_row(h: &mut Harness<'_, KilnApp>, from: &str, to: &str, upper: bool) {
+    let start = workspace_row(h, from).center();
+    let target = workspace_row(h, to);
+    let end = egui::pos2(target.center().x, if upper { target.top() + target.height() * 0.25 } else { target.bottom() - target.height() * 0.25 });
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    h.event(egui::Event::PointerMoved(start));
+    h.event(button(start, true));
+    h.step();
+    for k in 1..=6 {
+        h.event(egui::Event::PointerMoved(start + (end - start) * (k as f32 / 6.0)));
+        h.step();
+    }
+    h.event(button(end, false));
+    h.run_steps(3);
+}
+
+#[test]
+fn workspaces_are_reordered_by_dragging_their_rows_and_from_their_menu() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("reorder-workspaces");
+    let mut h = Harness::builder().with_size([1024.0, 768.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    for name in ["alpha", "beta"] {
+        let path = base.join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        h.state_mut().debug_queue_action(kiln::app::Action::NewWorkspace(Some(path)));
+    }
+    h.run_steps(3);
+    assert_eq!(h.state().debug_workspace_names(), ["proj", "alpha", "beta"]);
+    assert_eq!(h.state().debug_active_workspace_name(), "beta");
+    drag_row(&mut h, "beta", "proj", true);
+    assert_eq!(h.state().debug_workspace_names(), ["beta", "proj", "alpha"]);
+    assert_eq!(h.state().debug_active_workspace_name(), "beta", "the active workspace stays selected");
+    drag_row(&mut h, "proj", "alpha", false);
+    assert_eq!(h.state().debug_workspace_names(), ["beta", "alpha", "proj"]);
+    let row = workspace_row(&h, "beta").center();
+    h.event(egui::Event::PointerMoved(row));
+    for pressed in [true, false] { h.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE }); }
+    h.run_steps(3);
+    h.get_by_label("아래로 이동").click();
+    h.run_steps(3);
+    assert_eq!(h.state().debug_workspace_names(), ["alpha", "beta", "proj"]);
+    let active = h.state().debug_active_workspace_name().to_owned();
+    let ctx = h.ctx.clone();
+    h.state_mut().debug_checkpoint_restore(&ctx);
+    h.run_steps(5);
+    assert_eq!(h.state().debug_workspace_names(), ["alpha", "beta", "proj"], "the saved order is restored");
+    assert_eq!(h.state().debug_active_workspace_name(), active);
+    let row = workspace_row(&h, "alpha").center();
+    h.event(egui::Event::PointerMoved(row));
+    for pressed in [true, false] { h.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE }); }
+    h.run_steps(3);
+    assert!(egui_kittest::kittest::NodeT::accesskit_node(&h.get_by_label("위로 이동")).is_disabled(), "the first row cannot move up");
+    shutdown(&base);
+}
+
 #[test]
 fn closing_other_projects_preserves_the_active_project() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

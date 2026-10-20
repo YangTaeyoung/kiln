@@ -243,6 +243,8 @@ pub enum Action {
     RestartAgent(PaneId),
     /// 다음 계정으로 바꾸고 세션의 에이전트를 이어서 실행한다.
     RotateAccount(SessionId, kiln_accounts::Tool),
+    /// Moves the workspace at the first position to the second, keeping the active workspace.
+    MoveWorkspace(usize, usize),
     /// Redeems one reset credit of the active account of the tool.
     RedeemResetCredit(kiln_accounts::Tool),
     /// GitHub 저장소(`owner/name`)를 고른 폴더 아래로 복제하고 새 스페이스로 연다.
@@ -1190,6 +1192,13 @@ impl KilnApp {
                         self.add_workspace(home, ctx);
                     }
                     self.active = self.active.min(self.workspaces.len() - 1);
+                }
+            }
+            Action::MoveWorkspace(from, to) => {
+                if from != to && from < self.workspaces.len() && to < self.workspaces.len() {
+                    let workspace = self.workspaces.remove(from);
+                    self.workspaces.insert(to, workspace);
+                    self.active = ui::index_after_move(self.active, from, to);
                 }
             }
             Action::RenameWorkspace(i, name) => {
@@ -2233,6 +2242,9 @@ impl KilnApp {
         self.terminal_launch_drafts.insert(pane,state::TerminalLaunchDraft {pane,command:None,reason:"Invalid shell".into()});
         self.recovery_open=true;
     }
+
+    #[doc(hidden)]
+    pub fn debug_workspace_names(&self) -> Vec<String> { self.workspaces.iter().map(|ws| ws.name.clone()).collect() }
 
     #[doc(hidden)]
     pub fn debug_set_accounts(&mut self, manager: kiln_accounts::AccountManager) {

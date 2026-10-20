@@ -11638,5 +11638,15 @@
     "en": "Could not use the reset credit",
     "ja": "リセット権を使えませんでした",
     "zh-CN": "无法使用重置次数"
+  },
+  "위로 이동": {
+    "en": "Move Up",
+    "ja": "上へ移動",
+    "zh-CN": "上移"
+  },
+  "아래로 이동": {
+    "en": "Move Down",
+    "ja": "下へ移動",
+    "zh-CN": "下移"
   }
 }
