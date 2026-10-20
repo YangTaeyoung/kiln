@@ -23,45 +23,27 @@ jobs:
         with:
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.148
       - name: Localization coverage and font tests
         run: |
           python3 scripts/test-check-localizations.py
           python3 scripts/check-localizations.py
           python3 scripts/test-make-appcast.py
       - name: Library unit tests
-        run: KILN_PTY_HOST=0 cargo test --locked --workspace --lib -- --test-threads=1
+        run: KILN_PTY_HOST=0 cargo nextest run --locked --profile ci --workspace --lib
       - name: Native IME regressions
         run: |
           members=$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; print(" ".join("-p " + p["name"] for p in json.load(sys.stdin)["packages"]))')
           cargo test --locked $members -p egui-winit --lib kiln_ime_tests
           cargo test --locked --workspace --test native_ime
-      - name: Daemon foreground identity regressions
-        run: cargo test --locked --workspace --test macos_responsibility -- --test-threads=1
-      - name: Remote files and direct agent launches
+      - name: Integration tests
         run: |
-          cargo test --locked --workspace --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1
-          cargo test --locked --workspace --test direct_terminal_launch -- --test-threads=1
-          cargo test --locked --workspace --test shell_completion -- --test-threads=1
-          cargo test --locked --workspace --test terminal_recovery -- --test-threads=1
-          KILN_PTY_HOST=0 cargo test --locked --workspace --test daemon -- --test-threads=1
-          cargo test --locked --workspace --test hosted --test hosted_failures -- --test-threads=1
-          cargo test --locked --workspace --test mixed_upgrade
-      - name: SQL completion and SQLite regressions
-        run: |
-          cargo test --locked --workspace --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit
-          cargo test --locked --workspace --test sql_completion --test query_execution -- --test-threads=1
-      - name: Schema UI, editor and Git regressions
-        run: |
-          cargo test --locked --workspace --test schema_ui_flow -- --test-threads=1
           tests=$(for f in crates/kiln-editor/tests/*.rs crates/kiln-git/tests/*.rs; do printf -- '--test %s ' "$(basename "$f" .rs)"; done)
-          cargo test --locked --workspace $tests
-      - name: GUI and session integration
-        run: |
-          cargo test --locked --workspace --test gui
-          cargo test --locked --workspace --test remote_inspector -- --test-threads=1
-          cargo test --locked --workspace --test workflow_distill -- --test-threads=1
-          cargo test --locked --workspace --test pane_layout -- --test-threads=1
-          cargo test --locked --workspace --test portable_icons
+          cargo nextest run --locked --profile ci --workspace $tests --test macos_responsibility --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui --test direct_terminal_launch --test shell_completion --test terminal_recovery --test hosted --test hosted_failures --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow --test gui --test remote_inspector --test workflow_distill --test pane_layout --test portable_icons
+          KILN_PTY_HOST=0 cargo nextest run --locked --profile ci --workspace --test daemon
+          cargo test --locked --workspace --test mixed_upgrade
       - name: Validate release scripts
         run: |
           sh -n install.sh
@@ -70,17 +52,18 @@ jobs:
           python3 scripts/test-network-privacy.py
 
   windows:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.target.name }} ${{ matrix.part }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        target:
           - name: windows-x64
             runner: windows-latest
           - name: windows-arm64
             runner: windows-11-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
+        part: [libraries, crates, terminal]
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash
@@ -98,13 +81,14 @@ jobs:
           rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.name }}
+          key: ${{ matrix.target.name }}
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.part == 'libraries' }}
       - name: Library tests
+        if: matrix.part == 'libraries'
         run: cargo test --locked --no-fail-fast --workspace --lib -- --test-threads=1
       - name: Credential Manager
-        if: ${{ !cancelled() }}
+        if: matrix.part == 'libraries' && !cancelled()
         run: |
           status=0
           cargo test --locked --workspace --lib -- --ignored --exact store::tests::windows_store_keeps_kiln_snapshots_in_files_and_other_entries_in_credential_manager || status=1
@@ -116,14 +100,8 @@ jobs:
           KILN_CODEX_KEYRING_HOME="$home" cargo test --locked --workspace --lib -- --ignored --exact codex::tests::the_entry_the_cli_writes_is_read_under_its_key || status=1
           CODEX_HOME="$home" codex logout || true
           exit $status
-      - name: Terminal and daemon integration
-        if: ${{ !cancelled() }}
-        run: cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
-      - name: GUI integration
-        if: ${{ !cancelled() }}
-        run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
       - name: Editor, Git, database and remote integration
-        if: ${{ !cancelled() }}
+        if: matrix.part == 'crates'
         run: |
           status=0
           tests=$(for f in crates/kiln-editor/tests/*.rs crates/kiln-git/tests/*.rs; do printf -- '--test %s ' "$(basename "$f" .rs)"; done)
@@ -131,6 +109,12 @@ jobs:
           cargo test --locked --no-fail-fast --workspace --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1 || status=1
           cargo test --locked --no-fail-fast --workspace --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1 || status=1
           exit $status
+      - name: Terminal and daemon integration
+        if: matrix.part == 'terminal'
+        run: cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
+      - name: GUI integration
+        if: matrix.part == 'terminal' && !cancelled()
+        run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
 
   database-servers:
     runs-on: ubuntu-latest
