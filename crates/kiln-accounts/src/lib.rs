@@ -16,6 +16,7 @@ mod ui;
 
 pub use limit::{LimitHit, detect_limit};
 pub use manager::{AccountManager, Env, HistoryState};
+pub use ui::reset_outcome_text;
 pub use login::LoginStatus;
 pub use store::{CredentialStore, FileStore, MemoryStore, SecurityCli};
 pub use ui::{AccountsEvent, accounts_settings_ui};

@@ -25,6 +25,10 @@ pub(crate) struct UiState {
     adding: Option<(Tool, String)>,
     adding_focus: bool,
     relogin: Option<(Tool, String)>,
+    /// The Codex profile whose reset-credit redemption awaits confirmation.
+    confirm_reset: Option<String>,
+    /// The Codex profile whose usage history dialog is open.
+    history: Option<String>,
     login_code: [String; 2],
     pub(crate) feedback_profile: [Option<String>; 2],
 }
@@ -73,6 +77,7 @@ fn subtitle(tool: Tool) -> &'static str {
 }
 
 fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
+    if tool == Tool::Codex { usage_history_dialog(ui, mgr); }
     let t = Theme::current();
     let profiles = mgr.profiles(tool);
     let active = mgr.active(tool);
@@ -368,6 +373,146 @@ fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64)
     }
 }
 
+/// `amount` minor units of `currency` (USD when unknown) as money text.
+fn money(amount: f64, currency: Option<&str>) -> String {
+    let code = currency.unwrap_or("USD");
+    let whole = matches!(code, "JPY" | "KRW");
+    let digits = if whole { format!("{amount:.0}") } else { format!("{:.2}", amount / 100.0) };
+    match code {
+        "USD" => format!("${digits}"),
+        "EUR" => format!("€{digits}"),
+        "GBP" => format!("£{digits}"),
+        "JPY" => format!("¥{digits}"),
+        "KRW" => format!("₩{digits}"),
+        other => format!("{digits} {other}"),
+    }
+}
+
+/// `n` tokens, in thousands (K), millions (M) or billions (B) past 999.
+fn tokens(n: u64) -> String {
+    let short = |value: f64, unit: &str| {
+        let text = format!("{value:.1}");
+        format!("{}{unit}", text.strip_suffix(".0").unwrap_or(&text))
+    };
+    match n {
+        0..1000 => n.to_string(),
+        1000..1_000_000 => short(n as f64 / 1e3, "K"),
+        1_000_000..1_000_000_000 => short(n as f64 / 1e6, "M"),
+        _ => short(n as f64 / 1e9, "B"),
+    }
+}
+
+/// The credit figures of an account row: Claude extra usage, Codex credits and reset credits.
+pub(crate) fn credit_caption(usage: &Usage, now: i64) -> Option<String> {
+    if usage.is_unavailable() { return None; }
+    let mut parts = Vec::new();
+    if let Some(extra) = &usage.extra {
+        let currency = extra.currency.as_deref();
+        parts.push(match (extra.enabled, extra.used, extra.limit) {
+            (false, _, _) => kiln_common::i18n::tr("추가 사용 꺼짐").to_string(),
+            (true, Some(used), Some(limit)) => kiln_common::trf!("추가 사용 {}", format!("{} / {}", money(used, currency), money(limit, currency))),
+            (true, Some(used), None) => kiln_common::trf!("추가 사용 {}", money(used, currency)),
+            (true, None, _) => kiln_common::i18n::tr("추가 사용 켜짐").to_string(),
+        });
+    }
+    if let Some(credits) = &usage.credits {
+        if credits.unlimited {
+            parts.push(kiln_common::i18n::tr("크레딧 무제한").to_string());
+        } else if let Some(balance) = credits.balance.as_deref().filter(|_| credits.has_credits) {
+            parts.push(kiln_common::trf!("크레딧 {}", balance));
+        }
+    }
+    if let Some(resets) = usage.resets.as_ref().filter(|resets| resets.available > 0) {
+        parts.push(kiln_common::trf!("초기화권 {}개", resets.available));
+        if let Some(at) = resets.next_expiry.filter(|at| *at > now) {
+            let hours = (at - now) / 3600;
+            parts.push(if hours < 48 { kiln_common::trf!("{}시간 후 만료", hours.max(1)) } else { kiln_common::trf!("{}일 후 만료", hours / 24) });
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// The notice for a reset-credit redemption of the account labelled `label`.
+pub fn reset_outcome_text(outcome: crate::ResetOutcome, label: &str) -> String {
+    match outcome {
+        crate::ResetOutcome::Reset => kiln_common::trf!("‘{}’ 사용량 한도를 초기화했습니다", label),
+        crate::ResetOutcome::NothingToReset => kiln_common::i18n::tr("초기화할 사용량이 없어 초기화권을 쓰지 않았습니다").into(),
+        crate::ResetOutcome::NoCredit => kiln_common::i18n::tr("남은 초기화권이 없습니다").into(),
+        crate::ResetOutcome::AlreadyRedeemed => kiln_common::i18n::tr("이미 사용된 초기화권입니다").into(),
+    }
+}
+
+/// Daily token bars for the last 14 buckets of `daily`, each labelled with its date and total.
+fn daily_bars(ui: &mut Ui, daily: &[(String, u64)]) {
+    let t = Theme::current();
+    let recent = &daily[daily.len().saturating_sub(14)..];
+    if recent.is_empty() {
+        ui.label(RichText::new(kiln_common::i18n::tr("기록 없음")).color(t.text_faint));
+        return;
+    }
+    let peak = recent.iter().map(|(_, n)| *n).max().unwrap_or(1).max(1);
+    let height = 96.0;
+    let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), height + 18.0), Sense::hover());
+    let slot = area.width() / recent.len() as f32;
+    for (i, (date, n)) in recent.iter().enumerate() {
+        let left = area.left() + slot * i as f32;
+        let bar_height = (height * (*n as f32 / peak as f32)).max(1.0);
+        let bar = egui::Rect::from_min_max(pos2(left + slot * 0.15, area.top() + height - bar_height), pos2(left + slot * 0.85, area.top() + height));
+        let label = format!("{} · {}", date.get(5..).unwrap_or(date), tokens(*n));
+        let response = ui.interact(egui::Rect::from_min_max(pos2(left, area.top()), pos2(left + slot, area.top() + height)), ui.id().with(("usage-day", i)), Sense::hover());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &label));
+        ui.painter().rect_filled(bar, CornerRadius::same(2), if response.hovered() { t.accent } else { t.accent.gamma_multiply(0.7) });
+        response.on_hover_text(label);
+    }
+    let date = |i: usize| recent[i].0.get(5..).unwrap_or(&recent[i].0).to_owned();
+    ui.painter().text(area.left_bottom(), Align2::LEFT_BOTTOM, date(0), fonts::regular(10.5), t.text_faint);
+    ui.painter().text(area.right_bottom(), Align2::RIGHT_BOTTOM, date(recent.len() - 1), fonts::regular(10.5), t.text_faint);
+}
+
+/// The usage history dialog of the Codex profile chosen from its menu.
+fn usage_history_dialog(ui: &mut Ui, mgr: &AccountManager) {
+    let Some(id) = mgr.ui_state().history.clone() else { return };
+    let Some(profile) = mgr.profiles(Tool::Codex).into_iter().find(|profile| profile.id == id) else {
+        mgr.ui_state().history = None;
+        return;
+    };
+    let t = Theme::current();
+    let mut close = false;
+    let modal = egui::Modal::new(egui::Id::new(("kiln-usage-history", &id))).show(ui.ctx(), |ui| {
+        ui.set_width((ui.ctx().content_rect().width() - 48.0).clamp(240.0, 380.0));
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.label(RichText::new(kiln_common::trf!("‘{}’ 사용 내역", profile.label)).font(fonts::semibold(14.0)).color(t.text));
+        ui.add_space(6.0);
+        match mgr.usage_history(&id) {
+            None | Some(crate::HistoryState::Loading) => {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new().size(14.0));
+                    ui.label(kiln_common::i18n::tr("내역을 불러오는 중…"));
+                });
+            }
+            Some(crate::HistoryState::Failed(error)) => {
+                ui.label(RichText::new(kiln_common::i18n::tr("내역을 불러오지 못했습니다")).color(t.text_dim)).on_hover_text(error);
+            }
+            Some(crate::HistoryState::Ready(history)) => {
+                let lines = [
+                    history.lifetime_tokens.map(|n| kiln_common::trf!("누적 토큰 {}", tokens(n))),
+                    history.peak_daily_tokens.map(|n| kiln_common::trf!("최고 일일 토큰 {}", tokens(n))),
+                    history.current_streak_days.zip(history.longest_streak_days).map(|(now, best)| kiln_common::trf!("연속 사용 {}일 · 최장 {}일", now, best)),
+                ];
+                for line in lines.into_iter().flatten() { ui.label(RichText::new(line).color(t.text)); }
+                ui.add_space(8.0);
+                ui.label(RichText::new(kiln_common::i18n::tr("최근 14일")).font(fonts::medium(12.0)).color(t.text_dim));
+                daily_bars(ui, &history.daily);
+            }
+        }
+        ui.add_space(10.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::button(ui, kiln_common::i18n::tr("닫기"), ButtonKind::Secondary).clicked() { close = true; }
+        });
+    });
+    if close || modal.should_close() { mgr.ui_state().history = None; }
+}
+
 /// 사용량 열(폭 236, 높이 36 고정).
 fn usage_failure_label(usage: &Usage) -> &'static str {
     let reason = &usage.status;
@@ -446,6 +591,9 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
     let exhausted = !mgr.is_refreshing(tool) && mgr.usage_fetched_at(tool, &p.id).is_some_and(|at| now.saturating_sub(at) < 300) && usage.as_ref().is_some_and(|u| !u.is_unavailable() && u.exhausted_at(now));
     let renaming = mgr.ui_state().renaming.as_ref().filter(|(rt, id, _)| *rt == tool && *id == p.id).map(|r| r.2.clone());
     let confirming = mgr.ui_state().confirm_delete.as_ref().is_some_and(|(ct, id)| *ct == tool && *id == p.id);
+    let confirming_reset = tool == Tool::Codex && mgr.ui_state().confirm_reset.as_deref() == Some(p.id.as_str());
+    let caption = usage.as_ref().and_then(|usage| credit_caption(usage, now));
+    let resets_available = usage.as_ref().filter(|usage| !usage.is_unavailable()).and_then(|usage| usage.resets.as_ref()).map_or(0, |resets| resets.available);
 
     ui.horizontal(|ui| {
         ui.set_min_height(56.0);
@@ -453,7 +601,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
         let (ar, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
         widgets::avatar(ui, ar, &p.label, is_active);
 
-        ui.allocate_ui_with_layout(vec2(identity_width, 36.0), Layout::top_down(Align::Min), |ui| {
+        ui.allocate_ui_with_layout(vec2(identity_width, if caption.is_some() && !compact { 50.0 } else { 36.0 }), Layout::top_down(Align::Min), |ui| {
             ui.set_width(identity_width);
             ui.spacing_mut().item_spacing.y = 2.0;
             ui.add_space(2.0);
@@ -495,6 +643,9 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
             }
             let email = p.email.as_deref().unwrap_or(kiln_common::i18n::tr("이메일 알 수 없음"));
             ui.add(egui::Label::new(RichText::new(email).font(fonts::regular(12.0)).color(t.text_faint)).truncate()).on_hover_text(email);
+            if let Some(caption) = caption.as_ref().filter(|_| !compact) {
+                ui.add(egui::Label::new(RichText::new(caption).font(fonts::regular(11.0)).color(t.text_dim)).truncate()).on_hover_text(caption);
+            }
         });
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -516,6 +667,23 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 ui.label(RichText::new(kiln_common::i18n::tr("삭제할까요?")).font(fonts::medium(12.5)).color(t.text_dim));
                 return;
             }
+            if confirming_reset {
+                if ui.add_enabled_ui(!busy, |ui| widgets::button_with(ui, None, kiln_common::i18n::tr("사용"), ButtonKind::Primary, true)).inner.clicked() {
+                    mgr.ui_state().feedback_profile[1] = Some(p.id.clone());
+                    mgr.ui_state().confirm_reset = None;
+                    let id = p.id.clone();
+                    let label = p.label.clone();
+                    mgr.run_async(tool, kiln_common::i18n::tr("초기화권 사용 중…"), move |m| {
+                        let outcome = m.redeem_reset_credit(&id)?;
+                        Ok(reset_outcome_text(outcome, &label))
+                    });
+                }
+                if widgets::button_with(ui, None, kiln_common::i18n::tr("취소"), ButtonKind::Ghost, true).clicked() {
+                    mgr.ui_state().confirm_reset = None;
+                }
+                ui.label(RichText::new(kiln_common::i18n::tr("초기화권 1개를 사용할까요?")).font(fonts::medium(12.5)).color(t.text_dim));
+                return;
+            }
             let more = widgets::icon_button(ui, Icon::Menu, 26.0, false, kiln_common::i18n::tr("계정 메뉴"));
             egui::Popup::menu(&more).gap(4.0).show(|ui| {
                 ui.set_min_width(150.0);
@@ -529,6 +697,17 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     mgr.ui_state().adding = None;
                     mgr.ui_state().relogin = Some((tool, p.id.clone()));
                     ui.close();
+                }
+                if tool == Tool::Codex {
+                    if ui.add_enabled_ui(resets_available > 0 && !busy, |ui| menu_item(ui, Icon::Undo, kiln_common::i18n::tr("초기화권 사용"), t.text)).inner {
+                        mgr.ui_state().confirm_reset = Some(p.id.clone());
+                        ui.close();
+                    }
+                    if menu_item(ui, Icon::History, kiln_common::i18n::tr("사용 내역"), t.text) {
+                        mgr.ui_state().history = Some(p.id.clone());
+                        mgr.load_usage_history(&p.id);
+                        ui.close();
+                    }
                 }
                 let can_delete = !is_active && !busy;
                 let resp = ui.add_enabled_ui(can_delete, |ui| menu_item(ui, Icon::Trash, kiln_common::i18n::tr("삭제"), t.red)).inner;
@@ -560,6 +739,9 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
         });
     });
     if compact && !login_required { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
+    if let Some(caption) = caption.as_ref().filter(|_| compact) {
+        ui.add(egui::Label::new(RichText::new(caption).font(fonts::regular(11.0)).color(t.text_dim)).wrap()).on_hover_text(caption);
+    }
     if login_required {
         ui.add_space(8.0);
         ui.indent(("login-recovery", &p.id), |ui| { ui.horizontal_wrapped(|ui| {
@@ -618,6 +800,156 @@ mod tests {
                 assert_eq!(harness.query_all_by_label("방금 확인").count(), usize::from(!refreshing && !failed && age == 0));
             }
         });
+    }
+
+    #[test]
+    fn credit_captions_name_extra_usage_credits_and_reset_credits() {
+        use crate::{Credits, ExtraUsage, ResetCredits};
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            let now = 1_000_000;
+            let usage = |extra: Option<ExtraUsage>, credits: Option<Credits>, resets: Option<ResetCredits>| Usage { five_hour: Some((0.1, None)), status: "allowed".into(), extra, credits, resets, ..Default::default() };
+            let spend = |used: Option<f64>, limit: Option<f64>, currency: &str| Some(ExtraUsage { enabled: true, used, limit, currency: Some(currency.into()) });
+            assert_eq!(credit_caption(&usage(spend(Some(1230.0), Some(5000.0), "USD"), None, None), now).as_deref(), Some("추가 사용 $12.30 / $50.00"));
+            assert_eq!(credit_caption(&usage(spend(Some(500.0), None, "JPY"), None, None), now).as_deref(), Some("추가 사용 ¥500"));
+            assert_eq!(credit_caption(&usage(spend(Some(1999.0), Some(10000.0), "CAD"), None, None), now).as_deref(), Some("추가 사용 19.99 CAD / 100.00 CAD"));
+            assert_eq!(credit_caption(&usage(spend(None, None, "USD"), None, None), now).as_deref(), Some("추가 사용 켜짐"));
+            assert_eq!(credit_caption(&usage(Some(ExtraUsage::default()), None, None), now).as_deref(), Some("추가 사용 꺼짐"));
+            let balance = Some(Credits { has_credits: true, unlimited: false, balance: Some("120".into()) });
+            assert_eq!(credit_caption(&usage(None, balance, Some(ResetCredits { available: 2, next_expiry: Some(now + 5 * 86_400 + 60) })), now).as_deref(), Some("크레딧 120 · 초기화권 2개 · 5일 후 만료"));
+            let unlimited = Some(Credits { has_credits: true, unlimited: true, balance: None });
+            assert_eq!(credit_caption(&usage(None, unlimited, Some(ResetCredits { available: 1, next_expiry: Some(now + 5 * 3600) })), now).as_deref(), Some("크레딧 무제한 · 초기화권 1개 · 5시간 후 만료"));
+            assert_eq!(credit_caption(&usage(None, None, Some(ResetCredits { available: 1, next_expiry: None })), now).as_deref(), Some("초기화권 1개"));
+            assert_eq!(credit_caption(&usage(None, Some(Credits::default()), Some(ResetCredits::default())), now), None);
+            assert_eq!(credit_caption(&Usage::unavailable("offline"), now), None);
+        });
+    }
+
+    #[test]
+    fn token_counts_are_shortened() {
+        assert_eq!([0, 999, 1000, 123_456, 12_345_678, 2_500_000_000].map(tokens), ["0", "999", "1K", "123.5K", "12.3M", "2.5B"]);
+    }
+
+    fn codex_with_reset_credit(root: &std::path::Path, available: u32) -> (crate::Env, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (mut env, _) = crate::Env::sandbox(root, false);
+        env.codex_probe = Some(std::sync::Arc::new(move |_| Ok(Usage { five_hour: Some((1.0, Some(4_200_000_000))), status: "allowed".into(),
+            resets: Some(crate::ResetCredits { available, next_expiry: None }), ..Default::default() })));
+        let redeemed = std::sync::Arc::new(AtomicUsize::new(0));
+        let count = redeemed.clone();
+        env.codex_reset = std::sync::Arc::new(move |_, _| { count.fetch_add(1, Ordering::SeqCst); Ok(crate::ResetOutcome::Reset) });
+        std::fs::create_dir_all(&env.codex_home).unwrap();
+        std::fs::write(env.codex_home.join("auth.json"), crate::codex::tests::fake_auth("work@example.test", "fixture")).unwrap();
+        (env, redeemed)
+    }
+
+    #[test]
+    fn a_reset_credit_is_used_only_after_the_row_confirms() {
+        use egui_kittest::kittest::Queryable;
+        use std::sync::atomic::Ordering;
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            let root = tempfile::tempdir().unwrap();
+            let (env, redeemed) = codex_with_reset_credit(root.path(), 1);
+            let manager = AccountManager::with_env(env);
+            manager.save_current(Tool::Codex, "Work").unwrap();
+            manager.refresh_usage_blocking(Tool::Codex);
+            let mut harness = egui_kittest::Harness::builder().with_size(vec2(760.0, 520.0))
+                .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Codex); } }, manager.clone());
+            for _ in 0..3 { harness.step(); }
+            harness.get_by_label("계정 메뉴").click();
+            for _ in 0..3 { harness.step(); }
+            harness.get_by_label("초기화권 사용").click();
+            for _ in 0..3 { harness.step(); }
+            assert!(harness.query_by_label("초기화권 1개를 사용할까요?").is_some());
+            assert_eq!(redeemed.load(Ordering::SeqCst), 0, "opening the confirmation redeems nothing");
+            harness.get_by_label("사용").click();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while harness.query_by_label("‘Work’ 사용량 한도를 초기화했습니다").is_none() {
+                assert!(std::time::Instant::now() < deadline, "no outcome notice");
+                harness.step();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(redeemed.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    #[test]
+    fn the_reset_item_is_unavailable_without_a_credit() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            let root = tempfile::tempdir().unwrap();
+            let (env, _) = codex_with_reset_credit(root.path(), 0);
+            let manager = AccountManager::with_env(env);
+            manager.save_current(Tool::Codex, "Work").unwrap();
+            manager.refresh_usage_blocking(Tool::Codex);
+            let mut harness = egui_kittest::Harness::builder().with_size(vec2(760.0, 520.0))
+                .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Codex); } }, manager);
+            for _ in 0..3 { harness.step(); }
+            harness.get_by_label("계정 메뉴").click();
+            for _ in 0..3 { harness.step(); }
+            assert!(harness.get_by_label("초기화권 사용").accesskit_node().is_disabled());
+        });
+    }
+
+    #[test]
+    fn usage_history_dialog_shows_the_summary_and_daily_tokens() {
+        use egui_kittest::kittest::Queryable;
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            let root = tempfile::tempdir().unwrap();
+            let (mut env, _) = codex_with_reset_credit(root.path(), 1);
+            env.codex_history = std::sync::Arc::new(|_, _| Ok(crate::UsageHistory {
+                lifetime_tokens: Some(123_456), peak_daily_tokens: Some(5000), current_streak_days: Some(3), longest_streak_days: Some(9),
+                daily: (1..=20).map(|day| (format!("2026-10-{day:02}"), day * 100)).collect(),
+            }));
+            let manager = AccountManager::with_env(env);
+            manager.save_current(Tool::Codex, "Work").unwrap();
+            manager.refresh_usage_blocking(Tool::Codex);
+            let mut harness = egui_kittest::Harness::builder().with_size(vec2(760.0, 620.0))
+                .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Codex); } }, manager);
+            for _ in 0..3 { harness.step(); }
+            harness.get_by_label("계정 메뉴").click();
+            for _ in 0..3 { harness.step(); }
+            harness.get_by_label("사용 내역").click();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while harness.query_by_label("누적 토큰 123.5K").is_none() {
+                assert!(std::time::Instant::now() < deadline, "history not shown");
+                harness.step();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            for label in ["‘Work’ 사용 내역", "최고 일일 토큰 5K", "연속 사용 3일 · 최장 9일", "10-07 · 700", "10-20 · 2K"] {
+                assert!(harness.query_by_label(label).is_some(), "{label}");
+            }
+            assert!(harness.query_by_label("10-06 · 600").is_none(), "only the last 14 days are drawn");
+            // The dialog is centered again once the history replaces the spinner.
+            for _ in 0..3 { harness.step(); }
+            harness.get_by_label("닫기").click();
+            for _ in 0..3 { harness.step(); }
+            assert!(harness.query_by_label("‘Work’ 사용 내역").is_none());
+        });
+    }
+
+    #[test]
+    fn credit_captions_fit_four_languages_at_narrow_scaled_width() {
+        use egui_kittest::kittest::Queryable;
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                let root = tempfile::tempdir().unwrap();
+                let (mut env, _) = codex_with_reset_credit(root.path(), 2);
+                env.codex_probe = Some(std::sync::Arc::new(|_| Ok(Usage { five_hour: Some((0.25, Some(4_200_000_000))), status: "allowed".into(),
+                    credits: Some(crate::Credits { has_credits: true, unlimited: false, balance: Some("1,250".into()) }),
+                    resets: Some(crate::ResetCredits { available: 2, next_expiry: Some(crate::now_unix() + 3 * 86_400 + 600) }), ..Default::default() })));
+                let manager = AccountManager::with_env(env);
+                manager.save_current(Tool::Codex, "Work").unwrap();
+                manager.refresh_usage_blocking(Tool::Codex);
+                let caption = credit_caption(&manager.usage(Tool::Codex, &manager.profiles(Tool::Codex)[0].id).unwrap(), crate::now_unix()).unwrap();
+                let mut harness = egui_kittest::Harness::builder().with_size(vec2(420.0, 760.0)).wgpu()
+                    .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Codex); } }, manager);
+                harness.ctx.set_zoom_factor(1.3);
+                for _ in 0..4 { harness.step(); }
+                let node = harness.get_by_label(&caption);
+                assert!(harness.ctx.content_rect().contains_rect(node.rect()), "{language:?}: caption clipped");
+                harness.render().unwrap().save(std::env::temp_dir().join(format!("kiln024-credit-caption-{language:?}.png"))).unwrap();
+            });
+        }
     }
 
     #[test]
