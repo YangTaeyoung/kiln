@@ -99,7 +99,7 @@ git diff --check
 
 Windows changes are cross-checked from the Mac with `cargo xwin check -p kiln --bins
 --tests --target aarch64-pc-windows-msvc` and run on Windows by the `windows-x64` and
-`windows-arm64` CI jobs; [Windows support](docs/windows-parity.md) lists the VM
+`windows-arm64` CI jobs (each split into libraries, crates and terminal); [Windows support](docs/windows-parity.md) lists the VM
 scenarios behind each feature.
 
 Tests must use isolated configuration/socket/account paths. Do not shut down the

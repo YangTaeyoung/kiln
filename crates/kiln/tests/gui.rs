@@ -191,6 +191,15 @@ fn linked_resume_stops_the_old_agent_flushes_history_and_reopens_only_the_winner
     assert_eq!(new_ids.len(), 2);
 }
 
+/// Focuses the only multiline text input until it holds keyboard focus, then types `text` into it.
+fn type_into_prompt(h: &mut Harness<'_, KilnApp>, text: &str) {
+    use egui_kittest::kittest::NodeT;
+    let input = |h: &Harness<'_, KilnApp>| h.get_by_role(egui::accesskit::Role::MultilineTextInput).accesskit_node().is_focused();
+    assert!(pump_until(h, 10, |h| { h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus(); h.step(); input(h) }), "the prompt input takes keyboard focus");
+    h.event(egui::Event::Text(text.into()));
+    h.run_steps(3);
+}
+
 fn pump_until(h: &mut Harness<'_, KilnApp>, secs: u64, mut f: impl FnMut(&mut Harness<'_, KilnApp>) -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < deadline {
@@ -1887,7 +1896,7 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     let original=h.state().debug_focused_session().unwrap();
     h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
-    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("Review API contract independently".into()));h.run_steps(3);
+    type_into_prompt(&mut h,"Review API contract independently");
     assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently"]);
     h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
     h.get_by_label("새 워크스페이스").click();h.run_steps(4);
@@ -1905,9 +1914,8 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     assert_eq!(h.state().debug_active_workspace_name(),"Documentation review");
     assert_eq!(h.state().debug_active_workspace_root(),proj.canonical().unwrap());
     h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
-    h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("Write separate documentation".into()));h.run_steps(3);
-    let focused:Vec<String>=h.query_all(egui_kittest::kittest::By::new().predicate(|n|n.is_focused())).map(|n|{use egui_kittest::kittest::NodeT;let n=n.accesskit_node();format!("{:?} {:?}",n.role(),n.label())}).collect();
-    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently","Write separate documentation"],"focused nodes: {focused:?}");
+    type_into_prompt(&mut h,"Write separate documentation");
+    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently","Write separate documentation"]);
     h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
     let ctx=h.ctx.clone();h.state_mut().debug_split(&ctx,true);
     assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2 && h.state().debug_pane_sessions().len()==2));
