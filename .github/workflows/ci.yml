@@ -5,6 +5,12 @@ on:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+# Cargo commands select the whole workspace; --lib and --test choose the targets that run.
+env:
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 jobs:
   macos:
     runs-on: macos-14
@@ -13,54 +19,49 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
-      - name: Check
-        run: cargo check --locked -p kiln
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Localization coverage and font tests
         run: |
           python3 scripts/test-check-localizations.py
           python3 scripts/check-localizations.py
           python3 scripts/test-make-appcast.py
-          cargo test --locked -p kiln-common -p kiln-i18n-macros
-      - name: Native IME cancellation regression
-        run: cargo test --locked -p egui-winit --lib kiln_ime_tests
-      - name: Native IME commit and trigger regression
-        run: cargo test --locked -p kiln --test native_ime
-      - name: Daemon protocol, palette and foreground identity regressions
+      - name: Library unit tests
+        run: KILN_PTY_HOST=0 cargo test --locked --workspace --lib -- --test-threads=1
+      - name: Native IME regressions
         run: |
-          cargo test --locked -p kiln-proto
-          KILN_PTY_HOST=0 cargo test --locked -p kiln-daemon --lib
-          cargo test --locked -p kiln-daemon --test macos_responsibility -- --test-threads=1
-      - name: Application unit tests
-        run: |
-          cargo test --locked -p kiln --lib -- --test-threads=1
-          cargo test --locked -p kiln-accounts --lib
+          members=$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; print(" ".join("-p " + p["name"] for p in json.load(sys.stdin)["packages"]))')
+          cargo test --locked $members -p egui-winit --lib kiln_ime_tests
+          cargo test --locked --workspace --test native_ime
+      - name: Daemon foreground identity regressions
+        run: cargo test --locked --workspace --test macos_responsibility -- --test-threads=1
       - name: Remote files and direct agent launches
         run: |
-          cargo test --locked -p kiln-remote --lib --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1
-          cargo test --locked -p kiln --test direct_terminal_launch -- --test-threads=1
-          cargo test --locked -p kiln --test shell_completion -- --test-threads=1
-          cargo test --locked -p kiln --test terminal_recovery -- --test-threads=1
-          KILN_PTY_HOST=0 cargo test --locked -p kiln --test daemon -- --test-threads=1
-          cargo test --locked -p kiln --test hosted --test hosted_failures -- --test-threads=1
-          cargo test --locked -p kiln --test mixed_upgrade
+          cargo test --locked --workspace --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1
+          cargo test --locked --workspace --test direct_terminal_launch -- --test-threads=1
+          cargo test --locked --workspace --test shell_completion -- --test-threads=1
+          cargo test --locked --workspace --test terminal_recovery -- --test-threads=1
+          KILN_PTY_HOST=0 cargo test --locked --workspace --test daemon -- --test-threads=1
+          cargo test --locked --workspace --test hosted --test hosted_failures -- --test-threads=1
+          cargo test --locked --workspace --test mixed_upgrade
       - name: SQL completion and SQLite regressions
         run: |
-          cargo test --locked -p kiln-db --lib
-          cargo test --locked -p kiln-db --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit
-          cargo test --locked -p kiln-db --test sql_completion --test query_execution -- --test-threads=1
-      - name: Schema UI and editor regressions
+          cargo test --locked --workspace --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit
+          cargo test --locked --workspace --test sql_completion --test query_execution -- --test-threads=1
+      - name: Schema UI, editor and Git regressions
         run: |
-          cargo test --locked -p kiln-db --test schema_ui_flow -- --test-threads=1
-          cargo test --locked -p kiln-editor --tests
-      - name: Git integration tests
-        run: cargo test --locked -p kiln-git
+          cargo test --locked --workspace --test schema_ui_flow -- --test-threads=1
+          tests=$(for f in crates/kiln-editor/tests/*.rs crates/kiln-git/tests/*.rs; do printf -- '--test %s ' "$(basename "$f" .rs)"; done)
+          cargo test --locked --workspace $tests
       - name: GUI and session integration
         run: |
-          cargo test --locked -p kiln --test gui
-          cargo test --locked -p kiln --test remote_inspector -- --test-threads=1
-          cargo test --locked -p kiln --test workflow_distill -- --test-threads=1
-          cargo test --locked -p kiln --test pane_layout -- --test-threads=1
-          cargo test --locked -p kiln --test portable_icons
+          cargo test --locked --workspace --test gui
+          cargo test --locked --workspace --test remote_inspector -- --test-threads=1
+          cargo test --locked --workspace --test workflow_distill -- --test-threads=1
+          cargo test --locked --workspace --test pane_layout -- --test-threads=1
+          cargo test --locked --workspace --test portable_icons
       - name: Validate release scripts
         run: |
           sh -n install.sh
@@ -95,49 +96,40 @@ jobs:
             export PATH="$USERPROFILE/.cargo/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal && rustup default stable
-      - name: Check
-        run: cargo check --locked -p kiln --bins
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Library tests
-        if: ${{ !cancelled() }}
-        run: |
-          status=0
-          cargo test --locked --no-fail-fast -p kiln-common -p kiln-i18n-macros -p kiln-proto -p kiln-daemon -p kiln-accounts -p kiln-db -p kiln-editor -p kiln-git --lib || status=1
-          cargo test --locked --no-fail-fast -p kiln --lib -- --test-threads=1 || status=1
-          cargo test --locked --no-fail-fast -p kiln-remote --lib -- --test-threads=1 || status=1
-          exit $status
+        run: cargo test --locked --no-fail-fast --workspace --lib -- --test-threads=1
       - name: Credential Manager
         if: ${{ !cancelled() }}
         run: |
           status=0
-          cargo test --locked -p kiln-accounts --lib -- --ignored --exact store::tests::windows_store_keeps_kiln_snapshots_in_files_and_other_entries_in_credential_manager || status=1
+          cargo test --locked --workspace --lib -- --ignored --exact store::tests::windows_store_keeps_kiln_snapshots_in_files_and_other_entries_in_credential_manager || status=1
           npm install --global @openai/codex@0.162.1 || status=1
           home="$RUNNER_TEMP/codex-keyring"
           mkdir -p "$home"
           printf 'cli_auth_credentials_store = "keyring"\n[features]\nsecret_auth_storage = false\n' > "$home/config.toml"
           printf 'ci-fixture-key' | CODEX_HOME="$home" codex login --with-api-key || status=1
-          KILN_CODEX_KEYRING_HOME="$home" cargo test --locked -p kiln-accounts --lib -- --ignored --exact codex::tests::the_entry_the_cli_writes_is_read_under_its_key || status=1
+          KILN_CODEX_KEYRING_HOME="$home" cargo test --locked --workspace --lib -- --ignored --exact codex::tests::the_entry_the_cli_writes_is_read_under_its_key || status=1
           CODEX_HOME="$home" codex logout || true
           exit $status
       - name: Terminal and daemon integration
         if: ${{ !cancelled() }}
-        run: |
-          status=0
-          cargo test --locked --no-fail-fast -p kiln --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1 || status=1
-          exit $status
+        run: cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
       - name: GUI integration
         if: ${{ !cancelled() }}
-        run: |
-          status=0
-          cargo test --locked --no-fail-fast -p kiln --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1 || status=1
-          exit $status
+        run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
       - name: Editor, Git, database and remote integration
         if: ${{ !cancelled() }}
         run: |
           status=0
-          cargo test --locked --no-fail-fast -p kiln-editor --tests -- --test-threads=1 || status=1
-          cargo test --locked --no-fail-fast -p kiln-git --tests -- --test-threads=1 || status=1
-          cargo test --locked --no-fail-fast -p kiln-db --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1 || status=1
-          cargo test --locked --no-fail-fast -p kiln-remote --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1 || status=1
+          tests=$(for f in crates/kiln-editor/tests/*.rs crates/kiln-git/tests/*.rs; do printf -- '--test %s ' "$(basename "$f" .rs)"; done)
+          cargo test --locked --no-fail-fast --workspace $tests -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast --workspace --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast --workspace --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1 || status=1
           exit $status
 
   database-servers:
@@ -176,6 +168,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: SELECT editing on disposable PostgreSQL, MySQL and MariaDB
         env:
           KILN_TEST_PG_URL: postgres://postgres:kiln_fixture_only@127.0.0.1:5432/postgres
