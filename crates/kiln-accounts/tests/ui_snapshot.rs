@@ -60,8 +60,8 @@ fn populated(root: &Path) -> AccountManager {
     let (mut env, store) = Env::sandbox(root, true);
     let t = now() + 30;
     env.probe = Arc::new(move |tok: &str| match tok {
-        "at-work" => Ok(Usage { five_hour: Some((0.42, Some(t + 2 * 3600 + 13 * 60))), seven_day: Some((0.18, Some(t + 4 * 86400 + 5 * 3600))), status: "allowed".into() }),
-        "at-personal" => Ok(Usage { five_hour: Some((1.0, Some(t + 47 * 60))), seven_day: Some((0.64, Some(t + 2 * 86400))), status: "rejected".into() }),
+        "at-work" => Ok(Usage { five_hour: Some((0.42, Some(t + 2 * 3600 + 13 * 60))), seven_day: Some((0.18, Some(t + 4 * 86400 + 5 * 3600))), status: "allowed".into(), ..Default::default() }),
+        "at-personal" => Ok(Usage { five_hour: Some((1.0, Some(t + 47 * 60))), seven_day: Some((0.64, Some(t + 2 * 86400))), status: "rejected".into(), ..Default::default() }),
         _ => Err(anyhow::anyhow!("authentication failed (HTTP 401) — token may be expired")),
     });
     let m = AccountManager::with_env(env.clone());

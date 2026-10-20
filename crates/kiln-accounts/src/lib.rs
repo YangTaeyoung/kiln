@@ -15,7 +15,8 @@ pub mod store;
 mod ui;
 
 pub use limit::{LimitHit, detect_limit};
-pub use manager::{AccountManager, Env};
+pub use manager::{AccountManager, Env, HistoryState};
+pub use ui::reset_outcome_text;
 pub use login::LoginStatus;
 pub use store::{CredentialStore, FileStore, MemoryStore, SecurityCli};
 pub use ui::{AccountsEvent, accounts_settings_ui};
@@ -64,11 +65,65 @@ pub struct Usage {
     pub five_hour: Option<(f32, Option<i64>)>,
     pub seven_day: Option<(f32, Option<i64>)>,
     pub status: String,
+    /// Claude extra-usage spend for the billing period.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra: Option<ExtraUsage>,
+    /// Codex credit balance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credits: Option<Credits>,
+    /// Codex rate-limit reset credits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets: Option<ResetCredits>,
+}
+
+/// The result of redeeming a Codex rate-limit reset credit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetOutcome {
+    Reset,
+    NothingToReset,
+    NoCredit,
+    AlreadyRedeemed,
+}
+
+/// Codex's account token usage: summary figures and daily totals, oldest first.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct UsageHistory {
+    pub lifetime_tokens: Option<u64>,
+    pub peak_daily_tokens: Option<u64>,
+    pub current_streak_days: Option<u64>,
+    pub longest_streak_days: Option<u64>,
+    pub daily: Vec<(String, u64)>,
+}
+
+/// Claude extra-usage (overage) spend for the billing period, in minor units of `currency`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct ExtraUsage {
+    pub enabled: bool,
+    pub used: Option<f64>,
+    pub limit: Option<f64>,
+    pub currency: Option<String>,
+}
+
+/// Codex credits: whether the account has any, whether they are unlimited, and the balance
+/// as Codex reports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct Credits {
+    pub has_credits: bool,
+    pub unlimited: bool,
+    pub balance: Option<String>,
+}
+
+/// Codex rate-limit reset credits: how many are available and the nearest expiry (unix
+/// seconds) when the details were read.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct ResetCredits {
+    pub available: u32,
+    pub next_expiry: Option<i64>,
 }
 
 impl Usage {
     pub fn unavailable(reason: impl std::fmt::Display) -> Self {
-        Usage { five_hour: None, seven_day: None, status: format!("unavailable: {reason}") }
+        Usage { status: format!("unavailable: {reason}"), ..Default::default() }
     }
 
     pub fn is_unavailable(&self) -> bool {
@@ -106,6 +161,23 @@ pub fn resume_command(tool: Tool) -> &'static str {
     }
 }
 
+/// Fixture credentials for tests of crates that use the account manager.
+#[doc(hidden)]
+pub mod test_support {
+    /// A Codex `auth.json` for `email` with tokens named after `marker`.
+    pub fn codex_auth(email: &str, marker: &str) -> String {
+        use base64::Engine;
+        let encode = |value: &serde_json::Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(value).unwrap_or_default());
+        let id_token = format!("{}.{}.sig", encode(&serde_json::json!({"alg": "none"})), encode(&serde_json::json!({"email": email, "sub": marker})));
+        serde_json::json!({
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": null,
+            "tokens": {"id_token": id_token, "access_token": format!("access-{marker}"), "refresh_token": format!("refresh-{marker}"), "account_id": marker},
+            "last_refresh": "2026-09-20T00:00:00Z",
+        }).to_string()
+    }
+}
+
 pub(crate) fn now_unix() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
@@ -115,17 +187,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn samples_saved_before_credit_figures_still_load_and_new_figures_round_trip() {
+        let old: Usage = serde_json::from_str(r#"{"five_hour":[0.5,null],"seven_day":null,"status":"allowed"}"#).unwrap();
+        assert_eq!(old, Usage { five_hour: Some((0.5, None)), status: "allowed".into(), ..Default::default() });
+        assert_eq!(serde_json::to_value(&old).unwrap(), serde_json::json!({"five_hour": [0.5, null], "seven_day": null, "status": "allowed"}));
+        let full = Usage {
+            extra: Some(ExtraUsage { enabled: true, used: Some(10.0), limit: Some(50.0), currency: Some("USD".into()) }),
+            credits: Some(Credits { has_credits: true, unlimited: false, balance: Some("120".into()) }),
+            resets: Some(ResetCredits { available: 2, next_expiry: Some(1_800_000_000) }),
+            ..old.clone()
+        };
+        assert_eq!(serde_json::from_value::<Usage>(serde_json::to_value(&full).unwrap()).unwrap(), full);
+    }
+
+    #[test]
     fn exhausted_detection() {
         let now = 1_000_000;
-        let full = Usage { five_hour: Some((1.0, Some(now + 60))), seven_day: Some((0.2, None)), status: "allowed".into() };
+        let full = Usage { five_hour: Some((1.0, Some(now + 60))), seven_day: Some((0.2, None)), status: "allowed".into(), ..Default::default() };
         assert!(full.exhausted_at(now));
         assert!(!full.exhausted_at(now + 61));
-        let rejected = Usage { five_hour: Some((0.5, Some(now + 60))), seven_day: None, status: "rejected".into() };
+        let rejected = Usage { five_hour: Some((0.5, Some(now + 60))), seven_day: None, status: "rejected".into(), ..Default::default() };
         assert!(rejected.exhausted_at(now));
         assert!(!rejected.exhausted_at(now + 60));
         let rejected_no_reset = Usage { status: "rejected".into(), ..Default::default() };
         assert!(rejected_no_reset.exhausted_at(now));
-        assert!(!Usage { status: "allowed_warning".into(), five_hour: Some((0.95, None)), seven_day: None }.exhausted_at(now));
+        assert!(!Usage { status: "allowed_warning".into(), five_hour: Some((0.95, None)), seven_day: None, ..Default::default() }.exhausted_at(now));
         assert!(!Usage::unavailable("x").exhausted_at(now));
     }
 

@@ -101,6 +101,26 @@ way the official CLI 2.1.304 renews it:
 Kiln's saved snapshots are not renewed; an expired one is reported without a usage request.
 Codex renewal stays in its own app-server reader.
 
+## Credits, reset credits and usage history
+
+- Claude samples keep the usage endpoint's `extra_usage` (`is_enabled`, `used_credits`,
+  `monthly_limit`, `currency`); amounts are minor units of the currency, as the CLI 2.1.304
+  describes them. The account row shows the spend against the monthly limit, or "off".
+- Codex samples keep `rateLimits.credits` (`hasCredits`, `unlimited`, `balance`) and
+  `rateLimitResetCredits` (`availableCount`, and the nearest `expiresAt` of an available
+  credit) from `account/rateLimits/read` in Codex 0.163.0. Background polls send
+  `excludeResetCreditDetails: true`, which keeps the count; manual reads (settings opened,
+  refresh pressed) read the details. Older saved samples without these fields still load.
+- A reset credit is redeemed only on a click: the Codex account menu (after an inline
+  confirmation), or the limit toast when a Codex limit leaves no other account with room and
+  the active account's latest sample lists an available credit. Kiln runs
+  `account/rateLimitResetCredit/consume` with a new idempotency key per attempt through the
+  private app-server of the account's Codex home, between the identity checks of the usage
+  reader, reports `reset`, `nothingToReset`, `noCredit` or `alreadyRedeemed`, and reads the
+  account's usage again with details.
+- The usage history dialog reads `account/usage/read` when it opens and shows the lifetime
+  and peak daily tokens, the current and longest streaks and the last 14 daily buckets.
+
 ## Verification boundaries
 
 Use `cargo test -p kiln-accounts --lib`. Isolated fake credentials/probes exercise
@@ -117,6 +137,8 @@ copying credentials, or starting model turns. The ignored
 `live_claude_login_renewal_without_persisting_settings` test renews the selected Claude
 profile's login the way the usage worker does and reads its quotas, under the same
 authorization and variables.
+For Codex, the live usage check also reads the usage history and the reset-credit details.
+Redeeming a reset credit spends a real credit; it is verified only by the owner.
 
 Before publishing a usage fix, verify the authorized local accounts with the
 actual implementation. Ask the owner to reauthenticate only accounts for which

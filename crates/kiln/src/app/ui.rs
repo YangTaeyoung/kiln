@@ -731,16 +731,32 @@ impl KilnApp {
         if wide && !narrow {self.settings.sidebar_width=panel.response.rect.width();}
     }
 
-    fn workspace_order(&self)->Vec<(usize,usize)> {
-        let parent:Vec<Option<usize>>=self.workspaces.iter().enumerate().map(|(i,ws)|{
+    /// The main workspace each linked worktree is listed under.
+    fn workspace_parents(&self)->Vec<Option<usize>> {
+        self.workspaces.iter().enumerate().map(|(i,ws)|{
             let identity=ws.tools.worktree_identity()?;
             if !identity.linked {return None;}
             self.workspaces.iter().enumerate().filter(|(j,other)|*j!=i && !other.tools.worktree_identity().is_some_and(|x|x.linked) && identity.main_root.starts_with(other.tools.canonical_root()))
                 .max_by_key(|(_,other)|other.root.components().count()).map(|(j,_)|j)
-        }).collect();
+        }).collect()
+    }
+
+    fn workspace_order(&self)->Vec<(usize,usize)> {
+        let parent=self.workspace_parents();
         let mut order=Vec::new();
         for i in 0..self.workspaces.len(){if parent[i].is_none(){order.push((i,0));for (j,p) in parent.iter().enumerate(){if *p==Some(i){order.push((j,1));}}}}
         order
+    }
+
+    /// Where workspace `i` moves to go one row up and one row down among the rows it can move
+    /// between.
+    fn workspace_neighbors(&self, i: usize) -> (Option<usize>, Option<usize>) {
+        let parents = self.workspace_parents();
+        let peers: Vec<usize> = self.workspace_order().into_iter().map(|(j, _)| j).filter(|j| parents[*j] == parents[i]).collect();
+        let Some(at) = peers.iter().position(|j| *j == i) else { return (None, None) };
+        let up = at.checked_sub(1).and_then(|k| workspace_drop_index(&parents, i, peers[k], true));
+        let down = peers.get(at + 1).and_then(|next| workspace_drop_index(&parents, i, *next, false));
+        (up, down)
     }
 
     fn space_row(&mut self, ui: &mut egui::Ui, i: usize, wide: bool, scroll_active: bool) {
@@ -760,8 +776,23 @@ impl KilnApp {
         let sync_badge = sync_enabled.then(|| self.conversation_sync.badge(&sync_root));
         let task_context = self.projects.task_context(&root_path, &sync_root);
         let h = if wide { if tasks.len()>3 {70.0}else{52.0} } else { 44.0 };
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click_and_drag());
         resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), active, &name));
+        if resp.drag_started() { egui::DragAndDrop::set_payload(ui.ctx(), WorkspaceDrag(i)); }
+        if resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing); }
+        let pointer_y = ui.ctx().pointer_interact_pos().map(|p| p.y);
+        let before = pointer_y.is_some_and(|y| y < rect.center().y);
+        if let Some(dragged) = resp.dnd_hover_payload::<WorkspaceDrag>()
+            && workspace_drop_index(&self.workspace_parents(), dragged.0, i, before).is_some()
+        {
+            let y = if before { rect.top() - 3.0 } else { rect.bottom() + 3.0 };
+            ui.painter().line_segment([pos2(rect.left() + 4.0, y), pos2(rect.right() - 4.0, y)], Stroke::new(2.0, t.accent));
+        }
+        if let Some(dragged) = resp.dnd_release_payload::<WorkspaceDrag>()
+            && let Some(to) = workspace_drop_index(&self.workspace_parents(), dragged.0, i, before)
+        {
+            self.actions.push(Action::MoveWorkspace(dragged.0, to));
+        }
         widgets::focus_ring(ui, &resp, 5);
         let fill = if active {
             t.bg_elevated
@@ -835,9 +866,16 @@ impl KilnApp {
         if resp.double_clicked() && wide {
             self.workspaces[i].renaming = Some(name.clone());
         }
+        let neighbors = self.workspace_neighbors(i);
         resp.context_menu(|ui| {
             if ui.button(kiln_common::i18n::tr("새 워크스페이스")).clicked() {
                 self.actions.push(Action::NewWorkspaceAt(root_path.clone())); ui.close();
+            }
+            for (label, move_to) in [(kiln_common::i18n::tr("위로 이동"), neighbors.0), (kiln_common::i18n::tr("아래로 이동"), neighbors.1)] {
+                if ui.add_enabled(move_to.is_some(), egui::Button::new(label)).clicked() {
+                    if let Some(to) = move_to { self.actions.push(Action::MoveWorkspace(i, to)); }
+                    ui.close();
+                }
             }
             if ui.button(kiln_common::i18n::tr("이름 바꾸기")).clicked() {
                 self.workspaces[i].renaming = Some(name.clone());
@@ -1634,5 +1672,71 @@ impl KilnApp {
         add(Group::Settings, Icon::Command, kiln_common::i18n::tr("글꼴 작게").into(), "⌘-", Action::FontDelta(-1.0));
         add(Group::Settings, Icon::Sparkle, kiln_common::i18n::tr("데몬을 이 버전으로 교체").into(), "", Action::UpgradeDaemon);
         items
+    }
+}
+
+/// The drag payload of a workspace row.
+struct WorkspaceDrag(usize);
+
+/// Where workspace `from` moves in the list when dropped before or after the row of workspace
+/// `target`, given each linked worktree's main workspace in `parents`. A main workspace moves
+/// among main workspaces (a row of a linked worktree stands for its main workspace) and keeps
+/// its worktrees listed under it; a linked worktree moves only among the worktrees of its main
+/// workspace. None leaves the order as it is.
+pub(super) fn workspace_drop_index(parents: &[Option<usize>], from: usize, target: usize, before: bool) -> Option<usize> {
+    let anchor = match parents.get(from).copied().flatten() {
+        Some(parent) => (parents.get(target).copied().flatten() == Some(parent)).then_some(target)?,
+        None => parents.get(target).copied().flatten().unwrap_or(target),
+    };
+    if anchor == from { return None; }
+    let mut to = if before { anchor } else { anchor + 1 };
+    if from < to { to -= 1; }
+    (to != from).then_some(to)
+}
+
+/// The list position of the workspace at `index` after the workspace at `from` moved to `to`.
+pub(super) fn index_after_move(index: usize, from: usize, to: usize) -> usize {
+    if index == from { to }
+    else if from < index && index <= to { index - 1 }
+    else if to <= index && index < from { index + 1 }
+    else { index }
+}
+
+#[cfg(test)]
+mod workspace_order_tests {
+    use super::{index_after_move, workspace_drop_index};
+
+    /// Main workspaces 0, 2 and 3; linked worktrees 1 and 4 of workspace 0.
+    const PARENTS: [Option<usize>; 5] = [None, Some(0), None, None, Some(0)];
+
+    #[test]
+    fn main_workspaces_move_before_or_after_the_main_workspace_they_are_dropped_on() {
+        assert_eq!(workspace_drop_index(&PARENTS, 3, 0, true), Some(0));
+        assert_eq!(workspace_drop_index(&PARENTS, 0, 3, false), Some(3));
+        assert_eq!(workspace_drop_index(&PARENTS, 0, 2, false), Some(2));
+        assert_eq!(workspace_drop_index(&PARENTS, 2, 0, true), Some(0));
+        assert_eq!(workspace_drop_index(&PARENTS, 3, 2, false), None, "already there");
+        assert_eq!(workspace_drop_index(&PARENTS, 2, 2, true), None);
+    }
+
+    #[test]
+    fn a_drop_on_a_linked_worktree_counts_as_a_drop_on_its_main_workspace() {
+        assert_eq!(workspace_drop_index(&PARENTS, 3, 4, true), Some(0));
+        assert_eq!(workspace_drop_index(&PARENTS, 2, 1, false), Some(1));
+    }
+
+    #[test]
+    fn linked_worktrees_move_only_among_the_worktrees_of_their_main_workspace() {
+        assert_eq!(workspace_drop_index(&PARENTS, 4, 1, true), Some(1));
+        assert_eq!(workspace_drop_index(&PARENTS, 1, 4, false), Some(4));
+        assert_eq!(workspace_drop_index(&PARENTS, 4, 0, true), None);
+        assert_eq!(workspace_drop_index(&PARENTS, 1, 3, false), None);
+    }
+
+    #[test]
+    fn indices_follow_the_moved_workspace() {
+        assert_eq!([0, 1, 2, 3, 4].map(|i| index_after_move(i, 3, 0)), [1, 2, 3, 0, 4]);
+        assert_eq!([0, 1, 2, 3, 4].map(|i| index_after_move(i, 0, 3)), [3, 0, 1, 2, 4]);
+        assert_eq!([0, 1, 2].map(|i| index_after_move(i, 1, 1)), [0, 1, 2]);
     }
 }

@@ -27,7 +27,12 @@ pub struct Env {
     pub probe: UsageProbe,
     /// None keeps the offline rollout reader available in isolated fixtures.
     pub codex_probe: Option<UsageProbe>,
-    pub codex_native_probe: Option<Arc<dyn Fn(&Path, &str) -> Result<Usage> + Send + Sync>>,
+    /// Reads a Codex account's usage through its CLI; the flag also reads reset-credit details.
+    pub codex_native_probe: Option<Arc<dyn Fn(&Path, &str, bool) -> Result<Usage> + Send + Sync>>,
+    /// Redeems one Codex reset credit through the CLI of a Codex home.
+    pub codex_reset: Arc<dyn Fn(&Path, &str) -> Result<crate::ResetOutcome> + Send + Sync>,
+    /// Reads a Codex account's token usage history through the CLI of a Codex home.
+    pub codex_history: Arc<dyn Fn(&Path, &str) -> Result<crate::UsageHistory> + Send + Sync>,
     /// Sends a Claude refresh grant to the CLI's token endpoint.
     pub(crate) claude_renew: Arc<dyn Fn(&claude_refresh::Grant) -> Result<claude_refresh::Renewed> + Send + Sync>,
     /// 키체인 account 속성을 모를 때 쓰는 사용자 이름.
@@ -63,6 +68,8 @@ impl Env {
             probe: Arc::new(|token: &str| claude::probe_usage(token)),
             codex_probe: Some(Arc::new(codex::probe_usage)),
             codex_native_probe: Some(Arc::new(codex::probe_native)),
+            codex_reset: Arc::new(codex::consume_reset),
+            codex_history: Arc::new(codex::usage_history),
             claude_renew: Arc::new(claude_refresh::request),
             username: std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default(),
         }
@@ -82,6 +89,8 @@ impl Env {
             probe: Arc::new(|_: &str| Err(anyhow!("probe disabled"))),
             codex_probe: None,
             codex_native_probe: None,
+            codex_reset: Arc::new(|_, _| Err(anyhow!("reset credits disabled"))),
+            codex_history: Arc::new(|_, _| Err(anyhow!("usage history disabled"))),
             claude_renew: Arc::new(|_| Err(anyhow!("renewal disabled"))),
             username: "tester".into(),
         };
@@ -192,6 +201,8 @@ pub(crate) struct State {
     usage: HashMap<(Tool, String), Usage>,
     limited_at: HashMap<(Tool, String), i64>,
     login_required: std::collections::HashSet<(Tool, String)>,
+    /// Codex usage history per profile, as last requested.
+    histories: HashMap<String, HistoryState>,
     /// Logins whose refresh token was rejected, by the digest of their access token.
     renewal_rejected: HashMap<(Tool, String), Vec<u8>>,
     login_checked_at: Option<std::time::Instant>,
@@ -202,6 +213,14 @@ pub(crate) struct State {
     /// 현재 로그인된 계정 이메일(백그라운드에서 읽는다). 바깥 `None` 은 아직 모름.
     pub(crate) live_email: [Option<Option<String>>; 2],
     pub(crate) events: Vec<AccountsEvent>,
+}
+
+/// A Codex account's usage history request.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryState {
+    Loading,
+    Ready(crate::UsageHistory),
+    Failed(String),
 }
 
 /// Where the credentials of a usage read are kept.
@@ -1120,7 +1139,7 @@ impl AccountManager {
                 now >= poll.blocked_until && (manual || now >= poll.next_at)
             });
             if !due { continue; }
-            let result = self.probe_codex_profile(&profile);
+            let result = self.probe_codex_profile(&profile, manual);
             let _op = self.inner.op.lock();
             if self.pending_login(Tool::Codex, &profile.id) || !self.profiles(Tool::Codex).iter().any(|p| p.id == profile.id && p.email == profile.email) { continue; }
             self.with_state(|s| {
@@ -1133,21 +1152,65 @@ impl AccountManager {
         }
     }
 
-    fn probe_codex_profile(&self, profile: &Profile) -> Result<Usage> {
+    fn probe_codex_profile(&self, profile: &Profile, details: bool) -> Result<Usage> {
+        let probe = self.inner.env.codex_native_probe.as_ref().context("Codex usage reader unavailable")?;
+        self.with_codex_home(profile, |home, email| probe(home, email, details))
+    }
+
+    /// Runs `call` with the Codex home that holds `profile`'s login and its email: the
+    /// profile's runtime folder, or the default CLI home for the active profile when the
+    /// runtime login is missing. The CLI checks the account's identity before answering.
+    fn with_codex_home<T>(&self, profile: &Profile, call: impl Fn(&Path, &str) -> Result<T>) -> Result<T> {
         let runtime = self.runtime_dir(Tool::Codex, &profile.id);
         let home = if runtime.is_dir() { &runtime } else { &self.inner.env.codex_home };
-        profile.email.as_deref().context("account identity unavailable").and_then(|email| {
-            let probe = self.inner.env.codex_native_probe.as_ref().unwrap();
-            probe(home, email).or_else(|error| {
-                if error.to_string() == "authentication required"
-                    && home != &self.inner.env.codex_home
-                    && self.active(Tool::Codex).as_deref() == Some(&profile.id)
-                {
-                    // The native reader checks this profile's identity before returning quotas.
-                    probe(&self.inner.env.codex_home, email)
-                } else { Err(error) }
-            })
+        let email = profile.email.as_deref().context("account identity unavailable")?;
+        call(home, email).or_else(|error| {
+            if error.to_string() == "authentication required"
+                && home != &self.inner.env.codex_home
+                && self.active(Tool::Codex).as_deref() == Some(&profile.id)
+            {
+                call(&self.inner.env.codex_home, email)
+            } else { Err(error) }
         })
+    }
+
+    fn codex_profile(&self, id: &str) -> Result<Profile> {
+        let profile = self.profiles(Tool::Codex).into_iter().find(|profile| profile.id == id).context("account profile missing")?;
+        if self.pending_login(Tool::Codex, id) { bail!("account sign-in is not applied yet"); }
+        Ok(profile)
+    }
+
+    /// Redeems one rate-limit reset credit of Codex profile `id` through its CLI, then reads
+    /// its usage again with the reset-credit details.
+    pub fn redeem_reset_credit(&self, id: &str) -> Result<crate::ResetOutcome> {
+        let profile = self.codex_profile(id)?;
+        let outcome = self.with_codex_home(&profile, |home, email| (self.inner.env.codex_reset)(home, email))?;
+        self.refresh_usage(Tool::Codex);
+        Ok(outcome)
+    }
+
+    /// Starts reading the token usage history of Codex profile `id`.
+    pub fn load_usage_history(&self, id: &str) {
+        let id = id.to_owned();
+        let started = self.with_state(|s| {
+            if s.histories.get(&id) == Some(&HistoryState::Loading) { return false; }
+            s.histories.insert(id.clone(), HistoryState::Loading);
+            true
+        });
+        if !started { return; }
+        self.repaint();
+        let manager = self.clone();
+        std::thread::spawn(move || {
+            let result = manager.codex_profile(&id).and_then(|profile| manager.with_codex_home(&profile, |home, email| (manager.inner.env.codex_history)(home, email)));
+            let state = match result { Ok(history) => HistoryState::Ready(history), Err(error) => HistoryState::Failed(format!("{error:#}")) };
+            manager.with_state(|s| s.histories.insert(id, state));
+            manager.repaint();
+        });
+    }
+
+    /// The last usage history request of Codex profile `id`.
+    pub fn usage_history(&self, id: &str) -> Option<HistoryState> {
+        self.with_state(|s| s.histories.get(id).cloned())
     }
 
     fn usage_secret(&self, tool: Tool, id: &str) -> Result<Option<String>> {
@@ -1377,11 +1440,18 @@ mod tests {
         let manager = AccountManager::with_env(Env::real());
         let profile = manager.profiles(tool).into_iter().nth(index).expect("saved profile");
         let usage = if tool == Tool::Codex {
-            manager.probe_codex_profile(&profile).expect("live Codex quota request")
+            let history = manager.with_codex_home(&profile, |home, email| (manager.inner.env.codex_history)(home, email)).expect("live Codex usage history");
+            assert!(history.daily.iter().all(|(date, _)| date.len() == 10));
+            eprintln!("history: {} days, lifetime tokens {:?}, peak daily tokens {:?}", history.daily.len(), history.lifetime_tokens, history.peak_daily_tokens);
+            let usage = manager.probe_codex_profile(&profile, true).expect("live Codex quota request");
+            eprintln!("credits: {:?}\nreset credits: {:?}", usage.credits, usage.resets);
+            usage
         } else {
             let secret = manager.usage_secret(tool, &profile.id).unwrap().expect("profile credentials");
             let token = claude::access_token(&secret).expect("subscription authentication");
-            (manager.inner.env.probe)(&token).expect("live Claude quota request")
+            let usage = (manager.inner.env.probe)(&token).expect("live Claude quota request");
+            eprintln!("extra usage: {:?}", usage.extra);
+            usage
         };
         assert!(!usage.is_unavailable());
         assert!(usage.five_hour.is_some() || usage.seven_day.is_some());
@@ -1405,13 +1475,62 @@ mod tests {
     }
 
     #[test]
+    fn a_reset_credit_is_redeemed_in_the_profile_home_and_usage_is_read_again_in_detail() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        std::fs::create_dir_all(&env.codex_home).unwrap();
+        std::fs::write(env.codex_home.join("auth.json"), codex::tests::fake_auth("fixture@example.test", "fixture")).unwrap();
+        let detailed = Arc::new(AtomicUsize::new(0));
+        let seen = detailed.clone();
+        env.codex_native_probe = Some(Arc::new(move |_, _, details| {
+            if details { seen.fetch_add(1, Ordering::SeqCst); }
+            Ok(Usage { five_hour: Some((0.0, None)), status: "allowed".into(), resets: Some(crate::ResetCredits { available: 0, next_expiry: None }), ..Default::default() })
+        }));
+        let homes = Arc::new(Mutex::new(Vec::new()));
+        let used = homes.clone();
+        env.codex_reset = Arc::new(move |home, email| { used.lock().push((home.to_path_buf(), email.to_owned())); Ok(crate::ResetOutcome::Reset) });
+        let manager = AccountManager::with_env(env);
+        let profile = manager.save_current(Tool::Codex, "Fixture").unwrap();
+        let runtime = manager.runtime_dir(Tool::Codex, &profile.id);
+        std::fs::create_dir_all(&runtime).unwrap();
+        assert_eq!(manager.redeem_reset_credit(&profile.id).unwrap(), crate::ResetOutcome::Reset);
+        assert_eq!(*homes.lock(), vec![(runtime, "fixture@example.test".to_owned())]);
+        while manager.is_refreshing(Tool::Codex) { std::thread::sleep(std::time::Duration::from_millis(5)); }
+        assert_eq!(detailed.load(Ordering::SeqCst), 1, "usage is read again with reset-credit details");
+        assert_eq!(manager.usage(Tool::Codex, &profile.id).unwrap().resets.unwrap().available, 0);
+        assert!(manager.redeem_reset_credit("codex-missing").is_err());
+    }
+
+    #[test]
+    fn usage_history_is_read_in_the_background_for_one_account() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        std::fs::create_dir_all(&env.codex_home).unwrap();
+        std::fs::write(env.codex_home.join("auth.json"), codex::tests::fake_auth("fixture@example.test", "fixture")).unwrap();
+        let history = crate::UsageHistory { lifetime_tokens: Some(10), daily: vec![("2026-10-20".into(), 10)], ..Default::default() };
+        let answer = history.clone();
+        env.codex_history = Arc::new(move |_, email| { assert_eq!(email, "fixture@example.test"); Ok(answer.clone()) });
+        let manager = AccountManager::with_env(env);
+        let profile = manager.save_current(Tool::Codex, "Fixture").unwrap();
+        assert_eq!(manager.usage_history(&profile.id), None);
+        manager.load_usage_history(&profile.id);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while matches!(manager.usage_history(&profile.id), None | Some(HistoryState::Loading)) {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(manager.usage_history(&profile.id), Some(HistoryState::Ready(history)));
+    }
+
+    #[test]
     fn active_codex_uses_matching_live_credentials_when_runtime_auth_is_missing() {
         let root = tempfile::tempdir().unwrap();
         let (mut env, _) = Env::sandbox(root.path(), false);
         std::fs::create_dir_all(&env.codex_home).unwrap();
         std::fs::write(env.codex_home.join("auth.json"), codex::tests::fake_auth("fixture@example.test", "fixture")).unwrap();
         let live = env.codex_home.clone();
-        env.codex_native_probe = Some(Arc::new(move |home, email| {
+        env.codex_native_probe = Some(Arc::new(move |home, email, _| {
             assert_eq!(email, "fixture@example.test");
             if home != live { anyhow::bail!("authentication required"); }
             Ok(Usage { five_hour: Some((0.42, None)), status: "allowed".into(), ..Default::default() })
@@ -1422,7 +1541,7 @@ mod tests {
         manager.refresh_usage_blocking(Tool::Codex);
         assert_eq!(manager.usage(Tool::Codex, &profile.id).unwrap().five_hour.unwrap().0, 0.42);
         manager.with_state(|s| s.settings.codex.active = None);
-        assert_eq!(manager.probe_codex_profile(&profile).unwrap_err().to_string(), "authentication required");
+        assert_eq!(manager.probe_codex_profile(&profile, false).unwrap_err().to_string(), "authentication required");
     }
 
     #[test]
@@ -1442,7 +1561,7 @@ mod tests {
         let (mut env, _) = Env::sandbox(root.path(), false);
         std::fs::create_dir_all(&env.codex_home).unwrap();
         std::fs::write(env.codex_home.join("auth.json"), codex::tests::fake_auth("fixture@example.test", "fixture")).unwrap();
-        env.codex_native_probe = Some(Arc::new(|home, email| {
+        env.codex_native_probe = Some(Arc::new(|home, email, _| {
             assert_eq!(email, "fixture@example.test");
             assert_eq!(std::fs::read_to_string(home.join("auth.json")).unwrap(), "encrypted-fixture");
             Ok(Usage { five_hour: Some((0.42, None)), status: "allowed".into(), ..Default::default() })
@@ -2394,7 +2513,7 @@ mod tests {
         m.switch_to(Tool::Codex, &ps[0].id).unwrap();
         assert_eq!(m.next_with_headroom(Tool::Codex).unwrap().id, ps[1].id);
 
-        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now + 600))), seven_day: None, status: "allowed".into() });
+        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now + 600))), seven_day: None, status: "allowed".into(), ..Default::default() });
         assert_eq!(m.next_with_headroom(Tool::Codex).unwrap().id, ps[2].id);
 
         m.switch_to(Tool::Codex, &ps[2].id).unwrap();
@@ -2403,7 +2522,7 @@ mod tests {
         assert_eq!(m.next_with_headroom(Tool::Codex), None);
 
         // 창이 초기화된 계정은 다시 후보가 된다.
-        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now - 1))), seven_day: None, status: "allowed".into() });
+        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now - 1))), seven_day: None, status: "allowed".into(), ..Default::default() });
         assert_eq!(m.next_with_headroom(Tool::Codex).unwrap().id, ps[1].id);
     }
 
@@ -2427,7 +2546,7 @@ mod tests {
         let (mut env, store) = Env::sandbox(d.path(), true);
         env.probe = Arc::new(|tok: &str| {
             let util = if tok == "at-a1" { 0.25 } else { 1.0 };
-            Ok(Usage { five_hour: Some((util, Some(4_000_000_000))), seven_day: Some((0.5, None)), status: "allowed".into() })
+            Ok(Usage { five_hour: Some((util, Some(4_000_000_000))), seven_day: Some((0.5, None)), status: "allowed".into(), ..Default::default() })
         });
         let m = AccountManager::with_env(env.clone());
         login_claude(&env, &store, "a@x.com", "a1");
