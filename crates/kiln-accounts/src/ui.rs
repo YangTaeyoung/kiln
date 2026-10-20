@@ -373,11 +373,11 @@ fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64)
     }
 }
 
-/// `amount` minor units of `currency` (USD when unknown) as money text.
+/// `amount` minor units of `currency` (USD when unknown) as money text, rounded to whole units.
 fn money(amount: f64, currency: Option<&str>) -> String {
     let code = currency.unwrap_or("USD");
-    let whole = matches!(code, "JPY" | "KRW");
-    let digits = if whole { format!("{amount:.0}") } else { format!("{:.2}", amount / 100.0) };
+    let units = if matches!(code, "JPY" | "KRW") { amount } else { amount / 100.0 };
+    let digits = grouped(units.round() as i64);
     match code {
         "USD" => format!("${digits}"),
         "EUR" => format!("€{digits}"),
@@ -386,6 +386,18 @@ fn money(amount: f64, currency: Option<&str>) -> String {
         "KRW" => format!("₩{digits}"),
         other => format!("{digits} {other}"),
     }
+}
+
+/// `n` with a comma between each group of three digits.
+fn grouped(n: i64) -> String {
+    let digits = n.unsigned_abs().to_string();
+    let mut text = String::with_capacity(digits.len() + digits.len() / 3 + 1);
+    if n < 0 { text.push('-'); }
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 { text.push(','); }
+        text.push(digit);
+    }
+    text
 }
 
 /// `n` tokens, in thousands (K), millions (M) or billions (B) past 999.
@@ -419,7 +431,8 @@ pub(crate) fn credit_caption(usage: &Usage, now: i64) -> Option<String> {
         if credits.unlimited {
             parts.push(kiln_common::i18n::tr("크레딧 무제한").to_string());
         } else if let Some(balance) = credits.balance.as_deref().filter(|_| credits.has_credits) {
-            parts.push(kiln_common::trf!("크레딧 {}", balance));
+            let shown = balance.trim().parse::<f64>().map(|amount| grouped(amount.round() as i64)).unwrap_or_else(|_| balance.to_string());
+            parts.push(kiln_common::trf!("크레딧 {}", shown));
         }
     }
     if let Some(resets) = usage.resets.as_ref().filter(|resets| resets.available > 0) {
@@ -809,13 +822,16 @@ mod tests {
             let now = 1_000_000;
             let usage = |extra: Option<ExtraUsage>, credits: Option<Credits>, resets: Option<ResetCredits>| Usage { five_hour: Some((0.1, None)), status: "allowed".into(), extra, credits, resets, ..Default::default() };
             let spend = |used: Option<f64>, limit: Option<f64>, currency: &str| Some(ExtraUsage { enabled: true, used, limit, currency: Some(currency.into()) });
-            assert_eq!(credit_caption(&usage(spend(Some(1230.0), Some(5000.0), "USD"), None, None), now).as_deref(), Some("추가 사용 $12.30 / $50.00"));
+            assert_eq!(credit_caption(&usage(spend(Some(1230.0), Some(5000.0), "USD"), None, None), now).as_deref(), Some("추가 사용 $12 / $50"));
             assert_eq!(credit_caption(&usage(spend(Some(500.0), None, "JPY"), None, None), now).as_deref(), Some("추가 사용 ¥500"));
-            assert_eq!(credit_caption(&usage(spend(Some(1999.0), Some(10000.0), "CAD"), None, None), now).as_deref(), Some("추가 사용 19.99 CAD / 100.00 CAD"));
+            assert_eq!(credit_caption(&usage(spend(Some(1999.0), Some(10000.0), "CAD"), None, None), now).as_deref(), Some("추가 사용 20 CAD / 100 CAD"));
+            assert_eq!(credit_caption(&usage(spend(Some(123_456.0), Some(1_000_000.0), "USD"), None, None), now).as_deref(), Some("추가 사용 $1,235 / $10,000"));
             assert_eq!(credit_caption(&usage(spend(None, None, "USD"), None, None), now).as_deref(), Some("추가 사용 켜짐"));
             assert_eq!(credit_caption(&usage(Some(ExtraUsage::default()), None, None), now).as_deref(), Some("추가 사용 꺼짐"));
             let balance = Some(Credits { has_credits: true, unlimited: false, balance: Some("120".into()) });
             assert_eq!(credit_caption(&usage(None, balance, Some(ResetCredits { available: 2, next_expiry: Some(now + 5 * 86_400 + 60) })), now).as_deref(), Some("크레딧 120 · 초기화권 2개 · 5일 후 만료"));
+            let fractional = Some(Credits { has_credits: true, unlimited: false, balance: Some("28655.4911590000".into()) });
+            assert_eq!(credit_caption(&usage(None, fractional, None), now).as_deref(), Some("크레딧 28,655"));
             let unlimited = Some(Credits { has_credits: true, unlimited: true, balance: None });
             assert_eq!(credit_caption(&usage(None, unlimited, Some(ResetCredits { available: 1, next_expiry: Some(now + 5 * 3600) })), now).as_deref(), Some("크레딧 무제한 · 초기화권 1개 · 5시간 후 만료"));
             assert_eq!(credit_caption(&usage(None, None, Some(ResetCredits { available: 1, next_expiry: None })), now).as_deref(), Some("초기화권 1개"));
@@ -936,7 +952,7 @@ mod tests {
                 let root = tempfile::tempdir().unwrap();
                 let (mut env, _) = codex_with_reset_credit(root.path(), 2);
                 env.codex_probe = Some(std::sync::Arc::new(|_| Ok(Usage { five_hour: Some((0.25, Some(4_200_000_000))), status: "allowed".into(),
-                    credits: Some(crate::Credits { has_credits: true, unlimited: false, balance: Some("1,250".into()) }),
+                    credits: Some(crate::Credits { has_credits: true, unlimited: false, balance: Some("28655.4911590000".into()) }),
                     resets: Some(crate::ResetCredits { available: 2, next_expiry: Some(crate::now_unix() + 3 * 86_400 + 600) }), ..Default::default() })));
                 let manager = AccountManager::with_env(env);
                 manager.save_current(Tool::Codex, "Work").unwrap();

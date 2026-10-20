@@ -111,6 +111,8 @@ Codex renewal stays in its own app-server reader.
   credit) from `account/rateLimits/read` in Codex 0.163.0. Background polls send
   `excludeResetCreditDetails: true`, which keeps the count; manual reads (settings opened,
   refresh pressed) read the details. Older saved samples without these fields still load.
+- The account row rounds amounts and Codex credit balances to whole units and separates
+  thousands with commas ("$12 / $50", "크레딧 28,655").
 - A reset credit is redeemed only on a click: the Codex account menu (after an inline
   confirmation), or the limit toast when a Codex limit leaves no other account with room and
   the active account's latest sample lists an available credit. Kiln runs
