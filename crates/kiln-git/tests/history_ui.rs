@@ -245,9 +245,10 @@ fn rewriting_pushed_commit_warns_and_offers_force_push() {
     settle(&mut h);
     assert!(h.query_by_label("성공 후 이 브랜치만 force-with-lease로 푸시").is_some());
     h.snapshot("history_drop_pushed_confirm");
-    h.get_by_label("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다").click();
+    h.get_by_label("기본 브랜치·공유 이력에 미치는 영향을 확인했습니다").click_accesskit();
     settle(&mut h);
-    h.get_by_label("커밋 삭제").click();
+    assert!(!h.get_by_label("커밋 삭제").accesskit_node().is_disabled(), "confirming the warning enables the drop");
+    h.get_by_label("커밋 삭제").click_accesskit();
     settle(&mut h);
     let notices: Vec<String> = h
         .query_all(By::new().predicate(|n| n.label().is_some_and(|l| ["실패", "error", "fatal", "lock"].iter().any(|k| l.to_lowercase().contains(k)))))
