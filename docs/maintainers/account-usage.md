@@ -89,8 +89,9 @@ way the official CLI 2.1.304 renews it:
   used as it is.
 - It posts the refresh grant (`grant_type`, the stored refresh token, the stored or default
   client ID and the stored scopes) as JSON on curl's stdin to
-  `https://platform.claude.com/v1/oauth/token`, without redirects, with a bounded response and
-  without showing the response body.
+  `https://platform.claude.com/v1/oauth/token` with a `Kiln/<version>` user agent (the endpoint
+  answers curl's default user agent with HTTP 429), without redirects, with a bounded response
+  and without showing the response body.
 - It saves the new access token, refresh token, expiry and returned scopes only while the
   stored refresh token is still the one it sent, keeping every other field (the CLI's
   compare-and-swap save).

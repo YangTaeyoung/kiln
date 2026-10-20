@@ -11,6 +11,8 @@ use std::time::Duration;
 /// The CLI's token endpoint and default OAuth client.
 pub(crate) const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 pub(crate) const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+/// The user agent of renewal requests.
+const USER_AGENT: &str = concat!("Kiln/", env!("CARGO_PKG_VERSION"), " (+https://github.com/YangTaeyoung/kiln)");
 /// A token this close to its expiry is renewed, matching the CLI.
 const EXPIRY_MARGIN_MS: i64 = 300_000;
 /// The CLI treats a refresh lock untouched for this long as abandoned.
@@ -167,7 +169,7 @@ fn post(url: &str, grant: &Grant, protocol: &str) -> Result<Renewed> {
     let dump = tempfile::NamedTempFile::new()?;
     let mut child = kiln_common::process::hide_window(&mut Command::new("curl"))
         .args(["-q", "-sS", "--max-time", "30", "--connect-timeout", "5", "--max-filesize", "65536", "--proto", protocol,
-            "-X", "POST", "-H", "Content-Type: application/json", "--data-binary", "@-", "-D"])
+            "-A", USER_AGENT, "-X", "POST", "-H", "Content-Type: application/json", "--data-binary", "@-", "-D"])
         .arg(dump.path()).arg(url)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("token renewal could not start")?;
     let sent = child.stdin.take().context("token renewal input unavailable")?.write_all(grant.body().to_string().as_bytes());
@@ -338,6 +340,7 @@ mod tests {
         let request = String::from_utf8(server.join().unwrap()).unwrap();
         assert!(request.starts_with("POST /v1/oauth/token "), "{request}");
         assert!(request.to_ascii_lowercase().contains("content-type: application/json"));
+        assert!(request.contains(&format!("User-Agent: Kiln/{} (+https://github.com/YangTaeyoung/kiln)\r\n", env!("CARGO_PKG_VERSION"))), "{request}");
         let sent: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(sent, serde_json::json!({"grant_type": "refresh_token", "refresh_token": "rt-fixture", "client_id": CLIENT_ID, "scope": "user:inference"}));
     }
