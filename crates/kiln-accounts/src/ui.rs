@@ -609,7 +609,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
             for (refreshing, failed, age) in [(true, false, 0), (false, true, 0), (false, false, 301), (false, false, 0)] {
-                let usage = Usage { five_hour: Some((0.73, None)), seven_day: None, status: if failed { "unavailable: HTTP 429" } else { "allowed" }.into() };
+                let usage = Usage { five_hour: Some((0.73, None)), seven_day: None, status: if failed { "unavailable: HTTP 429" } else { "allowed" }.into(), ..Default::default() };
                 let mut harness = egui_kittest::Harness::builder().with_size(vec2(400.0, 150.0)).build_ui(move |ui| {
                     if test_fonts(ui) { usage_block(ui, Some(&usage), 1000, Some(1000-age), refreshing); }
                 });
@@ -631,7 +631,7 @@ mod tests {
                 ("token renewal failed (HTTP 503)", Some(now - 300), "로그인 갱신 실패 · 자동 재시도 · 5분 전 확인"),
                 ("usage authorization rejected (HTTP 401)", None, "사용량 인증 확인 필요"),
             ] {
-                let usage = Usage { five_hour: Some((0.5, None)), seven_day: None, status: format!("unavailable: {reason}") };
+                let usage = Usage { five_hour: Some((0.5, None)), seven_day: None, status: format!("unavailable: {reason}"), ..Default::default() };
                 let mut harness = egui_kittest::Harness::builder().with_size(vec2(400.0, 150.0)).build_ui(move |ui| {
                     if test_fonts(ui) { usage_block(ui, Some(&usage), now, fetched, false); }
                 });
@@ -764,7 +764,7 @@ mod tests {
             kiln_common::i18n::with_language(language, || {
                 let root = tempfile::tempdir().unwrap();
                 let (mut env, _) = crate::Env::sandbox(root.path(), false);
-                env.codex_probe = Some(std::sync::Arc::new(|_| Ok(Usage { five_hour: Some((0.25, Some(4_200_000_000))), seven_day:Some((0.7,Some(4_200_000_000))), status:"allowed".into() })));
+                env.codex_probe = Some(std::sync::Arc::new(|_| Ok(Usage { five_hour: Some((0.25, Some(4_200_000_000))), seven_day:Some((0.7,Some(4_200_000_000))), status:"allowed".into(), ..Default::default() })));
                 std::fs::create_dir_all(&env.codex_home).unwrap();
                 std::fs::write(env.codex_home.join("auth.json"), crate::codex::tests::fake_auth("work@example.test", "fixture")).unwrap();
                 let manager = AccountManager::with_env(env);

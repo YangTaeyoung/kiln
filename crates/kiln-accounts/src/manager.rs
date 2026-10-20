@@ -2394,7 +2394,7 @@ mod tests {
         m.switch_to(Tool::Codex, &ps[0].id).unwrap();
         assert_eq!(m.next_with_headroom(Tool::Codex).unwrap().id, ps[1].id);
 
-        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now + 600))), seven_day: None, status: "allowed".into() });
+        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now + 600))), seven_day: None, status: "allowed".into(), ..Default::default() });
         assert_eq!(m.next_with_headroom(Tool::Codex).unwrap().id, ps[2].id);
 
         m.switch_to(Tool::Codex, &ps[2].id).unwrap();
@@ -2403,7 +2403,7 @@ mod tests {
         assert_eq!(m.next_with_headroom(Tool::Codex), None);
 
         // 창이 초기화된 계정은 다시 후보가 된다.
-        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now - 1))), seven_day: None, status: "allowed".into() });
+        m.set_usage(Tool::Codex, &ps[1].id, Usage { five_hour: Some((1.0, Some(now - 1))), seven_day: None, status: "allowed".into(), ..Default::default() });
         assert_eq!(m.next_with_headroom(Tool::Codex).unwrap().id, ps[1].id);
     }
 
@@ -2427,7 +2427,7 @@ mod tests {
         let (mut env, store) = Env::sandbox(d.path(), true);
         env.probe = Arc::new(|tok: &str| {
             let util = if tok == "at-a1" { 0.25 } else { 1.0 };
-            Ok(Usage { five_hour: Some((util, Some(4_000_000_000))), seven_day: Some((0.5, None)), status: "allowed".into() })
+            Ok(Usage { five_hour: Some((util, Some(4_000_000_000))), seven_day: Some((0.5, None)), status: "allowed".into(), ..Default::default() })
         });
         let m = AccountManager::with_env(env.clone());
         login_claude(&env, &store, "a@x.com", "a1");

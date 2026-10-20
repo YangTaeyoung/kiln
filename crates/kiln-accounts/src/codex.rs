@@ -160,7 +160,7 @@ pub fn usage_from_rate_limits(rl: &Value, now_unix: i64) -> Option<Usage> {
     } else {
         format!("allowed · {plan}")
     };
-    Some(Usage { five_hour: five, seven_day: seven, status })
+    Some(Usage { five_hour: five, seven_day: seven, status, ..Default::default() })
 }
 
 /// JSONL 한 줄에서 `payload.rate_limits` 를 찾아 사용량으로 바꾼다.
@@ -335,7 +335,20 @@ fn usage_from_native(body: &Value) -> Option<Usage> {
         Some(((percent / 100.0).min(1.0) as f32, value["resetsAt"].as_i64()))
     };
     let (five_hour, seven_day) = (window(300), window(10080));
-    (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day, status: "allowed".into() })
+    let credits = limits.get("credits").filter(|credits| credits.is_object()).map(|credits| crate::Credits {
+        has_credits: credits["hasCredits"].as_bool().unwrap_or(false),
+        unlimited: credits["unlimited"].as_bool().unwrap_or(false),
+        balance: credits["balance"].as_str().filter(|balance| !balance.is_empty()).map(str::to_owned),
+    });
+    let resets = body.get("rateLimitResetCredits").filter(|resets| resets.is_object()).and_then(|resets| {
+        let available = u32::try_from(resets["availableCount"].as_u64()?).ok()?;
+        let next_expiry = resets["credits"].as_array().and_then(|credits| credits.iter()
+            .filter(|credit| credit["status"].as_str() == Some("available"))
+            .filter_map(|credit| credit["expiresAt"].as_i64())
+            .min());
+        Some(crate::ResetCredits { available, next_expiry })
+    });
+    (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day, status: "allowed".into(), credits, resets, ..Default::default() })
 }
 
 pub fn usage_from_json(body: &Value) -> Option<Usage> {
@@ -349,7 +362,7 @@ pub fn usage_from_json(body: &Value) -> Option<Usage> {
     let five_hour = window(18_000);
     let seven_day = window(604_800);
     (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day,
-        status: if limits.get("limit_reached").and_then(Value::as_bool) == Some(true) { "rejected" } else { "allowed" }.into() })
+        status: if limits.get("limit_reached").and_then(Value::as_bool) == Some(true) { "rejected" } else { "allowed" }.into(), ..Default::default() })
 }
 
 #[cfg(test)]
@@ -382,6 +395,26 @@ pub(crate) mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn credits_and_reset_credits_are_read_from_rate_limits() {
+        let primary = serde_json::json!({"usedPercent": 10, "windowDurationMins": 300, "resetsAt": 4_200_000_000i64});
+        let body = serde_json::json!({
+            "rateLimits": {"primary": primary, "credits": {"hasCredits": true, "unlimited": false, "balance": "120"}},
+            "rateLimitResetCredits": {"availableCount": 2, "credits": [
+                {"id": "a", "resetType": "codexRateLimits", "status": "available", "grantedAt": 1, "expiresAt": 2000},
+                {"id": "b", "resetType": "codexRateLimits", "status": "available", "grantedAt": 1, "expiresAt": 1500},
+                {"id": "c", "resetType": "codexRateLimits", "status": "redeemed", "grantedAt": 1, "expiresAt": 100},
+                {"id": "d", "resetType": "codexRateLimits", "status": "available", "grantedAt": 1, "expiresAt": null}]}
+        });
+        let usage = usage_from_native(&body).unwrap();
+        assert_eq!(usage.credits, Some(crate::Credits { has_credits: true, unlimited: false, balance: Some("120".into()) }));
+        assert_eq!(usage.resets, Some(crate::ResetCredits { available: 2, next_expiry: Some(1500) }));
+        let counted = usage_from_native(&serde_json::json!({"rateLimits": {"primary": primary, "credits": null}, "rateLimitResetCredits": {"availableCount": 1, "credits": null}})).unwrap();
+        assert_eq!((counted.credits, counted.resets), (None, Some(crate::ResetCredits { available: 1, next_expiry: None })));
+        let none = usage_from_native(&serde_json::json!({"rateLimits": {"primary": primary}, "rateLimitResetCredits": null})).unwrap();
+        assert_eq!(none.resets, None);
+    }
+
     #[test]
     fn native_usage_checks_identity_and_redacts_provider_errors() {
         use std::os::unix::fs::PermissionsExt;

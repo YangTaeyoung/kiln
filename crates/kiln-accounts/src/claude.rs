@@ -78,7 +78,7 @@ pub fn usage_from_headers(get: impl Fn(&str) -> Option<String>) -> Option<Usage>
         let reset = get(&format!("anthropic-ratelimit-unified-{w}-reset")).and_then(|s| s.trim().parse::<i64>().ok());
         Some((util, reset))
     };
-    Some(Usage { five_hour: window("5h"), seven_day: window("7d"), status })
+    Some(Usage { five_hour: window("5h"), seven_day: window("7d"), status, ..Default::default() })
 }
 
 /// `curl -D -` 가 출력한 응답 헤더 블록을 (상태 코드, 소문자 헤더 목록)으로 나눈다.
@@ -116,12 +116,33 @@ pub fn usage_from_json(body: &Value) -> Option<Usage> {
     };
     let five_hour = window("five_hour");
     let seven_day = window("seven_day");
-    (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day, status: "allowed".into() })
+    let extra = body.get("extra_usage").filter(|extra| extra.is_object()).map(|extra| {
+        let amount = |key: &str| extra.get(key).and_then(Value::as_f64).filter(|value| value.is_finite() && *value >= 0.0);
+        crate::ExtraUsage {
+            enabled: extra.get("is_enabled").and_then(Value::as_bool).unwrap_or(false),
+            used: amount("used_credits"),
+            limit: amount("monthly_limit"),
+            currency: extra.get("currency").and_then(Value::as_str).filter(|code| code.len() == 3 && code.chars().all(|c| c.is_ascii_alphabetic())).map(str::to_ascii_uppercase),
+        }
+    });
+    (five_hour.is_some() || seven_day.is_some()).then(|| Usage { five_hour, seven_day, status: "allowed".into(), extra, ..Default::default() })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extra_usage_spend_is_read_in_minor_units() {
+        let window = serde_json::json!({"utilization": 10.0, "resets_at": null});
+        let usage = usage_from_json(&serde_json::json!({"five_hour": window, "extra_usage": {"is_enabled": true, "monthly_limit": 5000, "used_credits": 1230.5, "utilization": 24.6, "currency": "USD"}})).unwrap();
+        assert_eq!(usage.extra, Some(crate::ExtraUsage { enabled: true, used: Some(1230.5), limit: Some(5000.0), currency: Some("USD".into()) }));
+        let off = usage_from_json(&serde_json::json!({"five_hour": window, "extra_usage": {"is_enabled": false, "monthly_limit": null, "used_credits": null, "utilization": null}})).unwrap();
+        assert_eq!(off.extra, Some(crate::ExtraUsage { enabled: false, ..Default::default() }));
+        assert_eq!(usage_from_json(&serde_json::json!({"five_hour": window})).unwrap().extra, None);
+        assert_eq!(usage_from_json(&serde_json::json!({"five_hour": window, "extra_usage": {"is_enabled": true, "used_credits": -1, "monthly_limit": "x"}})).unwrap().extra,
+            Some(crate::ExtraUsage { enabled: true, ..Default::default() }));
+    }
 
     #[test]
     fn usage_json_preserves_exhaustion_and_ignores_missing_windows() {
