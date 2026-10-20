@@ -2,7 +2,7 @@
 
 use crate::store::{CredentialStore, FileStore, SecurityCli, read_secret, write_secret_atomic};
 use crate::ui::{AccountsEvent, UiState};
-use crate::{Profile, Tool, Usage, claude, codex, now_unix};
+use crate::{Profile, Tool, Usage, claude, claude_refresh, codex, now_unix};
 use anyhow::{Context, Result, anyhow, bail};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,8 @@ pub struct Env {
     /// None keeps the offline rollout reader available in isolated fixtures.
     pub codex_probe: Option<UsageProbe>,
     pub codex_native_probe: Option<Arc<dyn Fn(&Path, &str) -> Result<Usage> + Send + Sync>>,
+    /// Sends a Claude refresh grant to the CLI's token endpoint.
+    pub(crate) claude_renew: Arc<dyn Fn(&claude_refresh::Grant) -> Result<claude_refresh::Renewed> + Send + Sync>,
     /// 키체인 account 속성을 모를 때 쓰는 사용자 이름.
     pub username: String,
 }
@@ -61,6 +63,7 @@ impl Env {
             probe: Arc::new(|token: &str| claude::probe_usage(token)),
             codex_probe: Some(Arc::new(codex::probe_usage)),
             codex_native_probe: Some(Arc::new(codex::probe_native)),
+            claude_renew: Arc::new(claude_refresh::request),
             username: std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default(),
         }
     }
@@ -79,6 +82,7 @@ impl Env {
             probe: Arc::new(|_: &str| Err(anyhow!("probe disabled"))),
             codex_probe: None,
             codex_native_probe: None,
+            claude_renew: Arc::new(|_| Err(anyhow!("renewal disabled"))),
             username: "tester".into(),
         };
         (env, store)
@@ -188,6 +192,8 @@ pub(crate) struct State {
     usage: HashMap<(Tool, String), Usage>,
     limited_at: HashMap<(Tool, String), i64>,
     login_required: std::collections::HashSet<(Tool, String)>,
+    /// Logins whose refresh token was rejected, by the digest of their access token.
+    renewal_rejected: HashMap<(Tool, String), Vec<u8>>,
     login_checked_at: Option<std::time::Instant>,
     pub(crate) refreshing: [bool; 2],
     pub(crate) busy: [Option<String>; 2],
@@ -197,6 +203,20 @@ pub(crate) struct State {
     pub(crate) live_email: [Option<Option<String>>; 2],
     pub(crate) events: Vec<AccountsEvent>,
 }
+
+/// Where the credentials of a usage read are kept.
+#[derive(Clone, Debug, PartialEq)]
+enum UsageSource {
+    /// A profile's runtime folder, which Claude Code panels of that profile renew.
+    Runtime(PathBuf),
+    /// The live CLI configuration of the active profile.
+    Live,
+    /// Kiln's saved copy, which no CLI renews.
+    Snapshot,
+}
+
+/// Attempts to take the CLI's refresh locks before a renewal waits for the next round.
+const RENEWAL_LOCK_ATTEMPTS: u32 = if cfg!(test) { 1 } else { 5 };
 
 #[derive(Clone, Default)]
 struct UsagePoll {
@@ -384,9 +404,15 @@ impl AccountManager {
                         // Missing identity and unsupported auth methods are not logout.
                         Tool::Codex => codex::credentials_missing(secret),
                     });
+                    let digest = secret.as_deref().and_then(|secret| claude::access_token(secret).ok()).map(|token| {
+                        use sha2::{Digest, Sha256};
+                        Sha256::digest(token.as_bytes()).to_vec()
+                    });
                     self.with_state(|s| {
                         let key = (tool, p.id.clone());
-                        if missing { s.login_required.insert(key); } else { s.login_required.remove(&key); }
+                        let rejected = s.renewal_rejected.get(&key).is_some_and(|rejected| Some(rejected) == digest.as_ref());
+                        if !rejected { s.renewal_rejected.remove(&key); }
+                        if missing || rejected { s.login_required.insert(key); } else { s.login_required.remove(&key); }
                     });
                 }
                 // An inaccessible Keychain or network error is not proof of logout.
@@ -1125,6 +1151,11 @@ impl AccountManager {
     }
 
     fn usage_secret(&self, tool: Tool, id: &str) -> Result<Option<String>> {
+        Ok(self.usage_credentials(tool, id)?.map(|(secret, _)| secret))
+    }
+
+    /// The credentials a usage read uses for profile `id`, and where they are kept.
+    fn usage_credentials(&self, tool: Tool, id: &str) -> Result<Option<(String, UsageSource)>> {
         let stored = self.with_state(|state| state.settings.tool(tool).profiles.iter().find(|profile| profile.profile.id == id).cloned()).context("account profile missing")?;
         let expected = stored.profile.email.as_deref().context("account identity unavailable")?;
         let matches = |email: Option<String>| email.is_some_and(|email| email.eq_ignore_ascii_case(expected));
@@ -1135,19 +1166,52 @@ impl AccountManager {
                 Tool::Codex => codex::auth_email(&secret),
             };
             if !matches(email) { bail!("account credentials do not match saved profile"); }
-            return Ok(Some(secret));
+            return Ok(Some((secret, UsageSource::Runtime(self.runtime_dir(tool, id)))));
         }
         if self.active(tool).as_deref() == Some(id)
             && let Some((secret, _)) = self.read_live(tool)?
             && matches(self.live_identity(tool, Some(&secret)).0)
-        { return Ok(Some(secret)); }
+        { return Ok(Some((secret, UsageSource::Live))); }
         let secret = self.inner.env.store.get(&profile_service(tool), id)?;
         let email = match tool {
             Tool::Claude => stored.oauth_account.as_ref().and_then(claude::oauth_email),
             Tool::Codex => secret.as_deref().and_then(codex::auth_email),
         };
         if secret.is_some() && !matches(email) { bail!("account credentials do not match saved profile"); }
-        Ok(secret)
+        Ok(secret.map(|secret| (secret, UsageSource::Snapshot)))
+    }
+
+    /// Renews Claude `secret` for profile `id` when it is about to expire and kept in a Claude
+    /// Code credential store, as the CLI renews it. None while the CLI is renewing it.
+    fn renew_claude(&self, id: &str, source: &UsageSource, secret: &str, now_ms: i64) -> Result<Option<String>> {
+        let env = &self.inner.env;
+        let (config, folder) = match source {
+            UsageSource::Runtime(dir) => (Some(dir.clone()), dir.clone()),
+            UsageSource::Live => (env.claude_config_dir.clone(), env.claude_config_dir.clone().unwrap_or_else(|| env.home.join(".claude"))),
+            UsageSource::Snapshot => bail!("sign-in expired"),
+        };
+        let observed = claude::access_token(secret)?;
+        std::fs::create_dir_all(&folder)?;
+        let Some(_lock) = claude_refresh::RefreshLock::acquire(&folder, RENEWAL_LOCK_ATTEMPTS, std::time::Duration::from_millis(1500))? else { return Ok(None) };
+        let read = || -> Result<(String, Option<String>)> {
+            let _op = self.inner.op.lock();
+            if self.usage_credentials(Tool::Claude, id)?.is_none_or(|(_, now)| &now != source) { bail!("account credentials changed"); }
+            env.claude_secret(config.as_deref())?.context("account credentials missing")
+        };
+        let (stored, _) = read()?;
+        if claude::access_token(&stored).ok().as_deref() != Some(observed.as_str()) || !claude_refresh::expiring(&stored, now_ms) {
+            return Ok(Some(stored));
+        }
+        let grant = claude_refresh::Grant::from_secret(&stored).ok_or(claude_refresh::SignInRequired)?;
+        let renewed = (env.claude_renew)(&grant)?;
+        let _op = self.inner.op.lock();
+        let (current, account) = env.claude_secret(config.as_deref())?.context("account credentials missing")?;
+        let Some(next) = claude_refresh::merged(&current, &grant.refresh_token, &renewed, now_ms)? else { return Ok(Some(current)) };
+        match account {
+            Some(account) if env.claude_live_in_store => env.store.set(&crate::login::claude_service(config.as_deref()), &account, &next)?,
+            _ => write_secret_atomic(&claude::credentials_path(&env.home, config.as_deref()), next.as_bytes())?,
+        }
+        Ok(Some(next))
     }
 
     fn refresh_profiles(&self, tool: Tool, manual: bool) {
@@ -1158,13 +1222,13 @@ impl AccountManager {
         use sha2::{Digest, Sha256};
         for profile in self.profiles(tool) {
             if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
-            let secret = {
+            let credentials = {
                 let _op = self.inner.op.lock();
                 if self.pending_login(tool, &profile.id) { continue; }
-                self.usage_secret(tool, &profile.id)
+                self.usage_credentials(tool, &profile.id)
             };
-            let secret = match secret {
-                Ok(Some(secret)) => secret,
+            let (mut secret, source) = match credentials {
+                Ok(Some(credentials)) => credentials,
                 _ => {
                     self.with_state(|s| {
                         if s.settings.tool(tool).profiles.iter().any(|p| p.profile.id == profile.id) {
@@ -1183,7 +1247,7 @@ impl AccountManager {
                     doc.pointer("/tokens/access_token").and_then(Value::as_str).unwrap_or_default(),
                     doc.pointer("/tokens/account_id").and_then(Value::as_str).unwrap_or_default())).unwrap_or_default(),
             };
-            let fingerprint = Sha256::digest(identity.as_bytes()).to_vec();
+            let mut fingerprint = Sha256::digest(identity.as_bytes()).to_vec();
             let now = clock();
             let due = self.with_state(|s| {
                 let poll = s.usage_poll.entry((tool, profile.id.clone())).or_default();
@@ -1191,6 +1255,34 @@ impl AccountManager {
                 now >= poll.blocked_until && (manual || now >= poll.next_at)
             });
             if !due { continue; }
+            if tool == Tool::Claude && claude_refresh::expiring(&secret, now.saturating_mul(1000)) {
+                let postpone = |s: &mut State, next_at: i64, blocked_until: i64| {
+                    s.usage_poll.insert((tool, profile.id.clone()), UsagePoll { fingerprint: fingerprint.clone(), next_at, blocked_until });
+                };
+                match self.renew_claude(&profile.id, &source, &secret, now.saturating_mul(1000)) {
+                    Ok(Some(renewed)) => {
+                        secret = renewed;
+                        fingerprint = Sha256::digest(claude::access_token(&secret).unwrap_or_default().as_bytes()).to_vec();
+                    }
+                    Ok(None) => {
+                        self.with_state(|s| postpone(s, now + 60, 0));
+                        continue;
+                    }
+                    Err(error) => {
+                        let rejected = error.downcast_ref::<claude_refresh::SignInRequired>().is_some();
+                        self.with_state(|s| {
+                            postpone(s, now + 300, if rejected { i64::MAX } else { 0 });
+                            if rejected {
+                                s.renewal_rejected.insert((tool, profile.id.clone()), fingerprint.clone());
+                                s.login_required.insert((tool, profile.id.clone()));
+                            }
+                        });
+                        self.set_usage(tool, &profile.id, Usage::unavailable(error));
+                        self.repaint();
+                        continue;
+                    }
+                }
+            }
             let result = match tool {
                 Tool::Claude => claude::access_token(&secret).and_then(|token| (self.inner.env.probe)(&token)),
                 Tool::Codex => (self.inner.env.codex_probe.as_ref().expect("online probe"))(&secret),
@@ -1291,6 +1383,23 @@ mod tests {
             let token = claude::access_token(&secret).expect("subscription authentication");
             (manager.inner.env.probe)(&token).expect("live Claude quota request")
         };
+        assert!(!usage.is_unavailable());
+        assert!(usage.five_hour.is_some() || usage.seven_day.is_some());
+    }
+
+    #[test]
+    #[ignore = "requires explicit owner authorization and real Keychain opt-in"]
+    fn live_claude_login_renewal_without_persisting_settings() {
+        let index: usize = std::env::var("KILN_VERIFY_PROFILE_INDEX").expect("explicit profile ordinal").parse().unwrap();
+        let manager = AccountManager::with_env(Env::real());
+        let profile = manager.profiles(Tool::Claude).into_iter().nth(index).expect("saved profile");
+        let (secret, source) = manager.usage_credentials(Tool::Claude, &profile.id).unwrap().expect("profile credentials");
+        let now_ms = now_unix() * 1000;
+        let secret = if claude_refresh::expiring(&secret, now_ms) {
+            manager.renew_claude(&profile.id, &source, &secret, now_ms).expect("login renewal").expect("CLI refresh lock free")
+        } else { secret };
+        assert!(!claude_refresh::expiring(&secret, now_ms));
+        let usage = (manager.inner.env.probe)(&claude::access_token(&secret).unwrap()).expect("live Claude quota request");
         assert!(!usage.is_unavailable());
         assert!(usage.five_hour.is_some() || usage.seven_day.is_some());
     }
@@ -1634,7 +1743,137 @@ mod tests {
     use crate::store::CredentialStore;
 
     fn claude_cred(marker: &str) -> String {
-        serde_json::json!({"claudeAiOauth": {"accessToken": format!("at-{marker}"), "refreshToken": format!("rt-{marker}"), "expiresAt": 1}}).to_string()
+        serde_json::json!({"claudeAiOauth": {"accessToken": format!("at-{marker}"), "refreshToken": format!("rt-{marker}"), "expiresAt": 4_102_444_800_000i64}}).to_string()
+    }
+
+    fn expired_claude_cred(marker: &str) -> String {
+        serde_json::json!({"claudeAiOauth": {"accessToken": format!("at-{marker}"), "refreshToken": format!("rt-{marker}"), "expiresAt": 1,
+            "scopes": ["user:inference", "user:profile"], "subscriptionType": "max"}, "mcpOAuth": {"kept": true}}).to_string()
+    }
+
+    fn renewal(marker: &str) -> crate::claude_refresh::Renewed {
+        crate::claude_refresh::Renewed { access_token: format!("at-{marker}"), refresh_token: Some(format!("rt-{marker}")), expires_in: 28_800, scope: None, refresh_token_expires_in: None }
+    }
+
+    /// Two saved Claude accounts with runtime folders; `b` is idle and holds `b_secret`.
+    fn idle_claude_account(env: &Env, store: &crate::MemoryStore, m: &AccountManager, b_secret: &str) -> (Profile, Profile, PathBuf) {
+        login_claude(env, store, "b@example.test", "b-old");
+        let b = m.save_current(Tool::Claude, "b").unwrap();
+        m.launch_environment(Tool::Claude).unwrap();
+        let dir = m.runtime_dir(Tool::Claude, &b.id);
+        claude::write_oauth_account(&dir.join(".claude.json"), Some(&serde_json::json!({"emailAddress": "b@example.test"}))).unwrap();
+        login_claude(env, store, "a@example.test", "a");
+        let a = m.save_current(Tool::Claude, "a").unwrap();
+        store.set(&crate::login::claude_service(Some(&dir)), &env.username, b_secret).unwrap();
+        assert_eq!(m.active(Tool::Claude).as_deref(), Some(a.id.as_str()));
+        (a, b, dir)
+    }
+
+    fn usage_from(token: &'static str, value: f32) -> UsageProbe {
+        Arc::new(move |seen: &str| {
+            if seen == token { Ok(Usage { five_hour: Some((value, None)), status: "allowed".into(), ..Default::default() }) }
+            else if seen == "at-a" { Ok(Usage { five_hour: Some((0.1, None)), status: "allowed".into(), ..Default::default() }) }
+            else { panic!("usage requested with {seen}") }
+        })
+    }
+
+    #[test]
+    fn an_idle_account_login_is_renewed_under_the_cli_locks_before_its_usage_is_read() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("at-b-renewed", 0.4);
+        let grants = Arc::new(AtomicUsize::new(0));
+        let seen = grants.clone();
+        let runtime = root.path().join("config/agent-accounts/claude");
+        env.claude_renew = Arc::new(move |grant| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(grant.refresh_token, "rt-b-old");
+            assert_eq!(grant.scope.as_deref(), Some("user:inference user:profile"));
+            let locked = std::fs::read_dir(&runtime).unwrap().flatten().any(|entry| entry.path().join(".oauth_refresh.lock").is_dir());
+            assert!(locked, "the grant is sent while the CLI lock is held");
+            Ok(renewal("b-renewed"))
+        });
+        let m = AccountManager::with_env(env.clone());
+        let (_, b, dir) = idle_claude_account(&env, &store, &m, &expired_claude_cred("b-old"));
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(m.usage(Tool::Claude, &b.id).unwrap().five_hour.unwrap().0, 0.4);
+        assert_eq!(grants.load(Ordering::SeqCst), 1);
+        let stored: Value = serde_json::from_str(&store.get(&crate::login::claude_service(Some(&dir)), &env.username).unwrap().unwrap()).unwrap();
+        assert_eq!(stored["claudeAiOauth"]["accessToken"], "at-b-renewed");
+        assert_eq!(stored["claudeAiOauth"]["refreshToken"], "rt-b-renewed");
+        assert!(stored["claudeAiOauth"]["expiresAt"].as_i64().unwrap() > now_unix() * 1000);
+        assert_eq!(stored["claudeAiOauth"]["subscriptionType"], "max");
+        assert_eq!(stored["mcpOAuth"]["kept"], true);
+        assert!(!dir.join(".oauth_refresh.lock").exists(), "the locks are released");
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(grants.load(Ordering::SeqCst), 1, "a fresh login is not renewed again");
+    }
+
+    #[test]
+    fn a_login_renewed_elsewhere_is_used_without_another_grant() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.claude_renew = Arc::new(|_| panic!("the other process already renewed this login"));
+        let m = AccountManager::with_env(env.clone());
+        let (_, b, dir) = idle_claude_account(&env, &store, &m, &claude_cred("b-fresh"));
+        let source = UsageSource::Runtime(dir);
+        assert_eq!(m.renew_claude(&b.id, &source, &expired_claude_cred("b-old"), now_unix() * 1000).unwrap(), Some(claude_cred("b-fresh")));
+    }
+
+    #[test]
+    fn a_rejected_refresh_token_asks_to_sign_in_and_stops_usage_requests() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("at-b-new-login", 0.3);
+        let grants = Arc::new(AtomicUsize::new(0));
+        let seen = grants.clone();
+        env.claude_renew = Arc::new(move |_| { seen.fetch_add(1, Ordering::SeqCst); Err(crate::claude_refresh::SignInRequired.into()) });
+        let m = AccountManager::with_env(env.clone());
+        let (_, b, dir) = idle_claude_account(&env, &store, &m, &expired_claude_cred("b-old"));
+        m.refresh_usage_blocking(Tool::Claude);
+        assert!(m.usage(Tool::Claude, &b.id).unwrap().status.contains("sign-in required"));
+        m.check_profile_credentials();
+        assert!(m.login_required(Tool::Claude, &b.id), "the rejected login still asks for sign-in after a presence check");
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(grants.load(Ordering::SeqCst), 1, "a rejected login is not renewed again");
+        store.set(&crate::login::claude_service(Some(&dir)), &env.username, &claude_cred("b-new-login")).unwrap();
+        m.check_profile_credentials();
+        assert!(!m.login_required(Tool::Claude, &b.id));
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(m.usage(Tool::Claude, &b.id).unwrap().five_hour.unwrap().0, 0.3);
+    }
+
+    #[test]
+    fn an_expired_saved_snapshot_is_not_sent_to_the_usage_endpoint() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("unused", 0.0);
+        env.claude_renew = Arc::new(|_| panic!("a saved snapshot is not a CLI credential store"));
+        let m = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "b@example.test", "b-old");
+        let b = m.save_current(Tool::Claude, "b").unwrap();
+        store.set(&profile_service(Tool::Claude), &b.id, &expired_claude_cred("b-old")).unwrap();
+        login_claude(&env, &store, "a@example.test", "a");
+        m.save_current(Tool::Claude, "a").unwrap();
+        assert!(!m.runtime_dir(Tool::Claude, &b.id).exists());
+        m.refresh_usage_blocking(Tool::Claude);
+        assert!(m.usage(Tool::Claude, &b.id).unwrap().status.contains("sign-in expired"));
+    }
+
+    #[test]
+    fn a_held_cli_lock_postpones_renewal_without_a_usage_request() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("unused", 0.0);
+        env.claude_renew = Arc::new(|_| panic!("the CLI is renewing this login"));
+        let m = AccountManager::with_env(env.clone());
+        let (_, b, dir) = idle_claude_account(&env, &store, &m, &expired_claude_cred("b-old"));
+        std::fs::create_dir(dir.join(".oauth_refresh.lock")).unwrap();
+        m.refresh_usage_blocking(Tool::Claude);
+        assert!(m.usage(Tool::Claude, &b.id).is_none());
+        assert!(dir.join(".oauth_refresh.lock").is_dir(), "another process's lock is left alone");
     }
 
     fn set_claude_identity(env: &Env, email: &str) {

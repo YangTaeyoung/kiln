@@ -371,10 +371,24 @@ fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64)
 /// 사용량 열(폭 236, 높이 36 고정).
 fn usage_failure_label(usage: &Usage) -> &'static str {
     let reason = &usage.status;
-    kiln_common::i18n::tr(if reason.contains("HTTP 429") { "사용량 조회 제한 · 자동 재시도 대기" }
+    kiln_common::i18n::tr(if reason.contains("sign-in required") { "다시 로그인 필요" }
+        else if reason.contains("sign-in expired") { "로그인 만료 · 이 계정을 쓰면 갱신" }
+        else if reason.contains("token renewal") { "로그인 갱신 실패 · 자동 재시도" }
+        else if reason.contains("HTTP 429") { "사용량 조회 제한 · 자동 재시도 대기" }
         else if reason.contains("HTTP 403") { "사용량 조회 권한 확인 필요" }
         else if reason.contains("HTTP 401") || reason.contains("authentication required") { "사용량 인증 확인 필요" }
         else { "사용량 확인 불가" })
+}
+
+/// How long ago usage was last read at `at`.
+fn checked_ago(now: i64, at: i64) -> String {
+    let minutes = now.saturating_sub(at).max(0) / 60;
+    match minutes {
+        0 => kiln_common::i18n::tr("방금 확인").to_string(),
+        1..60 => kiln_common::trf!("{}분 전 확인", minutes),
+        60..2880 => kiln_common::trf!("{}시간 전 확인", minutes / 60),
+        _ => kiln_common::trf!("{}일 전 확인", minutes / 1440),
+    }
 }
 
 fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<i64>, refreshing: bool) {
@@ -405,13 +419,16 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<
                 usage_line(ui, kiln_common::i18n::tr("5시간"), u.five_hour, now);
                 usage_line(ui, kiln_common::i18n::tr("7일"), u.seven_day, now);
                 if let Some(at) = fetched_at {
-                    let age = now.saturating_sub(at).max(0) / 60;
-                    ui.label(RichText::new(if age == 0 { kiln_common::i18n::tr("방금 확인").to_string() } else { kiln_common::trf!("{}분 전 확인", age) }).font(fonts::regular(10.5)).color(t.text_faint));
+                    ui.label(RichText::new(checked_ago(now, at)).font(fonts::regular(10.5)).color(t.text_faint));
                 }
             }
             Some(u) if u.is_unavailable() => {
                 let reason = u.status.trim_start_matches("unavailable:").trim().to_string();
-                note(ui, Icon::Warning, usage_failure_label(u), t.text_faint).on_hover_text(reason);
+                let label = match fetched_at {
+                    Some(at) => format!("{} · {}", usage_failure_label(u), checked_ago(now, at)),
+                    None => usage_failure_label(u).to_string(),
+                };
+                note(ui, Icon::Warning, &label, t.text_faint).on_hover_text(reason);
             }
             _ => {
                 note(ui, Icon::Info, kiln_common::i18n::tr("사용량 정보 없음"), t.text_faint);
@@ -599,6 +616,27 @@ mod tests {
                 for _ in 0..4 { harness.step(); }
                 assert_eq!(harness.query_all_by_label("확인 중…").count(), usize::from(refreshing));
                 assert_eq!(harness.query_all_by_label("방금 확인").count(), usize::from(!refreshing && !failed && age == 0));
+            }
+        });
+    }
+
+    #[test]
+    fn a_failed_usage_read_names_the_reason_and_when_usage_was_last_read() {
+        use egui_kittest::kittest::Queryable;
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            let now = 1_000_000;
+            for (reason, fetched, shown) in [
+                ("sign-in expired", Some(now - 6 * 3600), "로그인 만료 · 이 계정을 쓰면 갱신 · 6시간 전 확인"),
+                ("sign-in required", Some(now - 3 * 86_400), "다시 로그인 필요 · 3일 전 확인"),
+                ("token renewal failed (HTTP 503)", Some(now - 300), "로그인 갱신 실패 · 자동 재시도 · 5분 전 확인"),
+                ("usage authorization rejected (HTTP 401)", None, "사용량 인증 확인 필요"),
+            ] {
+                let usage = Usage { five_hour: Some((0.5, None)), seven_day: None, status: format!("unavailable: {reason}") };
+                let mut harness = egui_kittest::Harness::builder().with_size(vec2(400.0, 150.0)).build_ui(move |ui| {
+                    if test_fonts(ui) { usage_block(ui, Some(&usage), now, fetched, false); }
+                });
+                for _ in 0..4 { harness.step(); }
+                assert_eq!(harness.query_all_by_label(shown).count(), 1, "{reason}");
             }
         });
     }

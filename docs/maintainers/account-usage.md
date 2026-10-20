@@ -70,14 +70,41 @@ Provider response bodies and curl diagnostics are never displayed or logged.
 HTTP 429/403 observe bounded Retry-After; 401 pauses one hour. Safe HTTP status
 labels distinguish authorization, access and rate-limit errors without showing
 provider bodies. Settings never invents a fresh 0% reading from a passed reset time, and hides
-failed samples and samples older than five minutes. Keychain
-subprocesses have a three-second bound and owned children are reaped. Token refresh
-remains the responsibility of each official CLI.
+failed samples and samples older than five minutes; a failure note says how long ago usage
+was last read. Keychain subprocesses have a three-second bound and owned children are reaped.
+
+## Claude login renewal
+
+Claude Code renews its OAuth access token only while a CLI process uses it, so the token of
+an idle account expires (about eight hours after its last renewal in observed use). Before a
+due usage read, Kiln renews a Claude token that expires within five minutes when it is kept in
+a Claude Code credential store, a profile's runtime folder or the live CLI configuration, the
+way the official CLI 2.1.304 renews it:
+
+- It takes the CLI's refresh locks: the `.oauth_refresh.lock` folder inside the configuration
+  folder and the legacy `<real path>.lock` folder beside it, both made with `mkdir`; a lock
+  untouched for 60 seconds is abandoned (the CLI's `stale: 60000`). A held lock postpones the
+  read by a minute and is left alone.
+- Under the locks it reads the credentials again; a token another process already renewed is
+  used as it is.
+- It posts the refresh grant (`grant_type`, the stored refresh token, the stored or default
+  client ID and the stored scopes) as JSON on curl's stdin to
+  `https://platform.claude.com/v1/oauth/token`, without redirects, with a bounded response and
+  without showing the response body.
+- It saves the new access token, refresh token, expiry and returned scopes only while the
+  stored refresh token is still the one it sent, keeping every other field (the CLI's
+  compare-and-swap save).
+- `invalid_grant` marks the account for sign-in again and stops its requests until its
+  credentials change.
+
+Kiln's saved snapshots are not renewed; an expired one is reported without a usage request.
+Codex renewal stays in its own app-server reader.
 
 ## Verification boundaries
 
 Use `cargo test -p kiln-accounts --lib`. Isolated fake credentials/probes exercise
-both tools, active and inactive profiles, repeated cycles without settings UI,
+Claude login renewal (CLI locks, re-read, grant, compare-and-swap save, rejected and busy
+logins, expired snapshots), both tools, active and inactive profiles, repeated cycles without settings UI,
 shutdown, backoff, stale bars and deletion during a slow response. Real loopback
 HTTP fixtures check GET/no body, redirects, response bounds, Retry-After and
 private-response redaction. Four-language GPU captures cover the account card
@@ -85,7 +112,10 @@ at 420px and 130% scale. Real account checks require explicit owner authorizatio
 `live_saved_account_usage_without_persisting_settings` test with
 `KILN_ACCOUNTS_REAL_KEYCHAIN=1`, `KILN_VERIFY_TOOL` and
 `KILN_VERIFY_PROFILE_INDEX`. It queries quotas without persisting settings,
-copying credentials, or starting model turns.
+copying credentials, or starting model turns. The ignored
+`live_claude_login_renewal_without_persisting_settings` test renews the selected Claude
+profile's login the way the usage worker does and reads its quotas, under the same
+authorization and variables.
 
 Before publishing a usage fix, verify the authorized local accounts with the
 actual implementation. Ask the owner to reauthenticate only accounts for which

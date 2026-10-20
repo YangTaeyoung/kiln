@@ -3029,7 +3029,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kiln"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-accounts"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3100,7 +3100,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-common"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "directories",
@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-daemon"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -3141,7 +3141,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-db"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3166,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-editor"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "egui",
@@ -3193,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-git"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "egui",
@@ -3208,7 +3208,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-i18n-macros"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3218,7 +3218,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-proto"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "libc",
@@ -3228,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-remote"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "chrono",
