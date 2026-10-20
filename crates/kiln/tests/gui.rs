@@ -1837,7 +1837,8 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     assert_eq!(h.state().debug_active_workspace_root(),proj.canonical().unwrap());
     h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
     h.get_by_role(egui::accesskit::Role::MultilineTextInput).focus();h.event(egui::Event::Text("Write separate documentation".into()));h.run_steps(3);
-    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently","Write separate documentation"]);
+    let focused:Vec<String>=h.query_all(egui_kittest::kittest::By::new().predicate(|n|n.is_focused())).map(|n|{use egui_kittest::kittest::NodeT;let n=n.accesskit_node();format!("{:?} {:?}",n.role(),n.label())}).collect();
+    assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently","Write separate documentation"],"focused nodes: {focused:?}");
     h.state_mut().debug_queue_action(Action::CloseSheet);h.run_steps(3);
     let ctx=h.ctx.clone();h.state_mut().debug_split(&ctx,true);
     assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2 && h.state().debug_pane_sessions().len()==2));
