@@ -52,17 +52,18 @@ jobs:
           python3 scripts/test-network-privacy.py
 
   windows:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.target.name }} ${{ matrix.part }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        target:
           - name: windows-x64
             runner: windows-latest
           - name: windows-arm64
             runner: windows-11-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
+        part: [libraries, crates, terminal]
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash
@@ -80,16 +81,14 @@ jobs:
           rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.name }}
+          key: ${{ matrix.target.name }}
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: nextest@0.9.148
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.part == 'libraries' }}
       - name: Library tests
-        run: cargo nextest run --locked --profile ci --workspace --lib
+        if: matrix.part == 'libraries'
+        run: cargo test --locked --no-fail-fast --workspace --lib -- --test-threads=1
       - name: Credential Manager
-        if: ${{ !cancelled() }}
+        if: matrix.part == 'libraries' && !cancelled()
         run: |
           status=0
           cargo test --locked --workspace --lib -- --ignored --exact store::tests::windows_store_keeps_kiln_snapshots_in_files_and_other_entries_in_credential_manager || status=1
@@ -101,14 +100,21 @@ jobs:
           KILN_CODEX_KEYRING_HOME="$home" cargo test --locked --workspace --lib -- --ignored --exact codex::tests::the_entry_the_cli_writes_is_read_under_its_key || status=1
           CODEX_HOME="$home" codex logout || true
           exit $status
-      - name: Integration tests
-        if: ${{ !cancelled() }}
+      - name: Editor, Git, database and remote integration
+        if: matrix.part == 'crates'
         run: |
           status=0
           tests=$(for f in crates/kiln-editor/tests/*.rs crates/kiln-git/tests/*.rs; do printf -- '--test %s ' "$(basename "$f" .rs)"; done)
-          cargo nextest run --locked --profile ci --workspace $tests --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui || status=1
-          cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast --workspace $tests -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast --workspace --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1 || status=1
+          cargo test --locked --no-fail-fast --workspace --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1 || status=1
           exit $status
+      - name: GUI integration
+        if: matrix.part == 'crates' && !cancelled()
+        run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
+      - name: Terminal and daemon integration
+        if: matrix.part == 'terminal'
+        run: cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
 
   database-servers:
     runs-on: ubuntu-latest
