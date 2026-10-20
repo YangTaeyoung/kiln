@@ -903,7 +903,7 @@ mod tests {
             let manager = AccountManager::with_env(env);
             manager.save_current(Tool::Codex, "Work").unwrap();
             manager.refresh_usage_blocking(Tool::Codex);
-            let mut harness = egui_kittest::Harness::builder().with_size(vec2(760.0, 620.0))
+            let mut harness = egui_kittest::Harness::builder().with_size(vec2(760.0, 620.0)).wgpu()
                 .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Codex); } }, manager);
             for _ in 0..3 { harness.step(); }
             harness.get_by_label("계정 메뉴").click();
@@ -921,6 +921,7 @@ mod tests {
             assert!(harness.query_by_label("10-06 · 600").is_none(), "only the last 14 days are drawn");
             // The dialog is centered again once the history replaces the spinner.
             for _ in 0..3 { harness.step(); }
+            harness.render().unwrap().save(std::env::temp_dir().join("kiln024-usage-history.png")).unwrap();
             harness.get_by_label("닫기").click();
             for _ in 0..3 { harness.step(); }
             assert!(harness.query_by_label("‘Work’ 사용 내역").is_none());

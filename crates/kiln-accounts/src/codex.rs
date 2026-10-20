@@ -466,7 +466,6 @@ pub(crate) mod tests {
         assert_eq!(std::fs::read_to_string(auth_path(dir.path())).unwrap(), "encrypted-fixture");
     }
 
-    #[cfg(unix)]
     #[test]
     fn credits_and_reset_credits_are_read_from_rate_limits() {
         let primary = serde_json::json!({"usedPercent": 10, "windowDurationMins": 300, "resetsAt": 4_200_000_000i64});
@@ -487,6 +486,7 @@ pub(crate) mod tests {
         assert_eq!(none.resets, None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn native_usage_checks_identity_and_redacts_provider_errors() {
         use std::os::unix::fs::PermissionsExt;
