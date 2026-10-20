@@ -30,9 +30,9 @@ pub struct Env {
     /// Reads a Codex account's usage through its CLI; the flag also reads reset-credit details.
     pub codex_native_probe: Option<Arc<dyn Fn(&Path, &str, bool) -> Result<Usage> + Send + Sync>>,
     /// Redeems one Codex reset credit through the CLI of a Codex home.
-    pub(crate) codex_reset: Arc<dyn Fn(&Path, &str) -> Result<crate::ResetOutcome> + Send + Sync>,
+    pub codex_reset: Arc<dyn Fn(&Path, &str) -> Result<crate::ResetOutcome> + Send + Sync>,
     /// Reads a Codex account's token usage history through the CLI of a Codex home.
-    pub(crate) codex_history: Arc<dyn Fn(&Path, &str) -> Result<crate::UsageHistory> + Send + Sync>,
+    pub codex_history: Arc<dyn Fn(&Path, &str) -> Result<crate::UsageHistory> + Send + Sync>,
     /// Sends a Claude refresh grant to the CLI's token endpoint.
     pub(crate) claude_renew: Arc<dyn Fn(&claude_refresh::Grant) -> Result<claude_refresh::Renewed> + Send + Sync>,
     /// 키체인 account 속성을 모를 때 쓰는 사용자 이름.

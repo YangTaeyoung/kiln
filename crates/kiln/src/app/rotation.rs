@@ -1,7 +1,7 @@
 //! 에이전트 CLI(claude, codex) 사용량 한도 감지와 계정 전환 후 세션 이어가기.
 
 use super::conn::Conn;
-use kiln_accounts::{AccountManager, Tool, detect_limit, resume_command};
+use kiln_accounts::{AccountManager, ResetOutcome, Tool, detect_limit, resume_command};
 use kiln_proto::SessionId;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -15,6 +15,9 @@ pub enum RotationEvent {
     Switched { session: SessionId, tool: Tool, label: String },
     NoAccount { tool: Tool },
     Failed { tool: Tool, error: String },
+    /// A reset credit of the account labelled `label` was redeemed with `outcome`.
+    ResetRedeemed { label: String, outcome: ResetOutcome },
+    ResetFailed { error: String },
 }
 
 enum Stage {
@@ -41,6 +44,8 @@ pub struct Rotator {
     managed: HashSet<SessionId>,
     tx: Sender<(SessionId, Tool, Result<Option<String>, String>)>,
     rx: Receiver<(SessionId, Tool, Result<Option<String>, String>)>,
+    redeeming: bool,
+    resets: (Sender<RotationEvent>, Receiver<RotationEvent>),
 }
 
 pub fn tool_for(process: &str) -> Option<Tool> {
@@ -58,7 +63,41 @@ fn is_shell(p: &str) -> bool {
 impl Rotator {
     pub fn new(mgr: AccountManager) -> Self {
         let (tx, rx) = channel();
-        Rotator { mgr, last_poll: Instant::now(), handled: HashMap::new(), jobs: Vec::new(), managed: HashSet::new(), tx, rx }
+        Rotator { mgr, last_poll: Instant::now(), handled: HashMap::new(), jobs: Vec::new(), managed: HashSet::new(), tx, rx, redeeming: false, resets: channel() }
+    }
+
+    /// The reset credits the active `tool` account can redeem when no other account has room:
+    /// Codex only, from its latest usage sample.
+    pub fn reset_offer(&self, tool: Tool) -> Option<u32> {
+        if tool != Tool::Codex || self.mgr.next_with_headroom(tool).is_some() { return None; }
+        let active = self.mgr.active(tool)?;
+        let usage = self.mgr.usage(tool, &active).filter(|usage| !usage.is_unavailable())?;
+        usage.resets.map(|resets| resets.available).filter(|available| *available > 0)
+    }
+
+    /// Redeems one reset credit of the active `tool` account in the background; a redemption
+    /// already running is not started again.
+    pub fn redeem(&mut self, tool: Tool) {
+        if self.redeeming { return; }
+        let Some(id) = self.mgr.active(tool) else { return };
+        let label = self.mgr.profiles(tool).into_iter().find(|profile| profile.id == id).map(|profile| profile.label).unwrap_or_default();
+        self.redeeming = true;
+        let mgr = self.mgr.clone();
+        let tx = self.resets.0.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(match mgr.redeem_reset_credit(&id) {
+                Ok(outcome) => RotationEvent::ResetRedeemed { label, outcome },
+                Err(error) => RotationEvent::ResetFailed { error: format!("{error:#}") },
+            });
+        });
+    }
+
+    /// Moves finished redemptions to `out`.
+    pub fn drain_resets(&mut self, out: &mut Vec<RotationEvent>) {
+        while let Ok(event) = self.resets.1.try_recv() {
+            self.redeeming = false;
+            out.push(event);
+        }
     }
 
     pub fn set_managed(&mut self, sessions: impl IntoIterator<Item=SessionId>) {
@@ -122,6 +161,7 @@ impl Rotator {
 
     /// 진행 중인 작업을 한 단계씩 진행한다.
     pub fn tick(&mut self, conn: &mut Conn, out: &mut Vec<RotationEvent>) {
+        self.drain_resets(out);
         while let Ok((session, tool, r)) = self.rx.try_recv() {
             let Some(pos) = self.jobs.iter().position(|j| j.session == session) else { continue };
             match r {
@@ -178,6 +218,61 @@ mod tests {
         r.set_managed([42]);r.start(42,kiln_accounts::Tool::Codex);
         assert!(!r.busy());assert!(r.handled.is_empty());
     }
+    /// A sandbox with one saved Codex account whose usage reads `exhausted` and `resets`
+    /// available reset credits, and a second account with `spare` usage when given.
+    fn codex_accounts(root: &std::path::Path, resets: u32, spare: Option<f32>) -> kiln_accounts::AccountManager {
+        use kiln_accounts::{Env, ResetCredits, Tool, Usage};
+        let (mut env, _) = Env::sandbox(root, false);
+        env.codex_probe = Some(std::sync::Arc::new(move |auth: &str| {
+            let used = if auth.contains("spare") { spare.unwrap_or(1.0) } else { 1.0 };
+            Ok(Usage { five_hour: Some((used, Some(4_200_000_000))), status: "allowed".into(), resets: Some(ResetCredits { available: resets, next_expiry: None }), ..Default::default() })
+        }));
+        env.codex_reset = std::sync::Arc::new(|_, _| Ok(kiln_accounts::ResetOutcome::Reset));
+        std::fs::create_dir_all(&env.codex_home).unwrap();
+        let manager = kiln_accounts::AccountManager::with_env(env.clone());
+        if spare.is_some() {
+            std::fs::write(env.codex_home.join("auth.json"), kiln_accounts::test_support::codex_auth("spare@example.test", "spare")).unwrap();
+            manager.save_current(Tool::Codex, "Spare").unwrap();
+        }
+        std::fs::write(env.codex_home.join("auth.json"), kiln_accounts::test_support::codex_auth("work@example.test", "work")).unwrap();
+        manager.save_current(Tool::Codex, "Work").unwrap();
+        manager.refresh_usage_blocking(Tool::Codex);
+        manager
+    }
+
+    #[test]
+    fn a_reset_credit_is_offered_only_when_no_other_account_has_room() {
+        use kiln_accounts::Tool;
+        let root = tempfile::tempdir().unwrap();
+        let rotator = super::Rotator::new(codex_accounts(&root.path().join("a"), 2, None));
+        assert_eq!(rotator.reset_offer(Tool::Codex), Some(2));
+        assert_eq!(rotator.reset_offer(Tool::Claude), None);
+        let rotator = super::Rotator::new(codex_accounts(&root.path().join("b"), 0, None));
+        assert_eq!(rotator.reset_offer(Tool::Codex), None, "no credit to offer");
+        let rotator = super::Rotator::new(codex_accounts(&root.path().join("c"), 2, Some(0.1)));
+        assert_eq!(rotator.reset_offer(Tool::Codex), None, "another account can take over");
+    }
+
+    #[test]
+    fn a_redeemed_reset_credit_is_reported_once() {
+        use kiln_accounts::{ResetOutcome, Tool};
+        let root = tempfile::tempdir().unwrap();
+        let mut rotator = super::Rotator::new(codex_accounts(root.path(), 1, None));
+        rotator.redeem(Tool::Codex);
+        rotator.redeem(Tool::Codex);
+        let mut events = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while events.is_empty() {
+            assert!(std::time::Instant::now() < deadline);
+            rotator.drain_resets(&mut events);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        rotator.drain_resets(&mut events);
+        assert_eq!(events.len(), 1, "a redemption already running is not started again");
+        assert!(matches!(&events[0], super::RotationEvent::ResetRedeemed { label, outcome: ResetOutcome::Reset } if label == "Work"));
+    }
+
     #[test]
     fn only_agent_processes_are_watched() {
         assert!(tool_for("claude").is_some());

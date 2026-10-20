@@ -640,18 +640,7 @@ for line in sys.stdin:
     }
 
     pub fn fake_auth(email: &str, marker: &str) -> String {
-        serde_json::json!({
-            "auth_mode": "chatgpt",
-            "OPENAI_API_KEY": null,
-            "tokens": {
-                "id_token": fake_jwt(&serde_json::json!({"email": email, "sub": marker})),
-                "access_token": format!("access-{marker}"),
-                "refresh_token": format!("refresh-{marker}"),
-                "account_id": marker,
-            },
-            "last_refresh": "2026-09-20T00:00:00Z",
-        })
-        .to_string()
+        crate::test_support::codex_auth(email, marker)
     }
 
     #[test]

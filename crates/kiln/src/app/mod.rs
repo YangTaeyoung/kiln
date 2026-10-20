@@ -243,6 +243,8 @@ pub enum Action {
     RestartAgent(PaneId),
     /// 다음 계정으로 바꾸고 세션의 에이전트를 이어서 실행한다.
     RotateAccount(SessionId, kiln_accounts::Tool),
+    /// Redeems one reset credit of the active account of the tool.
+    RedeemResetCredit(kiln_accounts::Tool),
     /// GitHub 저장소(`owner/name`)를 고른 폴더 아래로 복제하고 새 스페이스로 연다.
     CloneRepo(String),
     /// 현재 스페이스 저장소의 Git 로그 카드를 연다.
@@ -1654,6 +1656,7 @@ impl KilnApp {
                     self.toast(kiln_common::i18n::tr("사용량 한도"),kiln_common::i18n::tr("이 패널은 원래 계정을 유지합니다. 계정 설정에서 다른 계정을 선택한 뒤 새 패널을 여세요."),ToastKind::Info,Some(session));
                 } else {self.rotator.start(session,tool);}
             },
+            Action::RedeemResetCredit(tool) => self.rotator.redeem(tool),
             Action::OpenHistory => {
                 if self.ws().tools.has_multiple_repositories(){self.apply(Action::OpenSheet(tools::ToolKind::Git),ctx);self.toast(kiln_common::i18n::tr("저장소별 로그"), kiln_common::i18n::tr("각 저장소의 로그 버튼으로 변경 이력을 확인하세요."), ToastKind::Info,None);return;}
                 let root = self.ws().root.clone();
@@ -1775,9 +1778,15 @@ impl KilnApp {
         for e in events {
             match e {
                 E::LimitReached { session, tool, reset_hint } => {
+                    let offer = self.rotator.reset_offer(tool);
                     let body = match reset_hint {
                         Some(h) => kiln_common::trf!("{} 사용량 한도에 도달했습니다 · {h}", tool.display_name()),
                         None => kiln_common::trf!("{} 사용량 한도에 도달했습니다", tool.display_name()),
+                    };
+                    let body = match offer { Some(available) => format!("{body} · {}", kiln_common::trf!("초기화권 {}개", available)), None => body };
+                    let button = match offer {
+                        Some(_) => (kiln_common::i18n::tr("초기화권 사용").into(), Action::RedeemResetCredit(tool)),
+                        None => (kiln_common::i18n::tr("다음 계정으로 전환").into(), Action::RotateAccount(session, tool)),
                     };
                     self.notifications.push(kiln_common::i18n::tr("사용량 한도"), &body, ToastKind::Notify, Some(session), self.session_workspace_name(session));
                     if let Some(item) = self.notifications.items.last_mut() { item.rotate_tool = Some(tool); }
@@ -1787,7 +1796,7 @@ impl KilnApp {
                         at: Instant::now(),
                         kind: ToastKind::Notify,
                         session: Some(session),
-                        button: Some((kiln_common::i18n::tr("다음 계정으로 전환").into(), Action::RotateAccount(session, tool))),
+                        button: Some(button),
                     }); }
                 }
                 E::ManagedLimitReached {session,tool} => {
@@ -1796,7 +1805,19 @@ impl KilnApp {
                 E::Switched { session, tool, label } => {
                     self.toast(kiln_common::trf!("계정 전환: {label}"), kiln_common::trf!("{} 대화를 이어서 실행합니다", tool.display_name()), ToastKind::Info, Some(session));
                 }
-                E::NoAccount { tool } => self.toast(kiln_common::i18n::tr("전환할 계정이 없습니다"), kiln_common::trf!("설정 → 계정에서 {} 계정을 더 등록하세요", tool.display_name()), ToastKind::Error, None),
+                E::NoAccount { tool } => match self.rotator.reset_offer(tool) {
+                    Some(available) if self.settings.notification_toasts && !self.settings.do_not_disturb => self.toasts.push(Toast {
+                        title: kiln_common::i18n::tr("전환할 계정이 없습니다").into(),
+                        body: kiln_common::trf!("초기화권 {}개", available),
+                        at: Instant::now(),
+                        kind: ToastKind::Notify,
+                        session: None,
+                        button: Some((kiln_common::i18n::tr("초기화권 사용").into(), Action::RedeemResetCredit(tool))),
+                    }),
+                    _ => self.toast(kiln_common::i18n::tr("전환할 계정이 없습니다"), kiln_common::trf!("설정 → 계정에서 {} 계정을 더 등록하세요", tool.display_name()), ToastKind::Error, None),
+                },
+                E::ResetRedeemed { label, outcome } => self.toast(kiln_accounts::reset_outcome_text(outcome, &label), String::new(), ToastKind::Info, None),
+                E::ResetFailed { error } => self.toast(kiln_common::i18n::tr("초기화권을 사용하지 못했습니다"), error, ToastKind::Error, None),
                 E::Failed { tool, error } => self.toast(kiln_common::trf!("{} 계정 전환 실패", tool.display_name()), error, ToastKind::Error, None),
             }
         }
@@ -2211,6 +2232,22 @@ impl KilnApp {
         let pane=self.focused_pane().unwrap();
         self.terminal_launch_drafts.insert(pane,state::TerminalLaunchDraft {pane,command:None,reason:"Invalid shell".into()});
         self.recovery_open=true;
+    }
+
+    #[doc(hidden)]
+    pub fn debug_set_accounts(&mut self, manager: kiln_accounts::AccountManager) {
+        self.rotator = rotation::Rotator::new(manager);
+    }
+
+    #[doc(hidden)]
+    pub fn debug_codex_limit(&mut self, session: SessionId, switching_on: bool) {
+        let tool = kiln_accounts::Tool::Codex;
+        self.handle_rotation(vec![if switching_on { rotation::RotationEvent::NoAccount { tool } } else { rotation::RotationEvent::LimitReached { session, tool, reset_hint: None } }]);
+    }
+
+    #[doc(hidden)]
+    pub fn debug_toast_buttons(&self) -> Vec<String> {
+        self.toasts.iter().filter_map(|toast| toast.button.as_ref().map(|(label, _)| label.clone())).collect()
     }
 
     #[doc(hidden)]

@@ -161,6 +161,23 @@ pub fn resume_command(tool: Tool) -> &'static str {
     }
 }
 
+/// Fixture credentials for tests of crates that use the account manager.
+#[doc(hidden)]
+pub mod test_support {
+    /// A Codex `auth.json` for `email` with tokens named after `marker`.
+    pub fn codex_auth(email: &str, marker: &str) -> String {
+        use base64::Engine;
+        let encode = |value: &serde_json::Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(value).unwrap_or_default());
+        let id_token = format!("{}.{}.sig", encode(&serde_json::json!({"alg": "none"})), encode(&serde_json::json!({"email": email, "sub": marker})));
+        serde_json::json!({
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": null,
+            "tokens": {"id_token": id_token, "access_token": format!("access-{marker}"), "refresh_token": format!("refresh-{marker}"), "account_id": marker},
+            "last_refresh": "2026-09-20T00:00:00Z",
+        }).to_string()
+    }
+}
+
 pub(crate) fn now_unix() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }

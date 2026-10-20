@@ -11633,5 +11633,10 @@
     "en": "No records",
     "ja": "記録なし",
     "zh-CN": "无记录"
+  },
+  "초기화권을 사용하지 못했습니다": {
+    "en": "Could not use the reset credit",
+    "ja": "リセット権を使えませんでした",
+    "zh-CN": "无法使用重置次数"
   }
 }
