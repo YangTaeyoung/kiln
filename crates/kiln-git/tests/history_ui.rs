@@ -6,7 +6,7 @@ mod history_common;
 
 use egui::{Modifiers, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{By, NodeT, Queryable};
 use history_common::{State, harness, row, settle, subjects, ui_repo};
 use kiln_git::history::{DropPlace, HistoryEvent};
 
@@ -249,7 +249,11 @@ fn rewriting_pushed_commit_warns_and_offers_force_push() {
     settle(&mut h);
     h.get_by_label("커밋 삭제").click();
     settle(&mut h);
-    assert!(!subjects(&r).contains(&"Fix date column".to_string()));
+    let notices: Vec<String> = h
+        .query_all(By::new().predicate(|n| n.label().is_some_and(|l| ["실패", "error", "fatal", "lock"].iter().any(|k| l.to_lowercase().contains(k)))))
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert!(!subjects(&r).contains(&"Fix date column".to_string()), "the drop did not apply; notices: {notices:?}");
     let remote=r.git(&["ls-remote","origin","refs/heads/main"]);
     assert_eq!(remote.split_whitespace().next().unwrap(),r.git(&["rev-parse","HEAD"]).trim());
 }

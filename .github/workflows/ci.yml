@@ -109,12 +109,12 @@ jobs:
           cargo test --locked --no-fail-fast --workspace --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow -- --test-threads=1 || status=1
           cargo test --locked --no-fail-fast --workspace --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui -- --test-threads=1 || status=1
           exit $status
-      - name: GUI integration
-        if: matrix.part == 'crates' && !cancelled()
-        run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
       - name: Terminal and daemon integration
         if: matrix.part == 'terminal'
         run: cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
+      - name: GUI integration
+        if: matrix.part == 'terminal' && !cancelled()
+        run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
 
   database-servers:
     runs-on: ubuntu-latest
