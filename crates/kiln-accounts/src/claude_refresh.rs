@@ -300,8 +300,16 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let (inner, _) = RefreshLock::paths(&dir);
         std::fs::create_dir(&inner).unwrap();
-        let old = std::time::SystemTime::now() - Duration::from_secs(120);
-        std::fs::File::open(&inner).unwrap().set_modified(old).unwrap();
+        let mut options = std::fs::OpenOptions::new();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // FILE_FLAG_BACKUP_SEMANTICS opens a folder handle.
+            options.write(true).custom_flags(0x0200_0000);
+        }
+        #[cfg(not(windows))]
+        options.read(true);
+        options.open(&inner).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_secs(120)).unwrap();
         assert!(RefreshLock::acquire(&dir, 1, Duration::ZERO).unwrap().is_some());
     }
 
