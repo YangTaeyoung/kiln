@@ -29,7 +29,7 @@ limit with no other account to switch to.
   the sample and absent in older settings.
 - Background Codex polls keep `excludeResetCreditDetails: true`; a manual refresh (settings
   opened or refresh pressed) reads details for the nearest expiry.
-- The account row shows one caption under the email: Claude "추가 사용 $12.30 / $50.00" or
+- The account row shows one caption under the email: Claude "추가 사용 $12 / $50" or
   "추가 사용 꺼짐"; Codex "크레딧 N" or "크레딧 무제한" and "초기화권 N개 · M/D 만료".
 - Codex account menu: "초기화권 사용" (enabled with an available credit) asks inline, like
   delete, and redeems through the profile's own Codex home after checking the account's
