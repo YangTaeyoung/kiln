@@ -44,6 +44,15 @@ jobs:
           cargo nextest run --locked --profile ci --workspace $tests --test macos_responsibility --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui --test direct_terminal_launch --test shell_completion --test terminal_recovery --test hosted --test hosted_failures --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow --test gui --test remote_inspector --test workflow_distill --test pane_layout --test portable_icons
           KILN_PTY_HOST=0 cargo nextest run --locked --profile ci --workspace --test daemon
           cargo test --locked --workspace --test mixed_upgrade
+      - name: Keep snapshot differences
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-differences-macos
+          path: |
+            crates/*/tests/snapshots/**/*.diff.png
+            crates/*/tests/snapshots/**/*.new.png
+          if-no-files-found: ignore
       - name: Validate release scripts
         run: |
           sh -n install.sh
@@ -115,6 +124,15 @@ jobs:
       - name: GUI integration
         if: matrix.part == 'terminal' && !cancelled()
         run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
+      - name: Keep snapshot differences
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-differences-${{ matrix.target.name }}-${{ matrix.part }}
+          path: |
+            crates/*/tests/snapshots/**/*.diff.png
+            crates/*/tests/snapshots/**/*.new.png
+          if-no-files-found: ignore
 
   database-servers:
     runs-on: ubuntu-latest

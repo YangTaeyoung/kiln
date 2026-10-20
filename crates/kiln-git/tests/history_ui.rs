@@ -242,6 +242,7 @@ fn rewriting_pushed_commit_warns_and_offers_force_push() {
     row(&h, "Fix date column").click_secondary();
     h.run_steps(3);
     h.get_by_label("커밋 삭제").click();
+    h.event(egui::Event::PointerGone);
     settle(&mut h);
     assert!(h.query_by_label("성공 후 이 브랜치만 force-with-lease로 푸시").is_some());
     h.snapshot("history_drop_pushed_confirm");
