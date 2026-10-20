@@ -7,8 +7,8 @@ final-status-level = "slow"
 filter = 'binary(perf) | binary(ui_perf) | binary(render_perf)'
 threads-required = "num-test-threads"
 
-# On Windows, the kiln integration tests that start terminals and the SQL completion tests run alone.
+# On Windows, the SQL completion tests run alone.
 [[profile.default.overrides]]
 platform = 'cfg(windows)'
-filter = '(package(kiln) & kind(test)) | binary(sql_completion)'
+filter = 'binary(sql_completion)'
 threads-required = "num-test-threads"
