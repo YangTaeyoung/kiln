@@ -2246,6 +2246,10 @@ impl KilnApp {
     #[doc(hidden)]
     pub fn debug_workspace_names(&self) -> Vec<String> { self.workspaces.iter().map(|ws| ws.name.clone()).collect() }
 
+    /// The number of task rows the sidebar lists under each workspace.
+    #[doc(hidden)]
+    pub fn debug_workspace_task_counts(&self) -> Vec<usize> { (0..self.workspaces.len()).map(|i| self.workspace_tasks(i).len()).collect() }
+
     #[doc(hidden)]
     pub fn debug_set_accounts(&mut self, manager: kiln_accounts::AccountManager) {
         self.rotator = rotation::Rotator::new(manager);

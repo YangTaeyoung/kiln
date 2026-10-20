@@ -997,20 +997,27 @@ fn workspace_row(h: &Harness<'_, KilnApp>, name: &str) -> egui::Rect {
     h.query_all_by_label(name).map(|node| node.rect()).min_by(|a, b| a.left().total_cmp(&b.left())).expect("workspace row")
 }
 
-/// Drags the row labelled `from` onto the upper or lower half of the row labelled `to`.
+/// Drags the row labelled `from` onto the upper or lower half of the row labelled `to`, aiming at
+/// where the target row is drawn in each frame.
 fn drag_row(h: &mut Harness<'_, KilnApp>, from: &str, to: &str, upper: bool) {
+    let aim = |h: &Harness<'_, KilnApp>| {
+        let target = workspace_row(h, to);
+        egui::pos2(target.center().x, if upper { target.top() + target.height() * 0.25 } else { target.bottom() - target.height() * 0.25 })
+    };
     let start = workspace_row(h, from).center();
-    let target = workspace_row(h, to);
-    let end = egui::pos2(target.center().x, if upper { target.top() + target.height() * 0.25 } else { target.bottom() - target.height() * 0.25 });
     let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
     h.event(egui::Event::PointerMoved(start));
     h.event(button(start, true));
     h.step();
     for k in 1..=6 {
+        let end = aim(h);
         h.event(egui::Event::PointerMoved(start + (end - start) * (k as f32 / 6.0)));
         h.step();
     }
-    h.event(button(end, false));
+    let end = aim(h);
+    h.event(egui::Event::PointerMoved(end));
+    h.step();
+    h.event(button(aim(h), false));
     h.run_steps(3);
 }
 
@@ -1024,6 +1031,7 @@ fn workspaces_are_reordered_by_dragging_their_rows_and_from_their_menu() {
         std::fs::create_dir_all(&path).unwrap();
         h.state_mut().debug_queue_action(kiln::app::Action::NewWorkspace(Some(path)));
     }
+    assert!(pump_until(&mut h, 60, |h| h.state().debug_workspace_task_counts().iter().all(|&tasks| tasks > 0)), "every workspace lists its terminal");
     h.run_steps(3);
     assert_eq!(h.state().debug_workspace_names(), ["proj", "alpha", "beta"]);
     assert_eq!(h.state().debug_active_workspace_name(), "beta");
