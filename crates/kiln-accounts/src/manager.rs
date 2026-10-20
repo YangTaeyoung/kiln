@@ -1442,11 +1442,16 @@ mod tests {
         let usage = if tool == Tool::Codex {
             let history = manager.with_codex_home(&profile, |home, email| (manager.inner.env.codex_history)(home, email)).expect("live Codex usage history");
             assert!(history.daily.iter().all(|(date, _)| date.len() == 10));
-            manager.probe_codex_profile(&profile, true).expect("live Codex quota request")
+            eprintln!("history: {} days, lifetime tokens {:?}, peak daily tokens {:?}", history.daily.len(), history.lifetime_tokens, history.peak_daily_tokens);
+            let usage = manager.probe_codex_profile(&profile, true).expect("live Codex quota request");
+            eprintln!("credits: {:?}\nreset credits: {:?}", usage.credits, usage.resets);
+            usage
         } else {
             let secret = manager.usage_secret(tool, &profile.id).unwrap().expect("profile credentials");
             let token = claude::access_token(&secret).expect("subscription authentication");
-            (manager.inner.env.probe)(&token).expect("live Claude quota request")
+            let usage = (manager.inner.env.probe)(&token).expect("live Claude quota request");
+            eprintln!("extra usage: {:?}", usage.extra);
+            usage
         };
         assert!(!usage.is_unavailable());
         assert!(usage.five_hour.is_some() || usage.seven_day.is_some());
