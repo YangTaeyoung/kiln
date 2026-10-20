@@ -15,7 +15,7 @@ pub mod store;
 mod ui;
 
 pub use limit::{LimitHit, detect_limit};
-pub use manager::{AccountManager, Env};
+pub use manager::{AccountManager, Env, HistoryState};
 pub use login::LoginStatus;
 pub use store::{CredentialStore, FileStore, MemoryStore, SecurityCli};
 pub use ui::{AccountsEvent, accounts_settings_ui};
@@ -73,6 +73,25 @@ pub struct Usage {
     /// Codex rate-limit reset credits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets: Option<ResetCredits>,
+}
+
+/// The result of redeeming a Codex rate-limit reset credit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetOutcome {
+    Reset,
+    NothingToReset,
+    NoCredit,
+    AlreadyRedeemed,
+}
+
+/// Codex's account token usage: summary figures and daily totals, oldest first.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct UsageHistory {
+    pub lifetime_tokens: Option<u64>,
+    pub peak_daily_tokens: Option<u64>,
+    pub current_streak_days: Option<u64>,
+    pub longest_streak_days: Option<u64>,
+    pub daily: Vec<(String, u64)>,
 }
 
 /// Claude extra-usage (overage) spend for the billing period, in minor units of `currency`.

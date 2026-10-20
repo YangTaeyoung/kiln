@@ -239,13 +239,41 @@ pub fn probe_usage(auth: &str) -> anyhow::Result<Usage> {
 }
 
 /// The CLI owns credential decryption and refresh; only account metadata and quotas cross this boundary.
-pub(crate) fn probe_native(home: &Path, expected_email: &str) -> anyhow::Result<Usage> {
+/// `details` also reads the reset-credit details (their expiry).
+pub(crate) fn probe_native(home: &Path, expected_email: &str, details: bool) -> anyhow::Result<Usage> {
+    let binary = native_binary()?;
+    repair_hex_auth(home, expected_email)?;
+    probe_native_with(&binary, home, expected_email, details, NATIVE_TIMEOUT)
+}
+
+/// Redeems one rate-limit reset credit of the account signed in at `home`.
+pub(crate) fn consume_reset(home: &Path, expected_email: &str) -> anyhow::Result<crate::ResetOutcome> {
+    let binary = native_binary()?;
+    repair_hex_auth(home, expected_email)?;
+    consume_reset_with(&binary, home, expected_email, &new_idempotency_key(), NATIVE_TIMEOUT)
+}
+
+/// The token usage history of the account signed in at `home`.
+pub(crate) fn usage_history(home: &Path, expected_email: &str) -> anyhow::Result<crate::UsageHistory> {
+    let binary = native_binary()?;
+    repair_hex_auth(home, expected_email)?;
+    usage_history_with(&binary, home, expected_email, NATIVE_TIMEOUT)
+}
+
+const NATIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn native_binary() -> anyhow::Result<PathBuf> {
     use anyhow::Context;
     let mut extra = vec![PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
     if let Some(home) = kiln_common::paths::home() { extra.insert(0, home.join(".local/bin")); }
-    let binary = kiln_common::paths::find_executable("codex", &extra).context("Codex CLI unavailable")?;
-    repair_hex_auth(home, expected_email)?;
-    probe_native_with(&binary, home, expected_email, std::time::Duration::from_secs(20))
+    kiln_common::paths::find_executable("codex", &extra).context("Codex CLI unavailable")
+}
+
+/// A key for one redemption attempt, unique within and across runs.
+fn new_idempotency_key() -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("kiln-{nanos:x}-{:x}-{:x}", std::process::id(), SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 /// Restore a hex-rendered JSON file only for the selected account.
@@ -258,7 +286,48 @@ fn repair_hex_auth(home: &Path, expected_email: &str) -> anyhow::Result<()> {
     crate::store::write_secret_atomic(&path, decoded.as_bytes())
 }
 
-fn probe_native_with(binary: &Path, home: &Path, expected_email: &str, timeout: std::time::Duration) -> anyhow::Result<Usage> {
+fn probe_native_with(binary: &Path, home: &Path, expected_email: &str, details: bool, timeout: std::time::Duration) -> anyhow::Result<Usage> {
+    use anyhow::Context;
+    let limits = native_session(binary, home, expected_email, timeout, |request| {
+        request("account/rateLimits/read", serde_json::json!({"excludeResetCreditDetails": !details}))
+    })?;
+    usage_from_native(&limits).context("Codex usage windows unavailable")
+}
+
+fn consume_reset_with(binary: &Path, home: &Path, expected_email: &str, key: &str, timeout: std::time::Duration) -> anyhow::Result<crate::ResetOutcome> {
+    let reply = native_session(binary, home, expected_email, timeout, |request| {
+        request("account/rateLimitResetCredit/consume", serde_json::json!({"idempotencyKey": key}))
+    })?;
+    Ok(match reply["outcome"].as_str() {
+        Some("reset") => crate::ResetOutcome::Reset,
+        Some("nothingToReset") => crate::ResetOutcome::NothingToReset,
+        Some("noCredit") => crate::ResetOutcome::NoCredit,
+        Some("alreadyRedeemed") => crate::ResetOutcome::AlreadyRedeemed,
+        _ => anyhow::bail!("Codex returned an unknown reset outcome"),
+    })
+}
+
+fn usage_history_with(binary: &Path, home: &Path, expected_email: &str, timeout: std::time::Duration) -> anyhow::Result<crate::UsageHistory> {
+    let reply = native_session(binary, home, expected_email, timeout, |request| request("account/usage/read", serde_json::json!({})))?;
+    let summary = &reply["summary"];
+    let mut daily: Vec<(String, u64)> = reply["dailyUsageBuckets"].as_array().map(|buckets| buckets.iter().filter_map(|bucket| {
+        let date = bucket["startDate"].as_str().filter(|date| date.len() == 10)?;
+        Some((date.to_owned(), bucket["tokens"].as_u64()?))
+    }).collect()).unwrap_or_default();
+    daily.sort();
+    Ok(crate::UsageHistory {
+        lifetime_tokens: summary["lifetimeTokens"].as_u64(),
+        peak_daily_tokens: summary["peakDailyTokens"].as_u64(),
+        current_streak_days: summary["currentStreakDays"].as_u64(),
+        longest_streak_days: summary["longestStreakDays"].as_u64(),
+        daily,
+    })
+}
+
+/// Runs `body` against a private `codex app-server` for `home` between two checks that it is
+/// signed in as `expected_email`; the server and its children end with the session.
+fn native_session<T>(binary: &Path, home: &Path, expected_email: &str, timeout: std::time::Duration,
+    body: impl FnOnce(&mut dyn FnMut(&str, Value) -> anyhow::Result<Value>) -> anyhow::Result<T>) -> anyhow::Result<T> {
     use anyhow::{Context, ensure};
     use std::io::{BufRead, Write};
     use std::process::{Command, Stdio};
@@ -267,7 +336,7 @@ fn probe_native_with(binary: &Path, home: &Path, expected_email: &str, timeout: 
     { use std::os::unix::process::CommandExt; command.process_group(0); }
     kiln_common::process::hide_window(&mut command);
     let mut child = command.args(["--no-daemon", "app-server"]).env("CODEX_HOME", home)
-        .current_dir(home).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("Cannot start Codex usage reader")?;
+        .current_dir(home).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("Cannot start Codex account reader")?;
     #[cfg(windows)]
     let job = kiln_common::process::Job::for_process(child.id(), true);
     let mut input = child.stdin.take().context("Codex input unavailable")?;
@@ -286,33 +355,36 @@ fn probe_native_with(binary: &Path, home: &Path, expected_email: &str, timeout: 
     });
     let result = (|| {
         let deadline = std::time::Instant::now() + timeout;
-        let mut request = |id: u64, method: &str, params: Value| -> anyhow::Result<Value> {
+        let mut next_id = 0u64;
+        let mut request = |method: &str, params: Value| -> anyhow::Result<Value> {
+            next_id += 1;
+            let id = next_id;
             writeln!(input, "{}", serde_json::json!({"id":id,"method":method,"params":params}))?;
             input.flush()?;
             loop {
-                ensure!(std::time::Instant::now() < deadline, "Codex usage request timed out");
-                let reply = rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).context("Codex usage request timed out")?.context("Invalid Codex reply")?;
+                ensure!(std::time::Instant::now() < deadline, "Codex account request timed out");
+                let reply = rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).context("Codex account request timed out")?.context("Invalid Codex reply")?;
                 if reply["id"].as_u64() != Some(id) { continue; }
                 if let Some(error) = reply.get("error") {
                     let message = error["message"].as_str().unwrap_or_default();
                     if message.contains("401") || message.contains("authentication required") {
                         anyhow::bail!("authentication required");
                     }
-                    anyhow::bail!("Codex usage request failed; check CLI sign-in");
+                    anyhow::bail!("Codex account request failed; check CLI sign-in");
                 }
-                if id == 1 { writeln!(input, "{{\"method\":\"initialized\"}}")?; input.flush()?; }
+                if method == "initialize" { writeln!(input, "{{\"method\":\"initialized\"}}")?; input.flush()?; }
                 return reply.get("result").cloned().context("Missing Codex result");
             }
         };
-        request(1, "initialize", serde_json::json!({"clientInfo":{"name":"kiln_usage","version":env!("CARGO_PKG_VERSION")}}))?;
-        let account = request(2, "account/read", serde_json::json!({"refreshToken":false}))?;
+        request("initialize", serde_json::json!({"clientInfo":{"name":"kiln_usage","version":env!("CARGO_PKG_VERSION")}}))?;
+        let account = request("account/read", serde_json::json!({"refreshToken":false}))?;
         ensure!(!account["account"].is_null(), "authentication required");
         ensure!(account.pointer("/account/email").and_then(Value::as_str).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account does not match saved profile");
-        let limits = request(3, "account/rateLimits/read", serde_json::json!({"excludeResetCreditDetails":true}))?;
-        let account = request(4, "account/read", serde_json::json!({"refreshToken":false}))?;
+        let value = body(&mut request)?;
+        let account = request("account/read", serde_json::json!({"refreshToken":false}))?;
         ensure!(!account["account"].is_null(), "authentication required");
-        ensure!(account.pointer("/account/email").and_then(Value::as_str).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account changed during usage request");
-        usage_from_native(&limits).context("Codex usage windows unavailable")
+        ensure!(account.pointer("/account/email").and_then(Value::as_str).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account changed during the request");
+        Ok(value)
     })();
     #[cfg(unix)]
     // SAFETY: this process group was created for this owned reader and its children.
@@ -374,7 +446,7 @@ pub(crate) mod tests {
     fn live_account_quota_probe() {
         let home = std::env::var_os("KILN_VERIFY_CODEX_HOME").expect("explicit account home");
         let email = std::env::var("KILN_VERIFY_CODEX_EMAIL").expect("explicit account identity");
-        let usage = probe_native(Path::new(&home), &email).expect("live account quota request");
+        let usage = probe_native(Path::new(&home), &email, true).expect("live account quota request");
         assert!(!usage.is_unavailable());
         assert!(usage.five_hour.is_some() || usage.seven_day.is_some());
     }
@@ -433,17 +505,101 @@ for line in sys.stdin:
 "#).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let timeout = std::time::Duration::from_secs(3);
-        assert_eq!(probe_native_with(&script, dir.path(), "fixture@example.test", timeout).unwrap().five_hour.unwrap().0, 0.42);
-        assert!(probe_native_with(&script, dir.path(), "other@example.test", timeout).unwrap_err().to_string().contains("does not match"));
+        assert_eq!(probe_native_with(&script, dir.path(), "fixture@example.test", false, timeout).unwrap().five_hour.unwrap().0, 0.42);
+        assert!(probe_native_with(&script, dir.path(), "other@example.test", false, timeout).unwrap_err().to_string().contains("does not match"));
         let source = std::fs::read_to_string(&script).unwrap().replace("'result':result", "'error':{'message':'PRIVATE PROVIDER BODY'}");
         std::fs::write(&script, source).unwrap();
-        let error = probe_native_with(&script, dir.path(), "fixture@example.test", timeout).unwrap_err().to_string();
+        let error = probe_native_with(&script, dir.path(), "fixture@example.test", false, timeout).unwrap_err().to_string();
         assert!(error.contains("request failed"));
         assert!(!error.contains("PRIVATE"));
         std::fs::write(&script, "#!/usr/bin/env python3\nimport time\ntime.sleep(10)\n").unwrap();
         let started = std::time::Instant::now();
-        assert!(probe_native_with(&script, dir.path(), "fixture@example.test", std::time::Duration::from_millis(100)).is_err());
+        assert!(probe_native_with(&script, dir.path(), "fixture@example.test", false, std::time::Duration::from_millis(100)).is_err());
         assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
+    /// A fake `codex app-server` signed in as `fixture@example.test` that logs each request to
+    /// `requests.jsonl` and answers consume with the outcome in `outcome` (default `reset`).
+    #[cfg(unix)]
+    fn account_server(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let script = dir.join("codex-account-fixture");
+        std::fs::write(&script, r#"#!/usr/bin/env python3
+import json,os,sys
+here=os.path.dirname(os.path.abspath(sys.argv[0]))
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ with open(os.path.join(here,'requests.jsonl'),'a') as log: log.write(json.dumps({'method':r['method'],'params':r.get('params')})+'\n')
+ m=r['method']
+ if m=='initialize': result={}
+ elif m=='account/read': result={'account':{'type':'chatgpt','email':'fixture@example.test'}}
+ elif m=='account/rateLimits/read':
+  detailed=not (r.get('params') or {}).get('excludeResetCreditDetails')
+  credits=[{'id':'c1','resetType':'codexRateLimits','status':'available','grantedAt':1,'expiresAt':1800000000}] if detailed else None
+  result={'rateLimits':{'primary':{'usedPercent':100,'windowDurationMins':300,'resetsAt':4200000000}},'rateLimitResetCredits':{'availableCount':1,'credits':credits}}
+ elif m=='account/rateLimitResetCredit/consume':
+  path=os.path.join(here,'outcome')
+  result={'outcome':open(path).read().strip() if os.path.exists(path) else 'reset'}
+ elif m=='account/usage/read':
+  result={'summary':{'lifetimeTokens':123456,'peakDailyTokens':5000,'longestRunningTurnSec':90,'currentStreakDays':3,'longestStreakDays':9},'dailyUsageBuckets':[{'startDate':'2026-10-19','tokens':4200},{'startDate':'2026-10-20','tokens':1200}]}
+ else: raise RuntimeError('unexpected request')
+ print(json.dumps({'id':r['id'],'result':result}),flush=True)
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        script
+    }
+
+    #[cfg(unix)]
+    fn requests(dir: &Path) -> Vec<Value> {
+        std::fs::read_to_string(dir.join("requests.jsonl")).unwrap_or_default().lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reset_credit_details_are_read_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = account_server(dir.path());
+        let timeout = std::time::Duration::from_secs(3);
+        let background = probe_native_with(&script, dir.path(), "fixture@example.test", false, timeout).unwrap();
+        assert_eq!(background.resets, Some(crate::ResetCredits { available: 1, next_expiry: None }));
+        let detailed = probe_native_with(&script, dir.path(), "fixture@example.test", true, timeout).unwrap();
+        assert_eq!(detailed.resets, Some(crate::ResetCredits { available: 1, next_expiry: Some(1_800_000_000) }));
+        let reads: Vec<Value> = requests(dir.path()).into_iter().filter(|r| r["method"] == "account/rateLimits/read").map(|r| r["params"].clone()).collect();
+        assert_eq!(reads, vec![serde_json::json!({"excludeResetCreditDetails": true}), serde_json::json!({"excludeResetCreditDetails": false})]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reset_credit_is_redeemed_only_for_the_signed_in_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = account_server(dir.path());
+        let timeout = std::time::Duration::from_secs(3);
+        assert!(consume_reset_with(&script, dir.path(), "other@example.test", "attempt-0", timeout).unwrap_err().to_string().contains("does not match"));
+        assert!(requests(dir.path()).iter().all(|r| r["method"] != "account/rateLimitResetCredit/consume"), "a different account is never redeemed");
+        assert_eq!(consume_reset_with(&script, dir.path(), "fixture@example.test", "attempt-1", timeout).unwrap(), crate::ResetOutcome::Reset);
+        let consumed: Vec<Value> = requests(dir.path()).into_iter().filter(|r| r["method"] == "account/rateLimitResetCredit/consume").map(|r| r["params"].clone()).collect();
+        assert_eq!(consumed, vec![serde_json::json!({"idempotencyKey": "attempt-1"})]);
+        for (answer, outcome) in [("nothingToReset", crate::ResetOutcome::NothingToReset), ("noCredit", crate::ResetOutcome::NoCredit), ("alreadyRedeemed", crate::ResetOutcome::AlreadyRedeemed)] {
+            std::fs::write(dir.path().join("outcome"), answer).unwrap();
+            assert_eq!(consume_reset_with(&script, dir.path(), "fixture@example.test", "attempt-2", timeout).unwrap(), outcome);
+        }
+        std::fs::write(dir.path().join("outcome"), "somethingNew").unwrap();
+        assert!(consume_reset_with(&script, dir.path(), "fixture@example.test", "attempt-3", timeout).is_err());
+        assert_ne!(new_idempotency_key(), new_idempotency_key());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn daily_usage_history_is_read_from_the_cli() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = account_server(dir.path());
+        let history = usage_history_with(&script, dir.path(), "fixture@example.test", std::time::Duration::from_secs(3)).unwrap();
+        assert_eq!(history, crate::UsageHistory {
+            lifetime_tokens: Some(123_456), peak_daily_tokens: Some(5000), current_streak_days: Some(3), longest_streak_days: Some(9),
+            daily: vec![("2026-10-19".into(), 4200), ("2026-10-20".into(), 1200)],
+        });
+        assert!(usage_history_with(&script, dir.path(), "other@example.test", std::time::Duration::from_secs(3)).is_err());
     }
 
     #[test]
