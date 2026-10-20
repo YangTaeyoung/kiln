@@ -12,6 +12,7 @@ the user's shells, agents, builds, or servers.
 - [Pane layout](docs/pane-layout.md) — accepted movement, boundary scope and snapping behavior.
 - [Remote files and verification](docs/maintainers/remote-files-verification.md) — isolated provider fixtures and explicit coverage boundaries.
 - [Automatic account usage](docs/maintainers/account-usage.md) — background cadence, provider contracts, bounded requests and isolated verification.
+- [0.2.4 release verification](docs/maintainers/0.2.4-status.md) — account credits, Codex reset credits and usage history, workspace reordering, verified archives.
 - [0.2.3 release verification](docs/maintainers/0.2.3-status.md) — idle Claude login renewal, live CLI credentials, notarized macOS and verified Windows archives.
 - [0.2.1 release verification](docs/maintainers/0.2.1-status.md) — automatic usage refresh, independent copy cleanup, notarized macOS and verified Windows archives.
 - [0.2.0 release verification](docs/maintainers/0.2.0-status.md) — Windows parity, notarized macOS and signed Windows archives, VM install and update with the release key.
