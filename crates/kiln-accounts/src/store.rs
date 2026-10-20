@@ -113,6 +113,22 @@ fn trim_newline(s: String) -> String {
     s.trim_end_matches('\n').to_string()
 }
 
+/// Decode security(1)'s hexadecimal rendering only when it contains credential JSON.
+/// Arbitrary hexadecimal passwords retain their original representation.
+pub(crate) fn decode_credential_json(value: &str) -> Option<String> {
+    let text = value.trim();
+    if text.is_empty() || text.len() % 2 != 0 || !text.bytes().all(|b| b.is_ascii_hexdigit()) { return None; }
+    let bytes = (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16)).collect::<Result<Vec<_>, _>>().ok()?;
+    let decoded = String::from_utf8(bytes).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&decoded).ok()?;
+    let object = doc.as_object()?;
+    object.keys().any(|key| matches!(key.as_str(), "claudeAiOauth" | "tokens" | "mcpOAuth" | "OPENAI_API_KEY")).then_some(decoded)
+}
+
+fn credential_output(value: String) -> String {
+    decode_credential_json(&value).unwrap_or_else(|| trim_newline(value))
+}
+
 /// `find-generic-password` 메타 출력에서 `"acct"<blob>="..."` 값을 꺼낸다.
 pub fn parse_keychain_account(meta: &str) -> String {
     let key = "\"acct\"<blob>=\"";
@@ -138,7 +154,7 @@ pub fn parse_keychain_account(meta: &str) -> String {
 
 impl CredentialStore for SecurityCli {
     fn get(&self, service: &str, account: &str) -> Result<Option<String>> {
-        Ok(security(&["find-generic-password", "-s", service, "-a", account, "-w"])?.map(trim_newline))
+        Ok(security(&["find-generic-password", "-s", service, "-a", account, "-w"])?.map(credential_output))
     }
 
     fn get_by_service(&self, service: &str) -> Result<Option<(String, String)>> {
@@ -148,7 +164,7 @@ impl CredentialStore for SecurityCli {
         let Some(value) = security(&["find-generic-password", "-s", service, "-w"])? else {
             return Ok(None);
         };
-        Ok(Some((trim_newline(value), parse_keychain_account(&meta))))
+        Ok(Some((credential_output(value), parse_keychain_account(&meta))))
     }
 
     fn set(&self, service: &str, account: &str, value: &str) -> Result<()> {
@@ -395,6 +411,17 @@ fn set_mode(_path: &Path, _mode: u32) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keychain_hex_credentials_decode_without_changing_plain_passwords() {
+        let json = "{\n\"tokens\":{\"access_token\":\"fixture\"}}";
+        let hex: String = json.bytes().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(credential_output(format!("{hex}\n")), json);
+        assert_eq!(credential_output(format!("{json}\n")), json);
+        for text in ["deadbeef", "616263", "7b7d", "bad", "encrypted-fixture"] {
+            assert_eq!(credential_output(text.into()), text);
+        }
+    }
 
     #[cfg(windows)]
     #[test]

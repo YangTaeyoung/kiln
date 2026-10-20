@@ -15,8 +15,10 @@ and newly saved accounts. Missing credentials postpone that profile's next
 deadline by five minutes instead of causing repeated per-second checks.
 
 Latest per-profile runtime credentials take precedence over imported snapshots.
-Claude follows the official CLI’s Keychain-first selection and private-file
-fallback. A namespaced legacy `.config.json` is authoritative when it exists;
+Claude selects the current operating-system user’s Keychain item before a
+service-only legacy lookup and private-file fallback. Credential JSON rendered
+as hexadecimal by `security -w` is decoded before use; arbitrary passwords are
+not decoded. A namespaced legacy `.config.json` is authoritative when it exists;
 `.claude.json` remains the default. A locked or inaccessible Keychain is an
 unknown local state, not proof that the account logged out.
 Backoff is held per profile and credential fingerprint in memory. Successful
@@ -40,7 +42,11 @@ from a missing `auth.json`. Managed file-backed namespaces retain their file pin
 - Codex: a bounded, private `codex --no-daemon app-server` reader uses
   `account/read` and `account/rateLimits/read`. The official CLI owns credential
   decryption and refresh, including encrypted `auth.json` formats. Account email
-  is checked before and after reading quotas. No model turn is started and no
+  is checked before and after reading quotas. The reader does not proactively rotate refresh tokens on each poll. An active
+  profile whose runtime login is unavailable can use the default CLI home only
+  after the native reader verifies the same saved identity. Hex-rendered JSON
+  files are repaired only when their account matches the selected profile.
+  No model turn is started and no
   authentication tokens cross the subprocess boundary. The response uses
   `usedPercent`, `windowDurationMins`, and `resetsAt`, as defined by the
   [official account protocol](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/account.rs).
@@ -64,21 +70,58 @@ Provider response bodies and curl diagnostics are never displayed or logged.
 HTTP 429/403 observe bounded Retry-After; 401 pauses one hour. Safe HTTP status
 labels distinguish authorization, access and rate-limit errors without showing
 provider bodies. Settings never invents a fresh 0% reading from a passed reset time, and hides
-failed samples and samples older than five minutes. Keychain
-subprocesses have a three-second bound and owned children are reaped. Token refresh
-remains the responsibility of each official CLI.
+failed samples and samples older than five minutes; a failure note says how long ago usage
+was last read. Keychain subprocesses have a three-second bound and owned children are reaped.
+
+## Claude login renewal
+
+Claude Code renews its OAuth access token only while a CLI process uses it, so the token of
+an idle account expires (about eight hours after its last renewal in observed use). Before a
+due usage read, Kiln renews a Claude token that expires within five minutes when it is kept in
+a Claude Code credential store, a profile's runtime folder or the live CLI configuration, the
+way the official CLI 2.1.304 renews it:
+
+- It takes the CLI's refresh locks: the `.oauth_refresh.lock` folder inside the configuration
+  folder and the legacy `<real path>.lock` folder beside it, both made with `mkdir`; a lock
+  untouched for 60 seconds is abandoned (the CLI's `stale: 60000`). A held lock postpones the
+  read by a minute and is left alone.
+- Under the locks it reads the credentials again; a token another process already renewed is
+  used as it is.
+- It posts the refresh grant (`grant_type`, the stored refresh token, the stored or default
+  client ID and the stored scopes) as JSON on curl's stdin to
+  `https://platform.claude.com/v1/oauth/token` with a `Kiln/<version>` user agent (the endpoint
+  answers curl's default user agent with HTTP 429), without redirects, with a bounded response
+  and without showing the response body.
+- It saves the new access token, refresh token, expiry and returned scopes only while the
+  stored refresh token is still the one it sent, keeping every other field (the CLI's
+  compare-and-swap save).
+- `invalid_grant` marks the account for sign-in again and stops its requests until its
+  credentials change.
+
+Kiln's saved snapshots are not renewed; an expired one is reported without a usage request.
+Codex renewal stays in its own app-server reader.
 
 ## Verification boundaries
 
 Use `cargo test -p kiln-accounts --lib`. Isolated fake credentials/probes exercise
-both tools, active and inactive profiles, repeated cycles without settings UI,
+Claude login renewal (CLI locks, re-read, grant, compare-and-swap save, rejected and busy
+logins, expired snapshots), both tools, active and inactive profiles, repeated cycles without settings UI,
 shutdown, backoff, stale bars and deletion during a slow response. Real loopback
 HTTP fixtures check GET/no body, redirects, response bounds, Retry-After and
 private-response redaction. Four-language GPU captures cover the account card
-at 420px and 130% scale. Do not query real accounts to make a test pass.
+at 420px and 130% scale. Real account checks require explicit owner authorization and the ignored
+`live_saved_account_usage_without_persisting_settings` test with
+`KILN_ACCOUNTS_REAL_KEYCHAIN=1`, `KILN_VERIFY_TOOL` and
+`KILN_VERIFY_PROFILE_INDEX`. It queries quotas without persisting settings,
+copying credentials, or starting model turns. The ignored
+`live_claude_login_renewal_without_persisting_settings` test renews the selected Claude
+profile's login the way the usage worker does and reads its quotas, under the same
+authorization and variables.
 
-Real provider responses and expired-token refresh must be observed by the owner
-without exposing credentials. Fixture success is not live-provider validity.
+Before publishing a usage fix, verify the authorized local accounts with the
+actual implementation. Ask the owner to reauthenticate only accounts for which
+the correct CLI credential source still fails authentication. Record live
+verification separately from fixture results; never record credential values.
 
 The 0.1.22 regression includes two simultaneous Claude runtime accounts with
 fresh Keychain tokens and stale files, legacy metadata precedence, Codex optional

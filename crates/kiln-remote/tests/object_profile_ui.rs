@@ -122,8 +122,14 @@ fn native_cli_profiles_discover_select_save_and_reedit_without_cloud_or_home_cha
         h.run_steps(3);
         h.get_all_by_label("연결 추가").next().unwrap().click();
         h.run_steps(3);
-        h.get_by_value("Amazon S3").click();
-        h.run_steps(3);
+        // Opens the provider list until it lists the provider.
+        for _ in 0..10 {
+            if h.query_by_label(label).is_some() {
+                break;
+            }
+            h.get_by_value("Amazon S3").click();
+            h.run_steps(3);
+        }
         h.get_by_label(label).click();
         h.run_steps(3);
         pump(&mut h, provider, "initial discovery", |h| {

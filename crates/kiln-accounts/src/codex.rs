@@ -244,7 +244,18 @@ pub(crate) fn probe_native(home: &Path, expected_email: &str) -> anyhow::Result<
     let mut extra = vec![PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
     if let Some(home) = kiln_common::paths::home() { extra.insert(0, home.join(".local/bin")); }
     let binary = kiln_common::paths::find_executable("codex", &extra).context("Codex CLI unavailable")?;
+    repair_hex_auth(home, expected_email)?;
     probe_native_with(&binary, home, expected_email, std::time::Duration::from_secs(20))
+}
+
+/// Restore a hex-rendered JSON file only for the selected account.
+fn repair_hex_auth(home: &Path, expected_email: &str) -> anyhow::Result<()> {
+    let path = auth_path(home);
+    let Some(raw) = crate::store::read_secret(&path)? else { return Ok(()); };
+    let Some(decoded) = crate::store::decode_credential_json(&raw) else { return Ok(()); };
+    anyhow::ensure!(auth_email(&decoded).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account does not match saved profile");
+    anyhow::ensure!(crate::store::read_secret(&path)?.as_deref() == Some(&raw), "Codex credentials changed during recovery");
+    crate::store::write_secret_atomic(&path, decoded.as_bytes())
 }
 
 fn probe_native_with(binary: &Path, home: &Path, expected_email: &str, timeout: std::time::Duration) -> anyhow::Result<Usage> {
@@ -282,16 +293,24 @@ fn probe_native_with(binary: &Path, home: &Path, expected_email: &str, timeout: 
                 ensure!(std::time::Instant::now() < deadline, "Codex usage request timed out");
                 let reply = rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).context("Codex usage request timed out")?.context("Invalid Codex reply")?;
                 if reply["id"].as_u64() != Some(id) { continue; }
-                ensure!(reply.get("error").is_none(), "Codex usage request failed; check CLI sign-in");
+                if let Some(error) = reply.get("error") {
+                    let message = error["message"].as_str().unwrap_or_default();
+                    if message.contains("401") || message.contains("authentication required") {
+                        anyhow::bail!("authentication required");
+                    }
+                    anyhow::bail!("Codex usage request failed; check CLI sign-in");
+                }
                 if id == 1 { writeln!(input, "{{\"method\":\"initialized\"}}")?; input.flush()?; }
                 return reply.get("result").cloned().context("Missing Codex result");
             }
         };
         request(1, "initialize", serde_json::json!({"clientInfo":{"name":"kiln_usage","version":env!("CARGO_PKG_VERSION")}}))?;
-        let account = request(2, "account/read", serde_json::json!({"refreshToken":true}))?;
+        let account = request(2, "account/read", serde_json::json!({"refreshToken":false}))?;
+        ensure!(!account["account"].is_null(), "authentication required");
         ensure!(account.pointer("/account/email").and_then(Value::as_str).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account does not match saved profile");
         let limits = request(3, "account/rateLimits/read", serde_json::json!({"excludeResetCreditDetails":true}))?;
         let account = request(4, "account/read", serde_json::json!({"refreshToken":false}))?;
+        ensure!(!account["account"].is_null(), "authentication required");
         ensure!(account.pointer("/account/email").and_then(Value::as_str).is_some_and(|email| email.eq_ignore_ascii_case(expected_email)), "Codex account changed during usage request");
         usage_from_native(&limits).context("Codex usage windows unavailable")
     })();
@@ -336,6 +355,31 @@ pub fn usage_from_json(body: &Value) -> Option<Usage> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires explicit owner authorization for a live account quota request"]
+    fn live_account_quota_probe() {
+        let home = std::env::var_os("KILN_VERIFY_CODEX_HOME").expect("explicit account home");
+        let email = std::env::var("KILN_VERIFY_CODEX_EMAIL").expect("explicit account identity");
+        let usage = probe_native(Path::new(&home), &email).expect("live account quota request");
+        assert!(!usage.is_unavailable());
+        assert!(usage.five_hour.is_some() || usage.seven_day.is_some());
+    }
+
+    #[test]
+    fn hex_auth_recovery_checks_identity_and_preserves_unknown_formats() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = fake_auth("fixture@example.test", "fixture");
+        let hex: String = json.bytes().map(|b| format!("{b:02x}")).collect();
+        std::fs::write(auth_path(dir.path()), &hex).unwrap();
+        assert!(repair_hex_auth(dir.path(), "other@example.test").is_err());
+        assert_eq!(std::fs::read_to_string(auth_path(dir.path())).unwrap(), hex);
+        repair_hex_auth(dir.path(), "fixture@example.test").unwrap();
+        assert_eq!(std::fs::read_to_string(auth_path(dir.path())).unwrap(), json);
+        std::fs::write(auth_path(dir.path()), "encrypted-fixture").unwrap();
+        repair_hex_auth(dir.path(), "fixture@example.test").unwrap();
+        assert_eq!(std::fs::read_to_string(auth_path(dir.path())).unwrap(), "encrypted-fixture");
+    }
 
     #[cfg(unix)]
     #[test]

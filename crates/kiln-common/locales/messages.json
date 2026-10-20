@@ -11483,5 +11483,30 @@
     "en": "Install it from Settings → About.",
     "ja": "設定 → アプリ情報 からインストールできます。",
     "zh-CN": "可在“设置 → 应用信息”中安装。"
+  },
+  "다시 로그인 필요": {
+    "en": "Sign in again",
+    "ja": "再ログインが必要です",
+    "zh-CN": "需要重新登录"
+  },
+  "로그인 만료 · 이 계정을 쓰면 갱신": {
+    "en": "Login expired · renews when this account is used",
+    "ja": "ログイン期限切れ・このアカウントを使うと更新",
+    "zh-CN": "登录已过期 · 使用此账户时续期"
+  },
+  "로그인 갱신 실패 · 자동 재시도": {
+    "en": "Login renewal failed · retrying",
+    "ja": "ログイン更新に失敗・自動で再試行",
+    "zh-CN": "登录续期失败 · 将自动重试"
+  },
+  "{}시간 전 확인": {
+    "en": "Checked {} h ago",
+    "ja": "{}時間前に確認",
+    "zh-CN": "{} 小时前检查"
+  },
+  "{}일 전 확인": {
+    "en": "Checked {} d ago",
+    "ja": "{}日前に確認",
+    "zh-CN": "{} 天前检查"
   }
 }

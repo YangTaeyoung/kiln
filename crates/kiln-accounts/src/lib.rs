@@ -5,6 +5,7 @@
 //! 프로필 스냅샷은 macOS 키체인(그 밖의 OS 는 0600 파일)에 두고, 설정 파일에는 비밀값을 넣지 않는다.
 
 pub mod claude;
+mod claude_refresh;
 pub mod codex;
 mod limit;
 mod manager;
