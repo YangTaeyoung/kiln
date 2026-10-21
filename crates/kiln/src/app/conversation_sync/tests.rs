@@ -4855,7 +4855,7 @@ fn file_changes_belong_to_the_call_codex_was_running() {
         event(patch_change("exec-0b1")),
         item(json!({"type": "custom_tool_call_output", "call_id": "call_A", "output": []})),
         item(json!({"type": "custom_tool_call", "call_id": "call_B", "name": "apply_patch", "input": "p"})),
-        item(json!({"type": "function_call", "call_id": "call_C", "name": "exec_command", "arguments": "{}"})),
+        item(json!({"type": "custom_tool_call", "call_id": "call_C", "name": "apply_patch", "input": "q"})),
         event(patch_change("call_B")),
         event(patch_change("exec-orphan")),
     ]
@@ -4863,7 +4863,7 @@ fn file_changes_belong_to_the_call_codex_was_running() {
     let changes = tools::file_changes(history.as_bytes()).unwrap();
     assert_eq!(changes.get("call_A").map(Vec::len), Some(1));
     assert_eq!(changes.get("call_B").map(Vec::len), Some(1));
-    assert!(!changes.contains_key("call_C"), "an item made while two calls run belongs to neither");
+    assert!(!changes.contains_key("call_C"), "an item made while two editing calls run belongs to neither");
 }
 
 #[test]
@@ -4882,4 +4882,47 @@ fn a_claude_copy_shows_the_edits_of_its_codex_original() {
     assert_eq!(read_messages(&claude).unwrap(), history);
 }
 
+
+
+#[test]
+fn relative_patch_paths_map_to_the_file_each_names() {
+    let call = "[Tool call: apply_patch]\n*** Begin Patch\n*** Update File: crates/x/src/lib.rs\n@@\n-a\n+b\n*** Update File: src/lib.rs\n@@\n-c\n+d\n*** End Patch";
+    let result = "[Tool result: call_RelativePatchId000000000000000]\nExit code: 0\nWall time: 0 seconds\nOutput:\nSuccess.\n";
+    let item = json!({"type": "FileChange", "id": "call_RelativePatchId000000000000000", "status": "completed", "changes": {
+        "/w/crates/x/src/lib.rs": {"type": "update", "unified_diff": "@@ -1 +1 @@\n-a\n+b\n"},
+        "/w/src/lib.rs": {"type": "update", "unified_diff": "@@ -1 +1 @@\n-c\n+d\n"}}});
+    let changes = tools::FileChanges::from([("call_RelativePatchId000000000000000".to_owned(), vec![item])]);
+    let history = shell_turn(call, result);
+    let data = rows(&format::render_changed(Tool::Claude, &stable_id("relative"), "/w", "2026-10-15T00:00:00Z", &history, "Relative", &changes).unwrap());
+    let edits: Vec<(String, String)> = data
+        .iter()
+        .filter(|r| r["message"]["content"][0]["name"] == "Edit")
+        .map(|r| {
+            let input = &r["message"]["content"][0]["input"];
+            (input["file_path"].as_str().unwrap().to_owned(), input["old_string"].as_str().unwrap().to_owned())
+        })
+        .collect();
+    assert_eq!(edits, [("/w/crates/x/src/lib.rs".to_owned(), "a".to_owned()), ("/w/src/lib.rs".to_owned(), "c".to_owned())]);
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+}
+
+#[test]
+fn a_call_left_without_output_does_not_take_later_file_changes() {
+    let item = |payload: serde_json::Value| json!({"timestamp": "t", "type": "response_item", "payload": payload}).to_string();
+    let history = [
+        item(json!({"type": "function_call", "call_id": "call_stale", "name": "web__run", "arguments": "{}"})),
+        json!({"timestamp": "t", "type": "compacted", "payload": {"replacement_history": [{"type": "function_call", "call_id": "call_old"}]}}).to_string(),
+        item(json!({"type": "custom_tool_call", "call_id": "call_edit", "name": "exec", "input": "text(await tools.apply_patch(\"p\"))"})),
+        json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "item_completed", "item": patch_change("exec-1234")}}).to_string(),
+        item(json!({"type": "custom_tool_call_output", "call_id": "call_edit", "output": []})),
+        item(json!({"type": "function_call", "call_id": "call_waiting", "name": "web__run", "arguments": "{}"})),
+        item(json!({"type": "custom_tool_call", "call_id": "call_next", "name": "apply_patch", "input": "p"})),
+        json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "item_completed", "item": patch_change("exec-5678")}}).to_string(),
+    ]
+    .join("\n");
+    let changes = tools::file_changes(history.as_bytes()).unwrap();
+    assert_eq!(changes.get("call_edit").map(Vec::len), Some(1));
+    assert_eq!(changes.get("call_next").map(Vec::len), Some(1), "only calls that edit files take an unnamed change");
+    assert!(!changes.contains_key("call_stale") && !changes.contains_key("call_waiting"));
+}
 

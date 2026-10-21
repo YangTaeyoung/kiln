@@ -474,42 +474,82 @@ const CLAUDE_TOOLS: [&str; 10] = ["Read", "Write", "Edit", "Glob", "Grep", "WebF
 /// Codex `FileChange` history items by the ID of the call that made them.
 pub(super) type FileChanges = HashMap<String, Vec<Value>>;
 
+/// The fields of a Codex history record that attribute file changes to calls.
+#[derive(serde::Deserialize)]
+struct ChangeRow {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    payload: ChangePayload,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct ChangePayload {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    call_id: Option<String>,
+    name: Option<String>,
+    input: Option<Value>,
+    item: Option<Value>,
+}
+
 /// The `FileChange` items of a Codex history by the call that made each: the call whose ID
-/// starts the item's ID (before a `#`), otherwise the only call still waiting for its output.
+/// starts the item's ID (before a `#`), otherwise the only call of the current turn that can
+/// edit files and is still waiting for its output.
 pub(super) fn file_changes(input: impl std::io::BufRead) -> std::io::Result<FileChanges> {
     use memchr::memmem::Finder;
-    let needles = [Finder::new(b"\"FileChange\""), Finder::new(b"_call\""), Finder::new(b"_call_output\"")];
+    let needles = [
+        Finder::new(b"\"FileChange\""),
+        Finder::new(b"_call\""),
+        Finder::new(b"_call_output\""),
+        Finder::new(b"\"task_started\""),
+        Finder::new(b"\"task_complete\""),
+        Finder::new(b"\"turn_complete\""),
+        Finder::new(b"\"turn_aborted\""),
+    ];
+    let compacted = Finder::new(b"\"type\":\"compacted\"");
     let mut changes = FileChanges::new();
     let mut calls = HashSet::new();
-    let mut open: Vec<String> = Vec::new();
+    // Calls of the current turn without an output, and whether each can edit files.
+    let mut open: Vec<(String, bool)> = Vec::new();
     for line in input.split(b'\n') {
         let line = line?;
+        // A compaction ends the calls before it; its replacement history is not read.
+        if compacted.find(&line[..line.len().min(256)]).is_some() {
+            open.clear();
+            continue;
+        }
         if !needles.iter().any(|needle| needle.find(&line).is_some()) {
             continue;
         }
-        let Ok(row) = serde_json::from_slice::<Value>(&line) else { continue };
-        let payload = &row["payload"];
-        let id = payload["call_id"].as_str().map(str::to_owned);
-        match (row["type"].as_str(), payload["type"].as_str(), id) {
+        let Ok(row) = serde_json::from_slice::<ChangeRow>(&line) else { continue };
+        let payload = row.payload;
+        match (row.kind.as_deref(), payload.kind.as_deref(), payload.call_id) {
             (Some("response_item"), Some("custom_tool_call" | "function_call"), Some(id)) => {
+                let edits = payload.name.as_deref() == Some("apply_patch")
+                    || (payload.name.as_deref() == Some("exec")
+                        && payload.input.as_ref().and_then(Value::as_str).is_some_and(|program| program.contains("tools.apply_patch(")));
                 calls.insert(id.clone());
-                open.push(id);
+                open.push((id, edits));
             }
             (Some("response_item"), Some("custom_tool_call_output" | "function_call_output"), Some(id)) => {
-                open.retain(|call| *call != id);
+                open.retain(|(call, _)| *call != id);
             }
-            (Some("event_msg"), Some("item_completed"), _) if payload["item"]["type"] == "FileChange" => {
-                let item = payload["item"]["id"].as_str().unwrap_or_default();
-                let owner = item.split_once('#').map_or(item, |(call, _)| call);
+            (Some("event_msg"), Some("task_started" | "task_complete" | "turn_complete" | "turn_aborted"), _) => open.clear(),
+            (Some("event_msg"), Some("item_completed"), _) => {
+                let Some(item) = payload.item.filter(|item| item["type"] == "FileChange") else { continue };
+                let id = item["id"].as_str().unwrap_or_default();
+                let owner = id.split_once('#').map_or(id, |(call, _)| call);
+                let editing: Vec<&String> = open.iter().filter(|(_, edits)| *edits).map(|(call, _)| call).collect();
                 let call = if calls.contains(owner) {
                     Some(owner.to_owned())
-                } else if let [only] = open.as_slice() {
-                    Some(only.clone())
+                } else if let [only] = editing.as_slice() {
+                    Some((*only).clone())
                 } else {
                     None
                 };
                 if let Some(call) = call {
-                    changes.entry(call).or_default().push(payload["item"].clone());
+                    changes.entry(call).or_default().push(item);
                 }
             }
             _ => {}
@@ -546,8 +586,23 @@ fn changes_of(item: &Value, patch: &str) -> Option<Vec<Change>> {
         return None;
     }
     let mut changes = Vec::new();
+    let mut used = HashSet::new();
     for path in paths {
-        let (key, change) = all.iter().find(|(key, _)| key.as_str() == path || std::path::Path::new(key).ends_with(path))?;
+        // The file named exactly, otherwise the only unused file whose path ends with it.
+        let (key, change) = match all.get_key_value(path) {
+            Some(found) => found,
+            None => {
+                let candidates: Vec<_> = all
+                    .iter()
+                    .filter(|(key, _)| !used.contains(key.as_str()) && std::path::Path::new(key).ends_with(path))
+                    .collect();
+                let [only] = candidates.as_slice() else { return None };
+                *only
+            }
+        };
+        if !used.insert(key.as_str()) {
+            return None;
+        }
         match change["type"].as_str()? {
             "add" => changes.push(Change::Add { path: key.clone(), content: change["content"].as_str()?.to_owned() }),
             "update" if change.get("move_path").is_none_or(Value::is_null) => {
