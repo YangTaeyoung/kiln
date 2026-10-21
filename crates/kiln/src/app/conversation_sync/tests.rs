@@ -4421,10 +4421,25 @@ fn oversized_projections_written_by_an_earlier_renderer_are_written_again() {
 }
 
 #[test]
-fn projections_within_the_context_budget_are_kept_by_a_new_renderer() {
+fn claude_projections_with_tool_records_are_written_again() {
     let f = Fixture::new(Tool::Codex);
     let mut history = messages();
     history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    assert!(f.scan().errors.is_empty());
+    let old = f.peer();
+    age_projection(&f, &old.path);
+    assert!(f.scan().errors.is_empty());
+    assert!(!old.path.exists());
+    let new = f.peer();
+    assert_ne!(new.id, old.id);
+    assert_eq!(read_messages(&new).unwrap(), history);
+}
+
+#[test]
+fn projections_within_the_context_budget_without_tools_are_kept_by_a_new_renderer() {
+    let f = Fixture::new(Tool::Codex);
+    let history = messages();
     write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
     assert!(f.scan().errors.is_empty());
     let old = f.peer();
@@ -4865,3 +4880,5 @@ fn a_claude_copy_shows_the_edits_of_its_codex_original() {
     assert_eq!(claude_records(&data).iter().filter(|(t, _, _)| t == "Edit").count(), 2);
     assert_eq!(read_messages(&claude).unwrap(), history);
 }
+
+

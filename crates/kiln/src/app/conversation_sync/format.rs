@@ -661,6 +661,7 @@ pub fn render(
     render_titled(tool, id, cwd, timestamp, messages, &title)
 }
 
+#[cfg(test)]
 pub fn render_titled(
     tool: Tool,
     id: &str,
