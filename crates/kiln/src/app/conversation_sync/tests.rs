@@ -4232,12 +4232,19 @@ fn parallel_tool_calls_stay_text() {
 }
 
 #[test]
-fn a_codex_command_run_in_another_directory_stays_text_in_claude() {
+fn a_codex_command_run_in_another_directory_changes_directory_in_claude() {
+    for (dir, shown) in [("/elsewhere", "cd /elsewhere && ls -la"), ("/a b/it's", "cd '/a b/it'\\''s' && ls -la"), ("sub", "cd /w/sub && ls -la"), (".", "ls -la")] {
+        let call = CODEX_CALL.replace("workdir:\"/w\"", &format!("workdir:{}", json!(dir)));
+        let history = shell_turn(&call, CODEX_RESULT);
+        let data = rows(&format::render_titled(Tool::Claude, &stable_id("workdir"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
+        let call = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_use").expect("a Bash record");
+        assert_eq!(call["message"]["content"][0]["input"]["command"], shown);
+        assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+        let bash = format!("[Tool call: Bash]\n{}", json!({"command": shown}));
+        assert!(hub::same(&text("assistant", &bash), &history[1]), "{shown}: the same command in either form");
+    }
     let call = CODEX_CALL.replace("workdir:\"/w\"", "workdir:\"/elsewhere\"");
     let history = shell_turn(&call, CODEX_RESULT);
-    let data = rows(&format::render_titled(Tool::Claude, &stable_id("workdir"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
-    assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use"));
-    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
     let data = rows(&format::render_titled(Tool::Codex, &stable_id("workdir"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
     let command = data.iter().find(|r| r["payload"]["item"]["type"] == "CommandExecution").expect("command cell");
     assert_eq!(command["payload"]["item"]["cwd"], "file:///elsewhere");
@@ -4448,7 +4455,7 @@ fn a_codex_program_with_several_commands_is_parallel_bash_in_claude() {
     let data = rows(&format::render_titled(Tool::Codex, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
     let cells: Vec<&serde_json::Value> = data.iter().filter(|r| r["payload"]["item"]["type"] == "CommandExecution").map(|r| &r["payload"]["item"]).collect();
     assert_eq!(cells.iter().map(|c| c["command"][2].as_str().unwrap()).collect::<Vec<_>>(), ["pwd", "ls (all)"]);
-    assert_eq!(data.iter().find(|r| r["payload"]["type"] == "custom_tool_call_output").unwrap()["payload"]["output"].as_array().unwrap().len(), 3);
+    assert_eq!(data.iter().find(|r| r["payload"]["type"] == "custom_tool_call_output").unwrap()["payload"]["output"].as_array().unwrap().len(), 2);
     assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history);
     let short = CODEX_TWO_RESULT.split("{\"chunk_id\":\"2\"").next().unwrap();
     let history = shell_turn(CODEX_TWO_CALL, short);
@@ -4666,4 +4673,90 @@ fn appends_beyond_the_context_limit_start_a_new_boundary() {
     let data = rows(&fs::read(&claude.path).unwrap());
     assert_eq!(data.iter().filter(|r| r["subtype"] == "compact_boundary").count(), 1, "an append within the limit adds no boundary");
     assert_eq!(read_messages(&claude).unwrap(), history);
+}
+
+/// Claude Code tool uses and results of a rendered Claude history: (command, content, error).
+fn claude_commands(data: &[serde_json::Value]) -> Vec<(String, String, bool)> {
+    let blocks: Vec<&serde_json::Value> = data.iter().flat_map(|r| r["message"]["content"].as_array().into_iter().flatten()).collect();
+    let uses: Vec<&&serde_json::Value> = blocks.iter().filter(|b| b["type"] == "tool_use").collect();
+    uses.iter()
+        .map(|u| {
+            let result = blocks.iter().find(|b| b["type"] == "tool_result" && b["tool_use_id"] == u["id"]).expect("a result for each use");
+            (u["input"]["command"].as_str().unwrap().to_owned(), result["content"].as_str().unwrap().to_owned(), result["is_error"] == true)
+        })
+        .collect()
+}
+
+fn exec_result(output: &str, code: i64) -> serde_json::Value {
+    json!({"chunk_id": "c", "wall_time_seconds": 0.06, "exit_code": code, "original_token_count": 3, "output": output})
+}
+
+#[test]
+fn codex_programs_of_every_printing_shape_are_bash_in_claude() {
+    let parallel = "const r = await Promise.allSettled([\n  tools.exec_command({cmd:\"git status --short\",workdir:\"/repo\",max_output_tokens:3000}),\n  tools.exec_command({cmd:\"nl -ba README.md\",workdir:\"/w\",login:true,shell:\"/bin/zsh\"})\n]); r.forEach((x,i)=>text(JSON.stringify({i,result:x})));";
+    let numbered = |value: serde_json::Value, i: usize| json!({"i": i, "result": {"status": "fulfilled", "value": value}}).to_string();
+    let cases: Vec<(String, String, Vec<(&str, &str, bool)>)> = vec![
+        (parallel.into(), numbered(exec_result(" M a.go\n", 0), 0) + &numbered(exec_result("     1\t# Kiln\n", 0), 1),
+            vec![("cd /repo && git status --short", " M a.go\n", false), ("nl -ba README.md", "     1\t# Kiln\n", false)]),
+        ("const out=await Promise.allSettled([tools.exec_command({cmd:\"pwd\"}),tools.exec_command({cmd:\"false\"})]);out.forEach(text);".into(),
+            json!({"status": "fulfilled", "value": exec_result("/w\n", 0)}).to_string() + &json!({"status": "fulfilled", "value": exec_result("", 1)}).to_string(),
+            vec![("pwd", "/w\n", false), ("false", "Exit code 1\n", true)]),
+        ("const r=await Promise.allSettled([tools.exec_command({cmd:\"pwd\"}),tools.exec_command({cmd:\"date\"})]);r.forEach((x,i)=>text(JSON.stringify({i,status:x.status,result:x.status===\"fulfilled\"?x.value.output:String(x.reason)})))".into(),
+            json!({"i": 0, "status": "fulfilled", "result": "/w\n"}).to_string() + &json!({"i": 1, "status": "fulfilled", "result": "Tue\n"}).to_string(),
+            vec![("pwd", "/w\n", false), ("date", "Tue\n", false)]),
+        ("text((await tools.exec_command({cmd:\"sed -n '1,3p' a.md\",workdir:\"/w\"})).output);".into(), "line one\nline two\n".into(),
+            vec![("sed -n '1,3p' a.md", "line one\nline two\n", false)]),
+        ("const r=await tools.exec_command({cmd:\"go test ./...\",yield_time_ms:10000});text(r)".into(),
+            json!({"chunk_id": "c", "wall_time_seconds": 10.0, "session_id": 94533, "original_token_count": 3, "output": "ok  pkg/a\n"}).to_string(),
+            vec![("go test ./...", "ok  pkg/a\nProcess running with session ID 94533", false)]),
+    ];
+    for (program, printed, expected) in cases {
+        let call = format!("[Tool call: exec]\n{program}");
+        let result = format!("[Tool result: call_ShapesResultId000000000000000]\nScript completed\nWall time 0.4 seconds\nOutput:\n{printed}");
+        let history = shell_turn(&call, &result);
+        let data = rows(&format::render_titled(Tool::Claude, &stable_id("shapes"), "/w", "2026-10-15T00:00:00Z", &history, "Shapes").unwrap());
+        let shown = claude_commands(&data);
+        let expected: Vec<(String, String, bool)> = expected.into_iter().map(|(c, o, e)| (c.to_owned(), o.to_owned(), e)).collect();
+        assert_eq!(shown, expected, "{program}");
+        assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history, "{program}");
+        let data = rows(&format::render_titled(Tool::Codex, &stable_id("shapes"), "/w", "2026-10-15T00:00:00Z", &history, "Shapes").unwrap());
+        assert_eq!(data.iter().filter(|r| r["payload"]["item"]["type"] == "CommandExecution").count(), shown.len());
+        assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history, "{program}");
+    }
+}
+
+#[test]
+fn codex_programs_whose_results_cannot_be_matched_stay_text() {
+    let reversed = "const [a,b]=await Promise.all([tools.exec_command({cmd:\"pwd\"}),tools.exec_command({cmd:\"date\"})]);text(b);text(a);";
+    let mixed = "text(await tools.write_stdin({session_id:1,chars:\"\"}));text(await tools.exec_command({cmd:\"pwd\"}));";
+    let counted = "const r=await tools.exec_command({cmd:\"git log\"});text(r.output.split(\"\\n\").length)";
+    for (program, printed) in [
+        (reversed, exec_result("Tue\n", 0).to_string() + &exec_result("/w\n", 0).to_string()),
+        (mixed, json!({"chunk_id": "a", "wall_time_seconds": 1.0, "exit_code": 0, "original_token_count": 1, "output": "done\n"}).to_string() + &exec_result("/w\n", 0).to_string()),
+        (counted, "42".into()),
+    ] {
+        let history = shell_turn(&format!("[Tool call: exec]\n{program}"), &format!("[Tool result: call_TextResultId00000000000000000]\nScript completed\nWall time 0.1 seconds\nOutput:\n{printed}"));
+        let data = rows(&format::render_titled(Tool::Claude, &stable_id("text"), "/w", "2026-10-15T00:00:00Z", &history, "Text").unwrap());
+        assert!(claude_commands(&data).is_empty(), "{program}");
+        assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    }
+    let shown = portable::display(&format!("[Tool result: call_x]\nScript completed\nWall time 0.1 seconds\nOutput:\n{}", json!({"i": 0, "result": {"status": "fulfilled", "value": exec_result("     21\t- line\n", 0)}})));
+    assert!(shown.contains("21\t- line") && !shown.contains("wall_time_seconds") && !shown.contains("chunk_id"), "{shown}");
+}
+
+#[test]
+fn codex_exec_command_function_calls_are_bash_in_claude() {
+    let call = "[Tool call: exec_command]\n{\"cmd\":\"sed -n '1,2p' owner.go\",\"workdir\":\"/repo\",\"max_output_tokens\":10000}";
+    let done = "[Tool result: call_FunctionResultId0000000000000]\nChunk ID: 62bf47\nWall time: 0.0389 seconds\nProcess exited with code 0\nOriginal token count: 4\nOutput:\npackage toolhost\n";
+    let running = "[Tool result: call_FunctionResultId0000000000000]\nChunk ID: 62bf48\nWall time: 10.0 seconds\nProcess running with session ID 77869\nOriginal token count: 0\nOutput:\n";
+    for (result, content) in [(done, "package toolhost\n"), (running, "Process running with session ID 77869")] {
+        let history = shell_turn(call, result);
+        let data = rows(&format::render_titled(Tool::Claude, &stable_id("function"), "/w", "2026-10-15T00:00:00Z", &history, "Function").unwrap());
+        assert_eq!(claude_commands(&data), [("cd /repo && sed -n '1,2p' owner.go".to_owned(), content.to_owned(), false)]);
+        assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+        let data = rows(&format::render_titled(Tool::Codex, &stable_id("function"), "/w", "2026-10-15T00:00:00Z", &history, "Function").unwrap());
+        let item = data.iter().find(|r| r["payload"]["type"] == "function_call").expect("the original function call");
+        assert_eq!(item["payload"]["name"], "exec_command");
+        assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history);
+    }
 }
