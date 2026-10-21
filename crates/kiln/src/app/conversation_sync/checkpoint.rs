@@ -13,6 +13,9 @@ pub(super) struct Checkpoint {
     pub leaf: Option<String>,
     /// Codex: the session metadata record.
     pub meta: Option<Value>,
+    /// Claude: bytes in Claude Code's context after the last compaction boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<u64>,
 }
 
 const WINDOW: u64 = 64 * 1024;
@@ -41,10 +44,18 @@ fn at(
     end: Option<(usize, Option<String>)>,
     leaf: Option<String>,
     meta: Option<Value>,
+    context: Option<u64>,
 ) -> Result<Option<Checkpoint>> {
     let Some((index, completed)) = end else { return Ok(None) };
     let offset = offsets[index];
-    Ok(Some(Checkpoint { offset, window: window(source, offset)?, leaf: completed.or(leaf), meta }))
+    Ok(Some(Checkpoint { offset, window: window(source, offset)?, leaf: completed.or(leaf), meta, context }))
+}
+
+/// The context of a Claude history up to the record that completed its last turn: bytes
+/// after its last compaction boundary.
+fn context_of(tool: Tool, rows: &[Value], end: Option<&(usize, Option<String>)>) -> Option<u64> {
+    let (index, _) = end?;
+    (tool == Tool::Claude).then(|| super::context::after_boundary(&rows[..=*index]) as u64)
 }
 
 /// Reads the whole history and the checkpoint after its last completed turn.
@@ -57,7 +68,8 @@ pub(super) fn read(source: &Source, title: &mut String) -> Result<(Vec<format::M
         .then(|| rows.iter().find(|r| r["type"] == "session_meta").cloned())
         .flatten();
     let end = format::completion(source.tool, &rows)?;
-    Ok((messages, at(source, &offsets, end, None, meta)?))
+    let context = context_of(source.tool, &rows, end.as_ref());
+    Ok((messages, at(source, &offsets, end, None, meta, context)?))
 }
 
 /// Messages completed after `checkpoint`, the newest Claude custom title among the appended
@@ -105,7 +117,10 @@ pub(super) fn since_titled(
         })
         .flatten();
     let next = match end {
-        Some(_) => at(source, &offsets, end, checkpoint.leaf.clone(), checkpoint.meta.clone())?.unwrap(),
+        Some((index, _)) => {
+            let context = checkpoint.context.map(|c| c + super::context::records(&rows[..=index]) as u64);
+            at(source, &offsets, end, checkpoint.leaf.clone(), checkpoint.meta.clone(), context)?.unwrap()
+        }
         None => checkpoint.clone(),
     };
     Ok(Some((messages, title, next)))
@@ -126,10 +141,13 @@ pub(super) fn of_bytes(tool: Tool, bytes: &[u8]) -> Result<Option<Checkpoint>> {
     let meta = (tool == Tool::Codex)
         .then(|| rows.iter().find(|r| r["type"] == "session_meta").cloned())
         .flatten();
-    Ok(format::completion(tool, &rows)?.map(|(index, leaf)| Checkpoint {
+    let end = format::completion(tool, &rows)?;
+    let context = context_of(tool, &rows, end.as_ref());
+    Ok(end.map(|(index, leaf)| Checkpoint {
         offset: offsets[index],
         window: window_of(bytes, offsets[index]),
         leaf,
         meta,
+        context,
     }))
 }

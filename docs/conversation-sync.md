@@ -30,9 +30,18 @@ connection. The status dialog identifies the pinned account pair. Sync remains o
 
 In the other CLI, open the same project and use **`/resume`** to select the newest
 linked conversation. Original user and assistant messages appear in the CLI's normal
-conversation display and become part of the next model request. Kiln creates no
-summary prompt, handoff note, or extra model request. Different conversations in
-the same folder remain separate; workspace discovery does not merge their histories.
+conversation display and become part of the next model request. Kiln makes no extra
+model request. Different conversations in the same folder remain separate; workspace
+discovery does not merge their histories.
+
+A conversation larger than about 320 KB of message text starts Claude Code's context at a
+compaction boundary, as a conversation Claude Code compacted itself does: the most recent
+part (up to about 320 KB) stays in context, and the boundary's summary lists the user's
+earlier requests (the newest 24 KB, each cut at 4 KB). The earlier messages stay in the
+Claude Code transcript and in the conversation; no summary of earlier answers is written.
+When the context after the last boundary would exceed about 640 KB, the next copied
+messages start a new boundary. Codex compacts its own context; its compaction summaries
+are encrypted and are not transferred.
 
 ## Matching names and readable history
 
@@ -62,11 +71,12 @@ Tool calls appear as the other CLI's own records where it has them:
   `name(summary)` with its input in a code block and its result after a `⎿` marker.
 
 A call is converted only when its result and a later answer follow it, parallel calls stay
-text, and history is never re-run. Conversations synchronized by earlier versions are
-written again once in the current form: when a Kiln-written copy has been unchanged for ten
-minutes and holds no records its CLI wrote itself, it is archived (recoverable) and its CLI
-receives a new copy. Originals, copies continued in their CLI and copies imported by Codex
-Desktop are never rewritten.
+text, and history is never re-run. A Claude Code copy written by an earlier version without
+a compaction boundary is written again once when its conversation exceeds the context
+budget: when the Kiln-written copy has been unchanged for ten minutes and holds no records
+its CLI wrote itself, it is archived (recoverable) and Claude Code receives a new copy.
+Originals, copies continued in their CLI and copies imported by Codex Desktop are never
+rewritten.
 
 Complete JSON tool results are decoded into fields and multiline output, including
 adjacent JSON responses and nested text blocks. Invalid or truncated JSON stays
@@ -187,7 +197,9 @@ The check refers to **completed responses**, not an answer still being generated
   Managed open endpoints wait for handover before publication. Unrelated or
   divergent histories are never merged based on matching titles or prompts.
   Interrupted turns retain their saved request, tool records, and explicit
-  interruption marker; unpersisted streamed output cannot be reconstructed.
+  interruption marker; unpersisted streamed output cannot be reconstructed. A Claude Code
+  error notice (an API error, or compaction that cannot keep the context within its limit)
+  ends the turn without an answer: the request is transferred, the notice is not.
 - A complete local transcript is required. Codex inherited-history references,
   subagent conversations, broken Claude parent chains, and Claude project path
   encodings over 200 characters are rejected. Claude compaction can be traversed

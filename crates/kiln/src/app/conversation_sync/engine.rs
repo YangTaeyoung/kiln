@@ -20,7 +20,7 @@ pub(super) struct Sync<'a, M> {
 }
 
 /// Revision of the renderer that writes projections.
-pub(super) const RENDER: u32 = 1;
+pub(super) const RENDER: u32 = 2;
 /// Projections written again for the current renderer in one scan.
 const REFRESH_LIMIT: usize = 4;
 /// A projection is written again for the current renderer after it was unchanged this long.
@@ -840,10 +840,10 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         Ok(waiting)
     }
 
-    /// Writes a projection Kiln made with an earlier renderer again when the canonical history
-    /// holds tool records and the projection holds only Kiln's records and has been unchanged
-    /// for `REFRESH_IDLE`: the earlier session leaves its resume list and the namespace
-    /// receives a new projection. Other projections are marked current.
+    /// Writes a Claude projection Kiln made with an earlier renderer again when the canonical
+    /// history exceeds Claude Code's context budget and the projection holds only Kiln's
+    /// records and has been unchanged for `REFRESH_IDLE`: the earlier session leaves its resume
+    /// list and the namespace receives a new projection. Other projections are marked current.
     fn refresh(&mut self, hub: &mut Hub, cid: &str, events: &mut Option<Vec<format::Message>>) -> Result<()> {
         let record = &hub.state.conversations[cid];
         let stale: Vec<usize> = record
@@ -861,15 +861,13 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             *events = Some(hub.events(cid)?);
         }
         let all = events.as_ref().unwrap();
-        let tools = all
-            .iter()
-            .any(|m| m.text.starts_with("[Tool call: ") || m.text.starts_with("[Tool result: "));
+        let large = all.iter().map(super::context::size).sum::<usize>() > super::context::BUDGET;
         let current = |hub: &mut Hub, i: usize| hub.state.conversations.get_mut(cid).unwrap().projections[i].rendered = RENDER;
         let mut rewrite = None;
         for i in stale {
             let p = &hub.state.conversations[cid].projections[i];
             let (source, known) = (p.source.clone(), p.stamp);
-            if !tools || discovery::imported(self.config, &source)?.is_none() {
+            if !large || source.tool != Tool::Claude || discovery::imported(self.config, &source)?.is_none() {
                 current(hub, i);
                 continue;
             }
