@@ -658,7 +658,7 @@ pub(super) enum Step {
 
 /// The Codex history item of each call of an editing call: its recorded `FileChange` item or
 /// the index of its command.
-enum Cell {
+pub(super) enum Cell {
     Changed(Value),
     Ran(usize),
 }
