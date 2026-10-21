@@ -3,6 +3,7 @@ use anyhow::{Context, Result, bail, ensure};
 use kiln_accounts::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use super::context;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -353,7 +354,9 @@ fn claude_chain<'a>(rows: &'a [Value], stop_at: Option<&str>) -> Result<Option<(
             );
             continue;
         }
-        if row["isMeta"] == true || row["isSidechain"] == true {
+        // Claude Code's own error notices (API errors, failed compaction) end a turn without
+        // answering it.
+        if row["isMeta"] == true || row["isSidechain"] == true || row["isApiErrorMessage"] == true {
             continue;
         }
         let role = match row["type"].as_str() {
@@ -654,22 +657,37 @@ pub fn render_titled(
         !messages.is_empty() && messages.iter().any(|m| m.role == "user"),
         "No completed user conversation"
     );
-    render_messages(tool, id, cwd, timestamp, messages, title)
+    render_messages(tool, id, cwd, timestamp, messages, title, |starts| context::of_history(messages, starts))
 }
 
+/// Native records of `messages`. For Claude, `compaction` receives which messages may start
+/// the context and returns where Claude Code's context starts.
 fn render_messages(
     tool: Tool, id: &str, cwd: &str, timestamp: &str,
     messages: &[Message], title: &str,
+    compaction: impl FnOnce(&dyn Fn(usize) -> bool) -> Option<context::Compaction>,
 ) -> Result<Vec<u8>> {
     let mut rows = Vec::new();
     match tool {
         Tool::Claude => {
             let pairs = tool_pairs(messages);
+            // A native tool result belongs with its call.
+            let compaction = compaction(&|i| i == 0 || !pairs.contains_key(&(i - 1)));
             let mut parent: Option<String> = None;
             let mut skip = false;
             for (i, m) in messages.iter().enumerate() {
                 if std::mem::take(&mut skip) {
                     continue;
+                }
+                if let Some(compaction) = compaction.as_ref().filter(|c| c.at == i) {
+                    let boundary = super::stable_id(&format!("{id}:compact"));
+                    let summary = super::stable_id(&format!("{id}:summary"));
+                    rows.push(json!({"type":"system","subtype":"compact_boundary","content":"Conversation compacted","level":"info","isMeta":false,
+                        "uuid":boundary,"parentUuid":null,"logicalParentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
+                        "compactMetadata":{"trigger":"auto","preTokens":compaction.tokens}}));
+                    rows.push(json!({"type":"user","uuid":summary,"parentUuid":boundary,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
+                        "isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"role":"user","content":compaction.summary}}));
+                    parent = Some(summary);
                 }
                 let mid = super::stable_id(&format!("{id}:{i}"));
                 if let Some((call, result, structured)) =
@@ -801,9 +819,14 @@ fn render_messages(
 /// A separate seed makes appended message IDs distinct from every earlier batch.
 /// Session identity stays fixed, and Claude's first new parent is the actual
 /// native leaf, not a reconstructed/imported message ID.
+/// With `context`, the bytes in Claude Code's context after the existing records' last
+/// compaction boundary and every message before `messages`: when the context would exceed
+/// `context::LIMIT`, a new boundary keeps the recent part of `messages` in context.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_suffix(
     tool: Tool, id: &str, cwd: &str, timestamp: &str, messages: &[Message],
     title: &str, existing: &[Value], checkpoint: &str, last_ordinal: Option<u64>,
+    context: Option<(usize, &[Message])>,
 ) -> Result<Vec<u8>> {
     let seed = super::stable_id(&format!("{id}:append:{checkpoint}"));
     // An existing conversation can append only recorded assistant/tool output.
@@ -811,7 +834,15 @@ pub(super) fn render_suffix(
     let mut rows: Vec<Value> = if messages.is_empty() {
         vec![]
     } else {
-        let bytes = render_messages(tool, &seed, cwd, timestamp, messages, title)?;
+        let compaction = |starts: &dyn Fn(usize) -> bool| {
+            let (before, earlier) = context?;
+            if before + messages.iter().map(context::size).sum::<usize>() <= context::LIMIT {
+                return None;
+            }
+            let at = context::fit(messages, starts, context::BUDGET);
+            Some(context::compaction(earlier.iter().chain(&messages[..at]), at))
+        };
+        let bytes = render_messages(tool, &seed, cwd, timestamp, messages, title, compaction)?;
         bytes.split(|b| *b == b'\n').filter(|b| !b.is_empty())
             .map(serde_json::from_slice).collect::<std::result::Result<_, _>>()?
     };
@@ -821,7 +852,8 @@ pub(super) fn render_suffix(
                 matches!(r["type"].as_str(), Some("user" | "assistant")) && r["isSidechain"] != true
             }).and_then(|r| r["uuid"].as_str()).context("Missing native Claude leaf")?;
             if let Some(first) = rows.first_mut() {
-                first["parentUuid"] = json!(parent);
+                let link = if first["subtype"] == "compact_boundary" { "logicalParentUuid" } else { "parentUuid" };
+                first[link] = json!(parent);
             } else {
                 rows.push(json!({"type":"custom-title", "customTitle":title, "kiln_projection":super::PROJECTION_REVISION,
                     "uuid":super::stable_id(&format!("{seed}:title")), "timestamp":timestamp}));

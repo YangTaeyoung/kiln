@@ -3,6 +3,7 @@ use kiln_common::paths::Canonical;
 mod codex_index;
 mod canonical;
 mod checkpoint;
+mod context;
 mod discovery;
 mod engine;
 mod format;

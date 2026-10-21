@@ -4383,11 +4383,20 @@ fn age_projection(f: &Fixture, path: &Path) {
     store.save().unwrap();
 }
 
-#[test]
-fn projections_written_by_an_earlier_renderer_are_written_again() {
-    let f = Fixture::new(Tool::Codex);
+/// A history with tool records that exceeds Claude Code's context budget.
+fn long_history(cwd: &str) -> Vec<Message> {
     let mut history = messages();
-    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    history.extend(shell_turn(&codex_call_in(cwd), CODEX_RESULT));
+    for k in 0..12 {
+        history.extend(turns(&[&format!("Long request {k}"), &format!("{k} {}", "long answer line\n".repeat(2_000))]));
+    }
+    history
+}
+
+#[test]
+fn oversized_projections_written_by_an_earlier_renderer_are_written_again() {
+    let f = Fixture::new(Tool::Codex);
+    let history = long_history(&f.source.cwd);
     write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
     assert!(f.scan().errors.is_empty());
     let old = f.peer();
@@ -4398,18 +4407,21 @@ fn projections_written_by_an_earlier_renderer_are_written_again() {
     let new = f.peer();
     assert_ne!(new.id, old.id);
     assert_eq!(read_messages(&new).unwrap(), history);
-    assert!(rows(&fs::read(&new.path).unwrap()).iter().any(|r| r["message"]["content"][0]["type"] == "tool_use"));
+    assert!(rows(&fs::read(&new.path).unwrap()).iter().any(|r| r["subtype"] == "compact_boundary"));
     assert!(f.source.path.exists(), "the original is never written again");
     assert!(f.hub().conversations.values().next().unwrap().aliases.iter().any(|a| a.id == old.id));
     assert_eq!(f.scan().published, 0);
 }
 
 #[test]
-fn projections_without_tool_records_are_kept_by_a_new_renderer() {
+fn projections_within_the_context_budget_are_kept_by_a_new_renderer() {
     let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
     assert!(f.scan().errors.is_empty());
     let old = f.peer();
-    mark_rendered(&f, &old.path, 0);
+    age_projection(&f, &old.path);
     assert!(f.scan().errors.is_empty());
     assert!(old.path.exists());
     assert_eq!(f.peer().id, old.id);
@@ -4447,8 +4459,7 @@ fn a_codex_program_with_several_commands_is_parallel_bash_in_claude() {
 #[test]
 fn a_recently_written_projection_is_not_written_again() {
     let f = Fixture::new(Tool::Codex);
-    let mut history = messages();
-    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    let history = long_history(&f.source.cwd);
     write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
     assert!(f.scan().errors.is_empty());
     let projection = f.peer();
@@ -4460,8 +4471,7 @@ fn a_recently_written_projection_is_not_written_again() {
 #[test]
 fn a_projection_continued_in_its_cli_is_not_written_again() {
     let f = Fixture::new(Tool::Codex);
-    let mut history = messages();
-    history.extend(shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT));
+    let history = long_history(&f.source.cwd);
     write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
     assert!(f.scan().errors.is_empty());
     let claude = f.peer();
@@ -4481,10 +4491,13 @@ fn a_projection_continued_in_its_cli_is_not_written_again() {
 }
 
 #[test]
-fn a_projection_that_cannot_be_archived_keeps_synchronizing() {
+fn a_codex_projection_is_kept_by_a_new_renderer() {
     let f = Fixture::new(Tool::Claude);
     let mut history = messages();
     history.extend(shell_turn(CLAUDE_CALL, CLAUDE_RESULT));
+    for k in 0..12 {
+        history.extend(turns(&[&format!("Long request {k}"), &format!("{k} {}", "long answer line\n".repeat(2_000))]));
+    }
     write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
     assert!(f.scan().errors.is_empty());
     let codex = f.peer();
@@ -4591,4 +4604,66 @@ fn one_protected_copy_does_not_block_retiring_other_copies() {
     let record = state.conversations.values().next().unwrap();
     assert!(record.pending.iter().any(|s| s.id == older.id));
     assert!(!record.pending.iter().any(|s| s.id == other.id));
+}
+
+#[test]
+fn a_claude_error_notice_ends_its_turn_without_an_answer() {
+    let mut data = rows(&format::render(Tool::Claude, &stable_id("notice"), "/w", "2026-10-15T00:00:00Z", &messages()).unwrap());
+    let leaf = data.iter().rev().find(|r| r["type"] == "assistant").unwrap()["uuid"].clone();
+    data.push(json!({"type": "user", "uuid": "prompt-1", "parentUuid": leaf, "isSidechain": false,
+        "message": {"role": "user", "content": "Is the conversion done?"}}));
+    data.push(json!({"type": "assistant", "uuid": "notice-1", "parentUuid": "prompt-1", "isSidechain": false,
+        "isApiErrorMessage": true, "apiError": "autocompact_thrashing", "error": "invalid_request",
+        "message": {"id": "notice", "type": "message", "role": "assistant", "model": "<synthetic>",
+            "content": [{"type": "text", "text": "Autocompact is thrashing: the context refilled to the limit."}],
+            "stop_reason": "stop_sequence", "stop_sequence": ""}}));
+    let mut expected = messages();
+    expected.push(text("user", "Is the conversion done?"));
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), expected);
+}
+
+#[test]
+fn a_long_history_starts_claude_code_context_at_a_boundary() {
+    let history = long_history("/w");
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("long"), "/w", "2026-10-15T00:00:00Z", &history, "Long").unwrap());
+    let boundary = data.iter().position(|r| r["subtype"] == "compact_boundary").expect("a compaction boundary");
+    assert_eq!(data.iter().filter(|r| r["subtype"] == "compact_boundary").count(), 1);
+    assert_eq!(data[boundary]["parentUuid"], serde_json::Value::Null);
+    assert_eq!(data[boundary]["logicalParentUuid"], data[boundary - 1]["uuid"]);
+    let summary = &data[boundary + 1];
+    assert_eq!((summary["isCompactSummary"].as_bool(), summary["parentUuid"].clone()), (Some(true), data[boundary]["uuid"].clone()));
+    let listed = summary["message"]["content"].as_str().unwrap();
+    assert!(listed.contains("Remember the exact token kiln-orchid-731") && listed.contains("Long request 0"), "{listed}");
+    assert!(data[boundary + 2]["message"]["content"][0]["type"] != "tool_result", "a tool result stays with its call");
+    let kept = context::after_boundary(&data);
+    assert!(kept < context::LIMIT && kept > context::BUDGET / 2, "{kept}");
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    let short = rows(&format::render_titled(Tool::Claude, &stable_id("short"), "/w", "2026-10-15T00:00:00Z", &messages(), "Short").unwrap());
+    assert!(short.iter().all(|r| r["subtype"] != "compact_boundary"), "a history within the budget has no boundary");
+}
+
+#[test]
+fn appends_beyond_the_context_limit_start_a_new_boundary() {
+    let f = Fixture::new(Tool::Codex);
+    assert!(f.scan().errors.is_empty());
+    let claude = f.peer();
+    let mut history = messages();
+    for k in 0..24 {
+        history.extend(turns(&[&format!("Request {k}"), &format!("{k} {}", "appended answer\n".repeat(2_000))]));
+    }
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(120));
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(f.peer().id, claude.id, "the projection is appended to");
+    let data = rows(&fs::read(&claude.path).unwrap());
+    assert_eq!(data.iter().filter(|r| r["subtype"] == "compact_boundary").count(), 1);
+    assert!(context::after_boundary(&data) < context::LIMIT);
+    assert_eq!(read_messages(&claude).unwrap(), history);
+    let more = turns(&["One more request", "One more answer"]);
+    history.extend(more);
+    write_history(&f.source, &history, SystemTime::now() - Duration::from_secs(60));
+    assert!(f.scan().errors.is_empty());
+    let data = rows(&fs::read(&claude.path).unwrap());
+    assert_eq!(data.iter().filter(|r| r["subtype"] == "compact_boundary").count(), 1, "an append within the limit adds no boundary");
+    assert_eq!(read_messages(&claude).unwrap(), history);
 }

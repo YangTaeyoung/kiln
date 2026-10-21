@@ -257,6 +257,13 @@ pub(super) fn append_since(
     if storage::compressed(&physical) {
         return Ok(None);
     }
+    // A boundary for Claude Code's context is written by a full update, which reads the history.
+    let appended = tail.iter().map(super::context::size).sum::<usize>() as u64;
+    if source.tool == Tool::Claude
+        && checkpoint.context.is_none_or(|c| c + appended > super::context::LIMIT as u64)
+    {
+        return Ok(None);
+    }
     let before = storage::metadata(source)?;
     let old = storage::bytes(source, COPY_LIMIT)?;
     ensure!(old.ends_with(b"\n"), "Transcript is being written; retrying");
@@ -310,6 +317,7 @@ pub(super) fn append_since(
         &existing,
         &seed,
         last_ordinal,
+        None,
     )?;
     let Some(rows) = parse(&suffix) else { anyhow::bail!("Appended conversation could not be read back") };
     let Some((messages, end)) =
@@ -341,6 +349,7 @@ pub(super) fn append_since(
             window: window_of(&candidate, ends[index]),
             leaf: leaf.or_else(|| checkpoint.leaf.clone()),
             meta: checkpoint.meta.clone(),
+            context: checkpoint.context.map(|c| c + super::context::records(&rows[..=index]) as u64),
         },
         None => checkpoint.clone(),
     };
@@ -381,6 +390,8 @@ pub(super) fn update(
     let last_ordinal = old.split(|b| *b == b'\n')
         .filter_map(|line| serde_json::from_slice::<Ordinal>(line).ok())
         .filter_map(|row| row.ordinal).max();
+    let context = (source.tool == Tool::Claude)
+        .then(|| (super::context::after_boundary(&rows), &messages[..current.len()]));
     let suffix = format::render_suffix(
         source.tool,
         &source.id,
@@ -391,6 +402,7 @@ pub(super) fn update(
         &rows,
         &digest(&old),
         last_ordinal,
+        context,
     )?;
     let old_count = current.len();
     // The parsed endpoint is released before the prospective bytes are parsed again.
