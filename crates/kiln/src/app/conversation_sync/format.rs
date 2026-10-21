@@ -173,16 +173,28 @@ pub(super) fn claude_interruption(row: &Value) -> Option<&str> {
 }
 
 /// The canonical text Kiln recorded beside a native tool record it wrote, while the record
-/// is unchanged.
-fn tool_original(row: &Value) -> Result<Option<&str>> {
+/// is unchanged: `Some(None)` for a record that continues the previous one.
+fn tool_original(row: &Value) -> Result<Option<Option<&str>>> {
     let metadata = &row["kiln_sync"];
     if metadata["revision"] != 5 {
         return Ok(None);
     }
     let content = serde_json::to_string(&row["message"]["content"])?;
-    Ok(metadata["original_text"]
-        .as_str()
-        .filter(|_| metadata["content_sha256"].as_str() == Some(super::digest(content.as_bytes()).as_str())))
+    if metadata["content_sha256"].as_str() != Some(super::digest(content.as_bytes()).as_str()) {
+        return Ok(None);
+    }
+    if metadata["continues"] == true {
+        return Ok(Some(None));
+    }
+    Ok(metadata["original_text"].as_str().map(Some))
+}
+
+/// Marks a native tool record that continues the previous one: its canonical text is held by
+/// the first record of its call or result.
+fn continue_tool(row: &mut Value) -> Result<()> {
+    let digest = super::digest(serde_json::to_string(&row["message"]["content"])?.as_bytes());
+    row["kiln_sync"] = json!({"revision": 5, "continues": true, "content_sha256": digest});
+    Ok(())
 }
 
 /// Records the canonical text of a native tool record whose own text differs from it.
@@ -202,7 +214,7 @@ fn annotate_tool(row: &mut Value, original: &str) -> Result<()> {
 
 /// Tool calls rendered as native records, by the index of their call message: a call and its
 /// result followed by another assistant message, outside a group of parallel calls.
-fn tool_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Pair> {
+fn tool_pairs(messages: &[Message], changes: &super::tools::FileChanges) -> HashMap<usize, super::tools::Pair> {
     let mut pairs = HashMap::new();
     let mut i = 0;
     while i + 2 < messages.len() {
@@ -214,7 +226,7 @@ fn tool_pairs(messages: &[Message]) -> HashMap<usize, super::tools::Pair> {
             && result.images.is_empty()
             && !(i > 0 && messages[i - 1].text.starts_with("[Tool call: "))
             && !messages[i + 2].text.starts_with("[Tool result: ");
-        if candidate && let Some(pair) = super::tools::pair(&call.text, &result.text) {
+        if candidate && let Some(pair) = super::tools::pair(&call.text, &result.text, changes) {
             pairs.insert(i, pair);
             i += 2;
         } else {
@@ -364,9 +376,13 @@ fn claude_chain<'a>(rows: &'a [Value], stop_at: Option<&str>) -> Result<Option<(
             Some("assistant") => "assistant",
             _ => continue,
         };
-        if let Some(original) = tool_original(row)? {
-            messages.push(Message { role: "assistant".into(), text: original.into(), images: vec![] });
-            continue;
+        match tool_original(row)? {
+            Some(Some(original)) => {
+                messages.push(Message { role: "assistant".into(), text: original.into(), images: vec![] });
+                continue;
+            }
+            Some(None) => continue,
+            None => {}
         }
         let content = super::portable::content(row, &row["message"]["content"]);
         // CLI commands and their local output are not user prompts to another provider.
@@ -645,6 +661,7 @@ pub fn render(
     render_titled(tool, id, cwd, timestamp, messages, &title)
 }
 
+#[cfg(test)]
 pub fn render_titled(
     tool: Tool,
     id: &str,
@@ -653,24 +670,38 @@ pub fn render_titled(
     messages: &[Message],
     title: &str,
 ) -> Result<Vec<u8>> {
+    render_changed(tool, id, cwd, timestamp, messages, title, &Default::default())
+}
+
+/// A new session of `messages`, with the file changes Codex recorded for its calls.
+pub(super) fn render_changed(
+    tool: Tool,
+    id: &str,
+    cwd: &str,
+    timestamp: &str,
+    messages: &[Message],
+    title: &str,
+    changes: &super::tools::FileChanges,
+) -> Result<Vec<u8>> {
     ensure!(
         !messages.is_empty() && messages.iter().any(|m| m.role == "user"),
         "No completed user conversation"
     );
-    render_messages(tool, id, cwd, timestamp, messages, title, |starts| context::of_history(messages, starts))
+    render_messages(tool, id, cwd, timestamp, messages, title, changes, |starts| context::of_history(messages, starts))
 }
 
 /// Native records of `messages`. For Claude, `compaction` receives which messages may start
 /// the context and returns where Claude Code's context starts.
+#[allow(clippy::too_many_arguments)]
 fn render_messages(
     tool: Tool, id: &str, cwd: &str, timestamp: &str,
-    messages: &[Message], title: &str,
+    messages: &[Message], title: &str, changes: &super::tools::FileChanges,
     compaction: impl FnOnce(&dyn Fn(usize) -> bool) -> Option<context::Compaction>,
 ) -> Result<Vec<u8>> {
     let mut rows = Vec::new();
     match tool {
         Tool::Claude => {
-            let pairs = tool_pairs(messages);
+            let pairs = tool_pairs(messages, changes);
             // A native tool result belongs with its call.
             let compaction = compaction(&|i| i == 0 || !pairs.contains_key(&(i - 1)));
             let mut parent: Option<String> = None;
@@ -690,22 +721,30 @@ fn render_messages(
                     parent = Some(summary);
                 }
                 let mid = super::stable_id(&format!("{id}:{i}"));
-                if let Some((call, result, structured)) =
-                    pairs.get(&i).and_then(|pair| pair.claude(&format!("{id}:{i}:tool"), cwd))
-                {
-                    let rid = super::stable_id(&format!("{id}:{}", i + 1));
-                    let mut row = json!({"type":"assistant","uuid":mid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
-                        "message":{"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":call,"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
-                    annotate_tool(&mut row, &m.text)?;
-                    rows.push(row);
-                    let mut row = json!({"type":"user","uuid":rid,"parentUuid":mid,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
-                        "message":{"role":"user","content":result},"sourceToolAssistantUUID":mid});
-                    if let Some(structured) = structured {
-                        row["toolUseResult"] = structured;
+                if let Some(records) = pairs.get(&i).and_then(|pair| pair.claude(&format!("{id}:{i}:tool"), cwd)) {
+                    // One record per tool use, as Claude Code writes parallel calls: the uses share
+                    // one message, then each result follows with its structured result.
+                    let mut uses = Vec::new();
+                    for (k, (call, _, _)) in records.iter().enumerate() {
+                        let uid = if k == 0 { mid.clone() } else { super::stable_id(&format!("{id}:{i}:use:{k}")) };
+                        let mut row = json!({"type":"assistant","uuid":uid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
+                            "message":{"id":format!("msg_{mid}"),"type":"message","role":"assistant","model":"<synthetic>","content":[call],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}});
+                        if k == 0 { annotate_tool(&mut row, &m.text)? } else { continue_tool(&mut row)? }
+                        rows.push(row);
+                        parent = Some(uid.clone());
+                        uses.push(uid);
                     }
-                    annotate_tool(&mut row, &messages[i + 1].text)?;
-                    rows.push(row);
-                    parent = Some(rid);
+                    for (k, (_, result, structured)) in records.into_iter().enumerate() {
+                        let rid = if k == 0 { super::stable_id(&format!("{id}:{}", i + 1)) } else { super::stable_id(&format!("{id}:{i}:result:{k}")) };
+                        let mut row = json!({"type":"user","uuid":rid,"parentUuid":parent,"isSidechain":false,"userType":"external","cwd":cwd,"sessionId":id,"timestamp":timestamp,"version":"2.1.296",
+                            "message":{"role":"user","content":[result]},"sourceToolAssistantUUID":uses[k]});
+                        if let Some(structured) = structured {
+                            row["toolUseResult"] = structured;
+                        }
+                        if k == 0 { annotate_tool(&mut row, &messages[i + 1].text)? } else { continue_tool(&mut row)? }
+                        rows.push(row);
+                        parent = Some(rid);
+                    }
                     skip = true;
                     continue;
                 }
@@ -734,7 +773,7 @@ fn render_messages(
             rows.push(json!({"timestamp":timestamp,"ordinal":0,"type":"session_meta","payload":{"id":id,"session_id":id,"timestamp":timestamp,"cwd":cwd,"originator":"kiln","cli_version":"0.162.1","source":"cli","model_provider":"openai","history_mode":"paginated"}}));
             let turn = super::stable_id(&format!("{id}:turn"));
             rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"task_started","turn_id":turn,"model_context_window":null,"collaboration_mode_kind":"default"}}));
-            let pairs = tool_pairs(messages);
+            let pairs = tool_pairs(messages, changes);
             for (i, m) in messages.iter().enumerate() {
                 let mid = super::stable_id(&format!("{id}:{i}"));
                 // A tool call and its result: native items when Codex recorded them, and one
@@ -826,7 +865,7 @@ fn render_messages(
 pub(super) fn render_suffix(
     tool: Tool, id: &str, cwd: &str, timestamp: &str, messages: &[Message],
     title: &str, existing: &[Value], checkpoint: &str, last_ordinal: Option<u64>,
-    context: Option<(usize, &[Message])>,
+    context: Option<(usize, &[Message])>, changes: &super::tools::FileChanges,
 ) -> Result<Vec<u8>> {
     let seed = super::stable_id(&format!("{id}:append:{checkpoint}"));
     // An existing conversation can append only recorded assistant/tool output.
@@ -842,7 +881,7 @@ pub(super) fn render_suffix(
             let at = context::fit(messages, starts, context::BUDGET);
             Some(context::compaction(earlier.iter().chain(&messages[..at]), at))
         };
-        let bytes = render_messages(tool, &seed, cwd, timestamp, messages, title, compaction)?;
+        let bytes = render_messages(tool, &seed, cwd, timestamp, messages, title, changes, compaction)?;
         bytes.split(|b| *b == b'\n').filter(|b| !b.is_empty())
             .map(serde_json::from_slice).collect::<std::result::Result<_, _>>()?
     };

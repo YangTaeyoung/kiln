@@ -251,6 +251,7 @@ pub(super) fn append_since(
     tail: &[format::Message],
     title: &str,
     timestamp: &str,
+    changes: &super::tools::FileChanges,
 ) -> Result<Option<super::checkpoint::Checkpoint>> {
     use super::checkpoint::{Checkpoint, window_of};
     let physical = storage::physical(source);
@@ -318,6 +319,7 @@ pub(super) fn append_since(
         &seed,
         last_ordinal,
         None,
+        changes,
     )?;
     let Some(rows) = parse(&suffix) else { anyhow::bail!("Appended conversation could not be read back") };
     let Some((messages, end)) =
@@ -365,6 +367,7 @@ pub(super) fn update(
     messages: &[format::Message],
     title: &str,
     timestamp: &str,
+    changes: &super::tools::FileChanges,
 ) -> Result<bool> {
     let physical = storage::physical(source);
     let old = storage::bytes(source, COPY_LIMIT)?;
@@ -403,6 +406,7 @@ pub(super) fn update(
         &digest(&old),
         last_ordinal,
         context,
+        changes,
     )?;
     let old_count = current.len();
     // The parsed endpoint is released before the prospective bytes are parsed again.

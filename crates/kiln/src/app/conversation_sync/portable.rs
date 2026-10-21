@@ -185,7 +185,7 @@ fn call_display(name: &str, body: &str) -> String {
 }
 
 /// The output of a tool result: a Codex code-mode result shows the output (and a non-zero
-/// exit code) of each command it ran.
+/// exit code or the running session) of each command it ran.
 pub(super) fn result_output(body: &str) -> String {
     if body.starts_with("Script ")
         && let Some(split) = body.find("Output:\n").map(|i| i + "Output:\n".len())
@@ -196,11 +196,7 @@ pub(super) fn result_output(body: &str) -> String {
     {
         return values
             .iter()
-            .map(|value| match (value.get("output").and_then(Value::as_str), value.get("exit_code").and_then(Value::as_i64)) {
-                (Some(output), Some(code)) if code != 0 => format!("Exit code {code}\n{output}"),
-                (Some(output), _) => output.to_owned(),
-                _ => readable_value(value, 1),
-            })
+            .map(|value| super::tools::printed_output(value).unwrap_or_else(|| readable_value(value, 1)))
             .collect::<Vec<_>>()
             .join("\n\n");
     }

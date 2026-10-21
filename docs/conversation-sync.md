@@ -59,22 +59,33 @@ that checks persistence.
 
 Tool calls appear as the other CLI's own records where it has them:
 
-- Claude Code shows a shell command run in Codex as a `Bash` tool use with its result, and
-  a Codex program that runs several commands as parallel `Bash` calls. Claude Code's
-  built-in tools (Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, TodoWrite, Agent,
-  NotebookEdit) keep their native records in another Claude Code account.
-- Codex's resume view shows a shell command as a command cell and every other tool call as
-  a tool call cell named by the CLI it came from (`claude_code.Read`, `codex.js`). Codex's
-  model receives calls from Claude Code as text; a command run in Codex keeps its native
-  code-mode records in another Codex account.
-- A tool Claude Code does not define (Codex's browser tool, MCP tools) reads as
-  `name(summary)` with its input in a code block and its result after a `⎿` marker.
+- Claude Code shows a shell command run in Codex as a `Bash` tool use with its result: from a
+  code-mode program (one command, several commands in sequence or in parallel with
+  `Promise.all`/`Promise.allSettled`, or a program printing only the command's output) or from
+  an `exec_command` function call. A command run in another folder reads `cd FOLDER && …`;
+  a command still running when Codex recorded its output ends with "Process running with
+  session ID N". Several calls are written one record per tool use, as Claude Code writes
+  parallel calls.
+- Claude Code shows a Codex `apply_patch` call (alone, or in a program that prints each patch
+  and command in order) as an `Edit` record for each changed hunk and a `Write` record for
+  each new file, with the line numbers Codex recorded in its `FileChange` history items. Kiln
+  reads those items from the conversation's Codex histories. A patch that deletes or moves
+  a file, or whose changes Codex did not record, stays readable text.
+- Claude Code's built-in tools (Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, TodoWrite,
+  Agent, NotebookEdit) keep their native records in another Claude Code account.
+- Codex's resume view shows a shell command as a command cell, a patch as its file change and
+  every other tool call as a tool call cell named by the CLI it came from (`claude_code.Read`,
+  `codex.js`). Codex's model receives calls from Claude Code as text; a call made in Codex
+  keeps its native records in another Codex account.
+- A tool Claude Code does not define (Codex's browser tool, MCP tools, subagent messages,
+  input to a running command) reads as `name(summary)` with its input in a code block and its
+  result after a `⎿` marker; a printed command result shows its output.
 
-A call is converted only when its result and a later answer follow it, parallel calls stay
-text, and history is never re-run. A Claude Code copy written by an earlier version without
-a compaction boundary is written again once when its conversation exceeds the context
-budget: when the Kiln-written copy has been unchanged for ten minutes and holds no records
-its CLI wrote itself, it is archived (recoverable) and Claude Code receives a new copy.
+A call is converted only when its result and a later answer follow it, calls the model made in parallel stay
+text, and history is never re-run. A Claude Code copy written by an earlier version is
+written again once when its conversation holds tool records or exceeds the context budget:
+when the Kiln-written copy has been unchanged for ten minutes and holds no records its CLI
+wrote itself, it is archived (recoverable) and Claude Code receives a new copy.
 Originals, copies continued in their CLI and copies imported by Codex Desktop are never
 rewritten.
 

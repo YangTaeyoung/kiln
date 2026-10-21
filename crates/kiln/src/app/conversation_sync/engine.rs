@@ -17,10 +17,12 @@ pub(super) struct Sync<'a, M> {
     databases: HashMap<PathBuf, u64>,
     /// Projections written again by this scan for the current renderer.
     refreshed: usize,
+    /// File changes read from each conversation's Codex histories during this scan.
+    changes: HashMap<String, std::rc::Rc<super::tools::FileChanges>>,
 }
 
 /// Revision of the renderer that writes projections.
-pub(super) const RENDER: u32 = 2;
+pub(super) const RENDER: u32 = 3;
 /// Projections written again for the current renderer in one scan.
 const REFRESH_LIMIT: usize = 4;
 /// A projection is written again for the current renderer after it was unchanged this long.
@@ -150,7 +152,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             .filter(|(tool, _)| *tool == Tool::Codex)
             .map(|(_, root)| (root.clone(), database_stamp(root)))
             .collect();
-        Self { config, scope, namespaces, gate, cache, status, metadata, notify, workspaces: HashMap::new(), databases, refreshed: 0 }
+        Self { config, scope, namespaces, gate, cache, status, metadata, notify, workspaces: HashMap::new(), databases, refreshed: 0, changes: HashMap::new() }
     }
 
     fn workspace(&mut self, cwd: &str) -> Option<PathBuf> {
@@ -841,9 +843,10 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
     }
 
     /// Writes a Claude projection Kiln made with an earlier renderer again when the canonical
-    /// history exceeds Claude Code's context budget and the projection holds only Kiln's
-    /// records and has been unchanged for `REFRESH_IDLE`: the earlier session leaves its resume
-    /// list and the namespace receives a new projection. Other projections are marked current.
+    /// history holds tool records or exceeds Claude Code's context budget, and the projection
+    /// holds only Kiln's records and has been unchanged for `REFRESH_IDLE`: the earlier session
+    /// leaves its resume list and the namespace receives a new projection. Other projections are
+    /// marked current.
     fn refresh(&mut self, hub: &mut Hub, cid: &str, events: &mut Option<Vec<format::Message>>) -> Result<()> {
         let record = &hub.state.conversations[cid];
         let stale: Vec<usize> = record
@@ -862,12 +865,13 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         }
         let all = events.as_ref().unwrap();
         let large = all.iter().map(super::context::size).sum::<usize>() > super::context::BUDGET;
+        let tools = all.iter().any(|m| m.text.starts_with("[Tool call: ") || m.text.starts_with("[Tool result: "));
         let current = |hub: &mut Hub, i: usize| hub.state.conversations.get_mut(cid).unwrap().projections[i].rendered = RENDER;
         let mut rewrite = None;
         for i in stale {
             let p = &hub.state.conversations[cid].projections[i];
             let (source, known) = (p.source.clone(), p.stamp);
-            if !large || source.tool != Tool::Claude || discovery::imported(self.config, &source)?.is_none() {
+            if !(large || tools) || source.tool != Tool::Claude || discovery::imported(self.config, &source)?.is_none() {
                 current(hub, i);
                 continue;
             }
@@ -925,7 +929,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         };
         self.copying(hub, cid);
         let quick = match &checkpoint {
-            Some(cp) => canonical::append_since(&source, cp, tail, &title, &timestamp())?,
+            Some(cp) => canonical::append_since(&source, cp, tail, &title, &timestamp(), &self.file_changes(hub, cid, tail))?,
             None => None,
         };
         let (changed, next) = match quick {
@@ -934,7 +938,9 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 if events.is_none() {
                     *events = Some(hub.events(cid)?);
                 }
-                let changed = canonical::update(&source, events.as_ref().unwrap(), &title, &timestamp())?;
+                let all = events.as_ref().unwrap();
+                let changes = self.file_changes(hub, cid, &all[tail_start(all, tail)..]);
+                let changed = canonical::update(&source, all, &title, &timestamp(), &changes)?;
                 (changed, checkpoint::read(&source, &mut title.clone())?.1)
             }
         };
@@ -954,6 +960,38 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             self.status.recent.insert(0, continuation(&source));
         }
         Ok(None)
+    }
+
+    /// The file changes Codex recorded in the conversation's Codex histories, its original
+    /// first, read once per scan and only when `messages` hold a call that edits files. A
+    /// history that cannot be read contributes none, so its calls keep their readable form.
+    fn file_changes(&mut self, hub: &Hub, cid: &str, messages: &[format::Message]) -> std::rc::Rc<super::tools::FileChanges> {
+        if !messages.iter().any(edits_files) {
+            return Default::default();
+        }
+        if let Some(changes) = self.changes.get(cid) {
+            return changes.clone();
+        }
+        let record = &hub.state.conversations[cid];
+        let mut sources: Vec<(bool, &Source)> = record
+            .projections
+            .iter()
+            .filter(|p| !p.removed && p.source.tool == Tool::Codex)
+            .map(|p| (p.origin, &p.source))
+            .chain(record.pending.iter().filter(|s| s.tool == Tool::Codex).map(|s| (false, s)))
+            .collect();
+        sources.sort_by_key(|(origin, _)| !*origin);
+        let mut changes = super::tools::FileChanges::new();
+        for (_, source) in sources {
+            let Ok((input, _)) = storage::open_at(&source.root, &storage::physical(source), 0) else { continue };
+            let Ok(found) = super::tools::file_changes(std::io::BufReader::new(input)) else { continue };
+            for (call, items) in found {
+                changes.entry(call).or_insert(items);
+            }
+        }
+        let changes = std::rc::Rc::new(changes);
+        self.changes.insert(cid.to_owned(), changes.clone());
+        changes
     }
 
     /// Writes a new projection of the canonical history into a namespace and registers it.
@@ -990,7 +1028,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 return Err(collision());
             }
         } else {
-            let bytes = format::render_titled(tool, &source.id, &source.cwd, &timestamp(), events, &title)?;
+            let changes = self.file_changes(hub, cid, events);
+            let bytes = format::render_changed(tool, &source.id, &source.cwd, &timestamp(), events, &title, &changes)?;
             let converted: Vec<serde_json::Value> = bytes
                 .split(|b| *b == b'\n')
                 .filter(|b| !b.is_empty())
@@ -1032,3 +1071,15 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         Ok(())
     }
 }
+
+/// Whether a tool call record edits files with Codex `apply_patch`.
+fn edits_files(message: &format::Message) -> bool {
+    message.text.starts_with("[Tool call: apply_patch]\n")
+        || (message.text.starts_with("[Tool call: exec]\n") && message.text.contains("tools.apply_patch("))
+}
+
+/// The index in `all` where `tail` starts, when `all` ends with it; otherwise 0.
+fn tail_start(all: &[format::Message], tail: &[format::Message]) -> usize {
+    all.len().checked_sub(tail.len()).filter(|start| all[*start..] == *tail).unwrap_or(0)
+}
+
