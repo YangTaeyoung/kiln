@@ -937,7 +937,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     *events = Some(hub.events(cid)?);
                 }
                 let all = events.as_ref().unwrap();
-                let changes = file_changes(hub, cid, &all[source_len(all, tail)..]);
+                let changes = file_changes(hub, cid, &all[tail_start(all, tail)..]);
                 let changed = canonical::update(&source, all, &title, &timestamp(), &changes)?;
                 (changed, checkpoint::read(&source, &mut title.clone())?.1)
             }
@@ -1045,7 +1045,7 @@ fn edits_files(message: &format::Message) -> bool {
 }
 
 /// The index in `all` where `tail` starts, when `all` ends with it; otherwise 0.
-fn source_len(all: &[format::Message], tail: &[format::Message]) -> usize {
+fn tail_start(all: &[format::Message], tail: &[format::Message]) -> usize {
     all.len().checked_sub(tail.len()).filter(|start| all[*start..] == *tail).unwrap_or(0)
 }
 
