@@ -840,9 +840,7 @@ pub(super) fn render_suffix(
                 return None;
             }
             let at = context::fit(messages, starts, context::BUDGET);
-            let mut history = earlier.to_vec();
-            history.extend_from_slice(&messages[..at]);
-            Some(context::compaction(&history, at))
+            Some(context::compaction(earlier.iter().chain(&messages[..at]), at))
         };
         let bytes = render_messages(tool, &seed, cwd, timestamp, messages, title, compaction)?;
         bytes.split(|b| *b == b'\n').filter(|b| !b.is_empty())

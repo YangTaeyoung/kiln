@@ -50,20 +50,20 @@ pub(super) fn of_history(messages: &[Message], starts: impl Fn(usize) -> bool) -
         return None;
     }
     let at = fit(messages, starts, BUDGET);
-    (at > 0 && at < messages.len()).then(|| compaction(&messages[..at], at))
+    (at > 0 && at < messages.len()).then(|| compaction(messages[..at].iter(), at))
 }
 
 /// The compaction before message `at` of the messages being written, given every message
 /// before it.
-pub(super) fn compaction(earlier: &[Message], at: usize) -> Compaction {
-    Compaction { at, summary: summary(earlier), tokens: earlier.iter().map(size).sum::<usize>() / 4 }
+pub(super) fn compaction<'a>(earlier: impl Iterator<Item = &'a Message> + Clone, at: usize) -> Compaction {
+    Compaction { at, summary: summary(earlier.clone()), tokens: earlier.map(size).sum::<usize>() / 4 }
 }
 
 /// The text standing for `earlier`: what the boundary means and the user's requests in it,
 /// oldest first, the newest ones when they do not all fit.
-pub(super) fn summary(earlier: &[Message]) -> String {
+pub(super) fn summary<'a>(earlier: impl IntoIterator<Item = &'a Message>) -> String {
     let requests: Vec<&str> = earlier
-        .iter()
+        .into_iter()
         .filter(|m| m.role == "user")
         .map(|m| m.text.trim())
         .filter(|t| !t.is_empty() && !t.starts_with("<local-command-") && !t.starts_with("<command-name>"))
