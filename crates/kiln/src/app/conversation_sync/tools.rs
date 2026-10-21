@@ -458,7 +458,7 @@ fn result_output(text: &str) -> Option<String> {
 /// of either CLI.
 pub(super) fn same(a: &str, b: &str) -> bool {
     if let (Some((x_dir, x)), Some((y_dir, y))) = (call_command(a), call_command(b)) {
-        let within = |a: &str, b: &str| std::path::Path::new(a).is_absolute() && std::path::Path::new(a).ends_with(b);
+        let within = |a: &str, b: &str| std::path::Path::new(a).ends_with(b);
         let dirs = match (x_dir.as_deref(), y_dir.as_deref()) {
             (Some(x), Some(y)) => x == y || within(x, y) || within(y, x),
             _ => true,

@@ -4233,7 +4233,8 @@ fn parallel_tool_calls_stay_text() {
 
 #[test]
 fn a_codex_command_run_in_another_directory_changes_directory_in_claude() {
-    for (dir, shown) in [("/elsewhere", "cd /elsewhere && ls -la"), ("/a b/it's", "cd '/a b/it'\\''s' && ls -la"), ("sub", "cd /w/sub && ls -la"), (".", "ls -la")] {
+    let sub = if cfg!(windows) { "cd '/w\\sub' && ls -la" } else { "cd /w/sub && ls -la" };
+    for (dir, shown) in [("/elsewhere", "cd /elsewhere && ls -la"), ("/a b/it's", "cd '/a b/it'\\''s' && ls -la"), ("sub", sub), (".", "ls -la")] {
         let call = CODEX_CALL.replace("workdir:\"/w\"", &format!("workdir:{}", json!(dir)));
         let history = shell_turn(&call, CODEX_RESULT);
         let data = rows(&format::render_titled(Tool::Claude, &stable_id("workdir"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
