@@ -674,7 +674,7 @@ fn canonical_append_accepts_assistant_only_continuations_without_inventing_a_pro
         let original = fs::read(&f.source.path).unwrap();
         let mut messages = read_messages(&f.source).unwrap();
         messages.push(format::Message { role:"assistant".into(), text:"An additional recorded result".into(), images:vec![] });
-        canonical::update(&f.source, &messages, "Shared title", "2026-10-14T06:00:00Z").unwrap();
+        canonical::update(&f.source, &messages, "Shared title", "2026-10-14T06:00:00Z", &Default::default()).unwrap();
         assert!(fs::read(&f.source.path).unwrap().starts_with(&original));
         assert_eq!(read_messages(&f.source).unwrap(), messages);
     }
@@ -688,7 +688,7 @@ fn native_append_continues_ordinals_after_provider_only_records() {
     let mut ms = messages();
     ms.push(Message { role:"assistant".into(), text:"New recorded answer".into(), images:vec![] });
     let before = fs::read(&f.source.path).unwrap();
-    canonical::update(&f.source,&ms,"Shared title","2026-10-14T07:00:00Z").unwrap();
+    canonical::update(&f.source,&ms,"Shared title","2026-10-14T07:00:00Z", &Default::default()).unwrap();
     let after = fs::read(&f.source.path).unwrap();
     assert!(after.starts_with(&before));
     assert!(rows(&after[before.len()..]).iter().all(|r| r["ordinal"].as_u64().unwrap() > 9000));
@@ -710,7 +710,7 @@ fn compressed_codex_history_is_discovered_and_appended_without_changing_its_id()
     let mut continued = messages();
     continued.push(Message { role:"user".into(), text:"Continue the compressed canonical history".into(), images:vec![] });
     continued.push(Message { role:"assistant".into(), text:"The original ID is retained".into(), images:vec![] });
-    canonical::update(&f.source, &continued, "Compressed native title", "2026-10-14T07:00:00Z").unwrap();
+    canonical::update(&f.source, &continued, "Compressed native title", "2026-10-14T07:00:00Z", &Default::default()).unwrap();
     assert!(!f.source.path.exists(), "keep a single native representation");
     let decoded = zstd::stream::decode_all(fs::File::open(&compressed).unwrap()).unwrap();
     assert!(decoded.starts_with(&original));
@@ -895,7 +895,7 @@ fn export_native_cli_fixtures() {
             for index in 1..=3 {
                 continued.push(Message { role:"user".into(), text:format!("Canonical continuation {index}"), images:vec![] });
                 continued.push(Message { role:"assistant".into(), text:format!("Recorded canonical continuation {index}"), images:vec![] });
-                canonical::update(&source, &continued, &fixture_title, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)).unwrap();
+                canonical::update(&source, &continued, &fixture_title, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true), &Default::default()).unwrap();
             }
         }
         fs::write(
@@ -3558,7 +3558,7 @@ fn incremental_and_full_parsing_agree_under_random_appends() {
                 added.extend(turns(&[&format!("q{round}-{k}"), &format!("a{round}-{k}")]));
             }
             expected.extend(added.clone());
-            canonical::update(&f.source, &expected, "Fixture title", "2026-10-15T00:00:00.000Z").unwrap();
+            canonical::update(&f.source, &expected, "Fixture title", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap();
             let (appended, after) = checkpoint::since(&f.source, &cp).unwrap().expect("appended records read on their own");
             assert_eq!(appended, added, "{tool:?} round {round}");
             let (full, full_cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
@@ -3580,7 +3580,7 @@ fn checkpointed_append_matches_a_full_read() {
             let added = turns(&[&format!("appended question {round}"), &format!("appended answer {round}")]);
             expected.extend(added.clone());
             let before = fs::read(&f.source.path).unwrap();
-            cp = canonical::append_since(&f.source, &cp, &added, "Fixture title", "2026-10-15T00:00:00.000Z").unwrap().expect("a checkpointed append");
+            cp = canonical::append_since(&f.source, &cp, &added, "Fixture title", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap().expect("a checkpointed append");
             assert!(fs::read(&f.source.path).unwrap().starts_with(&before), "existing bytes are kept");
             let (full, full_cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
             assert_eq!(full, expected, "{tool:?} round {round}");
@@ -3731,8 +3731,8 @@ fn the_more_recently_continued_side_wins_when_both_are_read_incrementally() {
     older.extend(turns(&["claude side", "claude reply"]));
     let mut newer = messages();
     newer.extend(turns(&["codex side", "codex reply"]));
-    canonical::update(&f.source, &older, "", "2026-10-15T00:00:00.000Z").unwrap();
-    canonical::update(&peer, &newer, "", "2026-10-15T00:00:00.000Z").unwrap();
+    canonical::update(&f.source, &older, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap();
+    canonical::update(&peer, &newer, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap();
     let now = SystemTime::now();
     set_modified(&f.source.path, now - Duration::from_secs(30));
     set_modified(&peer.path, now - Duration::from_secs(20));
@@ -3953,7 +3953,7 @@ fn appended_turns_and_later_writes_through_an_open_handle_both_remain() {
         let mut writer = fs::OpenOptions::new().append(true).open(&peer.path).unwrap();
         let mut more = extended.clone();
         more.extend(turns(&["A third question.", "A third answer."]));
-        assert!(canonical::update(&peer, &more, "", "2026-10-15T00:00:00.000Z").unwrap());
+        assert!(canonical::update(&peer, &more, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap());
         assert_eq!(read_messages(&peer).unwrap(), more, "{tool:?}: full update");
         writer.write_all(marker).unwrap();
         assert!(fs::read(&peer.path).unwrap().ends_with(marker), "{tool:?}: full update");
@@ -3978,7 +3978,7 @@ fn a_continuation_that_kept_only_displayed_tool_text_reaches_a_projection_withou
     assert_ne!(shown, history, "the native rewrite kept only the displayed tool text");
     let mut continued = shown.clone();
     continued.extend(turns(&["Continue after the tool.", "Continued after the tool."]));
-    assert!(canonical::update(&peer, &continued, "", "2026-10-15T00:00:00.000Z").unwrap());
+    assert!(canonical::update(&peer, &continued, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap());
     set_modified(&peer.path, SystemTime::now() - Duration::from_secs(30));
     let mut store = hub::Hub::open(&f.config).unwrap();
     for record in store.state.conversations.values_mut() {
@@ -4042,7 +4042,7 @@ fn hub_state_stays_small_with_large_codex_session_instructions() {
     assert!(state.len() < 10_000, "hub state holds {} bytes", state.len());
     let mut extended = messages();
     extended.extend(turns(&["Continue in Codex.", "Continued in Codex."]));
-    assert!(canonical::update(&f.source, &extended, "", "2026-10-15T00:00:00.000Z").unwrap());
+    assert!(canonical::update(&f.source, &extended, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap());
     set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(30));
     assert!(f.scan().errors.is_empty());
     assert_eq!(read_messages(&f.peer()).unwrap(), extended);
@@ -4190,7 +4190,7 @@ fn shell_turns_reach_the_other_cli_as_native_records_without_echo() {
             Tool::Claude => shell_turn(CLAUDE_CALL, CLAUDE_RESULT),
             Tool::Codex => shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT),
         });
-        assert!(canonical::update(&f.source, &extended, "", "2026-10-15T00:00:00.000Z").unwrap());
+        assert!(canonical::update(&f.source, &extended, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap());
         set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(30));
         let status = f.scan();
         assert!(status.errors.is_empty(), "{tool:?}: {:?}", status.errors);
@@ -4278,7 +4278,7 @@ fn a_native_shell_record_read_without_its_annotation_keeps_the_conversation_toge
     // A later Codex turn reaches the Claude projection through a full update.
     let mut later = expected.clone();
     later.extend(turns(&["Back in Codex.", "Back."]));
-    assert!(canonical::update(&f.source, &later, "", "2026-10-15T00:00:00.000Z").unwrap());
+    assert!(canonical::update(&f.source, &later, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap());
     set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(30));
     let mut store = hub::Hub::open(&f.config).unwrap();
     for p in store.state.conversations.values_mut().flat_map(|r| r.projections.iter_mut()) {
@@ -4442,15 +4442,10 @@ const CODEX_TWO_RESULT: &str = "[Tool result: call_TwoResultId000000000000000000
 fn a_codex_program_with_several_commands_is_parallel_bash_in_claude() {
     let history = shell_turn(CODEX_TWO_CALL, CODEX_TWO_RESULT);
     let data = rows(&format::render_titled(Tool::Claude, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
-    let call = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_use").expect("tool uses");
-    let uses = call["message"]["content"].as_array().unwrap();
-    let commands: Vec<&str> = uses.iter().map(|b| b["input"]["command"].as_str().unwrap()).collect();
-    assert_eq!(commands, ["pwd", "ls (all)"]);
-    let result = data.iter().find(|r| r["message"]["content"][0]["type"] == "tool_result").unwrap();
-    let results = result["message"]["content"].as_array().unwrap();
-    assert_eq!(results.iter().map(|b| b["tool_use_id"].clone()).collect::<Vec<_>>(), uses.iter().map(|b| b["id"].clone()).collect::<Vec<_>>());
-    assert_eq!((results[0]["content"].as_str(), results[1]["content"].as_str()), (Some("/w"), Some("Exit code 1\na\nb")));
-    assert_eq!(results[1]["is_error"], true);
+    assert_eq!(claude_commands(&data), [("pwd".to_owned(), "/w".to_owned(), false), ("ls (all)".to_owned(), "Exit code 1\na\nb".to_owned(), true)]);
+    let uses: Vec<&serde_json::Value> = data.iter().filter(|r| r["message"]["content"][0]["type"] == "tool_use").collect();
+    assert_eq!(uses.len(), 2, "one record per tool use");
+    assert_eq!(uses[0]["message"]["id"], uses[1]["message"]["id"], "parallel uses share one message");
     assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
     let data = rows(&format::render_titled(Tool::Codex, &stable_id("several"), "/w", "2026-10-15T00:00:00Z", &history, "Several").unwrap());
     let cells: Vec<&serde_json::Value> = data.iter().filter(|r| r["payload"]["item"]["type"] == "CommandExecution").map(|r| &r["payload"]["item"]).collect();
@@ -4759,4 +4754,114 @@ fn codex_exec_command_function_calls_are_bash_in_claude() {
         assert_eq!(item["payload"]["name"], "exec_command");
         assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history);
     }
+}
+
+const PATCH_CALL: &str = "[Tool call: apply_patch]\n*** Begin Patch\n*** Update File: /w/app.go\n@@\n type usecase struct {\n \tservice X\n+\tagents Y\n@@\n-func New(s X) U {\n+func New(s X, a Y) U {\n*** Add File: /w/new.go\n+package w\n*** End Patch";
+const PATCH_RESULT: &str = "[Tool result: call_PatchCallId0000000000000000]\nExit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM /w/app.go\nA /w/new.go\n";
+
+fn patch_change(id: &str) -> serde_json::Value {
+    json!({"type": "FileChange", "id": id, "status": "completed", "stdout": "Success.", "stderr": "", "changes": {
+        "/w/new.go": {"type": "add", "content": "package w\n"},
+        "/w/app.go": {"type": "update", "unified_diff": "@@ -40,2 +40,3 @@\n type usecase struct {\n \tservice X\n+\tagents Y\n@@ -88,2 +89,2 @@\n-func New(s X) U {\n+func New(s X, a Y) U {\n \treturn nil\n"}}})
+}
+
+/// Claude Code records of a rendered history: (tool, file path or command, structured result).
+fn claude_records(data: &[serde_json::Value]) -> Vec<(String, String, serde_json::Value)> {
+    data.iter()
+        .filter(|r| r["message"]["content"][0]["type"] == "tool_use")
+        .map(|r| {
+            let used = &r["message"]["content"][0];
+            let result = data.iter().find(|q| q["message"]["content"][0]["tool_use_id"] == used["id"]).expect("a result record");
+            let target = used["input"]["file_path"].as_str().or(used["input"]["command"].as_str()).unwrap().to_owned();
+            (used["name"].as_str().unwrap().to_owned(), target, result["toolUseResult"].clone())
+        })
+        .collect()
+}
+
+#[test]
+fn codex_patches_are_claude_code_edits_and_writes() {
+    let history = shell_turn(PATCH_CALL, PATCH_RESULT);
+    let changes = tools::FileChanges::from([("call_PatchCallId0000000000000000".to_owned(), vec![patch_change("call_PatchCallId0000000000000000")])]);
+    let data = rows(&format::render_changed(Tool::Claude, &stable_id("patch"), "/w", "2026-10-15T00:00:00Z", &history, "Patch", &changes).unwrap());
+    let records = claude_records(&data);
+    assert_eq!(records.iter().map(|(t, p, _)| (t.as_str(), p.as_str())).collect::<Vec<_>>(), [("Edit", "/w/app.go"), ("Edit", "/w/app.go"), ("Write", "/w/new.go")]);
+    assert_eq!(records[0].2["structuredPatch"], json!([{"oldStart": 40, "oldLines": 2, "newStart": 40, "newLines": 3, "lines": [" type usecase struct {", " \tservice X", "+\tagents Y"]}]));
+    assert_eq!(records[1].2["structuredPatch"][0]["newStart"], 89);
+    let edit = data.iter().find(|r| r["message"]["content"][0]["name"] == "Edit").unwrap();
+    assert_eq!(edit["message"]["content"][0]["input"], json!({"file_path": "/w/app.go", "old_string": "type usecase struct {\n\tservice X", "new_string": "type usecase struct {\n\tservice X\n\tagents Y", "replace_all": false}));
+    assert_eq!((records[2].2["type"].as_str(), records[2].2["content"].as_str()), (Some("create"), Some("package w\n")));
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    let data = rows(&format::render_changed(Tool::Codex, &stable_id("patch"), "/w", "2026-10-15T00:00:00Z", &history, "Patch", &changes).unwrap());
+    let cell = data.iter().find(|r| r["payload"]["item"]["type"] == "FileChange").expect("a file change cell");
+    assert_eq!(cell["payload"]["item"]["id"], "call_PatchCallId0000000000000000#0");
+    assert!(data.iter().any(|r| r["payload"]["type"] == "custom_tool_call" && r["payload"]["name"] == "apply_patch"));
+    assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history);
+    let bytes = format::render_changed(Tool::Codex, &stable_id("patch"), "/w", "2026-10-15T00:00:00Z", &history, "Patch", &changes).unwrap();
+    assert_eq!(tools::file_changes(&bytes[..]).unwrap().get("call_PatchCallId0000000000000000").map(Vec::len), Some(1), "a Kiln copy keeps its file changes findable");
+}
+
+#[test]
+fn a_codex_program_that_patches_and_runs_commands_is_edits_and_bash() {
+    let patch = PATCH_CALL.strip_prefix("[Tool call: apply_patch]\n").unwrap();
+    let call = format!("[Tool call: exec]\ntext(await tools.apply_patch({}));\ntext(await tools.exec_command({{cmd:\"gofmt -l .\",workdir:\"/repo\"}}));", json!(patch));
+    let result = format!("[Tool result: call_ProgramPatchId00000000000000]\nScript completed\nWall time 0.3 seconds\nOutput:\n{{}}{}", exec_result("", 0));
+    let history = shell_turn(&call, &result);
+    let changes = tools::FileChanges::from([("call_ProgramPatchId00000000000000".to_owned(), vec![patch_change("exec-1")])]);
+    let data = rows(&format::render_changed(Tool::Claude, &stable_id("program"), "/w", "2026-10-15T00:00:00Z", &history, "Program", &changes).unwrap());
+    let records = claude_records(&data);
+    assert_eq!(records.iter().map(|(t, p, _)| (t.as_str(), p.as_str())).collect::<Vec<_>>(), [("Edit", "/w/app.go"), ("Edit", "/w/app.go"), ("Write", "/w/new.go"), ("Bash", "cd /repo && gofmt -l .")]);
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+    let data = rows(&format::render_changed(Tool::Codex, &stable_id("program"), "/w", "2026-10-15T00:00:00Z", &history, "Program", &changes).unwrap());
+    let kinds: Vec<&str> = data.iter().filter_map(|r| r["payload"]["item"]["type"].as_str()).filter(|t| matches!(*t, "FileChange" | "CommandExecution")).collect();
+    assert_eq!(kinds, ["FileChange", "CommandExecution"]);
+    assert_eq!(format::parse(Tool::Codex, &data).unwrap(), history);
+}
+
+#[test]
+fn patches_without_recorded_changes_or_with_deletions_stay_text() {
+    let history = shell_turn(PATCH_CALL, PATCH_RESULT);
+    let data = rows(&format::render_titled(Tool::Claude, &stable_id("unknown"), "/w", "2026-10-15T00:00:00Z", &history, "Patch").unwrap());
+    assert!(claude_records(&data).is_empty(), "without Codex's file changes there are no line numbers");
+    let mut deleted = patch_change("call_PatchCallId0000000000000000");
+    deleted["changes"]["/w/new.go"] = json!({"type": "delete", "content": "package w\n"});
+    let changes = tools::FileChanges::from([("call_PatchCallId0000000000000000".to_owned(), vec![deleted])]);
+    let data = rows(&format::render_changed(Tool::Claude, &stable_id("deleted"), "/w", "2026-10-15T00:00:00Z", &history, "Patch", &changes).unwrap());
+    assert!(claude_records(&data).is_empty(), "Claude Code has no record of a deletion");
+    assert_eq!(format::parse(Tool::Claude, &data).unwrap(), history);
+}
+
+#[test]
+fn file_changes_belong_to_the_call_codex_was_running() {
+    let item = |payload: serde_json::Value| json!({"timestamp": "t", "type": "response_item", "payload": payload}).to_string();
+    let event = |item: serde_json::Value| json!({"timestamp": "t", "type": "event_msg", "payload": {"type": "item_completed", "item": item}}).to_string();
+    let history = [
+        item(json!({"type": "custom_tool_call", "call_id": "call_A", "name": "exec", "input": "text(await tools.apply_patch(\"p\"))"})),
+        event(patch_change("exec-0b1")),
+        item(json!({"type": "custom_tool_call_output", "call_id": "call_A", "output": []})),
+        item(json!({"type": "custom_tool_call", "call_id": "call_B", "name": "apply_patch", "input": "p"})),
+        item(json!({"type": "function_call", "call_id": "call_C", "name": "exec_command", "arguments": "{}"})),
+        event(patch_change("call_B")),
+        event(patch_change("exec-orphan")),
+    ]
+    .join("\n");
+    let changes = tools::file_changes(history.as_bytes()).unwrap();
+    assert_eq!(changes.get("call_A").map(Vec::len), Some(1));
+    assert_eq!(changes.get("call_B").map(Vec::len), Some(1));
+    assert!(!changes.contains_key("call_C"), "an item made while two calls run belongs to neither");
+}
+
+#[test]
+fn a_claude_copy_shows_the_edits_of_its_codex_original() {
+    let f = Fixture::new(Tool::Codex);
+    let mut history = messages();
+    history.extend(shell_turn(PATCH_CALL, PATCH_RESULT));
+    let changes = tools::FileChanges::from([("call_PatchCallId0000000000000000".to_owned(), vec![patch_change("call_PatchCallId0000000000000000")])]);
+    fs::write(&f.source.path, format::render_changed(Tool::Codex, &f.source.id, &f.source.cwd, "2026-10-14T00:00:00Z", &history, "Patch", &changes).unwrap()).unwrap();
+    set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(120));
+    let status = f.scan();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let claude = f.peer();
+    let data = rows(&fs::read(&claude.path).unwrap());
+    assert_eq!(claude_records(&data).iter().filter(|(t, _, _)| t == "Edit").count(), 2);
+    assert_eq!(read_messages(&claude).unwrap(), history);
 }

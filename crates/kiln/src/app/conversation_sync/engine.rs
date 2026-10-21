@@ -925,7 +925,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         };
         self.copying(hub, cid);
         let quick = match &checkpoint {
-            Some(cp) => canonical::append_since(&source, cp, tail, &title, &timestamp())?,
+            Some(cp) => canonical::append_since(&source, cp, tail, &title, &timestamp(), &file_changes(hub, cid, tail))?,
             None => None,
         };
         let (changed, next) = match quick {
@@ -934,7 +934,9 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 if events.is_none() {
                     *events = Some(hub.events(cid)?);
                 }
-                let changed = canonical::update(&source, events.as_ref().unwrap(), &title, &timestamp())?;
+                let all = events.as_ref().unwrap();
+                let changes = file_changes(hub, cid, &all[source_len(all, tail)..]);
+                let changed = canonical::update(&source, all, &title, &timestamp(), &changes)?;
                 (changed, checkpoint::read(&source, &mut title.clone())?.1)
             }
         };
@@ -990,7 +992,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 return Err(collision());
             }
         } else {
-            let bytes = format::render_titled(tool, &source.id, &source.cwd, &timestamp(), events, &title)?;
+            let changes = file_changes(hub, cid, events);
+            let bytes = format::render_changed(tool, &source.id, &source.cwd, &timestamp(), events, &title, &changes)?;
             let converted: Vec<serde_json::Value> = bytes
                 .split(|b| *b == b'\n')
                 .filter(|b| !b.is_empty())
@@ -1031,4 +1034,55 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         });
         Ok(())
     }
+}
+
+/// Whether a tool call record edits files with Codex `apply_patch`.
+fn edits_files(message: &format::Message) -> bool {
+    message.text.starts_with("[Tool call: apply_patch]\n")
+        || (message.text.starts_with("[Tool call: exec]\n") && message.text.contains("tools.apply_patch("))
+}
+
+/// The index in `all` where `tail` starts, when `all` ends with it; otherwise 0.
+fn source_len(all: &[format::Message], tail: &[format::Message]) -> usize {
+    all.len().checked_sub(tail.len()).filter(|start| all[*start..] == *tail).unwrap_or(0)
+}
+
+/// The file changes Codex recorded for the editing calls among `messages`, read from the
+/// conversation's Codex histories: its original first. A history that cannot be read
+/// contributes none, so its calls keep their readable form.
+fn file_changes(hub: &Hub, cid: &str, messages: &[format::Message]) -> super::tools::FileChanges {
+    let mut wanted: std::collections::HashSet<&str> = Default::default();
+    for (call, result) in messages.iter().zip(messages.iter().skip(1)) {
+        if edits_files(call)
+            && let Some((id, _)) = result.text.strip_prefix("[Tool result: ").and_then(|rest| rest.split_once("]\n"))
+        {
+            wanted.insert(id);
+        }
+    }
+    let mut changes = super::tools::FileChanges::new();
+    if wanted.is_empty() {
+        return changes;
+    }
+    let record = &hub.state.conversations[cid];
+    let mut sources: Vec<(bool, &Source)> = record
+        .projections
+        .iter()
+        .filter(|p| !p.removed && p.source.tool == Tool::Codex)
+        .map(|p| (p.origin, &p.source))
+        .chain(record.pending.iter().filter(|s| s.tool == Tool::Codex).map(|s| (false, s)))
+        .collect();
+    sources.sort_by_key(|(origin, _)| !*origin);
+    for (_, source) in sources {
+        if wanted.iter().all(|id| changes.contains_key(*id)) {
+            break;
+        }
+        let Ok((input, _)) = storage::open_at(&source.root, &storage::physical(source), 0) else { continue };
+        let Ok(found) = super::tools::file_changes(std::io::BufReader::new(input)) else { continue };
+        for (call, items) in found {
+            if wanted.contains(call.as_str()) {
+                changes.entry(call).or_insert(items);
+            }
+        }
+    }
+    changes
 }

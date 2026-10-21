@@ -1,6 +1,7 @@
 //! Tool calls recognised in the readable tool records of the canonical history, and the
 //! native records that show them in each CLI.
 use serde_json::{Map, Value, json};
+use std::collections::{HashMap, HashSet};
 
 /// How the command was recorded by the CLI it came from.
 pub(super) enum Native {
@@ -134,21 +135,53 @@ fn tools_at(text: &str, at: usize) -> bool {
         && !after.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
-/// `cmd` and `workdir` of each `tools.exec_command` call of a code-mode program that uses no
-/// other tool, in program order, and the program with each call replaced by `EXEC`.
-fn exec_calls(program: &str) -> Option<(Vec<(String, Option<String>)>, String)> {
-    let mut commands = Vec::new();
+/// A tool call of a code-mode program.
+enum Call {
+    /// `tools.exec_command`: its `cmd` and `workdir`.
+    Exec(String, Option<String>),
+    /// `tools.apply_patch`: the patch text.
+    Patch(String),
+}
+
+/// Each `tools.exec_command` and `tools.apply_patch` call of a code-mode program that uses
+/// no other tool, in program order, and the program with each call replaced by `EXEC` or
+/// `PATCH`.
+fn program_calls(program: &str) -> Option<(Vec<Call>, String)> {
+    let mut calls = Vec::new();
     let mut shape = String::new();
     let mut rest = program;
     while let Some(at) = rest.match_indices("tools").map(|(i, _)| i).find(|&i| tools_at(rest, i)) {
         shape.push_str(&rest[..at]);
-        let (fields, after) = object(rest[at..].strip_prefix("tools.exec_command(")?)?;
-        commands.push(exec_arguments(&fields)?);
-        shape.push_str("EXEC");
+        let after = if let Some(arguments) = rest[at..].strip_prefix("tools.exec_command(") {
+            let (fields, after) = object(arguments)?;
+            let (cmd, workdir) = exec_arguments(&fields)?;
+            calls.push(Call::Exec(cmd, workdir));
+            shape.push_str("EXEC");
+            after
+        } else {
+            let (patch, after) = scalar(rest[at..].strip_prefix("tools.apply_patch(")?.trim_start())?;
+            calls.push(Call::Patch(patch.as_str()?.to_owned()));
+            shape.push_str("PATCH");
+            after
+        };
         rest = after.trim_start().strip_prefix(')')?;
     }
     shape.push_str(rest);
-    (!commands.is_empty()).then_some((commands, shape))
+    (!calls.is_empty()).then_some((calls, shape))
+}
+
+/// `cmd` and `workdir` of each `tools.exec_command` call of a code-mode program that uses no
+/// other tool, in program order, and the program with each call replaced by `EXEC`.
+fn exec_calls(program: &str) -> Option<(Vec<(String, Option<String>)>, String)> {
+    let (calls, shape) = program_calls(program)?;
+    let commands = calls
+        .into_iter()
+        .map(|call| match call {
+            Call::Exec(cmd, workdir) => Some((cmd, workdir)),
+            Call::Patch(_) => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some((commands, shape))
 }
 
 /// `cmd` and `workdir` of each call of a code-mode program that only runs
@@ -438,7 +471,210 @@ pub(super) fn same(a: &str, b: &str) -> bool {
 /// Claude Code tools other than Bash that every Claude Code session defines.
 const CLAUDE_TOOLS: [&str; 10] = ["Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Agent", "NotebookEdit"];
 
+/// Codex `FileChange` history items by the ID of the call that made them.
+pub(super) type FileChanges = HashMap<String, Vec<Value>>;
+
+/// The `FileChange` items of a Codex history by the call that made each: the call whose ID
+/// starts the item's ID (before a `#`), otherwise the only call still waiting for its output.
+pub(super) fn file_changes(input: impl std::io::BufRead) -> std::io::Result<FileChanges> {
+    use memchr::memmem::Finder;
+    let needles = [Finder::new(b"\"FileChange\""), Finder::new(b"_call\""), Finder::new(b"_call_output\"")];
+    let mut changes = FileChanges::new();
+    let mut calls = HashSet::new();
+    let mut open: Vec<String> = Vec::new();
+    for line in input.split(b'\n') {
+        let line = line?;
+        if !needles.iter().any(|needle| needle.find(&line).is_some()) {
+            continue;
+        }
+        let Ok(row) = serde_json::from_slice::<Value>(&line) else { continue };
+        let payload = &row["payload"];
+        let id = payload["call_id"].as_str().map(str::to_owned);
+        match (row["type"].as_str(), payload["type"].as_str(), id) {
+            (Some("response_item"), Some("custom_tool_call" | "function_call"), Some(id)) => {
+                calls.insert(id.clone());
+                open.push(id);
+            }
+            (Some("response_item"), Some("custom_tool_call_output" | "function_call_output"), Some(id)) => {
+                open.retain(|call| *call != id);
+            }
+            (Some("event_msg"), Some("item_completed"), _) if payload["item"]["type"] == "FileChange" => {
+                let item = payload["item"]["id"].as_str().unwrap_or_default();
+                let owner = item.split_once('#').map_or(item, |(call, _)| call);
+                let call = if calls.contains(owner) {
+                    Some(owner.to_owned())
+                } else if let [only] = open.as_slice() {
+                    Some(only.clone())
+                } else {
+                    None
+                };
+                if let Some(call) = call {
+                    changes.entry(call).or_default().push(payload["item"].clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(changes)
+}
+
+/// A file change Claude Code shows natively: a created file, or one hunk of a changed file
+/// with its replaced and replacing text.
+pub(super) enum Change {
+    Add { path: String, content: String },
+    Hunk { path: String, old: String, new: String, hunk: Value },
+}
+
+/// The paths a patch names, in its order.
+fn patch_paths(patch: &str) -> Vec<&str> {
+    patch
+        .lines()
+        .filter_map(|line| ["*** Add File: ", "*** Update File: ", "*** Delete File: "].iter().find_map(|p| line.strip_prefix(p)))
+        .map(str::trim)
+        .collect()
+}
+
+/// The changes of a completed Codex `FileChange` item, in the order `patch` names its files:
+/// none when a file is deleted or moved.
+fn changes_of(item: &Value, patch: &str) -> Option<Vec<Change>> {
+    if item["status"] != "completed" {
+        return None;
+    }
+    let all = item["changes"].as_object()?;
+    let paths = patch_paths(patch);
+    if paths.len() != all.len() {
+        return None;
+    }
+    let mut changes = Vec::new();
+    for path in paths {
+        let (key, change) = all.iter().find(|(key, _)| key.as_str() == path || std::path::Path::new(key).ends_with(path))?;
+        match change["type"].as_str()? {
+            "add" => changes.push(Change::Add { path: key.clone(), content: change["content"].as_str()?.to_owned() }),
+            "update" if change.get("move_path").is_none_or(Value::is_null) => {
+                changes.extend(hunks(key, change["unified_diff"].as_str()?)?)
+            }
+            _ => return None,
+        }
+    }
+    Some(changes)
+}
+
+/// The hunks of a unified diff, as Claude Code's structured patch hunks.
+fn hunks(path: &str, diff: &str) -> Option<Vec<Change>> {
+    let range = |text: &str| -> Option<(u64, u64)> {
+        match text.split_once(',') {
+            Some((start, count)) => Some((start.parse().ok()?, count.parse().ok()?)),
+            None => Some((text.parse().ok()?, 1)),
+        }
+    };
+    let mut changes = Vec::new();
+    let mut lines = diff.lines().peekable();
+    while let Some(header) = lines.next() {
+        let (old, new) = header.strip_prefix("@@ -")?.split_once(" @@")?.0.split_once(" +")?;
+        let ((old_start, old_lines), (new_start, new_lines)) = (range(old)?, range(new)?);
+        let mut body = Vec::new();
+        while let Some(line) = lines.next_if(|line| !line.starts_with("@@")) {
+            if line.starts_with('\\') {
+                continue;
+            }
+            if !line.starts_with([' ', '+', '-']) {
+                return None;
+            }
+            body.push(line.to_owned());
+        }
+        let side = |kept: char| {
+            body.iter().filter(|l| l.starts_with(' ') || l.starts_with(kept)).map(|l| &l[1..]).collect::<Vec<_>>().join("\n")
+        };
+        changes.push(Change::Hunk {
+            path: path.into(),
+            old: side('-'),
+            new: side('+'),
+            hunk: json!({"oldStart": old_start, "oldLines": old_lines, "newStart": new_start, "newLines": new_lines, "lines": body}),
+        });
+    }
+    (!changes.is_empty()).then_some(changes)
+}
+
+/// A step of a Codex call that edits files and runs commands.
+pub(super) enum Step {
+    Change(Change),
+    Command(Command),
+}
+
+/// The Codex history item of each call of an editing call: its recorded `FileChange` item or
+/// the index of its command.
+enum Cell {
+    Changed(Value),
+    Ran(usize),
+}
+
+/// A Codex `apply_patch` call, or a code-mode program printing each of its `apply_patch` and
+/// `exec_command` calls, with the file changes Codex recorded for it.
+fn edits(name: &str, body: &str, id: &str, output: &str, changes: &[Value]) -> Option<Pair> {
+    let mut steps = Vec::new();
+    let mut cells = Vec::new();
+    let mut commands = Vec::new();
+    let items = match name {
+        "apply_patch" => {
+            let [item] = changes else { return None };
+            if !output.starts_with("Exit code: 0\n") {
+                return None;
+            }
+            steps.extend(changes_of(item, body)?.into_iter().map(Step::Change));
+            cells.push(Cell::Changed(item.clone()));
+            (
+                json!({"type": "custom_tool_call", "status": "completed", "call_id": id, "name": "apply_patch", "input": body}),
+                json!({"type": "custom_tool_call_output", "call_id": id, "output": output}),
+            )
+        }
+        "exec" => {
+            let (calls, shape) = program_calls(body)?;
+            let sequential = calls
+                .iter()
+                .map(|call| match call {
+                    Call::Exec(..) => "text(awaitEXEC)",
+                    Call::Patch(_) => "text(awaitPATCH)",
+                })
+                .collect::<Vec<_>>()
+                .join(";");
+            let patches = calls.iter().filter(|call| matches!(call, Call::Patch(_))).count();
+            let (header, rest) = exec_output(output)?;
+            if !shaped(&shape, &sequential) || patches != changes.len() || !header.starts_with("Script completed") {
+                return None;
+            }
+            let values = serde_json::Deserializer::from_str(rest).into_iter::<Value>().collect::<Result<Vec<_>, _>>().ok()?;
+            if values.len() != calls.len() {
+                return None;
+            }
+            let mut recorded = changes.iter();
+            for (call, value) in calls.into_iter().zip(&values) {
+                match call {
+                    Call::Patch(patch) => {
+                        if value.as_object().is_none_or(|fields| !fields.is_empty()) {
+                            return None;
+                        }
+                        let item = recorded.next()?;
+                        steps.extend(changes_of(item, &patch)?.into_iter().map(Step::Change));
+                        cells.push(Cell::Changed(item.clone()));
+                    }
+                    Call::Exec(command, cwd) => {
+                        let o = settled(value)?;
+                        let ran = Command { command, cwd, output: o.output, exit_code: o.exit_code, running: o.running };
+                        steps.push(Step::Command(ran.clone()));
+                        commands.push(ran);
+                        cells.push(Cell::Ran(commands.len() - 1));
+                    }
+                }
+            }
+            exec_items(id, body, header, rest)
+        }
+        _ => return None,
+    };
+    Some(Pair::Edits { id: id.into(), steps, items, cells, commands })
+}
+
 /// One command of a Codex code-mode program, with its result.
+#[derive(Clone)]
 pub(super) struct Command {
     pub command: String,
     pub cwd: Option<String>,
@@ -452,19 +688,28 @@ pub(super) enum Pair {
     Shell(Shell),
     /// A Codex code-mode program running several `tools.exec_command` calls.
     Commands { id: String, commands: Vec<Command>, program: String, header: String, result: String },
+    /// A Codex call that edits files, and may run commands, with its Codex call and output
+    /// items and the history items Codex recorded for it.
+    Edits { id: String, steps: Vec<Step>, items: (Value, Value), cells: Vec<Cell>, commands: Vec<Command> },
     /// A Claude Code tool other than Bash, as Claude Code recorded it.
     Claude { id: String, name: String, input: Value, content: String },
     /// Any other tool, by name, input and output.
     Other { id: String, name: String, input: Value, output: String, error: bool },
 }
 
-/// The tool call recorded by `call` and its result recorded by `result`.
-pub(super) fn pair(call: &str, result: &str) -> Option<Pair> {
+/// The tool call recorded by `call` and its result recorded by `result`, with the file
+/// changes Codex recorded for calls.
+pub(super) fn pair(call: &str, result: &str, changes: &FileChanges) -> Option<Pair> {
     if let Some(shell) = shell(call, result) {
         return Some(Pair::Shell(shell));
     }
     let (name, body) = record(call, "[Tool call: ")?;
     let (id, output) = record(result, "[Tool result: ")?;
+    if let Some(recorded) = changes.get(id)
+        && let Some(edits) = edits(name, body, id, output, recorded)
+    {
+        return Some(edits);
+    }
     if name == "exec"
         && let Some(calls) = exec_commands(body)
         && let Some((header, rest)) = exec_output(output)
@@ -553,41 +798,66 @@ fn exec_items(id: &str, program: &str, header: &str, result: &str) -> (Value, Va
     )
 }
 
+/// A Claude Code tool use, its tool result block and the structured result beside it.
+pub(super) type Record = (Value, Value, Option<Value>);
+
+/// The Claude Code `Write` or `Edit` record of a file change.
+fn change_record(change: &Change, id: &str) -> Record {
+    match change {
+        Change::Add { path, content } => (
+            json!({"type": "tool_use", "id": id, "name": "Write", "input": {"file_path": path, "content": content}}),
+            json!({"tool_use_id": id, "type": "tool_result", "content": format!("File created successfully at: {path}"), "is_error": false}),
+            Some(json!({"type": "create", "filePath": path, "content": content, "structuredPatch": [], "originalFile": null, "userModified": false})),
+        ),
+        Change::Hunk { path, old, new, hunk } => (
+            json!({"type": "tool_use", "id": id, "name": "Edit",
+                "input": {"file_path": path, "old_string": old, "new_string": new, "replace_all": false}}),
+            json!({"tool_use_id": id, "type": "tool_result", "content": format!("The file {path} has been updated successfully."), "is_error": false}),
+            Some(json!({"filePath": path, "oldString": old, "newString": new, "originalFile": null,
+                "structuredPatch": [hunk], "userModified": false, "replaceAll": false})),
+        ),
+    }
+}
+
+/// The Claude Code `Bash` record of a Codex command shown in `cwd`.
+fn command_record(command: &Command, id: &str, cwd: &str) -> Record {
+    (
+        json!({"type": "tool_use", "id": id, "name": "Bash", "input": {"command": shown(&command.command, command.cwd.as_deref(), cwd)}}),
+        json!({"tool_use_id": id, "type": "tool_result",
+            "content": claude_content(&command.output, command.exit_code, command.running), "is_error": command.exit_code != 0}),
+        Some(json!({"stdout": command.output, "stderr": "", "interrupted": false, "isImage": false, "noOutputExpected": false})),
+    )
+}
+
 impl Pair {
-    /// Claude Code tool use and tool result blocks, and the structured result beside them,
-    /// when Claude Code shows this call natively in `cwd`.
-    pub fn claude(&self, seed: &str, cwd: &str) -> Option<(Vec<Value>, Vec<Value>, Option<Value>)> {
+    /// The Claude Code records of this call shown in `cwd`, in call order, when Claude Code
+    /// shows it natively.
+    pub fn claude(&self, seed: &str, cwd: &str) -> Option<Vec<Record>> {
+        let id = |k: usize| format!("toolu_{}", &super::digest(format!("{seed}:{k}").as_bytes())[..24]);
         match self {
             Pair::Shell(shell) => {
                 let (call, result, structured) = shell.claude(&shell.claude_id(seed), cwd);
-                Some((vec![call], vec![result], Some(structured)))
+                Some(vec![(call, result, Some(structured))])
             }
             Pair::Commands { commands, .. } => {
-                let ids: Vec<String> = (0..commands.len())
-                    .map(|k| format!("toolu_{}", &super::digest(format!("{seed}:{k}").as_bytes())[..24]))
-                    .collect();
-                Some((
-                    commands
-                        .iter()
-                        .zip(&ids)
-                        .map(|(c, id)| json!({"type": "tool_use", "id": id, "name": "Bash",
-                            "input": {"command": shown(&c.command, c.cwd.as_deref(), cwd)}}))
-                        .collect(),
-                    commands
-                        .iter()
-                        .zip(&ids)
-                        .map(|(c, id)| json!({"tool_use_id": id, "type": "tool_result",
-                            "content": claude_content(&c.output, c.exit_code, c.running), "is_error": c.exit_code != 0}))
-                        .collect(),
-                    None,
-                ))
+                Some(commands.iter().enumerate().map(|(k, c)| command_record(c, &id(k), cwd)).collect())
             }
-            Pair::Claude { id, name, input, content } => Some((
-                vec![json!({"type": "tool_use", "id": id, "name": name, "input": input})],
-                vec![json!({"tool_use_id": id, "type": "tool_result", "content": content, "is_error": false})],
+            Pair::Edits { steps, .. } => Some(
+                steps
+                    .iter()
+                    .enumerate()
+                    .map(|(k, step)| match step {
+                        Step::Change(change) => change_record(change, &id(k)),
+                        Step::Command(command) => command_record(command, &id(k), cwd),
+                    })
+                    .collect(),
+            ),
+            Pair::Claude { id, name, input, content } => Some(vec![(
+                json!({"type": "tool_use", "id": id, "name": name, "input": input}),
+                json!({"tool_use_id": id, "type": "tool_result", "content": content, "is_error": false}),
                 None,
-            )),
-            _ => None,
+            )]),
+            Pair::Other { .. } => None,
         }
     }
     /// Codex call and output response items, for commands Codex recorded.
@@ -595,6 +865,7 @@ impl Pair {
         match self {
             Pair::Shell(shell) => shell.codex_items(),
             Pair::Commands { id, program, header, result, .. } => Some(exec_items(id, program, header, result)),
+            Pair::Edits { items, .. } => Some(items.clone()),
             _ => None,
         }
     }
@@ -608,6 +879,23 @@ impl Pair {
                 .map(|(k, c)| {
                     let id = format!("exec-{}", super::stable_id(&format!("{seed}:{k}")));
                     command_cell(&id, &c.command, c.cwd.as_deref(), cwd, &c.output, c.exit_code)
+                })
+                .collect(),
+            Pair::Edits { id, cells, commands, .. } => cells
+                .iter()
+                .enumerate()
+                .map(|(k, cell)| match cell {
+                    // The call's ID names the item, so its file changes are found again.
+                    Cell::Changed(item) => {
+                        let mut item = item.clone();
+                        item["id"] = json!(format!("{id}#{k}"));
+                        item
+                    }
+                    Cell::Ran(c) => {
+                        let id = format!("exec-{}", super::stable_id(&format!("{seed}:{k}")));
+                        let c = &commands[*c];
+                        command_cell(&id, &c.command, c.cwd.as_deref(), cwd, &c.output, c.exit_code)
+                    }
                 })
                 .collect(),
             Pair::Claude { id, name, input, content } => {
