@@ -98,7 +98,9 @@ an archived branch: its native transcript is moved out of the resume list with a
 integrity manifest (Codex through its native archive), its namespace receives a new
 projection of the canonical history, and **Restore** in the status dialog turns the
 branch into a separate conversation in every CLI. A restore that cannot complete is shown
-on its own row and tried again; other conversations keep synchronizing.
+on its own row and tried again; other conversations keep synchronizing. A native session
+that is waiting to leave its resume list and is continued after the canonical history last
+changed becomes its namespace's session again, and its history becomes the canonical one.
 
 Copies created by earlier versions are migrated once: each group of recorded copies
 becomes one conversation, the most recently modified copy defines its history, each
@@ -150,7 +152,9 @@ because it contains a record format Kiln does not know yet, an oversized or inco
 history, a response still being written — are shown in grey without a badge.
 Codex native import provenance is also checked: importing an unchanged Kiln copy
 through Codex Desktop does not start another transfer loop or consume an initial
-conversation slot. A genuinely continued imported copy remains eligible.
+conversation slot. An imported copy without a Codex turn of its own leaves the Codex
+resume list and keeps the conversation's Codex session, whatever form the import gave its
+tool calls. An imported copy continued in Codex becomes the conversation's Codex session.
 
 The status dialog distinguishes discovery, no conversations found in the open folders, and
 waiting for a completed response. A discovered unsupported transcript stays visible

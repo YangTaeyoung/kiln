@@ -1270,12 +1270,106 @@ fn native_import_of_a_kiln_copy_does_not_echo_but_new_turns_sync() {
         .unwrap(),
     )
     .unwrap();
+    native_turn(&external.path);
     let changed = workspace_scan(&f, &scope);
     assert_eq!(changed.published, 1);
     assert!(changed.errors.is_empty(), "{:?}", changed.errors);
     assert_eq!(changed.rows.len(), 1, "the continued import is the same conversation");
     assert_eq!(transcripts(&f.pair.codex.root), vec![external.path.clone()], "the continued import is the Codex projection");
     assert_eq!(read_messages(&f.projection_in(&f.pair.claude.root)).unwrap(), continued);
+}
+
+/// Appends the turn context record the Codex CLI writes for each model turn.
+fn native_turn(path: &Path) {
+    let row = json!({"timestamp":"2026-10-14T00:00:00Z","type":"turn_context","payload":{"cwd":"/tmp","model":"gpt-test"}});
+    let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(file, "{row}").unwrap();
+}
+/// Publishes a Codex Desktop import of the Claude projection `copy` holding `history`, with its ledger record.
+fn desktop_import(f: &Fixture, copy: &Source, name: &str, history: &[Message]) -> Source {
+    let import = destination(&f.pair, copy, &stable_id(name), chrono::Utc::now()).unwrap();
+    publish(&import.path, &format::render(Tool::Codex, &import.id, &import.cwd, "2026-10-14T00:00:00Z", history).unwrap()).unwrap();
+    fs::write(
+        f.pair.codex.root.join("external_agent_session_imports.json"),
+        serde_json::to_vec(&json!({"records":[{"source_path":copy.path,"imported_thread_id":import.id}]})).unwrap(),
+    )
+    .unwrap();
+    import
+}
+fn turn(history: &mut Vec<Message>, question: &str, answer: &str) {
+    history.push(Message { role: "user".into(), text: question.into(), images: vec![] });
+    history.push(Message { role: "assistant".into(), text: answer.into(), images: vec![] });
+}
+
+#[test]
+fn a_desktop_import_without_native_turns_leaves_without_displacing_the_original() {
+    let f = Fixture::new(Tool::Codex);
+    native_turn(&f.source.path);
+    let scope = workspace_scope(&f);
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+    let copy = f.projection_in(&f.pair.claude.root);
+    let mut flattened = messages();
+    flattened[1].text = "[external_agent_tool_call: Bash]\ncommand: true".into();
+    let import = desktop_import(&f, &copy, "flattened-desktop-import", &flattened);
+    let joined = workspace_scan(&f, &scope);
+    assert!(joined.errors.is_empty(), "{:?}", joined.errors);
+    assert_eq!(f.projection_in(&f.pair.codex.root).id, f.source.id, "the original stays the Codex projection");
+    assert!(!import.path.exists(), "the import leaves the resume list");
+    let record = f.hub().conversations.into_values().next().unwrap();
+    assert!(record.branches.is_empty(), "a copy without native turns is not a branch");
+    assert_eq!(hub::Hub::open(&f.config).unwrap().events(&hub::conversation_id(&hub::NativeRef::of(&f.source))).unwrap(), messages());
+    let mut continued = messages();
+    turn(&mut continued, "Original turn", "Original answer");
+    write_history(&f.source, &continued, SystemTime::now());
+    native_turn(&f.source.path);
+    let changed = workspace_scan(&f, &scope);
+    assert!(changed.errors.is_empty(), "{:?}", changed.errors);
+    assert_eq!(read_messages(&f.projection_in(&f.pair.claude.root)).unwrap(), continued);
+}
+
+#[test]
+fn a_displaced_original_continued_after_the_canonical_history_takes_its_namespace_back() {
+    let f = Fixture::new(Tool::Codex);
+    native_turn(&f.source.path);
+    set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(1200));
+    let scope = workspace_scope(&f);
+    let original = f.source.clone();
+    // The original has a descendant history, so its native archive is refused.
+    let scan = || {
+        scan_with_metadata(&f.config, &f.pair, &f.gate, &mut Cache::new(), Some(&scope), |source, request| {
+            if matches!(request, Metadata::Archive) {
+                ensure!(source.id != original.id, "Linked snapshot has descendant histories; preserved for review");
+                return archiving_into(source);
+            }
+            Ok(None)
+        }, |_| {})
+        .unwrap()
+    };
+    assert_eq!(scan().published, 1);
+    let copy = f.projection_in(&f.pair.claude.root);
+    set_modified(&copy.path, SystemTime::now() - Duration::from_secs(1100));
+    let mut imported = messages();
+    imported[1].text = "[external_agent_tool_call: Bash]\ncommand: true".into();
+    turn(&mut imported, "Import turn", "Import answer");
+    let import = desktop_import(&f, &copy, "continued-desktop-import", &imported);
+    native_turn(&import.path);
+    set_modified(&import.path, SystemTime::now() - Duration::from_secs(600));
+    scan();
+    assert_eq!(f.projection_in(&f.pair.codex.root).id, import.id, "a continued import becomes the Codex projection");
+    assert!(f.hub().conversations.values().any(|r| r.pending.iter().any(|s| s.id == f.source.id)));
+    let mut continued = messages();
+    turn(&mut continued, "Original turn", "Original answer");
+    write_history(&f.source, &continued, SystemTime::now());
+    native_turn(&f.source.path);
+    for _ in 0..3 {
+        scan();
+    }
+    assert_eq!(f.projection_in(&f.pair.codex.root).id, f.source.id, "the newer original is the Codex projection again");
+    assert!(f.source.path.exists());
+    assert_eq!(read_messages(&f.projection_in(&f.pair.claude.root)).unwrap(), continued);
+    assert!(!import.path.exists(), "the older import leaves the resume list");
+    let record = f.hub().conversations.into_values().next().unwrap();
+    assert!(record.pending.is_empty(), "{:?}", record.pending);
 }
 
 #[test]
