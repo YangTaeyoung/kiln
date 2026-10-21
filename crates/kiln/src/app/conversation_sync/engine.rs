@@ -402,43 +402,24 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         }
     }
 
-    /// A native session copied from a projection outside Kiln: an unchanged copy leaves the
-    /// resume list, a continued copy becomes its namespace's projection.
+    /// A native session copied from a projection outside Kiln: an unchanged copy, or one
+    /// without a native turn, leaves the resume list; a continued copy becomes its namespace's
+    /// projection.
     fn join(&mut self, hub: &mut Hub, cid: &str, source: Source) -> Result<()> {
-        let native = NativeRef::of(&source);
         if recently_modified(stamp(&source)?.1, self.cache.quiet) {
             return Ok(());
         }
         let messages = read_messages(&source)?;
         let events = hub.events(cid)?;
+        let unchanged = shared(&events, &messages) == messages.len() || canonical::kiln_written(&source)?;
         let record = hub.state.conversations.get_mut(cid).unwrap();
-        if shared(&events, &messages) == messages.len() {
+        if unchanged {
             if !record.pending.iter().any(|s| s.path == source.path) {
                 record.pending.push(source);
             }
             return Ok(());
         }
-        if let Some(i) = record
-            .projections
-            .iter()
-            .position(|p| !p.removed && p.source.tool == source.tool && p.source.root == source.root)
-        {
-            let old = record.projections.remove(i);
-            record.pending.push(old.source);
-        }
-        record.pending.retain(|s| s.path != source.path);
-        record.aliases.retain(|a| *a != native);
-        record.projections.push(Projection {
-            source,
-            synced: 0,
-            stamp: None,
-            origin: false,
-            removed: false,
-            title: String::new(),
-            checkpoint: None,
-            database: None,
-            rendered: 0,
-        });
+        record.displace(source);
         Ok(())
     }
 
@@ -464,33 +445,42 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         Ok(true)
     }
 
-    /// Moves native sessions left over from earlier copies out of their resume lists; one that
-    /// continued past the canonical history is kept as a branch.
+    /// Moves native sessions left over from earlier copies out of their resume lists; one whose
+    /// native turns continued past the canonical history is kept as a branch, or becomes its
+    /// namespace's projection again when it changed after the canonical history did.
     fn archive_pending(&mut self, hub: &mut Hub, cid: &str, events: &mut Option<Vec<format::Message>>) -> Result<()> {
         let pending = hub.state.conversations[cid].pending.clone();
         let mut failure = None;
         for source in pending {
             let native = NativeRef::of(&source);
             if storage::exists(&source) {
-                if recently_modified(stamp(&source)?.1, self.cache.quiet) {
+                let modified = stamp(&source)?.1;
+                if recently_modified(modified, self.cache.quiet) {
                     continue;
                 }
-                let messages = match read_messages(&source) {
-                    Ok(messages) => messages,
+                let (messages, native_turns) = match read_messages(&source).and_then(|m| Ok((m, !canonical::kiln_written(&source)?))) {
+                    Ok(read) => read,
                     Err(error) => { failure.get_or_insert(error); continue; }
                 };
+                let mut base = messages.len();
+                if native_turns && !messages.is_empty() {
+                    if events.is_none() {
+                        *events = Some(hub.events(cid)?);
+                    }
+                    base = shared(events.as_ref().unwrap(), &messages);
+                }
+                let record = hub.state.conversations.get_mut(cid).unwrap();
+                if base < messages.len() && modified > record.updated {
+                    record.displace(source);
+                    hub.save()?;
+                    continue;
+                }
                 let archived = match canonical::archive_native(self.config, &source, cid, &mut self.metadata) {
                     Ok(archived) => archived,
                     Err(error) => { failure.get_or_insert(error); continue; }
                 };
-                if !messages.is_empty() {
-                    if events.is_none() {
-                        *events = Some(hub.events(cid)?);
-                    }
-                    let base = shared(events.as_ref().unwrap(), &messages);
-                    if base < messages.len() {
-                        hub.save_branch(cid, base, &messages[base..], Some(native.clone()), Some(archived))?;
-                    }
+                if base < messages.len() {
+                    hub.save_branch(cid, base, &messages[base..], Some(native.clone()), Some(archived))?;
                 }
             }
             let record = hub.state.conversations.get_mut(cid).unwrap();

@@ -232,6 +232,13 @@ enum UsageSource {
     Live,
     /// Kiln's saved copy, which no CLI renews.
     Snapshot,
+    /// A Claude sign-in kept only in Kiln's store until it is applied.
+    Staged,
+}
+
+/// Whether a profile's usage read waits until its sign-in is applied, as a staged Codex sign-in does.
+fn usage_waits_for_apply(tool: Tool, pending: bool) -> bool {
+    pending && tool == Tool::Codex
 }
 
 /// Attempts to take the CLI's refresh locks before a renewal waits for the next round.
@@ -508,7 +515,14 @@ impl AccountManager {
         // Pin the original profile before mutating credentials. Same-account
         // browser sign-in is staged until the user's explicit Apply action.
         let saved = self.save_credentials_locked(tool, &profile.label, credentials.secret, None, credentials.email, credentials.oauth, false)?;
-        self.with_state(|s| s.login_required.remove(&(tool, id.to_string())));
+        // The new sign-in replaces the previous failure and is read with the next scheduler tick.
+        self.with_state(|s| {
+            let key = (tool, id.to_string());
+            s.login_required.remove(&key);
+            s.renewal_rejected.remove(&key);
+            if s.usage.get(&key).is_some_and(Usage::is_unavailable) { s.usage.remove(&key); }
+            s.usage_poll.insert(key, UsagePoll { next_at: now_unix(), ..Default::default() });
+        });
         Ok(saved)
     }
 
@@ -549,6 +563,7 @@ impl AccountManager {
                     }
                 });
             m.inner.login.lock()[idx(tool)] = None;
+            if result.is_ok() { m.refresh_usage(tool); }
             m.with_state(|s| {
                 s.busy[idx(tool)] = None;
                 match result {
@@ -1076,7 +1091,7 @@ impl AccountManager {
     /// A later account can become due between periodic credential checks.
     fn usage_due(&self, tool: Tool, now: i64) -> bool {
         self.with_state(|s| !s.refreshing[idx(tool)] && s.settings.tool(tool).profiles.iter().any(|profile| {
-            !profile.pending_login && s.usage_poll.get(&(tool, profile.profile.id.clone())).is_some_and(|poll| {
+            !usage_waits_for_apply(tool, profile.pending_login) && s.usage_poll.get(&(tool, profile.profile.id.clone())).is_some_and(|poll| {
                 poll.next_at > 0 && now >= poll.next_at.max(poll.blocked_until)
             })
         }))
@@ -1222,6 +1237,11 @@ impl AccountManager {
         let stored = self.with_state(|state| state.settings.tool(tool).profiles.iter().find(|profile| profile.profile.id == id).cloned()).context("account profile missing")?;
         let expected = stored.profile.email.as_deref().context("account identity unavailable")?;
         let matches = |email: Option<String>| email.is_some_and(|email| email.eq_ignore_ascii_case(expected));
+        if tool == Tool::Claude && stored.pending_login {
+            let secret = self.inner.env.store.get(&profile_service(tool), id)?;
+            if secret.is_some() && !matches(stored.oauth_account.as_ref().and_then(claude::oauth_email)) { bail!("account credentials do not match saved profile"); }
+            return Ok(secret.map(|secret| (secret, UsageSource::Staged)));
+        }
         if self.runtime_dir(tool, id).is_dir() {
             let Some(secret) = self.runtime_secret(tool, id)? else { return Ok(None); };
             let email = match tool {
@@ -1244,14 +1264,15 @@ impl AccountManager {
         Ok(secret.map(|secret| (secret, UsageSource::Snapshot)))
     }
 
-    /// Renews Claude `secret` for profile `id` when it is about to expire and kept in a Claude
-    /// Code credential store, as the CLI renews it. None while the CLI is renewing it.
+    /// Renews Claude `secret` for profile `id` when it is about to expire, as the CLI renews it:
+    /// in a Claude Code credential store under the CLI's locks, or in Kiln's store when Kiln holds
+    /// the only copy of the login. None while the CLI is renewing it.
     fn renew_claude(&self, id: &str, source: &UsageSource, secret: &str, now_ms: i64) -> Result<Option<String>> {
         let env = &self.inner.env;
         let (config, folder) = match source {
             UsageSource::Runtime(dir) => (Some(dir.clone()), dir.clone()),
             UsageSource::Live => (env.claude_config_dir.clone(), env.claude_config_dir.clone().unwrap_or_else(|| env.home.join(".claude"))),
-            UsageSource::Snapshot => bail!("sign-in expired"),
+            UsageSource::Snapshot | UsageSource::Staged => return self.renew_saved_claude(id, source, secret, now_ms),
         };
         let observed = claude::access_token(secret)?;
         std::fs::create_dir_all(&folder)?;
@@ -1277,6 +1298,33 @@ impl AccountManager {
         Ok(Some(next))
     }
 
+    /// Renews a Claude login kept only in Kiln's store: a staged sign-in, or the saved login of
+    /// an inactive profile without a runtime folder; the active profile's saved login is not
+    /// renewed. The renewed login is saved while the stored refresh token is still the one sent.
+    fn renew_saved_claude(&self, id: &str, source: &UsageSource, secret: &str, now_ms: i64) -> Result<Option<String>> {
+        let env = &self.inner.env;
+        let service = profile_service(Tool::Claude);
+        let current = || -> Result<String> {
+            if *source == UsageSource::Snapshot && self.active(Tool::Claude).as_deref() == Some(id) { bail!("sign-in expired"); }
+            if self.usage_credentials(Tool::Claude, id)?.is_none_or(|(_, now)| &now != source) { bail!("account credentials changed"); }
+            env.store.get(&service, id)?.context("account credentials missing")
+        };
+        let stored = {
+            let _op = self.inner.op.lock();
+            current()?
+        };
+        if claude::access_token(&stored).ok() != claude::access_token(secret).ok() || !claude_refresh::expiring(&stored, now_ms) {
+            return Ok(Some(stored));
+        }
+        let grant = claude_refresh::Grant::from_secret(&stored).ok_or(claude_refresh::SignInRequired)?;
+        let renewed = (env.claude_renew)(&grant)?;
+        let _op = self.inner.op.lock();
+        let latest = current()?;
+        let Some(next) = claude_refresh::merged(&latest, &grant.refresh_token, &renewed, now_ms)? else { return Ok(Some(latest)) };
+        env.store.set(&service, id, &next)?;
+        Ok(Some(next))
+    }
+
     fn refresh_profiles(&self, tool: Tool, manual: bool) {
         self.refresh_profiles_with_clock(tool, manual, &now_unix);
     }
@@ -1287,7 +1335,7 @@ impl AccountManager {
             if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
             let credentials = {
                 let _op = self.inner.op.lock();
-                if self.pending_login(tool, &profile.id) { continue; }
+                if usage_waits_for_apply(tool, self.pending_login(tool, &profile.id)) { continue; }
                 self.usage_credentials(tool, &profile.id)
             };
             let (mut secret, source) = match credentials {
@@ -1352,7 +1400,7 @@ impl AccountManager {
             };
             let _op = self.inner.op.lock();
             // A response belongs to the exact profile credentials it was requested with.
-            if self.pending_login(tool, &profile.id) || self.usage_secret(tool, &profile.id).ok().flatten().as_deref() != Some(&secret) { continue; }
+            if usage_waits_for_apply(tool, self.pending_login(tool, &profile.id)) || self.usage_secret(tool, &profile.id).ok().flatten().as_deref() != Some(&secret) { continue; }
             let exists = self.profiles(tool).iter().any(|p| p.id == profile.id);
             if !exists { continue; }
             let (usage, delay) = match result {
@@ -1740,9 +1788,15 @@ mod tests {
         assert_eq!(later.load(Ordering::Relaxed), 2);
         assert!(!manager.usage_due(Tool::Claude, 1_599));
         manager.with_state(|s| s.usage_poll.get_mut(&(Tool::Claude, b.id.clone())).unwrap().blocked_until = 2_000);
+        let a = manager.profiles(Tool::Claude)[0].id.clone();
         manager.with_state(|s| s.settings.claude.profiles[0].pending_login = true);
-        assert!(!manager.usage_due(Tool::Claude, 1_900), "staged logins and provider delays do not cause busy polling");
-        manager.with_state(|s| s.settings.claude.profiles[0].pending_login = false);
+        assert!(manager.usage_due(Tool::Claude, 1_900), "a staged Claude login keeps its own schedule");
+        manager.with_state(|s| s.usage_poll.get_mut(&(Tool::Claude, a.clone())).unwrap().blocked_until = 2_000);
+        assert!(!manager.usage_due(Tool::Claude, 1_900), "provider delays do not cause busy polling");
+        manager.with_state(|s| {
+            s.settings.claude.profiles[0].pending_login = false;
+            s.usage_poll.get_mut(&(Tool::Claude, a)).unwrap().blocked_until = 0;
+        });
         manager.refresh_profiles_with_clock(Tool::Claude, true, &clock);
         store.delete(&profile_service(Tool::Claude), &b.id).unwrap();
         manager.with_state(|s| s.usage_poll.get_mut(&(Tool::Claude, b.id.clone())).unwrap().blocked_until = 0);
@@ -1964,21 +2018,165 @@ mod tests {
         assert_eq!(m.usage(Tool::Claude, &b.id).unwrap().five_hour.unwrap().0, 0.3);
     }
 
+    /// Two saved Claude accounts without runtime folders; `a` is active and `b` holds `b_secret`.
+    fn inactive_claude_snapshot(env: &Env, store: &crate::MemoryStore, m: &AccountManager, b_secret: &str) -> (Profile, Profile) {
+        login_claude(env, store, "b@example.test", "b-old");
+        let b = m.save_current(Tool::Claude, "b").unwrap();
+        store.set(&profile_service(Tool::Claude), &b.id, b_secret).unwrap();
+        login_claude(env, store, "a@example.test", "a");
+        let a = m.save_current(Tool::Claude, "a").unwrap();
+        assert!(!m.runtime_dir(Tool::Claude, &b.id).exists());
+        (a, b)
+    }
+
     #[test]
-    fn an_expired_saved_snapshot_is_not_sent_to_the_usage_endpoint() {
+    fn an_inactive_accounts_saved_login_is_renewed_before_its_usage_is_read() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("at-b-renewed", 0.4);
+        let grants = Arc::new(AtomicUsize::new(0));
+        let seen = grants.clone();
+        env.claude_renew = Arc::new(move |grant| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(grant.refresh_token, "rt-b-old");
+            Ok(renewal("b-renewed"))
+        });
+        let m = AccountManager::with_env(env.clone());
+        let (_, b) = inactive_claude_snapshot(&env, &store, &m, &expired_claude_cred("b-old"));
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(m.usage(Tool::Claude, &b.id).unwrap().five_hour.unwrap().0, 0.4);
+        let saved: Value = serde_json::from_str(&store.get(&profile_service(Tool::Claude), &b.id).unwrap().unwrap()).unwrap();
+        assert_eq!(saved["claudeAiOauth"]["accessToken"], "at-b-renewed");
+        assert_eq!(saved["claudeAiOauth"]["refreshToken"], "rt-b-renewed");
+        assert!(saved["claudeAiOauth"]["expiresAt"].as_i64().unwrap() > now_unix() * 1000);
+        assert_eq!(saved["claudeAiOauth"]["subscriptionType"], "max");
+        assert_eq!(saved["mcpOAuth"]["kept"], true);
+        assert_eq!(live_claude(&store), claude_cred("a"), "the live CLI login is untouched");
+        assert!(!m.runtime_dir(Tool::Claude, &b.id).exists());
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(grants.load(Ordering::SeqCst), 1, "a fresh login is not renewed again");
+    }
+
+    #[test]
+    fn a_rejected_saved_login_asks_to_sign_in_without_a_usage_request() {
         let root = tempfile::tempdir().unwrap();
         let (mut env, store) = Env::sandbox(root.path(), true);
         env.probe = usage_from("unused", 0.0);
-        env.claude_renew = Arc::new(|_| panic!("a saved snapshot is not a CLI credential store"));
+        env.claude_renew = Arc::new(|_| Err(crate::claude_refresh::SignInRequired.into()));
         let m = AccountManager::with_env(env.clone());
-        login_claude(&env, &store, "b@example.test", "b-old");
-        let b = m.save_current(Tool::Claude, "b").unwrap();
-        store.set(&profile_service(Tool::Claude), &b.id, &expired_claude_cred("b-old")).unwrap();
-        login_claude(&env, &store, "a@example.test", "a");
-        m.save_current(Tool::Claude, "a").unwrap();
-        assert!(!m.runtime_dir(Tool::Claude, &b.id).exists());
+        let (_, b) = inactive_claude_snapshot(&env, &store, &m, &expired_claude_cred("b-old"));
         m.refresh_usage_blocking(Tool::Claude);
-        assert!(m.usage(Tool::Claude, &b.id).unwrap().status.contains("sign-in expired"));
+        assert!(m.usage(Tool::Claude, &b.id).unwrap().status.contains("sign-in required"));
+        assert!(m.login_required(Tool::Claude, &b.id));
+        assert_eq!(store.get(&profile_service(Tool::Claude), &b.id).unwrap(), Some(expired_claude_cred("b-old")));
+    }
+
+    #[test]
+    fn a_saved_login_replaced_during_renewal_is_kept() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("at-b-new-login", 0.2);
+        let m = AccountManager::with_env(env.clone());
+        let (_, b) = inactive_claude_snapshot(&env, &store, &m, &expired_claude_cred("b-old"));
+        let (shared, id) = (store.clone(), b.id.clone());
+        let mut env = env;
+        env.claude_renew = Arc::new(move |_| {
+            shared.set(&profile_service(Tool::Claude), &id, &claude_cred("b-new-login")).unwrap();
+            Ok(renewal("b-renewed"))
+        });
+        let m = AccountManager::with_env(env);
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(store.get(&profile_service(Tool::Claude), &b.id).unwrap(), Some(claude_cred("b-new-login")));
+        assert_eq!(m.usage(Tool::Claude, &b.id).unwrap().five_hour.unwrap().0, 0.2);
+    }
+
+    #[test]
+    fn the_active_accounts_saved_login_is_not_renewed() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("unused", 0.0);
+        env.claude_renew = Arc::new(|_| panic!("the active account's login is shared with the live CLI"));
+        let m = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "a@example.test", "a");
+        let a = m.save_current(Tool::Claude, "a").unwrap();
+        store.set(&profile_service(Tool::Claude), &a.id, &expired_claude_cred("a")).unwrap();
+        set_claude_identity(&env, "someone-else@example.test");
+        m.refresh_usage_blocking(Tool::Claude);
+        assert!(m.usage(Tool::Claude, &a.id).unwrap().status.contains("sign-in expired"));
+        assert_eq!(store.get(&profile_service(Tool::Claude), &a.id).unwrap(), Some(expired_claude_cred("a")));
+    }
+
+    #[test]
+    fn a_staged_login_is_renewed_in_the_saved_copy_only() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("at-a-renewed", 0.5);
+        env.claude_renew = Arc::new(|grant| {
+            assert_eq!(grant.refresh_token, "rt-a-staged");
+            Ok(renewal("a-renewed"))
+        });
+        let m = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "a@example.test", "a");
+        let a = m.save_current(Tool::Claude, "a").unwrap();
+        m.save_relogin_locked(Tool::Claude, &a.id, crate::login::LoginCredentials {
+            secret: expired_claude_cred("a-staged"), email: a.email.clone(), oauth: None,
+        }).unwrap();
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(m.usage(Tool::Claude, &a.id).unwrap().five_hour.unwrap().0, 0.5);
+        let saved: Value = serde_json::from_str(&store.get(&profile_service(Tool::Claude), &a.id).unwrap().unwrap()).unwrap();
+        assert_eq!(saved["claudeAiOauth"]["refreshToken"], "rt-a-renewed");
+        assert_eq!(live_claude(&store), claude_cred("a"), "the live CLI login is untouched");
+        assert!(m.pending_login(Tool::Claude, &a.id));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_staged_relogin_reads_usage_with_the_new_login_before_apply() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(d.path(), false);
+        env.probe = usage_from("at-fresh", 0.25);
+        env.claude_renew = Arc::new(|_| Err(crate::claude_refresh::SignInRequired.into()));
+        let m = AccountManager::with_env(env.clone());
+        m.write_live(Tool::Claude, &expired_claude_cred("old")).unwrap();
+        set_claude_identity(&env, "same@example.test");
+        let original = m.save_current(Tool::Claude, "Work").unwrap();
+        m.launch_environment(Tool::Claude).unwrap();
+        let other = m.save_credentials_locked(Tool::Claude, "Personal", claude_cred("a"), None, Some("a@example.test".into()), None, true).unwrap();
+        m.refresh_usage_blocking(Tool::Claude);
+        assert!(m.usage(Tool::Claude, &original.id).unwrap().status.contains("sign-in required"));
+        let script = d.path().join("login-fixture");
+        std::fs::write(&script, format!("#!/bin/sh\nprintf '%s' '{}' > \"$CLAUDE_CONFIG_DIR/.credentials.json\"\nprintf '%s' '{{\"oauthAccount\":{{\"emailAddress\":\"same@example.test\"}}}}' > \"$CLAUDE_CONFIG_DIR/.claude.json\"\n", claude_cred("fresh"))).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        m.start_login_job(Tool::Claude, original.label.clone(), Some(original.id.clone()), script, std::time::Duration::from_secs(3));
+        let start = std::time::Instant::now();
+        while m.with_state(|s| s.busy[idx(Tool::Claude)].is_some()) || m.is_refreshing(Tool::Claude) {
+            assert!(start.elapsed() < std::time::Duration::from_secs(4));
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(m.with_state(|s| s.error[idx(Tool::Claude)].is_none()), "{:?}", m.with_state(|s| s.error[idx(Tool::Claude)].clone()));
+        assert_eq!(m.usage(Tool::Claude, &original.id).unwrap().five_hour.unwrap().0, 0.25);
+        assert!(!m.login_required(Tool::Claude, &original.id));
+        assert!(m.pending_login(Tool::Claude, &original.id));
+        assert_eq!(m.active(Tool::Claude), Some(other.id));
+        assert_eq!(m.runtime_secret(Tool::Claude, &original.id).unwrap(), Some(expired_claude_cred("old")));
+        assert_eq!(m.read_live(Tool::Claude).unwrap().map(|(secret, _)| secret), Some(expired_claude_cred("old")));
+        assert_eq!(store.get(&profile_service(Tool::Claude), &original.id).unwrap(), Some(claude_cred("fresh")));
+    }
+
+    #[test]
+    fn a_staged_relogin_clears_the_previous_failure() {
+        let d = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(d.path(), true);
+        let m = AccountManager::with_env(env.clone());
+        let (_, b) = inactive_claude_snapshot(&env, &store, &m, &expired_claude_cred("b-old"));
+        m.set_usage(Tool::Claude, &b.id, Usage::unavailable("sign-in required"));
+        m.save_relogin_locked(Tool::Claude, &b.id, crate::login::LoginCredentials {
+            secret: claude_cred("b-new"), email: b.email.clone(), oauth: None,
+        }).unwrap();
+        assert!(m.usage(Tool::Claude, &b.id).is_none());
+        assert!(m.usage_due(Tool::Claude, now_unix()), "the new login is read with the next scheduler tick");
     }
 
     #[test]

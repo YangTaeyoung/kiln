@@ -102,6 +102,32 @@ impl Record {
             pending: Vec::new(),
         }
     }
+    /// Makes `source` the projection of its namespace; the namespace's current projection
+    /// leaves its resume list with the next synchronization.
+    pub fn displace(&mut self, source: Source) {
+        let native = NativeRef::of(&source);
+        if let Some(i) = self
+            .projections
+            .iter()
+            .position(|p| !p.removed && p.source.tool == source.tool && p.source.root == source.root)
+        {
+            let old = self.projections.remove(i);
+            self.pending.push(old.source);
+        }
+        self.pending.retain(|s| s.path != source.path);
+        self.aliases.retain(|a| *a != native);
+        self.projections.push(Projection {
+            source,
+            synced: 0,
+            stamp: None,
+            origin: false,
+            removed: false,
+            title: String::new(),
+            checkpoint: None,
+            database: None,
+            rendered: 0,
+        });
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]

@@ -5,10 +5,11 @@ It requests all saved accounts at startup and every five minutes, outside the
 render thread. Per-tool in-flight guards prevent overlap. Closing the GUI stops
 new checks; it never sends input to, restarts or stops agent panels. Providers
 are queried independently; profile mutations use the existing credential lock,
-and results from deleted, staged or changed credentials are discarded.
+and results from deleted or changed credentials, or from a Codex sign-in that is not
+applied yet, are discarded.
 
-A one-second scheduler tick dispatches a tool only when a saved, unstaged
-profile reaches its own next deadline and provider backoff has elapsed. This
+A one-second scheduler tick dispatches a tool only when a saved profile (for
+Codex, one whose sign-in is applied) reaches its own next deadline and provider backoff has elapsed. This
 avoids skipping a later account when earlier requests finish faster than the
 previous batch. The five-minute periodic pass still checks changed credentials
 and newly saved accounts. Missing credentials postpone that profile's next
@@ -98,7 +99,18 @@ way the official CLI 2.1.304 renews it:
 - `invalid_grant` marks the account for sign-in again and stops its requests until its
   credentials change.
 
-Kiln's saved snapshots are not renewed; an expired one is reported without a usage request.
+Kiln also renews, the same way, a Claude login that only Kiln's store holds: a staged sign-in,
+or the saved login of an inactive profile without a runtime folder. The re-read and the
+compare-and-swap save use Kiln's credential lock and Kiln's store; no CLI store or runtime folder
+is written. The active profile's saved login shares its refresh token with the live CLI and is
+not renewed; an expired one is reported without a usage request.
+
+A completed browser sign-in of a Claude profile is read with its staged credentials before
+**Apply**; the active profile, runtime folders and the live CLI login stay unchanged until
+then. The sign-in clears the profile's previous failure, makes it due with the next scheduler
+tick and starts a usage refresh of its tool. A Codex sign-in is read once applied, because
+the Codex reader uses the CLI of the Codex home holding the applied login.
+
 Codex renewal stays in its own app-server reader.
 
 ## Credits, reset credits and usage history
@@ -127,7 +139,7 @@ Codex renewal stays in its own app-server reader.
 
 Use `cargo test -p kiln-accounts --lib`. Isolated fake credentials/probes exercise
 Claude login renewal (CLI locks, re-read, grant, compare-and-swap save, rejected and busy
-logins, expired snapshots), both tools, active and inactive profiles, repeated cycles without settings UI,
+logins, saved logins of inactive and active profiles, staged sign-ins read before Apply), both tools, active and inactive profiles, repeated cycles without settings UI,
 shutdown, backoff, stale bars and deletion during a slow response. Real loopback
 HTTP fixtures check GET/no body, redirects, response bounds, Retry-After and
 private-response redaction. Four-language GPU captures cover the account card

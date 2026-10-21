@@ -63,9 +63,11 @@ The account card shows the last successful check time and retains the last known
 bars when a request fails. The refresh button requests another check, subject
 to provider backoff. New accounts are picked up by the next cycle.
 
-These are read-only usage requests: Kiln does not send a model prompt, consume
-reset credits or refresh OAuth tokens. Each account uses its latest persistent
-CLI credentials; a completed browser login must first be **Applied**. Provider
+These are read-only usage requests: Kiln does not send a model prompt or consume
+reset credits. Each account uses its latest persistent CLI credentials. Kiln renews
+an expiring Claude login the way Claude Code does, including the saved login of an
+account you switched away from. A completed Claude browser sign-in is read right
+away, before **Apply**; a Codex sign-in is read once applied. Provider
 rate limiting delays subsequent checks, including manual checks, according to
 Retry-After (bounded to one minute through one day), or five minutes when absent.
 A 401 pauses that credential for an hour. A newly refreshed CLI token can be
