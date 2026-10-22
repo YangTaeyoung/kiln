@@ -118,6 +118,7 @@ pub(super) fn completion(tool: Tool, rows: &[Value]) -> Result<Option<(usize, Op
                     && matches!(r["payload"]["type"].as_str(), Some("task_complete" | "turn_complete" | "turn_aborted"))
             })
             .map(|index| (index, None))),
+        Tool::Antigravity => Ok(rows.iter().rposition(antigravity_turn_end).map(|index| (index, None))),
     }
 }
 
@@ -152,6 +153,10 @@ pub(super) fn parse_appended(
             let messages = codex(&all)?;
             Ok(Some((messages, completion(Tool::Codex, rows)?)))
         }
+        Tool::Antigravity => {
+            let end = completion(Tool::Antigravity, rows)?;
+            Ok(Some((antigravity(rows, end.as_ref().map(|(index, _)| *index)), end)))
+        }
     }
 }
 
@@ -159,6 +164,7 @@ pub fn parse(tool: Tool, rows: &[Value]) -> Result<Vec<Message>> {
     match tool {
         Tool::Claude => claude(rows),
         Tool::Codex => codex(rows),
+        Tool::Antigravity => Ok(antigravity(rows, completion(Tool::Antigravity, rows)?.map(|(index, _)| index))),
     }
 }
 
@@ -238,6 +244,81 @@ fn tool_pairs(messages: &[Message], changes: &super::tools::FileChanges) -> Hash
 
 fn claude(rows: &[Value]) -> Result<Vec<Message>> {
     Ok(claude_chain(rows, None)?.map(|(messages, _)| messages).unwrap_or_default())
+}
+
+/// Marker the reader appends to an agy transcript whose unanswered turn has settled.
+pub(super) const SETTLED: &str = "KILN_SETTLED";
+
+/// Whether an agy record ends a turn: an answer without tool calls, or the settled marker.
+fn antigravity_turn_end(row: &Value) -> bool {
+    row["type"] == SETTLED
+        || (row["type"] == "PLANNER_RESPONSE"
+            && row["status"] == "DONE"
+            && row["tool_calls"].as_array().is_none_or(Vec::is_empty))
+}
+
+/// The prompt of an agy user input: the text inside `<USER_REQUEST>`, without the metadata
+/// agy adds around it.
+pub(super) fn antigravity_prompt(content: &str) -> &str {
+    let Some(start) = content.find("<USER_REQUEST>") else { return content.trim() };
+    let rest = &content[start + "<USER_REQUEST>".len()..];
+    rest[..rest.find("</USER_REQUEST>").unwrap_or(rest.len())].trim()
+}
+
+/// Messages of agy records up to and including `end`. Tool calls take their results from
+/// the records that follow them, in order.
+fn antigravity(rows: &[Value], end: Option<usize>) -> Vec<Message> {
+    let Some(end) = end else { return Vec::new() };
+    let mut messages = Vec::new();
+    let mut calls = std::collections::VecDeque::new();
+    for row in &rows[..=end] {
+        let step = &row["step_index"];
+        match row["type"].as_str() {
+            Some("USER_INPUT") => {
+                calls.clear();
+                messages.extend(message("user", antigravity_prompt(row["content"].as_str().unwrap_or_default()).to_owned()));
+            }
+            Some("PLANNER_RESPONSE") => {
+                messages.extend(message("assistant", row["content"].as_str().unwrap_or_default().to_owned()));
+                for (i, call) in row["tool_calls"].as_array().into_iter().flatten().enumerate() {
+                    // agy stores each argument as its JSON text.
+                    let args: serde_json::Map<String, Value> = call["args"]
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .map(|(key, value)| {
+                            let value = value.as_str().and_then(|text| serde_json::from_str(text).ok()).unwrap_or_else(|| value.clone());
+                            (key.clone(), value)
+                        })
+                        .collect();
+                    let id = format!("agy-{step}-{i}");
+                    messages.push(Message {
+                        role: "assistant".into(),
+                        text: format!("[Tool call: {}]\n{}", call["name"].as_str().unwrap_or("tool"), Value::Object(args)),
+                        images: Vec::new(),
+                    });
+                    calls.push_back(id);
+                }
+            }
+            Some(SETTLED) => messages.push(Message {
+                role: "assistant".into(),
+                text: "[Session event: unanswered]\nAntigravity stopped before answering this request.".into(),
+                images: Vec::new(),
+            }),
+            _ if row["source"] == "MODEL" && row["content"].is_string() => {
+                let id = calls.pop_front().unwrap_or_else(|| format!("agy-{step}"));
+                let output = row["content"].as_str().unwrap_or_default();
+                // agy heads each result with its start and completion times.
+                let output = output
+                    .split_inclusive('\n')
+                    .skip_while(|line| line.starts_with("Created At: ") || line.starts_with("Completed At: "))
+                    .collect::<String>();
+                messages.push(Message { role: "assistant".into(), text: format!("[Tool result: {id}]\n{}", output.trim_end()), images: Vec::new() });
+            }
+            _ => {}
+        }
+    }
+    messages
 }
 
 /// Messages of the active Claude chain up to its last completed turn, with the row that
@@ -846,6 +927,7 @@ fn render_messages(
                 row["ordinal"] = json!(i);
             }
         }
+        Tool::Antigravity => bail!("Antigravity conversations are read only"),
     }
     let mut bytes = Vec::new();
     for row in rows {
@@ -912,6 +994,7 @@ pub(super) fn render_suffix(
                 if row["payload"]["type"] == "item_completed" { row["payload"]["thread_id"] = json!(id); }
             }
         }
+        Tool::Antigravity => bail!("Antigravity conversations are read only"),
     }
     let mut bytes = Vec::new();
     for row in rows { serde_json::to_writer(&mut bytes, &row)?; bytes.push(b'\n'); }

@@ -28,15 +28,33 @@ use serde::{Deserialize, Serialize};
 pub enum Tool {
     Claude,
     Codex,
+    Antigravity,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 2] = [Tool::Claude, Tool::Codex];
+    pub const ALL: [Tool; 3] = [Tool::Claude, Tool::Codex, Tool::Antigravity];
+    /// Tools whose logins Kiln saves and switches as account profiles.
+    pub const ACCOUNTS: [Tool; 2] = [Tool::Claude, Tool::Codex];
+
+    /// Whether Kiln saves and switches this tool's logins.
+    pub fn has_accounts(self) -> bool {
+        self != Tool::Antigravity
+    }
+
+    /// The executable name of the CLI.
+    pub fn program(self) -> &'static str {
+        match self {
+            Tool::Claude => "claude",
+            Tool::Codex => "codex",
+            Tool::Antigravity => "agy",
+        }
+    }
 
     pub fn key(self) -> &'static str {
         match self {
             Tool::Claude => "claude",
             Tool::Codex => "codex",
+            Tool::Antigravity => "antigravity",
         }
     }
 
@@ -44,6 +62,7 @@ impl Tool {
         match self {
             Tool::Claude => "Claude Code",
             Tool::Codex => "Codex",
+            Tool::Antigravity => "Antigravity",
         }
     }
 }
@@ -150,6 +169,7 @@ pub fn login_command(tool: Tool) -> String {
     match tool {
         Tool::Claude => "claude auth login".to_string(),
         Tool::Codex => "codex login".to_string(),
+        Tool::Antigravity => "agy".to_string(),
     }
 }
 
@@ -158,6 +178,7 @@ pub fn resume_command(tool: Tool) -> &'static str {
     match tool {
         Tool::Claude => "claude --continue",
         Tool::Codex => "codex resume --last",
+        Tool::Antigravity => "agy -c",
     }
 }
 

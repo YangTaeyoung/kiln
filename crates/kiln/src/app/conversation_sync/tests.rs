@@ -28,7 +28,7 @@ fn messages() -> Vec<Message> {
 
 #[test]
 fn active_append_preserves_checkpoint_but_rewrite_and_replacement_retry() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let expected = reader::rows(&f.source, &mut String::new()).unwrap();
         let actual = reader::rows_before_validation(&f.source, &mut String::new(), || {
@@ -93,7 +93,7 @@ fn historical_versions_directory_changes_and_tool_references_preserve_identity()
 fn native_images_roundtrip_without_data_loss_or_sync_echo() {
     // Public one-pixel PNG fixture, not a user's attachment.
     let url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let mut expected = messages();
         expected.insert(
@@ -189,7 +189,7 @@ fn obsolete_echo_bookkeeping_is_retired_only_for_unchanged_imports() {
 fn cli_looking_original_text_is_preserved_as_content_in_both_destinations() {
     let mut original = messages();
     original[0].text = "<command-name>/fixture</command-name>\nThis is original history.".into();
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let bytes = format::render(
             tool,
             &stable_id("reserved-text"),
@@ -482,7 +482,7 @@ impl Fixture {
 }
 #[test]
 fn native_formats_preserve_text_and_visible_items() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let original = messages();
         let bytes = format::render(
             tool,
@@ -507,7 +507,7 @@ fn native_formats_preserve_text_and_visible_items() {
 }
 #[test]
 fn repeated_resume_updates_the_same_two_native_ids_and_preserves_existing_bytes() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         assert_eq!(f.scan().published, 1);
         let peer = f.state().entries.values().find(|e| e.source.tool == opposite(tool)).unwrap().source.clone();
@@ -669,7 +669,7 @@ fn claude_interruption_written_before_its_prompt_keeps_both_native_records() {
 
 #[test]
 fn canonical_append_accepts_assistant_only_continuations_without_inventing_a_prompt() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let original = fs::read(&f.source.path).unwrap();
         let mut messages = read_messages(&f.source).unwrap();
@@ -851,7 +851,7 @@ fn export_native_cli_fixtures() {
     }
     let fixture_title = std::env::var("KILN_SYNC_FIXTURE_TITLE")
         .unwrap_or_else(|_| messages()[0].text.lines().next().unwrap().into());
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let seed = Source {
             tool: opposite(tool),
             root: PathBuf::new(),
@@ -864,7 +864,7 @@ fn export_native_cli_fixtures() {
         let append_only = std::env::var_os("KILN_SYNC_FIXTURE_APPEND_ONLY").is_some();
         let source = if append_only {
             let saved: Source = serde_json::from_slice(&fs::read(dir.join(format!("{}.json", tool.key()))).unwrap()).unwrap();
-            assert_eq!(saved.root, pair.endpoint(tool).root);
+            assert_eq!(saved.root, pair.endpoint(tool).unwrap().root);
             assert_eq!(saved.cwd, dir.to_string_lossy());
             assert_eq!(saved.id, id);
             saved
@@ -1002,7 +1002,7 @@ fn verify_native_cli_continuations() {
     assert!(dir.join("owned-fixture").is_file());
     let config = dir.join("sync-state");
     private_dir(&config).unwrap();
-    let sources: Vec<Source> = Tool::ALL
+    let sources: Vec<Source> = PROJECTED
         .into_iter()
         .map(|tool| {
             serde_json::from_slice(&fs::read(dir.join(format!("{}.json", tool.key()))).unwrap())
@@ -1134,9 +1134,9 @@ fn claude_project_encoding_matches_utf16_and_compaction_is_explicit() {
 fn workspace_scope(f: &Fixture) -> discovery::Scope {
     discovery::Scope {
         workspaces: vec![PathBuf::from(&f.source.cwd)],
-        roots: Tool::ALL
+        roots: PROJECTED
             .into_iter()
-            .map(|t| (t, f.pair.endpoint(t).root.clone()))
+            .map(|t| (t, f.pair.endpoint(t).unwrap().root.clone()))
             .collect(),
     }
 }
@@ -1185,7 +1185,7 @@ fn hub_view(config: &Path) -> State {
 }
 #[test]
 fn existing_sessions_are_discovered_without_hooks_and_without_echo() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
         let original = fs::read(&f.source.path).unwrap();
@@ -1423,11 +1423,11 @@ fn default_and_connected_namespaces_receive_copies_and_continued_copies_sync_bac
     let mut default_pair = f.pair.clone();
     default_pair.claude.root = defaults.join("claude");
     default_pair.codex.root = defaults.join("codex");
-    for tool in Tool::ALL {
-        private_dir(&default_pair.endpoint(tool).root).unwrap();
+    for tool in PROJECTED {
+        private_dir(&default_pair.endpoint(tool).unwrap().root).unwrap();
         scope
             .roots
-            .push((tool, default_pair.endpoint(tool).root.clone()));
+            .push((tool, default_pair.endpoint(tool).unwrap().root.clone()));
     }
     let default_source = destination(
         &default_pair,
@@ -1706,7 +1706,7 @@ fn inspect_existing_workspace_metadata_read_only() {
                 let images: usize = messages.iter().map(|m| m.images.len()).sum();
                 let bytes = serde_json::to_vec(&messages).unwrap().len();
                 // A newly opened live conversation can have no completed checkpoint yet.
-                for tool in Tool::ALL.into_iter().filter(|_| !messages.is_empty()) {
+                for tool in PROJECTED.into_iter().filter(|_| !messages.is_empty()) {
                     let rendered = format::render_titled(tool, &source.id, &source.cwd, "2026-10-14T00:00:00Z", &messages, "Read-only integrity check").unwrap();
                     let parsed_rows: Vec<serde_json::Value> = rendered.split(|b| *b == b'\n').filter(|b| !b.is_empty()).map(serde_json::from_slice).collect::<std::result::Result<_, _>>().unwrap();
                     assert!(format::parse(tool, &parsed_rows).unwrap() == messages, "Native round-trip changed message or image bytes");
@@ -2002,9 +2002,9 @@ fn export_discovered_workspace_fixtures() {
     };
     let scope = discovery::Scope {
         workspaces: vec![dir.clone()],
-        roots: Tool::ALL
+        roots: PROJECTED
             .into_iter()
-            .map(|t| (t, pair.endpoint(t).root.clone()))
+            .map(|t| (t, pair.endpoint(t).unwrap().root.clone()))
             .collect(),
     };
     let config = dir.join("workspace-sync");
@@ -2121,9 +2121,9 @@ fn verify_discovered_workspace_cli_continuations() {
     };
     let scope = discovery::Scope {
         workspaces: vec![dir.clone()],
-        roots: Tool::ALL
+        roots: PROJECTED
             .into_iter()
-            .map(|t| (t, pair.endpoint(t).root.clone()))
+            .map(|t| (t, pair.endpoint(t).unwrap().root.clone()))
             .collect(),
     };
     let gate = Arc::new(AtomicBool::new(true));
@@ -2339,7 +2339,7 @@ fn readable_tool_records_retain_raw_bytes_and_respect_edits_in_both_clis() {
             images: vec![],
         },
     );
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let bytes = format::render_titled(
             tool,
             &stable_id("portable-fixture"),
@@ -2621,7 +2621,7 @@ fn unnamed_image_only_history_gets_a_nonempty_shared_resume_title() {
 
 #[test]
 fn unnamed_history_normalizes_title_whitespace_without_changing_messages() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let mut expected = messages();
         expected[0].text = "  공백이 있는 제목? \t\n본문은 그대로 보존합니다.  ".into();
@@ -3097,7 +3097,7 @@ fn write_history(source: &Source, history: &[Message], modified: SystemTime) {
 
 #[test]
 fn hub_continuations_reach_the_original_without_echo() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let first = f.scan();
         assert!(first.errors.is_empty(), "{:?}", first.errors);
@@ -3324,7 +3324,7 @@ fn rewrite_rows(path: &Path, change: impl Fn(&mut serde_json::Value)) {
 
 #[test]
 fn unknown_cli_versions_with_known_content_synchronize() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         rewrite_rows(&f.source.path, |row| {
             if row["version"].is_string() {
@@ -3546,7 +3546,7 @@ fn incremental_and_full_parsing_agree_under_random_appends() {
         seed ^= seed << 17;
         seed % n
     };
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let (full, cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
         let mut expected = messages();
@@ -3571,7 +3571,7 @@ fn incremental_and_full_parsing_agree_under_random_appends() {
 
 #[test]
 fn checkpointed_append_matches_a_full_read() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let (_, cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
         let mut cp = cp.unwrap();
@@ -3591,7 +3591,7 @@ fn checkpointed_append_matches_a_full_read() {
 
 #[test]
 fn prefix_change_falls_back_to_a_full_parse() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         let (_, cp) = checkpoint::read(&f.source, &mut String::new()).unwrap();
         let cp = cp.unwrap();
@@ -3661,10 +3661,10 @@ fn hub_cli_round_trip() {
     if std::env::var("KILN_HUB_FIXTURE_STEP").as_deref() == Ok("export") {
         let tracked = config.join("conversation-sync/tracked");
         private_dir(&tracked).unwrap();
-        for tool in Tool::ALL {
+        for tool in PROJECTED {
             let id = stable_id(&format!("hub-fixture-{}", tool.key()));
-            let path = native_path(tool, &pair.endpoint(tool).root, &work.to_string_lossy(), &id, chrono::Utc::now()).unwrap();
-            let source = Source { tool, root: pair.endpoint(tool).root.clone(), path, cwd: work.to_string_lossy().into_owned(), id };
+            let path = native_path(tool, &pair.endpoint(tool).unwrap().root, &work.to_string_lossy(), &id, chrono::Utc::now()).unwrap();
+            let source = Source { tool, root: pair.endpoint(tool).unwrap().root.clone(), path, cwd: work.to_string_lossy().into_owned(), id };
             let mut history = turns(&[&format!("Remember the token started-in-{}.", tool.key()), "Remembered."]);
             match tool {
                 Tool::Claude => {
@@ -3677,6 +3677,7 @@ fn hub_cli_round_trip() {
                     history.extend(shell_turn(JS_CALL, JS_RESULT));
                     history.extend(shell_turn(CODEX_TWO_CALL, CODEX_TWO_RESULT));
                 }
+                Tool::Antigravity => {}
             }
             publish(&source.path, &format::render_titled(tool, &source.id, &source.cwd, &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true), &history, &format!("Hub fixture from {}", tool.display_name())).unwrap()).unwrap();
             publish(&tracked.join(format!("{}.json", tool.key())), &serde_json::to_vec(&source).unwrap()).unwrap();
@@ -3937,7 +3938,7 @@ fn a_scan_interrupted_before_its_state_save_leaves_a_readable_hub_without_duplic
 #[test]
 fn appended_turns_and_later_writes_through_an_open_handle_both_remain() {
     let marker = b"{\"type\":\"kiln-test-marker\"}\n";
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         assert!(f.scan().errors.is_empty());
         let peer = f.peer();
@@ -4174,7 +4175,7 @@ fn shell_pairs_render_as_native_codex_items() {
 fn a_shell_pair_that_ends_its_batch_stays_text() {
     let mut history = shell_turn(CLAUDE_CALL, CLAUDE_RESULT);
     history.pop();
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let data = rows(&format::render_titled(tool, &stable_id("ends"), "/w", "2026-10-15T00:00:00Z", &history, "Shell").unwrap());
         assert!(data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use" && r["payload"]["item"]["type"] != "CommandExecution"), "{tool:?}");
     }
@@ -4182,13 +4183,14 @@ fn a_shell_pair_that_ends_its_batch_stays_text() {
 
 #[test]
 fn shell_turns_reach_the_other_cli_as_native_records_without_echo() {
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let f = Fixture::new(tool);
         assert!(f.scan().errors.is_empty());
         let mut extended = messages();
         extended.extend(match tool {
             Tool::Claude => shell_turn(CLAUDE_CALL, CLAUDE_RESULT),
             Tool::Codex => shell_turn(&codex_call_in(&f.source.cwd), CODEX_RESULT),
+            Tool::Antigravity => unreachable!(),
         });
         assert!(canonical::update(&f.source, &extended, "", "2026-10-15T00:00:00.000Z", &Default::default()).unwrap());
         set_modified(&f.source.path, SystemTime::now() - Duration::from_secs(30));
@@ -4221,7 +4223,7 @@ fn parallel_tool_calls_stay_text() {
         text("assistant", CLAUDE_RESULT),
         text("assistant", "Done."),
     ];
-    for tool in Tool::ALL {
+    for tool in PROJECTED {
         let data = rows(&format::render_titled(tool, &stable_id("parallel"), "/w", "2026-10-15T00:00:00Z", &history, "Parallel").unwrap());
         assert!(
             data.iter().all(|r| r["message"]["content"][0]["type"] != "tool_use" && r["payload"]["item"]["type"] != "CommandExecution"),
@@ -4926,3 +4928,282 @@ fn a_call_left_without_output_does_not_take_later_file_changes() {
     assert!(!changes.contains_key("call_stale") && !changes.contains_key("call_waiting"));
 }
 
+
+/// The summary table of agy 1.4.5's `conversation_summaries.db`.
+const AGY_SUMMARIES: &str = "CREATE TABLE IF NOT EXISTS `conversation_summaries` (`conversation_id` text,`title` text NOT NULL DEFAULT \"\",`preview` text NOT NULL DEFAULT \"\",`step_count` integer NOT NULL DEFAULT 0,`last_modified_time` datetime NOT NULL,`workspace_uris` text NOT NULL,`status` text NOT NULL DEFAULT \"\",`source` text NOT NULL DEFAULT \"\",`project_id` text NOT NULL DEFAULT \"\",`agent_name` text NOT NULL DEFAULT \"\",`parent_conversation_id` text NOT NULL DEFAULT \"\",`nesting_depth` integer NOT NULL DEFAULT 0,`battle_id` text NOT NULL DEFAULT \"\",`winning_conversation_id` text NOT NULL DEFAULT \"\",`not_fully_idle` numeric NOT NULL DEFAULT false,`killed` numeric NOT NULL DEFAULT false,`last_user_input_time` datetime NOT NULL,`last_user_input_step_index` integer NOT NULL DEFAULT -1,`app_data_dir` text NOT NULL DEFAULT \"\",`raw_summary` blob,`group_id` text NOT NULL DEFAULT \"\",PRIMARY KEY (`conversation_id`));";
+
+fn agy_user(step: u64, text: &str) -> serde_json::Value {
+    json!({"step_index": step, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE", "created_at": "2026-10-22T10:57:56Z",
+        "content": format!("<USER_REQUEST>\n{text}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-10-22T19:57:56+09:00.\n</ADDITIONAL_METADATA>")})
+}
+fn agy_answer(step: u64, text: &str) -> serde_json::Value {
+    json!({"step_index": step, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-10-22T10:58:00Z",
+        "input_tokens": 9351, "cache_read_tokens": 0, "output_tokens": 193, "thinking": "Private reasoning.", "content": text})
+}
+fn agy_calls(step: u64, calls: &[(&str, serde_json::Value)]) -> serde_json::Value {
+    let calls: Vec<_> = calls.iter().map(|(name, args)| {
+        let args: serde_json::Map<_, _> = args.as_object().unwrap().iter().map(|(k, v)| (k.clone(), json!(v.to_string()))).collect();
+        json!({"name": name, "args": args})
+    }).collect();
+    json!({"step_index": step, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-10-22T10:57:58Z",
+        "input_tokens": 9351, "cache_read_tokens": 0, "output_tokens": 193, "thinking": "Private reasoning.", "tool_calls": calls})
+}
+fn agy_result(step: u64, output: &str) -> serde_json::Value {
+    json!({"step_index": step, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-10-22T10:58:03Z",
+        "content": format!("Created At: 2026-10-22T19:58:03+09:00\nCompleted At: 2026-10-22T19:58:03+09:00\n{output}")})
+}
+fn agy_system(step: u64) -> serde_json::Value {
+    json!({"step_index": step, "source": "SYSTEM", "type": "SYSTEM_MESSAGE", "status": "DONE", "created_at": "2026-10-22T11:08:28Z",
+        "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user."})
+}
+fn agy_turn() -> Vec<serde_json::Value> {
+    vec![
+        agy_user(0, "Add agy support"),
+        agy_calls(1, &[("run_command", json!({"CommandLine": "ls -la", "WaitMsBeforeAsync": 5000})), ("read_file", json!({"Path": "/w/AGENTS.md"}))]),
+        agy_result(2, "total 8"),
+        agy_result(3, "1: # Working on Kiln"),
+        agy_system(4),
+        agy_answer(5, "Added support."),
+    ]
+}
+fn agy_messages() -> Vec<Message> {
+    vec![
+        text("user", "Add agy support"),
+        text("assistant", "[Tool call: run_command]\n{\"CommandLine\":\"ls -la\",\"WaitMsBeforeAsync\":5000}"),
+        text("assistant", "[Tool call: read_file]\n{\"Path\":\"/w/AGENTS.md\"}"),
+        text("assistant", "[Tool result: agy-1-0]\ntotal 8"),
+        text("assistant", "[Tool result: agy-1-1]\n1: # Working on Kiln"),
+        text("assistant", "Added support."),
+    ]
+}
+
+/// One agy conversation in an agy data folder, written as agy 1.4.5 writes its files.
+struct Agy {
+    root: PathBuf,
+    id: String,
+    transcript: PathBuf,
+}
+impl Agy {
+    fn new(root: &Path, key: &str, cwd: &str, parent: Option<&str>, records: &[serde_json::Value]) -> Self {
+        let id = stable_id(key);
+        for dir in ["conversations", "annotations", "presence"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        fs::write(root.join("conversations").join(format!("{id}.db")), b"").unwrap();
+        fs::write(root.join("annotations").join(format!("{id}.pbtxt")), format!("title:\"Agy {key} \\\"quoted\\\"\"")).unwrap();
+        let db = rusqlite::Connection::open(root.join("conversation_summaries.db")).unwrap();
+        db.pragma_update(None, "journal_mode", "WAL").unwrap();
+        db.execute_batch(AGY_SUMMARIES).unwrap();
+        let uris = json!([url::Url::from_file_path(cwd).unwrap().to_string()]).to_string();
+        db.execute(
+            "INSERT INTO conversation_summaries (conversation_id, workspace_uris, parent_conversation_id, last_modified_time, last_user_input_time) VALUES (?1, ?2, ?3, '2026-10-22 12:00:00+00:00', '2026-10-22 12:00:00+00:00')",
+            (&id, &uris, parent.unwrap_or("")),
+        ).unwrap();
+        let logs = root.join("brain").join(&id).join(".system_generated").join("logs");
+        fs::create_dir_all(&logs).unwrap();
+        let agy = Self { root: root.into(), id, transcript: logs.join("transcript_full.jsonl") };
+        fs::write(&agy.transcript, b"").unwrap();
+        agy.append(records);
+        agy
+    }
+    fn append(&self, records: &[serde_json::Value]) {
+        let mut file = fs::OpenOptions::new().append(true).open(&self.transcript).unwrap();
+        for record in records {
+            writeln!(file, "{record}").unwrap();
+        }
+        drop(file);
+        fs::copy(&self.transcript, self.transcript.with_file_name("transcript.jsonl")).unwrap();
+    }
+    fn source(&self, cwd: &str) -> Source {
+        Source { tool: Tool::Antigravity, root: self.root.canonical().unwrap(), path: self.transcript.canonical().unwrap(), cwd: cwd.into(), id: self.id.clone() }
+    }
+}
+/// Every file below `root` with its bytes and modification time.
+fn agy_snapshot(root: &Path) -> BTreeMap<PathBuf, (Vec<u8>, SystemTime)> {
+    let mut files = BTreeMap::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                let meta = fs::metadata(&path).unwrap();
+                files.insert(path.clone(), (fs::read(&path).unwrap(), meta.modified().unwrap()));
+            }
+        }
+    }
+    files
+}
+/// A workspace with only agy conversations: the fixture's own transcript is removed.
+fn agy_workspace(f: &Fixture) -> (PathBuf, discovery::Scope) {
+    fs::remove_file(&f.source.path).unwrap();
+    fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
+    let root = f.config.parent().unwrap().join("agy");
+    fs::create_dir_all(&root).unwrap();
+    let mut scope = workspace_scope(f);
+    scope.roots.push((Tool::Antigravity, root.canonical().unwrap()));
+    (root, scope)
+}
+
+#[test]
+fn antigravity_records_become_portable_messages_without_reasoning_or_system_steps() {
+    let f = Fixture::new(Tool::Claude);
+    let (root, _) = agy_workspace(&f);
+    let agy = Agy::new(&root, "records", &f.source.cwd, None, &agy_turn());
+    let source = agy.source(&f.source.cwd);
+    let mut title = String::new();
+    let (rows, _, messages) = read_rows_offsets_titled(&source, &mut title).unwrap();
+    assert_eq!(messages, agy_messages());
+    assert_eq!(title, "Agy records \"quoted\"");
+    assert!(rows.iter().all(|r| r.get("thinking").is_none() && r["type"] != "SYSTEM_MESSAGE"));
+    // A turn still running is left until it is answered.
+    agy.append(&[agy_user(6, "Release it"), agy_calls(7, &[("run_command", json!({"CommandLine": "cargo test"}))])]);
+    assert_eq!(read_messages(&source).unwrap(), agy_messages());
+    // A transcript left unchanged ends its unanswered turn.
+    set_modified(&agy.transcript, SystemTime::now() - Duration::from_secs(6 * 60));
+    let mut settled = agy_messages();
+    settled.extend([
+        text("user", "Release it"),
+        text("assistant", "[Tool call: run_command]\n{\"CommandLine\":\"cargo test\"}"),
+        text("assistant", "[Session event: unanswered]\nAntigravity stopped before answering this request."),
+    ]);
+    assert_eq!(read_messages(&source).unwrap(), settled);
+    let (_, checkpoint) = checkpoint::read(&source, &mut String::new()).unwrap();
+    let checkpoint = checkpoint.unwrap();
+    assert_eq!(checkpoint.offset, fs::metadata(&agy.transcript).unwrap().len());
+    // The rest of a settled turn is read on its own.
+    agy.append(&[agy_result(8, "ok"), agy_answer(9, "Released.")]);
+    let (appended, _, _) = checkpoint::since_titled(&source, &checkpoint).unwrap().unwrap();
+    assert_eq!(appended, vec![text("assistant", "[Tool result: agy-8]\nok"), text("assistant", "Released.")]);
+}
+
+#[test]
+fn antigravity_conversations_reach_both_clis_without_writing_to_agy() {
+    let f = Fixture::new(Tool::Claude);
+    let (root, scope) = agy_workspace(&f);
+    let agy = Agy::new(&root, "main", &f.source.cwd, None, &agy_turn());
+    Agy::new(&root, "subagent", &f.source.cwd, Some(&agy.id), &agy_turn());
+    let orphan = Agy::new(&root, "orphan", &f.source.cwd, None, &agy_turn());
+    fs::remove_file(root.join("conversations").join(format!("{}.db", orphan.id))).unwrap();
+    let before = agy_snapshot(&root);
+    let first = workspace_scan(&f, &scope);
+    assert!(first.errors.is_empty(), "{:?}", first.errors);
+    assert_eq!(first.published, 2);
+    assert_eq!(agy_snapshot(&root), before, "the agy folder is only read");
+    let store = hub::Hub::open(&f.config).unwrap();
+    assert_eq!(store.state.conversations.len(), 1);
+    let record = store.state.conversations.values().next().unwrap();
+    assert_eq!(record.title, "Agy main \"quoted\"");
+    let origin = record.projections.iter().find(|p| p.origin).unwrap();
+    assert_eq!((origin.source.tool, origin.source.id.as_str()), (Tool::Antigravity, agy.id.as_str()));
+    let copies: Vec<_> = record.projections.iter().filter(|p| !p.origin).map(|p| p.source.clone()).collect();
+    assert_eq!(copies.iter().map(|s| s.tool).collect::<Vec<_>>(), vec![Tool::Claude, Tool::Codex]);
+    for copy in &copies {
+        assert_eq!(read_messages(copy).unwrap(), agy_messages(), "{:?}", copy.tool);
+    }
+    let links = fs::read_to_string(f.config.join("conversation-sync/native-links.json")).unwrap();
+    assert!(!links.contains("antigravity"), "agy has no resume hook: {links}");
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+    // A turn continued in agy reaches both copies.
+    agy.append(&[agy_user(6, "Also update docs"), agy_answer(7, "Docs updated.")]);
+    let before = agy_snapshot(&root);
+    let next = workspace_scan(&f, &scope);
+    assert!(next.errors.is_empty(), "{:?}", next.errors);
+    assert_eq!(next.published, 2);
+    assert_eq!(agy_snapshot(&root), before);
+    let mut expected = agy_messages();
+    expected.extend(turns(&["Also update docs", "Docs updated."]));
+    for copy in &copies {
+        assert_eq!(read_messages(copy).unwrap(), expected, "{:?}", copy.tool);
+    }
+}
+
+#[test]
+fn a_diverged_antigravity_original_is_detached_never_archived() {
+    let f = Fixture::new(Tool::Claude);
+    let (root, scope) = agy_workspace(&f);
+    let agy = Agy::new(&root, "diverged", &f.source.cwd, None, &agy_turn());
+    assert!(workspace_scan(&f, &scope).errors.is_empty());
+    let claude = hub::Hub::open(&f.config).unwrap().state.conversations.values().next().unwrap()
+        .projections.iter().find(|p| p.source.tool == Tool::Claude).unwrap().source.clone();
+    let mut continued = agy_messages();
+    continued.extend(turns(&["claude side", "claude reply"]));
+    assert!(canonical::update(&claude, &continued, "", "2026-10-22T13:00:00.000Z", &Default::default()).unwrap());
+    agy.append(&[agy_user(6, "agy side"), agy_answer(7, "agy reply")]);
+    set_modified(&agy.transcript, SystemTime::now() - Duration::from_secs(120));
+    let before = agy_snapshot(&root);
+    let status = workspace_scan(&f, &scope);
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(agy_snapshot(&root), before, "a detached original stays in place");
+    let store = hub::Hub::open(&f.config).unwrap();
+    let record = store.state.conversations.values().next().unwrap();
+    assert!(!record.projections.iter().any(|p| p.source.tool == Tool::Antigravity && !p.removed));
+    assert!(record.aliases.iter().any(|a| a.tool == Tool::Antigravity && a.id == agy.id));
+    assert!(!record.branches.is_empty(), "the agy continuation is kept as a branch");
+    assert_eq!(read_messages(&claude).unwrap(), continued);
+    agy.append(&[agy_user(8, "later agy turn"), agy_answer(9, "later reply")]);
+    let again = workspace_scan(&f, &scope);
+    assert!(again.errors.is_empty(), "{:?}", again.errors);
+    assert_eq!(hub::Hub::open(&f.config).unwrap().state.conversations.len(), 1, "a detached original is not adopted again");
+    assert_eq!(read_messages(&claude).unwrap(), continued);
+}
+
+#[test]
+fn an_unanswered_agy_turn_reaches_the_copies_once_its_transcript_settles() {
+    let f = Fixture::new(Tool::Claude);
+    let (root, scope) = agy_workspace(&f);
+    let agy = Agy::new(&root, "settles", &f.source.cwd, None, &agy_turn());
+    assert!(workspace_scan(&f, &scope).errors.is_empty());
+    agy.append(&[agy_user(6, "Release it")]);
+    let waiting = workspace_scan(&f, &scope);
+    assert!(waiting.errors.is_empty(), "{:?}", waiting.errors);
+    assert_eq!(waiting.published, 0, "a turn agy may still answer is not copied");
+    set_modified(&agy.transcript, SystemTime::now() - Duration::from_secs(6 * 60));
+    let settled = workspace_scan(&f, &scope);
+    assert!(settled.errors.is_empty(), "{:?}", settled.errors);
+    assert_eq!(settled.published, 2);
+    let mut expected = agy_messages();
+    expected.extend([text("user", "Release it"), text("assistant", "[Session event: unanswered]\nAntigravity stopped before answering this request.")]);
+    for copy in hub::Hub::open(&f.config).unwrap().state.conversations.values().next().unwrap().projections.iter().filter(|p| !p.origin) {
+        assert_eq!(read_messages(&copy.source).unwrap(), expected, "{:?}", copy.source.tool);
+    }
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+}
+
+#[test]
+fn an_unreadable_agy_folder_leaves_the_other_clis_synchronizing() {
+    let f = Fixture::new(Tool::Claude);
+    let root = f.config.parent().unwrap().join("agy");
+    let agy = Agy::new(&root, "broken", &f.source.cwd, None, &agy_turn());
+    fs::write(root.join("conversation_summaries.db"), b"not a database").unwrap();
+    let mut scope = workspace_scope(&f);
+    scope.roots.push((Tool::Antigravity, root.canonical().unwrap()));
+    let status = workspace_scan(&f, &scope);
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(status.published, 1, "the Claude conversation still reaches Codex");
+    let store = hub::Hub::open(&f.config).unwrap();
+    assert!(store.state.conversations.values().all(|r| r.projections.iter().all(|p| p.source.id != agy.id)));
+}
+
+#[test]
+fn older_agy_tool_steps_and_rewritten_steps_read_once() {
+    let f = Fixture::new(Tool::Claude);
+    let (root, _) = agy_workspace(&f);
+    let mut records = vec![agy_user(0, "Inspect"), agy_calls(1, &[("list_dir", json!({"DirectoryPath": "/w"})), ("view_file", json!({"AbsolutePath": "/w/a"}))])];
+    let mut running = agy_result(2, "listing");
+    running["status"] = json!("RUNNING");
+    records.push(running.clone());
+    records.push(running);
+    records.push(json!({"step_index": 3, "source": "MODEL", "type": "VIEW_FILE", "status": "DONE", "content": "file a"}));
+    records.push(agy_answer(4, "Inspected."));
+    let agy = Agy::new(&root, "older", &f.source.cwd, None, &records);
+    assert_eq!(read_messages(&agy.source(&f.source.cwd)).unwrap(), vec![
+        text("user", "Inspect"),
+        text("assistant", "[Tool call: list_dir]\n{\"DirectoryPath\":\"/w\"}"),
+        text("assistant", "[Tool call: view_file]\n{\"AbsolutePath\":\"/w/a\"}"),
+        text("assistant", "[Tool result: agy-1-0]\nlisting"),
+        text("assistant", "[Tool result: agy-1-1]\nfile a"),
+        text("assistant", "Inspected."),
+    ]);
+}

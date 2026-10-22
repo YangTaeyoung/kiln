@@ -29,15 +29,23 @@ pub(crate) struct UiState {
     confirm_reset: Option<String>,
     /// The Codex profile whose usage history dialog is open.
     history: Option<String>,
-    login_code: [String; 2],
-    pub(crate) feedback_profile: [Option<String>; 2],
+    login_code: [String; 3],
+    pub(crate) feedback_profile: [Option<String>; 3],
+}
+
+fn tool_idx(tool: Tool) -> usize {
+    match tool {
+        Tool::Claude => 0,
+        Tool::Codex => 1,
+        Tool::Antigravity => 2,
+    }
 }
 
 /// 도구별 카드를 그리고, 이번 프레임까지 쌓인 이벤트를 돌려준다.
 pub fn accounts_settings_ui(ui: &mut Ui, mgr: &AccountManager) -> Vec<AccountsEvent> {
     mgr.set_repaint_context(ui.ctx());
     mgr.refresh_login_status();
-    for tool in Tool::ALL {
+    for tool in Tool::ACCOUNTS {
         ui.push_id(("kiln-accounts", tool.key()), |ui| tool_card(ui, mgr, tool));
     }
     mgr.drain_events()
@@ -65,6 +73,7 @@ fn brand_mark(ui: &mut Ui, tool: Tool) {
     let (icon, color) = match tool {
         Tool::Claude => (Icon::Claude, t.orange),
         Tool::Codex => (Icon::Codex, t.text),
+        Tool::Antigravity => (Icon::Antigravity, t.purple),
     };
     icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(24.0, 24.0)), icon, color);
 }
@@ -73,6 +82,7 @@ fn subtitle(tool: Tool) -> &'static str {
     match tool {
         Tool::Claude => kiln_common::i18n::tr("Anthropic 구독 계정"),
         Tool::Codex => kiln_common::i18n::tr("ChatGPT 구독 계정"),
+        Tool::Antigravity => "",
     }
 }
 
@@ -82,12 +92,15 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
     let profiles = mgr.profiles(tool);
     let active = mgr.active(tool);
     let refreshing = mgr.is_refreshing(tool);
-    let index = if tool == Tool::Claude { 0 } else { 1 };
+    let index = match tool {
+        Tool::Claude => 0,
+        Tool::Codex => 1,
+        Tool::Antigravity => 2,
+    };
     let login_target = mgr.login_profile(tool).map(|p| p.id).or_else(|| mgr.ui_state().relogin.clone().filter(|(current, _)| *current == tool).map(|(_, id)| id));
     let feedback_target = mgr.ui_state().feedback_profile[index].clone().filter(|id| profiles.iter().any(|p| p.id == *id));
     let (busy, error, notice, live) = mgr.with_state(|s| {
-        let i = if tool == Tool::Claude { 0 } else { 1 };
-        (s.busy[i].clone(), s.error[i].clone(), s.notice[i].clone(), s.live_email[i].clone())
+        (s.busy[index].clone(), s.error[index].clone(), s.notice[index].clone(), s.live_email[index].clone())
     });
 
     card(ui, |ui| {
@@ -108,8 +121,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                     ui.add(egui::Spinner::new().size(14.0).color(t.text_dim));
                 } else {
                     let tip = match tool {
-                        Tool::Claude => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
-                        Tool::Codex => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
+                        Tool::Claude | Tool::Codex | Tool::Antigravity => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
                     };
                     if widgets::icon_button(ui, Icon::Refresh, 26.0, false, tip).clicked() {
                         mgr.refresh_usage(tool);
@@ -665,7 +677,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
             ui.spacing_mut().item_spacing.x = 6.0;
             if confirming {
                 if widgets::button_with(ui, None, kiln_common::i18n::tr("삭제"), ButtonKind::Danger, true).clicked() {
-                    mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
+                    mgr.ui_state().feedback_profile[tool_idx(tool)] = Some(p.id.clone());
                     mgr.ui_state().confirm_delete = None;
                     let id = p.id.clone();
                     let label = p.label.clone();
@@ -705,8 +717,8 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     ui.close();
                 }
                 if ui.add_enabled_ui(!busy, |ui| menu_item(ui, Icon::Refresh, kiln_common::i18n::tr("다시 로그인"), t.text)).inner {
-                    mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
-                    mgr.with_state(|s| { s.error[if tool == Tool::Claude { 0 } else { 1 }] = None; s.notice[if tool == Tool::Claude { 0 } else { 1 }] = None; });
+                    mgr.ui_state().feedback_profile[tool_idx(tool)] = Some(p.id.clone());
+                    mgr.with_state(|s| { s.error[tool_idx(tool)] = None; s.notice[tool_idx(tool)] = None; });
                     mgr.ui_state().adding = None;
                     mgr.ui_state().relogin = Some((tool, p.id.clone()));
                     ui.close();
@@ -736,7 +748,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     ui.add_enabled_ui(!busy, |ui| {
                         let label = if mgr.pending_login(tool, &p.id) { kiln_common::i18n::tr("적용") } else { kiln_common::i18n::tr("전환") };
                         if widgets::button_with(ui, None, label, ButtonKind::Secondary, true).clicked() {
-                            mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
+                            mgr.ui_state().feedback_profile[tool_idx(tool)] = Some(p.id.clone());
                             let id = p.id.clone();
                             let name = p.label.clone();
                             mgr.run_async(tool, kiln_common::i18n::tr("전환 중…"), move |m| {
@@ -761,8 +773,8 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
             ui.spacing_mut().item_spacing.x = 10.0;
             widgets::pill(ui, kiln_common::i18n::tr("로그인 필요"), t.orange);
             if ui.add_enabled_ui(!busy, |ui| widgets::button_with(ui, Some(Icon::Refresh), kiln_common::i18n::tr("다시 로그인"), ButtonKind::Secondary, true)).inner.clicked() {
-                mgr.ui_state().feedback_profile[if tool == Tool::Claude { 0 } else { 1 }] = Some(p.id.clone());
-                mgr.with_state(|s| { s.error[if tool == Tool::Claude { 0 } else { 1 }] = None; s.notice[if tool == Tool::Claude { 0 } else { 1 }] = None; });
+                mgr.ui_state().feedback_profile[tool_idx(tool)] = Some(p.id.clone());
+                mgr.with_state(|s| { s.error[tool_idx(tool)] = None; s.notice[tool_idx(tool)] = None; });
                 mgr.ui_state().adding = None;
                 mgr.ui_state().relogin = Some((tool, p.id.clone()));
             }
@@ -1211,7 +1223,7 @@ mod tests {
             kiln_common::i18n::with_language(language, || {
                 for width in [420.0, 720.0] {
                     for scale in [1.0, 1.3] {
-                        for tool in Tool::ALL {
+                        for tool in Tool::ACCOUNTS {
                             let root = tempfile::tempdir().unwrap();
                             let (env, _) = crate::Env::sandbox(root.path(), false);
                             let manager = AccountManager::with_env(env);
@@ -1221,8 +1233,7 @@ mod tests {
                             for _ in 0..4 { harness.step(); }
                             let subtitle_rect = harness.get_by_label(subtitle(tool)).rect();
                             let refresh_label = match tool {
-                                Tool::Claude => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
-                                Tool::Codex => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
+                                Tool::Claude | Tool::Codex | Tool::Antigravity => kiln_common::i18n::tr("저장한 계정의 사용량 확인"),
                             };
                             let refresh_rect = harness.get_by_label(refresh_label).rect();
                             assert!(harness.ctx.content_rect().contains_rect(refresh_rect), "{language:?}/{tool:?}: refresh overflow at {width}px / {scale}");
@@ -1241,13 +1252,13 @@ mod tests {
             let mut input = egui::RawInput::default();
             input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(density);
             let mut output = ctx.run_ui(input, |ui| {
-                for tool in Tool::ALL { brand_mark(ui, tool); }
+                for tool in Tool::ACCOUNTS { brand_mark(ui, tool); }
             });
             // This headless test inspects shapes and cache identities without a renderer.
             // Clear unapplied deltas before assertions so failures can unwind normally.
             output.textures_delta.clear();
-            for tool in Tool::ALL {
-                let name = match tool { Tool::Claude => "claude", Tool::Codex => "codex" };
+            for tool in Tool::ACCOUNTS {
+                let name = match tool { Tool::Claude => "claude", Tool::Codex => "codex", Tool::Antigravity => "antigravity" };
                 let pixels = (24.0 * ctx.pixels_per_point()).ceil() as u32;
                 let texture = ctx.data(|data| data.get_temp::<egui::TextureHandle>(egui::Id::new(("bundled-mark", name, pixels))))
                     .expect("account header must use the shared embedded SVG, not a hand-drawn substitute");
@@ -1277,7 +1288,7 @@ mod tests {
             kiln_common::i18n::with_language(language, || {
                 for theme in ["kiln-dark", "kiln-light"] {
                     kiln_common::Theme::set_current(theme);
-                    for tool in Tool::ALL {
+                    for tool in Tool::ACCOUNTS {
                         let root = tempfile::tempdir().unwrap();
                         let (env, _) = crate::Env::sandbox(root.path(), false);
                         let manager = AccountManager::with_env(env);
@@ -1285,6 +1296,7 @@ mod tests {
                             browser_url: Some(match tool {
                                 Tool::Claude => "https://claude.ai/oauth/authorize?client_id=fixture&redirect_uri=fixture&state=fixture",
                                 Tool::Codex => "https://auth.openai.com/oauth/authorize?client_id=fixture&redirect_uri=fixture&state=fixture",
+                                Tool::Antigravity => "https://accounts.google.com/o/oauth2/auth?client_id=fixture&redirect_uri=fixture",
                             }.into()),
                             accepts_code: tool == Tool::Claude,
                         });

@@ -54,9 +54,13 @@ fn database_stamp(root: &Path) -> u64 {
     hasher.finish()
 }
 
+/// Length and modification time of a transcript. An agy transcript's stamp changes once more
+/// when it settles, so its unanswered turn is read.
 fn stamp(source: &Source) -> Result<(u64, SystemTime)> {
     let meta = storage::metadata(source)?;
-    Ok((meta.len(), meta.modified()?))
+    let modified = meta.modified()?;
+    let settled = source.tool == Tool::Antigravity && modified.elapsed().is_ok_and(|age| age >= reader::SETTLE);
+    Ok((meta.len(), if settled { modified + Duration::from_nanos(1) } else { modified }))
 }
 
 fn continuation(source: &Source) -> Continuation {
@@ -104,7 +108,7 @@ fn import_ledger(root: &Path) -> Result<HashMap<NativeRef, PathBuf>> {
 pub(super) fn links(hub: &Hub, scope: Option<&discovery::Scope>) -> Vec<handover::Link> {
     let mut links = Vec::new();
     for (cid, record) in &hub.state.conversations {
-        let live: Vec<&Projection> = record.projections.iter().filter(|p| !p.removed).collect();
+        let live: Vec<&Projection> = record.projections.iter().filter(|p| !p.removed && projected(p.source.tool)).collect();
         if live.len() < 2 || scope.is_some_and(|s| s.workspace(&record.cwd).is_none()) {
             continue;
         }
@@ -147,6 +151,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         metadata: M,
         notify: &'a dyn Fn(&Status),
     ) -> Self {
+        let mut namespaces = namespaces;
+        namespaces.retain(|(tool, _)| projected(*tool));
         let databases = namespaces
             .iter()
             .filter(|(tool, _)| *tool == Tool::Codex)
@@ -276,6 +282,10 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             let is_alias = known
                 .as_ref()
                 .is_some_and(|cid| hub.state.conversations[cid].aliases.contains(&native));
+            // A detached Antigravity original is no longer followed.
+            if is_alias && !projected(source.tool) {
+                continue;
+            }
             let joined = match (&known, ledger.get(&native).and_then(|p| paths.get(p))) {
                 (Some(cid), _) if is_alias => Some(cid.clone()),
                 (None, Some(target)) => Some(target.clone()),
@@ -477,12 +487,16 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     hub.save()?;
                     continue;
                 }
-                let archived = match canonical::archive_native(self.config, &source, cid, &mut self.metadata) {
-                    Ok(archived) => archived,
-                    Err(error) => { failure.get_or_insert(error); continue; }
+                let archived = if projected(source.tool) {
+                    match canonical::archive_native(self.config, &source, cid, &mut self.metadata) {
+                        Ok(archived) => Some(archived),
+                        Err(error) => { failure.get_or_insert(error); continue; }
+                    }
+                } else {
+                    None
                 };
                 if base < messages.len() {
-                    hub.save_branch(cid, base, &messages[base..], Some(native.clone()), Some(archived))?;
+                    hub.save_branch(cid, base, &messages[base..], Some(native.clone()), archived)?;
                 }
             }
             let record = hub.state.conversations.get_mut(cid).unwrap();
@@ -762,8 +776,13 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                         }
                     }
                     Outcome::CanonicalWins { base } => {
-                        let archived = canonical::archive_native(self.config, &source, cid, &mut self.metadata)?;
-                        hub.save_branch(cid, base, &native[base..], Some(native_ref.clone()), Some(archived))?;
+                        // A read-only Antigravity original is detached instead of archived.
+                        let archived = if projected(source.tool) {
+                            Some(canonical::archive_native(self.config, &source, cid, &mut self.metadata)?)
+                        } else {
+                            None
+                        };
+                        hub.save_branch(cid, base, &native[base..], Some(native_ref.clone()), archived)?;
                         let record = hub.state.conversations.get_mut(cid).unwrap();
                         record.projections.remove(i);
                         record.aliases.push(native_ref);

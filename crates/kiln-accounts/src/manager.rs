@@ -3,7 +3,7 @@
 use crate::store::{CredentialStore, FileStore, SecurityCli, read_secret, write_secret_atomic};
 use crate::ui::{AccountsEvent, UiState};
 use crate::{Profile, Tool, Usage, claude, claude_refresh, codex, now_unix};
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -168,6 +168,8 @@ struct Settings {
     claude: ToolSettings,
     #[serde(default)]
     codex: ToolSettings,
+    #[serde(default, skip_serializing)]
+    antigravity: ToolSettings,
 }
 
 impl Settings {
@@ -175,6 +177,7 @@ impl Settings {
         match t {
             Tool::Claude => &self.claude,
             Tool::Codex => &self.codex,
+            Tool::Antigravity => &self.antigravity,
         }
     }
 
@@ -182,6 +185,7 @@ impl Settings {
         match t {
             Tool::Claude => &mut self.claude,
             Tool::Codex => &mut self.codex,
+            Tool::Antigravity => &mut self.antigravity,
         }
     }
 }
@@ -190,6 +194,7 @@ fn idx(t: Tool) -> usize {
     match t {
         Tool::Claude => 0,
         Tool::Codex => 1,
+        Tool::Antigravity => 2,
     }
 }
 
@@ -206,12 +211,12 @@ pub(crate) struct State {
     /// Logins whose refresh token was rejected, by the digest of their access token.
     renewal_rejected: HashMap<(Tool, String), Vec<u8>>,
     login_checked_at: Option<std::time::Instant>,
-    pub(crate) refreshing: [bool; 2],
-    pub(crate) busy: [Option<String>; 2],
-    pub(crate) error: [Option<String>; 2],
-    pub(crate) notice: [Option<String>; 2],
+    pub(crate) refreshing: [bool; 3],
+    pub(crate) busy: [Option<String>; 3],
+    pub(crate) error: [Option<String>; 3],
+    pub(crate) notice: [Option<String>; 3],
     /// 현재 로그인된 계정 이메일(백그라운드에서 읽는다). 바깥 `None` 은 아직 모름.
-    pub(crate) live_email: [Option<Option<String>>; 2],
+    pub(crate) live_email: [Option<Option<String>>; 3],
     pub(crate) events: Vec<AccountsEvent>,
 }
 
@@ -258,7 +263,7 @@ struct Inner {
     op: Mutex<()>,
     ctx: Mutex<Option<egui::Context>>,
     pub(crate) ui: Mutex<UiState>,
-    login: Mutex<[Option<Arc<crate::login::LoginControl>>; 2]>,
+    login: Mutex<[Option<Arc<crate::login::LoginControl>>; 3]>,
     shutting_down: std::sync::atomic::AtomicBool,
     usage_worker_started: std::sync::atomic::AtomicBool,
 }
@@ -285,7 +290,7 @@ impl AccountManager {
     pub fn with_env(env: Env) -> Self {
         let settings: Settings = kiln_common::store::load_json(&env.settings_path);
         let mut usage = HashMap::new();
-        for t in Tool::ALL {
+        for t in Tool::ACCOUNTS {
             for p in &settings.tool(t).profiles {
                 if let Some(u) = &p.last_usage {
                     usage.insert((t, p.profile.id.clone()), u.clone());
@@ -299,7 +304,7 @@ impl AccountManager {
                 op: Mutex::new(()),
                 ctx: Mutex::new(None),
                 ui: Mutex::new(UiState::default()),
-                login: Mutex::new([None, None]),
+                login: Mutex::new([None, None, None]),
                 shutting_down: std::sync::atomic::AtomicBool::new(false),
                 usage_worker_started: std::sync::atomic::AtomicBool::new(false),
             }),
@@ -416,7 +421,7 @@ impl AccountManager {
 
     fn check_profile_credentials(&self) {
         let _op = self.inner.op.lock();
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             for p in self.profiles(tool) {
                 // An unapplied successful login is ready for Apply, not logged out.
                 let secret = if self.pending_login(tool, &p.id) {
@@ -432,6 +437,7 @@ impl AccountManager {
                         Tool::Claude => claude::access_token(secret).is_err(),
                         // Missing identity and unsupported auth methods are not logout.
                         Tool::Codex => codex::credentials_missing(secret),
+                        Tool::Antigravity => true,
                     });
                     let digest = secret.as_deref().and_then(|secret| claude::access_token(secret).ok()).map(|token| {
                         use sha2::{Digest, Sha256};
@@ -530,6 +536,7 @@ impl AccountManager {
     }
 
     fn start_login_job(&self, tool: Tool, label: String, profile_id: Option<String>, binary: PathBuf, timeout: std::time::Duration) {
+        if !tool.has_accounts() { return; }
         let mut control = crate::login::LoginControl::default();
         control.profile_id = profile_id.clone();
         let control = Arc::new(control);
@@ -607,6 +614,7 @@ impl AccountManager {
         match tool {
             Tool::Claude => env.claude_secret(env.claude_config_dir.as_deref()),
             Tool::Codex => Ok(codex::read_credentials(&env.codex_home, env.store.as_ref())?.map(|v| (v, None))),
+            Tool::Antigravity => Ok(None),
         }
     }
 
@@ -622,6 +630,7 @@ impl AccountManager {
             }
             Tool::Claude => write_secret_atomic(&env.claude_credentials_path(), secret.as_bytes()),
             Tool::Codex => write_secret_atomic(&codex::auth_path(&env.codex_home), secret.as_bytes()),
+            Tool::Antigravity => bail!("Antigravity logins are not saved as accounts"),
         }
     }
 
@@ -637,13 +646,14 @@ impl AccountManager {
                 }
             },
             Tool::Codex => (live_secret.and_then(codex::auth_email), None),
+            Tool::Antigravity => (None, None),
         }
     }
 
     fn check_live_identity_async(&self) {
         let m = self.clone();
         std::thread::spawn(move || {
-            for t in Tool::ALL {
+            for t in Tool::ACCOUNTS {
                 m.check_live_identity(t);
             }
             m.check_profile_credentials();
@@ -661,10 +671,11 @@ impl AccountManager {
 
     /// 현재 로그인된 계정을 프로필로 저장하고 활성으로 표시한다. 같은 이메일이 있으면 그 프로필을 갱신한다.
     pub fn save_current(&self, tool: Tool, label: &str) -> Result<Profile> {
+        ensure!(tool.has_accounts(), "Antigravity logins are not saved as accounts");
         let _op = self.inner.op.lock();
         let (secret, acct) = self.read_live(tool)?.ok_or_else(|| match tool {
             Tool::Claude => anyhow!(kiln_common::i18n::tr("저장할 Claude Code 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
-            Tool::Codex => anyhow!(kiln_common::i18n::tr("저장할 Codex 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
+            Tool::Codex | Tool::Antigravity => anyhow!(kiln_common::i18n::tr("저장할 Codex 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
         })?;
         if tool == Tool::Codex && !codex::has_chatgpt_tokens(&secret) {
             bail!(kiln_common::trf!("Codex 가 ChatGPT 계정으로 로그인되어 있지 않습니다(API 키 로그인은 저장하지 않습니다)"));
@@ -748,6 +759,7 @@ impl AccountManager {
 
     /// Persistent CLI-owned credentials: bootstrap once, then let the CLI refresh them.
     pub fn launch_environment(&self, tool: Tool) -> Result<Vec<(String, String)>> {
+        if !tool.has_accounts() { return Ok(Vec::new()); }
         let _op = self.inner.op.lock();
         let Some(id) = self.active(tool) else { return Ok(Vec::new()); };
         let dir = self.runtime_dir(tool, &id);
@@ -761,8 +773,16 @@ impl AccountManager {
             let secret = env.store.get(&profile_service(tool), &id)?.context("saved account credentials missing")?;
             std::fs::create_dir_all(&dir)?;
             #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?; }
-            let source = match tool { Tool::Claude => env.claude_config_dir.clone().unwrap_or_else(||env.home.join(".claude")), Tool::Codex => env.codex_home.clone() };
-            for file in match tool { Tool::Claude => &["settings.json", "CLAUDE.md"][..], Tool::Codex => &["config.toml", "AGENTS.md"][..] } {
+            let source = match tool {
+                Tool::Claude => env.claude_config_dir.clone().unwrap_or_else(||env.home.join(".claude")),
+                Tool::Codex => env.codex_home.clone(),
+                Tool::Antigravity => bail!("Antigravity logins are not saved as accounts"),
+            };
+            for file in match tool {
+                Tool::Claude => &["settings.json", "CLAUDE.md"][..],
+                Tool::Codex => &["config.toml", "AGENTS.md"][..],
+                Tool::Antigravity => &[][..],
+            } {
                 if !dir.join(file).exists() && let Ok(bytes) = std::fs::read(source.join(file)) { write_secret_atomic(&dir.join(file), &bytes)?; }
             }
             if tool == Tool::Claude {
@@ -773,7 +793,7 @@ impl AccountManager {
             } else { write_secret_atomic(&dir.join("auth.json"), secret.as_bytes())?; }
             write_secret_atomic(&dir.join("initialized"), b"1")?;
         }
-        let mut variables = vec![(match tool { Tool::Claude=>"CLAUDE_CONFIG_DIR",Tool::Codex=>"CODEX_HOME" }.into(), dir.to_string_lossy().into_owned()), ("KILN_AGENT_PROFILE".into(), id.clone())];
+        let mut variables = vec![(if tool == Tool::Claude { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" }.into(), dir.to_string_lossy().into_owned()), ("KILN_AGENT_PROFILE".into(), id.clone())];
         if tool == Tool::Codex && !dir.join("auth.json").exists() {
             // A legacy/manual CLI may have migrated this namespace to Keyring.
             // Preserve its current store; never seed a second refresh-token copy.
@@ -785,7 +805,9 @@ impl AccountManager {
 
     /// Validate the original saved account before interrupting a running panel.
     pub fn validate_launch_environment(&self,tool:Tool,variables:&[(String,String)])->Result<()> {
-        let id=variables.iter().find(|(key,_)|key=="KILN_AGENT_PROFILE").map(|(_,value)|value).context("original account not recorded")?;
+        let id=variables.iter().find(|(key,_)|key=="KILN_AGENT_PROFILE").map(|(_,value)|value);
+        if !tool.has_accounts() { ensure!(id.is_none(), "unexpected account for {}", tool.display_name()); return Ok(()); }
+        let id=id.context("original account not recorded")?;
         if !self.profiles(tool).iter().any(|p|p.id==*id) {bail!("original account was removed");}
         let key=if tool==Tool::Claude {"CLAUDE_CONFIG_DIR"}else{"CODEX_HOME"};
         let config=variables.iter().find(|(k,_)|k==key).map(|(_,v)|PathBuf::from(v)).context("original account configuration missing")?;
@@ -852,6 +874,7 @@ impl AccountManager {
                 if let Some(secret) = read_secret(&dir.join("auth.json"))? { return Ok(Some(secret)); }
                 codex::read_credentials(&dir, self.inner.env.store.as_ref())
             },
+            Tool::Antigravity => Ok(None),
         }
     }
 
@@ -900,7 +923,7 @@ impl AccountManager {
         if tool==Tool::Claude && env.claude_live_in_store {
             let service=crate::login::claude_service(env.claude_config_dir.as_deref());
             if let Some((_,account))=env.store.get_by_service(&service)? {env.store.delete(&service,&account)?;}
-        } else {
+        } else if tool.has_accounts() {
             let path=if tool==Tool::Claude {env.claude_credentials_path()} else {codex::auth_path(&env.codex_home)};
             if path.exists() {std::fs::remove_file(path)?;}
         }
@@ -1077,7 +1100,7 @@ impl AccountManager {
                 if inner.shutting_down.load(Ordering::Relaxed) { break; }
                 let manager = AccountManager { inner };
                 let periodic = std::time::Instant::now() >= next;
-                for tool in Tool::ALL {
+                for tool in Tool::ACCOUNTS {
                     if periodic || manager.usage_due(tool, now_unix()) {
                         manager.refresh_usage_impl(tool, false);
                     }
@@ -1112,7 +1135,7 @@ impl AccountManager {
             opened
         });
         if opened {
-            for tool in Tool::ALL { self.refresh_usage(tool); }
+            for tool in Tool::ACCOUNTS { self.refresh_usage(tool); }
         }
     }
 
@@ -1250,6 +1273,7 @@ impl AccountManager {
             let email = match tool {
                 Tool::Claude => self.runtime_oauth(tool, id)?.as_ref().and_then(claude::oauth_email),
                 Tool::Codex => codex::auth_email(&secret),
+                Tool::Antigravity => None,
             };
             if !matches(email) { bail!("account credentials do not match saved profile"); }
             if let Some(live) = self.live_stands_in(tool, id, &secret) { return Ok(Some((live, UsageSource::Live))); }
@@ -1263,6 +1287,7 @@ impl AccountManager {
         let email = match tool {
             Tool::Claude => stored.oauth_account.as_ref().and_then(claude::oauth_email),
             Tool::Codex => secret.as_deref().and_then(codex::auth_email),
+            Tool::Antigravity => None,
         };
         if secret.is_some() && !matches(email) { bail!("account credentials do not match saved profile"); }
         Ok(secret.map(|secret| (secret, UsageSource::Snapshot)))
@@ -1375,6 +1400,7 @@ impl AccountManager {
                 Tool::Codex => serde_json::from_str::<Value>(&secret).ok().map(|doc| format!("{}\0{}",
                     doc.pointer("/tokens/access_token").and_then(Value::as_str).unwrap_or_default(),
                     doc.pointer("/tokens/account_id").and_then(Value::as_str).unwrap_or_default())).unwrap_or_default(),
+                Tool::Antigravity => String::new(),
             };
             let mut fingerprint = Sha256::digest(identity.as_bytes()).to_vec();
             let now = clock();
@@ -1415,6 +1441,7 @@ impl AccountManager {
             let result = match tool {
                 Tool::Claude => claude::access_token(&secret).and_then(|token| (self.inner.env.probe)(&token)),
                 Tool::Codex => (self.inner.env.codex_probe.as_ref().expect("online probe"))(&secret),
+                Tool::Antigravity => Err(anyhow!("Antigravity usage is not available")),
             };
             let _op = self.inner.op.lock();
             // A response belongs to the exact profile credentials it was requested with.
@@ -1733,7 +1760,7 @@ mod tests {
     #[test]
     fn usage_never_attributes_external_or_runtime_login_to_another_profile() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             for runtime_changed in [false, true] {
                 let dir = tempfile::tempdir().unwrap();
                 let (mut env, store) = Env::sandbox(dir.path(), true);
@@ -1753,13 +1780,18 @@ mod tests {
                 let login = |email, marker| match tool {
                     Tool::Claude => login_claude(&env, &store, email, marker),
                     Tool::Codex => login_codex(&env, email, marker),
+                    Tool::Antigravity => unreachable!(),
                 };
                 login("a@example.test", "a");
                 let manager = AccountManager::with_env(env.clone());
                 let profile = manager.save_current(tool, "A").unwrap();
                 if runtime_changed {
                     manager.launch_environment(tool).unwrap();
-                    let other = match tool { Tool::Claude => claude_cred("b"), Tool::Codex => fake_auth("b@example.test", "b") };
+                    let other = match tool {
+                        Tool::Claude => claude_cred("b"),
+                        Tool::Codex => fake_auth("b@example.test", "b"),
+                        Tool::Antigravity => unreachable!(),
+                    };
                     manager.restore_runtime(tool, &profile.id, Some(&other), Some(&serde_json::json!({"emailAddress":"b@example.test"}))).unwrap();
                 } else { login("b@example.test", "b"); }
                 manager.refresh_usage_blocking(tool);
@@ -2376,7 +2408,7 @@ mod tests {
             "#!/bin/sh\nfixture_dir='{fixture_dir}'\ncase \"$1\" in auth) fixture_tool=claude;; *) fixture_tool=codex;; esac\nprintf '%s\\n' \"$$\" > \"$fixture_dir/$fixture_tool.pid\"\nprintf '%s\\n' \"$HOME\" > \"$fixture_dir/$fixture_tool.home\"\nprintf '%s\\n' \"$CLAUDE_CONFIG_DIR\" > \"$fixture_dir/$fixture_tool.config\"\nexec /bin/sleep 60\n"
         )).unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             manager.start_login_with_binary(tool, "Disposable".into(), binary.clone(), std::time::Duration::from_secs(90));
         }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -2467,7 +2499,7 @@ mod tests {
     #[cfg(unix)]
     fn targeted_browser_relogin_keeps_profile_and_requires_apply_for_both_tools() {
         use std::os::unix::fs::PermissionsExt;
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             let d = tempfile::tempdir().unwrap();
             let (env, store) = Env::sandbox(d.path(), false);
             let m = AccountManager::with_env(env.clone());
@@ -2556,8 +2588,26 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_logins_are_never_saved_written_or_persisted() {
+        let d = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(d.path(), false);
+        let m = AccountManager::with_env(env.clone());
+        assert!(m.save_current(Tool::Antigravity, "Work").is_err());
+        assert!(m.write_live(Tool::Antigravity, "fixture").is_err());
+        assert!(m.read_live(Tool::Antigravity).unwrap().is_none());
+        assert!(m.launch_environment(Tool::Antigravity).unwrap().is_empty());
+        m.validate_launch_environment(Tool::Antigravity, &[]).unwrap();
+        assert!(m.validate_launch_environment(Tool::Antigravity, &[("KILN_AGENT_PROFILE".into(), "fixture".into())]).is_err());
+        m.refresh_usage_blocking(Tool::Antigravity);
+        assert!(m.profiles(Tool::Antigravity).is_empty());
+        m.persist().unwrap();
+        assert!(!std::fs::read_to_string(&env.settings_path).unwrap().contains("antigravity"));
+        assert!(!env.home.join(".gemini").exists());
+    }
+
+    #[test]
     fn targeted_relogin_rejects_another_account_and_missing_identity_without_mutation() {
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             let d = tempfile::tempdir().unwrap();
             let (env, store) = Env::sandbox(d.path(), false);
             let m = AccountManager::with_env(env.clone());
@@ -2581,7 +2631,7 @@ mod tests {
 
     #[test]
     fn removed_runtime_credentials_require_signin_but_expiry_and_probe_errors_do_not() {
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             let d = tempfile::tempdir().unwrap();
             let (env, _) = Env::sandbox(d.path(), false);
             let m = AccountManager::with_env(env.clone());

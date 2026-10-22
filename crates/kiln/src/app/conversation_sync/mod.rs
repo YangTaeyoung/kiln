@@ -70,10 +70,12 @@ pub struct Pair {
     pub codex: Endpoint,
 }
 impl Pair {
-    fn endpoint(&self, tool: Tool) -> &Endpoint {
+    /// The connected namespace of a tool that receives projections.
+    fn endpoint(&self, tool: Tool) -> Option<&Endpoint> {
         match tool {
-            Tool::Claude => &self.claude,
-            Tool::Codex => &self.codex,
+            Tool::Claude => Some(&self.claude),
+            Tool::Codex => Some(&self.codex),
+            Tool::Antigravity => None,
         }
     }
     fn connect(accounts: &AccountManager) -> Result<Self> {
@@ -84,18 +86,8 @@ impl Pair {
                 .iter()
                 .find(|(k, _)| k == key)
                 .map(|(_, v)| PathBuf::from(v))
-                .or_else(|| std::env::var_os(key).map(PathBuf::from))
-                .unwrap_or_else(|| {
-                    directories::BaseDirs::new()
-                        .expect("home directory")
-                        .home_dir()
-                        .to_path_buf()
-                        .join(if tool == Tool::Claude {
-                            ".claude"
-                        } else {
-                            ".codex"
-                        })
-                });
+                .or_else(|| default_root(tool))
+                .context("Missing home directory")?;
             fs::create_dir_all(&root)?;
             let active = env
                 .iter()
@@ -119,18 +111,38 @@ impl Pair {
     }
 }
 fn env_key(tool: Tool) -> &'static str {
-    if tool == Tool::Claude {
-        "CLAUDE_CONFIG_DIR"
-    } else {
-        "CODEX_HOME"
+    match tool {
+        Tool::Claude => "CLAUDE_CONFIG_DIR",
+        Tool::Codex => "CODEX_HOME",
+        Tool::Antigravity => "KILN_ANTIGRAVITY_DIR",
     }
 }
-fn opposite(tool: Tool) -> Tool {
-    if tool == Tool::Claude {
-        Tool::Codex
-    } else {
-        Tool::Claude
+/// The ordinary namespace of a tool: its environment variable, else its folder in the home.
+fn default_root(tool: Tool) -> Option<PathBuf> {
+    match tool {
+        Tool::Antigravity => super::agent_runtime::antigravity_root(),
+        _ => std::env::var_os(env_key(tool)).map(PathBuf::from).or_else(|| {
+            let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
+            Some(home.join(if tool == Tool::Claude { ".claude" } else { ".codex" }))
+        }),
     }
+}
+/// Tools whose namespaces receive projections; Antigravity histories are only read.
+const PROJECTED: [Tool; 2] = [Tool::Claude, Tool::Codex];
+fn projected(tool: Tool) -> bool {
+    PROJECTED.contains(&tool)
+}
+fn opposite(tool: Tool) -> Tool {
+    match tool {
+        Tool::Claude => Tool::Codex,
+        Tool::Codex => Tool::Claude,
+        Tool::Antigravity => Tool::Claude,
+    }
+}
+/// A native session ID: a hyphenated UUID.
+fn uuid(id: &str) -> bool {
+    id.len() == 36
+        && id.bytes().enumerate().all(|(i, b)| if [8, 13, 18, 23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() })
 }
 fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
@@ -208,24 +220,15 @@ pub(super) fn track(
     record: &super::agent_runtime::Record,
     transcript: &str,
 ) -> Result<()> {
+    ensure!(projected(record.tool), "Untracked CLI");
     let root = record
         .spec
         .env
         .iter()
         .find(|(k, _)| k == env_key(record.tool))
         .map(|(_, v)| PathBuf::from(v))
-        .or_else(|| std::env::var_os(env_key(record.tool)).map(PathBuf::from))
-        .unwrap_or_else(|| {
-            directories::BaseDirs::new()
-                .expect("home directory")
-                .home_dir()
-                .to_path_buf()
-                .join(if record.tool == Tool::Claude {
-                    ".claude"
-                } else {
-                    ".codex"
-                })
-        })
+        .or_else(|| default_root(record.tool))
+        .context("Missing home directory")?
         .canonical()?;
     let path = storage::logical(record.tool, &under_root(&root, Path::new(transcript)));
     safe_path(&root, &path)?;
@@ -574,6 +577,7 @@ fn read_rows_offsets_titled(
                 }
             }
         }
+        Tool::Antigravity => {}
     }
     let messages = format::parse(source.tool, &rows)?;
     *title = titles::clean(title);
@@ -590,7 +594,7 @@ fn destination(
     date: chrono::DateTime<chrono::Utc>,
 ) -> Result<Source> {
     let tool = opposite(source.tool);
-    let root = pair.endpoint(tool).root.clone();
+    let root = pair.endpoint(tool).context("No namespace")?.root.clone();
     let path = native_path(tool, &root, &source.cwd, id, date)?;
     Ok(Source {
         tool,
@@ -608,6 +612,7 @@ fn native_path(
     id: &str,
     date: chrono::DateTime<chrono::Utc>,
 ) -> Result<PathBuf> {
+    ensure!(projected(tool), "Antigravity conversations are read only");
     let path = if tool == Tool::Claude {
         let encoded = cwd
             // Claude's /[^a-zA-Z0-9]/g operates on UTF-16 code units.
@@ -791,7 +796,7 @@ fn scan_with_metadata(
                     continue;
                 }
                 let source: Source = serde_json::from_slice(&bounded(&path, 16 * 1024)?)?;
-                if source.root == pair.endpoint(source.tool).root {
+                if pair.endpoint(source.tool).is_some_and(|e| e.root == source.root) {
                     sources.push(source);
                 }
             }
@@ -799,9 +804,9 @@ fn scan_with_metadata(
         sources
     };
     let namespaces = scope.map(|s| s.roots.clone()).unwrap_or_else(|| {
-        Tool::ALL
+        PROJECTED
             .into_iter()
-            .map(|tool| (tool, pair.endpoint(tool).root.clone()))
+            .filter_map(|tool| Some((tool, pair.endpoint(tool)?.root.clone())))
             .collect()
     });
     let hub = engine::Sync::new(config, scope, namespaces, gate, cache, &mut status, &mut metadata, &notify)
@@ -1637,8 +1642,9 @@ impl Manager {
                                 targets.extend(row.copies.iter().cloned());
                                 let account = |target: &Continuation| {
                                     self.configured.as_ref()
-                                        .filter(|p| p.endpoint(target.tool).root == target.root)
-                                        .map(|p| p.endpoint(target.tool).label.clone())
+                                        .and_then(|p| p.endpoint(target.tool))
+                                        .filter(|e| e.root == target.root)
+                                        .map(|e| e.label.clone())
                                         .unwrap_or_else(|| tr("기본 CLI").to_owned())
                                 };
                                 if row.phase == Phase::Synced && !row.copies.is_empty() {

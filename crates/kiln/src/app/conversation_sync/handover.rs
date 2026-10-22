@@ -88,16 +88,7 @@ fn root(record: &Record) -> Option<PathBuf> {
         .iter()
         .find(|(key, _)| key == env_key(record.tool))
         .map(|(_, value)| PathBuf::from(value))
-        .or_else(|| std::env::var_os(env_key(record.tool)).map(PathBuf::from))
-        .or_else(|| {
-            directories::BaseDirs::new().map(|d| {
-                d.home_dir().join(if record.tool == Tool::Claude {
-                    ".claude"
-                } else {
-                    ".codex"
-                })
-            })
-        })
+        .or_else(|| default_root(record.tool))
         .and_then(|root| root.canonical().ok())
 }
 pub(crate) fn link<'a>(links: &'a [Link], record: &Record) -> Option<&'a Link> {

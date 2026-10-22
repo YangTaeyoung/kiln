@@ -15,9 +15,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn agent_choice(ui: &mut Ui, selected: bool, label: &str, icon: Icon) -> egui::Response {
+/// The narrowest agent choice that shows its mark and the whole `label`.
+fn agent_choice_width(ui: &Ui, label: &str) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    30.0 + ui.painter().layout_no_wrap(label.to_owned(), font, Theme::current().text).size().x + 10.0
+}
+
+fn agent_choice(ui: &mut Ui, selected: bool, label: &str, icon: Icon, width: f32) -> egui::Response {
     let theme = Theme::current();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(100.0, 32.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 32.0), egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::RadioButton,
@@ -43,12 +49,12 @@ fn agent_choice(ui: &mut Ui, selected: bool, label: &str, icon: Icon) -> egui::R
         );
     }
     let mark = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 18.0, rect.center().y),
-        egui::vec2(18.0, 18.0),
+        egui::pos2(rect.left() + 17.0, rect.center().y),
+        egui::vec2(16.0, 16.0),
     );
     kiln_common::icons::paint(ui.painter(), mark, icon, theme.text);
     ui.painter().text(
-        egui::pos2(rect.left() + 33.0, rect.center().y),
+        egui::pos2(rect.left() + 30.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         egui::TextStyle::Button.resolve(ui.style()),
@@ -801,12 +807,19 @@ impl RepositoryWorkspace {
                         request.request_focus();
                     }
                 });
-            ui.horizontal(|ui| {
-                for (program, label, icon) in [
-                    ("codex", "Codex", Icon::Codex),
-                    ("claude", "Claude", Icon::Claude),
-                ] {
-                    if agent_choice(ui, self.agent_program == program, label, icon).clicked() {
+            let agents = [
+                ("codex", "Codex", Icon::Codex),
+                ("claude", "Claude", Icon::Claude),
+                ("agy", "Antigravity", Icon::Antigravity),
+            ];
+            // Equal widths when all three fit on one line, otherwise each fits its label.
+            let fitted = agents.map(|(_, label, _)| agent_choice_width(ui, label));
+            let equal = fitted.iter().fold(100.0f32, |a, b| a.max(*b));
+            let gaps = ui.spacing().item_spacing.x * (agents.len() - 1) as f32;
+            let widths = if equal * agents.len() as f32 + gaps <= ui.available_width() { [equal; 3] } else { fitted };
+            ui.horizontal_wrapped(|ui| {
+                for ((program, label, icon), width) in agents.into_iter().zip(widths) {
+                    if agent_choice(ui, self.agent_program == program, label, icon, width).clicked() {
                         self.agent_program = program.into();
                     }
                 }
@@ -1865,11 +1878,14 @@ mod tests {
                         .content_rect()
                         .contains_rect(h.get_by_label("작업 시작").rect())
                 );
-                assert!(
-                    h.ctx
-                        .content_rect()
-                        .contains_rect(h.get_by_label("Claude").rect())
-                );
+                for agent in ["Codex", "Claude", "Antigravity"] {
+                    assert!(
+                        h.ctx
+                            .content_rect()
+                            .contains_rect(h.get_by_label(agent).rect()),
+                        "{agent} outside the composer"
+                    );
+                }
                 h.render()
                     .unwrap()
                     .save(output.join(format!("composer-130-{suffix}.png")))

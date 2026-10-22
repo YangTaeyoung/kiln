@@ -3,6 +3,9 @@ use super::*;
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
 
+/// An agy transcript unchanged this long ends its unanswered turn.
+pub(super) const SETTLE: Duration = Duration::from_secs(5 * 60);
+
 pub(super) fn rows(source: &Source, title: &mut String) -> Result<Vec<Value>> {
     rows_before_validation(source, title, || {})
 }
@@ -70,6 +73,24 @@ fn read(
             continue;
         }
         let mut row: Value = serde_json::from_slice(&line)?;
+        if source.tool == Tool::Antigravity {
+            match row["type"].as_str() {
+                Some("USER_INPUT") => {}
+                Some("PLANNER_RESPONSE") => {
+                    if let Some(record) = row.as_object_mut() {
+                        record.remove("thinking");
+                    }
+                }
+                // Tool results are the model's other steps; system, checkpoint and error steps stay with agy.
+                _ if row["source"] == "MODEL" && row["content"].is_string() => {}
+                _ => continue,
+            }
+            // A step written again replaces its earlier record.
+            if rows.last().is_some_and(|last: &Value| last["step_index"] == row["step_index"]) {
+                rows.pop();
+                offsets.pop();
+            }
+        }
         if source.tool == Tool::Codex {
             match row["type"].as_str() {
                 Some("session_meta") => {
@@ -162,6 +183,14 @@ fn read(
     }
     before_validation();
     ensure!(storage::physical(source) == physical, "Transcript storage changed; retrying");
+    if source.tool == Tool::Antigravity
+        && let Some(&end) = offsets.last()
+        && format::completion(Tool::Antigravity, &rows)?.is_none_or(|(index, _)| index + 1 < rows.len())
+        && before.modified()?.elapsed().is_ok_and(|age| age >= SETTLE)
+    {
+        rows.push(serde_json::json!({ "type": format::SETTLED }));
+        offsets.push(end);
+    }
     if compressed {
         storage::unchanged(source, &physical, &before)?;
         return Ok((rows, offsets));
@@ -229,6 +258,10 @@ fn row_title(tool: Tool, row: &Value) -> String {
             if row["type"] == "event_msg" && row["payload"]["item"]["type"] == "UserMessage" =>
         {
             &row["payload"]["item"]["content"]
+        }
+        Tool::Antigravity if row["type"] == "USER_INPUT" => {
+            let prompt = super::format::antigravity_prompt(row["content"].as_str().unwrap_or_default());
+            return prompt.lines().find(|l| !l.trim().is_empty()).unwrap_or_default().chars().take(96).collect();
         }
         _ => return String::new(),
     };

@@ -4,12 +4,13 @@ Open **Settings → Accounts → CLI updates** to see the installed executable,
 installed version and latest published package version. Version checks run in
 background workers. The installed version appears as soon as its single local
 probe completes; the latest-package lookup has its own visible pending/error
-state and never withholds the installed version. Enable **Automatically update Codex and Claude Code** for
-six-hour checks while Kiln is open, or update either CLI explicitly. Both automatic updating and
+state and never withholds the installed version. Enable **Automatically update Codex, Claude Code, and Antigravity** for
+six-hour checks while Kiln is open, or update a CLI explicitly. Both automatic updating and
 immediate session restart are off by default.
 
 Claude Code uses its official `claude update` command, preserving its configured
-update channel. Codex uses its detected Homebrew or npm installer. Custom or
+update channel. Antigravity uses `agy update` and checks its latest version itself, so no
+latest version is shown for it. Codex uses its detected Homebrew or npm installer. Custom or
 unrecognized installations report that their installer is required; Kiln does
 not invoke `codex update`, which can restart the shared background server. Kiln
 never invokes sudo or replaces an unknown custom launcher. The latest package
@@ -52,6 +53,10 @@ bypass hook trust or enable hooks forbidden by administrator policy. When hooks
 are disabled or unavailable, automatic restart is unavailable.
 
 If a Start task terminal disappears, Kiln resumes its recorded conversation instead of resending the original request. A request that may already have been sent but has no conversation ID requires an explicit new task.
+
+**Antigravity** panels receive no hooks: Kiln records the conversation whose presence lock
+the panel's `agy` process holds open ([details](antigravity.md#conversations-and-restart)).
+They have no saved account, so the restart checks only the conversation ID.
 
 Pre-existing panels and CLIs typed manually into an ordinary shell are not
 retroactively instrumented. Use a new Kiln agent panel to enable tracking. The

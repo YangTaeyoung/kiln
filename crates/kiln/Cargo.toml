@@ -57,6 +57,7 @@ rfd = "0.17"
 global-hotkey = "0.8"
 zstd = { version = "0.14.2", default-features = false }
 url = "2.5"
+rusqlite = { version = "0.39", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

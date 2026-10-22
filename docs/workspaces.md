@@ -35,7 +35,7 @@ the last selected tool when closed and reopened.
 - Running work appears first, followed by requests awaiting input and older failures.
   Recent work uses the same activity state and keeps its order stable while open.
 - Clicking a task reveals its workspace, tab and split, including a pane hidden by zoom.
-- Codex/Claude selection stays directly below the request input. Repository context
+- Codex/Claude/Antigravity selection stays directly below the request input. Repository context
   scrolls separately so it cannot push the start action out of reach.
 - Linked worktrees are distinguished from the main repository's workspace.
 

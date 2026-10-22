@@ -128,6 +128,9 @@ fn manifest_path(config: &Path, source: &Source) -> PathBuf {
 /// assistant record from a model and no Codex turn context.
 pub(super) fn kiln_written(source: &Source) -> Result<bool> {
     use std::io::BufRead;
+    if !projected(source.tool) {
+        return Ok(false);
+    }
     let (input, _) = storage::open_at(&source.root, &storage::physical(source), 0)?;
     let contains = |line: &[u8], needle: &[u8]| line.windows(needle.len()).any(|w| w == needle);
     for line in std::io::BufReader::new(input).split(b'\n') {
@@ -135,6 +138,7 @@ pub(super) fn kiln_written(source: &Source) -> Result<bool> {
         let native = match source.tool {
             Tool::Claude => contains(&line, b"\"type\":\"assistant\"") && !contains(&line, b"\"model\":\"<synthetic>\""),
             Tool::Codex => contains(&line, b"\"type\":\"turn_context\""),
+            Tool::Antigravity => true,
         };
         if native {
             return Ok(false);
@@ -159,6 +163,7 @@ pub(super) fn archive_native(
     canonical_id: &str,
     metadata: &mut impl FnMut(&Source, Metadata<'_>) -> Result<Option<String>>,
 ) -> Result<PathBuf> {
+    ensure!(projected(source.tool), "Antigravity conversations are read only");
     let key = source.path.to_string_lossy().into_owned();
     let manifest = manifest_path(config, source);
     let _guard = handover::write_guard(config, source)?;
@@ -215,6 +220,7 @@ pub(super) fn archive_native(
 /// Appends `suffix` in place to an uncompressed transcript that still has `length` bytes and,
 /// when given, the modification time `modified`.
 fn append_in_place(source: &Source, physical: &Path, length: u64, modified: Option<SystemTime>, suffix: &[u8]) -> Result<()> {
+    ensure!(projected(source.tool), "Antigravity conversations are read only");
     let mut options = fs::OpenOptions::new();
     options.append(true);
     #[cfg(unix)]
@@ -284,6 +290,7 @@ pub(super) fn append_since(
     let unfinished = trailing.iter().any(|r| match source.tool {
         Tool::Claude => matches!(r["type"].as_str(), Some("user" | "assistant")),
         Tool::Codex => r["type"] == "response_item" || r["payload"]["type"] == "user_message" || r["payload"]["type"] == "task_started",
+        Tool::Antigravity => true,
     });
     if unfinished {
         return Ok(None);
@@ -369,6 +376,7 @@ pub(super) fn update(
     timestamp: &str,
     changes: &super::tools::FileChanges,
 ) -> Result<bool> {
+    ensure!(projected(source.tool), "Antigravity conversations are read only");
     let physical = storage::physical(source);
     let old = storage::bytes(source, COPY_LIMIT)?;
     ensure!(

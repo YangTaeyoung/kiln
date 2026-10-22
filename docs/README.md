@@ -11,6 +11,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Remote files and SSH](remote-files.md) | S3/OCI/GCS/R2, CLI profiles, FTP/SFTP, file transfers and SSH terminals |
 | [Object storage](object-storage.md) | AWS, OCI, Google and Cloudflare profiles, authentication and transfer limits |
 | [Agent accounts](accounts.md) | Browser sign-in, recovery, automatic usage updates and account switching |
+| [Antigravity CLI](antigravity.md) | Starting `agy`, conversation restart, updates and copies in Claude Code and Codex |
 | [Database tools](databases.md) | Connections, SQL completion, schema editing and metadata boundaries |
 | [File editor](editor.md) | Language detection, completion and language-server setup |
 | [Git workflows](git.md) | Review changes, squash, cherry-pick, and drop commits |

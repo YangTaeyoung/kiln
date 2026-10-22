@@ -1806,6 +1806,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3029,7 +3041,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kiln"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3066,6 +3078,7 @@ dependencies = [
  "rfd",
  "ring",
  "roxmltree",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3079,7 +3092,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-accounts"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3101,7 +3114,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-common"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "directories",
@@ -3117,7 +3130,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-daemon"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -3142,7 +3155,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-db"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3167,7 +3180,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-editor"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "egui",
@@ -3194,7 +3207,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-git"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "egui",
@@ -3209,7 +3222,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-i18n-macros"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3219,7 +3232,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-proto"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "libc",
@@ -3229,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-remote"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4921,6 +4934,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsqlite-vfs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
+dependencies = [
+ "hashbrown 0.16.1",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.39.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0d2b0146dd9661bf67bb107c0bb2a55064d556eeb3fc314151b957f313bcd4e"
+dependencies = [
+ "bitflags 2.13.2",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "libsqlite3-sys",
+ "smallvec",
+ "sqlite-wasm-rs",
+]
+
+[[package]]
 name = "rust-ini"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5486,6 +5523,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9571ea910ebd84c86af4b3ed27f9dbdc6ad06f17c5f96146b2b671e2976744f"
 dependencies = [
  "bitflags 2.13.2",
+]
+
+[[package]]
+name = "sqlite-wasm-rs"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc3efc0da82635d7e1ced0053bbbfa8c7ab9645d0bf36ceb4f7127bb85315d75"
+dependencies = [
+ "cc",
+ "js-sys",
+ "rsqlite-vfs",
+ "wasm-bindgen",
 ]
 
 [[package]]

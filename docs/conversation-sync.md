@@ -28,6 +28,10 @@ and a Kiln account panel list the same conversations in `/resume` for both CLIs.
 directories are deduplicated. Switching the active account does not redirect the pinned
 connection. The status dialog identifies the pinned account pair. Sync remains opt-in.
 
+Antigravity CLI (`agy`) conversations in a linked folder are copied to Claude Code and Codex
+as well; Kiln only reads agy's files. See [Antigravity CLI](antigravity.md#conversations-in-claude-code-and-codex)
+for what is copied and how a conversation continued on both sides is resolved.
+
 In the other CLI, open the same project and use **`/resume`** to select the newest
 linked conversation. Original user and assistant messages appear in the CLI's normal
 conversation display and become part of the next model request. Kiln makes no extra

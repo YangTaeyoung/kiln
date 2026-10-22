@@ -289,6 +289,7 @@ pub struct KilnApp {
     capacity_recovery: capacity_recovery::Recovery,
     agent_handover: agent_handover::Transfers,
     cli_updates: agent_runtime::Updates,
+    agy_conversations: agent_runtime::Observer,
     conversation_sync: conversation_sync::Manager,
     cli_restarts: HashMap<PaneId, (SessionId, Instant, SpawnSpec, u8)>,
     cli_confirmations: HashMap<PaneId, Instant>,
@@ -400,6 +401,7 @@ impl KilnApp {
             capacity_recovery: Default::default(),
             agent_handover: Default::default(),
             cli_updates: Default::default(),
+            agy_conversations: Default::default(),
             conversation_sync: Default::default(),
             cli_restarts: HashMap::new(),
             cli_confirmations: HashMap::new(),
@@ -750,6 +752,7 @@ impl KilnApp {
                     let index = match record.tool {
                         kiln_accounts::Tool::Claude => 0,
                         kiln_accounts::Tool::Codex => 1,
+                        kiln_accounts::Tool::Antigravity => 2,
                     };
                     let version = &self.cli_updates.versions[index];
                     (updated.contains(&record.tool)
@@ -913,7 +916,7 @@ impl KilnApp {
                 ws.sheet = None;
             }
             // Agent tasks keep following their live CLI title.
-            None => page.title = spec.name.clone().filter(|name| name != "Codex" && name != "Claude Code"),
+            None => page.title = spec.name.clone().filter(|name| !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == name)),
         }
         self.launch_specs.insert(pane, spec);
         let ws = &mut self.workspaces[target];
@@ -934,7 +937,7 @@ impl KilnApp {
         let mut page = Page::new(pid, pane);
         // Agent tasks keep following their live CLI title. SSH aliases remain
         // stable because a remote shell may publish only its working directory.
-        page.title = spec.name.clone().filter(|name|name != "Codex" && name != "Claude Code");
+        page.title = spec.name.clone().filter(|name| !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == name));
         self.launch_specs.insert(pane, spec);
         let ws = self.ws();
         ws.pages.push(page);
@@ -1636,7 +1639,7 @@ impl KilnApp {
                     self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), kiln_common::i18n::tr("워크스페이스 폴더를 찾을 수 없습니다."), ToastKind::Error, None);
                     return;
                 }
-                let tool=match program.as_str() {"claude"=>kiln_accounts::Tool::Claude,"codex"=>kiln_accounts::Tool::Codex,_=>return};
+                let tool=match program.as_str() {"claude"=>kiln_accounts::Tool::Claude,"codex"=>kiln_accounts::Tool::Codex,"agy"=>kiln_accounts::Tool::Antigravity,_=>return};
                 // One request per workspace is prepared at a time; the composer stays open until it starts.
                 let workspace=self.ws().id;
                 if self.preparing_agents.iter().any(|p|p.request.is_some() && p.workspace==workspace) {return;}
@@ -1794,18 +1797,19 @@ impl KilnApp {
                     };
                     let body = match offer { Some(available) => format!("{body} · {}", kiln_common::trf!("초기화권 {}개", available)), None => body };
                     let button = match offer {
-                        Some(_) => (kiln_common::i18n::tr("초기화권 사용").into(), Action::RedeemResetCredit(tool)),
-                        None => (kiln_common::i18n::tr("다음 계정으로 전환").into(), Action::RotateAccount(session, tool)),
+                        Some(_) => Some((kiln_common::i18n::tr("초기화권 사용").into(), Action::RedeemResetCredit(tool))),
+                        None if tool.has_accounts() => Some((kiln_common::i18n::tr("다음 계정으로 전환").into(), Action::RotateAccount(session, tool))),
+                        None => None,
                     };
                     self.notifications.push(kiln_common::i18n::tr("사용량 한도"), &body, ToastKind::Notify, Some(session), self.session_workspace_name(session));
-                    if let Some(item) = self.notifications.items.last_mut() { item.rotate_tool = Some(tool); }
+                    if let Some(item) = self.notifications.items.last_mut() { item.rotate_tool = tool.has_accounts().then_some(tool); }
                     if self.settings.notification_toasts && !self.settings.do_not_disturb { self.toasts.push(Toast {
                         title: kiln_common::i18n::tr("사용량 한도").into(),
                         body,
                         at: Instant::now(),
                         kind: ToastKind::Notify,
                         session: Some(session),
-                        button: Some(button),
+                        button,
                     }); }
                 }
                 E::ManagedLimitReached {session,tool} => {
@@ -2558,6 +2562,15 @@ impl eframe::App for KilnApp {
         self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
         self.tick_agent_handover(ctx);
         self.tick_cli_updates(ctx);
+        if self.agy_conversations.due() {
+            let launches = self.panes.iter().filter_map(|(pane, p)| {
+                let info = self.conn.infos.get(&p.session()?)?;
+                info.exited.is_none().then_some(())?;
+                let (record, generation) = agent_runtime::launch_of(self.launch_specs.get(pane)?)?;
+                Some((record, generation, info.pid))
+            }).collect();
+            self.agy_conversations.tick(launches);
+        }
         self.tick_capacity_recovery(ctx);
         self.conversation_sync.tick(&mut self.settings, self.workspaces.iter().filter(|w| w.conversation_sync).map(|w| w.tools.canonical_root().to_path_buf()).collect(), ctx);
         self.rotator.poll(&mut self.conn);

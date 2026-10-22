@@ -76,6 +76,9 @@ impl Cache {
                 Ok(None)
             };
         }
+        if source.tool == Tool::Antigravity {
+            return antigravity(source);
+        }
         let path = source.root.join("session_index.jsonl");
         safe_path(&source.root, &path)?;
         if !path.exists() {
@@ -125,6 +128,52 @@ impl Cache {
             .filter(|s| !s.is_empty())
             .cloned())
     }
+}
+
+/// The name agy shows in its resume picker: `title:"…"` in `annotations/<id>.pbtxt`.
+fn antigravity(source: &Source) -> Result<Option<String>> {
+    let path = source.root.join("annotations").join(format!("{}.pbtxt", source.id));
+    safe_path(&source.root, &path)?;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&bounded(&path, 64 * 1024)?).into_owned();
+    Ok(text_proto_string(&text, "title").map(|title| clean(&title)).filter(|t| !t.is_empty()))
+}
+
+/// The string value of the top-level `field` in protocol buffer text format.
+fn text_proto_string(text: &str, field: &str) -> Option<String> {
+    let start = text.match_indices(field).find_map(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let rest = text[at + field.len()..].trim_start().strip_prefix(':')?.trim_start();
+        (before.is_none_or(|c| !c.is_alphanumeric() && c != '_')).then_some(rest)
+    })?;
+    let quote = start.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    let mut bytes = Vec::new();
+    let mut chars = start[1..].chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c == quote => return Some(String::from_utf8_lossy(&bytes).into_owned()),
+            '\\' => match chars.next()? {
+                'n' => bytes.push(b'\n'),
+                't' => bytes.push(b'\t'),
+                'r' => bytes.push(b'\r'),
+                digit @ '0'..='7' => {
+                    let mut value = digit.to_digit(8)?;
+                    for _ in 0..2 {
+                        let next = chars.clone().next().filter(|c| c.is_digit(8));
+                        let Some(next) = next else { break };
+                        chars.next();
+                        value = value * 8 + next.to_digit(8)?;
+                    }
+                    bytes.push(value as u8);
+                }
+                other => bytes.extend(other.to_string().as_bytes()),
+            },
+            other => bytes.extend(other.to_string().as_bytes()),
+        }
+    }
+    None
 }
 
 pub(super) fn from_rows(source: &Source, rows: &[Value], preferred: &str) -> String {

@@ -153,7 +153,7 @@ pub(super) fn task_rows(ui:&mut egui::Ui,tasks:&[WorkspaceTask],selected:Option<
     for task in tasks.iter().take(if expanded {usize::MAX}else{3}) {
         let (rect,response)=ui.allocate_exact_size(vec2(ui.available_width(),40.0),Sense::click());
         let chosen=selected==Some(task.pane);
-        let agent_name=match task.agent {Some(kiln_accounts::Tool::Claude)=>"Claude Code",Some(kiln_accounts::Tool::Codex)=>"Codex",None=>""};
+        let agent_name=match task.agent {Some(kiln_accounts::Tool::Claude)=>"Claude Code",Some(kiln_accounts::Tool::Codex)=>"Codex",Some(kiln_accounts::Tool::Antigravity)=>"Antigravity",None=>""};
         let label=if agent_name.is_empty(){format!("{} · {}",task.title,task.phase.label())}else{format!("{} · {agent_name} · {}",task.title,task.phase.label())};
         response.widget_info(||egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel,true,chosen,&label));
         if chosen || response.hovered() {ui.painter().rect_filled(rect,4,if response.hovered(){theme.bg_hover}else{theme.bg_panel});}

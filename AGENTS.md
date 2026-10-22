@@ -35,6 +35,7 @@ the user's shells, agents, builds, or servers.
 - [0.1.22 release verification](docs/maintainers/0.1.22-status.md) — credential selection, account-specific sign-in and responsive CLI updates.
 - [0.1.21 release verification](docs/maintainers/0.1.21-status.md) — automatic per-account usage, deadline scheduling and sign-in recovery.
 - [Agent accounts](docs/accounts.md) — official CLI browser sign-in and profile isolation.
+- [Antigravity CLI](docs/antigravity.md) — agy launch and initial prompt, presence-lock conversation tracking, read-only copies into Claude Code and Codex, no account management.
 - [Localization and native menus](docs/localization.md) — catalog, font caches, and isolated session-control tests.
 - [Shell completion](docs/shell-completion.md) — Zsh buffer bridge, bounded local suggestions, private metadata and native-input boundaries.
 - [Query-result editing](docs/query-results.md) — source proof, exact-row transactions, execution scope and review-only recovery.
