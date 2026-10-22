@@ -159,6 +159,11 @@ pub fn cmdline(pid: u32) -> Option<Vec<String>> {
     }
 }
 
+/// Paths a process holds open; another process's handles are not listed on Windows.
+pub fn open_files(_pid: u32) -> Vec<std::path::PathBuf> {
+    Vec::new()
+}
+
 /// The process's current folder from its PEB (`ProcessParameters->CurrentDirectory`).
 pub fn cwd(pid: u32) -> Option<String> {
     use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
@@ -226,7 +231,7 @@ pub fn parent_of(pid: u32) -> Option<u32> {
 }
 
 fn is_agent(pid: u32) -> bool {
-    matches!(super::display_name(pid).map(|n| n.to_ascii_lowercase()).as_deref(), Some("codex" | "claude"))
+    matches!(super::display_name(pid).map(|n| n.to_ascii_lowercase()).as_deref(), Some("codex" | "claude" | "agy"))
 }
 
 /// The process in the foreground of the console whose shell is `shell`: the single agent

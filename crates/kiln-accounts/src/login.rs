@@ -125,6 +125,7 @@ impl IsolatedLogin {
         match tool {
             Tool::Codex => { cmd.args(["login", "-c", "cli_auth_credentials_store=\"file\""]); }
             Tool::Claude => { cmd.args(["auth", "login", "--claudeai"]); }
+            Tool::Antigravity => {}
         }
         // Keychain lookup uses HOME on macOS. Claude's documented config-dir
         // isolation is sufficient; changing HOME hides the user's login keychain.
@@ -174,6 +175,7 @@ impl IsolatedLogin {
                 let email = oauth.as_ref().and_then(claude::oauth_email);
                 (secret, oauth, email)
             }
+            Tool::Antigravity => bail!("Antigravity logins are not saved as accounts"),
         };
         Ok(LoginCredentials { secret, oauth, email })
     }
@@ -297,6 +299,7 @@ impl OutputScanner {
             let valid = match tool {
                 Tool::Codex => token.starts_with("https://auth.openai.com/oauth/authorize?"),
                 Tool::Claude => token.starts_with("https://claude.ai/oauth/authorize?") || token.starts_with("https://console.anthropic.com/oauth/authorize?") || token.starts_with("https://platform.claude.com/oauth/authorize?"),
+                Tool::Antigravity => false,
             };
             // Require complete OAuth parameters to avoid reopening a split URL.
             if valid && token.contains("state=") && token.contains("client_id=") && token.contains("redirect_uri=") {
@@ -350,7 +353,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (env, _) = Env::sandbox(root.path(), true);
         let login = IsolatedLogin::new(&env).unwrap();
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             let command = login.command(tool, Path::new("fixture-cli"));
             let vars: std::collections::HashMap<_, _> = command.get_envs().collect();
             let expected = if tool == Tool::Claude { &env.home } else { &login.env.home };
@@ -470,5 +473,5 @@ mod tests {
 
 pub(crate) fn find_cli(home: &Path, tool: Tool) -> Option<PathBuf> {
     let extra = [home.join(".local").join("bin"), home.join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")];
-    kiln_common::paths::find_executable(tool.key(), &extra)
+    kiln_common::paths::find_executable(tool.program(), &extra)
 }

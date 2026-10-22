@@ -33,7 +33,11 @@ pub fn agent(tool: kiln_accounts::Tool, cwd: PathBuf) -> Result<SpawnSpec, Strin
     if !cwd.is_dir() {
         return Err(kiln_common::i18n::tr("워크스페이스 폴더를 찾을 수 없습니다.").to_owned());
     }
-    let program = match tool { kiln_accounts::Tool::Codex => "codex", kiln_accounts::Tool::Claude => "claude" };
+    let program = match tool {
+        kiln_accounts::Tool::Codex => "codex",
+        kiln_accounts::Tool::Claude => "claude",
+        kiln_accounts::Tool::Antigravity => "agy",
+    };
     let binary = super::agent_launch::executable(program)
         .ok_or_else(|| kiln_common::trf!("{program}을 찾을 수 없습니다. 설치 후 다시 시작해 주세요."))?;
     let binary = std::path::absolute(binary).map_err(|error| error.to_string())?;
@@ -41,7 +45,11 @@ pub fn agent(tool: kiln_accounts::Tool, cwd: PathBuf) -> Result<SpawnSpec, Strin
         cwd: Some(cwd.to_string_lossy().into_owned()),
         program: Some(binary.to_string_lossy().into_owned()),
         cols: 100, rows: 30,
-        name: Some(match tool { kiln_accounts::Tool::Codex => "Codex", kiln_accounts::Tool::Claude => "Claude Code" }.into()),
+        name: Some(match tool {
+            kiln_accounts::Tool::Codex => "Codex",
+            kiln_accounts::Tool::Claude => "Claude Code",
+            kiln_accounts::Tool::Antigravity => "Antigravity",
+        }.into()),
         ..Default::default()
     })
 }

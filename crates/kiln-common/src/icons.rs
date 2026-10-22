@@ -13,6 +13,7 @@ pub enum Icon {
     GitHub,
     Codex,
     Claude,
+    Antigravity,
     /// Official Amazon S3 architecture mark; original colors are preserved.
     S3,
     OracleCloud,
@@ -91,6 +92,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::GitHub => paint_github(p, rect, color),
         Icon::Codex => paint_bundled_mark(p, rect, color, "codex", include_str!("../assets/mark-codex.svg")),
         Icon::Claude => paint_bundled_mark(p, rect, color, "claude", include_str!("../assets/mark-claude.svg")),
+        Icon::Antigravity => paint_bundled_mark(p, rect, color, "antigravity", include_str!("../assets/mark-antigravity.svg")),
         Icon::S3 => paint_bundled_mark(p, rect, Color32::WHITE, "amazon-s3", include_str!("../assets/mark-amazon-s3.svg")),
         Icon::OracleCloud => paint_bundled_mark(p, rect, color, "oracle-cloud", include_str!("../assets/mark-oracle-cloud.svg")),
         Icon::GoogleCloud => paint_bundled_mark(p, rect, color, "google-cloud", include_str!("../assets/mark-google-cloud.svg")),

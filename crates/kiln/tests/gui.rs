@@ -151,7 +151,7 @@ fn linked_resume_stops_the_old_agent_flushes_history_and_reopens_only_the_winner
     use base64::Engine;
     let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"email":"handover@example.invalid"}"#);
     std::fs::write(home.join(".codex/auth.json"), json!({"tokens":{"id_token":format!("x.{claims}.x"),"access_token":"fixture-only","refresh_token":"fixture-only"}}).to_string()).unwrap();
-    for tool in Tool::ALL { manager.save_current(tool, "Handover fixture").unwrap(); }
+    for tool in Tool::ACCOUNTS { manager.save_current(tool, "Handover fixture").unwrap(); }
     let endpoint = |tool, key| PathBuf::from(&manager.launch_environment(tool).unwrap().into_iter().find(|(k, _)| k == key).unwrap().1);
     let codex = endpoint(Tool::Codex, "CODEX_HOME"); let claude = endpoint(Tool::Claude, "CLAUDE_CONFIG_DIR");
     unsafe { std::env::set_var("CODEX_HOME", &codex); std::env::set_var("CLAUDE_CONFIG_DIR", &claude); }
@@ -2018,11 +2018,12 @@ fn cli_update_fixture(tool: kiln_accounts::Tool) {
     use std::os::unix::fs::PermissionsExt;
     let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
     let(base,proj)=setup("cli-update-resume");
-    struct Cleanup(PathBuf,Option<std::ffi::OsString>);
-    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);unsafe {if let Some(path)=&self.1 {std::env::set_var("PATH",path);}else {std::env::remove_var("PATH");}}}}
-    let _cleanup=Cleanup(base.clone(),std::env::var_os("PATH"));
+    struct Cleanup(PathBuf,Option<std::ffi::OsString>,Option<std::ffi::OsString>);
+    impl Drop for Cleanup {fn drop(&mut self){shutdown(&self.0);unsafe {if let Some(path)=&self.1 {std::env::set_var("PATH",path);}else {std::env::remove_var("PATH");} if let Some(path)=&self.2 {std::env::set_var("KILN_ANTIGRAVITY_DIR",path);}else {std::env::remove_var("KILN_ANTIGRAVITY_DIR");}}}}
+    let _cleanup=Cleanup(base.clone(),std::env::var_os("PATH"),std::env::var_os("KILN_ANTIGRAVITY_DIR"));
+    unsafe {std::env::set_var("KILN_ANTIGRAVITY_DIR",base.join("agy"));}
     let bin=base.join("bin");std::fs::create_dir_all(&bin).unwrap();
-    let cli=if tool==Tool::Codex {let dir=base.join("lib/node_modules/@openai/codex/bin");std::fs::create_dir_all(&dir).unwrap();let cli=dir.join("codex");std::os::unix::fs::symlink(&cli,bin.join("codex")).unwrap();cli} else {bin.join("claude")};
+    let cli=if tool==Tool::Codex {let dir=base.join("lib/node_modules/@openai/codex/bin");std::fs::create_dir_all(&dir).unwrap();let cli=dir.join("codex");std::os::unix::fs::symlink(&cli,bin.join("codex")).unwrap();cli} else {bin.join(tool.program())};
     if tool==Tool::Codex {
         let npm=bin.join("npm");std::fs::write(&npm,format!("#!/bin/sh\ncase \"$1\" in root) printf '%s\\n' '{}' ;; install) printf '%s' 2.1.2 > '{}' ;; *) exit 2 ;; esac\n",base.join("lib/node_modules").display(),cli.with_file_name("version").display())).unwrap();std::fs::set_permissions(npm,std::fs::Permissions::from_mode(0o700)).unwrap();
     }
@@ -2038,9 +2039,16 @@ if args==['update']:
 with Path(__file__).resolve().with_name('argv.jsonl').open('a') as log: log.write(json.dumps(args)+'\n')
 if '--resume' in args: cid=args[args.index('--resume')+1]
 elif 'resume' in args: cid=args[args.index('resume')+1]
+elif '--conversation' in args: cid=args[args.index('--conversation')+1]
 else:
  count=Path(__file__).resolve().with_name('count');n=int(count.read_text())+1 if count.exists() else 1;count.write_text(str(n));cid=f'{n:08x}-1234-1234-1234-123456789abc'
-if '--settings' in args: groups=json.loads(args[args.index('--settings')+1])['hooks']['SessionStart']
+if Path(__file__).name=='agy':
+ # Like agy: prompts only through --prompt-interactive, no hooks, and the open conversation's presence lock.
+ rest=[a for i,a in enumerate(args) if a not in ('--conversation','--prompt-interactive') and (i==0 or args[i-1] not in ('--conversation','--prompt-interactive'))]
+ if rest: print('Error: unexpected argument '+repr(rest[0]),flush=True);sys.exit(2)
+ presence=Path(os.environ['KILN_ANTIGRAVITY_DIR'])/'presence';presence.mkdir(parents=True,exist_ok=True);held=open(presence/(cid+'.lock'),'w')
+ groups=[]
+elif '--settings' in args: groups=json.loads(args[args.index('--settings')+1])['hooks']['SessionStart']
 else:
  import re
  inline=next(a for a in args if a.startswith('hooks.SessionStart='))
@@ -2068,11 +2076,12 @@ while True:
             std::fs::create_dir_all(home.join(".codex")).unwrap();
             std::fs::write(home.join(".codex/auth.json"),serde_json::json!({"tokens":{"id_token":format!("x.{claims}.x"),"access_token":"fixture-only","refresh_token":"fixture-only"}}).to_string()).unwrap();
         }
-        manager.save_current(tool,"").unwrap();
+        if tool.has_accounts() {manager.save_current(tool,"").unwrap();}
     };
-    sign_in("fixture-a@example.invalid");h.state_mut().debug_queue_action(Action::LaunchAgent{program:tool.key().into(),cwd:proj.clone(),context:"fixture context".into(),request:"fixture task request".into()});
+    sign_in("fixture-a@example.invalid");h.state_mut().debug_queue_action(Action::LaunchAgent{program:tool.program().into(),cwd:proj.clone(),context:"fixture context".into(),request:"fixture task request".into()});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
-    let sid_a=h.state().debug_focused_session().unwrap();let pane_a=h.state().debug_focused_pane_id().unwrap();let spec_a=h.state().debug_focused_launch_spec().unwrap();let path_a=agent_runtime::record_path(&spec_a).unwrap();let a=agent_runtime::read(&path_a).unwrap();assert!(a.confirmed);
+    let sid_a=h.state().debug_focused_session().unwrap();let pane_a=h.state().debug_focused_pane_id().unwrap();let spec_a=h.state().debug_focused_launch_spec().unwrap();let path_a=agent_runtime::record_path(&spec_a).unwrap();
+    assert!(pump_until(&mut h,10,|_|agent_runtime::read(&path_a).is_ok_and(|r|r.confirmed)),"{tool:?} conversation was not confirmed");let a=agent_runtime::read(&path_a).unwrap();
     assert!(a.request_started);
     let output=std::process::Command::new(spec_a.program.as_ref().unwrap()).args(&spec_a.args).envs(spec_a.env.clone()).current_dir(&proj).output().unwrap();
     assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
@@ -2080,10 +2089,13 @@ while True:
     let starts=starts.lines().map(|s|serde_json::from_str::<Vec<String>>(s).unwrap()).collect::<Vec<_>>();
     assert_eq!(starts.len(),2);assert!(starts[0].iter().any(|s|s.contains("fixture task request")));
     assert!(!starts[1].iter().any(|s|s.contains("fixture task request")));assert!(starts[1].contains(a.conversation.as_ref().unwrap()));
+    if tool==Tool::Antigravity {assert_eq!(starts[0][0],"--prompt-interactive");assert_eq!(starts[1],["--conversation",a.conversation.as_ref().unwrap().as_str()]);}
     sign_in("fixture-b@example.invalid");h.state_mut().debug_queue_action(Action::DirectAgent{tool,cwd:Some(proj.clone())});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_pane_id()!=Some(pane_a)&&h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
-    let sid_b=h.state().debug_focused_session().unwrap();let pane_b=h.state().debug_focused_pane_id().unwrap();let spec_b=h.state().debug_focused_launch_spec().unwrap();let path_b=agent_runtime::record_path(&spec_b).unwrap();let b=agent_runtime::read(&path_b).unwrap();assert!(b.confirmed);assert_ne!(a.conversation,b.conversation);assert_ne!(a.spec.env,b.spec.env);
-    h.state_mut().debug_cli_fixture_update(tool,bin.join(tool.key()));
+    let sid_b=h.state().debug_focused_session().unwrap();let pane_b=h.state().debug_focused_pane_id().unwrap();let spec_b=h.state().debug_focused_launch_spec().unwrap();let path_b=agent_runtime::record_path(&spec_b).unwrap();
+    assert!(pump_until(&mut h,10,|_|agent_runtime::read(&path_b).is_ok_and(|r|r.confirmed)),"{tool:?} conversation was not confirmed");let b=agent_runtime::read(&path_b).unwrap();assert_ne!(a.conversation,b.conversation);
+    if tool.has_accounts() {assert_ne!(a.spec.env,b.spec.env);} else {assert!(!a.spec.env.iter().chain(&b.spec.env).any(|(k,_)|k=="KILN_AGENT_PROFILE"));}
+    h.state_mut().debug_cli_fixture_update(tool,bin.join(tool.program()));
     assert!(pump_until(&mut h,15,|_|agent_runtime::read(&path_a).is_ok_and(|r|r.confirmed&&r.version=="2.1.2")&&agent_runtime::read(&path_b).is_ok_and(|r|r.confirmed&&r.version=="2.1.2")));
     assert_eq!(agent_runtime::read(&path_a).unwrap().conversation,a.conversation);assert_eq!(agent_runtime::read(&path_b).unwrap().conversation,b.conversation);
     assert_eq!(agent_runtime::read(&path_a).unwrap().spec.env,a.spec.env);assert_eq!(agent_runtime::read(&path_b).unwrap().spec.env,b.spec.env);

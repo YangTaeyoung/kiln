@@ -9354,6 +9354,11 @@
     "ja": "ChatGPT のサブスクリプションアカウントでログインしてください",
     "zh-CN": "请使用 ChatGPT 订阅账户登录"
   },
+  "Antigravity로 새 작업": {
+    "en": "New Antigravity task",
+    "ja": "Antigravity の新規タスク",
+    "zh-CN": "新建 Antigravity 任务"
+  },
   "Claude Code로 새 작업": {
     "en": "New Claude Code task",
     "ja": "Claude Code の新規タスク",
@@ -10754,10 +10759,10 @@
     "ja": "CLI 更新",
     "zh-CN": "CLI 更新"
   },
-  "Codex·Claude Code 자동 업데이트": {
-    "en": "Automatically update Codex and Claude Code",
-    "ja": "Codex・Claude Code を自動更新",
-    "zh-CN": "自动更新 Codex 和 Claude Code"
+  "Codex·Claude Code·Antigravity 자동 업데이트": {
+    "en": "Automatically update Codex, Claude Code, and Antigravity",
+    "ja": "Codex・Claude Code・Antigravity を自動更新",
+    "zh-CN": "自动更新 Codex、Claude Code 和 Antigravity"
   },
   "업데이트 직후 같은 대화로 세션 재시작": {
     "en": "Restart sessions in the same conversation immediately after updates",

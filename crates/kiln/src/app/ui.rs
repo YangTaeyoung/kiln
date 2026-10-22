@@ -72,11 +72,21 @@ pub(super) fn paint_running(ui: &egui::Ui, center: egui::Pos2, color: Color32) {
 }
 
 pub(super) fn agent_icon(agent: Option<kiln_accounts::Tool>) -> Icon {
-    match agent { Some(kiln_accounts::Tool::Claude) => Icon::Claude, Some(kiln_accounts::Tool::Codex) => Icon::Codex, None => Icon::Terminal }
+    match agent {
+        Some(kiln_accounts::Tool::Claude) => Icon::Claude,
+        Some(kiln_accounts::Tool::Codex) => Icon::Codex,
+        Some(kiln_accounts::Tool::Antigravity) => Icon::Antigravity,
+        None => Icon::Terminal,
+    }
 }
 
 pub(super) fn agent_ink(icon: Icon, theme: &Theme) -> Color32 {
-    match icon { Icon::Claude => theme.orange, Icon::Codex => theme.blue, _ => theme.text_dim }
+    match icon {
+        Icon::Claude => theme.orange,
+        Icon::Codex => theme.blue,
+        Icon::Antigravity => theme.purple,
+        _ => theme.text_dim,
+    }
 }
 
 /// Keep the brand legible inside a separate fixed-size activity ring.
@@ -179,6 +189,7 @@ pub(super) fn running_color(agent: Option<kiln_accounts::Tool>, theme: &Theme) -
     match agent {
         Some(kiln_accounts::Tool::Claude) => theme.orange,
         Some(kiln_accounts::Tool::Codex) => theme.blue,
+        Some(kiln_accounts::Tool::Antigravity) => theme.purple,
         None => theme.text_dim,
     }
 }
@@ -605,6 +616,7 @@ impl KilnApp {
             egui::Popup::menu(&create).show(|ui| {
                 if widgets::button_with(ui,Some(Icon::Codex),"Codex",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::DirectAgent { tool: kiln_accounts::Tool::Codex, cwd: None });ui.close();}
                 if widgets::button_with(ui,Some(Icon::Claude),"Claude Code",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::DirectAgent { tool: kiln_accounts::Tool::Claude, cwd: None });ui.close();}
+                if widgets::button_with(ui,Some(Icon::Antigravity),"Antigravity",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::DirectAgent { tool: kiln_accounts::Tool::Antigravity, cwd: None });ui.close();}
                 ui.separator();
                 if widgets::button_with(ui,Some(Icon::Sparkle),kiln_common::i18n::tr("에이전트 요청"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::NewAgentTask);ui.close();}
                 if widgets::button_with(ui,Some(Icon::Terminal),kiln_common::i18n::tr("새 터미널"),ButtonKind::Ghost,true).on_hover_text(self.keymap.label("new_task","⌘T")).clicked(){self.actions.push(Action::NewPage);ui.close();}
@@ -612,6 +624,7 @@ impl KilnApp {
                 ui.menu_button(kiln_common::i18n::tr("폴더에서 열기"), |ui| {
                     if widgets::button_with(ui,Some(Icon::Codex),"Codex",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Codex));ui.close();}
                     if widgets::button_with(ui,Some(Icon::Claude),"Claude Code",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Claude));ui.close();}
+                    if widgets::button_with(ui,Some(Icon::Antigravity),"Antigravity",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Antigravity));ui.close();}
                     if widgets::button_with(ui,Some(Icon::Terminal),kiln_common::i18n::tr("터미널"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenFolder);ui.close();}
                 });
             });
@@ -1643,6 +1656,7 @@ impl KilnApp {
         add(Group::Commands, Icon::Plus, kiln_common::i18n::tr("새 터미널 탭").into(), "⌘T", Action::NewPage);
         add(Group::Commands, Icon::Codex, kiln_common::i18n::tr("Codex로 새 작업").into(), "", Action::DirectAgent {tool:kiln_accounts::Tool::Codex,cwd:None});
         add(Group::Commands, Icon::Claude, kiln_common::i18n::tr("Claude Code로 새 작업").into(), "", Action::DirectAgent {tool:kiln_accounts::Tool::Claude,cwd:None});
+        add(Group::Commands, Icon::Antigravity, kiln_common::i18n::tr("Antigravity로 새 작업").into(), "", Action::DirectAgent {tool:kiln_accounts::Tool::Antigravity,cwd:None});
         add(Group::Commands, Icon::SplitRight, kiln_common::i18n::tr("오른쪽으로 나누기").into(), "⌘D", Action::Split(layout::Dir::Horizontal));
         add(Group::Commands, Icon::SplitDown, kiln_common::i18n::tr("아래로 나누기").into(), "⇧⌘D", Action::Split(layout::Dir::Vertical));
         add(Group::Commands, Icon::History, kiln_common::i18n::tr("Git 로그 (히스토리)").into(), "⇧⌘L", Action::OpenHistory);

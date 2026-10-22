@@ -16,7 +16,7 @@ pub(super) fn executable(name:&str)->Option<PathBuf>{
 }
 
 pub fn prepare(program:&str,context:&str,request:&str)->Result<Prepared,String>{
-    if !matches!(program,"codex"|"claude"){return Err(kiln_common::i18n::tr("지원하지 않는 에이전트입니다.").into());}
+    if !matches!(program,"codex"|"claude"|"agy"){return Err(kiln_common::i18n::tr("지원하지 않는 에이전트입니다.").into());}
     let binary=executable(program).ok_or_else(||kiln_common::trf!("{program}을 찾을 수 없습니다. 설치 후 다시 시작해 주세요."))?;
     prepare_in(&kiln_common::paths::config_dir().join("agent-requests"),&binary,context,request)
 }

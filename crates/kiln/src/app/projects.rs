@@ -78,7 +78,7 @@ fn detected_agents() -> Vec<(String,Option<PathBuf>)> {
     let mut dirs:Vec<PathBuf>=std::env::var_os("PATH").map(|p|std::env::split_paths(&p).collect()).unwrap_or_default();
     #[cfg(target_os="macos")] dirs.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);
     if let Some(home)=kiln_common::paths::home(){dirs.push(home.join(".local").join("bin"));}
-    ["codex","claude","gemini"].into_iter().map(|name|(name.into(),executable_in(name,&dirs))).collect()
+    ["codex","claude","agy","gemini"].into_iter().map(|name|(name.into(),executable_in(name,&dirs))).collect()
 }
 
 impl Draft {
@@ -467,7 +467,7 @@ impl Projects {
                         ui.add_space(10.0); ui.label(kiln_common::i18n::tr("시작 방식"));
                         ui.horizontal_wrapped(|ui| { ui.selectable_value(&mut draft.mode, StartMode::Terminal, kiln_common::i18n::tr("터미널")); ui.selectable_value(&mut draft.mode, StartMode::Agent, kiln_common::i18n::tr("AI 에이전트")); });
                         if draft.mode == StartMode::Agent {
-                            ui.horizontal_wrapped(|ui| { for command in ["codex", "claude", "gemini"] { ui.selectable_value(&mut draft.command, command.into(), command); } });
+                            ui.horizontal_wrapped(|ui| { for command in ["codex", "claude", "agy", "gemini"] { ui.selectable_value(&mut draft.command, command.into(), command); } });
                             field(ui, kiln_common::i18n::tr("에이전트 실행 명령"), &mut draft.command);
                             let binary=draft.command.split_whitespace().next().unwrap_or("");
                             if let Some((_,path))=self.agent_bins.iter().find(|(name,_)| name==binary) {

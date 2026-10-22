@@ -1,7 +1,8 @@
 # Agent accounts
 
 Open **Settings → Accounts** to manage Claude Code and Codex subscription
-accounts. Install the official CLI for each agent you use.
+accounts. Install the official CLI for each agent you use. The Antigravity CLI keeps its
+own sign-in; Kiln does not save or switch Antigravity accounts ([Antigravity CLI](antigravity.md)).
 
 ## Add an account
 

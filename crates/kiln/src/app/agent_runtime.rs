@@ -215,6 +215,8 @@ fn attach(spec: &mut SpawnSpec, path: &Path, record: &Record) -> Result<()> {
             serde_json::json!({"hooks":{"SessionStart":hooks,"UserPromptSubmit":hooks}})
                 .to_string(),
         ]),
+        // agy runs no Kiln hook; `observe` records the conversation it holds open.
+        Tool::Antigravity => {}
     }
     spec.env.push((
         "KILN_AGENT_RECORD".into(),
@@ -231,28 +233,27 @@ pub fn resume(path: &Path) -> Result<SpawnSpec> {
         .as_deref()
         .context("conversation ID is not confirmed")?;
     ensure!(valid_id(id), "invalid conversation ID");
-    let key = match record.tool {
-        Tool::Codex => "CODEX_HOME",
-        Tool::Claude => "CLAUDE_CONFIG_DIR",
-    };
-    ensure!(
-        record
+    if record.tool.has_accounts() {
+        let key = if record.tool == Tool::Codex { "CODEX_HOME" } else { "CLAUDE_CONFIG_DIR" };
+        ensure!(
+            record
+                .spec
+                .env
+                .iter()
+                .any(|(k, v)| k == "KILN_AGENT_PROFILE" && !v.is_empty()),
+            "original account not pinned"
+        );
+        let config = record
             .spec
             .env
             .iter()
-            .any(|(k, v)| k == "KILN_AGENT_PROFILE" && !v.is_empty()),
-        "original account not pinned"
-    );
-    let config = record
-        .spec
-        .env
-        .iter()
-        .find(|(k, _)| k == key)
-        .context("original account configuration missing")?;
-    ensure!(
-        Path::new(&config.1).join("initialized").is_file(),
-        "original account directory missing"
-    );
+            .find(|(k, _)| k == key)
+            .context("original account configuration missing")?;
+        ensure!(
+            Path::new(&config.1).join("initialized").is_file(),
+            "original account directory missing"
+        );
+    }
     let mut spec = record.spec.clone();
     spec.args = match record.tool {
         Tool::Codex => vec![
@@ -263,6 +264,7 @@ pub fn resume(path: &Path) -> Result<SpawnSpec> {
             codex_store_override(&spec),
         ],
         Tool::Claude => vec!["--resume".into(), id.into()],
+        Tool::Antigravity => vec!["--conversation".into(), id.into()],
     };
     attach(&mut spec, path, &record)?;
     Ok(spec)
@@ -416,6 +418,10 @@ pub fn run_request(
     let mut cmd = Command::new(program);
     cmd.args(lead).args(&spec.args).envs(spec.env).env_remove("KILN_CAPACITY_RETRY_TURN");
     if !resumed && let Some(payload) = payload {
+        // agy takes the initial prompt as --prompt-interactive.
+        if record.tool == Tool::Antigravity {
+            cmd.arg("--prompt-interactive");
+        }
         cmd.arg(payload);
     }
     #[cfg(unix)]
@@ -496,7 +502,7 @@ fn installer_with(binary: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> R
     )
 }
 fn update_command(tool: Tool, binary: &Path) -> Result<Command> {
-    if tool == Tool::Claude {
+    if tool == Tool::Claude || tool == Tool::Antigravity {
         let mut cmd = Command::new(binary);
         kiln_common::process::hide_window(&mut cmd);
         cmd.arg("update");
@@ -595,6 +601,117 @@ fn hook_in(root: &Path, path: &Path, generation: &str, input: impl Read) -> Resu
     }
     Ok(None)
 }
+/// agy's data folder (`KILN_ANTIGRAVITY_DIR` in isolated runs); `presence/<conversation>.lock`
+/// stays open while a conversation is.
+pub(super) fn antigravity_root() -> Option<PathBuf> {
+    std::env::var_os("KILN_ANTIGRAVITY_DIR")
+        .map(PathBuf::from)
+        .or_else(|| kiln_common::paths::home().map(|home| home.join(".gemini").join("antigravity-cli")))
+}
+/// The single conversation whose presence lock under `root` is among `open` paths.
+fn held_conversation(root: &Path, open: &[PathBuf]) -> Option<String> {
+    let presence = root.join("presence");
+    let mut ids = open.iter().filter(|path| path.parent() == Some(presence.as_path())).filter_map(|path| {
+        let id = path.file_name()?.to_str()?.strip_suffix(".lock")?;
+        valid_id(id).then(|| id.to_owned())
+    });
+    let id = ids.next()?;
+    ids.all(|other| other == id).then_some(id)
+}
+/// The conversation the agy process `pid` holds open.
+pub fn antigravity_conversation(pid: u32) -> Option<String> {
+    let root = antigravity_root()?.canonical().ok()?;
+    held_conversation(&root, &kiln_daemon::procinfo::open_files(pid))
+}
+/// Records the conversation an agy launch holds open, as the SessionStart hook does for
+/// the other CLIs: a resumed launch confirms only its original conversation.
+pub fn observe(path: &Path, generation: &str, id: &str) -> Result<()> {
+    ensure!(valid_id(id), "invalid conversation ID");
+    // A lock briefly held elsewhere (or inherited by a process being spawned) is waited for.
+    let mut waits = 0;
+    let _lock = loop {
+        match lock_record(path) {
+            Ok(lock) => break lock,
+            Err(error)
+                if waits < 25
+                    && error.downcast_ref::<std::fs::TryLockError>().is_some_and(|e| matches!(e, std::fs::TryLockError::WouldBlock)) =>
+            {
+                waits += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    let mut record = read(path)?;
+    ensure!(record.tool == Tool::Antigravity, "not an Antigravity launch");
+    ensure!(record.generation == generation, "stale launch");
+    if record.confirmed && record.conversation.as_deref() == Some(id) {
+        return Ok(());
+    }
+    if !record.confirmed
+        && let Some(expected) = &record.conversation
+    {
+        ensure!(expected == id, "CLI did not resume the original conversation");
+    }
+    record.confirmed = true;
+    record.conversation = Some(id.to_owned());
+    private_write(path, &serde_json::to_vec(&record)?)
+}
+/// Records, off the UI thread, the conversations Kiln-launched agy panels hold open.
+#[derive(Default)]
+pub struct Observer {
+    last: Option<Instant>,
+    running: Option<Receiver<Vec<(PathBuf, bool)>>>,
+    /// Whether each launch record is an agy launch.
+    agy: std::collections::HashMap<PathBuf, bool>,
+}
+impl Observer {
+    /// Checks the agy launches among `launches` (record, generation, process) at most every
+    /// two seconds.
+    pub fn tick(&mut self, mut launches: Vec<(PathBuf, String, u32)>) {
+        if cfg!(windows) {
+            return;
+        }
+        if let Some(rx) = &self.running {
+            match rx.try_recv() {
+                Ok(kinds) => self.agy.extend(kinds),
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+            self.running = None;
+        }
+        launches.retain(|(path, _, _)| self.agy.get(path) != Some(&false));
+        if launches.is_empty() || self.last.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
+            return;
+        }
+        self.last = Some(Instant::now());
+        let (tx, rx) = channel();
+        self.running = Some(rx);
+        std::thread::spawn(move || {
+            let mut kinds = Vec::new();
+            for (path, generation, pid) in launches {
+                let Ok(record) = read(&path) else { continue };
+                kinds.push((path.clone(), record.tool == Tool::Antigravity));
+                if record.tool != Tool::Antigravity || record.generation != generation {
+                    continue;
+                }
+                if let Some(id) = antigravity_conversation(pid)
+                    && !(record.confirmed && record.conversation.as_deref() == Some(id.as_str()))
+                    && let Err(error) = observe(&path, &generation, &id)
+                {
+                    log::debug!("agy conversation {id} not recorded: {error:#}");
+                }
+            }
+            let _ = tx.send(kinds);
+        });
+    }
+}
+/// The record and generation of a `kiln agent-run` launch spec.
+pub fn launch_of(spec: &SpawnSpec) -> Option<(PathBuf, String)> {
+    let value = |name: &str| spec.args.iter().position(|a| a == name).and_then(|i| spec.args.get(i + 1)).cloned();
+    (spec.args.first().map(String::as_str) == Some("agent-run")).then_some(())?;
+    Some((PathBuf::from(value("--record")?), value("--generation")?))
+}
 fn bounded(mut cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -664,17 +781,18 @@ struct Reply {
     complete: bool,
 }
 pub struct Updates {
-    pub versions: [Version; 2],
+    pub versions: [Version; 3],
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
     last: Instant,
     automatic: bool,
-    observed: [String; 2],
+    observed: [String; 3],
 }
 fn index(t: Tool) -> usize {
     match t {
         Tool::Claude => 0,
         Tool::Codex => 1,
+        Tool::Antigravity => 2,
     }
 }
 impl Default for Updates {
@@ -707,7 +825,7 @@ impl Updates {
         std::thread::spawn(move || {
             let result = (|| -> Result<(Version, bool)> {
                 let binary = fixture
-                    .or_else(|| agent_launch::executable(tool.key()))
+                    .or_else(|| agent_launch::executable(tool.program()))
                     .context("CLI is not installed")?;
                 version_request(tool, install, binary, &tx, || latest_version(tool, offline))
             })();
@@ -785,7 +903,7 @@ impl Updates {
         ui.spacing_mut().item_spacing.y = 8.0;
         ui.checkbox(
             &mut s.cli_auto_update,
-            tr("Codex·Claude Code 자동 업데이트"),
+            tr("Codex·Claude Code·Antigravity 자동 업데이트"),
         );
         ui.checkbox(
             &mut s.cli_restart_after_update,
@@ -803,7 +921,12 @@ impl Updates {
                 ui.spacing_mut().item_spacing = egui::vec2(10.0, 8.0);
                 ui.horizontal_wrapped(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
-                    icons::paint(ui.painter(), rect.shrink(2.0), if tool == Tool::Claude { Icon::Claude } else { Icon::Codex }, if tool == Tool::Claude { theme.orange } else { theme.text });
+                    let (icon, color) = match tool {
+                        Tool::Claude => (Icon::Claude, theme.orange),
+                        Tool::Codex => (Icon::Codex, theme.text),
+                        Tool::Antigravity => (Icon::Antigravity, theme.purple),
+                    };
+                    icons::paint(ui.painter(), rect.shrink(2.0), icon, color);
                     ui.label(egui::RichText::new(tool.display_name()).font(fonts::semibold(14.0)).color(theme.text));
                     if !v.installed.is_empty() { widgets::pill(ui, &v.installed, theme.text_dim); }
                 });
@@ -877,10 +1000,12 @@ fn version_request(
     version.busy = false;
     Ok((version, changed))
 }
+/// The newest published version, empty when the CLI checks for it itself (agy).
 fn latest_version(tool: Tool, offline: bool) -> Option<String> {
     let package = match tool {
         Tool::Codex => "@openai/codex",
         Tool::Claude => "@anthropic-ai/claude-code",
+        Tool::Antigravity => return Some(String::new()),
     };
     let mut cmd = Command::new("curl");
     kiln_common::process::hide_window(&mut cmd);
@@ -1102,7 +1227,7 @@ mod tests {
                             node.accesskit_node().role() == egui::accesskit::Role::Button
                         })
                         .collect::<Vec<_>>();
-                    assert_eq!(buttons.len(), 2);
+                    assert_eq!(buttons.len(), Tool::ALL.len());
                     assert!(
                         buttons
                             .iter()
@@ -1179,7 +1304,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let mut links = vec![];
         let mut records = vec![];
-        for (i, tool) in Tool::ALL.into_iter().enumerate() {
+        for (i, tool) in [Tool::Claude, Tool::Codex].into_iter().enumerate() {
             let root = config.join(tool.key());
             fs::create_dir(&root).unwrap();
             let id = format!("{}2345678-1234-1234-1234-123456789abc", i + 1);
@@ -1388,7 +1513,7 @@ mod tests {
             .click();
         h.run_steps(2);
         assert!(h.state().1.cli_restart_after_update && !h.state().1.cli_auto_update);
-        h.get_by_label(tr("Codex·Claude Code 자동 업데이트"))
+        h.get_by_label(tr("Codex·Claude Code·Antigravity 자동 업데이트"))
             .click();
         h.run_steps(2);
         let saved = serde_json::to_vec(&h.state().1).unwrap();
@@ -1428,7 +1553,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let path = d.path().join("record.json");
         fs::write(d.path().join("initialized"), b"1").unwrap();
-        for tool in Tool::ALL {
+        for tool in Tool::ACCOUNTS {
             let record = Record {
                 tool,
                 spec: SpawnSpec {
@@ -1436,11 +1561,7 @@ mod tests {
                     cwd: Some("/same directory".into()),
                     env: vec![
                         (
-                            match tool {
-                                Tool::Claude => "CLAUDE_CONFIG_DIR",
-                                Tool::Codex => "CODEX_HOME",
-                            }
-                            .into(),
+                            if tool == Tool::Claude { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" }.into(),
                             d.path().to_string_lossy().into_owned(),
                         ),
                         ("KILN_AGENT_PROFILE".into(), "account-a".into()),
@@ -1460,6 +1581,71 @@ mod tests {
             assert!(spec.args.contains(record.conversation.as_ref().unwrap()));
             assert!(!spec.args.iter().any(|s| s == "--last" || s == "--continue"));
         }
+    }
+    #[test]
+    fn agy_resumes_its_exact_conversation_without_an_account() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("record.json");
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let record = Record {
+            tool: Tool::Antigravity,
+            spec: SpawnSpec { program: Some("/fixture/agy".into()), cwd: Some("/same directory".into()), ..Default::default() },
+            conversation: Some(id.into()),
+            version: "1.4.5".into(),
+            generation: "fixture".into(),
+            confirmed: true,
+            request_started: false,
+        };
+        private_write(&path, &serde_json::to_vec(&record).unwrap()).unwrap();
+        let spec = resume(&path).unwrap();
+        assert_eq!(spec.args, vec!["--conversation".to_string(), id.into()]);
+        assert_eq!(spec.cwd, record.spec.cwd);
+        assert!(!spec.env.iter().any(|(k, _)| k == "KILN_AGENT_PROFILE"));
+        let claude = Record { tool: Tool::Claude, ..record };
+        private_write(&path, &serde_json::to_vec(&claude).unwrap()).unwrap();
+        assert!(resume(&path).is_err(), "account tools still need their pinned account");
+    }
+    #[test]
+    fn an_agy_launch_records_only_the_conversation_it_holds_open() {
+        let root = Path::new("/agy");
+        let (id, other) = ("12345678-1234-1234-1234-123456789abc", "22345678-1234-1234-1234-123456789abc");
+        let lock = |id: &str| root.join("presence").join(format!("{id}.lock"));
+        assert_eq!(held_conversation(root, &[root.join("conversations").join(format!("{id}.db")), lock(id)]), Some(id.into()));
+        assert_eq!(held_conversation(root, &[lock(id), lock(id)]), Some(id.into()));
+        assert_eq!(held_conversation(root, &[lock(id), lock(other)]), None);
+        assert_eq!(held_conversation(root, &[root.join("presence/fixture.lock"), Path::new("/other/presence").join(format!("{id}.lock"))]), None);
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("record.json");
+        let fresh = Record {
+            tool: Tool::Antigravity,
+            spec: SpawnSpec::default(),
+            conversation: None,
+            version: "1.4.5".into(),
+            generation: "launch".into(),
+            confirmed: false,
+            request_started: false,
+        };
+        private_write(&path, &serde_json::to_vec(&fresh).unwrap()).unwrap();
+        assert!(observe(&path, "stale", id).is_err());
+        observe(&path, "launch", id).unwrap();
+        let record = read(&path).unwrap();
+        assert!(record.confirmed && record.conversation.as_deref() == Some(id));
+        // A new conversation in the same panel replaces a confirmed one.
+        observe(&path, "launch", other).unwrap();
+        assert_eq!(read(&path).unwrap().conversation.as_deref(), Some(other));
+        // A resumed launch confirms only its original conversation.
+        let resumed = Record { conversation: Some(id.into()), ..fresh.clone() };
+        private_write(&path, &serde_json::to_vec(&resumed).unwrap()).unwrap();
+        assert!(observe(&path, "launch", other).is_err());
+        assert!(!read(&path).unwrap().confirmed);
+        observe(&path, "launch", id).unwrap();
+        assert!(read(&path).unwrap().confirmed);
+        let codex = Record { tool: Tool::Codex, ..fresh };
+        private_write(&path, &serde_json::to_vec(&codex).unwrap()).unwrap();
+        assert!(observe(&path, "launch", id).is_err(), "hooks confirm the other CLIs");
+        let spec = SpawnSpec { args: ["agent-run", "--record", "/r.json", "--generation", "g-1"].map(String::from).to_vec(), ..Default::default() };
+        assert_eq!(launch_of(&spec), Some((PathBuf::from("/r.json"), "g-1".into())));
+        assert_eq!(launch_of(&SpawnSpec::default()), None);
     }
     #[test]
     fn missing_identity_cannot_restart() {

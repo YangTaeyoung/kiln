@@ -52,6 +52,7 @@ pub fn tool_for(process: &str) -> Option<Tool> {
     match process {
         "claude" => Some(Tool::Claude),
         "codex" => Some(Tool::Codex),
+        "agy" => Some(Tool::Antigravity),
         _ => None,
     }
 }
@@ -135,7 +136,9 @@ impl Rotator {
             return;
         }
         self.handled.insert(session, Instant::now());
-        if self.managed.contains(&session) {
+        if !tool.has_accounts() {
+            out.push(RotationEvent::LimitReached { session, tool, reset_hint: hit.reset_hint });
+        } else if self.managed.contains(&session) {
             out.push(RotationEvent::ManagedLimitReached{session,tool});
         } else if self.mgr.auto_rotate(tool) {
             self.start(session, tool);
@@ -146,7 +149,7 @@ impl Rotator {
 
     /// 다음 계정으로 바꾸고 세션을 이어가는 작업을 시작한다.
     pub fn start(&mut self, session: SessionId, tool: Tool) {
-        if self.managed.contains(&session) || self.jobs.iter().any(|j| j.session == session) {
+        if !tool.has_accounts() || self.managed.contains(&session) || self.jobs.iter().any(|j| j.session == session) {
             return;
         }
         self.handled.insert(session, Instant::now());
@@ -277,6 +280,8 @@ mod tests {
     fn only_agent_processes_are_watched() {
         assert!(tool_for("claude").is_some());
         assert!(tool_for("codex").is_some());
+        assert_eq!(tool_for("agy"), Some(kiln_accounts::Tool::Antigravity));
+        assert!(tool_for("antigravity").is_none());
         assert!(tool_for("zsh").is_none());
         assert!(tool_for("node").is_none());
     }

@@ -5,30 +5,28 @@ use std::io::{BufRead, BufReader};
 
 pub(super) struct Scope {
     pub workspaces: Vec<PathBuf>,
+    /// Projected namespaces and read-only Antigravity data folders.
     pub(super) roots: Vec<(Tool, PathBuf)>,
 }
 impl Scope {
     pub fn new(pair: &Pair, workspaces: Vec<PathBuf>) -> Result<Self> {
-        let home = directories::BaseDirs::new().context("Missing home directory")?;
         let mut roots = Vec::new();
-        for tool in Tool::ALL {
-            let default = std::env::var_os(env_key(tool))
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    home.home_dir().join(if tool == Tool::Claude {
-                        ".claude"
-                    } else {
-                        ".codex"
-                    })
-                });
-            // Both CLIs see the same workspace history in their ordinary /resume picker.
-            for root in [default, pair.endpoint(tool).root.clone()] {
-                private_dir(&root)?;
-                let root = root.canonical()?;
-                if !roots.contains(&(tool, root.clone())) {
-                    roots.push((tool, root));
+        for tool in PROJECTED {
+            let default = default_root(tool).context("Missing home directory")?;
+            let connected = pair.endpoint(tool).context("No namespace")?.root.clone();
+            for r in [default, connected] {
+                private_dir(&r)?;
+                let r = r.canonical()?;
+                if !roots.contains(&(tool, r.clone())) {
+                    roots.push((tool, r));
                 }
             }
+        }
+        // Read only: the folder is never created or modified.
+        if let Some(root) = default_root(Tool::Antigravity).and_then(|r| r.canonical().ok())
+            && root.is_dir()
+        {
+            roots.push((Tool::Antigravity, root));
         }
         let mut workspaces: Vec<_> = workspaces
             .into_iter()
@@ -218,6 +216,85 @@ fn files(
     Ok(())
 }
 
+/// The full transcripts of agy conversations that have a conversation database:
+/// `brain/<id>/.system_generated/logs/transcript_full.jsonl`.
+fn antigravity_files(root: &Path, budget: &mut usize, out: &mut Vec<PathBuf>, gate: &Gate) -> Result<()> {
+    let brain = root.join("brain");
+    if !brain.is_dir() {
+        return Ok(());
+    }
+    safe_path(root, &brain)?;
+    for entry in fs::read_dir(&brain)? {
+        if !gate.load(Ordering::Acquire) {
+            break;
+        }
+        ensure!(*budget > 0, "Session discovery limit reached (100000 directory entries)");
+        *budget -= 1;
+        let entry = entry?;
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if !entry.file_type()?.is_dir() || !uuid(&id) {
+            continue;
+        }
+        let transcript = entry.path().join(".system_generated").join("logs").join("transcript_full.jsonl");
+        let database = root.join("conversations").join(format!("{id}.db"));
+        if fs::symlink_metadata(&transcript).is_ok_and(|m| m.is_file()) && database.is_file() {
+            out.push(transcript);
+        }
+    }
+    Ok(())
+}
+
+/// Workspace folder and parent conversation of each agy conversation, from its summary index.
+pub(super) type Summaries = HashMap<String, (Option<String>, bool)>;
+pub(super) fn antigravity_summaries(root: &Path) -> Result<Summaries> {
+    use rusqlite::{Connection, OpenFlags};
+    let path = root.join("conversation_summaries.db");
+    let mut summaries = HashMap::new();
+    if !path.is_file() {
+        return Ok(summaries);
+    }
+    safe_path(root, &path)?;
+    let db = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    db.busy_timeout(Duration::from_millis(500))?;
+    let mut query = db.prepare("SELECT conversation_id, workspace_uris, parent_conversation_id FROM conversation_summaries")?;
+    let rows = query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))?;
+    for row in rows {
+        let (id, uris, parent) = row?;
+        let cwd = serde_json::from_str::<Vec<String>>(&uris)
+            .ok()
+            .and_then(|uris| uris.into_iter().next())
+            .and_then(|uri| url::Url::parse(&uri).ok()?.to_file_path().ok())
+            .map(|path| path.to_string_lossy().into_owned());
+        summaries.insert(id, (cwd, !parent.is_empty()));
+    }
+    Ok(summaries)
+}
+
+/// The conversation of an agy transcript: its workspace folder from the summary index, when it
+/// is not a subagent and its first records hold a prompt.
+fn antigravity_metadata(root: &Path, path: &Path, summaries: &Summaries) -> Result<Option<Source>> {
+    safe_path(root, path)?;
+    let Some(id) = path.ancestors().nth(3).and_then(|dir| dir.file_name()).map(|n| n.to_string_lossy().into_owned()) else {
+        return Ok(None);
+    };
+    let Some((Some(cwd), false)) = summaries.get(&id) else {
+        return Ok(None);
+    };
+    let mut input = BufReader::new(storage::open(root, path)?.0.take(2 * 1024 * 1024));
+    let mut line = Vec::new();
+    for _ in 0..64 {
+        line.clear();
+        if input.read_until(b'\n', &mut line)? == 0 || !line.ends_with(b"\n") {
+            break;
+        }
+        let Ok(row) = serde_json::from_slice::<serde_json::Value>(&line) else { continue };
+        if row["type"] == "USER_INPUT" && row["content"].as_str().is_some_and(|c| !format::antigravity_prompt(c).trim().is_empty()) {
+            return Ok(Some(Source { tool: Tool::Antigravity, root: root.into(), path: path.into(), cwd: cwd.clone(), id }));
+        }
+    }
+    Ok(None)
+}
+
 /// Read only bounded leading rows until the native session identity appears.
 fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
     if tool == Tool::Claude && storage::compressed(path) { return Ok(None); }
@@ -311,14 +388,7 @@ fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
         let Some((id, cwd)) = id.zip(meta["cwd"].as_str()) else {
             return Ok(None);
         };
-        if !(id.len() == 36
-            && id.bytes().enumerate().all(|(i, b)| {
-                if [8, 13, 18, 23].contains(&i) {
-                    b == b'-'
-                } else {
-                    b.is_ascii_hexdigit()
-                }
-            }))
+        if !uuid(id)
             || !path
                 .file_name()
                 .is_some_and(|p| p.to_string_lossy().contains(id))
@@ -367,7 +437,8 @@ pub(super) fn find(
         .workspaces
         .iter()
         .map(|w| {
-            let key = digest(&serde_json::to_vec(&(w, &scope.roots)).expect("discovery key"));
+            let projected: Vec<_> = scope.roots.iter().filter(|(tool, _)| projected(*tool)).collect();
+            let key = digest(&serde_json::to_vec(&(w, projected)).expect("discovery key"));
             (w.clone(), key)
         })
         .collect();
@@ -384,18 +455,19 @@ pub(super) fn find(
             HashMap::new()
         };
         let mut paths = Vec::new();
-        files(
-            root,
-            &root.join(if *tool == Tool::Claude {
-                "projects"
-            } else {
-                "sessions"
-            }),
-            if *tool == Tool::Claude { 1 } else { 3 },
-            &mut budget,
-            &mut paths,
-            gate,
-        )?;
+        let mut summaries = None;
+        if *tool == Tool::Antigravity {
+            antigravity_files(root, &mut budget, &mut paths, gate)?;
+        } else {
+            files(
+                root,
+                &root.join(if *tool == Tool::Claude { "projects" } else { "sessions" }),
+                if *tool == Tool::Claude { 1 } else { 3 },
+                &mut budget,
+                &mut paths,
+                gate,
+            )?;
+        }
         for path in paths {
             if !gate.load(Ordering::Acquire) {
                 break;
@@ -408,7 +480,15 @@ pub(super) fn find(
             {
                 source.clone()
             } else {
-                let source = metadata(*tool, root, &path)?;
+                let source = if *tool == Tool::Antigravity {
+                    let summaries = match &summaries {
+                        Some(summaries) => summaries,
+                        None => summaries.insert(antigravity_summaries(root)?),
+                    };
+                    antigravity_metadata(root, &path, summaries)?
+                } else {
+                    metadata(*tool, root, &path)?
+                };
                 cache.insert(path.clone(), (meta.len(), modified, source.clone()));
                 source
             };

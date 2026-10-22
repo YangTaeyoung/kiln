@@ -4,7 +4,7 @@
 #[path = "procinfo_windows.rs"]
 mod windows;
 #[cfg(windows)]
-pub use windows::{cmdline, cwd, foreground_of, is_window_application, name, parent_of};
+pub use windows::{cmdline, cwd, foreground_of, is_window_application, name, open_files, parent_of};
 
 /// Resolve the actual foreground job through Kiro's nested PTY. tcgetpgrp
 /// reports the outer bridge's process group, not its inner shell's job.
@@ -48,7 +48,7 @@ mod mac_foreground {
     }
 
     fn is_agent(pid: u32) -> bool {
-        matches!(super::display_name(pid).as_deref(), Some("codex" | "claude"))
+        matches!(super::display_name(pid).as_deref(), Some("codex" | "claude" | "agy"))
     }
 
     fn is_shell(pid: u32) -> bool {
@@ -213,10 +213,88 @@ pub fn cwd(pid: u32) -> Option<String> {
     std::fs::read_link(format!("/proc/{pid}/cwd")).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
+/// `struct vnode_fdinfowithpath` in bsd/sys/proc_info.h.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct VnodeFdInfoWithPath {
+    openflags: u32,
+    status: u32,
+    offset: i64,
+    kind: i32,
+    guardflags: u32,
+    path: libc::vnode_info_path,
+}
+
+/// Paths of the files and directories `pid` holds open.
+#[cfg(target_os = "macos")]
+pub fn open_files(pid: u32) -> Vec<std::path::PathBuf> {
+    const PROC_PIDFDVNODEPATHINFO: i32 = 2;
+    let entry = std::mem::size_of::<libc::proc_fdinfo>();
+    // SAFETY: a null buffer asks the kernel for the size of the descriptor table.
+    let needed = unsafe { libc::proc_pidinfo(pid as i32, libc::PROC_PIDLISTFDS, 0, std::ptr::null_mut(), 0) };
+    if needed <= 0 {
+        return Vec::new();
+    }
+    // Room for descriptors opened between sizing and reading.
+    let capacity = needed as usize / entry + 32;
+    // SAFETY: proc_fdinfo is plain data; zeroed values are valid.
+    let mut fds: Vec<libc::proc_fdinfo> = (0..capacity).map(|_| unsafe { std::mem::zeroed() }).collect();
+    // SAFETY: the buffer size matches the allocated array.
+    let bytes = unsafe { libc::proc_pidinfo(pid as i32, libc::PROC_PIDLISTFDS, 0, fds.as_mut_ptr().cast(), (capacity * entry) as i32) };
+    if bytes <= 0 {
+        return Vec::new();
+    }
+    fds.truncate(bytes as usize / entry);
+    let size = std::mem::size_of::<VnodeFdInfoWithPath>() as i32;
+    fds.iter()
+        .filter(|fd| fd.proc_fdtype == libc::PROX_FDTYPE_VNODE as u32)
+        .filter_map(|fd| {
+            // SAFETY: correctly sized output struct; the kernel writes a NUL-terminated path.
+            unsafe {
+                let mut info: VnodeFdInfoWithPath = std::mem::zeroed();
+                let n = libc::proc_pidfdinfo(pid as i32, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, (&mut info as *mut VnodeFdInfoWithPath).cast(), size);
+                if n != size {
+                    return None;
+                }
+                let path = std::ffi::CStr::from_ptr(info.path.vip_path.as_ptr() as *const libc::c_char);
+                let path = path.to_string_lossy();
+                (!path.is_empty()).then(|| std::path::PathBuf::from(path.into_owned()))
+            }
+        })
+        .collect()
+}
+
+/// Paths of the files and directories `pid` holds open.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn open_files(pid: u32) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+        .filter(|path| path.is_absolute())
+        .collect()
+}
+
 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(unix)]
+    fn open_files_lists_a_file_this_process_holds_open() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(std::mem::size_of::<super::VnodeFdInfoWithPath>(), 1200);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("held.lock");
+        let file = std::fs::File::create(&path).unwrap();
+        let held = std::fs::canonicalize(&path).unwrap();
+        assert!(super::open_files(std::process::id()).iter().any(|p| p == &held), "{held:?}");
+        drop(file);
+        assert!(!super::open_files(std::process::id()).iter().any(|p| p == &held));
+        assert!(super::open_files(u32::MAX - 1).is_empty());
+    }
+
     #[test]
     #[cfg(target_os = "macos")]
     fn nested_pty_follows_only_the_foreground_job_and_recovers_shell() {
