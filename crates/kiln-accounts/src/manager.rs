@@ -422,7 +422,10 @@ impl AccountManager {
                 let secret = if self.pending_login(tool, &p.id) {
                     self.inner.env.store.get(&profile_service(tool), &p.id)
                 } else if self.runtime_dir(tool, &p.id).join("initialized").exists() {
-                    self.runtime_secret(tool, &p.id)
+                    self.runtime_secret(tool, &p.id).map(|secret| match secret {
+                        Some(runtime) => Some(self.live_stands_in(tool, &p.id, &runtime).unwrap_or(runtime)),
+                        None => None,
+                    })
                 } else { self.inner.env.store.get(&profile_service(tool), &p.id) };
                 if let Ok(secret) = secret {
                     let missing = secret.as_deref().is_none_or(|secret| match tool {
@@ -1249,6 +1252,7 @@ impl AccountManager {
                 Tool::Codex => codex::auth_email(&secret),
             };
             if !matches(email) { bail!("account credentials do not match saved profile"); }
+            if let Some(live) = self.live_stands_in(tool, id, &secret) { return Ok(Some((live, UsageSource::Live))); }
             return Ok(Some((secret, UsageSource::Runtime(self.runtime_dir(tool, id)))));
         }
         if self.active(tool).as_deref() == Some(id)
@@ -1262,6 +1266,20 @@ impl AccountManager {
         };
         if secret.is_some() && !matches(email) { bail!("account credentials do not match saved profile"); }
         Ok(secret.map(|secret| (secret, UsageSource::Snapshot)))
+    }
+
+    /// The live Claude login that stands in for the runtime login `runtime` of the active
+    /// profile `id` while `runtime` is expiring and the live CLI login of the same account is
+    /// not: the CLI in use renews the live login, and the runtime copy of an account whose
+    /// sessions use the live login is no longer renewed by anything.
+    fn live_stands_in(&self, tool: Tool, id: &str, runtime: &str) -> Option<String> {
+        if tool != Tool::Claude || self.active(tool).as_deref() != Some(id) { return None; }
+        let now_ms = now_unix().saturating_mul(1000);
+        if !claude_refresh::expiring(runtime, now_ms) { return None; }
+        let expected = self.with_state(|state| state.settings.tool(tool).profiles.iter().find(|profile| profile.profile.id == id).and_then(|profile| profile.profile.email.clone()))?;
+        let (live, _) = self.read_live(tool).ok().flatten()?;
+        let same_account = self.live_identity(tool, Some(&live)).0.is_some_and(|email| email.eq_ignore_ascii_case(&expected));
+        (same_account && claude::access_token(&live).is_ok() && !claude_refresh::expiring(&live, now_ms)).then_some(live)
     }
 
     /// Renews Claude `secret` for profile `id` when it is about to expire, as the CLI renews it:
@@ -2016,6 +2034,50 @@ mod tests {
         assert!(!m.login_required(Tool::Claude, &b.id));
         m.refresh_usage_blocking(Tool::Claude);
         assert_eq!(m.usage(Tool::Claude, &b.id).unwrap().five_hour.unwrap().0, 0.3);
+    }
+
+    #[test]
+    fn the_live_login_stands_in_for_an_expired_runtime_login_of_the_active_account() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("at-a-live", 0.6);
+        env.claude_renew = Arc::new(|_| panic!("neither login is renewed by Kiln"));
+        let m = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "a@example.test", "a-old");
+        let a = m.save_current(Tool::Claude, "a").unwrap();
+        m.launch_environment(Tool::Claude).unwrap();
+        let dir = m.runtime_dir(Tool::Claude, &a.id);
+        claude::write_oauth_account(&dir.join(".claude.json"), Some(&serde_json::json!({"emailAddress": "a@example.test"}))).unwrap();
+        store.set(&crate::login::claude_service(Some(&dir)), &env.username, &expired_claude_cred("a-runtime")).unwrap();
+        store.set(claude::CLAUDE_SERVICE, &env.username, &claude_cred("a-live")).unwrap();
+        assert_eq!(m.active(Tool::Claude).as_deref(), Some(a.id.as_str()));
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(m.usage(Tool::Claude, &a.id).unwrap().five_hour.unwrap().0, 0.6, "usage is read with the live login");
+        m.check_profile_credentials();
+        assert!(!m.login_required(Tool::Claude, &a.id));
+        store.set(claude::CLAUDE_SERVICE, &env.username, &expired_claude_cred("a-live")).unwrap();
+        env.claude_renew = Arc::new(|_| Err(crate::claude_refresh::SignInRequired.into()));
+        let m = AccountManager::with_env(env.clone());
+        m.refresh_usage_blocking(Tool::Claude);
+        m.check_profile_credentials();
+        assert!(m.login_required(Tool::Claude, &a.id), "with no usable login the account still asks to sign in");
+    }
+
+    #[test]
+    fn a_runtime_login_that_is_still_valid_is_used_before_the_live_login() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), true);
+        env.probe = usage_from("at-a-runtime", 0.2);
+        let m = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "a@example.test", "a-old");
+        let a = m.save_current(Tool::Claude, "a").unwrap();
+        m.launch_environment(Tool::Claude).unwrap();
+        let dir = m.runtime_dir(Tool::Claude, &a.id);
+        claude::write_oauth_account(&dir.join(".claude.json"), Some(&serde_json::json!({"emailAddress": "a@example.test"}))).unwrap();
+        store.set(&crate::login::claude_service(Some(&dir)), &env.username, &claude_cred("a-runtime")).unwrap();
+        store.set(claude::CLAUDE_SERVICE, &env.username, &claude_cred("a-live")).unwrap();
+        m.refresh_usage_blocking(Tool::Claude);
+        assert_eq!(m.usage(Tool::Claude, &a.id).unwrap().five_hour.unwrap().0, 0.2);
     }
 
     /// Two saved Claude accounts without runtime folders; `a` is active and `b` holds `b_secret`.

@@ -105,6 +105,12 @@ compare-and-swap save use Kiln's credential lock and Kiln's store; no CLI store 
 is written. The active profile's saved login shares its refresh token with the live CLI and is
 not renewed; an expired one is reported without a usage request.
 
+The active profile's runtime login is replaced by Claude Code's own login of the same account
+(the live login) when the runtime login is expiring and the live one is not: the CLI in use
+renews the live login, and nothing renews a runtime copy that no session uses. Neither login
+is renewed by Kiln in that case, and the profile asks for sign-in only when no usable login
+remains.
+
 A completed browser sign-in of a Claude profile is read with its staged credentials before
 **Apply**; the active profile, runtime folders and the live CLI login stay unchanged until
 then. The sign-in clears the profile's previous failure, makes it due with the next scheduler
