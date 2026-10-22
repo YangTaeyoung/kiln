@@ -916,7 +916,7 @@ impl KilnApp {
                 ws.sheet = None;
             }
             // Agent tasks keep following their live CLI title.
-            None => page.title = spec.name.clone().filter(|name| name != "Codex" && name != "Claude Code"),
+            None => page.title = spec.name.clone().filter(|name| !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == name)),
         }
         self.launch_specs.insert(pane, spec);
         let ws = &mut self.workspaces[target];
@@ -937,7 +937,7 @@ impl KilnApp {
         let mut page = Page::new(pid, pane);
         // Agent tasks keep following their live CLI title. SSH aliases remain
         // stable because a remote shell may publish only its working directory.
-        page.title = spec.name.clone().filter(|name|name != "Codex" && name != "Claude Code");
+        page.title = spec.name.clone().filter(|name| !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == name));
         self.launch_specs.insert(pane, spec);
         let ws = self.ws();
         ws.pages.push(page);
@@ -2562,13 +2562,15 @@ impl eframe::App for KilnApp {
         self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
         self.tick_agent_handover(ctx);
         self.tick_cli_updates(ctx);
-        let launches = self.panes.iter().filter_map(|(pane, p)| {
-            let info = self.conn.infos.get(&p.session()?)?;
-            info.exited.is_none().then_some(())?;
-            let (record, generation) = agent_runtime::launch_of(self.launch_specs.get(pane)?)?;
-            Some((record, generation, info.pid))
-        }).collect();
-        self.agy_conversations.tick(launches);
+        if self.agy_conversations.due() {
+            let launches = self.panes.iter().filter_map(|(pane, p)| {
+                let info = self.conn.infos.get(&p.session()?)?;
+                info.exited.is_none().then_some(())?;
+                let (record, generation) = agent_runtime::launch_of(self.launch_specs.get(pane)?)?;
+                Some((record, generation, info.pid))
+            }).collect();
+            self.agy_conversations.tick(launches);
+        }
         self.tick_capacity_recovery(ctx);
         self.conversation_sync.tick(&mut self.settings, self.workspaces.iter().filter(|w| w.conversation_sync).map(|w| w.tools.canonical_root().to_path_buf()).collect(), ctx);
         self.rotator.poll(&mut self.conn);

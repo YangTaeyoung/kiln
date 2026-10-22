@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader};
 
 /// An agy transcript unchanged this long ends its unanswered turn.
-const SETTLE: Duration = Duration::from_secs(5 * 60);
+pub(super) const SETTLE: Duration = Duration::from_secs(5 * 60);
 
 pub(super) fn rows(source: &Source, title: &mut String) -> Result<Vec<Value>> {
     rows_before_validation(source, title, || {})
@@ -75,14 +75,20 @@ fn read(
         let mut row: Value = serde_json::from_slice(&line)?;
         if source.tool == Tool::Antigravity {
             match row["type"].as_str() {
-                Some("USER_INPUT" | "GENERIC") => {}
+                Some("USER_INPUT") => {}
                 Some("PLANNER_RESPONSE") => {
                     if let Some(record) = row.as_object_mut() {
                         record.remove("thinking");
                     }
                 }
-                // System, checkpoint and error steps stay with agy.
+                // Tool results are the model's other steps; system, checkpoint and error steps stay with agy.
+                _ if row["source"] == "MODEL" && row["content"].is_string() => {}
                 _ => continue,
+            }
+            // A step written again replaces its earlier record.
+            if rows.last().is_some_and(|last: &Value| last["step_index"] == row["step_index"]) {
+                rows.pop();
+                offsets.pop();
             }
         }
         if source.tool == Tool::Codex {

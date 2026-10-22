@@ -300,7 +300,12 @@ fn antigravity(rows: &[Value], end: Option<usize>) -> Vec<Message> {
                     calls.push_back(id);
                 }
             }
-            Some("GENERIC") => {
+            Some(SETTLED) => messages.push(Message {
+                role: "assistant".into(),
+                text: "[Session event: unanswered]\nAntigravity stopped before answering this request.".into(),
+                images: Vec::new(),
+            }),
+            _ if row["source"] == "MODEL" && row["content"].is_string() => {
                 let id = calls.pop_front().unwrap_or_else(|| format!("agy-{step}"));
                 let output = row["content"].as_str().unwrap_or_default();
                 // agy heads each result with its start and completion times.

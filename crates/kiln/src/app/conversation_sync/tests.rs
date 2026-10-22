@@ -4992,6 +4992,7 @@ impl Agy {
         fs::write(root.join("conversations").join(format!("{id}.db")), b"").unwrap();
         fs::write(root.join("annotations").join(format!("{id}.pbtxt")), format!("title:\"Agy {key} \\\"quoted\\\"\"")).unwrap();
         let db = rusqlite::Connection::open(root.join("conversation_summaries.db")).unwrap();
+        db.pragma_update(None, "journal_mode", "WAL").unwrap();
         db.execute_batch(AGY_SUMMARIES).unwrap();
         let uris = json!([url::Url::from_file_path(cwd).unwrap().to_string()]).to_string();
         db.execute(
@@ -5062,7 +5063,11 @@ fn antigravity_records_become_portable_messages_without_reasoning_or_system_step
     // A transcript left unchanged ends its unanswered turn.
     set_modified(&agy.transcript, SystemTime::now() - Duration::from_secs(6 * 60));
     let mut settled = agy_messages();
-    settled.extend([text("user", "Release it"), text("assistant", "[Tool call: run_command]\n{\"CommandLine\":\"cargo test\"}")]);
+    settled.extend([
+        text("user", "Release it"),
+        text("assistant", "[Tool call: run_command]\n{\"CommandLine\":\"cargo test\"}"),
+        text("assistant", "[Session event: unanswered]\nAntigravity stopped before answering this request."),
+    ]);
     assert_eq!(read_messages(&source).unwrap(), settled);
     let (_, checkpoint) = checkpoint::read(&source, &mut String::new()).unwrap();
     let checkpoint = checkpoint.unwrap();
@@ -5142,4 +5147,63 @@ fn a_diverged_antigravity_original_is_detached_never_archived() {
     assert!(again.errors.is_empty(), "{:?}", again.errors);
     assert_eq!(hub::Hub::open(&f.config).unwrap().state.conversations.len(), 1, "a detached original is not adopted again");
     assert_eq!(read_messages(&claude).unwrap(), continued);
+}
+
+#[test]
+fn an_unanswered_agy_turn_reaches_the_copies_once_its_transcript_settles() {
+    let f = Fixture::new(Tool::Claude);
+    let (root, scope) = agy_workspace(&f);
+    let agy = Agy::new(&root, "settles", &f.source.cwd, None, &agy_turn());
+    assert!(workspace_scan(&f, &scope).errors.is_empty());
+    agy.append(&[agy_user(6, "Release it")]);
+    let waiting = workspace_scan(&f, &scope);
+    assert!(waiting.errors.is_empty(), "{:?}", waiting.errors);
+    assert_eq!(waiting.published, 0, "a turn agy may still answer is not copied");
+    set_modified(&agy.transcript, SystemTime::now() - Duration::from_secs(6 * 60));
+    let settled = workspace_scan(&f, &scope);
+    assert!(settled.errors.is_empty(), "{:?}", settled.errors);
+    assert_eq!(settled.published, 2);
+    let mut expected = agy_messages();
+    expected.extend([text("user", "Release it"), text("assistant", "[Session event: unanswered]\nAntigravity stopped before answering this request.")]);
+    for copy in hub::Hub::open(&f.config).unwrap().state.conversations.values().next().unwrap().projections.iter().filter(|p| !p.origin) {
+        assert_eq!(read_messages(&copy.source).unwrap(), expected, "{:?}", copy.source.tool);
+    }
+    assert_eq!(workspace_scan(&f, &scope).published, 0);
+}
+
+#[test]
+fn an_unreadable_agy_folder_leaves_the_other_clis_synchronizing() {
+    let f = Fixture::new(Tool::Claude);
+    let root = f.config.parent().unwrap().join("agy");
+    let agy = Agy::new(&root, "broken", &f.source.cwd, None, &agy_turn());
+    fs::write(root.join("conversation_summaries.db"), b"not a database").unwrap();
+    let mut scope = workspace_scope(&f);
+    scope.roots.push((Tool::Antigravity, root.canonical().unwrap()));
+    let status = workspace_scan(&f, &scope);
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(status.published, 1, "the Claude conversation still reaches Codex");
+    let store = hub::Hub::open(&f.config).unwrap();
+    assert!(store.state.conversations.values().all(|r| r.projections.iter().all(|p| p.source.id != agy.id)));
+}
+
+#[test]
+fn older_agy_tool_steps_and_rewritten_steps_read_once() {
+    let f = Fixture::new(Tool::Claude);
+    let (root, _) = agy_workspace(&f);
+    let mut records = vec![agy_user(0, "Inspect"), agy_calls(1, &[("list_dir", json!({"DirectoryPath": "/w"})), ("view_file", json!({"AbsolutePath": "/w/a"}))])];
+    let mut running = agy_result(2, "listing");
+    running["status"] = json!("RUNNING");
+    records.push(running.clone());
+    records.push(running);
+    records.push(json!({"step_index": 3, "source": "MODEL", "type": "VIEW_FILE", "status": "DONE", "content": "file a"}));
+    records.push(agy_answer(4, "Inspected."));
+    let agy = Agy::new(&root, "older", &f.source.cwd, None, &records);
+    assert_eq!(read_messages(&agy.source(&f.source.cwd)).unwrap(), vec![
+        text("user", "Inspect"),
+        text("assistant", "[Tool call: list_dir]\n{\"DirectoryPath\":\"/w\"}"),
+        text("assistant", "[Tool call: view_file]\n{\"AbsolutePath\":\"/w/a\"}"),
+        text("assistant", "[Tool result: agy-1-0]\nlisting"),
+        text("assistant", "[Tool result: agy-1-1]\nfile a"),
+        text("assistant", "Inspected."),
+    ]);
 }

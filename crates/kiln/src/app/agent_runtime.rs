@@ -666,6 +666,10 @@ pub struct Observer {
     agy: std::collections::HashMap<PathBuf, bool>,
 }
 impl Observer {
+    /// Whether the next check is due.
+    pub fn due(&self) -> bool {
+        !cfg!(windows) && self.last.is_none_or(|at| at.elapsed() >= Duration::from_secs(2))
+    }
     /// Checks the agy launches among `launches` (record, generation, process) at most every
     /// two seconds.
     pub fn tick(&mut self, mut launches: Vec<(PathBuf, String, u32)>) {
@@ -680,11 +684,14 @@ impl Observer {
             }
             self.running = None;
         }
-        launches.retain(|(path, _, _)| self.agy.get(path) != Some(&false));
-        if launches.is_empty() || self.last.is_some_and(|at| at.elapsed() < Duration::from_secs(2)) {
+        if !self.due() {
             return;
         }
         self.last = Some(Instant::now());
+        launches.retain(|(path, _, _)| self.agy.get(path) != Some(&false));
+        if launches.is_empty() {
+            return;
+        }
         let (tx, rx) = channel();
         self.running = Some(rx);
         std::thread::spawn(move || {
@@ -773,6 +780,8 @@ pub struct Version {
     pub installing: bool,
     pub checking_latest: bool,
     pub latest_error: bool,
+    /// The CLI's executable was not found.
+    pub missing: bool,
 }
 struct Reply {
     tool: Tool,
@@ -824,9 +833,9 @@ impl Updates {
         let offline = std::env::var_os("KILN_ACCOUNTS_SANDBOX").is_some();
         std::thread::spawn(move || {
             let result = (|| -> Result<(Version, bool)> {
-                let binary = fixture
-                    .or_else(|| agent_launch::executable(tool.program()))
-                    .context("CLI is not installed")?;
+                let Some(binary) = fixture.or_else(|| agent_launch::executable(tool.program())) else {
+                    return Ok((Version { missing: true, ..Default::default() }, false));
+                };
                 version_request(tool, install, binary, &tx, || latest_version(tool, offline))
             })();
             let (updated, result) = match result {
@@ -940,6 +949,7 @@ impl Updates {
                         else if v.latest_error { tr("최신 버전 확인 실패").to_string() }
                         else if !v.latest.is_empty() { format!("{}  {}", tr("최신"), v.latest) }
                         else if v.busy { tr("확인 중…").to_string() }
+                        else if v.missing { tr("설치되지 않음").to_string() }
                         else if v.installed.is_empty() { tr("버전 정보 없음").to_string() }
                         else { String::new() };
                     if !text.is_empty() { ui.label(egui::RichText::new(text).font(fonts::regular(12.0)).color(theme.text_dim)); }
@@ -947,7 +957,7 @@ impl Updates {
                 ui.horizontal_wrapped(|ui| {
                     ui.add_enabled_ui(!v.busy, |ui| {
                         if widgets::button_with(ui, Some(Icon::Refresh), tr("버전 확인"), ButtonKind::Secondary, true).clicked() { self.request(tool, false); }
-                        if widgets::button_with(ui, Some(Icon::Download), tr("CLI 업데이트"), ButtonKind::Secondary, true).clicked() { self.request(tool, true); }
+                        if ui.add_enabled_ui(!v.missing, |ui| widgets::button_with(ui, Some(Icon::Download), tr("CLI 업데이트"), ButtonKind::Secondary, true)).inner.clicked() { self.request(tool, true); }
                     });
                 });
                 if v.error.is_some() {
@@ -1241,6 +1251,38 @@ mod tests {
                     .unwrap();
             });
         }
+    }
+    #[test]
+    fn a_missing_cli_reads_not_installed_and_offers_no_update() {
+        use egui_kittest::{
+            Harness,
+            kittest::{NodeT, Queryable},
+        };
+        use kiln_common::i18n::tr;
+        let mut updates = Updates::default();
+        updates.versions = std::array::from_fn(|_| Version { installed: "1.2.3".into(), ..Default::default() });
+        updates.versions[index(Tool::Antigravity)] = Version { missing: true, ..Default::default() };
+        let mut h = Harness::builder().with_size([420., 900.]).build_ui_state(
+            |ui, state: &mut (Updates, super::super::state::Settings)| {
+                let id = egui::Id::new("cli-card-test-fonts");
+                if !ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false) {
+                    ui.ctx().data_mut(|d| d.insert_temp(id, true));
+                    ui.ctx().set_fonts(kiln_common::fonts::definitions(false));
+                    return;
+                }
+                state.0.ui(ui, &mut state.1);
+            },
+            (updates, super::super::state::Settings::default()),
+        );
+        h.run_steps(4);
+        h.get_by_label(tr("설치되지 않음"));
+        assert!(h.query_by_label(tr("CLI 업데이트 실패. 설치 프로그램 또는 패키지 관리자를 확인하세요.")).is_none());
+        let updates: Vec<_> = h
+            .query_all_by_label(tr("CLI 업데이트"))
+            .filter(|node| node.accesskit_node().role() == egui::accesskit::Role::Button)
+            .map(|node| node.accesskit_node().is_disabled())
+            .collect();
+        assert_eq!(updates, vec![false, false, true]);
     }
     #[test]
     fn uuid_validation_rejects_options_and_shell_input() {

@@ -1172,7 +1172,7 @@ impl KilnApp {
         ui.painter().line_segment([pos2(rect.left() + 1.0, rect.bottom()), pos2(rect.right() - 1.0, rect.bottom())], Stroke::new(1.0, t.border));
 
         let show_identity = rect.width() >= 160.0;
-        let branded = matches!(info.icon, Icon::Claude | Icon::Codex);
+        let branded = matches!(info.icon, Icon::Claude | Icon::Codex | Icon::Antigravity);
         let icon_rect = egui::Rect::from_center_size(pos2(rect.left() + 30.0, cy), vec2(18.0, 18.0));
         if show_identity {
         if info.running && branded { paint_agent_progress(ui, icon_rect.center(), agent_ink(info.icon, &t)); }
@@ -1186,7 +1186,7 @@ impl KilnApp {
             icons::paint(ui.painter(), icon_rect, info.icon, if branded { agent_ink(info.icon, &t) } else if focused { t.text_dim } else { t.text_faint });
         }
         if branded {
-            let brand = if info.icon == Icon::Claude { "Claude Code" } else { "Codex" };
+            let brand = match info.icon { Icon::Claude => "Claude Code", Icon::Antigravity => "Antigravity", _ => "Codex" };
             let label = format!("{} · {brand}{}", info.name, if info.detail.is_empty() { String::new() } else { format!(" · {}", info.detail) });
             let response = ui.interact(icon_rect.expand(3.0), ui.id().with(("agent-identity", pid)), Sense::hover());
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
@@ -1630,7 +1630,7 @@ impl KilnApp {
                     let command=pane.session().and_then(|sid|self.conn.telemetry.get(&sid)).and_then(|telemetry|telemetry.commands.last());
                     // Agent launch commands stay open while awaiting input. Show
                     // the actual task title rather than calling that launch busy.
-                    let title=if let Some(command)=command.filter(|command|!command.command.is_empty() && (command.finished_unix.is_some() || !matches!(info.icon,Icon::Codex|Icon::Claude))) {
+                    let title=if let Some(command)=command.filter(|command|!command.command.is_empty() && (command.finished_unix.is_some() || !matches!(info.icon,Icon::Codex|Icon::Claude|Icon::Antigravity))) {
                         format!("{} · {}",if command.finished_unix.is_some(){kiln_common::i18n::tr("최근 명령")}else{kiln_common::i18n::tr("실행 중")},command.command)
                     }else if let Some(name)=page.title.as_ref().filter(|name|*name!=&info.name) {format!("{name} · {}",info.name)}else{info.name.clone()};
                     let title=if pane.session().is_some(){kiln_common::trf!("터미널 {}.{} · {}",page_index+1,pane_index+1,title)}else{title};

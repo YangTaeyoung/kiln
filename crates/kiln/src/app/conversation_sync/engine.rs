@@ -54,9 +54,13 @@ fn database_stamp(root: &Path) -> u64 {
     hasher.finish()
 }
 
+/// Length and modification time of a transcript. An agy transcript's stamp changes once more
+/// when it settles, so its unanswered turn is read.
 fn stamp(source: &Source) -> Result<(u64, SystemTime)> {
     let meta = storage::metadata(source)?;
-    Ok((meta.len(), meta.modified()?))
+    let modified = meta.modified()?;
+    let settled = source.tool == Tool::Antigravity && modified.elapsed().is_ok_and(|age| age >= reader::SETTLE);
+    Ok((meta.len(), if settled { modified + Duration::from_nanos(1) } else { modified }))
 }
 
 fn continuation(source: &Source) -> Continuation {

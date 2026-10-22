@@ -74,17 +74,14 @@ pub fn detect_limit(tool: Tool, screen_text: &str) -> Option<LimitHit> {
     })
 }
 
-/// agy 의 할당량 오류 줄: `RESOURCE_EXHAUSTED (code 429): Individual quota reached. … Resets in 1h30m.`
+/// agy 의 할당량 오류: 줄 어디든 `RESOURCE_EXHAUSTED (code 429): Individual quota reached`,
+/// 또는 줄 머리의 할당량 문구.
 fn antigravity_match(lower: &str) -> bool {
     let line = lower.strip_prefix("error: ").unwrap_or(lower);
-    ANTIGRAVITY_PREFIXES.iter().any(|p| line.starts_with(p))
+    lower.contains("resource_exhausted (code 429): individual quota reached") || ANTIGRAVITY_PREFIXES.iter().any(|p| line.starts_with(p))
 }
 
-const ANTIGRAVITY_PREFIXES: &[&str] = &[
-    "resource_exhausted (code 429): individual quota reached",
-    "individual quota reached",
-    "you have exhausted your quota",
-];
+const ANTIGRAVITY_PREFIXES: &[&str] = &["individual quota reached", "you have exhausted your quota"];
 
 #[cfg(test)]
 mod tests {
@@ -142,6 +139,7 @@ mod tests {
         assert_eq!(hint(Tool::Antigravity, "Individual quota reached. Please upgrade your subscription to increase your limits."), Some(None));
         assert!(detect_limit(Tool::Antigravity, "You have exhausted your quota on this model.").is_some());
         assert!(detect_limit(Tool::Antigravity, "INTERNAL (code 500): Internal error encountered.").is_none());
+        assert_eq!(hint(Tool::Antigravity, &format!("API error (attempt 1): {s}")), Some(Some("in 1h30m25s".into())));
         assert!(detect_limit(Tool::Antigravity, "The log says individual quota reached for that user").is_none());
         assert!(detect_limit(Tool::Antigravity, "You've hit your usage limit.").is_none());
     }

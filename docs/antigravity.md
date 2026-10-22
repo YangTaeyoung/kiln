@@ -32,8 +32,8 @@ Windows have no recorded conversation and are not restarted automatically.
 
 ## CLI updates
 
-**Settings → Accounts → CLI updates** shows the installed `agy` and its version. Updates use
-agy's own `agy update`. agy checks its published version itself, so Kiln shows no latest
+**Settings → Accounts → CLI updates** shows the installed `agy` and its version, or **Not
+installed** when Kiln does not find it. Updates use agy's own `agy update`. agy checks its published version itself, so Kiln shows no latest
 version for it. **Automatically update Codex, Claude Code, and Antigravity** includes agy in
 the six-hour checks.
 
@@ -51,7 +51,8 @@ conversations whose workspace is in that folder are copied to Claude Code and Co
 `/resume` in either CLI continues them. Kiln reads, and never writes:
 
 - `conversation_summaries.db` for each conversation's workspace folder and parent
-  conversation (subagent conversations are skipped),
+  conversation (subagent conversations are skipped); Kiln queries a private copy of it and its
+  write-ahead log, so nothing is created next to agy's database,
 - `brain/<id>/.system_generated/logs/transcript_full.jsonl` for the conversation, when
   `conversations/<id>.db` exists,
 - `annotations/<id>.pbtxt` for the title agy shows in its resume picker.
@@ -59,7 +60,9 @@ conversations whose workspace is in that folder are copied to Claude Code and Co
 User requests, answers, tool calls and tool results are copied. agy's reasoning, system and
 checkpoint steps stay in agy. A turn appears once agy answers it; a request agy never
 answered, for example after its quota ran out, appears once its transcript has been
-unchanged for five minutes.
+unchanged for five minutes, followed by a note that Antigravity stopped before answering.
+If agy's files cannot be read, Antigravity conversations are skipped and Claude Code and Codex
+conversations keep synchronizing.
 
 Turns continued in agy reach the copies. Turns continued in Claude Code or Codex do not reach
 agy, because agy keeps its conversations in a private database. When both continue the same

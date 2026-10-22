@@ -246,6 +246,7 @@ fn antigravity_files(root: &Path, budget: &mut usize, out: &mut Vec<PathBuf>, ga
 
 /// Workspace folder and parent conversation of each agy conversation, from its summary index.
 pub(super) type Summaries = HashMap<String, (Option<String>, bool)>;
+/// Reads a private copy of agy's summary index and its write-ahead log.
 pub(super) fn antigravity_summaries(root: &Path) -> Result<Summaries> {
     use rusqlite::{Connection, OpenFlags};
     let path = root.join("conversation_summaries.db");
@@ -253,9 +254,15 @@ pub(super) fn antigravity_summaries(root: &Path) -> Result<Summaries> {
     if !path.is_file() {
         return Ok(summaries);
     }
-    safe_path(root, &path)?;
-    let db = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
-    db.busy_timeout(Duration::from_millis(500))?;
+    let copy = tempfile::Builder::new().prefix("kiln-agy-summaries-").tempdir()?;
+    for suffix in ["", "-wal"] {
+        let source = root.join(format!("conversation_summaries.db{suffix}"));
+        safe_path(root, &source)?;
+        if fs::symlink_metadata(&source).is_ok_and(|m| m.is_file()) {
+            fs::write(copy.path().join(format!("summaries.db{suffix}")), bounded(&source, 64 * 1024 * 1024)?)?;
+        }
+    }
+    let db = Connection::open_with_flags(copy.path().join("summaries.db"), OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
     let mut query = db.prepare("SELECT conversation_id, workspace_uris, parent_conversation_id FROM conversation_summaries")?;
     let rows = query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))?;
     for row in rows {
@@ -457,7 +464,11 @@ pub(super) fn find(
         let mut paths = Vec::new();
         let mut summaries = None;
         if *tool == Tool::Antigravity {
-            antigravity_files(root, &mut budget, &mut paths, gate)?;
+            // An unreadable agy folder is skipped; the other CLIs still synchronize.
+            if let Err(error) = antigravity_files(root, &mut budget, &mut paths, gate) {
+                log::warn!("conversation sync: Antigravity conversations skipped: {error:#}");
+                continue;
+            }
         } else {
             files(
                 root,
@@ -481,11 +492,20 @@ pub(super) fn find(
                 source.clone()
             } else {
                 let source = if *tool == Tool::Antigravity {
-                    let summaries = match &summaries {
-                        Some(summaries) => summaries,
-                        None => summaries.insert(antigravity_summaries(root)?),
-                    };
-                    antigravity_metadata(root, &path, summaries)?
+                    let summaries = summaries.get_or_insert_with(|| {
+                        antigravity_summaries(root)
+                            .inspect_err(|error| log::warn!("conversation sync: Antigravity summary index unreadable: {error:#}"))
+                            .ok()
+                    });
+                    // Without the summary index nothing is decided or cached.
+                    let Some(summaries) = summaries else { continue };
+                    match antigravity_metadata(root, &path, summaries) {
+                        Ok(source) => source,
+                        Err(error) => {
+                            log::warn!("conversation sync: {} skipped: {error:#}", path.display());
+                            continue;
+                        }
+                    }
                 } else {
                     metadata(*tool, root, &path)?
                 };
