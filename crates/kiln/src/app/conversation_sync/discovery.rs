@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 
 pub(super) struct Scope {
     pub workspaces: Vec<PathBuf>,
+    pub limits: BTreeMap<PathBuf, usize>,
     /// Projected namespaces and read-only Antigravity data folders.
     pub(super) roots: Vec<(Tool, PathBuf)>,
 }
@@ -34,7 +35,7 @@ impl Scope {
             .collect();
         workspaces.sort();
         workspaces.dedup();
-        Ok(Self { workspaces, roots })
+        Ok(Self { workspaces, roots, limits: BTreeMap::new() })
     }
     pub fn contains(&self, source: &Source) -> bool {
         self.roots.contains(&(source.tool, source.root.clone())) && self.matches_cwd(&source.cwd)
@@ -424,36 +425,10 @@ pub(super) fn find(
     if scope.workspaces.is_empty() {
         return Ok(Vec::new());
     }
-    #[derive(Serialize, Deserialize)]
-    struct WorkspaceSeed {
-        #[serde(default)]
-        selection_revision: u8,
-        started: SystemTime,
-        paths: Vec<PathBuf>,
-    }
-    let seeds_path = config.join("conversation-sync/workspace-discovery.json");
-    let mut seeds: BTreeMap<String, WorkspaceSeed> = if seeds_path.exists() {
-        serde_json::from_slice(&bounded(&seeds_path, 8 * 1024 * 1024)?)?
-    } else {
-        BTreeMap::new()
-    };
-    // Refresh once to include native compressed histories in the initial twenty.
-    seeds.retain(|_, seed| seed.selection_revision == 4);
-    let scan_started = SystemTime::now();
-    let keys: BTreeMap<_, _> = scope
-        .workspaces
-        .iter()
-        .map(|w| {
-            let projected: Vec<_> = scope.roots.iter().filter(|(tool, _)| projected(*tool)).collect();
-            let key = digest(&serde_json::to_vec(&(w, projected)).expect("discovery key"));
-            (w.clone(), key)
-        })
-        .collect();
     if cache.len() > 100_000 {
         cache.clear();
     }
     let mut selected = BTreeMap::new();
-    let mut candidates: BTreeMap<PathBuf, Vec<(SystemTime, Source)>> = BTreeMap::new();
     let mut budget = 100_000;
     for (tool, root) in &scope.roots {
         let external = if *tool == Tool::Codex {
@@ -515,7 +490,7 @@ pub(super) fn find(
             let Some(source) = source else {
                 continue;
             };
-            let Some(workspace) = scope.workspace(&source.cwd) else {
+            let Some(_workspace) = scope.workspace(&source.cwd) else {
                 continue;
             };
             if let Some(baseline) = external.get(&source.id) {
@@ -526,45 +501,9 @@ pub(super) fn find(
                 selected.insert(source.path.clone(), source);
                 continue;
             }
-            if let Some(seed) = seeds.get(&keys[workspace]) {
-                if modified >= seed.started || seed.paths.contains(&source.path) {
-                    selected.insert(source.path.clone(), source);
-                }
-            } else {
-                candidates
-                    .entry(workspace.clone())
-                    .or_default()
-                    .push((modified, source));
-            }
-        }
-    }
-    // Freeze the initial selection. New workspaces get their own boundary, so adding
-    // a folder months later does not accidentally import all its historical sessions.
-    for (workspace, key) in keys {
-        if seeds.contains_key(&key) || !gate.load(Ordering::Acquire) {
-            continue;
-        }
-        let mut candidates = candidates.remove(&workspace).unwrap_or_default();
-        candidates.sort_by(|(a, sa), (b, sb)| b.cmp(a).then_with(|| sa.path.cmp(&sb.path)));
-        let mut paths = Vec::new();
-        for (_, source) in candidates.into_iter().take(20) {
-            paths.push(source.path.clone());
             selected.insert(source.path.clone(), source);
         }
-        seeds.insert(
-            key,
-            WorkspaceSeed {
-                selection_revision: 4,
-                started: scan_started,
-                paths,
-            },
-        );
     }
-    // Persist the selection itself before returning, making initial sync resumable.
-    replace_changed(&seeds_path, &serde_json::to_vec(&seeds)?)?;
-    ensure!(
-        selected.len() <= MAX_SOURCES,
-        "Workspace conversation limit reached (4096)"
-    );
+    ensure!(selected.len() <= 100_000, "Session discovery limit reached");
     Ok(selected.into_values().collect())
 }

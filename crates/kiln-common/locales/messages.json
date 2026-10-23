@@ -11658,5 +11658,20 @@
     "en": "Move Down",
     "ja": "下へ移動",
     "zh-CN": "下移"
+  },
+  "최근 대화 수": {
+    "en": "Recent conversations",
+    "ja": "最近の会話数",
+    "zh-CN": "最近对话数量"
+  },
+  "같은 대화의 사본은 하나로 계산합니다. 범위 밖 기록은 보존하며 추가 동기화만 중단합니다.": {
+    "en": "Copies of the same conversation count once. Older histories are kept; only further synchronization stops.",
+    "ja": "同じ会話のコピーは1件として数えます。範囲外の履歴は保持し、追加の同期のみ停止します。",
+    "zh-CN": "同一对话的副本只计一次。范围外的记录会保留，仅停止后续同步。"
+  },
+  "이 워크스페이스와 하위 폴더에서 실제 대화 활동이 최근인 대화를 설정한 개수까지 동기화합니다.": {
+    "en": "Sync up to the configured number of conversations with the most recent native activity in this workspace and its subfolders.",
+    "ja": "このワークスペースとサブフォルダーで、実際の会話活動が新しいものから設定件数まで同期します。",
+    "zh-CN": "同步此工作区及其子文件夹中实际对话活动最近的对话，最多达到设置数量。"
   }
 }

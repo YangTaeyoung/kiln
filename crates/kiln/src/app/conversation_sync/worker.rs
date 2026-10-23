@@ -29,6 +29,8 @@ pub(super) enum Request {
         id: u64,
         pair: Pair,
         workspaces: Vec<PathBuf>,
+        #[serde(default)]
+        limits: BTreeMap<PathBuf, usize>,
         quiet_ms: u64,
         expedite: bool,
         reset: bool,
@@ -139,7 +141,7 @@ pub(super) fn serve_with<M: NativeMetadata>(
     let mut registry = M::default();
     let output = std::cell::RefCell::new(output);
     for request in requests {
-        let Request::Scan { id, pair, workspaces, quiet_ms, expedite, reset } = request else {
+        let Request::Scan { id, pair, workspaces, limits, quiet_ms, expedite, reset } = request else {
             continue;
         };
         if reset {
@@ -161,7 +163,8 @@ pub(super) fn serve_with<M: NativeMetadata>(
         registry.begin_scan();
         let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
         let result = scope(&pair, workspaces)
-            .and_then(|scope| {
+            .and_then(|mut scope| {
+                scope.limits=limits;
                 scan_with_metadata(
                     config,
                     &pair,
@@ -263,6 +266,7 @@ impl Worker {
         gate: Gate,
         pair: &Pair,
         workspaces: &[PathBuf],
+        limits: &BTreeMap<PathBuf, usize>,
         quiet: Duration,
         expedite: bool,
         reset: bool,
@@ -272,6 +276,7 @@ impl Worker {
             id,
             pair: pair.clone(),
             workspaces: workspaces.to_vec(),
+            limits: limits.clone(),
             quiet_ms: quiet.as_millis() as u64,
             expedite,
             reset,

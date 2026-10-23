@@ -10,15 +10,24 @@ Synchronization discovers Claude Code and Codex transcripts within each selected
 folder, including subfolders. Existing sessions and sessions opened outside Kiln
 are included; reopening a panel or receiving a lifecycle hook is not required.
 
-The initial synchronization selects the **20 most recently modified conversations
-per workspace**, across both tools and their default/connected namespaces. The
-selection is persisted so restarting Kiln continues the same initial batch. Version
-0.1.28 refreshes that selection once to include Codex compressed (`.jsonl.zst`)
-histories. Compression and native materialization retain the same conversation ID. Metadata-only CLI sessions and local-command-only sessions do not consume a slot. On upgrading from 0.1.24, the initial selection is refreshed once to exclude those empty sessions. New
-and modified conversations are discovered afterward, including an older session
-that saves another update. Closing a workspace pauses its synchronization; linking
-a different workspace starts that folder's own initial batch. Overlapping folders
-are assigned to the nearest linked workspace, and duplicate workspace paths count once.
+In the workspace's **Link conversations** dialog, set **Recent conversations** to
+choose the ongoing limit (default **20**, configurable from 1 to 4096). This is a
+rolling limit per workspace, including histories already in Kiln's hub. Copies
+across Claude Code, Codex and their account namespaces count as one conversation.
+The most recent native activity determines selection; Kiln's own projection writes
+do not promote a conversation. Resuming an older conversation makes it eligible
+again. Reducing the limit stops further synchronization of excluded histories;
+their original files and existing copies remain available. Included conversations
+retain their complete messages and attachments.
+
+Known selected histories are polled separately from full discovery, which runs at
+most once every 30 seconds during ordinary background operation. New conversations
+and activity in excluded histories can therefore take up to 30 seconds to appear;
+**Check again** refreshes discovery immediately. After each scan finishes Kiln waits
+three seconds before starting the next background scan. Compressed Codex histories
+retain their logical conversation ID. Metadata-only sessions and local-command-only
+sessions do not consume a slot. Overlapping folders belong to the nearest linked
+workspace; duplicate workspace paths count once. Closing a workspace pauses sync.
 
 Discovery checks both the ordinary CLI directories (`~/.claude`, `~/.codex`, or
 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and the two connected account directories. Each

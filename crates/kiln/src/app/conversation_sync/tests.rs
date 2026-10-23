@@ -1132,7 +1132,7 @@ fn claude_project_encoding_matches_utf16_and_compaction_is_explicit() {
 }
 
 fn workspace_scope(f: &Fixture) -> discovery::Scope {
-    discovery::Scope {
+    discovery::Scope { limits: BTreeMap::new(),
         workspaces: vec![PathBuf::from(&f.source.cwd)],
         roots: PROJECTED
             .into_iter()
@@ -1551,7 +1551,7 @@ fn workspace_filter_includes_children_excludes_neighbors_and_pauses_closed_folde
     assert_eq!(closed.watched, 0);
 }
 #[test]
-fn initial_sync_is_latest_twenty_per_workspace_then_only_new_or_changed_sessions() {
+fn ongoing_sync_is_latest_twenty_per_workspace_including_native_resumes() {
     let f = Fixture::new(Tool::Claude);
     fs::remove_dir_all(f.config.join("conversation-sync/tracked")).unwrap();
     fs::remove_file(&f.source.path).unwrap();
@@ -1617,7 +1617,7 @@ fn initial_sync_is_latest_twenty_per_workspace_then_only_new_or_changed_sessions
         .unwrap();
     let changed = workspace_scan(&f, &scope);
     assert_eq!(changed.published, 1);
-    assert_eq!(changed.rows.len(), 21);
+    assert_eq!(changed.rows.len(), 20);
     assert_eq!(workspace_scan(&f, &scope).published, 0);
     // A newly opened child workspace has its own initial limit, even though its
     // files are newer than the existing parent's first discovery boundary.
@@ -1676,7 +1676,7 @@ fn inspect_existing_workspace_metadata_read_only() {
             }
         }
     }
-    let scope = discovery::Scope {
+    let scope = discovery::Scope { limits: BTreeMap::new(),
         workspaces: serde_json::from_value(manifest["workspaces"].clone()).unwrap(),
         roots: serde_json::from_value(manifest["roots"].clone()).unwrap(),
     };
@@ -2000,7 +2000,7 @@ fn export_discovered_workspace_fixtures() {
             label: "fixture".into(),
         },
     };
-    let scope = discovery::Scope {
+    let scope = discovery::Scope { limits: BTreeMap::new(),
         workspaces: vec![dir.clone()],
         roots: PROJECTED
             .into_iter()
@@ -2119,7 +2119,7 @@ fn verify_discovered_workspace_cli_continuations() {
             label: "fixture".into(),
         },
     };
-    let scope = discovery::Scope {
+    let scope = discovery::Scope { limits: BTreeMap::new(),
         workspaces: vec![dir.clone()],
         roots: PROJECTED
             .into_iter()
@@ -2284,7 +2284,7 @@ fn workspace_status_uses_canonical_assignment_for_aliased_working_directories() 
     let root = PathBuf::from(&f.source.cwd);
     let alias = root.join("workspace-alias");
     std::os::unix::fs::symlink(&root, &alias).unwrap();
-    let scope = discovery::Scope {
+    let scope = discovery::Scope { limits: BTreeMap::new(),
         workspaces: vec![root.clone()],
         roots: vec![],
     };
@@ -2749,7 +2749,7 @@ impl WorkerFixture {
         let (config, roots) = (f.config.clone(), workspace_scope(f).roots);
         let done = std::thread::spawn(move || {
             worker::serve_with::<NoNativeMetadata>(std::io::BufReader::new(worker_end), Lines(tx, Vec::new()), &config, recycle_peak, move |_, workspaces| {
-                Ok(discovery::Scope { workspaces, roots: roots.clone() })
+                Ok(discovery::Scope { limits: BTreeMap::new(), workspaces, roots: roots.clone() })
             })
         });
         Self { gui, replies, done, exiting: false }
@@ -2760,7 +2760,7 @@ impl WorkerFixture {
         self.gui.write_all(&line).unwrap();
     }
     fn scan(&mut self, f: &Fixture, id: u64) -> Status {
-        self.send(&worker::Request::Scan { id, pair: f.pair.clone(), workspaces: vec![PathBuf::from(&f.source.cwd)], quiet_ms: 0, expedite: false, reset: false });
+        self.send(&worker::Request::Scan { id, pair: f.pair.clone(), workspaces: vec![PathBuf::from(&f.source.cwd)], limits: BTreeMap::new(), quiet_ms: 0, expedite: false, reset: false });
         loop {
             let line = self.replies.recv_timeout(Duration::from_secs(30)).expect("worker reply");
             if let worker::Reply::Scanned { id: done, result, exiting } = serde_json::from_str(&line).unwrap() {
@@ -5206,4 +5206,134 @@ fn older_agy_tool_steps_and_rewritten_steps_read_once() {
         text("assistant", "[Tool result: agy-1-1]\nfile a"),
         text("assistant", "Inspected."),
     ]);
+}
+
+
+#[test]
+fn bounded_sync_rolling_limit_applies_to_existing_hub_and_keeps_files() {
+    let f = Fixture::new(Tool::Claude);
+    let mut scope=workspace_scope(&f);
+    scope.limits.insert(PathBuf::from(&f.source.cwd),1);
+    let first=workspace_scan(&f,&scope);
+    assert_eq!(first.watched,1);
+    let original_peer=f.peer();
+    let mut newer=f.source.clone();
+    newer.id=stable_id("bounded-newer");
+    newer.path=newer.path.with_file_name(format!("{}.jsonl",newer.id));
+    write_history(&newer,&turns(&["new question","new answer"]),SystemTime::now()+Duration::from_secs(2));
+    let next=workspace_scan(&f,&scope);
+    assert_eq!(next.watched,1,"existing hub must obey the cap too");
+    assert_eq!(next.rows.len(),1,"copies count as one logical conversation");
+    assert!(next.rows.values().any(|r|r.source.id==newer.id));
+    assert!(f.source.path.exists() && original_peer.path.exists(),"excluded histories must remain");
+    assert_eq!(workspace_scan(&f,&scope).published,0,"self-written copies must not promote old conversations");
+    append_native_claude_turn(&f.source,"resumed old question","resumed old answer");
+    set_modified(&f.source.path,SystemTime::now()+Duration::from_secs(4));
+    let resumed=workspace_scan(&f,&scope);
+    assert_eq!(resumed.watched,1);
+    assert!(resumed.rows.values().any(|r|r.source.id==f.source.id),"native activity promotes an old conversation");
+    scope.limits.insert(PathBuf::from(&f.source.cwd),2);
+    assert_eq!(workspace_scan(&f,&scope).watched,2,"raising the limit restores eligibility");
+    scope.limits.insert(PathBuf::from(&f.source.cwd),1);
+    assert_eq!(workspace_scan(&f,&scope).watched,1,"lowering the limit prunes existing hub work");
+}
+
+#[test]
+fn bounded_sync_alias_failures_respect_retry_delay() {
+    let f=Fixture::new(Tool::Claude);
+    let mut cache=Cache::new();
+    scan(&f.config,&f.pair,&f.gate,&mut cache,|_|{}).unwrap();
+    let mut alias=f.source.clone();
+    alias.id=stable_id("bounded-bad-alias");
+    alias.path=alias.path.with_file_name(format!("{}.jsonl",alias.id));
+    let mut data=rows(&fs::read(&f.source.path).unwrap());
+    for row in &mut data {row["sessionId"]=json!(alias.id);if row["type"]=="assistant"{row["parentUuid"]=json!("missing-parent");}}
+    fs::write(&alias.path,data.iter().map(|r|format!("{r}\n")).collect::<String>()).unwrap();
+    let mut store=hub::Hub::open(&f.config).unwrap();
+    store.state.conversations.values_mut().next().unwrap().aliases.push(hub::NativeRef::of(&alias));
+    store.save().unwrap();
+    publish(&f.config.join("conversation-sync/tracked/alias.json"),&serde_json::to_vec(&alias).unwrap()).unwrap();
+    let key=alias.path.to_string_lossy().into_owned();
+    scan(&f.config,&f.pair,&f.gate,&mut cache,|_|{}).unwrap();
+    let failed=cache.hub[&key].1;
+    scan(&f.config,&f.pair,&f.gate,&mut cache,|_|{}).unwrap();
+    assert_eq!(cache.hub[&key].1,failed,"unchanged alias failure must not parse/fail every scan");
+}
+
+#[test]
+#[ignore = "synthetic parser timing probe"]
+fn bounded_sync_compaction_parser_scaling() {
+    for n in [1000usize,2000,4000,8000] {
+        let mut data=Vec::new();
+        for i in 0..n {
+            data.push(json!({"type":if i%2==0{"user"}else{"assistant"},"uuid":format!("id-{i}"),"parentUuid":if i==0{None}else{Some(format!("id-{}",i-1))},"message":{"content":"synthetic text","stop_reason":"end_turn"}}));
+        }
+        let plain=std::time::Instant::now();
+        assert_eq!(format::parse(Tool::Claude,&data).unwrap().len(),n);
+        let plain=plain.elapsed();
+        data.push(json!({"type":"system","subtype":"compact_boundary","uuid":"boundary","parentUuid":null,"logicalParentUuid":format!("id-{}",n-1)}));
+        data.push(json!({"type":"user","uuid":"summary","parentUuid":"boundary","isCompactSummary":true,"message":{"content":"summary"}}));
+        data.push(json!({"type":"assistant","uuid":"after","parentUuid":"summary","message":{"content":"done","stop_reason":"end_turn"}}));
+        let start=std::time::Instant::now();
+        assert_eq!(format::parse(Tool::Claude,&data).unwrap().len(),n+1);
+        println!("AUDIT parser messages={n} plain_ms={:.3} compacted_ms={:.3}",plain.as_secs_f64()*1000.0,start.elapsed().as_secs_f64()*1000.0);
+    }
+}
+
+#[test]
+fn bounded_sync_stale_completion_cannot_clear_a_new_scan() {
+    let mut manager=Manager::default();
+    let stale=Arc::new(AtomicBool::new(false));
+    manager.gate=Arc::new(AtomicBool::new(true));
+    manager.busy=true;
+    manager.tx.send(Event::Scanned(stale,Err("stale".into()))).unwrap();
+    let f=Fixture::new(Tool::Claude);
+    let mut settings=super::super::state::Settings::default();
+    settings.conversation_sync_enabled=true;
+    settings.conversation_sync_pair=Some(f.pair.clone());
+    manager.configured=Some(f.pair);
+    manager.workspaces=vec![PathBuf::from(f.source.cwd)];
+    manager.tick(&mut settings,manager.workspaces.clone(),&egui::Context::default());
+    assert!(manager.busy,"late cancelled completion must not end the current scan");
+}
+
+#[test]
+fn bounded_sync_limit_setting_roundtrips_and_dialog_fits() {
+    use egui_kittest::{Harness,kittest::Queryable};
+    for theme in ["kiln-dark","kiln-light"] {
+        kiln_common::Theme::set_current(theme);
+        let f=Fixture::new(Tool::Claude);
+        let root=PathBuf::from(&f.source.cwd);
+        let accounts=AccountManager::with_env(kiln_accounts::Env::sandbox(f._temp.path(),false).0);
+        let settings: super::super::state::Settings=serde_json::from_str("{}").unwrap();
+        assert!(settings.conversation_sync_limits.is_empty());
+        let mut installed=false;
+        let mut h=Harness::builder().with_size([720.0,600.0]).build_ui_state(|ui,state:&mut(Manager,super::super::state::Settings)| {
+            if !installed {kiln_common::fonts::install(ui.ctx());kiln_common::Theme::current().apply(ui.ctx());installed=true;return;}
+            state.0.dialog(ui.ctx(),"Workspace fixture",&root,true,&mut state.1,&accounts);
+        },(Manager::default(),settings));
+        h.run_steps(4);
+        let input=h.get_by_label("최근 대화 수");
+        assert!(h.ctx.content_rect().contains_rect(input.rect()));
+        h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-bounded-{theme}.png"))).unwrap();
+        h.state_mut().1.conversation_sync_limits.insert(root.clone(),7);
+        let restored:super::super::state::Settings=serde_json::from_slice(&serde_json::to_vec(&h.state().1).unwrap()).unwrap();
+        assert_eq!(restored.conversation_sync_limits[&root],7);
+    }
+}
+
+#[test]
+fn bounded_sync_full_discovery_is_cached_until_refresh() {
+    let f=Fixture::new(Tool::Claude);
+    let mut scope=workspace_scope(&f);
+    scope.limits.insert(PathBuf::from(&f.source.cwd),1);
+    set_modified(&f.source.path,SystemTime::now()-Duration::from_secs(120));
+    let mut cache=Cache::new();cache.quiet=Duration::from_secs(10);
+    let scan_now=|cache:&mut Cache|scan_with_metadata(&f.config,&f.pair,&f.gate,cache,Some(&scope),|_,_|Ok(None),|_|{}).unwrap();
+    assert_eq!(scan_now(&mut cache).watched,1);
+    let mut newer=f.source.clone();newer.id=stable_id("catalog-newer");newer.path=newer.path.with_file_name(format!("{}.jsonl",newer.id));
+    write_history(&newer,&turns(&["new","answer"]),SystemTime::now()-Duration::from_secs(60));
+    assert!(scan_now(&mut cache).rows.values().all(|r|r.source.id!=newer.id));
+    cache.catalog.as_mut().unwrap().0=Instant::now()-Duration::from_secs(31);
+    assert!(scan_now(&mut cache).rows.values().any(|r|r.source.id==newer.id));
 }

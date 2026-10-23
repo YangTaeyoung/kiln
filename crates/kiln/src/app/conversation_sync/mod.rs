@@ -12,6 +12,7 @@ mod hub;
 mod migrate;
 mod portable;
 mod reader;
+mod selection;
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -45,6 +46,7 @@ const LIMIT: u64 = 64 * 1024 * 1024;
 const PORTABLE_LIMIT: u64 = 512 * 1024 * 1024;
 const COPY_LIMIT: u64 = 1024 * 1024 * 1024;
 const MAX_SOURCES: usize = 4096;
+pub(super) const DEFAULT_SYNC_LIMIT: usize = 20;
 const PROJECTION_REVISION: u8 = 5;
 
 enum Metadata<'a> {
@@ -652,6 +654,10 @@ type Gate = Arc<AtomicBool>;
 #[derive(Default, Serialize, Deserialize)]
 struct Cache {
     messages: HashMap<PathBuf, (u64, SystemTime, String)>,
+    #[serde(default)]
+    aliases: HashMap<PathBuf, (u64, SystemTime, String, u64, usize)>,
+    #[serde(skip)]
+    catalog: Option<(Instant, Vec<Source>)>,
     metadata: discovery::MetadataCache,
     titles: titles::Cache,
     rows: BTreeMap<String, Conversation>,
@@ -769,6 +775,8 @@ fn scan_with_metadata(
     let build = kiln_daemon::build_id().to_string();
     if cache.build != build {
         cache.hub.clear();
+        cache.aliases.clear();
+        cache.catalog = None;
         cache.build = build;
     }
     let mut hub = hub::Hub::open(config)?;
@@ -778,7 +786,13 @@ fn scan_with_metadata(
         status.workspaces = scope.workspaces.len();
         status.discovering = true;
         notify(&status);
-        let found = discovery::find(config, scope, gate, &mut cache.metadata)?;
+        let found = if !cache.quiet.is_zero() && cache.catalog.as_ref().is_some_and(|(at,_)| at.elapsed()<Duration::from_secs(30)) {
+            cache.catalog.as_ref().unwrap().1.clone()
+        } else {
+            let found=discovery::find(config, scope, gate, &mut cache.metadata)?;
+            cache.catalog=Some((Instant::now(),found.clone()));
+            found
+        };
         status.discovering = false;
         status.discovered = found.len();
         found
@@ -826,7 +840,7 @@ fn scan_with_metadata(
         .collect();
     cache.rows = status.rows.clone();
     if gate.load(Ordering::Acquire) {
-        handover::publish(config, &engine::links(&hub, scope))?;
+        handover::publish(config, &engine::links(&hub, scope).into_iter().filter(|link|status.rows.contains_key(&link.group)).collect::<Vec<_>>())?;
     }
     status.groups = status.rows.keys().map(|k| (k.clone(), k.clone())).collect();
     notify(&status);
@@ -893,6 +907,7 @@ pub struct Manager {
     error: Option<String>,
     configured: Option<Pair>,
     workspaces: Vec<PathBuf>,
+    limits: BTreeMap<PathBuf, usize>,
     cache: Arc<Mutex<Cache>>,
     registry: Arc<Mutex<codex_index::Registry>>,
     /// The next scan neither waits for active writers nor applies retry delays.
@@ -965,6 +980,7 @@ impl Default for Manager {
             error: None,
             configured: None,
             workspaces: Vec::new(),
+            limits: BTreeMap::new(),
             cache: Arc::new(Mutex::new(Cache::new())),
             registry: Default::default(),
             urgent: false,
@@ -1096,10 +1112,10 @@ impl Manager {
                     }
                 }
                 Event::Scanned(gate, result) => {
+                    if !Arc::ptr_eq(&gate, &self.gate) { continue; }
                     self.busy = false;
-                    if !Arc::ptr_eq(&gate, &self.gate) || !gate.load(Ordering::Acquire) {
-                        continue;
-                    }
+                    if !gate.load(Ordering::Acquire) { continue; }
+                    self.next = Instant::now() + Duration::from_secs(3);
                     self.completed += 1;
                     match result {
                         Ok(status) => {
@@ -1134,13 +1150,17 @@ impl Manager {
         self.links_cleared = false;
         if self.configured != settings.conversation_sync_pair
             || self.workspaces != workspaces
+            || self.limits != settings.conversation_sync_limits
             || !self.gate.load(Ordering::Acquire)
         {
             self.gate.store(false, Ordering::Release);
             self.cancel_worker_scan();
             self.gate = Arc::new(AtomicBool::new(true));
+            self.busy = false;
             self.revision += 1;
             self.workspaces = workspaces;
+            self.limits = settings.conversation_sync_limits.clone();
+            self.reset_next = true;
             self.status = Status::default();
             self.configured = settings.conversation_sync_pair.clone();
             self.cache = Arc::new(Mutex::new(Cache::new()));
@@ -1166,13 +1186,14 @@ impl Manager {
             return;
         }
         let workspaces = self.workspaces.clone();
+        let limits = self.limits.clone();
         let gate = self.gate.clone();
         let tx = self.tx.clone();
         let cache = self.cache.clone();
         let registry = self.registry.clone();
         std::thread::spawn(move || {
             let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
-            let result = discovery::Scope::new(&pair, workspaces)
+            let result = discovery::Scope::new(&pair, workspaces).map(|mut scope| {scope.limits=limits;scope})
                 .and_then(|scope| {
                     let mut registry = registry.lock().unwrap();
                     registry.begin_scan();
@@ -1213,7 +1234,7 @@ impl Manager {
         };
         self.scan_id += 1;
         let (expedite, reset) = (std::mem::take(&mut self.expedite_next), std::mem::take(&mut self.reset_next));
-        match worker.scan(self.scan_id, self.gate.clone(), pair, &self.workspaces, quiet, expedite, reset) {
+        match worker.scan(self.scan_id, self.gate.clone(), pair, &self.workspaces, &self.limits, quiet, expedite, reset) {
             Ok(()) => {
                 self.worker_scan = Some(self.scan_id);
                 true
@@ -1391,12 +1412,20 @@ impl Manager {
                 if let Some(pair) = &settings.conversation_sync_pair {
                     ui.add(egui::Label::new(format!("Claude Code: {} ↔ Codex: {}", pair.claude.label, pair.codex.label)).truncate());
                 }
+                ui.horizontal(|ui| {
+                    let label=ui.label(tr("최근 대화 수"));
+                    let mut limit=settings.conversation_sync_limits.get(root).copied().unwrap_or(DEFAULT_SYNC_LIMIT).clamp(1,MAX_SOURCES);
+                    if ui.add(egui::DragValue::new(&mut limit).range(1..=MAX_SOURCES).speed(1)).labelled_by(label.id).changed() {
+                        settings.conversation_sync_limits.insert(root.to_path_buf(),limit);
+                    }
+                });
+                ui.add(egui::Label::new(egui::RichText::new(tr("같은 대화의 사본은 하나로 계산합니다. 범위 밖 기록은 보존하며 추가 동기화만 중단합니다.")).small().color(theme.text_dim)).wrap());
                 // A single scroll surface; fixed summary and footer never reflow with polling.
                 let list_height = (ctx.content_rect().height() - 340.0).clamp(120.0, 520.0);
                 actions = self.progress_status_ui(ui, enabled, &status, list_height);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label(tr("연동 범위와 지원 형식")).on_hover_text(tr("이 워크스페이스와 하위 폴더의 최근 대화 20개부터 연결합니다. 이후 새 대화와 변경된 대화를 자동 동기화합니다."))
+                    ui.label(tr("연동 범위와 지원 형식")).on_hover_text(tr("이 워크스페이스와 하위 폴더에서 실제 대화 활동이 최근인 대화를 설정한 개수까지 동기화합니다."))
                         .on_hover_text(tr("이미지를 포함한 원문을 연동합니다. 전달할 수 없는 첨부가 있으면 완료로 표시하지 않습니다."));
                     if ui.button(tr("다시 확인")).clicked() {
                         self.cache = Arc::new(Mutex::new(Cache::new()));

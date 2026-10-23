@@ -351,6 +351,8 @@ fn claude_chain<'a>(rows: &'a [Value], stop_at: Option<&str>) -> Result<Option<(
         return Ok(Some((vec![], None)));
     };
     let mut chain = Vec::new();
+    let mut positions: HashMap<&str,usize> = HashMap::new();
+    let mut superseded = HashSet::new();
     let mut seen = HashSet::new();
     loop {
         let id = current["uuid"]
@@ -363,8 +365,9 @@ fn claude_chain<'a>(rows: &'a [Value], stop_at: Option<&str>) -> Result<Option<(
         // A preserved message can be visited on both sides of a compaction boundary.
         // Keep its original position, using its pre-relink parent from the append-only log.
         if restoring_originals {
-            chain.retain(|r: &&Value| r["uuid"] != id);
+            if let Some(previous)=positions.get(id) {superseded.insert(*previous);}
         }
+        positions.insert(id,chain.len());
         chain.push(current);
         let parent = if current["subtype"] == "compact_boundary" {
             restoring_originals = true;
@@ -427,6 +430,7 @@ fn claude_chain<'a>(rows: &'a [Value], stop_at: Option<&str>) -> Result<Option<(
         .copied()
         .context("Incomplete Claude message chain; waiting for a complete transcript")?;
     }
+    let mut chain: Vec<_> = chain.into_iter().enumerate().filter_map(|(i,row)|(!superseded.contains(&i)).then_some(row)).collect();
     chain.reverse();
     let Some(last) = chain.iter().rposition(|r| {
         (r["type"] == "assistant"

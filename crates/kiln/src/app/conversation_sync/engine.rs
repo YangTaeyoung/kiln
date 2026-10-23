@@ -56,7 +56,7 @@ fn database_stamp(root: &Path) -> u64 {
 
 /// Length and modification time of a transcript. An agy transcript's stamp changes once more
 /// when it settles, so its unanswered turn is read.
-fn stamp(source: &Source) -> Result<(u64, SystemTime)> {
+pub(super) fn source_stamp(source: &Source) -> Result<(u64, SystemTime)> {
     let meta = storage::metadata(source)?;
     let modified = meta.modified()?;
     let settled = source.tool == Tool::Antigravity && modified.elapsed().is_ok_and(|age| age >= reader::SETTLE);
@@ -176,6 +176,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
     }
 
     pub fn run(&mut self, mut hub: Hub, sources: Vec<Source>) -> Result<Hub> {
+        let (sources,selected)=selection::choose(self.scope,&hub,&sources,&self.cache.metadata,&self.cache.rows)?;
         let mut ledger = HashMap::new();
         for (tool, root) in self.namespaces.clone() {
             if tool != Tool::Codex {
@@ -213,6 +214,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         for (native, imported_from) in &ledger {
             if let (Some(own), Some(target)) = (index.get(native).cloned(), paths.get(imported_from).cloned())
                 && own != target
+                && selected.as_ref().is_none_or(|ids|ids.contains(&own) && ids.contains(&target))
             {
                 match self.merge(&mut hub, &own, &target) {
                     Ok(true) => {
@@ -256,7 +258,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         let cids: Vec<String> = hub.state.conversations.keys().cloned().collect();
         for cid in cids {
             let record = hub.state.conversations[&cid].clone();
-            if self.in_scope(&record) {
+            if self.in_scope(&record) && selected.as_ref().is_none_or(|ids|ids.contains(&cid)) {
                 if let Some(row) = self.cache.rows.get(&cid) {
                     self.status.rows.insert(cid.clone(), row.clone());
                 }
@@ -295,7 +297,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 let key = source.path.to_string_lossy().into_owned();
                 if let Err(error) = self.join(&mut hub, &cid, source.clone()) {
                     let row = self.unadopted(&source, Phase::Failed, "");
-                    self.fail(&key, row, &error, Self::fingerprint(&[stamp(&source).ok()], 0));
+                    self.fail(&key, row, &error, Self::fingerprint(&[source_stamp(&source).ok()], hub.state.conversations[&cid].events) ^ hub.state.conversations[&cid].generation);
                 }
                 index.insert(native, cid);
                 continue;
@@ -362,7 +364,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         if discovery::imported(self.config, &source)?.is_some() || !storage::exists(&source) {
             return Ok(None);
         }
-        let Ok(current) = stamp(&source) else {
+        let Ok(current) = source_stamp(&source) else {
             return Ok(None);
         };
         if recently_modified(current.1, self.cache.quiet) {
@@ -418,14 +420,25 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
     /// without a native turn, leaves the resume list; a continued copy becomes its namespace's
     /// projection.
     fn join(&mut self, hub: &mut Hub, cid: &str, source: Source) -> Result<()> {
-        if recently_modified(stamp(&source)?.1, self.cache.quiet) {
+        let current=source_stamp(&source)?;
+        if recently_modified(current.1, self.cache.quiet) { return Ok(()); }
+        let record=&hub.state.conversations[cid];
+        let fingerprint=Self::fingerprint(&[Some(current)], record.events) ^ record.generation;
+        let key=source.path.to_string_lossy();
+        if self.deferred(&key,fingerprint) {
+            if let Some(row)=self.cache.rows.get(key.as_ref()) {self.status.rows.insert(key.into_owned(),row.clone());}
             return Ok(());
         }
+        let signature=(current.0,current.1,cid.to_owned(),record.generation,record.events);
+        if self.cache.aliases.get(&source.path)==Some(&signature) {return Ok(());}
         let messages = read_messages(&source)?;
         let events = hub.events(cid)?;
         let unchanged = shared(&events, &messages) == messages.len() || canonical::kiln_written(&source)?;
         let record = hub.state.conversations.get_mut(cid).unwrap();
         if unchanged {
+            if self.cache.aliases.len()>8192 {self.cache.aliases.clear();}
+            self.cache.aliases.insert(source.path.clone(),signature);
+            self.cache.hub.remove(key.as_ref());
             if !record.pending.iter().any(|s| s.path == source.path) {
                 record.pending.push(source);
             }
@@ -466,7 +479,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         for source in pending {
             let native = NativeRef::of(&source);
             if storage::exists(&source) {
-                let modified = stamp(&source)?.1;
+                let modified = source_stamp(&source)?.1;
                 if recently_modified(modified, self.cache.quiet) {
                     continue;
                 }
@@ -587,7 +600,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         record
             .projections
             .iter()
-            .map(|p| if p.removed { None } else { stamp(&p.source).ok() })
+            .map(|p| if p.removed { None } else { source_stamp(&p.source).ok() })
             .collect()
     }
 
@@ -650,7 +663,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                     }
                     continue;
                 }
-                let current = stamp(&p.source)?;
+                let current = source_stamp(&p.source)?;
                 if Some(current) == p.stamp {
                     continue;
                 }
@@ -894,7 +907,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 current(hub, i);
                 continue;
             }
-            let stamped = stamp(&source)?;
+            let stamped = source_stamp(&source)?;
             if rewrite.is_some() || known != Some(stamped) || recently_modified(stamped.1, REFRESH_IDLE) {
                 continue;
             }
@@ -937,7 +950,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             let p = &record.projections[i];
             (p.source.clone(), p.stamp, record.title.clone(), p.checkpoint.clone(), record.events)
         };
-        let current = stamp(&source)?;
+        let current = source_stamp(&source)?;
         if recently_modified(current.1, self.cache.quiet) || known != Some(current) {
             return Ok(Some(WRITING.into()));
         }
@@ -970,7 +983,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         drop(guard);
         let p = &mut hub.state.conversations.get_mut(cid).unwrap().projections[i];
         p.synced = total;
-        p.stamp = Some(stamp(&source)?);
+        p.stamp = Some(source_stamp(&source)?);
         p.title = title;
         p.checkpoint = next;
         if changed {
@@ -1040,7 +1053,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             let collision = || anyhow::anyhow!("Continuation collision; existing conversation was preserved");
             let existing = read_messages(&source).map_err(|_| collision())?;
             if super::hub::shared(events, &existing) == existing.len() {
-                (existing.len(), Some(stamp(&source)?), None)
+                (existing.len(), Some(source_stamp(&source)?), None)
             } else if super::hub::shared(events, &existing) == events.len() {
                 (events.len(), None, None)
             } else {
@@ -1069,7 +1082,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             }
             self.copying(hub, cid);
             publish(&source.path, &bytes)?;
-            (events.len(), Some(stamp(&source)?), checkpoint::of_bytes(tool, &bytes)?)
+            (events.len(), Some(source_stamp(&source)?), checkpoint::of_bytes(tool, &bytes)?)
         };
         (self.metadata)(&source, Metadata::Name(&title))?;
         titles::pin_claude(&source, &title)?;
