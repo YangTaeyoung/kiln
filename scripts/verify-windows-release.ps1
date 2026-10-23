@@ -42,8 +42,8 @@ try {
  try {
   $sid=(& $cli new --cwd $fixture --name release-smoke -- cmd.exe /K 'echo KILN_RELEASE_SMOKE_OK').Trim()
   $deadline=(Get-Date).AddSeconds(20)
-  do {$text=& $cli read $sid;if($text -match 'KILN_RELEASE_SMOKE_OK'){break};Start-Sleep -Milliseconds 100}while((Get-Date) -lt $deadline)
-  if($text -notmatch 'KILN_RELEASE_SMOKE_OK'){throw 'Isolated PTY smoke failed'}
+  do {$text=(& $cli read $sid) -join "`n";if($text -match 'KILN_RELEASE_SMOKE_OK'){break};Start-Sleep -Milliseconds 100}while((Get-Date) -lt $deadline)
+  if($text -notmatch 'KILN_RELEASE_SMOKE_OK'){throw "Isolated PTY smoke failed: $text"}
  } finally {& $cli shutdown-daemon}
  Write-Output "PASS: native $NativeArch installation, matching files, idempotent reinstall, executable versions, isolated terminal smoke"
 } finally {
