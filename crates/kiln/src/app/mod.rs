@@ -1798,11 +1798,11 @@ impl KilnApp {
                     let body = match offer { Some(available) => format!("{body} · {}", kiln_common::trf!("초기화권 {}개", available)), None => body };
                     let button = match offer {
                         Some(_) => Some((kiln_common::i18n::tr("초기화권 사용").into(), Action::RedeemResetCredit(tool))),
-                        None if tool.has_accounts() => Some((kiln_common::i18n::tr("다음 계정으로 전환").into(), Action::RotateAccount(session, tool))),
+                        None if tool.supports_rotation() => Some((kiln_common::i18n::tr("다음 계정으로 전환").into(), Action::RotateAccount(session, tool))),
                         None => None,
                     };
                     self.notifications.push(kiln_common::i18n::tr("사용량 한도"), &body, ToastKind::Notify, Some(session), self.session_workspace_name(session));
-                    if let Some(item) = self.notifications.items.last_mut() { item.rotate_tool = tool.has_accounts().then_some(tool); }
+                    if let Some(item) = self.notifications.items.last_mut() { item.rotate_tool = tool.supports_rotation().then_some(tool); }
                     if self.settings.notification_toasts && !self.settings.do_not_disturb { self.toasts.push(Toast {
                         title: kiln_common::i18n::tr("사용량 한도").into(),
                         body,

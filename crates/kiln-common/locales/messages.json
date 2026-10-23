@@ -11683,5 +11683,20 @@
     "en": "Automatic sync pauses while an agent runs. Sync resumes after exit, with a 60-second fallback check.",
     "ja": "エージェントの実行中は自動同期を保留します。終了後に同期し、補完チェックは60秒間隔です。",
     "zh-CN": "代理运行时暂停自动同步。退出后同步，并每60秒补充检查一次。"
+  },
+  "Google 계정": {
+    "en": "Google accounts",
+    "ja": "Google アカウント",
+    "zh-CN": "Google 账号"
+  },
+  "전환한 계정은 새 작업부터 사용됩니다. 실행 중인 작업은 기존 계정을 유지합니다.": {
+    "en": "Switching applies to new tasks. Running tasks keep their original account.",
+    "ja": "切り替えは新しいタスクから適用されます。実行中のタスクは元のアカウントを維持します。",
+    "zh-CN": "切换后仅对新任务生效，正在运行的任务继续使用原账号。"
+  },
+  "저장할 Antigravity 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요": {
+    "en": "No signed-in Antigravity account to save. Sign in using Add account.",
+    "ja": "保存できる Antigravity アカウントがありません。「アカウントを追加」からログインしてください。",
+    "zh-CN": "没有可保存的 Antigravity 登录账号。请通过“添加账号”登录。"
   }
 }

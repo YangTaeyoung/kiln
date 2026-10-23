@@ -233,8 +233,8 @@ pub fn resume(path: &Path) -> Result<SpawnSpec> {
         .as_deref()
         .context("conversation ID is not confirmed")?;
     ensure!(valid_id(id), "invalid conversation ID");
-    if record.tool.has_accounts() {
-        let key = if record.tool == Tool::Codex { "CODEX_HOME" } else { "CLAUDE_CONFIG_DIR" };
+    if record.tool.has_accounts() && (record.tool != Tool::Antigravity || record.spec.env.iter().any(|(k, _)| k == "KILN_AGENT_PROFILE")) {
+        let key = match record.tool { Tool::Codex => "CODEX_HOME", Tool::Claude => "CLAUDE_CONFIG_DIR", Tool::Antigravity => "HOME" };
         ensure!(
             record
                 .spec
@@ -618,11 +618,6 @@ fn held_conversation(root: &Path, open: &[PathBuf]) -> Option<String> {
     let id = ids.next()?;
     ids.all(|other| other == id).then_some(id)
 }
-/// The conversation the agy process `pid` holds open.
-pub fn antigravity_conversation(pid: u32) -> Option<String> {
-    let root = antigravity_root()?.canonical().ok()?;
-    held_conversation(&root, &kiln_daemon::procinfo::open_files(pid))
-}
 /// Records the conversation an agy launch holds open, as the SessionStart hook does for
 /// the other CLIs: a resumed launch confirms only its original conversation.
 pub fn observe(path: &Path, generation: &str, id: &str) -> Result<()> {
@@ -702,7 +697,10 @@ impl Observer {
                 if record.tool != Tool::Antigravity || record.generation != generation {
                     continue;
                 }
-                if let Some(id) = antigravity_conversation(pid)
+                let root = record.spec.env.iter().find(|(k, _)| k == "ANTIGRAVITY_APP_DATA_DIR")
+                    .map(|(_, v)| PathBuf::from(v)).or_else(antigravity_root);
+                let id = root.and_then(|root| root.canonical().ok()).and_then(|root| held_conversation(&root, &kiln_daemon::procinfo::open_files(pid)));
+                if let Some(id) = id
                     && !(record.confirmed && record.conversation.as_deref() == Some(id.as_str()))
                     && let Err(error) = observe(&path, &generation, &id)
                 {
@@ -1595,7 +1593,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let path = d.path().join("record.json");
         fs::write(d.path().join("initialized"), b"1").unwrap();
-        for tool in Tool::ACCOUNTS {
+        for tool in Tool::ALL {
             let record = Record {
                 tool,
                 spec: SpawnSpec {
@@ -1603,7 +1601,7 @@ mod tests {
                     cwd: Some("/same directory".into()),
                     env: vec![
                         (
-                            if tool == Tool::Claude { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" }.into(),
+                            match tool { Tool::Claude => "CLAUDE_CONFIG_DIR", Tool::Codex => "CODEX_HOME", Tool::Antigravity => "HOME" }.into(),
                             d.path().to_string_lossy().into_owned(),
                         ),
                         ("KILN_AGENT_PROFILE".into(), "account-a".into()),

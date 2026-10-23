@@ -13,6 +13,7 @@ anyhow.workspace = true
 log.workspace = true
 parking_lot.workspace = true
 base64 = "0.22"
+getrandom = "0.3"
 tempfile.workspace = true
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std"] }

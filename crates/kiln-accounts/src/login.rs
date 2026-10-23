@@ -2,14 +2,14 @@
 //! terminal panel, under a disposable configuration and credential namespace.
 //! URLs and fallback codes are kept only in memory, never in logs or settings.
 
-use crate::{Env, Tool, claude, codex};
+use crate::{Env, Tool, antigravity, claude, codex};
 use crate::store::read_secret;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use parking_lot::{Condvar, Mutex};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 
@@ -24,7 +24,7 @@ pub(crate) struct LoginControl {
     pub cancel: AtomicBool,
     pub profile_id: Option<String>,
     pub status: Mutex<LoginStatus>,
-    input: Mutex<Option<ChildStdin>>,
+    input: Mutex<Option<Box<dyn Write + Send>>>,
     stop_readers: AtomicBool,
     child: Mutex<Option<Arc<Mutex<Child>>>>,
     finished: Mutex<bool>,
@@ -101,6 +101,7 @@ struct IsolatedLogin {
     dir: tempfile::TempDir,
     env: Env,
     system_home: PathBuf,
+    antigravity_attempt: bool,
 }
 
 impl IsolatedLogin {
@@ -117,7 +118,7 @@ impl IsolatedLogin {
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
             }
         }
-        Ok(Self { dir, env, system_home: source.home.clone() })
+        Ok(Self { dir, env, system_home: source.home.clone(), antigravity_attempt: false })
     }
 
     fn command(&self, tool: Tool, binary: &Path) -> Command {
@@ -175,7 +176,11 @@ impl IsolatedLogin {
                 let email = oauth.as_ref().and_then(claude::oauth_email);
                 (secret, oauth, email)
             }
-            Tool::Antigravity => bail!("Antigravity logins are not saved as accounts"),
+            Tool::Antigravity => {
+                let secret = antigravity::read(&self.env, &self.env.home)?.context("Antigravity sign-in required")?;
+                let email = (self.env.antigravity_identity)(&secret)?;
+                (secret, None, Some(email))
+            },
         };
         Ok(LoginCredentials { secret, oauth, email })
     }
@@ -183,6 +188,9 @@ impl IsolatedLogin {
 
 impl Drop for IsolatedLogin {
     fn drop(&mut self) {
+        if self.antigravity_attempt {
+            let _ = antigravity::cleanup(&self.env, &self.env.home);
+        }
         if self.env.claude_live_in_store {
             // Only the exact disposable namespace created by this job is removed.
             let service = claude_service(self.env.claude_config_dir.as_deref());
@@ -227,6 +235,7 @@ pub(crate) fn run_login(source: &Env, tool: Tool, binary: &Path, control: &Arc<L
     // Declared first so completion is signalled only after OwnedChild and the
     // isolated credential namespace have both been dropped, including errors.
     let _completion = LoginCompletion(control);
+    if tool == Tool::Antigravity { return run_antigravity_login(source, binary, control, timeout, repaint); }
     let isolated = IsolatedLogin::new(source)?;
     if control.cancel.load(Ordering::Relaxed) { bail!(kiln_common::i18n::tr("로그인을 취소했습니다")); }
     let child = OwnedChild(Arc::new(Mutex::new(isolated.command(tool, binary).spawn()
@@ -234,7 +243,7 @@ pub(crate) fn run_login(source: &Env, tool: Tool, binary: &Path, control: &Arc<L
     control.register_child(child.0.clone());
     let pipes = {
         let mut child = child.0.lock();
-        *control.input.lock() = child.stdin.take();
+        *control.input.lock() = child.stdin.take().map(|input| Box::new(input) as Box<dyn Write + Send>);
         [child.stdout.take().map(output_pipe).transpose()?, child.stderr.take().map(output_pipe).transpose()?]
     };
     let mut readers = Vec::new();
@@ -279,6 +288,91 @@ pub(crate) fn run_login(source: &Env, tool: Tool, binary: &Path, control: &Arc<L
     result
 }
 
+/// Agy 1.4.6 requires a controlling terminal for its official sign-in selector.
+/// This terminal belongs only to this attempt and never receives a model prompt.
+#[cfg(target_os = "macos")]
+fn run_antigravity_login(source: &Env, binary: &Path, control: &Arc<LoginControl>, timeout: Duration, repaint: Arc<dyn Fn() + Send + Sync>) -> Result<LoginCredentials> {
+    use std::os::fd::{FromRawFd, AsRawFd};
+    use std::os::unix::process::CommandExt;
+    let mut isolated = IsolatedLogin::new(source)?;
+    isolated.antigravity_attempt = true;
+    antigravity::prepare(&isolated.env, &isolated.env.home)?;
+    let (mut master, mut slave) = (-1, -1);
+    // Wide enough that the authorization URL is not wrapped by the CLI renderer.
+    let mut size = libc::winsize { ws_row: 40, ws_col: 4096, ws_xpixel: 0, ws_ypixel: 0 };
+    if unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) } != 0 { return Err(std::io::Error::last_os_error().into()); }
+    let master = unsafe { std::fs::File::from_raw_fd(master) };
+    let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+    let mut command = isolated.command(Tool::Antigravity, binary);
+    command.envs(antigravity::environment(&isolated.env.home)).env("TERM", "xterm-256color")
+        .stdin(slave.try_clone()?).stdout(slave.try_clone()?).stderr(slave);
+    unsafe { command.pre_exec(|| {
+        if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as libc::c_ulong, 0) < 0 { return Err(std::io::Error::last_os_error()); }
+        Ok(())
+    }); }
+    if control.cancel.load(Ordering::Relaxed) { bail!("{}", kiln_common::i18n::tr("로그인을 취소했습니다")); }
+    let child = OwnedChild(Arc::new(Mutex::new(command.spawn().context("could not start Antigravity sign-in")?)));
+    // All descendants of this attempt share its new process group.
+    struct Group(u32);
+    impl Drop for Group { fn drop(&mut self) { unsafe { libc::kill(-(self.0 as i32), libc::SIGKILL); } } }
+    let _group = Group(child.0.lock().id());
+    control.register_child(child.0.clone());
+    *control.input.lock() = Some(Box::new(master.try_clone()?));
+    let flags = unsafe { libc::fcntl(master.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 { return Err(std::io::Error::last_os_error().into()); }
+    let mut reader = master;
+    let start = Instant::now();
+    let mut next_read = Instant::now();
+    let mut screen = Vec::new();
+    let mut scanner = OutputScanner::default();
+    let mut selected = false;
+    loop {
+        if control.cancel.load(Ordering::Relaxed) { bail!("{}", kiln_common::i18n::tr("로그인을 취소했습니다")); }
+        if start.elapsed() >= timeout { bail!("{}", kiln_common::i18n::tr("로그인 시간이 만료되었습니다. 다시 시도하세요")); }
+        let mut bytes = [0; 8192];
+        match reader.read(&mut bytes) {
+            Ok(n) if n > 0 => {
+                screen.extend_from_slice(&bytes[..n]);
+                if screen.len() > 65536 { screen.drain(..screen.len()-65536); }
+                let text = plain_terminal(&screen);
+                if !selected && text.contains("Select login method:") && text.contains("1. Google OAuth") {
+                    if let Some(input) = control.input.lock().as_mut() { input.write_all(b"\r")?; input.flush()?; }
+                    selected = true;
+                }
+                if scanner.feed(text.as_bytes(), Tool::Antigravity, control) { repaint(); }
+            }
+            Err(e) if e.kind() != std::io::ErrorKind::WouldBlock && e.raw_os_error() != Some(libc::EIO) => return Err(e.into()),
+            _ => {}
+        }
+        if Instant::now() >= next_read {
+            if antigravity::read(&isolated.env, &isolated.env.home)?.is_some() { return isolated.credentials(Tool::Antigravity); }
+            next_read = Instant::now() + Duration::from_secs(1);
+        }
+        if child.0.lock().try_wait()?.is_some() { bail!("{}", kiln_common::i18n::tr("로그인을 완료하지 못했습니다. 브라우저와 네트워크 상태를 확인한 뒤 다시 시도하세요")); }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn run_antigravity_login(_: &Env, _: &Path, _: &Arc<LoginControl>, _: Duration, _: Arc<dyn Fn() + Send + Sync>) -> Result<LoginCredentials> {
+    bail!("Antigravity account isolation currently requires macOS")
+}
+/// Strip CSI styling and OSC controls without copying terminal contents to logs.
+#[cfg(target_os = "macos")]
+fn plain_terminal(bytes: &[u8]) -> String {
+    let mut out = Vec::new(); let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 27 && i+1 < bytes.len() {
+            match bytes[i+1] {
+                b'[' => { i+=2; while i<bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {i+=1;} i+=1; continue; }
+                b']' => { i+=2; while i<bytes.len() && bytes[i]!=7 && !(bytes[i]==27 && bytes.get(i+1)==Some(&b'\\')) {i+=1;} i+=if bytes.get(i)==Some(&27) {2}else{1}; continue; }
+                _ => {i+=2;continue;}
+            }
+        }
+        out.push(bytes[i]);i+=1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[derive(Default)]
 struct OutputScanner { tail: Vec<u8> }
 impl OutputScanner {
@@ -299,7 +393,7 @@ impl OutputScanner {
             let valid = match tool {
                 Tool::Codex => token.starts_with("https://auth.openai.com/oauth/authorize?"),
                 Tool::Claude => token.starts_with("https://claude.ai/oauth/authorize?") || token.starts_with("https://console.anthropic.com/oauth/authorize?") || token.starts_with("https://platform.claude.com/oauth/authorize?"),
-                Tool::Antigravity => false,
+                Tool::Antigravity => token.starts_with("https://accounts.google.com/o/oauth2/auth?") || token.starts_with("https://accounts.google.com/o/oauth2/v2/auth?"),
             };
             // Require complete OAuth parameters to avoid reopening a split URL.
             if valid && token.contains("state=") && token.contains("client_id=") && token.contains("redirect_uri=") {
@@ -314,6 +408,50 @@ impl OutputScanner {
 mod tests {
     use super::*;
     use crate::CredentialStore;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_pty_login_stages_credentials_and_cleans_up() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        env.antigravity_identity = Arc::new(|_| Ok("work@example.test".into()));
+        let binary = root.path().join("fake-agy");
+        std::fs::write(&binary, r##"#!/bin/sh
+printf 'Select login method:\n > 1. Google OAuth\n'
+read choice
+printf 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&state=fixture&redirect_uri=fixture\n'
+printf '%s' '{"token":{"access_token":"fixture","refresh_token":"fixture"}}' > "$ANTIGRAVITY_APP_DATA_DIR/antigravity-oauth-token"
+sleep 30
+"##).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let control = Arc::new(LoginControl::default());
+        let credentials = run_login(&env, Tool::Antigravity, &binary, &control, Duration::from_secs(5), Arc::new(|| {})).unwrap();
+        assert_eq!(credentials.email.as_deref(), Some("work@example.test"));
+        assert_eq!(antigravity::access_token(&credentials.secret).unwrap(), "fixture");
+        assert!(control.status.lock().browser_url.as_deref().unwrap().starts_with("https://accounts.google.com/"));
+        assert!(control.input.lock().is_none());
+        assert!(control.wait_for_cleanup(Instant::now()+Duration::from_secs(1)));
+        assert!(!env.home.join(".gemini").exists());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_pty_cancel_and_timeout_do_not_save_credentials() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(root.path(), false);
+        let binary = root.path().join("fake-agy");
+        std::fs::write(&binary, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for cancel in [false, true] {
+            let control = Arc::new(LoginControl::default());
+            if cancel { control.cancel.store(true, Ordering::Relaxed); }
+            assert!(run_login(&env, Tool::Antigravity, &binary, &control, Duration::from_millis(80), Arc::new(|| {})).is_err());
+            assert!(control.wait_for_cleanup(Instant::now()+Duration::from_secs(1)));
+            assert!(store.is_empty());
+        }
+    }
 
     #[test]
     fn scanner_accepts_only_complete_provider_authorization_urls_and_code_prompt() {

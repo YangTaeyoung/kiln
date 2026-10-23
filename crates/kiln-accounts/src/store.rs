@@ -75,9 +75,17 @@ fn security(args: &[&str]) -> Result<Option<String>> {
 }
 
 fn bounded_output(command: &mut std::process::Command, timeout: std::time::Duration) -> Result<std::process::Output> {
+    bounded_output_with_input(command, timeout, None)
+}
+
+pub(crate) fn bounded_output_with_input(command: &mut std::process::Command, timeout: std::time::Duration, input: Option<&[u8]>) -> Result<std::process::Output> {
     use std::io::Read;
     use std::process::Stdio;
-    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().context("credential store could not start")?;
+    let mut child = command.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().context("credential store could not start")?;
+    if let Some(input) = input {
+        let sent = child.stdin.take().context("credential input unavailable").and_then(|mut stdin| stdin.write_all(input).map_err(Into::into));
+        if let Err(error) = sent { let _ = child.kill(); let _ = child.wait(); return Err(error); }
+    }
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
     let read = |stream: Box<dyn Read + Send>| std::thread::spawn(move || { let mut bytes = Vec::new(); let result = stream.take(262_145).read_to_end(&mut bytes); (result, bytes) });

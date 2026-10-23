@@ -1,7 +1,8 @@
 # Antigravity CLI (`agy`)
 
 Kiln runs Google's Antigravity CLI (`agy`) next to Claude Code and Codex. Install it with
-Google's installer and sign in once by running `agy` in a terminal; Kiln finds it in your
+Google's installer. On macOS, sign in from **Settings → Accounts → Antigravity**;
+on other platforms, sign in by running `agy` in a terminal. Kiln finds it in your
 `PATH`, `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`.
 
 ## Start a task
@@ -40,9 +41,36 @@ the six-hour checks.
 ## Usage limits
 
 When agy reports `Individual quota reached … Resets in …`, Kiln shows a usage-limit
-notification with the reset time. Kiln does not save or switch Antigravity accounts: agy
-keeps its sign-in in the system credential store and offers no per-launch configuration
-folder, so **Settings → Accounts** lists only Claude Code and Codex.
+notification with the reset time. Antigravity accounts do not show quota bars or offer
+automatic rotation: Kiln has not established a supported quota API or cross-account
+conversation continuation contract.
+
+## Accounts on macOS
+
+**Settings → Accounts → Antigravity → Add account** starts the installed CLI's Google
+OAuth sign-in in a temporary private terminal. Complete the browser login, then choose
+**Apply**. Repeat for another account and choose **Switch** to use it for new tasks.
+Running tasks keep their original account. The row menu offers rename, delete and
+same-account sign-in again; a different Google identity cannot replace that profile.
+**Save current signed-in account** imports the ordinary CLI's Google login. Importing
+requires a successful read-only Google UserInfo lookup to identify the account.
+
+Each account has a private home directory and macOS Keychain. Kiln never replaces
+the ordinary CLI's credential, changes the user's default keychain, or logs tokens.
+Keychain unlock secrets and profile snapshots use Kiln's credential store; account-list
+settings contain only metadata. The CLI owns token refresh inside its account home.
+An initialized account with missing credentials requires sign-in again instead of
+restoring an old token. Login cancellation removes the temporary home and keychain.
+
+Account homes also isolate Agy preferences, global CLI configuration and conversations.
+They do not inherit files such as the ordinary home's shell, Git or SSH configuration.
+Workspace files remain available. Account conversations participate in Kiln's existing
+read-only Agy-to-Claude/Codex synchronization, and exact-conversation restart preserves
+the original account home. Ordinary unregistered Agy sessions keep their existing behavior.
+
+This account integration is macOS-only. Linux and Windows retain ordinary CLI sign-in
+until their credential isolation has been implemented and verified. Browser sign-in
+currently selects Google OAuth; Google Cloud project onboarding is not automated.
 
 ## Conversations in Claude Code and Codex
 
@@ -80,3 +108,15 @@ References:
 
 - [Antigravity CLI](https://antigravity.google/docs/cli/reference)
 - [Antigravity hooks](https://antigravity.google/docs/hooks)
+
+Account integration references:
+
+- [Official CLI authentication](https://github.com/google-antigravity/antigravity-cli#authentication)
+- [Google OpenID Connect UserInfo](https://developers.google.com/identity/openid-connect/openid-connect#obtaininguserprofileinformation)
+- [go-keyring macOS implementation](https://github.com/zalando/go-keyring/blob/master/keyring_darwin.go)
+
+The local agy 1.4.6 binary and isolated launches were inspected for TTY requirements,
+`ANTIGRAVITY_APP_DATA_DIR`, `ANTIGRAVITY_GEMINI_DIR`, private keychain lookup, and the
+`antigravity-oauth-token` fallback. These are version-sensitive integration details.
+Tests use synthetic credentials; a real browser sign-in and Google UserInfo response
+remain a separate interactive acceptance check.
