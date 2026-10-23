@@ -2046,7 +2046,7 @@ if Path(__file__).name=='agy':
  # Like agy: prompts only through --prompt-interactive, no hooks, and the open conversation's presence lock.
  rest=[a for i,a in enumerate(args) if a not in ('--conversation','--prompt-interactive') and (i==0 or args[i-1] not in ('--conversation','--prompt-interactive'))]
  if rest: print('Error: unexpected argument '+repr(rest[0]),flush=True);sys.exit(2)
- presence=Path(os.environ['KILN_ANTIGRAVITY_DIR'])/'presence';presence.mkdir(parents=True,exist_ok=True);held=open(presence/(cid+'.lock'),'w')
+ presence=Path(os.environ.get('ANTIGRAVITY_APP_DATA_DIR') or os.environ['KILN_ANTIGRAVITY_DIR'])/'presence';presence.mkdir(parents=True,exist_ok=True);held=open(presence/(cid+'.lock'),'w')
  groups=[]
 elif '--settings' in args: groups=json.loads(args[args.index('--settings')+1])['hooks']['SessionStart']
 else:
@@ -2067,8 +2067,18 @@ while True:
     unsafe {std::env::set_var("PATH",format!("{}:{}",bin.display(),std::env::var("PATH").unwrap_or_default()));}
     let mut h=Harness::builder().with_size([1100.,720.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
-    let manager=h.state().debug_accounts();let home=base.join("accounts/home");std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let (mut account_env, account_store) = kiln_accounts::Env::sandbox(&base.join("accounts"), false);
+    account_env.antigravity_identity = std::sync::Arc::new(|secret| kiln_accounts::antigravity::access_token(secret));
+    let home = account_env.home.clone();
+    let manager = kiln_accounts::AccountManager::with_env(account_env);
+    h.state_mut().debug_set_accounts(manager.clone());
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
     let sign_in=|email:&str| {
+        if tool == Tool::Antigravity && tool.has_accounts() {
+            use kiln_accounts::CredentialStore;
+            account_store.set(kiln_accounts::antigravity::SERVICE, kiln_accounts::antigravity::ACCOUNT,
+                &serde_json::json!({"token":{"access_token":email,"refresh_token":"fixture-only"}}).to_string()).unwrap();
+        }
         std::fs::write(home.join(".claude/.credentials.json"),r#"{"claudeAiOauth":{"accessToken":"fixture-only","refreshToken":"fixture-only"}}"#).unwrap();
         std::fs::write(home.join(".claude.json"),serde_json::json!({"oauthAccount":{"emailAddress":email}}).to_string()).unwrap();if tool==Tool::Codex {
             use base64::Engine;
