@@ -13,6 +13,7 @@ the user's shells, agents, builds, or servers.
 - [Remote files and verification](docs/maintainers/remote-files-verification.md) — isolated provider fixtures and explicit coverage boundaries.
 - [Automatic account usage](docs/maintainers/account-usage.md) — background cadence, provider contracts, bounded requests and isolated verification.
 - [0.2.5 release verification](docs/maintainers/0.2.5-status.md) — whole-unit credit figures, live 0.2.4 samples, verified archives.
+- [0.2.10 release verification](docs/maintainers/0.2.10-status.md) — Antigravity CLI panels, conversation restart and read-only conversation copies, verified archives.
 - [0.2.9 release verification](docs/maintainers/0.2.9-status.md) — active account usage with the live login when the runtime login expired, verified archives.
 - [0.2.8 release verification](docs/maintainers/0.2.8-status.md) — Codex commands and patches as native Claude Code records, verified archives.
 - [0.2.7 release verification](docs/maintainers/0.2.7-status.md) — Claude Code context budget for long synchronized conversations, error notices, verified archives.
