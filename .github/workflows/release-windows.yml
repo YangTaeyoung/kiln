@@ -34,6 +34,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $archives=(Resolve-Path archives).Path
+          Copy-Item scripts/0.2.12-SHA256SUMS.txt (Join-Path $archives 'SHA256SUMS.txt')
           $portFile=Join-Path $env:RUNNER_TEMP 'kiln-mirror-port'
           $server=Start-Process python -ArgumentList @('scripts/release-archive-mirror.py',$archives,$portFile) -PassThru
           try {
