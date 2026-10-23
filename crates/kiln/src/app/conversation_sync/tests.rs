@@ -5535,3 +5535,17 @@ fn bounded_sync_terminal_exit_schedules_once_and_cancels_running_scan() {
     assert_eq!(manager.next, deadline, "idle snapshots do not repeatedly schedule sync");
     assert_eq!(BACKGROUND_INTERVAL, Duration::from_secs(60));
 }
+
+#[test]
+fn bounded_sync_enabling_requests_first_scan_without_overriding_active_pause() {
+    let f = Fixture::new(Tool::Claude);
+    let accounts = AccountManager::with_env(kiln_accounts::Env::sandbox(f._temp.path(), false).0);
+    let mut settings = super::super::state::Settings::default();
+    settings.conversation_sync_pair = Some(f.pair.clone());
+    let mut manager = Manager::default();
+    manager.paused = vec![PathBuf::from(&f.source.cwd)];
+    manager.enable(&mut settings, &accounts);
+    assert!(manager.exit_sync, "initial explicit linking must not wait a full polling interval");
+    assert!(!manager.urgent, "initial linking still respects the active CLI pause");
+    assert_eq!(manager.paused.len(), 1);
+}

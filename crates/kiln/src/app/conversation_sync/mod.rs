@@ -1138,6 +1138,7 @@ impl Manager {
                         Ok(pair) => {
                             settings.conversation_sync_pair = Some(pair);
                             settings.conversation_sync_enabled = true;
+                            self.exit_sync = true;
                             self.next = Instant::now();
                             self.error = None;
                         }
@@ -1313,6 +1314,8 @@ impl Manager {
     ) {
         if settings.conversation_sync_pair.is_some() {
             settings.conversation_sync_enabled = true;
+            self.exit_sync = true;
+            self.next = Instant::now();
             return;
         }
         if self.connecting || self.busy {
