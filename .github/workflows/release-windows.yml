@@ -5,6 +5,9 @@ on:
       ref:
         description: Release source commit
         required: true
+      release_url:
+        description: Optional public release URL instead of the local mirror
+        required: false
 permissions:
   contents: read
   actions: read
@@ -31,8 +34,14 @@ jobs:
           merge-multiple: true
       - name: Verify final archives through the installer
         shell: pwsh
+        env:
+          KILN_VERIFY_URL: ${{ inputs.release_url }}
         run: |
           $ErrorActionPreference='Stop'
+          if ($env:KILN_VERIFY_URL) {
+            ./scripts/verify-windows-release.ps1 -Mirror $env:KILN_VERIFY_URL -NativeArch '${{ matrix.arch }}'
+            exit 0
+          }
           $archives=(Resolve-Path archives).Path
           Copy-Item scripts/0.2.12-SHA256SUMS.txt (Join-Path $archives 'SHA256SUMS.txt')
           $portFile=Join-Path $env:RUNNER_TEMP 'kiln-mirror-port'
