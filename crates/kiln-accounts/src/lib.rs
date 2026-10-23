@@ -4,6 +4,7 @@
 //! `~/.claude/.credentials.json`(0600)에 있다. Codex 는 `$CODEX_HOME/auth.json`(0600)이다.
 //! 프로필 스냅샷은 macOS 키체인(그 밖의 OS 는 0600 파일)에 두고, 설정 파일에는 비밀값을 넣지 않는다.
 
+pub mod antigravity;
 pub mod claude;
 mod claude_refresh;
 pub mod codex;
@@ -33,13 +34,15 @@ pub enum Tool {
 
 impl Tool {
     pub const ALL: [Tool; 3] = [Tool::Claude, Tool::Codex, Tool::Antigravity];
-    /// Tools whose logins Kiln saves and switches as account profiles.
+    /// Providers with quota polling and cross-account conversation rotation.
     pub const ACCOUNTS: [Tool; 2] = [Tool::Claude, Tool::Codex];
 
     /// Whether Kiln saves and switches this tool's logins.
     pub fn has_accounts(self) -> bool {
-        self != Tool::Antigravity
+        self != Tool::Antigravity || cfg!(target_os = "macos")
     }
+
+    pub fn supports_rotation(self) -> bool { self != Tool::Antigravity }
 
     /// The executable name of the CLI.
     pub fn program(self) -> &'static str {

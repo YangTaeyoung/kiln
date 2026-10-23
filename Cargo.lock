@@ -3099,6 +3099,7 @@ dependencies = [
  "chrono",
  "egui",
  "egui_kittest",
+ "getrandom 0.3.4",
  "keyring",
  "kiln-common",
  "libc",

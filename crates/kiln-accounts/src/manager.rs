@@ -2,7 +2,7 @@
 
 use crate::store::{CredentialStore, FileStore, SecurityCli, read_secret, write_secret_atomic};
 use crate::ui::{AccountsEvent, UiState};
-use crate::{Profile, Tool, Usage, claude, claude_refresh, codex, now_unix};
+use crate::{Profile, Tool, Usage, antigravity, claude, claude_refresh, codex, now_unix};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,8 @@ pub type UsageProbe = Arc<dyn Fn(&str) -> Result<Usage> + Send + Sync>;
 #[derive(Clone)]
 pub struct Env {
     pub home: PathBuf,
+    pub antigravity_keychains: bool,
+    pub antigravity_identity: Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
     pub claude_config_dir: Option<PathBuf>,
     pub codex_home: PathBuf,
     /// true 면 Claude Code 의 현재 자격증명을 `store` 의 `Claude Code-credentials` 항목으로 다룬다(macOS).
@@ -59,6 +61,8 @@ impl Env {
         let files = FileStore { base_dir: kiln_common::paths::config_file("accounts-credentials") };
         let store: Arc<dyn CredentialStore> = if macos { Arc::new(SecurityCli) } else { platform_store(files) };
         Env {
+            antigravity_keychains: cfg!(target_os = "macos"),
+            antigravity_identity: Arc::new(antigravity::identity),
             home,
             claude_config_dir,
             codex_home,
@@ -80,6 +84,8 @@ impl Env {
         let store = Arc::new(crate::MemoryStore::new());
         let home = root.join("home");
         let env = Env {
+            antigravity_keychains: false,
+            antigravity_identity: Arc::new(|_| Err(anyhow!("identity probe disabled"))),
             codex_home: home.join(".codex"),
             home,
             claude_config_dir: None,
@@ -168,7 +174,7 @@ struct Settings {
     claude: ToolSettings,
     #[serde(default)]
     codex: ToolSettings,
-    #[serde(default, skip_serializing)]
+    #[serde(default)]
     antigravity: ToolSettings,
 }
 
@@ -421,7 +427,7 @@ impl AccountManager {
 
     fn check_profile_credentials(&self) {
         let _op = self.inner.op.lock();
-        for tool in Tool::ACCOUNTS {
+        for tool in Tool::ALL {
             for p in self.profiles(tool) {
                 // An unapplied successful login is ready for Apply, not logged out.
                 let secret = if self.pending_login(tool, &p.id) {
@@ -437,7 +443,7 @@ impl AccountManager {
                         Tool::Claude => claude::access_token(secret).is_err(),
                         // Missing identity and unsupported auth methods are not logout.
                         Tool::Codex => codex::credentials_missing(secret),
-                        Tool::Antigravity => true,
+                        Tool::Antigravity => antigravity::access_token(secret).is_err(),
                     });
                     let digest = secret.as_deref().and_then(|secret| claude::access_token(secret).ok()).map(|token| {
                         use sha2::{Digest, Sha256};
@@ -614,7 +620,7 @@ impl AccountManager {
         match tool {
             Tool::Claude => env.claude_secret(env.claude_config_dir.as_deref()),
             Tool::Codex => Ok(codex::read_credentials(&env.codex_home, env.store.as_ref())?.map(|v| (v, None))),
-            Tool::Antigravity => Ok(None),
+            Tool::Antigravity => env.store.get(antigravity::SERVICE, antigravity::ACCOUNT)?.map(|raw| antigravity::decode(&raw).map(|s| (s, None))).transpose(),
         }
     }
 
@@ -675,12 +681,13 @@ impl AccountManager {
         let _op = self.inner.op.lock();
         let (secret, acct) = self.read_live(tool)?.ok_or_else(|| match tool {
             Tool::Claude => anyhow!(kiln_common::i18n::tr("저장할 Claude Code 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
-            Tool::Codex | Tool::Antigravity => anyhow!(kiln_common::i18n::tr("저장할 Codex 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
+            Tool::Codex => anyhow!(kiln_common::i18n::tr("저장할 Codex 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
+            Tool::Antigravity => anyhow!(kiln_common::i18n::tr("저장할 Antigravity 계정이 없습니다. ‘새 계정 추가’에서 로그인하세요")),
         })?;
         if tool == Tool::Codex && !codex::has_chatgpt_tokens(&secret) {
             bail!(kiln_common::trf!("Codex 가 ChatGPT 계정으로 로그인되어 있지 않습니다(API 키 로그인은 저장하지 않습니다)"));
         }
-        let (email, oauth) = self.live_identity(tool, Some(&secret));
+        let (email, oauth) = if tool == Tool::Antigravity { (Some((self.inner.env.antigravity_identity)(&secret)?), None) } else { self.live_identity(tool, Some(&secret)) };
         self.save_credentials_locked(tool, label, secret, acct, email, oauth, true)
     }
 
@@ -764,6 +771,18 @@ impl AccountManager {
         let Some(id) = self.active(tool) else { return Ok(Vec::new()); };
         let dir = self.runtime_dir(tool, &id);
         let env = &self.inner.env;
+        if tool == Tool::Antigravity {
+            if self.runtime_secret(tool, &id)?.is_none() {
+                ensure!(!self.pending_login(tool, &id), "{}", kiln_common::i18n::tr("로그인 갱신을 적용한 후 새 세션을 여세요"));
+                ensure!(!dir.join("initialized").exists(), "{}", kiln_common::i18n::tr("이 계정은 다시 로그인해야 합니다."));
+                let secret = env.store.get(&profile_service(tool), &id)?.context("saved account credentials missing")?;
+                self.write_runtime(tool, &id, &secret, None)?;
+            }
+            antigravity::prepare(env, &dir)?;
+            let mut variables = antigravity::environment(&dir);
+            variables.push(("KILN_AGENT_PROFILE".into(), id));
+            return Ok(variables);
+        }
         let credential = self.runtime_secret(tool, &id)?;
         if credential.is_none() {
             if self.pending_login(tool, &id) { bail!("{}", kiln_common::i18n::tr("로그인 갱신을 적용한 후 새 세션을 여세요")); }
@@ -806,12 +825,18 @@ impl AccountManager {
     /// Validate the original saved account before interrupting a running panel.
     pub fn validate_launch_environment(&self,tool:Tool,variables:&[(String,String)])->Result<()> {
         let id=variables.iter().find(|(key,_)|key=="KILN_AGENT_PROFILE").map(|(_,value)|value);
+        if tool == Tool::Antigravity && id.is_none() { return Ok(()); }
         if !tool.has_accounts() { ensure!(id.is_none(), "unexpected account for {}", tool.display_name()); return Ok(()); }
         let id=id.context("original account not recorded")?;
         if !self.profiles(tool).iter().any(|p|p.id==*id) {bail!("original account was removed");}
-        let key=if tool==Tool::Claude {"CLAUDE_CONFIG_DIR"}else{"CODEX_HOME"};
+        let key=match tool {Tool::Claude=>"CLAUDE_CONFIG_DIR",Tool::Codex=>"CODEX_HOME",Tool::Antigravity=>"HOME"};
         let config=variables.iter().find(|(k,_)|k==key).map(|(_,v)|PathBuf::from(v)).context("original account configuration missing")?;
         if config!=self.runtime_dir(tool,id) {bail!("account configuration changed");}
+        if tool == Tool::Antigravity {
+            for pair in antigravity::environment(&config) { ensure!(variables.contains(&pair), "Antigravity account configuration changed"); }
+            ensure!(self.runtime_secret(tool, id)?.is_some(), "Antigravity sign-in required");
+            antigravity::prepare(&self.inner.env, &config)?;
+        }
         Ok(())
     }
 
@@ -832,6 +857,7 @@ impl AccountManager {
 
     fn restore_runtime(&self, tool: Tool, id: &str, secret: Option<&str>, oauth: Option<&Value>) -> Result<()> {
         let dir=self.runtime_dir(tool,id);
+        if tool == Tool::Antigravity { return antigravity::write(&self.inner.env, &dir, secret); }
         if tool==Tool::Claude {claude::write_oauth_account(&claude::config_path(&dir),oauth)?;}
         if tool==Tool::Claude && self.inner.env.claude_live_in_store {
             let service=crate::login::claude_service(Some(&dir));
@@ -874,7 +900,7 @@ impl AccountManager {
                 if let Some(secret) = read_secret(&dir.join("auth.json"))? { return Ok(Some(secret)); }
                 codex::read_credentials(&dir, self.inner.env.store.as_ref())
             },
-            Tool::Antigravity => Ok(None),
+            Tool::Antigravity => antigravity::read(&self.inner.env, &dir),
         }
     }
 
@@ -900,6 +926,7 @@ impl AccountManager {
             return Ok(());
         }
         if self.runtime_dir(tool, &active).join("initialized").exists() { return Ok(()); }
+        if tool == Tool::Antigravity { return Ok(()); }
         let Some((secret, _)) = self.read_live(tool)? else { return Ok(()); };
         let (live_email, oauth) = self.live_identity(tool, Some(&secret));
         if active_email.as_ref().is_none_or(|a| live_email.as_ref().is_none_or(|l|!a.eq_ignore_ascii_case(l))) {
@@ -918,6 +945,7 @@ impl AccountManager {
     }
 
     fn restore_live(&self,tool:Tool,previous:Option<&str>)->Result<()> {
+        if tool == Tool::Antigravity { return Ok(()); }
         if let Some(secret)=previous {return self.write_live(tool,secret);}
         let env=&self.inner.env;
         if tool==Tool::Claude && env.claude_live_in_store {
@@ -949,16 +977,16 @@ impl AccountManager {
             else {self.inner.env.store.get(&profile_service(tool),id)?.with_context(||kiln_common::trf!("프로필 {id} 의 저장된 자격증명이 없습니다"))?};
         let previous_runtime=self.runtime_secret(tool,id)?;
         let previous_runtime_oauth=self.runtime_oauth(tool,id)?;
-        let previous = self.read_live(tool)?;
+        let previous = if tool == Tool::Antigravity { None } else { self.read_live(tool)? };
         let previous_oauth=if tool==Tool::Claude {claude::read_oauth_account(&self.inner.env.claude_json_path())?} else {None};
         let (previous_settings,previous_email,previous_events)=self.with_state(|s|(s.settings.clone(),s.live_email[idx(tool)].clone(),s.events.len()));
-        self.write_live(tool, &secret)?;
+        if tool != Tool::Antigravity { self.write_live(tool, &secret)?; }
         if tool == Tool::Claude && let Some(oa) = &oauth
             && let Err(error) = claude::write_oauth_account(&self.inner.env.claude_json_path(), Some(oa)) {
             self.restore_live(tool,previous.as_ref().map(|(v,_)|v.as_str()))?;
             return Err(error);
         }
-        if pending && self.runtime_dir(tool,id).is_dir() {
+        if tool == Tool::Antigravity || pending && self.runtime_dir(tool,id).is_dir() {
             if let Err(error)=self.write_runtime(tool,id,&secret,oauth.as_ref()) {
                 self.restore_live(tool,previous.as_ref().map(|(v,_)|v.as_str()))?;
                 if tool==Tool::Claude {claude::write_oauth_account(&self.inner.env.claude_json_path(),previous_oauth.as_ref())?;}
@@ -976,7 +1004,7 @@ impl AccountManager {
         });
         if let Err(error)=self.persist() {
             self.with_state(|s| {s.settings=previous_settings;s.live_email[idx(tool)]=previous_email;s.events.truncate(previous_events);});
-            if pending && self.runtime_dir(tool,id).is_dir() {self.restore_runtime(tool,id,previous_runtime.as_deref(),previous_runtime_oauth.as_ref())?;}
+            if tool == Tool::Antigravity || pending && self.runtime_dir(tool,id).is_dir() {self.restore_runtime(tool,id,previous_runtime.as_deref(),previous_runtime_oauth.as_ref())?;}
             self.restore_live(tool,previous.as_ref().map(|(v,_)|v.as_str()))?;
             if tool==Tool::Claude {claude::write_oauth_account(&self.inner.env.claude_json_path(),previous_oauth.as_ref())?;}
             return Err(error);
@@ -1144,7 +1172,7 @@ impl AccountManager {
 
     fn refresh_usage_impl(&self, tool: Tool, manual: bool) {
         use std::sync::atomic::Ordering;
-        if self.inner.shutting_down.load(Ordering::Relaxed) || self.profiles(tool).is_empty() { return; }
+        if tool == Tool::Antigravity || self.inner.shutting_down.load(Ordering::Relaxed) || self.profiles(tool).is_empty() { return; }
         let started = self.with_state(|s| !std::mem::replace(&mut s.refreshing[idx(tool)], true));
         if !started { return; }
         self.repaint();
@@ -2588,21 +2616,47 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_logins_are_never_saved_written_or_persisted() {
+    #[cfg(target_os = "macos")]
+    fn antigravity_accounts_stage_switch_and_keep_runtime_tokens_separate() {
         let d = tempfile::tempdir().unwrap();
-        let (env, _) = Env::sandbox(d.path(), false);
+        let (mut env, store) = Env::sandbox(d.path(), false);
+        env.antigravity_identity = Arc::new(|secret| Ok(format!("{}@example.test", antigravity::access_token(secret)?)));
         let m = AccountManager::with_env(env.clone());
-        assert!(m.save_current(Tool::Antigravity, "Work").is_err());
-        assert!(m.write_live(Tool::Antigravity, "fixture").is_err());
-        assert!(m.read_live(Tool::Antigravity).unwrap().is_none());
-        assert!(m.launch_environment(Tool::Antigravity).unwrap().is_empty());
-        m.validate_launch_environment(Tool::Antigravity, &[]).unwrap();
-        assert!(m.validate_launch_environment(Tool::Antigravity, &[("KILN_AGENT_PROFILE".into(), "fixture".into())]).is_err());
-        m.refresh_usage_blocking(Tool::Antigravity);
-        assert!(m.profiles(Tool::Antigravity).is_empty());
-        m.persist().unwrap();
-        assert!(!std::fs::read_to_string(&env.settings_path).unwrap().contains("antigravity"));
-        assert!(!env.home.join(".gemini").exists());
+        let secret = |token: &str| serde_json::json!({"token":{"access_token":token,"refresh_token":"fixture"}}).to_string();
+        store.set(antigravity::SERVICE, antigravity::ACCOUNT, &secret("first")).unwrap();
+        let first = m.save_current(Tool::Antigravity, "Personal").unwrap();
+        let first_env = m.launch_environment(Tool::Antigravity).unwrap();
+        let second = m.save_credentials_locked(Tool::Antigravity, "Work", secret("second"), None, Some("second@example.test".into()), None, false).unwrap();
+        assert_eq!(m.active(Tool::Antigravity).as_deref(), Some(first.id.as_str()));
+        m.switch_to(Tool::Antigravity, &second.id).unwrap();
+        let second_env = m.launch_environment(Tool::Antigravity).unwrap();
+        assert_ne!(first_env, second_env);
+        assert_eq!(store.get(antigravity::SERVICE, antigravity::ACCOUNT).unwrap(), Some(secret("first")));
+        assert_eq!(m.runtime_secret(Tool::Antigravity, &first.id).unwrap(), Some(secret("first")));
+        assert_eq!(m.runtime_secret(Tool::Antigravity, &second.id).unwrap(), Some(secret("second")));
+        m.validate_launch_environment(Tool::Antigravity, &first_env).unwrap();
+        m.restore_runtime(Tool::Antigravity, &first.id, Some(&secret("renewed")), None).unwrap();
+        m.switch_to(Tool::Antigravity, &first.id).unwrap();
+        assert_eq!(m.runtime_secret(Tool::Antigravity, &first.id).unwrap(), Some(secret("renewed")));
+        assert!(m.save_relogin_locked(Tool::Antigravity, &first.id, crate::login::LoginCredentials {
+            secret: secret("wrong"), email: Some("another@example.test".into()), oauth: None,
+        }).is_err());
+        let same = m.save_relogin_locked(Tool::Antigravity, &first.id, crate::login::LoginCredentials {
+            secret: secret("fresh"), email: first.email.clone(), oauth: None,
+        }).unwrap();
+        assert_eq!(same.id, first.id);
+        assert!(m.pending_login(Tool::Antigravity, &first.id));
+        assert_eq!(m.runtime_secret(Tool::Antigravity, &first.id).unwrap(), Some(secret("renewed")));
+        m.switch_to(Tool::Antigravity, &first.id).unwrap();
+        assert_eq!(m.runtime_secret(Tool::Antigravity, &first.id).unwrap(), Some(secret("fresh")));
+        assert!(m.remove(Tool::Antigravity, &first.id).is_err());
+        let saved = std::fs::read_to_string(&env.settings_path).unwrap();
+        assert!(saved.contains("antigravity")); assert!(!saved.contains("access_token")); assert!(!saved.contains("refresh_token"));
+        assert_eq!(AccountManager::with_env(env).profiles(Tool::Antigravity).len(), 2);
+        m.restore_runtime(Tool::Antigravity, &first.id, None, None).unwrap();
+        assert!(m.launch_environment(Tool::Antigravity).is_err());
+        assert!(m.validate_launch_environment(Tool::Antigravity, &first_env).is_err());
+        assert!(m.runtime_secret(Tool::Antigravity, &second.id).unwrap().is_some());
     }
 
     #[test]

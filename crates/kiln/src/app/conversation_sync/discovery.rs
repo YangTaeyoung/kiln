@@ -11,6 +11,16 @@ pub(super) struct Scope {
     pub(super) roots: Vec<(Tool, PathBuf)>,
 }
 impl Scope {
+    pub fn with_accounts(pair: &Pair, workspaces: Vec<PathBuf>, config: &Path) -> Result<Self> {
+        let mut scope = Self::new(pair, workspaces)?;
+        for root in kiln_accounts::antigravity::saved_roots(&config.join("accounts.json")) {
+            if let Ok(root) = root.canonical() && root.is_dir() && !scope.roots.contains(&(Tool::Antigravity, root.clone())) {
+                scope.roots.push((Tool::Antigravity, root));
+            }
+        }
+        Ok(scope)
+    }
+
     pub fn new(pair: &Pair, workspaces: Vec<PathBuf>) -> Result<Self> {
         let mut roots = Vec::new();
         for tool in PROJECTED {
@@ -507,4 +517,19 @@ pub(super) fn find(
     }
     ensure!(selected.len() <= 100_000, "Session discovery limit reached");
     Ok(selected.into_values().collect())
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+    #[test]
+    fn antigravity_account_roots_are_read_only_and_reject_path_traversal() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = temp.path().join("accounts.json");
+        std::fs::write(&settings, br#"{"antigravity":{"profiles":[{"id":"account-a"},{"id":"account-b"},{"id":"../../escape"}]}}"#).unwrap();
+        let roots = kiln_accounts::antigravity::saved_roots(&settings);
+        assert_eq!(roots.len(), 2);
+        assert!(roots.iter().all(|root| root.starts_with(temp.path()) && !root.exists()));
+        assert!(roots[0].ends_with("agent-accounts/antigravity/account-a/.gemini/antigravity-cli"));
+    }
 }

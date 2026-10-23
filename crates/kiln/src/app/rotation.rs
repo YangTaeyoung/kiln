@@ -136,7 +136,7 @@ impl Rotator {
             return;
         }
         self.handled.insert(session, Instant::now());
-        if !tool.has_accounts() {
+        if !tool.supports_rotation() {
             out.push(RotationEvent::LimitReached { session, tool, reset_hint: hit.reset_hint });
         } else if self.managed.contains(&session) {
             out.push(RotationEvent::ManagedLimitReached{session,tool});
@@ -149,7 +149,7 @@ impl Rotator {
 
     /// 다음 계정으로 바꾸고 세션을 이어가는 작업을 시작한다.
     pub fn start(&mut self, session: SessionId, tool: Tool) {
-        if !tool.has_accounts() || self.managed.contains(&session) || self.jobs.iter().any(|j| j.session == session) {
+        if !tool.supports_rotation() || self.managed.contains(&session) || self.jobs.iter().any(|j| j.session == session) {
             return;
         }
         self.handled.insert(session, Instant::now());

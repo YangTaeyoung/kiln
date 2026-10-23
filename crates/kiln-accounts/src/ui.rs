@@ -45,7 +45,7 @@ fn tool_idx(tool: Tool) -> usize {
 pub fn accounts_settings_ui(ui: &mut Ui, mgr: &AccountManager) -> Vec<AccountsEvent> {
     mgr.set_repaint_context(ui.ctx());
     mgr.refresh_login_status();
-    for tool in Tool::ACCOUNTS {
+    for tool in Tool::ALL.into_iter().filter(|tool| tool.has_accounts()) {
         ui.push_id(("kiln-accounts", tool.key()), |ui| tool_card(ui, mgr, tool));
     }
     mgr.drain_events()
@@ -82,7 +82,7 @@ fn subtitle(tool: Tool) -> &'static str {
     match tool {
         Tool::Claude => kiln_common::i18n::tr("Anthropic 구독 계정"),
         Tool::Codex => kiln_common::i18n::tr("ChatGPT 구독 계정"),
-        Tool::Antigravity => "",
+        Tool::Antigravity => kiln_common::i18n::tr("Google 계정"),
     }
 }
 
@@ -117,6 +117,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                 ui.add(egui::Label::new(RichText::new(format!("{}{count}", subtitle(tool))).font(fonts::regular(12.0)).color(t.text_faint)).truncate());
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if tool == Tool::Antigravity { return; }
                 if refreshing {
                     ui.add(egui::Spinner::new().size(14.0).color(t.text_dim));
                 } else {
@@ -129,7 +130,8 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                 }
             });
         });
-        ui.label(RichText::new(kiln_common::i18n::tr("자동 갱신 · 5분마다")).font(fonts::regular(11.0)).color(t.text_faint));
+        let hint = if tool == Tool::Antigravity { kiln_common::i18n::tr("전환한 계정은 새 작업부터 사용됩니다. 실행 중인 작업은 기존 계정을 유지합니다.") } else { kiln_common::i18n::tr("자동 갱신 · 5분마다") };
+        ui.add(egui::Label::new(RichText::new(hint).font(fonts::regular(11.0)).color(t.text_faint)).wrap());
         ui.add_space(8.0);
 
         // 저장되지 않은 현재 로그인 안내.
@@ -186,6 +188,7 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
         ui.add_space(6.0);
         widgets::divider(ui);
 
+        if tool == Tool::Antigravity { return; }
         let mut on = mgr.auto_rotate(tool);
         widgets::setting_row(ui, kiln_common::i18n::tr("자동 전환"), kiln_common::i18n::tr("사용량이 소진되면 다음 계정으로 전환하고 세션을 이어갑니다"), |ui| {
             if widgets::toggle(ui, &mut on).changed() {
@@ -612,7 +615,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
     let tool = p.tool;
     let login_required = mgr.login_required(tool, &p.id);
     let compact = ui.available_width() < 600.0;
-    let identity_width = (ui.available_width() - 166.0 - if compact || login_required { 0.0 } else { 252.0 }).max(64.0);
+    let identity_width = (ui.available_width() - 166.0 - if compact || login_required || tool == Tool::Antigravity { 0.0 } else { 252.0 }).max(64.0);
     let exhausted = !mgr.is_refreshing(tool) && mgr.usage_fetched_at(tool, &p.id).is_some_and(|at| now.saturating_sub(at) < 300) && usage.as_ref().is_some_and(|u| !u.is_unavailable() && u.exhausted_at(now));
     let renaming = mgr.ui_state().renaming.as_ref().filter(|(rt, id, _)| *rt == tool && *id == p.id).map(|r| r.2.clone());
     let confirming = mgr.ui_state().confirm_delete.as_ref().is_some_and(|(ct, id)| *ct == tool && *id == p.id);
@@ -649,7 +652,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     st.renaming = None;
                     drop(st);
                     if let Err(e) = mgr.rename(tool, &p.id, &buf) {
-                        mgr.with_state(|s| s.error[if tool == Tool::Claude { 0 } else { 1 }] = Some(format!("{e:#}")));
+                        mgr.with_state(|s| s.error[tool_idx(tool)] = Some(format!("{e:#}")));
                     }
                 } else if let Some(r) = st.renaming.as_mut() {
                     r.2 = buf;
@@ -760,10 +763,10 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 }
             });
             ui.add_space(8.0);
-            if !login_required && !compact { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
+            if !login_required && !compact && tool != Tool::Antigravity { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
         });
     });
-    if compact && !login_required { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
+    if compact && !login_required && tool != Tool::Antigravity { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
     if let Some(caption) = caption.as_ref().filter(|_| compact) {
         ui.add(egui::Label::new(RichText::new(caption).font(fonts::regular(11.0)).color(t.text_dim)).wrap()).on_hover_text(caption);
     }
@@ -1211,6 +1214,54 @@ mod tests {
                     assert!(manager.ui_state().relogin.is_none());
                     assert_eq!(manager.profiles(Tool::Codex), vec![profile]);
                     assert!(manager.login_status(Tool::Codex).is_none());
+                }
+            });
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_card_add_switch_and_relogin_are_accessible() {
+        use egui_kittest::kittest::Queryable;
+        use crate::CredentialStore;
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                for width in [420.0, 760.0] {
+                    let root = tempfile::tempdir().unwrap();
+                    let (mut env, store) = crate::Env::sandbox(root.path(), false);
+                    env.antigravity_identity = std::sync::Arc::new(|s| Ok(format!("{}@example.test", crate::antigravity::access_token(s)?)));
+                    let manager = AccountManager::with_env(env);
+                    let mut profiles = Vec::new();
+                    for name in ["Personal", "Work"] {
+                        let secret = serde_json::json!({"token":{"access_token":name,"refresh_token":"fixture"}}).to_string();
+                        store.set(crate::antigravity::SERVICE, crate::antigravity::ACCOUNT, &secret).unwrap();
+                        profiles.push(manager.save_current(Tool::Antigravity, name).unwrap());
+                    }
+                    let mut h = egui_kittest::Harness::builder().with_size(vec2(width, 720.0))
+                        .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { tool_card(ui, manager, Tool::Antigravity); } }, manager.clone());
+                    h.ctx.set_zoom_factor(1.3);
+                    for _ in 0..4 { h.step(); }
+                    assert!(h.query_by_label(kiln_common::i18n::tr("자동 전환")).is_none());
+                    assert!(h.query_by_label(kiln_common::i18n::tr("사용량 정보 없음")).is_none());
+                    for label in ["새 계정 추가", "전환"] {
+                        assert!(h.ctx.content_rect().contains_rect(h.get_by_label(kiln_common::i18n::tr(label)).rect()));
+                    }
+                    h.get_by_label(kiln_common::i18n::tr("전환")).click();
+                    let deadline = std::time::Instant::now()+std::time::Duration::from_secs(3);
+                    while manager.active(Tool::Antigravity).as_deref()!=Some(profiles[0].id.as_str()) {
+                        assert!(std::time::Instant::now()<deadline); h.step(); std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    for _ in 0..4 { h.step(); }
+                    h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-agy-accounts-{language:?}-{width}.png"))).unwrap();
+                    h.get_by_label(kiln_common::i18n::tr("새 계정 추가")).click();
+                    for _ in 0..4 { h.step(); }
+                    assert!(h.ctx.content_rect().contains_rect(h.get_by_label(kiln_common::i18n::tr("브라우저에서 로그인")).rect()));
+                    h.get_by_label(kiln_common::i18n::tr("취소")).click();
+                    for _ in 0..4 { h.step(); }
+                    manager.ui_state().relogin = Some((Tool::Antigravity, profiles[0].id.clone()));
+                    for _ in 0..4 { h.step(); }
+                    assert!(h.query_by_label(kiln_common::i18n::tr("브라우저에서 로그인")).is_some());
+                    assert_eq!(manager.profiles(Tool::Antigravity), profiles);
                 }
             });
         }

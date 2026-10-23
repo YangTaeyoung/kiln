@@ -1234,7 +1234,7 @@ impl Manager {
         let registry = self.registry.clone();
         std::thread::spawn(move || {
             let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
-            let result = discovery::Scope::new(&pair, workspaces).map(|mut scope| {scope.limits=limits;scope.paused=paused;scope})
+            let result = discovery::Scope::with_accounts(&pair, workspaces, &kiln_common::paths::config_dir()).map(|mut scope| {scope.limits=limits;scope.paused=paused;scope})
                 .and_then(|scope| {
                     let mut registry = registry.lock().unwrap();
                     registry.begin_scan();

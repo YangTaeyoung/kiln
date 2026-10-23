@@ -83,7 +83,7 @@ pub fn serve() -> Result<()> {
         std::io::stdout(),
         &kiln_common::paths::config_dir(),
         RECYCLE_PEAK,
-        discovery::Scope::new,
+        |pair, workspaces| discovery::Scope::with_accounts(pair, workspaces, &kiln_common::paths::config_dir()),
     )
 }
 
