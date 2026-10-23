@@ -1132,7 +1132,7 @@ fn claude_project_encoding_matches_utf16_and_compaction_is_explicit() {
 }
 
 fn workspace_scope(f: &Fixture) -> discovery::Scope {
-    discovery::Scope { limits: BTreeMap::new(),
+    discovery::Scope { paused: Vec::new(), limits: BTreeMap::new(),
         workspaces: vec![PathBuf::from(&f.source.cwd)],
         roots: PROJECTED
             .into_iter()
@@ -1676,7 +1676,7 @@ fn inspect_existing_workspace_metadata_read_only() {
             }
         }
     }
-    let scope = discovery::Scope { limits: BTreeMap::new(),
+    let scope = discovery::Scope { paused: Vec::new(), limits: BTreeMap::new(),
         workspaces: serde_json::from_value(manifest["workspaces"].clone()).unwrap(),
         roots: serde_json::from_value(manifest["roots"].clone()).unwrap(),
     };
@@ -2000,7 +2000,7 @@ fn export_discovered_workspace_fixtures() {
             label: "fixture".into(),
         },
     };
-    let scope = discovery::Scope { limits: BTreeMap::new(),
+    let scope = discovery::Scope { paused: Vec::new(), limits: BTreeMap::new(),
         workspaces: vec![dir.clone()],
         roots: PROJECTED
             .into_iter()
@@ -2119,7 +2119,7 @@ fn verify_discovered_workspace_cli_continuations() {
             label: "fixture".into(),
         },
     };
-    let scope = discovery::Scope { limits: BTreeMap::new(),
+    let scope = discovery::Scope { paused: Vec::new(), limits: BTreeMap::new(),
         workspaces: vec![dir.clone()],
         roots: PROJECTED
             .into_iter()
@@ -2284,7 +2284,7 @@ fn workspace_status_uses_canonical_assignment_for_aliased_working_directories() 
     let root = PathBuf::from(&f.source.cwd);
     let alias = root.join("workspace-alias");
     std::os::unix::fs::symlink(&root, &alias).unwrap();
-    let scope = discovery::Scope { limits: BTreeMap::new(),
+    let scope = discovery::Scope { paused: Vec::new(), limits: BTreeMap::new(),
         workspaces: vec![root.clone()],
         roots: vec![],
     };
@@ -2749,7 +2749,7 @@ impl WorkerFixture {
         let (config, roots) = (f.config.clone(), workspace_scope(f).roots);
         let done = std::thread::spawn(move || {
             worker::serve_with::<NoNativeMetadata>(std::io::BufReader::new(worker_end), Lines(tx, Vec::new()), &config, recycle_peak, move |_, workspaces| {
-                Ok(discovery::Scope { limits: BTreeMap::new(), workspaces, roots: roots.clone() })
+                Ok(discovery::Scope { paused: Vec::new(), limits: BTreeMap::new(), workspaces, roots: roots.clone() })
             })
         });
         Self { gui, replies, done, exiting: false }
@@ -2760,7 +2760,7 @@ impl WorkerFixture {
         self.gui.write_all(&line).unwrap();
     }
     fn scan(&mut self, f: &Fixture, id: u64) -> Status {
-        self.send(&worker::Request::Scan { id, pair: f.pair.clone(), workspaces: vec![PathBuf::from(&f.source.cwd)], limits: BTreeMap::new(), quiet_ms: 0, expedite: false, reset: false });
+        self.send(&worker::Request::Scan { id, pair: f.pair.clone(), workspaces: vec![PathBuf::from(&f.source.cwd)], limits: BTreeMap::new(), paused: Vec::new(), quiet_ms: 0, expedite: false, reset: false });
         loop {
             let line = self.replies.recv_timeout(Duration::from_secs(30)).expect("worker reply");
             if let worker::Reply::Scanned { id: done, result, exiting } = serde_json::from_str(&line).unwrap() {
@@ -5336,4 +5336,202 @@ fn bounded_sync_full_discovery_is_cached_until_refresh() {
     assert!(scan_now(&mut cache).rows.values().all(|r|r.source.id!=newer.id));
     cache.catalog.as_mut().unwrap().0=Instant::now()-Duration::from_secs(31);
     assert!(scan_now(&mut cache).rows.values().any(|r|r.source.id==newer.id));
+}
+
+#[test]
+fn bounded_sync_review_imports_merge_before_limit() {
+    let f = Fixture::new(Tool::Codex);
+    let mut scope = workspace_scope(&f);
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+    let state = workspace_state(&f);
+    let copied = &state.entries.values().find(|e| e.imported).unwrap().source;
+    let external = destination(
+        &f.pair,
+        copied,
+        &stable_id("native-import"),
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    let bytes = format::render(
+        Tool::Codex,
+        &external.id,
+        &external.cwd,
+        "2026-10-13T00:00:00Z",
+        &messages(),
+    )
+    .unwrap();
+    publish(&external.path, &bytes).unwrap();
+    // Reproduce an older Kiln already tracking this as a separate conversation.
+    assert_eq!(workspace_scan(&f, &scope).published, 1);
+    fs::write(
+        f.pair
+            .codex
+            .root
+            .join("external_agent_session_imports.json"),
+        serde_json::to_vec(
+            &json!({"records":[{"source_path":copied.path,"imported_thread_id":external.id}]}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    scope.limits.insert(PathBuf::from(&f.source.cwd), 1);
+    let again = workspace_scan(&f, &scope);
+    assert_eq!(again.published, 0);
+    assert_eq!(again.rows.len(), 1);
+    let archived = f
+        .pair
+        .codex
+        .root
+        .join("archived_sessions")
+        .join(external.path.file_name().unwrap());
+    assert_eq!(fs::read(&archived).unwrap(), bytes);
+    // A native unarchive restores the old endpoint; new turns still join its group.
+    fs::rename(&archived, &external.path).unwrap();
+    let mut continued = messages();
+    continued.push(Message {
+        role: "user".into(),
+        text: "New native turn".into(),
+        images: vec![],
+    });
+    continued.push(Message {
+        role: "assistant".into(),
+        text: "Native answer".into(),
+        images: vec![],
+    });
+    fs::write(
+        &external.path,
+        format::render(
+            Tool::Codex,
+            &external.id,
+            &external.cwd,
+            "2026-10-13T00:00:00Z",
+            &continued,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    native_turn(&external.path);
+    let changed = workspace_scan(&f, &scope);
+    assert_eq!(changed.published, 1);
+    assert!(changed.errors.is_empty(), "{:?}", changed.errors);
+    assert_eq!(
+        changed.rows.len(),
+        1,
+        "the continued import is the same conversation"
+    );
+    assert_eq!(
+        transcripts(&f.pair.codex.root),
+        vec![external.path.clone()],
+        "the continued import is the Codex projection"
+    );
+    assert_eq!(
+        read_messages(&f.projection_in(&f.pair.claude.root)).unwrap(),
+        continued
+    );
+}
+
+#[test]
+fn bounded_sync_review_duplicate_native_paths_do_not_panic() {
+    let f = Fixture::new(Tool::Claude);
+    let scope = workspace_scope(&f);
+    let duplicate = f
+        .pair
+        .claude
+        .root
+        .join("projects/another-project")
+        .join(format!("{}.jsonl", f.source.id));
+    private_dir(duplicate.parent().unwrap()).unwrap();
+    fs::copy(&f.source.path, &duplicate).unwrap();
+    let status = workspace_scan(&f, &scope);
+    assert_eq!(status.watched, 1);
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+}
+
+#[test]
+fn bounded_sync_review_pending_copy_does_not_promote_old_history() {
+    let f = Fixture::new(Tool::Claude);
+    let mut scope = workspace_scope(&f);
+    write_history(
+        &f.source,
+        &messages(),
+        SystemTime::now() - Duration::from_secs(120),
+    );
+    workspace_scan(&f, &scope);
+    let mut latest = f.source.clone();
+    latest.id = stable_id("review-latest");
+    latest.path = latest.path.with_file_name(format!("{}.jsonl", latest.id));
+    write_history(
+        &latest,
+        &turns(&["latest question", "latest answer"]),
+        SystemTime::now() - Duration::from_secs(60),
+    );
+    workspace_scan(&f, &scope);
+    let mut pending = f.source.clone();
+    pending.id = stable_id("review-pending");
+    pending.path = pending.path.with_file_name(format!("{}.jsonl", pending.id));
+    write_history(
+        &pending,
+        &messages(),
+        SystemTime::now() + Duration::from_secs(10),
+    );
+    let mut store = hub::Hub::open(&f.config).unwrap();
+    let old = store
+        .state
+        .conversations
+        .values_mut()
+        .find(|r| r.projections.iter().any(|p| p.source.id == f.source.id))
+        .unwrap();
+    old.pending.push(pending.clone());
+    store.save().unwrap();
+    scope.limits.insert(PathBuf::from(&f.source.cwd), 1);
+    let status = workspace_scan(&f, &scope);
+    assert_eq!(status.watched, 1);
+    assert!(
+        status.rows.values().any(|r| r.source.id == latest.id),
+        "a synthetic pending copy is not native activity"
+    );
+    assert!(
+        pending.path.exists(),
+        "out-of-range pending copy remains untouched"
+    );
+}
+
+#[test]
+fn bounded_sync_paused_workspace_does_not_parse_or_publish() {
+    let f = Fixture::new(Tool::Claude);
+    let mut scope = workspace_scope(&f);
+    workspace_scan(&f, &scope);
+    let before = fs::read(f.projection_in(&f.pair.codex.root).path).unwrap();
+    fs::write(&f.source.path, b"not json\n").unwrap();
+    scope.paused.push(PathBuf::from(&f.source.cwd));
+    let paused = workspace_scan(&f, &scope);
+    assert_eq!(paused.checked, 0);
+    assert_eq!(paused.published, 0);
+    assert!(paused.errors.is_empty());
+    assert_eq!(fs::read(f.projection_in(&f.pair.codex.root).path).unwrap(), before);
+    scope.paused.clear();
+    assert!(!workspace_scan(&f, &scope).errors.is_empty(), "the invalid body is read only after resume");
+}
+
+#[test]
+fn bounded_sync_terminal_exit_schedules_once_and_cancels_running_scan() {
+    let mut manager = Manager::default();
+    manager.gate.store(true, Ordering::Release);
+    manager.busy = true;
+    let old = manager.gate.clone();
+    let root = PathBuf::from("/workspace");
+    let active = BTreeMap::from([(1, (root.clone(), true)), (2, (root.clone(), true))]);
+    manager.observe_terminals(active.clone());
+    assert!(!old.load(Ordering::Acquire));
+    assert!(!manager.busy);
+    assert_eq!(manager.paused, vec![root.clone()]);
+    manager.observe_terminals(BTreeMap::from([(1, (root.clone(), false)), (2, (root.clone(), true))]));
+    assert!(manager.exit_sync);
+    assert_eq!(manager.paused, vec![root.clone()], "another running CLI keeps the workspace paused");
+    manager.observe_terminals(BTreeMap::from([(1, (root.clone(), false))]));
+    assert!(manager.paused.is_empty());
+    let deadline = manager.next;
+    manager.observe_terminals(BTreeMap::from([(1, (root.clone(), false))]));
+    assert_eq!(manager.next, deadline, "idle snapshots do not repeatedly schedule sync");
+    assert_eq!(BACKGROUND_INTERVAL, Duration::from_secs(60));
 }

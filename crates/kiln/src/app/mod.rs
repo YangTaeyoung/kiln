@@ -2572,6 +2572,18 @@ impl eframe::App for KilnApp {
             self.agy_conversations.tick(launches);
         }
         self.tick_capacity_recovery(ctx);
+        let sync_terminals = self.workspaces.iter().flat_map(|w| {
+            let root = w.tools.canonical_root().to_path_buf();
+            w.all_panes().into_iter().filter_map(|pane| {
+                let session = self.panes.get(&pane)?.session()?;
+                let info = self.conn.infos.get(&session)?;
+                if info.exited.is_some() { return None; }
+                let managed = self.launch_specs.get(&pane).and_then(agent_runtime::record_path).is_some();
+                let active = managed || info.fg_process.as_deref().and_then(rotation::tool_for).is_some();
+                Some((session, (root.clone(), active)))
+            }).collect::<Vec<_>>()
+        }).collect();
+        self.conversation_sync.observe_terminals(sync_terminals);
         self.conversation_sync.tick(&mut self.settings, self.workspaces.iter().filter(|w| w.conversation_sync).map(|w| w.tools.canonical_root().to_path_buf()).collect(), ctx);
         self.rotator.poll(&mut self.conn);
         let mut out = Vec::new();

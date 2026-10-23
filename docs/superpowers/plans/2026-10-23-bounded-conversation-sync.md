@@ -43,3 +43,5 @@ Default 20; valid range 1..4096; full contents preserved; no source deletion for
 - [ ] Commit release source, push PR, wait for CI and merge under user authorization.
 - [ ] Build/sign/notarize macOS and build Windows artifacts from full merge SHA; validate installers and signatures.
 - [ ] Publish only after all checks, re-download assets and verify latest feeds; report observation boundaries.
+
+User-approved lifecycle refinement: pause ordinary scans for workspaces with a running CLI (including idle input wait), cancel in-flight background work when a CLI starts, synchronize after CLI/shell exit, and use a 60-second fallback interval. Explicit handover and manual refresh retain writer guards and bypass the automatic pause.

@@ -656,6 +656,8 @@ struct Cache {
     messages: HashMap<PathBuf, (u64, SystemTime, String)>,
     #[serde(default)]
     aliases: HashMap<PathBuf, (u64, SystemTime, String, u64, usize)>,
+    #[serde(default)]
+    activity: HashMap<PathBuf, ((u64, SystemTime, String, u64, usize), bool)>,
     #[serde(skip)]
     catalog: Option<(Instant, Vec<Source>)>,
     metadata: discovery::MetadataCache,
@@ -840,7 +842,7 @@ fn scan_with_metadata(
         .collect();
     cache.rows = status.rows.clone();
     if gate.load(Ordering::Acquire) {
-        handover::publish(config, &engine::links(&hub, scope).into_iter().filter(|link|status.rows.contains_key(&link.group)).collect::<Vec<_>>())?;
+        handover::publish(config, &engine::links(&hub, scope).into_iter().filter(|link|status.rows.contains_key(&link.group) || scope.is_some_and(|s| hub.state.conversations.get(&link.group).is_some_and(|r| !s.active(&r.cwd)))).collect::<Vec<_>>())?;
     }
     status.groups = status.rows.keys().map(|k| (k.clone(), k.clone())).collect();
     notify(&status);
@@ -888,6 +890,7 @@ enum Badge {
     Attention,
     Working { checked: usize, watched: usize },
     Empty,
+    Paused,
     Waiting,
     Synced(usize),
 }
@@ -907,6 +910,9 @@ pub struct Manager {
     error: Option<String>,
     configured: Option<Pair>,
     workspaces: Vec<PathBuf>,
+    paused: Vec<PathBuf>,
+    terminals: BTreeMap<u64, (PathBuf, bool)>,
+    exit_sync: bool,
     limits: BTreeMap<PathBuf, usize>,
     cache: Arc<Mutex<Cache>>,
     registry: Arc<Mutex<codex_index::Registry>>,
@@ -961,6 +967,7 @@ enum RowAction {
     Restore { branch: String, title: String },
 }
 /// Background scans leave a transcript until it has been unchanged this long.
+const BACKGROUND_INTERVAL: Duration = Duration::from_secs(60);
 const QUIET: Duration = Duration::from_secs(10);
 impl Default for Manager {
     fn default() -> Self {
@@ -980,6 +987,9 @@ impl Default for Manager {
             error: None,
             configured: None,
             workspaces: Vec::new(),
+            paused: Vec::new(),
+            terminals: BTreeMap::new(),
+            exit_sync: false,
             limits: BTreeMap::new(),
             cache: Arc::new(Mutex::new(Cache::new())),
             registry: Default::default(),
@@ -1079,6 +1089,29 @@ impl Manager {
     pub(super) fn handover_ready(&self, after: u64, group: &str) -> bool {
         self.completed > after && self.error.is_none() && self.status.settled.contains(group)
     }
+    /// Observe daemon metadata only: no transcript or filesystem reads on the UI thread.
+    /// A managed CLI stays active while awaiting input, not just while generating output.
+    pub(super) fn observe_terminals(&mut self, terminals: BTreeMap<u64, (PathBuf, bool)>) {
+        let ended = self.terminals.iter().any(|(id, old)| {
+            terminals.get(id).is_none_or(|current| old.0 != current.0 || (old.1 && !current.1))
+        });
+        let mut paused: Vec<_> = terminals.values().filter(|(_, active)| *active).map(|(root, _)| root.clone()).collect();
+        paused.sort(); paused.dedup();
+        if paused != self.paused {
+            // Cancel a background scan already reading this workspace when a CLI starts.
+            self.gate.store(false, Ordering::Release);
+            self.cancel_worker_scan();
+            self.gate = Arc::new(AtomicBool::new(true));
+            self.busy = false;
+            self.paused = paused;
+            self.revision += 1;
+        }
+        if ended {
+            self.exit_sync = true;
+            self.next = Instant::now() + Duration::from_secs(1);
+        }
+        self.terminals = terminals;
+    }
     pub fn tick(
         &mut self,
         settings: &mut super::state::Settings,
@@ -1115,7 +1148,7 @@ impl Manager {
                     if !Arc::ptr_eq(&gate, &self.gate) { continue; }
                     self.busy = false;
                     if !gate.load(Ordering::Acquire) { continue; }
-                    self.next = Instant::now() + Duration::from_secs(3);
+                    self.next = Instant::now() + if self.exit_sync { Duration::from_secs(1) } else { BACKGROUND_INTERVAL };
                     self.completed += 1;
                     match result {
                         Ok(status) => {
@@ -1172,17 +1205,24 @@ impl Manager {
         ctx.request_repaint_after(if self.busy {
             Duration::from_millis(100)
         } else {
-            Duration::from_secs(3)
+            Duration::from_secs(1)
         });
         if self.busy || Instant::now() < self.next {
             return;
         }
+        if !self.urgent && self.workspaces.iter().all(|w| self.paused.contains(w)) {
+            self.next = Instant::now() + BACKGROUND_INTERVAL;
+            return;
+        }
         self.busy = true;
         self.revision += 1;
-        self.next = Instant::now() + Duration::from_secs(3);
+        self.next = Instant::now() + BACKGROUND_INTERVAL;
         let pair = settings.conversation_sync_pair.clone().unwrap();
-        let quiet = if std::mem::take(&mut self.urgent) { Duration::ZERO } else { QUIET };
-        if self.scan_in_worker(&pair, quiet, ctx) {
+        let forced = std::mem::take(&mut self.urgent);
+        let exited = std::mem::take(&mut self.exit_sync);
+        let quiet = if forced || exited { Duration::ZERO } else { QUIET };
+        let paused = if forced { Vec::new() } else { self.paused.clone() };
+        if self.scan_in_worker(&pair, quiet, &paused, ctx) {
             return;
         }
         let workspaces = self.workspaces.clone();
@@ -1193,7 +1233,7 @@ impl Manager {
         let registry = self.registry.clone();
         std::thread::spawn(move || {
             let last_progress = std::cell::Cell::new(Instant::now() - Duration::from_secs(1));
-            let result = discovery::Scope::new(&pair, workspaces).map(|mut scope| {scope.limits=limits;scope})
+            let result = discovery::Scope::new(&pair, workspaces).map(|mut scope| {scope.limits=limits;scope.paused=paused;scope})
                 .and_then(|scope| {
                     let mut registry = registry.lock().unwrap();
                     registry.begin_scan();
@@ -1220,7 +1260,7 @@ impl Manager {
     }
     /// Sends the scan to the sync worker process; false when no worker can run it,
     /// in which case the scan runs on a thread of this process.
-    fn scan_in_worker(&mut self, pair: &Pair, quiet: Duration, ctx: &egui::Context) -> bool {
+    fn scan_in_worker(&mut self, pair: &Pair, quiet: Duration, paused: &[PathBuf], ctx: &egui::Context) -> bool {
         // An executable replaced on disk (an installed update) may not speak this protocol.
         let (exe, build) = &self.worker_exe;
         if cfg!(test) || kiln_daemon::exe_build_id(exe) != *build {
@@ -1234,7 +1274,7 @@ impl Manager {
         };
         self.scan_id += 1;
         let (expedite, reset) = (std::mem::take(&mut self.expedite_next), std::mem::take(&mut self.reset_next));
-        match worker.scan(self.scan_id, self.gate.clone(), pair, &self.workspaces, &self.limits, quiet, expedite, reset) {
+        match worker.scan(self.scan_id, self.gate.clone(), pair, &self.workspaces, &self.limits, paused, quiet, expedite, reset) {
             Ok(()) => {
                 self.worker_scan = Some(self.scan_id);
                 true
@@ -1342,6 +1382,8 @@ impl Manager {
             || status.rows.iter().any(|(key, row)| row.attention().is_some() && !self.is_ignored(key, row))
         {
             Badge::Attention
+        } else if self.paused.iter().any(|p| p == root) {
+            Badge::Paused
         } else if self.connecting
             || (status.discovering && status.rows.is_empty())
             || status
@@ -1373,6 +1415,7 @@ impl Manager {
                 kiln_common::trf!("대화 연동 중 · {}/{}", checked, watched),
             ),
             Badge::Empty => (Icon::Plug, theme.text_dim, tr("대화 연동됨 · 대화 대기").into()),
+            Badge::Paused => (Icon::History, theme.text_dim, tr("대화 연동 · 에이전트 종료 대기").into()),
             Badge::Waiting => (Icon::History, theme.blue, tr("대화 연동 · 응답 완료 대기").into()),
             Badge::Synced(count) => (
                 Icon::Check,
@@ -1420,6 +1463,7 @@ impl Manager {
                     }
                 });
                 ui.add(egui::Label::new(egui::RichText::new(tr("같은 대화의 사본은 하나로 계산합니다. 범위 밖 기록은 보존하며 추가 동기화만 중단합니다.")).small().color(theme.text_dim)).wrap());
+                if self.paused.iter().any(|p| p == root) { ui.label(tr("에이전트 실행 중에는 자동 동기화를 미룹니다. 종료 후 동기화하며, 보완 확인 주기는 60초입니다.")); }
                 // A single scroll surface; fixed summary and footer never reflow with polling.
                 let list_height = (ctx.content_rect().height() - 340.0).clamp(120.0, 520.0);
                 actions = self.progress_status_ui(ui, enabled, &status, list_height);

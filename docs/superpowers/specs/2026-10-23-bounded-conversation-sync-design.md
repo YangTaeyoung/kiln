@@ -7,3 +7,5 @@ Each workspace configures its recent logical conversation limit (default 20, ran
 Repair unchanged alias retry/caching and quadratic Claude compaction reconstruction. Separate full discovery cadence from known-file polling and schedule a quiet interval after completed scans. Verify content and no-echo behavior separately from performance; do not claim this proves system-wide keyboard/mouse latency is fixed.
 
 Ship a new immutable version with macOS notarization and signed update archives for macOS and Windows x64/ARM64. Preserve real user sessions. User authorization covers implementation, push, merge and release for this change.
+
+User-approved lifecycle refinement: pause ordinary scans for workspaces with a running CLI (including idle input wait), cancel in-flight background work when a CLI starts, synchronize after CLI/shell exit, and use a 60-second fallback interval. Explicit handover and manual refresh retain writer guards and bypass the automatic pause.

@@ -11673,5 +11673,15 @@
     "en": "Sync up to the configured number of conversations with the most recent native activity in this workspace and its subfolders.",
     "ja": "このワークスペースとサブフォルダーで、実際の会話活動が新しいものから設定件数まで同期します。",
     "zh-CN": "同步此工作区及其子文件夹中实际对话活动最近的对话，最多达到设置数量。"
+  },
+  "대화 연동 · 에이전트 종료 대기": {
+    "en": "Conversation sync · waiting for agent exit",
+    "ja": "会話同期 · エージェントの終了待ち",
+    "zh-CN": "对话同步 · 等待代理退出"
+  },
+  "에이전트 실행 중에는 자동 동기화를 미룹니다. 종료 후 동기화하며, 보완 확인 주기는 60초입니다.": {
+    "en": "Automatic sync pauses while an agent runs. Sync resumes after exit, with a 60-second fallback check.",
+    "ja": "エージェントの実行中は自動同期を保留します。終了後に同期し、補完チェックは60秒間隔です。",
+    "zh-CN": "代理运行时暂停自动同步。退出后同步，并每60秒补充检查一次。"
   }
 }

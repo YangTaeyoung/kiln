@@ -169,14 +169,13 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
             .clone()
     }
     fn in_scope(&mut self, record: &Record) -> bool {
-        self.scope.is_none() || self.workspace(&record.cwd).is_some()
+        self.scope.is_none() || self.scope.is_some_and(|s| s.active(&record.cwd))
     }
     fn live(&self) -> bool {
         self.gate.load(Ordering::Acquire)
     }
 
     pub fn run(&mut self, mut hub: Hub, sources: Vec<Source>) -> Result<Hub> {
-        let (sources,selected)=selection::choose(self.scope,&hub,&sources,&self.cache.metadata,&self.cache.rows)?;
         let mut ledger = HashMap::new();
         for (tool, root) in self.namespaces.clone() {
             if tool != Tool::Codex {
@@ -214,7 +213,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         for (native, imported_from) in &ledger {
             if let (Some(own), Some(target)) = (index.get(native).cloned(), paths.get(imported_from).cloned())
                 && own != target
-                && selected.as_ref().is_none_or(|ids|ids.contains(&own) && ids.contains(&target))
+                && self.in_scope(&hub.state.conversations[&target])
             {
                 match self.merge(&mut hub, &own, &target) {
                     Ok(true) => {
@@ -227,6 +226,7 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 }
             }
         }
+        let (sources, selected) = selection::choose(self.scope, &hub, &sources, self.cache, &ledger)?;
         let mut restored = Vec::new();
         for (path, request) in super::hub::restore_requests(self.config) {
             let key = format!("restore:{}", request.branch);

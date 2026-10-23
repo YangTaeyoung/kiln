@@ -20,11 +20,17 @@ again. Reducing the limit stops further synchronization of excluded histories;
 their original files and existing copies remain available. Included conversations
 retain their complete messages and attachments.
 
-Known selected histories are polled separately from full discovery, which runs at
-most once every 30 seconds during ordinary background operation. New conversations
-and activity in excluded histories can therefore take up to 30 seconds to appear;
-**Check again** refreshes discovery immediately. After each scan finishes Kiln waits
-three seconds before starting the next background scan. Compressed Codex histories
+Automatic synchronization pauses for a workspace while an agent CLI is running,
+including while it waits for input. Kiln observes terminal lifecycle metadata; it
+does not inspect typed `/exit` commands or repeatedly parse the active transcript.
+When a CLI exits back to its shell, its terminal ends, or the shell closes, Kiln
+schedules synchronization after one second. Other running agents in that workspace
+keep automatic synchronization paused. **Check again** and agent handover can
+explicitly request synchronization, retaining the existing writer guards.
+
+Background checks resume 60 seconds after a scan finishes. Full discovery is cached
+for 30 seconds; exit-triggered checks and **Check again** refresh it immediately.
+Compressed Codex histories
 retain their logical conversation ID. Metadata-only sessions and local-command-only
 sessions do not consume a slot. Overlapping folders belong to the nearest linked
 workspace; duplicate workspace paths count once. Closing a workspace pauses sync.

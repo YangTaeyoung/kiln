@@ -8,8 +8,8 @@ pub(super) fn choose(
     scope: Option<&discovery::Scope>,
     hub: &hub::Hub,
     sources: &[Source],
-    metadata: &discovery::MetadataCache,
-    previous: &BTreeMap<String, Conversation>,
+    cache: &mut Cache,
+    ledger: &HashMap<hub::NativeRef, PathBuf>,
 ) -> Result<Selection> {
     let Some(scope) = scope else {
         return Ok((sources.to_vec(), None));
@@ -18,15 +18,15 @@ pub(super) fn choose(
     let mut workspace_for = |cwd: &str| {
         assignments
             .entry(cwd.to_owned())
-            .or_insert_with(|| scope.workspace(cwd).cloned())
+            .or_insert_with(|| scope.workspace(cwd).filter(|w| !scope.paused.contains(w)).cloned())
             .clone()
     };
-    let cached_stamp = |source: &Source| {
-        metadata
+    fn cached_stamp(cache: &Cache, source: &Source) -> Option<(u64, SystemTime)> {
+        cache.metadata
             .get(&source.path)
-            .or_else(|| metadata.get(&source.path.with_extension("jsonl.zst")))
+            .or_else(|| cache.metadata.get(&source.path.with_extension("jsonl.zst")))
             .map(|(len, modified, _)| (*len, *modified))
-    };
+    }
     let mut index = HashMap::new();
     let mut candidates: HashMap<String, (PathBuf, SystemTime)> = HashMap::new();
     for (cid, record) in &hub.state.conversations {
@@ -37,10 +37,10 @@ pub(super) fn choose(
         for p in &record.projections {
             index.insert(hub::NativeRef::of(&p.source), cid.clone());
             if !p.removed
-                && let Some(current) = if previous.contains_key(cid) {
+                && let Some(current) = if cache.rows.contains_key(cid) {
                     engine::source_stamp(&p.source).ok()
                 } else {
-                    cached_stamp(&p.source)
+                    cached_stamp(cache, &p.source)
                 }
                 && p.stamp != Some(current)
             {
@@ -55,6 +55,22 @@ pub(super) fn choose(
         }
         candidates.insert(cid.clone(), (workspace.clone(), activity));
     }
+    let paths: HashMap<_, _> = hub
+        .state
+        .conversations
+        .iter()
+        .flat_map(|(cid, r)| {
+            r.projections
+                .iter()
+                .map(|p| (&p.source.path, cid.clone()))
+                .chain(r.pending.iter().map(|p| (&p.path, cid.clone())))
+        })
+        .collect();
+    for (native, path) in ledger {
+        if let Some(cid) = paths.get(path) {
+            index.insert(native.clone(), cid.clone());
+        }
+    }
     let mut source_keys = HashMap::new();
     for source in sources {
         let Some(workspace) = workspace_for(&source.cwd) else {
@@ -68,18 +84,29 @@ pub(super) fn choose(
         // Known projections were ranked above against their post-write stamp.
         // Native alias continuations may rejoin the conversation after a later edit.
         let activity = if let Some((_, at)) = candidates.get(&key) {
-            let record = &hub.state.conversations[&key];
+            if let Some(record) = hub.state.conversations.get(&key) {
             if record
                 .projections
                 .iter()
                 .any(|p| p.source.path == source.path)
             {
                 *at
+                } else {
+                    match cached_stamp(cache, source) {
+                        Some(stamp)
+                            if stamp.1 > *at
+                                && native_activity(hub, &key, source, stamp, cache)? =>
+                        {
+                            stamp.1
+                        }
+                        _ => *at,
+                    }
+                }
             } else {
-                cached_stamp(source).map_or(*at, |stamp| (*at).max(stamp.1))
+                cached_stamp(cache, source).map_or(*at, |stamp| (*at).max(stamp.1))
             }
         } else {
-            match cached_stamp(source) {
+            match cached_stamp(cache, source) {
                 Some(stamp) => stamp.1,
                 None => continue,
             }
@@ -115,4 +142,38 @@ pub(super) fn choose(
         .cloned()
         .collect();
     Ok((sources, Some(selected)))
+}
+
+/// Copies and pending projections do not acquire recency merely by being written.
+/// Verify a changed alias once per source stamp and canonical generation.
+fn native_activity(
+    hub: &hub::Hub,
+    cid: &str,
+    source: &Source,
+    stamp: (u64, SystemTime),
+    cache: &mut Cache,
+) -> Result<bool> {
+    let record = &hub.state.conversations[cid];
+    let signature = (
+        stamp.0,
+        stamp.1,
+        cid.to_owned(),
+        record.generation,
+        record.events,
+    );
+    if let Some((saved, active)) = cache.activity.get(&source.path)
+        && *saved == signature
+    {
+        return Ok(*active);
+    }
+    let active = if canonical::kiln_written(source)? {
+        false
+    } else {
+        let messages = read_messages(source)?;
+        hub::shared(&hub.events(cid)?, &messages) < messages.len()
+    };
+    cache
+        .activity
+        .insert(source.path.clone(), (signature, active));
+    Ok(active)
 }

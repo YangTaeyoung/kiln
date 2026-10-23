@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 
 pub(super) struct Scope {
     pub workspaces: Vec<PathBuf>,
+    pub paused: Vec<PathBuf>,
     pub limits: BTreeMap<PathBuf, usize>,
     /// Projected namespaces and read-only Antigravity data folders.
     pub(super) roots: Vec<(Tool, PathBuf)>,
@@ -35,10 +36,13 @@ impl Scope {
             .collect();
         workspaces.sort();
         workspaces.dedup();
-        Ok(Self { workspaces, roots, limits: BTreeMap::new() })
+        Ok(Self { workspaces, roots, paused: Vec::new(), limits: BTreeMap::new() })
+    }
+    pub fn active(&self, cwd: &str) -> bool {
+        self.workspace(cwd).is_some_and(|w| !self.paused.contains(w))
     }
     pub fn contains(&self, source: &Source) -> bool {
-        self.roots.contains(&(source.tool, source.root.clone())) && self.matches_cwd(&source.cwd)
+        self.roots.contains(&(source.tool, source.root.clone())) && self.active(&source.cwd)
     }
     pub(super) fn workspace(&self, cwd: &str) -> Option<&PathBuf> {
         let cwd = Path::new(cwd).canonical().ok()?;
@@ -46,9 +50,6 @@ impl Scope {
             .iter()
             .filter(|w| cwd.starts_with(w))
             .max_by_key(|w| w.components().count())
-    }
-    fn matches_cwd(&self, cwd: &str) -> bool {
-        self.workspace(cwd).is_some()
     }
 }
 
