@@ -86,7 +86,7 @@ Each account has its own private home and macOS keychain, which also keep its An
 
 Applied accounts show used percentages and reset times for each model group reported by the official CLI. Usage is checked on startup and every five minutes; you can also refresh manually. These read-only checks require agy 1.1.11 or later and do not start an agent turn or spend model quota. Stale or failed checks hide the percentages. Automatic rotation is not included. When `agy` reaches its quota, Kiln shows the reset time in a notification. Sign-in uses Google OAuth; Google Cloud project setup is not automated.
 
-New Kiln zsh terminals also use the selected account when you type `agy`, preserving the arguments and current folder. Open a new terminal after updating. With a custom shell, choose **New Task → Antigravity**.
+New Kiln zsh terminals also use the selected account when you type `agy`, preserving the arguments and current folder. Open a new terminal after updating. With a custom shell, choose **New Task → Antigravity**. Kiln keeps its own shell integration active when Kiro is installed, so its selected-account routing also works in those new terminals.
 
 Conversations from these accounts take part in conversation sync, and restarting in the same conversation keeps the original account. See [Conversations and updates](conversations.html).
 

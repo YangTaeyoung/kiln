@@ -108,6 +108,10 @@ pub fn configure_zsh(cmd: &mut std::process::Command, program: &str, spec: &kiln
     }
     let launcher = crate::client::cli_executable(&std::env::current_exe()?);
     cmd.env("KILN_AGENT_LAUNCHER", launcher)
+        // Kiro's startup hook can exec its own PTY wrapper after ZDOTDIR has
+        // restored the user's directory, dropping Kiln's remaining integration.
+        // Keep this terminal's existing PTY and account routing in charge.
+        .env("Q_TERM_DISABLED", "1")
         .env("KILN_ORIGINAL_ZDOTDIR", original).env("KILN_INTEGRATION_DIR", &dir).env("ZDOTDIR", dir);
     Ok(())
 }
@@ -232,7 +236,12 @@ mod tests {
     fn real_zsh_preserves_startup_and_reports_success_failure_output() {
         use std::io::Write;
         let temp=tempfile::tempdir().unwrap();
-        std::fs::write(temp.path().join(".zshrc"), "export KILN_USER_RC_WORKED=yes\nPS1='test> '\n").unwrap();
+        std::fs::write(temp.path().join(".zshrc"), concat!(
+            "# Simulate Kiro replacing this shell before Kiln's wrapper can finish.\n",
+            "if [[ ${Q_TERM_DISABLED:-} != 1 && ${KILN_FIXTURE_REWRAPPED:-} != 1 ]]; then\n",
+            "  export KILN_FIXTURE_REWRAPPED=1\n  exec /bin/zsh\nfi\n",
+            "export KILN_USER_RC_WORKED=yes\nPS1='test> '\n",
+        )).unwrap();
         let spec=kiln_proto::SpawnSpec {program:Some("/bin/zsh".into()),env:vec![("ZDOTDIR".into(),temp.path().to_string_lossy().into_owned())],cols:80,rows:24,..Default::default()};
         let pty=crate::pty::Pty::spawn(&spec,991).unwrap();
         let mut reader=pty.reader().unwrap(); let mut writer=pty.writer().unwrap(); let mut tracker=Tracker::default();

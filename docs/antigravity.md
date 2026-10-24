@@ -21,7 +21,7 @@ New Kiln zsh terminals route a typed `agy` command through the currently selecte
 preserving its arguments and working directory. Open a new terminal after updating Kiln.
 Version/help and CLI-update commands go directly to the CLI. Custom shells can use
 **New task → Antigravity**. The Kiln helper pins its config directory before applying the
-private account home, so launch records stay readable.
+private account home, so launch records stay readable. Integrated zsh launches set `Q_TERM_DISABLED=1` to prevent Kiro from replacing the shell before Kiln installs its account wrapper. User startup files still load; other terminals keep their existing Kiro setup.
 
 ## Conversations and restart
 
