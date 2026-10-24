@@ -25,6 +25,7 @@ pub(crate) struct LoginControl {
     pub profile_id: Option<String>,
     pub status: Mutex<LoginStatus>,
     input: Mutex<Option<Box<dyn Write + Send>>>,
+    terminal_input: AtomicBool,
     stop_readers: AtomicBool,
     child: Mutex<Option<Arc<Mutex<Child>>>>,
     finished: Mutex<bool>,
@@ -63,7 +64,7 @@ impl LoginControl {
 
     pub(crate) fn send_code(&self, code: &str) -> Result<()> {
         let code = code.trim();
-        if code.is_empty() || code.len() > 4096 || code.contains(['\n', '\r', '\0']) {
+        if code.is_empty() || code.len() > 4096 || code.chars().any(char::is_control) {
             bail!(kiln_common::i18n::tr("브라우저에서 받은 로그인 코드를 입력하세요"));
         }
         if !self.status.lock().accepts_code {
@@ -73,7 +74,10 @@ impl LoginControl {
         let Some(input) = input.as_mut() else {
             bail!(kiln_common::i18n::tr("로그인 대기가 종료되었습니다. 다시 시도하세요"));
         };
-        writeln!(input, "{code}").map_err(|_| anyhow::anyhow!(kiln_common::i18n::tr("로그인 코드를 전달하지 못했습니다. 다시 시도하세요")))?;
+        // Agy's raw terminal treats CR as Enter; the other CLIs read lines from pipes.
+        let enter = if self.terminal_input.load(Ordering::Relaxed) { b"\r" } else { b"\n" };
+        input.write_all(code.as_bytes()).and_then(|_| input.write_all(enter))
+            .map_err(|_| anyhow::anyhow!(kiln_common::i18n::tr("로그인 코드를 전달하지 못했습니다. 다시 시도하세요")))?;
         input.flush()?;
         Ok(())
     }
@@ -317,6 +321,7 @@ fn run_antigravity_login(source: &Env, binary: &Path, control: &Arc<LoginControl
     impl Drop for Group { fn drop(&mut self) { unsafe { libc::kill(-(self.0 as i32), libc::SIGKILL); } } }
     let _group = Group(child.0.lock().id());
     control.register_child(child.0.clone());
+    control.terminal_input.store(true, Ordering::Relaxed);
     *control.input.lock() = Some(Box::new(master.try_clone()?));
     let flags = unsafe { libc::fcntl(master.as_raw_fd(), libc::F_GETFL) };
     if flags < 0 || unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 { return Err(std::io::Error::last_os_error().into()); }
@@ -382,7 +387,17 @@ impl OutputScanner {
         let text = String::from_utf8_lossy(&self.tail);
         let mut status = control.status.lock();
         let old = status.clone();
-        if tool == Tool::Claude && text.contains("Paste code here if prompted") { status.accepts_code = true; }
+        let asks_for_code = match tool {
+            Tool::Claude => text.contains("Paste code here if prompted"),
+            Tool::Antigravity => {
+                let lower = text.to_ascii_lowercase();
+                lower.contains("paste the authorization code")
+                    || lower.contains("enter the authorization code:")
+                    || lower.contains("copy the code displayed in the browser and paste it below:")
+            }
+            Tool::Codex => false,
+        };
+        if asks_for_code { status.accepts_code = true; }
         let delimiter = |c: char| c.is_whitespace() || c.is_control() || matches!(c, '\"' | '\'' | '<' | '>');
         // URLs may be split between reads or wrapped in an OSC-8 hyperlink by
         // Claude. Find their actual start and require a terminating separator.
@@ -433,6 +448,101 @@ sleep 30
         assert!(control.input.lock().is_none());
         assert!(control.wait_for_cleanup(Instant::now()+Duration::from_secs(1)));
         assert!(!env.home.join(".gemini").exists());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_browser_code_reaches_raw_pty_and_completes_login() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        env.antigravity_identity = Arc::new(|_| Ok("work@example.test".into()));
+        let binary = root.path().join("fake-agy");
+        std::fs::write(&binary, r#"#!/usr/bin/python3
+import os, sys, tty, json, time
+from pathlib import Path
+print('Select login method:\n1. Google OAuth', flush=True)
+sys.stdin.readline()
+tty.setraw(0)
+print('https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&state=fixture&redirect_uri=fixture', flush=True)
+print('Or, paste the authorization code here and press Enter:', flush=True)
+code = b''
+while True:
+    ch = os.read(0, 1)
+    if ch == b'\r': break
+    code += ch
+assert code == b'4/fixture-code', 'incorrect terminal input'
+Path(os.environ['ANTIGRAVITY_APP_DATA_DIR'], 'antigravity-oauth-token').write_text(json.dumps({'token':{'access_token':'fixture','refresh_token':'fixture'}}))
+time.sleep(30)
+"#).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let control = Arc::new(LoginControl::default());
+        let send = control.clone();
+        let sender = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !send.status.lock().accepts_code {
+                assert!(Instant::now() < deadline, "Agy code input was never offered");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(send.send_code("bad\x1bcode").is_err());
+            send.send_code(" 4/fixture-code ").unwrap();
+        });
+        let result = run_login(&env, Tool::Antigravity, &binary, &control, Duration::from_secs(6), Arc::new(|| {}));
+        sender.join().unwrap();
+        let credentials = result.unwrap();
+        assert_eq!(credentials.email.as_deref(), Some("work@example.test"));
+        assert_eq!(antigravity::access_token(&credentials.secret).unwrap(), "fixture");
+        assert!(control.input.lock().is_none());
+        assert!(control.wait_for_cleanup(Instant::now()+Duration::from_secs(1)));
+    }
+
+    /// Observes only the installed CLI's sign-in prompt in a private keychain.
+    /// It never submits an authorization code or starts a model request.
+    #[test]
+    #[ignore = "requires KILN_AGY_KEYCHAIN_TEST=1 and KILN_AGY_PROMPT_BINARY; creates a private keychain"]
+    #[cfg(target_os = "macos")]
+    fn native_antigravity_offers_manual_browser_code_input() {
+        use std::os::unix::fs::PermissionsExt;
+        let real_cli = std::env::var("KILN_AGY_PROMPT_BINARY").expect("explicit agy executable required");
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        env.antigravity_keychains = true;
+        let wrapper = root.path().join("agy-prompt-probe");
+        std::fs::write(&wrapper, format!("#!/bin/sh\nexport SSH_CONNECTION='fixture fixture fixture fixture'\nexport BROWSER=/usr/bin/true\nexec '{}'\n", real_cli.replace('\'', "'\\''"))).unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let control = Arc::new(LoginControl::default());
+        let observer = control.clone();
+        let cancel = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if observer.status.lock().accepts_code { break; }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            observer.shutdown();
+        });
+        let result = run_login(&env, Tool::Antigravity, &wrapper, &control, Duration::from_secs(22), Arc::new(|| {}));
+        cancel.join().unwrap();
+        assert!(control.status.lock().browser_url.is_some(), "no official browser sign-in URL observed: {:?}", result.err());
+        assert!(control.status.lock().accepts_code, "installed CLI manual-code prompt was not recognized");
+        assert!(control.wait_for_cleanup(Instant::now()+Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn antigravity_code_prompt_handles_chunking_and_does_not_enable_other_providers() {
+        for prompt in ["Paste the authorization code below:", "Or, paste the authorization code here and press Enter:", "Enter the authorization code:", "After authenticating, copy the code displayed in the browser and paste it below:"] {
+            let job = LoginControl::default();
+            let mut scanner = OutputScanner::default();
+            for chunk in prompt.as_bytes().chunks(3) { scanner.feed(chunk, Tool::Antigravity, &job); }
+            assert!(job.status.lock().accepts_code, "{prompt}");
+            for tool in [Tool::Codex, Tool::Claude] {
+                let job = LoginControl::default();
+                OutputScanner::default().feed(prompt.as_bytes(), tool, &job);
+                assert!(!job.status.lock().accepts_code);
+            }
+        }
+        let job = LoginControl::default();
+        OutputScanner::default().feed(b"https://accounts.google.com/o/oauth2/auth?client_id=fixture&state=fixture&redirect_uri=fixture\n", Tool::Antigravity, &job);
+        assert!(!job.status.lock().accepts_code, "a URL alone is not an input prompt");
     }
 
     #[test]
