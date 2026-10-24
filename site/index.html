@@ -17,7 +17,7 @@
   --paper: #f4f2ee;
   --ink: #1c1b19;
   --dim: #66635d;
-  --faint: #8a877f;
+  --faint: #66635c;
   --line: #d3cfc7;
   --celadon: #3f6b5c;
   --sans: "Pretendard", "Hiragino Sans", "PingFang SC", "Apple SD Gothic Neo", system-ui, sans-serif;
@@ -132,7 +132,7 @@ html:is([lang="ko"], [lang="ja"], [lang="zh-CN"]) .f-copy h2 { letter-spacing: -
 .final .btn.ghost { background: transparent; color: #f6efe5; border-color: rgba(246, 239, 229, .35); }
 footer { padding-block: 56px 64px; color: var(--dim); font-size: 14px; }
 footer .wrap { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 28px; }
-footer h4 { margin: 0 0 10px; font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+footer h3 { margin: 0 0 10px; font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 footer a { text-decoration: none; }
 footer a:hover { color: var(--ink); }
@@ -200,8 +200,8 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
 
   <div class="plate hero-plate" data-glaze="tenmoku" data-seed="2.1" id="hero-plate">
     <div class="hero-win" id="hero-win">
-      <video id="hero-video" muted loop playsinline preload="metadata" poster="assets/hero-poster-en.webp" aria-label="Kiln running Claude Code, Codex and Antigravity side by side">
-        <source id="v-webm" src="assets/hero-loop-en.webm" type="video/webm"><source id="v-mp4" src="assets/hero-loop-en.mp4" type="video/mp4">
+      <video id="hero-video" muted loop playsinline preload="metadata" poster="/assets/hero-poster-en.webp" aria-label="Kiln running Claude Code, Codex and Antigravity side by side">
+        <source id="v-webm" src="/assets/hero-loop-en.webm" type="video/webm"><source id="v-mp4" src="/assets/hero-loop-en.mp4" type="video/mp4">
       </video>
       <button class="vbtn" type="button" id="vbtn" aria-label="Pause video"><svg aria-hidden="true"><use href="#i-pause"/></svg></button>
     </div>
@@ -270,7 +270,7 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
       <dt>macOS</dt><dd data-i18n="sp_mac_v">macOS 11+ on Apple Silicon</dd>
       <dt>Windows</dt><dd data-i18n="sp_win_v">Windows 11 (x64, ARM64) · not code-signed yet</dd>
       <dt data-i18n="sp_agents">Agents</dt><dd data-i18n="sp_agents_v">Bring your own Claude Code, Codex or Antigravity account</dd>
-      <dt data-i18n="sp_lang">Languages</dt><dd>English · 한국어 · 日本語 · 简体中文</dd>
+      <dt data-i18n="sp_lang">Languages</dt><dd class="locale-names">English · 한국어 · 日本語 · 简体中文</dd>
       <dt data-i18n="sp_license">License</dt><dd data-i18n="sp_license_v">MIT</dd>
     </dl>
   </section>
@@ -292,18 +292,18 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
 <footer>
   <div class="wrap">
     <div><a class="brand" href="#top"><img src="assets/kiln.svg" alt="">Kiln</a><p style="margin:0" data-i18n="ft_tag">The terminal IDE for agents.</p></div>
-    <div><h4 data-i18n="ft_start">Get started</h4><ul><li><a href="docs/install.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="ft_install">Install and update</span></a></li><li><a href="docs/index.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-i18n="ft_intro">Introduction</span></a></li><li><a href="docs/workspaces.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-i18n="ft_ws">Workspaces and tasks</span></a></li></ul></div>
-    <div><h4 data-i18n="ft_guides">Guides</h4><ul><li><a href="docs/agents.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-i18n="ft_agents">Agents</span></a></li><li><a href="docs/git.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10m12-8c0 6-12 3-12 8"/></svg><span>Git &amp; GitHub</span></a></li><li><a href="docs/databases.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></svg><span data-i18n="ft_db">Databases</span></a></li></ul></div>
-    <div><h4 data-i18n="ft_project">Project</h4><ul><li><a href="https://github.com/YangTaeyoung/kiln" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg><span>GitHub</span></a></li><li><a href="https://github.com/YangTaeyoung/kiln/releases" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 4v5h5M3 9a9 9 0 1 1 0 6m9-9v6l4 2"/></svg><span data-i18n="nav_changelog">Changelog</span></a></li><li><a href="https://github.com/YangTaeyoung/kiln/issues" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span data-i18n="ft_issue">Report an issue</span></a></li></ul></div>
+    <div><h3 data-i18n="ft_start">Get started</h3><ul><li><a href="docs/install.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="ft_install">Install and update</span></a></li><li><a href="docs/index.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-i18n="ft_intro">Introduction</span></a></li><li><a href="docs/workspaces.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-i18n="ft_ws">Workspaces and tasks</span></a></li></ul></div>
+    <div><h3 data-i18n="ft_guides">Guides</h3><ul><li><a href="docs/agents.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-i18n="ft_agents">Agents</span></a></li><li><a href="docs/git.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10m12-8c0 6-12 3-12 8"/></svg><span>Git &amp; GitHub</span></a></li><li><a href="docs/databases.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></svg><span data-i18n="ft_db">Databases</span></a></li></ul></div>
+    <div><h3 data-i18n="ft_project">Project</h3><ul><li><a href="https://github.com/YangTaeyoung/kiln" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg><span>GitHub</span></a></li><li><a href="https://github.com/YangTaeyoung/kiln/releases" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 4v5h5M3 9a9 9 0 1 1 0 6m9-9v6l4 2"/></svg><span data-i18n="nav_changelog">Changelog</span></a></li><li><a href="https://github.com/YangTaeyoung/kiln/issues" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span data-i18n="ft_issue">Report an issue</span></a></li></ul></div>
   </div>
 </footer>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
-<script src="assets/glaze.js"></script>
-<script src="assets/site-i18n.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script defer src="assets/glaze.js"></script>
+<script defer src="assets/site-i18n.js"></script>
 <script>
-(function () {
+document.addEventListener("DOMContentLoaded", function () {
   var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   var I = window.KILN_I18N || {}, EN = {};
   document.querySelectorAll("[data-i18n]").forEach(function (el) { EN[el.dataset.i18n] = el.textContent; });
@@ -319,7 +319,7 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
     img.style.width = (100 / c[2]) + "%";
     img.style.left = (-c[0] / c[2] * 100) + "%";
     img.style.top = (-c[1] / c[3] * 100) + "%";
-    img.src = "assets/shots/" + el.dataset.shot + "-" + lang + ".webp";
+    img.src = "/assets/shots/" + el.dataset.shot + "-" + lang + ".webp";
   }
 
   function apply(next) {
@@ -334,16 +334,16 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
     syncVideo();
     try { localStorage.setItem("kiln-site-lang", lang); } catch (e) {}
   }
-  document.getElementById("lang").addEventListener("change", function (e) { apply(e.target.value); });
+  document.getElementById("lang").addEventListener("change", function (e) { if (window.KILN_ROUTES) location.assign(window.KILN_ROUTES[e.target.value] + location.hash); else apply(e.target.value); });
 
-  var video = document.getElementById("hero-video"), vbtn = document.getElementById("vbtn"), userPaused = reduce, inView = false;
-  var videoLang = "en";
+  var video = document.getElementById("hero-video"), vbtn = document.getElementById("vbtn"), userPaused = reduce || matchMedia("(max-width: 640px)").matches, inView = false;
+  var videoLang = document.documentElement.lang;
   function setVideoLang() {
     if (videoLang === lang) return;
     videoLang = lang;
-    video.poster = "assets/hero-poster-" + lang + ".webp";
-    document.getElementById("v-webm").src = "assets/hero-loop-" + lang + ".webm";
-    document.getElementById("v-mp4").src = "assets/hero-loop-" + lang + ".mp4";
+    video.poster = "/assets/hero-poster-" + lang + ".webp";
+    document.getElementById("v-webm").src = "/assets/hero-loop-" + lang + ".webm";
+    document.getElementById("v-mp4").src = "/assets/hero-loop-" + lang + ".mp4";
     video.load(); updateVideo();
   }
   function syncVideo() { var playing = !video.paused; vbtn.setAttribute("aria-label", t(playing ? "pause" : "play")); vbtn.querySelector("use").setAttribute("href", playing ? "#i-pause" : "#i-play"); }
@@ -362,8 +362,8 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
 
   if (!reduce && window.gsap) {
     gsap.registerPlugin(ScrollTrigger);
-    gsap.from(".hero-copy, .hero-side", { y: 14, opacity: 0, duration: 1, stagger: .1, ease: "expo.out" });
-    gsap.from("#hero-win", { y: 36, scale: .975, opacity: 0, duration: 1.5, ease: "expo.out", delay: .15 });
+    gsap.from(".hero-copy, .hero-side", { y: 14, duration: 1, stagger: .1, ease: "expo.out" });
+    gsap.from("#hero-win", { y: 36, scale: .975, duration: 1.5, ease: "expo.out", delay: .15 });
     gsap.to("#hero-win", { y: -32, ease: "none", scrollTrigger: { trigger: "#hero-plate", start: "top 40%", end: "bottom top", scrub: true } });
     gsap.utils.toArray(".feature").forEach(function (el) {
       gsap.from(el.querySelector(".f-copy"), { y: 24, duration: 1, ease: "expo.out", scrollTrigger: { trigger: el, start: "top 80%", once: true } });
@@ -372,9 +372,9 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
   }
 
   var saved = null; try { saved = localStorage.getItem("kiln-site-lang"); } catch (e) {}
-  apply(saved || "en");
+  apply(window.KILN_ROUTES ? document.documentElement.lang : (saved || "en"));
   window.addEventListener("load", function () { if (window.KilnGlaze) KilnGlaze.refresh(); });
-})();
+});
 </script>
 </body>
 </html>

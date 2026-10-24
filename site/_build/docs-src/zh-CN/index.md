@@ -1,5 +1,5 @@
 ---
-title: 简介
+title: 开始使用 AI 智能体 IDE
 description: Kiln 是面向代理工作、以终端为核心的 IDE，终端、AI 代理、Git、文件和数据库都在同一个原生工作区里。
 ---
 

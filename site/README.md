@@ -1,8 +1,8 @@
 # Kiln product site
 
-Static site for Kiln: a landing page with a feature atlas and an 11-page user guide in
-English, Korean, Japanese and Simplified Chinese. No build step for the landing page; the
-guide is generated from Markdown.
+Static site for Kiln: a product landing page and an 11-page user guide in
+English, Korean, Japanese and Simplified Chinese. The publishing build renders each
+language to its own URL; the guide is generated from Markdown.
 
 | Path | Contents |
 | --- | --- |
@@ -38,7 +38,7 @@ Update the site in the same change as the feature.
 
 ## Publishing
 
-`.github/workflows/pages.yml` publishes `index.html`, `assets/` and `docs/` to GitHub Pages
+`.github/workflows/pages.yml` builds and publishes `public/` to GitHub Pages
 whenever `site/` changes on `main`. The workflow fails if `docs/` was not rebuilt after a
 source change or if a translation drifts from the English structure.
 
@@ -55,3 +55,29 @@ site/_build/capture/capture.sh
 
 Terminal content comes from scene files in `_build/capture/scenes/`; everything else on screen
 is the real app. Edit `compose.py` to change the window layouts.
+
+## Search / localized publishing
+
+The published artifact is now generated (the source landing remains editable HTML):
+
+```sh
+pip install -r site/_build/requirements.txt
+python3 site/_build/check-site.py
+python3 site/_build/build-docs.py
+python3 site/_build/build-site.py
+python3 site/_build/check-seo.py
+python3 -m http.server 8767 --directory public
+```
+
+`build-site.py` emits 48 indexable documents: English `/`, Korean `/ko/`, Japanese `/ja/`,
+Simplified Chinese `/zh-cn/`, each with 11 guide pages. The published HTML contains the
+selected language before JavaScript runs. Language controls navigate to reciprocal URLs;
+stored preferences do not override a URL's language. Existing `/docs/index.html` remains
+available with `/docs/` as canonical. `public/` is ignored and never edited by hand.
+
+`_build/seo-content.json` owns localized search titles/descriptions and the workflow/FAQ
+section. Keep its headline/subtitle aligned with `assets/site-i18n.js`. Guide frontmatter
+owns guide search titles/descriptions. Generated output includes canonical, hreflang,
+Open Graph/Twitter, JSON-LD, robots.txt, sitemap.xml and a noindex 404 page.
+CI checks all canonical URLs, reciprocal alternates, internal links/fragments, assets,
+unique headings/IDs/titles and JSON-LD syntax before deployment. See `_build/SEO-AUDIT.md`.

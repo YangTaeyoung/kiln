@@ -1,5 +1,5 @@
 ---
-title: 에이전트
+title: Claude Code·Codex·Antigravity 함께 실행하기
 description: 워크스페이스에서 Claude Code, Codex, Antigravity 작업을 시작하고 상태를 확인하며, 서버 과부하로 중단된 Codex 턴을 Kiln이 다시 시도하게 합니다.
 ---
 

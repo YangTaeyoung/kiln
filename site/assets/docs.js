@@ -57,14 +57,14 @@
     var ui = UI[lang] || UI.en || {};
     document.querySelectorAll("[data-ui]").forEach(function (el) { if (ui[el.dataset.ui]) el.textContent = ui[el.dataset.ui]; });
     document.getElementById("toc-h").textContent = ui.toc || "On this page";
-    if (ui.title) document.title = ui.title + " · Kiln";
+    if (ui.title && !window.KILN_ROUTES) document.title = ui.title + " · Kiln";
     select.value = lang;
     buildToc();
     if (window.KilnGlaze) requestAnimationFrame(function () { KilnGlaze.refresh(); });
     try { localStorage.setItem("kiln-site-lang", lang); } catch (e) {}
   }
 
-  select.addEventListener("change", function () { apply(select.value); });
+  select.addEventListener("change", function () { if (window.KILN_ROUTES) location.assign(window.KILN_ROUTES[select.value] + location.hash); else apply(select.value); });
 
   var side = document.getElementById("side"), menu = document.getElementById("menu-btn");
   menu.addEventListener("click", function () {
@@ -77,5 +77,5 @@
   addCopy();
   var saved = null;
   try { saved = localStorage.getItem("kiln-site-lang"); } catch (e) {}
-  apply(saved || "en");
+  apply(window.KILN_ROUTES ? document.documentElement.lang : (saved || "en"));
 })();

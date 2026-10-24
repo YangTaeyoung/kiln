@@ -1,5 +1,5 @@
 ---
-title: エージェント
+title: Claude Code・Codex・Antigravity の実行
 description: ワークスペースから Claude Code、Codex、Antigravity の作業を開始して状態を確認する方法と、サーバーの混雑時に Kiln が Codex のターンを再試行する仕組みを説明します。
 ---
 

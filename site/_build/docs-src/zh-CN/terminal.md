@@ -1,5 +1,5 @@
 ---
-title: 终端
+title: AI 终端：会话、Shell 与恢复
 description: Kiln 终端的 Shell 集成、活动上报、命令历史、补全、连接恢复和后台会话。
 ---
 

@@ -1,5 +1,5 @@
 ---
-title: Terminal
+title: AI terminal: sessions, shells and recovery
 description: Shell integration, activity reporting, command history, completion, connection recovery and background sessions in Kiln's terminal.
 ---
 

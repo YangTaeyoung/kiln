@@ -4,7 +4,7 @@
   --paper: #f4f2ee;
   --ink: #1c1b19;
   --dim: #5f5c56;
-  --faint: #8a877f;
+  --faint: #66635c;
   --line: #d3cfc7;
   --celadon: #3f6b5c;
   --code-bg: #f1efea;
@@ -113,3 +113,5 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
   .pager { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .side { transition: none; } }
+
+.doc :not(pre) > code { overflow-wrap: anywhere; }
