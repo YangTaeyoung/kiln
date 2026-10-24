@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Databases · Kiln Docs</title>
+<meta name="description" content="Connect to PostgreSQL, MySQL, MariaDB and SQLite, run SQL with completion, edit SELECT results and change table structure with reviewed SQL.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html" class="on" aria-current="page">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html" class="on" aria-current="page">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html" class="on" aria-current="page">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html" class="on" aria-current="page">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="20.7"></div><p class="crumb">Documentation<b>Tools</b></p></div><h1>Databases</h1><p class="desc">Connect to PostgreSQL, MySQL, MariaDB and SQLite, run SQL with completion, edit SELECT results and change table structure with reviewed SQL.</p><p>Kiln includes database tools next to your terminals: a connection explorer, a SQL console with completion, editable result grids and table structure forms. Nothing is written to the database until you apply it.</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="15.3"><img src="../assets/shots/db-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<h2 id="connect">Connect</h2>
+<p>Select <strong>Database</strong> (the database icon) in the workspace inspector, or choose databases from the titlebar <strong>Tools</strong> menu. Add a connection, then open a table or a SQL console.</p>
+<p>Kiln supports PostgreSQL, MySQL, MariaDB and SQLite. Each one uses its own identifier quoting and metadata queries. Connection secrets are kept in Kiln's credential store.</p>
+<p>Opening database tools does not change the workspace root or move an agent into another repository.</p>
+<h2 id="run-sql">Run SQL</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Action</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Run the statement at the caret</td>
+<td><strong>Run</strong> or <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>Run only the selected text</td>
+<td>Select it, then <strong>Run</strong> or <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>Run every statement in the editor</td>
+<td><strong>Run all</strong> or <code>⌘⌥Enter</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>A semicolon belongs to the statement before it, and semicolons inside strings, comments or quoted identifiers do not split a statement. A blank or comment-only selection runs nothing.</p>
+<h2 id="sql-completion">SQL completion</h2>
+<p>Suggestions appear as you type an identifier, or an alias followed by a dot. You can also open them with <code>⌃Space</code>, <code>⌥Esc</code> or the console's code icon. <code>⌘Space</code> works when macOS passes it to Kiln. Kiln does not override Spotlight.</p>
+<blockquote class="callout"><p><strong>Tip</strong> macOS may use <code>⌃Space</code> to switch input sources. The code icon and <code>⌥Esc</code> work without changing your Mac's shortcuts.</p>
+</blockquote>
+<p>What you get depends on where the caret is:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Context</th>
+<th>Suggestions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>After <code>FROM</code> or <code>JOIN</code></td>
+<td>Tables and schemas. Table names are inserted with their schema.</td>
+</tr>
+<tr>
+<td><code>SELECT</code>, <code>WHERE</code>, <code>JOIN ... ON</code>, <code>UPDATE ... SET</code>, <code>INSERT</code> column list</td>
+<td>Columns of the referenced tables, including aliases defined after the caret</td>
+</tr>
+</tbody>
+</table></div>
+<p>The connection's dialect also supplies common SQL keywords and function names. Inserting a function places the caret inside its parentheses.</p>
+<p>Browse with the arrow keys or the mouse wheel, insert with <code>Tab</code> or <code>Enter</code>, and dismiss with <code>Esc</code>. Hover a candidate to see its full name and metadata. Completion never runs SQL.</p>
+<h3 id="keep-metadata-current">Keep metadata current</h3>
+<ul>
+<li>Schema changes you run in this console refresh completion automatically.</li>
+<li>After changes made elsewhere, use the refresh icon.</li>
+<li>If loading metadata fails, your SQL stays as it is. Retry with the refresh icon.</li>
+</ul>
+<p>Metadata loads in the background and never reopens a connection you closed.</p>
+<h3 id="what-completion-does-not-know">What completion does not know</h3>
+<p>Completion reads the database catalog, separately from your console session, so it does not see <code>TEMP</code> objects, SQLite <code>ATTACH</code>, MySQL <code>USE</code> or PostgreSQL <code>search_path</code> changes. Use explicit schema names for persistent tables. Columns of CTEs and derived tables are not inferred, and Kiln hides table suggestions that would claim those columns wrongly. Keyword and function lists cover common syntax, not every server extension.</p>
+<p>SQL completion never sends query text or table rows to an external AI service.</p>
+<h2 id="edit-query-results">Edit query results</h2>
+<p>For a supported single-table <code>SELECT</code>, double-click a cell, or press <code>Enter</code> or <code>F2</code>, to change it. Changes stay local until you choose <strong>Apply changes</strong>. <strong>Undo</strong> discards them.</p>
+<p>Use the value sidebar for longer values. Stage its text with <strong>Apply to cell</strong>, or reset it, before you select another cell or run another query. Copying selected cells includes staged values.</p>
+<h3 id="which-results-can-be-edited">Which results can be edited</h3>
+<p>The result must come from one permanent table, using its columns directly. Aliases and filters are fine. Include every column of the primary key, or of a non-null unique key. The key does not need to be called <code>id</code>.</p>
+<p>These stay read-only, and Kiln explains why:</p>
+<ul>
+<li>Joins, aggregates and computed columns</li>
+<li>The same source column selected twice</li>
+<li>Views and temporary tables</li>
+<li>Results without the complete row key</li>
+<li>Generated, binary and unsupported column types</li>
+</ul>
+<p>Result editing works with PostgreSQL, SQLite, and MySQL or MariaDB with transactional InnoDB tables. It does not insert or delete rows. Use SQL for those.</p>
+<h3 id="how-changes-are-applied">How changes are applied</h3>
+<p>Kiln writes your changes in a separate transaction, using the row key and the original values you saw. Each changed row must match exactly one row in the database. If a row was deleted, changed by someone else or is ambiguous, the whole transaction fails and your local changes stay for review.</p>
+<p>Before writing, Kiln locks the table and rechecks its identity and its column and key definitions. If the structure changed since your query, run the query again. Applying changes does not commit an explicit <code>BEGIN</code> in your console.</p>
+<p>If the write succeeds but the refresh fails, Kiln tells you the write was saved and makes the stale result read-only. It never resubmits a change automatically.</p>
+<h2 id="tables-columns-and-indexes">Tables, columns and indexes</h2>
+<p>Right-click a table in the explorer for <strong>Open table</strong>, <strong>Edit table…</strong> and <strong>Drop table…</strong>. <strong>Edit table…</strong> opens one dialog with <strong>Columns</strong>, <strong>Indexes</strong> and <strong>DDL</strong>, plus table rename. Views open in the same structure browser, read-only.</p>
+<p>Open a table to switch between <strong>Data</strong>, <strong>Columns</strong>, <strong>Indexes</strong> and <strong>DDL</strong> in its tab. DDL can be refreshed and copied.</p>
+<h3 id="columns">Columns</h3>
+<p>Each column row offers edit, rename and drop. Use <strong>Add column</strong> to set a name, SQL type, nullability and an optional default. String defaults need SQL quotes, for example <code>'guest'</code>, while <code>CURRENT_TIMESTAMP</code> is an expression. Generated or identity columns and primary-key removal need manual DDL.</p>
+<h3 id="indexes">Indexes</h3>
+<p><strong>Indexes</strong> lists key columns in order, uniqueness, method and the full definition. To add an index, select columns, set their order and direction, and optionally make it unique. Expression, partial and engine-specific indexes can be created in the SQL console. Primary-key and constraint-owned indexes cannot be dropped from this form.</p>
+<h3 id="review-before-applying">Review before applying</h3>
+<p>Every structure change follows <strong>Preview SQL → review → Apply to database</strong>.</p>
+<ul>
+<li>Opening a form or previewing never runs DDL.</li>
+<li>Editing a field clears the preview and its approval.</li>
+<li>Deleting a table also asks you to type its exact name.</li>
+<li>Pending row edits in an open table block structure changes.</li>
+<li>If an operation fails, your input is kept so you can correct it.</li>
+</ul>
+<p>PostgreSQL applies changes in a transaction. MySQL and MariaDB run a single DDL statement, without multi-statement rollback. For SQLite, attribute edits rebuild the table in a transaction, keeping values, indexes, triggers and dependent views, and roll back on failure. Dependent objects can block a column or table drop. Kiln does not silently delete them.</p>
+<h2 id="closing-and-recovery">Closing and recovery</h2>
+<p>Kiln will not close a tab, workspace or the app while a database write is still running. The block clears when the write finishes, even if the tab is hidden.</p>
+<p>When you keep work on exit, staged values and unfinished text are saved locally. On restart they appear in a <strong>review-only</strong> section with the original query and values, which you can copy, export or delete. Nothing is rerun or resubmitted. Run the query again and compare before you re-enter a change.</p>
+<blockquote class="callout"><p><strong>Warning</strong> Local recovery files can contain database values. After an abrupt exit during a write, check whether the database already committed it before applying again.</p>
+</blockquote>
+<h2 id="windows">Windows</h2>
+<p>Database tools work the same on Windows. Closing the window waits for running database writes, as on macOS.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="editor.html"><small>Previous</small>Editor and search</a><a class="pn next" href="remote.html"><small>Next</small>Remote files and SSH</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="20.7"></div><p class="crumb">문서<b>도구</b></p></div><h1>데이터베이스</h1><p class="desc">PostgreSQL, MySQL, MariaDB, SQLite에 연결하고, 자동 완성으로 SQL을 작성해 실행하고, SELECT 결과를 편집하고, 검토한 SQL로 테이블 구조를 바꿉니다.</p><p>Kiln은 터미널 옆에서 쓸 수 있는 데이터베이스 도구를 제공합니다. 연결 탐색기, 자동 완성을 지원하는 SQL 콘솔, 편집할 수 있는 결과 그리드, 테이블 구조 양식이 있습니다. 직접 적용하기 전까지는 데이터베이스에 아무것도 쓰지 않습니다.</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="15.3"><img src="../assets/shots/db-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<h2 id="connect">연결하기</h2>
+<p>워크스페이스 인스펙터에서 <strong>데이터베이스</strong>(데이터베이스 아이콘)를 선택하거나, 제목 표시줄의 <strong>도구</strong> 메뉴에서 데이터베이스를 고릅니다. 연결을 추가한 뒤 테이블이나 SQL 콘솔을 엽니다.</p>
+<p>Kiln은 PostgreSQL, MySQL, MariaDB, SQLite를 지원하며, 데이터베이스마다 고유한 식별자 인용 방식과 메타데이터 쿼리를 사용합니다. 연결 비밀 정보는 Kiln의 자격 증명 저장소에 보관됩니다.</p>
+<p>데이터베이스 도구를 열어도 워크스페이스 루트는 바뀌지 않고, 에이전트가 다른 저장소로 옮겨 가지도 않습니다.</p>
+<h2 id="run-sql">SQL 실행하기</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>동작</th>
+<th>방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>커서가 있는 문장 실행</td>
+<td><strong>실행</strong> 또는 <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>선택한 텍스트만 실행</td>
+<td>텍스트를 선택하고 <strong>실행</strong> 또는 <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>편집기의 모든 문장 실행</td>
+<td><strong>모두 실행</strong> 또는 <code>⌘⌥Enter</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>세미콜론은 바로 앞 문장에 속합니다. 문자열, 주석, 인용된 식별자 안에 있는 세미콜론으로는 문장이 나뉘지 않습니다. 비어 있거나 주석만 있는 영역을 선택하면 아무것도 실행되지 않습니다.</p>
+<h2 id="sql-completion">SQL 자동 완성</h2>
+<p>식별자를 입력하거나 별칭 뒤에 점을 찍으면 제안이 나타납니다. <code>⌃Space</code>, <code>⌥Esc</code>, 콘솔의 코드 아이콘으로 직접 열 수도 있습니다. <code>⌘Space</code>는 macOS가 이 키를 Kiln에 넘겨줄 때 동작하며, Kiln이 Spotlight 단축키를 가로채지는 않습니다.</p>
+<blockquote class="callout"><p><strong>팁</strong> macOS에서는 <code>⌃Space</code>가 입력 소스 전환에 쓰일 수 있습니다. 코드 아이콘과 <code>⌥Esc</code>는 Mac의 단축키 설정을 바꾸지 않아도 동작합니다.</p>
+</blockquote>
+<p>커서 위치에 따라 제안되는 항목이 달라집니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>위치</th>
+<th>제안</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FROM</code> 또는 <code>JOIN</code> 뒤</td>
+<td>테이블과 스키마. 테이블 이름은 스키마와 함께 삽입됩니다.</td>
+</tr>
+<tr>
+<td><code>SELECT</code>, <code>WHERE</code>, <code>JOIN ... ON</code>, <code>UPDATE ... SET</code>, <code>INSERT</code> 컬럼 목록</td>
+<td>참조하는 테이블의 컬럼. 커서 뒤에 정의된 별칭도 반영합니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>연결된 데이터베이스의 방언에 맞춰 자주 쓰는 SQL 키워드와 함수 이름도 제안합니다. 함수를 삽입하면 커서가 괄호 안에 놓입니다.</p>
+<p>화살표 키나 마우스 휠로 이동하고, <code>Tab</code>이나 <code>Enter</code>로 삽입하고, <code>Esc</code>로 닫습니다. 후보에 마우스를 올리면 전체 이름과 메타데이터를 볼 수 있습니다. 자동 완성이 SQL을 실행하는 일은 없습니다.</p>
+<h3 id="keep-metadata-current">메타데이터 최신 상태로 유지하기</h3>
+<ul>
+<li>이 콘솔에서 실행한 스키마 변경은 자동 완성에 바로 반영됩니다.</li>
+<li>다른 곳에서 스키마를 바꿨다면 새로 고침 아이콘을 누르세요.</li>
+<li>메타데이터를 불러오지 못해도 작성한 SQL은 그대로 남습니다. 새로 고침 아이콘으로 다시 시도하세요.</li>
+</ul>
+<p>메타데이터는 백그라운드에서 불러오며, 닫은 연결을 다시 열지 않습니다.</p>
+<h3 id="what-completion-does-not-know">자동 완성이 알 수 없는 것</h3>
+<p>자동 완성은 콘솔 세션과 별도로 데이터베이스 카탈로그를 읽습니다. 그래서 <code>TEMP</code> 객체, SQLite <code>ATTACH</code>, MySQL <code>USE</code>, PostgreSQL <code>search_path</code> 변경은 반영되지 않습니다. 영구 테이블에는 스키마 이름을 명시하세요. CTE와 파생 테이블의 컬럼은 추론하지 않으며, 그런 컬럼을 잘못 안내할 수 있는 테이블 제안은 숨깁니다. 키워드와 함수 목록은 자주 쓰는 문법 위주이며, 서버 확장을 모두 다루지는 않습니다.</p>
+<p>SQL 자동 완성은 쿼리 텍스트나 테이블 행을 외부 AI 서비스로 보내지 않습니다.</p>
+<h2 id="edit-query-results">쿼리 결과 편집하기</h2>
+<p>지원되는 단일 테이블 <code>SELECT</code> 결과에서는 셀을 더블클릭하거나 <code>Enter</code> 또는 <code>F2</code>를 눌러 값을 바꿀 수 있습니다. 변경 사항은 <strong>변경 반영</strong>을 선택하기 전까지 로컬에만 있습니다. <strong>되돌리기</strong>를 선택하면 변경 사항을 버립니다.</p>
+<p>긴 값은 값 사이드바에서 편집하세요. 다른 셀을 선택하거나 다른 쿼리를 실행하기 전에 <strong>셀에 반영</strong>으로 텍스트를 반영해 두거나, 초기화하세요. 선택한 셀을 복사하면 반영해 둔 값도 함께 복사됩니다.</p>
+<h3 id="which-results-can-be-edited">편집할 수 있는 결과</h3>
+<p>결과는 영구 테이블 하나에서 컬럼을 그대로 가져온 것이어야 합니다. 별칭과 필터는 써도 됩니다. 기본 키의 모든 컬럼, 또는 NULL이 아닌 고유 키의 모든 컬럼을 포함하세요. 키 이름이 꼭 <code>id</code>일 필요는 없습니다.</p>
+<p>다음은 읽기 전용으로 남으며, Kiln이 그 이유를 알려 줍니다.</p>
+<ul>
+<li>조인, 집계, 계산된 컬럼</li>
+<li>같은 원본 컬럼을 두 번 선택한 경우</li>
+<li>뷰와 임시 테이블</li>
+<li>행 키가 모두 포함되지 않은 결과</li>
+<li>생성된 컬럼, 바이너리 컬럼, 지원하지 않는 컬럼 타입</li>
+</ul>
+<p>결과 편집은 PostgreSQL, SQLite, 그리고 트랜잭션을 지원하는 InnoDB 테이블을 쓰는 MySQL·MariaDB에서 동작합니다. 행을 추가하거나 삭제하는 기능은 없으니, 이런 작업에는 SQL을 쓰세요.</p>
+<h3 id="how-changes-are-applied">변경을 적용하는 방식</h3>
+<p>Kiln은 행 키와 내가 본 원래 값을 기준으로, 별도의 트랜잭션에서 변경을 씁니다. 변경한 행은 각각 데이터베이스의 행 하나와 정확히 일치해야 합니다. 행이 삭제되었거나, 다른 사람이 바꿨거나, 어느 행인지 모호하면 트랜잭션 전체가 실패하고, 로컬 변경은 검토할 수 있도록 남습니다.</p>
+<p>쓰기 전에 Kiln은 테이블을 잠그고, 테이블이 같은 테이블인지와 컬럼·키 정의를 다시 확인합니다. 쿼리를 실행한 뒤 구조가 바뀌었다면 쿼리를 다시 실행하세요. 변경을 적용해도 콘솔에서 직접 연 <code>BEGIN</code> 트랜잭션은 커밋되지 않습니다.</p>
+<p>쓰기는 성공했지만 결과를 새로 고치지 못하면, Kiln은 쓰기가 저장되었다고 알리고 오래된 결과를 읽기 전용으로 바꿉니다. 변경을 자동으로 다시 제출하는 일은 없습니다.</p>
+<h2 id="tables-columns-and-indexes">테이블, 컬럼, 인덱스</h2>
+<p>탐색기에서 테이블을 우클릭하면 <strong>테이블 열기</strong>, <strong>테이블 수정…</strong>, <strong>테이블 삭제…</strong>가 나타납니다. <strong>테이블 수정…</strong>을 선택하면 <strong>컬럼</strong>, <strong>인덱스</strong>, <strong>DDL</strong>과 테이블 이름 변경을 한곳에 모은 대화상자가 열립니다. 뷰도 같은 구조 브라우저에서 읽기 전용으로 열립니다.</p>
+<p>테이블을 열면 탭 안에서 <strong>데이터</strong>, <strong>컬럼</strong>, <strong>인덱스</strong>, <strong>DDL</strong>을 오갈 수 있습니다. DDL은 새로 고치거나 복사할 수 있습니다.</p>
+<h3 id="columns">컬럼</h3>
+<p>각 컬럼 행에서 편집, 이름 변경, 삭제를 할 수 있습니다. <strong>컬럼 추가</strong>에서는 이름, SQL 타입, NULL 허용 여부, 기본값(선택)을 정합니다. 문자열 기본값에는 <code>'guest'</code>처럼 SQL 따옴표를 붙여야 하고, <code>CURRENT_TIMESTAMP</code>는 표현식으로 취급합니다. 생성 컬럼, identity 컬럼, 기본 키 제거는 DDL을 직접 작성해야 합니다.</p>
+<h3 id="indexes">인덱스</h3>
+<p><strong>인덱스</strong>에는 키 컬럼이 순서대로 표시되고, 고유 여부, 방식, 전체 정의도 함께 나옵니다. 인덱스를 추가하려면 컬럼을 고르고 순서와 방향을 정한 뒤, 필요하면 고유 인덱스로 지정합니다. 표현식 인덱스, 부분 인덱스, 엔진 전용 인덱스는 SQL 콘솔에서 만들 수 있습니다. 기본 키 인덱스와 제약 조건에 딸린 인덱스는 이 양식에서 삭제할 수 없습니다.</p>
+<h3 id="review-before-applying">적용 전에 검토하기</h3>
+<p>모든 구조 변경은 <strong>SQL 미리보기 → 검토 → DB에 적용</strong> 순서로 진행됩니다.</p>
+<ul>
+<li>양식을 열거나 미리 보기만 해서는 DDL이 실행되지 않습니다.</li>
+<li>필드를 고치면 미리보기와 승인이 초기화됩니다.</li>
+<li>테이블을 삭제할 때는 테이블 이름을 정확히 입력해야 합니다.</li>
+<li>열린 테이블에 아직 적용하지 않은 행 편집이 있으면 구조를 바꿀 수 없습니다.</li>
+<li>작업이 실패해도 입력한 내용은 남아 있으므로 고칠 수 있습니다.</li>
+</ul>
+<p>PostgreSQL은 트랜잭션 안에서 변경을 적용합니다. MySQL과 MariaDB는 DDL 문 하나를 실행하며, 여러 문에 걸친 롤백은 지원하지 않습니다. SQLite에서 속성을 편집하면 트랜잭션 안에서 테이블을 다시 만들면서 값, 인덱스, 트리거, 의존하는 뷰를 유지하고, 실패하면 롤백합니다. 의존하는 객체가 있으면 컬럼이나 테이블을 삭제하지 못할 수 있습니다. Kiln이 그런 객체를 몰래 삭제하지는 않습니다.</p>
+<h2 id="closing-and-recovery">닫기와 복구</h2>
+<p>데이터베이스 쓰기가 진행 중이면 Kiln은 탭, 워크스페이스, 앱을 닫지 않습니다. 쓰기가 끝나면 탭이 숨겨져 있더라도 이 제한이 풀립니다.</p>
+<p>종료할 때 작업을 보관하기로 하면, 반영해 둔 값과 작성 중이던 텍스트가 로컬에 저장됩니다. 다시 시작하면 원래 쿼리, 값과 함께 <strong>검토 전용</strong> 섹션에 나타나며, 복사하거나 내보내거나 삭제할 수 있습니다. 다시 실행되거나 다시 제출되는 것은 없습니다. 변경을 다시 입력하기 전에 쿼리를 다시 실행해 비교해 보세요.</p>
+<blockquote class="callout"><p><strong>주의</strong> 로컬 복구 파일에는 데이터베이스 값이 들어 있을 수 있습니다. 쓰기 도중 앱이 갑자기 종료되었다면, 다시 적용하기 전에 데이터베이스에 이미 커밋되었는지 확인하세요.</p>
+</blockquote>
+<h2 id="windows">Windows</h2>
+<p>데이터베이스 도구는 Windows에서도 똑같이 동작합니다. macOS에서처럼 창을 닫으면 진행 중인 데이터베이스 쓰기가 끝날 때까지 기다립니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="editor.html"><small>이전</small>편집기와 검색</a><a class="pn next" href="remote.html"><small>다음</small>원격 파일과 SSH</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="20.7"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>データベース</h1><p class="desc">PostgreSQL、MySQL、MariaDB、SQLite への接続、補完を使った SQL の実行、SELECT の結果の編集、SQL を確認してからのテーブル構造の変更について説明します。</p><p>Kiln では、ターミナルの横でデータベースツールを使えます。接続エクスプローラー、補完付きの SQL コンソール、編集できる結果グリッド、テーブル構造を編集するフォームがそろっています。適用するまで、データベースには何も書き込まれません。</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="15.3"><img src="../assets/shots/db-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<h2 id="connect">接続する</h2>
+<p>ワークスペースインスペクターで<strong>データベース</strong>（データベースアイコン）を選ぶか、タイトルバーの<strong>ツール</strong>メニューからデータベースを選びます。接続を追加してから、テーブルまたは SQL コンソールを開きます。</p>
+<p>Kiln は PostgreSQL、MySQL、MariaDB、SQLite に対応しています。識別子のクォートとメタデータの取得クエリは、データベースごとに専用のものを使います。接続のシークレットは Kiln の認証情報ストアに保存されます。</p>
+<p>データベースツールを開いても、ワークスペースのルートは変わらず、エージェントが別のリポジトリに移動することもありません。</p>
+<h2 id="run-sql">SQL を実行する</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>カーソル位置の文を実行する</td>
+<td><strong>実行</strong>または <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>選択したテキストだけを実行する</td>
+<td>選択してから<strong>実行</strong>または <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>エディター内のすべての文を実行する</td>
+<td><strong>すべて実行</strong>または <code>⌘⌥Enter</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>セミコロンは直前の文の一部として扱われます。文字列、コメント、クォートされた識別子の中にあるセミコロンでは、文は区切られません。空白だけ、またはコメントだけの選択範囲では何も実行されません。</p>
+<h2 id="sql-completion">SQL の補完</h2>
+<p>識別子や、エイリアスに続けてドットを入力すると候補が表示されます。<code>⌃Space</code>、<code>⌥Esc</code>、またはコンソールのコードアイコンで開くこともできます。<code>⌘Space</code> は、macOS がこのキーを Kiln に渡す場合に使えます。Spotlight の動作を Kiln が上書きすることはありません。</p>
+<blockquote class="callout"><p><strong>ヒント</strong> macOS では <code>⌃Space</code> が入力ソースの切り替えに使われていることがあります。コードアイコンと <code>⌥Esc</code> なら、Mac のショートカットを変えなくても使えます。</p>
+</blockquote>
+<p>表示される候補は、カーソルの位置によって変わります。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>コンテキスト</th>
+<th>候補</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FROM</code> または <code>JOIN</code> の後</td>
+<td>テーブルとスキーマ。テーブル名はスキーマ付きで挿入されます。</td>
+</tr>
+<tr>
+<td><code>SELECT</code>、<code>WHERE</code>、<code>JOIN ... ON</code>、<code>UPDATE ... SET</code>、<code>INSERT</code> のカラムリスト</td>
+<td>参照しているテーブルのカラム。カーソルより後で定義されたエイリアスも含みます</td>
+</tr>
+</tbody>
+</table></div>
+<p>接続先の SQL 方言に応じて、よく使う SQL のキーワードと関数名も候補になります。関数を挿入すると、カーソルは括弧の中に置かれます。</p>
+<p>矢印キーまたはマウスホイールで選び、<code>Tab</code> または <code>Enter</code> で挿入し、<code>Esc</code> で閉じます。候補にポインタを合わせると、完全な名前とメタデータが表示されます。補完で SQL が実行されることはありません。</p>
+<h3 id="keep-metadata-current">メタデータを最新に保つ</h3>
+<ul>
+<li>このコンソールで実行したスキーマ変更は、補完に自動で反映されます。</li>
+<li>ほかの場所で変更した後は、更新アイコンを使います。</li>
+<li>メタデータの読み込みに失敗しても、SQL はそのまま残ります。更新アイコンで再試行してください。</li>
+</ul>
+<p>メタデータはバックグラウンドで読み込まれます。そのために、閉じた接続が開き直されることはありません。</p>
+<h3 id="what-completion-does-not-know">補完が認識しないもの</h3>
+<p>補完はコンソールのセッションとは別にデータベースのカタログを読むため、<code>TEMP</code> オブジェクト、SQLite の <code>ATTACH</code>、MySQL の <code>USE</code>、PostgreSQL の <code>search_path</code> の変更は反映されません。永続的なテーブルにはスキーマ名を明示してください。CTE と派生テーブルのカラムは推論されず、それらのカラムを誤って示してしまうテーブルの候補は表示されません。キーワードと関数のリストは一般的な構文を対象としており、サーバー固有の拡張をすべて網羅するものではありません。</p>
+<p>SQL の補完が、クエリのテキストやテーブルの行を外部の AI サービスに送ることはありません。</p>
+<h2 id="edit-query-results">クエリ結果を編集する</h2>
+<p>対応している単一テーブルの <code>SELECT</code> では、セルをダブルクリックするか、<code>Enter</code> または <code>F2</code> を押して値を変更できます。変更は<strong>変更を反映</strong>を選ぶまでローカルに留まります。<strong>元に戻す</strong>で変更を破棄します。</p>
+<p>長い値には値のサイドバーを使います。別のセルを選んだり別のクエリを実行したりする前に、<strong>セルに反映</strong>でテキストを反映するか、リセットしてください。選択したセルをコピーすると、反映待ちの値も含まれます。</p>
+<h3 id="which-results-can-be-edited">編集できる結果</h3>
+<p>編集できるのは、1 つの永続テーブルからカラムを直接取得した結果です。エイリアスやフィルターは使ってもかまいません。主キー、または NULL を許可しない一意キーのカラムをすべて含めてください。キーの名前が <code>id</code> である必要はありません。</p>
+<p>次のような結果は読み取り専用になり、Kiln がその理由を表示します。</p>
+<ul>
+<li>結合、集計、計算カラム</li>
+<li>同じ元のカラムを 2 回選択している</li>
+<li>ビューと一時テーブル</li>
+<li>行のキーが揃っていない結果</li>
+<li>生成カラム、バイナリ、未対応のカラム型</li>
+</ul>
+<p>結果の編集は、PostgreSQL、SQLite、およびトランザクション対応の InnoDB テーブルを使う MySQL または MariaDB で動作します。行の挿入と削除には対応していないので、SQL を使ってください。</p>
+<h3 id="how-changes-are-applied">変更の適用方法</h3>
+<p>Kiln は、行のキーと、画面に表示されていた元の値を使って、独立したトランザクションで変更を書き込みます。変更した各行は、データベース内のちょうど 1 行に一致する必要があります。行が削除されていたり、ほかの人に変更されていたり、一意に特定できなかったりすると、トランザクション全体が失敗し、ローカルの変更は確認用に残ります。</p>
+<p>書き込む前に、Kiln はテーブルをロックし、テーブルが同じものであることと、カラムとキーの定義を再確認します。クエリの後に構造が変わっていた場合は、クエリをもう一度実行してください。変更の適用によって、コンソールで明示的に実行した <code>BEGIN</code> がコミットされることはありません。</p>
+<p>書き込みは成功したものの再読み込みに失敗した場合、Kiln は書き込みが保存されたことを伝え、古くなった結果を読み取り専用にします。変更を自動で再送信することはありません。</p>
+<h2 id="tables-columns-and-indexes">テーブル、カラム、インデックス</h2>
+<p>エクスプローラーでテーブルを右クリックすると、<strong>テーブルを開く</strong>、<strong>テーブルを編集…</strong>、<strong>テーブルを削除…</strong> が表示されます。<strong>テーブルを編集…</strong> を選ぶと、<strong>カラム</strong>、<strong>インデックス</strong>、<strong>DDL</strong> とテーブル名の変更をまとめた 1 つのダイアログが開きます。ビューは同じ構造ブラウザーで読み取り専用として開きます。</p>
+<p>テーブルを開くと、そのタブで<strong>データ</strong>、<strong>カラム</strong>、<strong>インデックス</strong>、<strong>DDL</strong> を切り替えられます。DDL は更新とコピーができます。</p>
+<h3 id="columns">カラム</h3>
+<p>各カラムの行には、編集、名前の変更、削除の操作があります。<strong>カラムを追加</strong>では、名前、SQL の型、NULL の可否、任意の既定値を設定します。文字列の既定値には <code>'guest'</code> のように SQL のクォートが必要で、<code>CURRENT_TIMESTAMP</code> は式として扱われます。生成カラムや IDENTITY カラム、主キーの削除には、DDL を手動で書く必要があります。</p>
+<h3 id="indexes">インデックス</h3>
+<p><strong>インデックス</strong>には、キーのカラムが順番どおりに表示され、一意性、方式、完全な定義も確認できます。インデックスを追加するには、カラムを選び、その順序と方向を設定し、必要に応じて一意にします。式インデックス、部分インデックス、エンジン固有のインデックスは SQL コンソールで作成できます。主キーと制約に属するインデックスは、このフォームからは削除できません。</p>
+<h3 id="review-before-applying">適用前に確認する</h3>
+<p>構造の変更はすべて <strong>SQLをプレビュー → 確認 → DBに適用</strong>の流れで行います。</p>
+<ul>
+<li>フォームを開いたりプレビューしたりしただけでは、DDL は実行されません。</li>
+<li>フィールドを編集すると、プレビューとその承認は取り消されます。</li>
+<li>テーブルを削除するときは、正確なテーブル名の入力も求められます。</li>
+<li>開いているテーブルに未反映の行の編集があると、構造の変更はできません。</li>
+<li>操作が失敗しても、入力内容は残るので修正できます。</li>
+</ul>
+<p>PostgreSQL はトランザクション内で変更を適用します。MySQL と MariaDB は単一の DDL 文を実行し、複数の文にまたがるロールバックはありません。SQLite では、属性を編集するとトランザクション内でテーブルを再構築します。値、インデックス、トリガー、依存するビューは保持され、失敗した場合はロールバックされます。依存するオブジェクトがあると、カラムやテーブルを削除できないことがあります。Kiln がそれらを断りなく削除することはありません。</p>
+<h2 id="closing-and-recovery">終了と復旧</h2>
+<p>データベースへの書き込みが実行中の間、Kiln はタブ、ワークスペース、アプリを閉じません。タブが非表示であっても、書き込みが終わればこの制限は解除されます。</p>
+<p>終了時に作業を残すと、反映待ちの値と書きかけのテキストがローカルに保存されます。再起動すると、それらは元のクエリと値とともに<strong>確認専用</strong>のセクションに表示され、コピー、エクスポート、削除ができます。再実行や再送信は一切行われません。変更を入力し直す前に、クエリを再実行して比較してください。</p>
+<blockquote class="callout"><p><strong>警告</strong> ローカルの復旧ファイルにはデータベースの値が含まれることがあります。書き込み中に異常終了した場合は、もう一度適用する前に、データベースがすでにコミットしていないか確認してください。</p>
+</blockquote>
+<h2 id="windows">Windows</h2>
+<p>データベースツールは Windows でも同じように動作します。ウィンドウを閉じるときは、macOS と同様に実行中のデータベースへの書き込みが終わるまで待ちます。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="editor.html"><small>前へ</small>エディターと検索</a><a class="pn next" href="remote.html"><small>次へ</small>リモートファイルと SSH</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="20.7"></div><p class="crumb">文档<b>工具</b></p></div><h1>数据库</h1><p class="desc">连接 PostgreSQL、MySQL、MariaDB 和 SQLite，借助补全编写 SQL，编辑 SELECT 结果，并通过审阅过的 SQL 修改表结构。</p><p>Kiln 在终端旁边提供数据库工具：连接浏览器、带补全的 SQL 控制台、可编辑的结果网格和表结构表单。在你确认应用之前，不会向数据库写入任何内容。</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="15.3"><img src="../assets/shots/db-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<h2 id="connect">连接</h2>
+<p>在工作区检查器中选择<strong>数据库</strong>（数据库图标），或者从标题栏的<strong>工具</strong>菜单中选择数据库。添加连接后，即可打开表或 SQL 控制台。</p>
+<p>Kiln 支持 PostgreSQL、MySQL、MariaDB 和 SQLite，每种数据库都使用各自的标识符引用规则和元数据查询。连接密钥保存在 Kiln 的凭据存储中。</p>
+<p>打开数据库工具不会改变工作区根目录，也不会把代理移到其他仓库。</p>
+<h2 id="run-sql">运行 SQL</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>运行光标所在的语句</td>
+<td><strong>执行</strong>或 <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>只运行选中的文本</td>
+<td>选中后点击<strong>执行</strong>或按 <code>⌘Enter</code></td>
+</tr>
+<tr>
+<td>运行编辑器中的所有语句</td>
+<td><strong>全部执行</strong>或 <code>⌘⌥Enter</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>分号归属于它前面的语句；字符串、注释或带引号的标识符中的分号不会拆分语句。选区为空或只含注释时，不会执行任何内容。</p>
+<h2 id="sql-completion">SQL 补全</h2>
+<p>输入标识符，或者输入别名再加一个点时，会出现建议。也可以用 <code>⌃Space</code>、<code>⌥Esc</code> 或控制台的代码图标打开建议。macOS 把 <code>⌘Space</code> 传给 Kiln 时，它同样可用。Kiln 不会覆盖 Spotlight。</p>
+<blockquote class="callout"><p><strong>提示</strong> macOS 可能把 <code>⌃Space</code> 用于切换输入法。代码图标和 <code>⌥Esc</code> 不需要改动 Mac 的快捷键就能用。</p>
+</blockquote>
+<p>建议的内容取决于光标位置：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>上下文</th>
+<th>建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FROM</code> 或 <code>JOIN</code> 之后</td>
+<td>表和 schema。插入表名时会带上 schema。</td>
+</tr>
+<tr>
+<td><code>SELECT</code>、<code>WHERE</code>、<code>JOIN ... ON</code>、<code>UPDATE ... SET</code>、<code>INSERT</code> 列列表</td>
+<td>所引用表的列，包括在光标之后定义的别名</td>
+</tr>
+</tbody>
+</table></div>
+<p>连接所用的方言还会提供常用的 SQL 关键字和函数名。插入函数时，光标会落在括号内。</p>
+<p>用方向键或鼠标滚轮浏览，用 <code>Tab</code> 或 <code>Enter</code> 插入，按 <code>Esc</code> 关闭。把指针悬停在候选项上，可以查看完整名称和元数据。补全绝不会执行 SQL。</p>
+<h3 id="keep-metadata-current">保持元数据最新</h3>
+<ul>
+<li>在当前控制台中执行的结构更改会自动刷新补全。</li>
+<li>在其他地方做了更改后，请点击刷新图标。</li>
+<li>元数据加载失败时，你的 SQL 保持原样，点击刷新图标重试即可。</li>
+</ul>
+<p>元数据在后台加载，绝不会重新打开你已关闭的连接。</p>
+<h3 id="what-completion-does-not-know">补全的盲区</h3>
+<p>补全读取的是数据库目录，与控制台会话互不相干，因此看不到 <code>TEMP</code> 对象、SQLite 的 <code>ATTACH</code>、MySQL 的 <code>USE</code> 或 PostgreSQL 的 <code>search_path</code> 变更。持久表请使用显式的 schema 名称。CTE 和派生表的列不会被推断，Kiln 会隐藏那些可能错误声称拥有这些列的表建议。关键字和函数列表覆盖常用语法，不包含所有服务器扩展。</p>
+<p>SQL 补全绝不会把查询文本或表中的行发送给外部 AI 服务。</p>
+<h2 id="edit-query-results">编辑查询结果</h2>
+<p>对于受支持的单表 <code>SELECT</code>，双击单元格，或按 <code>Enter</code> 或 <code>F2</code>，即可修改。选择<strong>应用更改</strong>之前，更改只保存在本地。<strong>撤销</strong>会丢弃这些更改。</p>
+<p>较长的值请在值侧边栏中编辑。在选择其他单元格或运行其他查询之前，先用<strong>应用到单元格</strong>暂存文本，或者将其重置。复制选中的单元格时，会包含已暂存的值。</p>
+<h3 id="which-results-can-be-edited">可编辑的结果</h3>
+<p>结果必须来自一张永久表，并直接使用该表的列。可以使用别名和筛选条件。结果中要包含主键的全部列，或某个非空唯一键的全部列。键不必叫 <code>id</code>。</p>
+<p>以下情况保持只读，Kiln 会说明原因：</p>
+<ul>
+<li>连接、聚合和计算列</li>
+<li>同一个源列被选择了两次</li>
+<li>视图和临时表</li>
+<li>不包含完整行键的结果</li>
+<li>生成列、二进制列和不受支持的列类型</li>
+</ul>
+<p>结果编辑适用于 PostgreSQL、SQLite，以及使用事务型 InnoDB 表的 MySQL 或 MariaDB。它不能插入或删除行，这类操作请使用 SQL。</p>
+<h3 id="how-changes-are-applied">更改的应用方式</h3>
+<p>Kiln 在单独的事务中写入你的更改，依据的是行键和你看到的原始值。每个被修改的行都必须恰好匹配数据库中的一行。如果某行已被删除、被他人修改，或无法唯一确定，整个事务都会失败，本地更改会保留下来供你审阅。</p>
+<p>写入之前，Kiln 会锁定该表，并重新核对表的标识以及列和键的定义。如果查询之后表结构有变化，请重新运行查询。应用更改不会提交你在控制台中显式执行的 <code>BEGIN</code>。</p>
+<p>如果写入成功但刷新失败，Kiln 会告诉你写入已保存，并把过期的结果设为只读。它绝不会自动重新提交更改。</p>
+<h2 id="tables-columns-and-indexes">表、列和索引</h2>
+<p>在浏览器中右键点击表，可以选择<strong>打开表</strong>、<strong>编辑表…</strong> 和<strong>删除表…</strong>。<strong>编辑表…</strong> 会打开一个对话框，其中包含<strong>列</strong>、<strong>索引</strong>和 <strong>DDL</strong>，还可以重命名表。视图会以只读方式在同一个结构浏览器中打开。</p>
+<p>打开表后，可以在其标签页中切换<strong>数据</strong>、<strong>列</strong>、<strong>索引</strong>和 <strong>DDL</strong>。DDL 支持刷新和复制。</p>
+<h3 id="columns">列</h3>
+<p>每一列所在的行都提供编辑、重命名和删除操作。使用<strong>添加列</strong>设置名称、SQL 类型、是否可为空，以及可选的默认值。字符串默认值需要加 SQL 引号，例如 <code>'guest'</code>；<code>CURRENT_TIMESTAMP</code> 则是表达式。生成列、标识列以及移除主键，都需要手动编写 DDL。</p>
+<h3 id="indexes">索引</h3>
+<p><strong>索引</strong>按顺序列出键列，以及唯一性、方法和完整定义。要添加索引，选择列，设置它们的顺序和方向，还可以设为唯一索引。表达式索引、部分索引和引擎专用索引可以在 SQL 控制台中创建。主键索引和由约束拥有的索引无法在此表单中删除。</p>
+<h3 id="review-before-applying">应用前审阅</h3>
+<p>每一项结构更改都按<strong>预览 SQL → 审阅 → 应用到数据库</strong>的流程进行。</p>
+<ul>
+<li>打开表单或预览绝不会执行 DDL。</li>
+<li>编辑任何字段都会清除预览及其确认。</li>
+<li>删除表时，还需要输入该表的准确名称。</li>
+<li>已打开的表中有待处理的行编辑时，无法更改结构。</li>
+<li>操作失败时，你的输入会保留，方便修正。</li>
+</ul>
+<p>PostgreSQL 在事务中应用更改。MySQL 和 MariaDB 执行单条 DDL 语句，不支持多语句回滚。对于 SQLite，属性编辑会在事务中重建表，保留值、索引、触发器和依赖视图，失败时回滚。依赖对象可能会导致无法删除列或表，Kiln 不会悄悄删除这些对象。</p>
+<h2 id="closing-and-recovery">关闭与恢复</h2>
+<p>数据库写入仍在进行时，Kiln 不会关闭标签页、工作区或应用。写入完成后，限制随即解除，即使该标签页处于隐藏状态。</p>
+<p>如果退出时选择保留工作，已暂存的值和未完成的文本会保存在本地。重启后，它们会出现在<strong>仅供审阅</strong>区域中，并附上原始查询和值，可以复制、导出或删除。不会重新执行或重新提交任何内容。请先重新运行查询并比较，再重新输入更改。</p>
+<blockquote class="callout"><p><strong>警告</strong> 本地恢复文件可能包含数据库中的值。如果写入过程中应用意外退出，请先确认数据库是否已经提交了这次写入，再重新应用。</p>
+</blockquote>
+<h2 id="windows">Windows</h2>
+<p>数据库工具在 Windows 上的用法完全相同。与 macOS 一样，关闭窗口时会等待进行中的数据库写入完成。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="editor.html"><small>上一页</small>编辑器与搜索</a><a class="pn next" href="remote.html"><small>下一页</small>远程文件与 SSH</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Databases", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "데이터베이스", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "データベース", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "数据库", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

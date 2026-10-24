@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Terminal · Kiln Docs</title>
+<meta name="description" content="Shell integration, activity reporting, command history, completion, connection recovery and background sessions in Kiln&#x27;s terminal.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html" class="on" aria-current="page">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html" class="on" aria-current="page">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html" class="on" aria-current="page">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html" class="on" aria-current="page">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="6.9"></div><p class="crumb">Documentation<b>Using Kiln</b></p></div><h1>Terminal</h1><p class="desc">Shell integration, activity reporting, command history, completion, connection recovery and background sessions in Kiln&#x27;s terminal.</p><p>Every Kiln task runs in a real terminal session owned by a local daemon. Shell integration adds command tracking, activity reporting and completion on top, and sessions keep running when you close the window.</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="5.1"><img src="../assets/shots/files-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<h2 id="shell-integration">Shell integration</h2>
+<p>New default zsh sessions get shell integration automatically. It tracks command boundaries and the working directory, and it does not modify your <code>.zshrc</code>.</p>
+<p>Automatic integration does not apply to custom launches with arguments, or to bash and fish. Shells that were already open may need a new session before new integration behavior applies. To turn integration off, set <code>KILN_SHELL_INTEGRATION=0</code>.</p>
+<h3 id="attach-an-existing-zsh-session">Attach an existing zsh session</h3>
+<ol>
+<li>In Settings, choose <code>/bin/zsh</code> as the default shell and open a new Kiln terminal. This sets up the integration files.</li>
+<li>In the existing zsh, wait for any foreground task to finish, then run this at an idle prompt:</li>
+</ol>
+<pre><code class="language-zsh">source ~/.local/share/kiln/shell-integration-v1/integration.zsh
+</code></pre>
+<p>Starting <code>zsh</code> inside an existing terminal does not run Kiln's new-session setup on its own.</p>
+<h2 id="activity-and-notifications">Activity and notifications</h2>
+<p>Kiln reads terminal notifications (OSC escape sequences) and explicit activity reports. Both are local terminal escape sequences and do not send your prompt to another service.</p>
+<p>Report activity from a script or agent hook with <code>kiln activity</code>:</p>
+<pre><code class="language-sh">kiln activity running
+kiln activity waiting
+kiln activity done
+kiln activity failed
+</code></pre>
+<p>Send a notification with <code>kiln notify</code>. Run <code>kiln activity --help</code> and <code>kiln notify --help</code> for the syntax of your installed version. Shell integration also provides a <code>kiln-agent-status running|waiting|done|failed|unknown</code> function. Hook output has to reach the Kiln terminal for Kiln to receive the activity.</p>
+<p>Kiln also recognizes the activity markers that Claude Code and Codex put in their terminal titles, so running activity appears without any hooks. Explicit waiting and failure reports take priority. Plain shells and agents that report nothing appear as open sessions instead of being marked complete. See <a href="agents.html">Agents</a> for the indicators and colors.</p>
+<p>The notification center keeps recent notifications and links each one to its session. Reading a notification clears that session's attention state.</p>
+<h2 id="command-history">Command history</h2>
+<p>The daemon keeps your most recent commands in memory so you can review them and their output.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Commands kept</td>
+<td>The most recent 40</td>
+</tr>
+<tr>
+<td>Output kept per command</td>
+<td>The first 128 KiB</td>
+</tr>
+<tr>
+<td>Survives a daemon restart or upgrade</td>
+<td>No</td>
+</tr>
+</tbody>
+</table></div>
+<p>History is a reconstructed text view of each command's output. It is not a raw terminal log and does not record every intermediate screen of a full-screen TUI. Without command-boundary integration, only the currently visible output is available.</p>
+<p>If you edit a command from history, it runs only when you choose its explicit run action, and it runs in a new terminal.</p>
+<h2 id="shell-completion">Shell completion</h2>
+<p>In a newly opened, integrated zsh terminal, Kiln suggests <code>cd</code> paths and common Git, Docker, npm and Cargo subcommands as you type.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>Open suggestions, or look up installed command names</td>
+</tr>
+<tr>
+<td>Arrow keys</td>
+<td>Select a suggestion</td>
+</tr>
+<tr>
+<td><code>Tab</code> or <code>Enter</code></td>
+<td>Insert the selected suggestion</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Close the menu</td>
+</tr>
+</tbody>
+</table></div>
+<p>Inserting a suggestion never runs the command. When the menu is closed, zsh's own <code>Tab</code> completion works as usual.</p>
+<p>To hide automatic suggestions, turn off command suggestions in Terminal settings. <code>Ctrl+Space</code> keeps working. Set <code>KILN_COMPLETION_PREVIEW=0</code> in your shell to also stop the shell from producing preview data.</p>
+<p>Completion does not read your shell history files, run commands to generate help, or send anything to a cloud service.</p>
+<p>Completion supports zsh only. Bash, fish, SSH sessions, agent chats, full-screen applications and other shells keep their normal input behavior. Help for the integration is in the terminal's context menu.</p>
+<h2 id="connection-recovery">Connection recovery</h2>
+<p>Kiln keeps the terminal connection separate from the shell or agent running inside it. If a panel loses its connection or stops responding, Kiln repairs the connection, redraws the screen and asks the CLI to redraw. It does not restart the agent, send a prompt or run <code>/resume</code> for you.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Panel shows</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Reconnecting</strong></td>
+<td>Kiln is repairing the connection, up to three attempts.</td>
+</tr>
+<tr>
+<td><strong>Connection stalled</strong></td>
+<td>The attempts failed. Choose <strong>Reconnect</strong> to try again.</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Reconnect</strong> is also in the <strong>…</strong> menu of every running terminal panel, even when the connection looks healthy, and it resets that panel's retry budget. A quiet agent that is thinking or waiting for input is not treated as stalled.</p>
+<p>During recovery, the session and its process keep running and the existing text stays on screen. Input is paused, so your typing never queues up behind a broken connection.</p>
+<blockquote class="callout"><p><strong>Note</strong> A CLI can hang internally while its connection stays healthy. <strong>Reconnect</strong> cannot fix that. Open another panel and use the CLI's own resume flow.</p>
+</blockquote>
+<h2 id="sessions-that-outlive-the-window">Sessions that outlive the window</h2>
+<p>Your terminals belong to the session daemon, not to the window. Close Kiln and its shells and agents keep running; reopen it to return to them. Updates keep running terminals too. A system reboot or explicitly stopping the daemon can end sessions.</p>
+<ul>
+<li><strong>macOS:</strong> the menu-bar icon opens a menu with <strong>Settings…</strong> and <strong>Stop Background Sessions…</strong>. Ending background sessions lists the live sessions and asks for confirmation, with <strong>Cancel</strong> as the default. It includes sessions in open workspaces, so unsaved shell or agent work can be lost.</li>
+<li><strong>Windows:</strong> the notification-area icon shows a session summary and a red dot when something needs attention or a notification is unread. Its menu has <strong>Open Kiln</strong>, <strong>Settings</strong> and <strong>Stop Background Sessions…</strong>.</li>
+</ul>
+<blockquote class="callout"><p><strong>Warning</strong> <code>kiln status</code> shows the session daemon's state. Do not use <code>shutdown-daemon</code> to refresh the window: it ends your sessions.</p>
+</blockquote>
+<h2 id="local-network-access-on-macos">Local network access on macOS</h2>
+<p>macOS 15 and later require permission for local-network connections. This can affect terminal commands such as <code>kubectl get nodes</code>, SSH, database connections and remote files when their servers are on a local network.</p>
+<ol>
+<li>Open <strong>Kiln → Settings → Behavior</strong>.</li>
+<li>Under <strong>Privacy → Local Network</strong>, choose <strong>Request Access</strong>.</li>
+<li>If macOS shows a prompt, allow Kiln, then retry the command.</li>
+</ol>
+<p>The gear button opens <strong>System Settings → Privacy &amp; Security</strong>, where you can check Kiln under <strong>Local Network</strong>. Kiln cannot read or change the system's decision, and macOS may not show a new prompt if you already decided.</p>
+<blockquote class="callout"><p><strong>Tip</strong> Panels opened before an update keep their old process setup. If a local-network command fails there, open a new terminal panel and retry it.</p>
+</blockquote>
+<h2 id="windows-shells">Windows shells</h2>
+<p>Terminals start in PowerShell 7 when it is installed, otherwise in Windows PowerShell. Choose <code>cmd.exe</code>, Git Bash or a WSL distribution in <strong>Settings → Terminal</strong>.</p>
+<ul>
+<li>PowerShell and cmd report commands, exit codes and the current location to Kiln. A custom prompt still sees the last command's status.</li>
+<li>PowerShell keeps PSReadLine's completion (<code>Tab</code>, <code>Ctrl+Space</code>). Kiln's completion menu is zsh-only.</li>
+<li>Closing a terminal ends its console programs. Window applications it started, such as a browser, keep running.</li>
+<li>The pane is named after the newest console program running in the shell. Programs started from Git Bash are not followed.</li>
+<li>Korean IME input works in terminals and the editor.</li>
+</ul><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="workspaces.html"><small>Previous</small>Workspaces and tasks</a><a class="pn next" href="agents.html"><small>Next</small>Agents</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="6.9"></div><p class="crumb">문서<b>Kiln 사용하기</b></p></div><h1>터미널</h1><p class="desc">Kiln 터미널의 셸 통합, 활동 보고, 명령 기록, 자동 완성, 연결 복구, 백그라운드 세션을 설명합니다.</p><p>Kiln의 모든 작업은 로컬 데몬이 소유한 실제 터미널 세션에서 실행됩니다. 여기에 셸 통합이 명령 추적, 활동 보고, 자동 완성을 더하며, 창을 닫아도 세션은 계속 실행됩니다.</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="5.1"><img src="../assets/shots/files-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<h2 id="shell-integration">셸 통합</h2>
+<p>새로 여는 기본 zsh 세션에는 셸 통합이 자동으로 적용됩니다. 셸 통합은 명령의 시작과 끝, 작업 디렉터리를 추적하며 <code>.zshrc</code>는 수정하지 않습니다.</p>
+<p>인수를 붙인 사용자 지정 실행이나 bash, fish에는 자동 통합이 적용되지 않습니다. 이미 열려 있던 셸에 새 통합 동작을 적용하려면 새 세션을 열어야 할 수 있습니다. 통합을 끄려면 <code>KILN_SHELL_INTEGRATION=0</code>을 설정하세요.</p>
+<h3 id="attach-an-existing-zsh-session">기존 zsh 세션 연결하기</h3>
+<ol>
+<li>설정에서 기본 셸을 <code>/bin/zsh</code>로 지정하고 새 Kiln 터미널을 엽니다. 이때 통합 파일이 만들어집니다.</li>
+<li>기존 zsh에서 포그라운드 작업이 끝나기를 기다렸다가, 아무것도 실행 중이지 않은 프롬프트에서 다음 명령을 실행합니다.</li>
+</ol>
+<pre><code class="language-zsh">source ~/.local/share/kiln/shell-integration-v1/integration.zsh
+</code></pre>
+<p>기존 터미널 안에서 <code>zsh</code>를 실행하는 것만으로는 Kiln의 새 세션 설정이 적용되지 않습니다.</p>
+<h2 id="activity-and-notifications">활동과 알림</h2>
+<p>Kiln은 터미널 알림(OSC 이스케이프 시퀀스)과 명시적인 활동 보고를 읽습니다. 둘 다 로컬 터미널 이스케이프 시퀀스이므로 프롬프트가 다른 서비스로 전송되지 않습니다.</p>
+<p>스크립트나 에이전트 훅에서는 <code>kiln activity</code>로 활동을 보고합니다.</p>
+<pre><code class="language-sh">kiln activity running
+kiln activity waiting
+kiln activity done
+kiln activity failed
+</code></pre>
+<p>알림은 <code>kiln notify</code>로 보냅니다. 설치된 버전의 문법은 <code>kiln activity --help</code>와 <code>kiln notify --help</code>로 확인하세요. 셸 통합은 <code>kiln-agent-status running|waiting|done|failed|unknown</code> 함수도 제공합니다. 훅의 출력이 Kiln 터미널까지 전달되어야 Kiln이 활동을 받을 수 있습니다.</p>
+<p>Kiln은 Claude Code와 Codex가 터미널 제목에 넣는 활동 표시도 인식하므로, 훅이 없어도 실행 중 활동이 표시됩니다. 명시적인 대기·실패 보고가 있으면 그쪽이 우선합니다. 아무것도 보고하지 않는 일반 셸과 에이전트는 완료로 표시되지 않고 열린 세션으로 나타납니다. 표시와 색상은 <a href="agents.html">에이전트</a>를 참고하세요.</p>
+<p>알림 센터는 최근 알림을 보관하고 각 알림을 해당 세션과 연결해 둡니다. 알림을 읽으면 그 세션의 확인 필요 상태가 풀립니다.</p>
+<h2 id="command-history">명령 기록</h2>
+<p>데몬은 최근 명령을 메모리에 보관하므로, 실행한 명령과 출력을 다시 살펴볼 수 있습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>한도</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>보관하는 명령 수</td>
+<td>최근 40개</td>
+</tr>
+<tr>
+<td>명령당 보관하는 출력</td>
+<td>앞부분 128 KiB</td>
+</tr>
+<tr>
+<td>데몬을 재시작하거나 업그레이드한 뒤에도 유지</td>
+<td>아니요</td>
+</tr>
+</tbody>
+</table></div>
+<p>기록은 각 명령의 출력을 재구성한 텍스트입니다. 원시 터미널 로그가 아니며, 전체 화면 TUI의 중간 화면을 모두 담지도 않습니다. 명령 경계를 추적하는 통합이 없으면 지금 화면에 보이는 출력만 볼 수 있습니다.</p>
+<p>기록에서 명령을 편집하면, 명시적으로 실행을 선택해야만 실행되며 새 터미널에서 실행됩니다.</p>
+<h2 id="shell-completion">셸 자동 완성</h2>
+<p>새로 연 zsh 터미널에 셸 통합이 적용되어 있으면, 입력하는 동안 Kiln이 <code>cd</code> 경로와 자주 쓰는 Git, Docker, npm, Cargo 하위 명령을 추천합니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>키</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>추천 목록 열기, 또는 설치된 명령 이름 찾기</td>
+</tr>
+<tr>
+<td>화살표 키</td>
+<td>추천 항목 선택</td>
+</tr>
+<tr>
+<td><code>Tab</code> 또는 <code>Enter</code></td>
+<td>선택한 추천 항목 삽입</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>메뉴 닫기</td>
+</tr>
+</tbody>
+</table></div>
+<p>추천 항목을 삽입해도 명령은 실행되지 않습니다. 메뉴가 닫혀 있을 때는 zsh 자체의 <code>Tab</code> 자동 완성이 평소처럼 동작합니다.</p>
+<p>자동 추천을 숨기려면 터미널 설정에서 명령어 입력 힌트를 끄세요. 그래도 <code>Ctrl+Space</code>는 계속 동작합니다. 셸이 미리보기 데이터를 아예 만들지 않게 하려면 셸에서 <code>KILN_COMPLETION_PREVIEW=0</code>도 설정하세요.</p>
+<p>자동 완성은 셸 기록 파일을 읽지 않고, 도움말을 만들려고 명령을 실행하지도 않으며, 클라우드 서비스로 아무것도 보내지 않습니다.</p>
+<p>자동 완성은 zsh에서만 동작합니다. Bash, fish, SSH 세션, 에이전트 채팅, 전체 화면 애플리케이션, 그 밖의 셸에서는 원래 입력 방식이 그대로 유지됩니다. 통합 관련 도움말은 터미널의 컨텍스트 메뉴에 있습니다.</p>
+<h2 id="connection-recovery">연결 복구</h2>
+<p>Kiln은 터미널 연결과 그 안에서 실행 중인 셸이나 에이전트를 분리해서 관리합니다. 패널의 연결이 끊기거나 응답이 멈추면 Kiln은 연결을 복구하고, 화면을 다시 그리고, CLI에도 다시 그리기를 요청합니다. 에이전트를 재시작하거나, 프롬프트를 보내거나, <code>/resume</code>을 대신 실행하지는 않습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>패널 표시</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>연결 복구 중</strong></td>
+<td>Kiln이 연결을 복구하고 있습니다. 최대 세 번 시도합니다.</td>
+</tr>
+<tr>
+<td><strong>연결 멈춤</strong></td>
+<td>시도가 모두 실패했습니다. <strong>연결 다시 복구</strong>를 선택해 다시 시도하세요.</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>연결 다시 복구</strong>는 실행 중인 모든 터미널 패널의 <strong>…</strong> 메뉴에 있으며, 연결이 정상으로 보일 때도 쓸 수 있습니다. 이 메뉴를 선택하면 그 패널의 재시도 횟수가 초기화됩니다. 생각 중이거나 입력을 기다리느라 조용한 에이전트는 멈춘 것으로 보지 않습니다.</p>
+<p>복구하는 동안에도 세션과 프로세스는 계속 실행되고, 기존 텍스트는 화면에 남아 있습니다. 입력은 잠시 멈추므로, 끊어진 연결 뒤로 입력이 쌓이지 않습니다.</p>
+<blockquote class="callout"><p><strong>참고</strong> 연결은 정상인데 CLI 내부가 멈출 수도 있습니다. 이때는 <strong>연결 다시 복구</strong>로 해결되지 않습니다. 다른 패널을 열고 CLI 자체의 재개 기능을 사용하세요.</p>
+</blockquote>
+<h2 id="sessions-that-outlive-the-window">창을 닫아도 유지되는 세션</h2>
+<p>터미널은 창이 아니라 세션 데몬에 속합니다. Kiln을 닫아도 셸과 에이전트는 계속 실행되고, 다시 열면 그 세션으로 돌아옵니다. 업데이트할 때도 실행 중인 터미널은 유지됩니다. 시스템을 재부팅하거나 데몬을 명시적으로 중지하면 세션이 종료될 수 있습니다.</p>
+<ul>
+<li><strong>macOS:</strong> 메뉴 막대 아이콘을 누르면 <strong>설정…</strong>과 <strong>백그라운드 세션 종료…</strong>가 있는 메뉴가 열립니다. 백그라운드 세션을 종료하려고 하면 실행 중인 세션 목록과 함께 확인 창이 뜨며, 기본 선택은 <strong>취소</strong>입니다. 열려 있는 워크스페이스의 세션도 함께 종료되므로, 저장하지 않은 셸이나 에이전트 작업을 잃을 수 있습니다.</li>
+<li><strong>Windows:</strong> 알림 영역 아이콘에는 세션 요약이 표시되고, 확인이 필요한 항목이나 읽지 않은 알림이 있으면 빨간 점이 붙습니다. 메뉴에는 <strong>Kiln 열기</strong>, <strong>설정</strong>, <strong>백그라운드 세션 종료…</strong>가 있습니다.</li>
+</ul>
+<blockquote class="callout"><p><strong>주의</strong> <code>kiln status</code>는 세션 데몬의 상태를 보여 줍니다. 창을 새로 고치려고 <code>shutdown-daemon</code>을 실행하지 마세요. 세션이 종료됩니다.</p>
+</blockquote>
+<h2 id="local-network-access-on-macos">macOS의 로컬 네트워크 접근</h2>
+<p>macOS 15 이상에서는 로컬 네트워크에 연결하려면 권한이 필요합니다. 그래서 서버가 로컬 네트워크에 있으면 <code>kubectl get nodes</code>, SSH, 데이터베이스 연결, 원격 파일 같은 터미널 명령이 영향을 받을 수 있습니다.</p>
+<ol>
+<li><strong>Kiln → 설정 → 동작</strong>을 엽니다.</li>
+<li><strong>개인정보 보호 → 로컬 네트워크</strong>에서 <strong>접근 요청</strong>을 선택합니다.</li>
+<li>macOS가 확인 창을 띄우면 Kiln을 허용하고 명령을 다시 실행합니다.</li>
+</ol>
+<p>톱니바퀴 버튼을 누르면 <strong>시스템 설정 → 개인정보 보호 및 보안</strong>이 열리고, <strong>로컬 네트워크</strong> 항목에서 Kiln을 확인할 수 있습니다. Kiln은 시스템에서 내린 결정을 읽거나 바꿀 수 없으며, 이미 허용 여부를 정했다면 macOS가 확인 창을 다시 띄우지 않을 수 있습니다.</p>
+<blockquote class="callout"><p><strong>팁</strong> 업데이트 전에 연 패널은 이전 프로세스 설정을 그대로 씁니다. 그 패널에서 로컬 네트워크 명령이 실패하면 새 터미널 패널을 열고 다시 실행하세요.</p>
+</blockquote>
+<h2 id="windows-shells">Windows 셸</h2>
+<p>터미널은 PowerShell 7이 설치되어 있으면 PowerShell 7로, 없으면 Windows PowerShell로 시작합니다. <strong>설정 → 터미널</strong>에서 <code>cmd.exe</code>, Git Bash, WSL 배포판을 고를 수 있습니다.</p>
+<ul>
+<li>PowerShell과 cmd는 명령, 종료 코드, 현재 위치를 Kiln에 보고합니다. 사용자 지정 프롬프트에서도 마지막 명령의 상태를 그대로 받을 수 있습니다.</li>
+<li>PowerShell에서는 PSReadLine의 자동 완성(<code>Tab</code>, <code>Ctrl+Space</code>)을 그대로 씁니다. Kiln의 자동 완성 메뉴는 zsh 전용입니다.</li>
+<li>터미널을 닫으면 그 안의 콘솔 프로그램이 종료됩니다. 터미널에서 띄운 브라우저 같은 창 애플리케이션은 계속 실행됩니다.</li>
+<li>패널 이름은 셸에서 실행 중인 가장 최근 콘솔 프로그램의 이름을 따릅니다. Git Bash에서 시작한 프로그램은 추적하지 않습니다.</li>
+<li>터미널과 편집기에서 한국어 IME 입력을 쓸 수 있습니다.</li>
+</ul><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="workspaces.html"><small>이전</small>워크스페이스와 작업</a><a class="pn next" href="agents.html"><small>다음</small>에이전트</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="6.9"></div><p class="crumb">ドキュメント<b>Kiln を使う</b></p></div><h1>ターミナル</h1><p class="desc">Kiln のターミナルで使えるシェル連携、アクティビティの報告、コマンド履歴、補完、接続の復旧、バックグラウンドセッションについて説明します。</p><p>Kiln の作業はすべて、ローカルデーモンが管理する本物のターミナルセッションで実行されます。シェル連携によってコマンドの追跡、アクティビティの報告、補完が加わり、ウィンドウを閉じてもセッションは動き続けます。</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="5.1"><img src="../assets/shots/files-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<h2 id="shell-integration">シェル連携</h2>
+<p>既定の zsh で開いた新しいセッションには、シェル連携が自動で適用されます。コマンドの区切りと作業ディレクトリを追跡し、<code>.zshrc</code> は変更しません。</p>
+<p>引数を付けたカスタム起動や、bash、fish には、自動連携は適用されません。すでに開いているシェルに新しい連携の動作を反映するには、セッションを開き直す必要がある場合があります。連携をオフにするには <code>KILN_SHELL_INTEGRATION=0</code> を設定します。</p>
+<h3 id="attach-an-existing-zsh-session">既存の zsh セッションを連携させる</h3>
+<ol>
+<li>設定で既定のシェルに <code>/bin/zsh</code> を選び、Kiln の新しいターミナルを開きます。これで連携用のファイルが準備されます。</li>
+<li>既存の zsh でフォアグラウンドの処理が終わるのを待ち、アイドル状態のプロンプトで次のコマンドを実行します。</li>
+</ol>
+<pre><code class="language-zsh">source ~/.local/share/kiln/shell-integration-v1/integration.zsh
+</code></pre>
+<p>既存のターミナルの中で <code>zsh</code> を起動しただけでは、Kiln の新規セッション用のセットアップは実行されません。</p>
+<h2 id="activity-and-notifications">アクティビティと通知</h2>
+<p>Kiln は、ターミナルの通知（OSC エスケープシーケンス）と明示的なアクティビティ報告を読み取ります。どちらもローカルのターミナルエスケープシーケンスで、プロンプトが外部のサービスに送られることはありません。</p>
+<p>スクリプトやエージェントのフックからは <code>kiln activity</code> でアクティビティを報告します。</p>
+<pre><code class="language-sh">kiln activity running
+kiln activity waiting
+kiln activity done
+kiln activity failed
+</code></pre>
+<p>通知を送るには <code>kiln notify</code> を使います。インストールされているバージョンの構文は <code>kiln activity --help</code> と <code>kiln notify --help</code> で確認してください。シェル連携では <code>kiln-agent-status running|waiting|done|failed|unknown</code> 関数も使えます。Kiln がアクティビティを受け取るには、フックの出力が Kiln のターミナルに届く必要があります。</p>
+<p>Kiln は、Claude Code と Codex がターミナルのタイトルに出すアクティビティマーカーも認識します。そのため、フックを設定しなくても実行中であることが表示されます。入力待ちと失敗を明示的に報告した場合は、そちらが優先されます。何も報告しない通常のシェルやエージェントは、完了ではなく、開いているセッションとして表示されます。インジケーターと色については<a href="agents.html">エージェント</a>を参照してください。</p>
+<p>通知センターには最近の通知が残り、各通知は対応するセッションにひも付いています。通知を読むと、そのセッションの要確認状態が解除されます。</p>
+<h2 id="command-history">コマンド履歴</h2>
+<p>デーモンは最近のコマンドをメモリに保持しているので、コマンドとその出力をあとから確認できます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>制限</th>
+<th>値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>保持するコマンド数</td>
+<td>最新の 40 件</td>
+</tr>
+<tr>
+<td>コマンドごとに保持する出力</td>
+<td>先頭の 128 KiB</td>
+</tr>
+<tr>
+<td>デーモンの再起動やアップグレード後も残るか</td>
+<td>いいえ</td>
+</tr>
+</tbody>
+</table></div>
+<p>履歴は、各コマンドの出力を再構成したテキスト表示です。生のターミナルログではなく、フルスクリーン TUI の途中の画面をすべて記録するものでもありません。コマンドの区切りを追跡する連携がない場合、確認できるのは現在表示されている出力だけです。</p>
+<p>履歴のコマンドを編集しても、実行されるのは実行操作を明示的に選んだときだけです。その場合は新しいターミナルで実行されます。</p>
+<h2 id="shell-completion">シェル補完</h2>
+<p>シェル連携が有効な状態で新しく開いた zsh ターミナルでは、入力に合わせて <code>cd</code> のパスや、Git、Docker、npm、Cargo のよく使うサブコマンドを Kiln が候補として表示します。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>キー</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>候補を開く、またはインストール済みのコマンド名を検索する</td>
+</tr>
+<tr>
+<td>矢印キー</td>
+<td>候補を選ぶ</td>
+</tr>
+<tr>
+<td><code>Tab</code> または <code>Enter</code></td>
+<td>選んだ候補を挿入する</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>メニューを閉じる</td>
+</tr>
+</tbody>
+</table></div>
+<p>候補を挿入しても、コマンドは実行されません。メニューが閉じているときは、zsh 本来の <code>Tab</code> 補完が通常どおり動作します。</p>
+<p>候補を自動で表示しないようにするには、ターミナルの設定で「コマンド入力候補」をオフにします。この場合も <code>Ctrl+Space</code> は使えます。シェル側でもプレビュー用のデータを生成しないようにするには、シェルで <code>KILN_COMPLETION_PREVIEW=0</code> を設定します。</p>
+<p>補完のために、シェルの履歴ファイルを読んだり、ヘルプを得るためにコマンドを実行したり、クラウドサービスにデータを送ったりすることはありません。</p>
+<p>補完に対応しているのは zsh だけです。Bash、fish、SSH セッション、エージェントとのチャット、フルスクリーンのアプリケーション、その他のシェルでは、入力の動作は通常どおりです。連携のヘルプはターミナルのコンテキストメニューにあります。</p>
+<h2 id="connection-recovery">接続の復旧</h2>
+<p>Kiln は、ターミナルの接続と、その中で動くシェルやエージェントを分けて管理しています。パネルの接続が切れたり応答しなくなったりすると、Kiln は接続を修復して画面を再描画し、CLI にも再描画を求めます。エージェントの再起動、プロンプトの送信、<code>/resume</code> の代行は行いません。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>パネルの表示</th>
+<th>意味</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>再接続中</strong></td>
+<td>Kiln が接続を修復しています（最大 3 回試行）。</td>
+</tr>
+<tr>
+<td><strong>接続停止</strong></td>
+<td>修復に失敗しました。<strong>再接続</strong>を選ぶと、もう一度試せます。</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>再接続</strong>は、実行中のすべてのターミナルパネルの <strong>…</strong> メニューにもあり、接続が正常に見えるときでも使えます。選ぶと、そのパネルの再試行回数がリセットされます。思考中や入力待ちで出力が止まっているだけのエージェントは、停止とは見なしません。</p>
+<p>復旧中もセッションとそのプロセスは動き続け、それまでのテキストも画面に残ります。入力は一時的に受け付けなくなるので、切れた接続に入力がたまることはありません。</p>
+<blockquote class="callout"><p><strong>注意</strong> 接続が正常なまま、CLI の内部で処理が止まることがあります。その場合は<strong>再接続</strong>では直せません。別のパネルを開いて、CLI 自身の再開（resume）機能を使ってください。</p>
+</blockquote>
+<h2 id="sessions-that-outlive-the-window">ウィンドウを閉じても続くセッション</h2>
+<p>ターミナルはウィンドウではなく、セッションデーモンに属しています。Kiln を閉じてもシェルとエージェントは動き続け、開き直せばそのセッションに戻れます。アップデートしても、実行中のターミナルは維持されます。システムの再起動やデーモンの明示的な停止では、セッションが終了する場合があります。</p>
+<ul>
+<li><strong>macOS:</strong> メニューバーのアイコンのメニューには、<strong>設定…</strong> と<strong>バックグラウンドセッションを終了…</strong> があります。バックグラウンドセッションを終了しようとすると、稼働中のセッションの一覧と確認画面が表示されます。既定のボタンは<strong>キャンセル</strong>です。開いているワークスペースのセッションも対象になるため、未保存のシェルやエージェントの作業が失われることがあります。</li>
+<li><strong>Windows:</strong> 通知領域のアイコンにはセッションの概要が表示され、対応が必要なものや未読の通知があると赤い点が付きます。メニューには <strong>Kiln を開く</strong>、<strong>設定</strong>、<strong>バックグラウンドセッションを終了…</strong> があります。</li>
+</ul>
+<blockquote class="callout"><p><strong>警告</strong> <code>kiln status</code> はセッションデーモンの状態を表示します。ウィンドウを再読み込みする目的で <code>shutdown-daemon</code> を使わないでください。セッションが終了してしまいます。</p>
+</blockquote>
+<h2 id="local-network-access-on-macos">macOS のローカルネットワークアクセス</h2>
+<p>macOS 15 以降では、ローカルネットワークへの接続に許可が必要です。サーバーがローカルネットワーク上にあると、<code>kubectl get nodes</code> などのターミナルコマンド、SSH、データベース接続、リモートファイルが影響を受けることがあります。</p>
+<ol>
+<li><strong>Kiln → 設定 → 動作</strong>を開きます。</li>
+<li><strong>プライバシー → ローカルネットワーク</strong>で<strong>アクセスをリクエスト</strong>を選びます。</li>
+<li>macOS の確認画面が表示されたら Kiln を許可し、コマンドを再実行します。</li>
+</ol>
+<p>歯車ボタンから<strong>システム設定 → プライバシーとセキュリティ</strong>を開き、<strong>ローカルネットワーク</strong>で Kiln の状態を確認できます。Kiln からは、システム側の許可状態を読み取ることも変更することもできません。また、すでに許可または拒否を選んでいる場合、macOS は確認画面を再表示しないことがあります。</p>
+<blockquote class="callout"><p><strong>ヒント</strong> アップデート前に開いたパネルは、古いプロセス設定のまま動いています。そこでローカルネットワークを使うコマンドが失敗した場合は、新しいターミナルパネルを開いて再実行してください。</p>
+</blockquote>
+<h2 id="windows-shells">Windows のシェル</h2>
+<p>ターミナルは、PowerShell 7 がインストールされていれば PowerShell 7 で、なければ Windows PowerShell で起動します。<code>cmd.exe</code>、Git Bash、WSL ディストリビューションは<strong>設定 → ターミナル</strong>で選べます。</p>
+<ul>
+<li>PowerShell と cmd は、コマンド、終了コード、現在の場所を Kiln に報告します。カスタムプロンプトからも直前のコマンドの状態を参照できます。</li>
+<li>PowerShell では PSReadLine の補完（<code>Tab</code>、<code>Ctrl+Space</code>）がそのまま使えます。Kiln の補完メニューは zsh 専用です。</li>
+<li>ターミナルを閉じると、そこで動いているコンソールプログラムは終了します。ブラウザーなど、ターミナルから起動したウィンドウアプリケーションは動き続けます。</li>
+<li>パネルの名前には、シェルで実行中の最も新しいコンソールプログラムの名前が使われます。Git Bash から起動したプログラムは追跡されません。</li>
+<li>ターミナルとエディターで韓国語 IME の入力が使えます。</li>
+</ul><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="workspaces.html"><small>前へ</small>ワークスペースと作業</a><a class="pn next" href="agents.html"><small>次へ</small>エージェント</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="6.9"></div><p class="crumb">文档<b>使用 Kiln</b></p></div><h1>终端</h1><p class="desc">Kiln 终端的 Shell 集成、活动上报、命令历史、补全、连接恢复和后台会话。</p><p>每个 Kiln 任务都运行在真实的终端会话中，会话由本地守护进程托管。Shell 集成在此之上提供命令跟踪、活动上报和补全；关闭窗口后，会话照常运行。</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="5.1"><img src="../assets/shots/files-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<h2 id="shell-integration">Shell 集成</h2>
+<p>新建的默认 zsh 会话会自动启用 Shell 集成。它会跟踪命令边界和工作目录，不会修改你的 <code>.zshrc</code>。</p>
+<p>带参数的自定义启动方式不会自动集成，bash 和 fish 也不会。已经打开的 Shell 可能要新建会话，才能用上新的集成行为。要关闭集成，设置 <code>KILN_SHELL_INTEGRATION=0</code>。</p>
+<h3 id="attach-an-existing-zsh-session">为现有 zsh 会话启用集成</h3>
+<ol>
+<li>在设置中把默认 Shell 设为 <code>/bin/zsh</code>，然后打开一个新的 Kiln 终端。这一步会生成集成文件。</li>
+<li>在现有的 zsh 中，等前台任务结束，然后在空闲的提示符下运行：</li>
+</ol>
+<pre><code class="language-zsh">source ~/.local/share/kiln/shell-integration-v1/integration.zsh
+</code></pre>
+<p>在现有终端里直接启动 <code>zsh</code>，并不会执行 Kiln 的新会话设置。</p>
+<h2 id="activity-and-notifications">活动与通知</h2>
+<p>Kiln 会读取终端通知（OSC 转义序列）和显式的活动上报。两者都是本地终端转义序列，不会把你的提示词发送给其他服务。</p>
+<p>在脚本或代理钩子中用 <code>kiln activity</code> 上报活动：</p>
+<pre><code class="language-sh">kiln activity running
+kiln activity waiting
+kiln activity done
+kiln activity failed
+</code></pre>
+<p>用 <code>kiln notify</code> 发送通知。运行 <code>kiln activity --help</code> 和 <code>kiln notify --help</code> 查看当前安装版本的语法。Shell 集成还提供 <code>kiln-agent-status running|waiting|done|failed|unknown</code> 函数。钩子的输出必须送达 Kiln 终端，Kiln 才能收到活动。</p>
+<p>Claude Code 和 Codex 会在终端标题中写入活动标记，Kiln 能识别这些标记，因此不配置任何钩子也能显示运行中的活动。显式上报的等待和失败状态优先。什么都不上报的普通 Shell 和代理显示为打开的会话，不会被标为已完成。指示器和颜色见<a href="agents.html">代理</a>。</p>
+<p>通知中心保留最近的通知，每条通知都关联到对应的会话。读过通知后，该会话的待处理状态随即清除。</p>
+<h2 id="command-history">命令历史</h2>
+<p>守护进程在内存中保存最近执行的命令，方便你回看命令及其输出。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>限制</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>保存的命令数</td>
+<td>最近 40 条</td>
+</tr>
+<tr>
+<td>每条命令保存的输出</td>
+<td>前 128 KiB</td>
+</tr>
+<tr>
+<td>守护进程重启或升级后是否保留</td>
+<td>否</td>
+</tr>
+</tbody>
+</table></div>
+<p>历史是根据每条命令的输出重建的文本视图，不是原始终端日志，也不会记录全屏 TUI 的每一帧中间画面。没有命令边界集成时，只能查看当前可见的输出。</p>
+<p>编辑历史中的命令后，只有明确选择运行操作它才会执行，而且会在新终端中运行。</p>
+<h2 id="shell-completion">Shell 补全</h2>
+<p>在新打开且已集成的 zsh 终端中，Kiln 会在你输入时提示 <code>cd</code> 路径，以及 Git、Docker、npm 和 Cargo 的常用子命令。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>按键</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>打开建议，或查找已安装的命令名</td>
+</tr>
+<tr>
+<td>方向键</td>
+<td>选择建议</td>
+</tr>
+<tr>
+<td><code>Tab</code> 或 <code>Enter</code></td>
+<td>插入所选建议</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>关闭菜单</td>
+</tr>
+</tbody>
+</table></div>
+<p>插入建议永远不会执行命令。菜单关闭时，zsh 自带的 <code>Tab</code> 补全照常可用。</p>
+<p>要隐藏自动建议，在终端设置中关闭“命令输入提示”，<code>Ctrl+Space</code> 仍然可用。在 Shell 中设置 <code>KILN_COMPLETION_PREVIEW=0</code>，Shell 也会停止生成预览数据。</p>
+<p>补全不会读取 Shell 历史文件，不会为了生成帮助而运行命令，也不会向云服务发送任何内容。</p>
+<p>补全只支持 zsh。Bash、fish、SSH 会话、代理对话、全屏应用和其他 Shell 的输入方式保持不变。集成的帮助位于终端的右键菜单中。</p>
+<h2 id="connection-recovery">连接恢复</h2>
+<p>Kiln 把终端连接和其中运行的 Shell 或代理分开管理。面板断开连接或停止响应时，Kiln 会修复连接、重绘屏幕，并让 CLI 重绘。它不会替你重启代理、发送提示词或运行 <code>/resume</code>。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>面板显示</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>正在重新连接</strong></td>
+<td>Kiln 正在修复连接，最多尝试三次。</td>
+</tr>
+<tr>
+<td><strong>连接停滞</strong></td>
+<td>几次尝试都失败了。选择<strong>重新连接</strong>再试一次。</td>
+</tr>
+</tbody>
+</table></div>
+<p>每个运行中的终端面板的 <strong>…</strong> 菜单里也有<strong>重新连接</strong>，即使连接看起来正常也能使用，并会重置该面板的重试次数。代理在思考或等待输入时没有输出，不会被视为停滞。</p>
+<p>恢复期间，会话和进程继续运行，屏幕上的现有文本也会保留。输入会暂停，键入的内容不会堆积在断开的连接后面。</p>
+<blockquote class="callout"><p><strong>注意</strong> 有时连接正常，CLI 却在内部卡住了。<strong>重新连接</strong>解决不了这种情况，请另开一个面板，使用该 CLI 自己的恢复流程。</p>
+</blockquote>
+<h2 id="sessions-that-outlive-the-window">关闭窗口后保留的会话</h2>
+<p>终端属于会话守护进程，而不是窗口。关闭 Kiln 后，其中的 Shell 和代理继续运行，重新打开即可回到它们。更新时，正在运行的终端也会保留。系统重启或手动停止守护进程可能会结束会话。</p>
+<ul>
+<li><strong>macOS：</strong>点击菜单栏图标会打开菜单，其中有<strong>设置…</strong> 和<strong>结束后台会话…</strong>。结束后台会话前，Kiln 会列出仍在运行的会话并请求确认，默认选项是<strong>取消</strong>。列表也包括已打开工作区中的会话，因此 Shell 或代理中未保存的工作可能会丢失。</li>
+<li><strong>Windows：</strong>通知区域图标显示会话摘要；有需要处理的事项或未读通知时会出现红点。图标菜单包含<strong>打开 Kiln</strong>、<strong>设置</strong>和<strong>结束后台会话…</strong>。</li>
+</ul>
+<blockquote class="callout"><p><strong>警告</strong> <code>kiln status</code> 显示会话守护进程的状态。不要用 <code>shutdown-daemon</code> 来刷新窗口，它会结束你的会话。</p>
+</blockquote>
+<h2 id="local-network-access-on-macos">macOS 上的本地网络访问</h2>
+<p>macOS 15 及更高版本要求获得授权才能连接本地网络。服务器位于本地网络时，<code>kubectl get nodes</code>、SSH、数据库连接和远程文件等终端命令都可能受影响。</p>
+<ol>
+<li>打开 <strong>Kiln → 设置 → 行为</strong>。</li>
+<li>在<strong>隐私 → 本地网络</strong>下，选择<strong>请求访问</strong>。</li>
+<li>如果 macOS 弹出提示，允许 Kiln，然后重试命令。</li>
+</ol>
+<p>齿轮按钮会打开<strong>系统设置 → 隐私与安全性</strong>，可以在<strong>本地网络</strong>下查看 Kiln。Kiln 无法读取或更改系统的授权结果；如果之前已经做过选择，macOS 可能不会再次弹出提示。</p>
+<blockquote class="callout"><p><strong>提示</strong> 更新前打开的面板沿用旧的进程设置。如果访问本地网络的命令在这类面板中失败，请新开一个终端面板再试。</p>
+</blockquote>
+<h2 id="windows-shells">Windows Shell</h2>
+<p>装有 PowerShell 7 时，终端以 PowerShell 7 启动，否则使用 Windows PowerShell。也可以在<strong>设置 → 终端</strong>中选择 <code>cmd.exe</code>、Git Bash 或某个 WSL 发行版。</p>
+<ul>
+<li>PowerShell 和 cmd 会向 Kiln 上报命令、退出码和当前位置。自定义提示符仍能拿到上一条命令的状态。</li>
+<li>PowerShell 保留 PSReadLine 的补全（<code>Tab</code>、<code>Ctrl+Space</code>）。Kiln 的补全菜单只适用于 zsh。</li>
+<li>关闭终端会结束其中的控制台程序，由它启动的窗口应用（例如浏览器）会继续运行。</li>
+<li>面板以 Shell 中最新运行的控制台程序命名。从 Git Bash 启动的程序不会被跟踪。</li>
+<li>韩语输入法在终端和编辑器中都能正常使用。</li>
+</ul><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="workspaces.html"><small>上一页</small>工作区与任务</a><a class="pn next" href="agents.html"><small>下一页</small>代理</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Terminal", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "터미널", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "ターミナル", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "终端", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

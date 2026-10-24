@@ -1,0 +1,13 @@
+!title Draft the release notes
+!activity running
+!clear
+[35mRELEASE NOTES · 2.5.0[0m
+
+Reading commits since v2.4.0 in services/api and apps/web…
+
+[32m✓[0m 9 commits across 2 repositories
+[32m✓[0m Grouped into Features, Fixes and Internal
+[32m✓[0m Linked the payment timeout fix to apps/web
+
+[35mWriting CHANGELOG.md…[0m
+!hold

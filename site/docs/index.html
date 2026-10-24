@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Introduction · Kiln Docs</title>
+<meta name="description" content="Kiln is a terminal-first IDE for agent work that keeps terminals, AI agents, Git, files and databases in one native workspace.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html" class="on" aria-current="page">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html" class="on" aria-current="page">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html" class="on" aria-current="page">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html" class="on" aria-current="page">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="0.0"></div><p class="crumb">Documentation<b>Get started</b></p></div><h1>Introduction</h1><p class="desc">Kiln is a terminal-first IDE for agent work that keeps terminals, AI agents, Git, files and databases in one native workspace.</p><p>Kiln is a terminal-first IDE for agent work. It brings terminals, AI agents, Git, files and databases into one native app for macOS and Windows, so the whole task stays in view.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="0.0"><img src="../assets/shots/agents-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<p>Open a single repository, or a parent folder that holds your frontend, backend and shared libraries. Run Claude Code, Codex or Antigravity in a terminal panel, watch which tasks need you, and review the result without leaving the window.</p>
+<h2 id="core-concepts">Core concepts</h2>
+<h3 id="workspace">Workspace</h3>
+<p>A workspace is a named view of a folder. It keeps its own tasks, terminal sessions, split layout and unsent requests. One folder can have several workspaces, for example <strong>API review</strong> and <strong>Documentation</strong>, and each one is restored independently when Kiln reopens. Files and Git history belong to the folder, so every workspace for that folder shares them.</p>
+<p>The folder can be one repository or a parent directory with several repositories. Your agent works from that shared root, while Git operations target the repository you select. See <a href="workspaces.html">Workspaces and tasks</a>.</p>
+<h3 id="task">Task</h3>
+<p>A task is the work running in a workspace's terminal: a shell you use directly, or an agent you start with <strong>New Task</strong>. The sidebar lists tasks under each workspace and shows their reported state:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Working</td>
+<td>The agent or command reports that it is working.</td>
+</tr>
+<tr>
+<td>Waiting for Input</td>
+<td>The agent is waiting for your answer.</td>
+</tr>
+<tr>
+<td>Done</td>
+<td>The agent reported that it finished.</td>
+</tr>
+<tr>
+<td>Failed</td>
+<td>The agent or command reported a failure.</td>
+</tr>
+</tbody>
+</table></div>
+<p>When a session does not report its state, Kiln shows it as an open session instead of guessing from terminal output. An idle terminal is not treated as a completed task. Click a task to jump straight to its workspace, tab and split.</p>
+<h3 id="panels-and-splits">Panels and splits</h3>
+<p>Each terminal lives in a panel. Panel headers have controls to split right, split down and close. Drag a panel's title onto another panel to rearrange the layout; the move keeps the terminal session and its running process. See <a href="workspaces.html#splits-and-pane-layout">Splits and pane layout</a>.</p>
+<h3 id="inspector-and-tools">Inspector and tools</h3>
+<p>The right-hand workspace inspector holds <strong>Files</strong>, <strong>Changes</strong>, <strong>GitHub</strong> and a database icon for connections, tables and SQL consoles. The titlebar <strong>Tools</strong> menu lists files, search, source control, GitHub, databases, remote connections and problems together, and opens each one alongside your current work. In compact windows, <strong>Back to Task</strong> returns you to the terminal.</p>
+<h3 id="session-daemon">Session daemon</h3>
+<p>A separate local daemon owns your terminals. Closing the Kiln window leaves its shells and agents running, and reopening Kiln brings you back to them. Updates keep running terminals alive too. A system reboot or explicitly stopping the daemon is different from closing the window and can end sessions. See <a href="terminal.html#sessions-that-outlive-the-window">Sessions that outlive the window</a>.</p>
+<h3 id="notifications">Notifications</h3>
+<p>Agents and scripts can report activity and send notifications through local terminal escape sequences or the <code>kiln activity</code> and <code>kiln notify</code> commands. These do not send your prompt to another service. The notification center keeps recent notifications and links each one to its session, and reading a notification clears that session's attention state. On Windows, agent notifications also appear as Windows toasts. See <a href="terminal.html#activity-and-notifications">Terminal</a>.</p>
+<h2 id="what-you-need">What you need</h2>
+<ul>
+<li>macOS 11 or later on Apple Silicon, or Windows 11 on x64 or ARM64.</li>
+<li>The agent CLIs you plan to use: Claude Code, Codex or Antigravity (<code>agy</code>), plus <code>gh</code> for GitHub. Kiln does not include a subscription to any agent. Install and sign in to the tools you use.</li>
+</ul>
+<p>The app is available in English, Korean, Japanese and Simplified Chinese.</p>
+<h2 id="where-to-go-next">Where to go next</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Page</th>
+<th>What you will find</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="install.html">Install and update</a></td>
+<td>Install on macOS or Windows, first launch, updates and language</td>
+</tr>
+<tr>
+<td><a href="workspaces.html">Workspaces and tasks</a></td>
+<td>Named workspaces, multi-repository folders, the task list, splits and drafts</td>
+</tr>
+<tr>
+<td><a href="terminal.html">Terminal</a></td>
+<td>Shell integration, activity, command history, completion and connection recovery</td>
+</tr>
+<tr>
+<td><a href="agents.html">Agents</a></td>
+<td>Starting Claude Code, Codex and Antigravity tasks and reading their states</td>
+</tr>
+<tr>
+<td><a href="accounts.html">Accounts</a></td>
+<td>Agent profiles, browser sign-in and account switching</td>
+</tr>
+<tr>
+<td><a href="conversations.html">Conversations and updates</a></td>
+<td>Conversation sync between agents and CLI updates</td>
+</tr>
+<tr>
+<td><a href="git.html">Git and GitHub</a></td>
+<td>History, squash, cherry-pick, diffs and pull requests</td>
+</tr>
+<tr>
+<td><a href="editor.html">Editor and search</a></td>
+<td>File editing, language servers, search and problems</td>
+</tr>
+<tr>
+<td><a href="databases.html">Databases</a></td>
+<td>Connections, SQL console and table editing</td>
+</tr>
+<tr>
+<td><a href="remote.html">Remote files and SSH</a></td>
+<td>Object storage, FTP/SFTP and SSH terminals</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="Previous / Next"><span></span><a class="pn next" href="install.html"><small>Next</small>Install and update</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="0.0"></div><p class="crumb">문서<b>시작하기</b></p></div><h1>소개</h1><p class="desc">Kiln은 에이전트 작업을 위한 터미널 중심 IDE로, 터미널·AI 에이전트·Git·파일·데이터베이스를 네이티브 워크스페이스 하나에 담습니다.</p><p>Kiln은 에이전트 작업을 위한 터미널 중심 IDE입니다. 터미널, AI 에이전트, Git, 파일, 데이터베이스를 macOS·Windows용 네이티브 앱 하나에 모아 두므로 작업 전체가 한눈에 들어옵니다.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="0.0"><img src="../assets/shots/agents-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<p>저장소 하나를 열어도 되고, 프론트엔드·백엔드·공유 라이브러리를 담은 상위 폴더를 열어도 됩니다. 터미널 패널에서 Claude Code, Codex, Antigravity를 실행하고, 내 응답이 필요한 작업을 확인하고, 창을 떠나지 않고 결과를 검토하세요.</p>
+<h2 id="core-concepts">핵심 개념</h2>
+<h3 id="workspace">워크스페이스</h3>
+<p>워크스페이스는 폴더에 이름을 붙여 만든 보기입니다. 작업, 터미널 세션, 분할 레이아웃, 보내지 않은 요청을 워크스페이스마다 따로 관리합니다. 한 폴더에 <strong>API 리뷰</strong>, <strong>문서</strong>처럼 워크스페이스를 여러 개 둘 수 있고, Kiln을 다시 열면 각각 따로 복원됩니다. 파일과 Git 기록은 폴더에 속하므로 같은 폴더의 워크스페이스는 모두 이를 공유합니다.</p>
+<p>폴더는 저장소 하나여도 되고, 여러 저장소를 담은 상위 디렉터리여도 됩니다. 에이전트는 이 공유 루트에서 작업하고, Git 작업은 선택한 저장소에 적용됩니다. 자세한 내용은 <a href="workspaces.html">워크스페이스와 작업</a>을 참고하세요.</p>
+<h3 id="task">작업</h3>
+<p>작업은 워크스페이스의 터미널에서 돌아가는 일입니다. 직접 쓰는 셸일 수도 있고, <strong>새 작업</strong>으로 시작한 에이전트일 수도 있습니다. 사이드바에는 워크스페이스별로 작업이 나열되고, 각 작업이 보고한 상태가 함께 표시됩니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>상태</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>작업 중</td>
+<td>에이전트나 명령이 작업 중이라고 보고했습니다.</td>
+</tr>
+<tr>
+<td>입력 대기</td>
+<td>에이전트가 내 답변을 기다리고 있습니다.</td>
+</tr>
+<tr>
+<td>완료</td>
+<td>에이전트가 작업을 마쳤다고 보고했습니다.</td>
+</tr>
+<tr>
+<td>실패</td>
+<td>에이전트나 명령이 실패를 보고했습니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>세션이 상태를 보고하지 않으면 Kiln은 터미널 출력으로 짐작하지 않고 열린 세션으로 표시합니다. 유휴 상태의 터미널을 완료된 작업으로 보지 않습니다. 작업을 클릭하면 해당 워크스페이스, 탭, 분할 화면으로 바로 이동합니다.</p>
+<h3 id="panels-and-splits">패널과 분할 화면</h3>
+<p>터미널마다 패널이 하나씩 있습니다. 패널 헤더에는 오른쪽으로 나누기, 아래로 나누기, 닫기 버튼이 있습니다. 패널 제목을 다른 패널로 끌어다 놓으면 레이아웃을 바꿀 수 있고, 옮겨도 터미널 세션과 실행 중인 프로세스는 그대로입니다. 자세한 내용은 <a href="workspaces.html#splits-and-pane-layout">분할 화면과 패널 레이아웃</a>을 참고하세요.</p>
+<h3 id="inspector-and-tools">인스펙터와 도구</h3>
+<p>오른쪽 워크스페이스 인스펙터에는 <strong>파일</strong>, <strong>변경</strong>, <strong>GitHub</strong>와 데이터베이스 아이콘이 있습니다. 데이터베이스 아이콘에서는 연결, 테이블, SQL 콘솔을 엽니다. 제목 표시줄의 <strong>도구</strong> 메뉴에는 파일, 검색, 소스 제어, GitHub, 데이터베이스, 원격 연결, 문제가 한데 모여 있고, 무엇을 고르든 현재 작업 옆에 열립니다. 창이 좁을 때는 <strong>작업으로 돌아가기</strong>를 눌러 터미널로 돌아옵니다.</p>
+<h3 id="session-daemon">세션 데몬</h3>
+<p>터미널은 별도의 로컬 데몬이 소유합니다. 그래서 Kiln 창을 닫아도 셸과 에이전트는 계속 실행되고, Kiln을 다시 열면 그 세션으로 돌아옵니다. 업데이트할 때도 실행 중인 터미널은 그대로 유지됩니다. 다만 시스템을 재부팅하거나 데몬을 명시적으로 중지하면 창을 닫을 때와 달리 세션이 종료될 수 있습니다. 자세한 내용은 <a href="terminal.html#sessions-that-outlive-the-window">창을 닫아도 유지되는 세션</a>을 참고하세요.</p>
+<h3 id="notifications">알림</h3>
+<p>에이전트와 스크립트는 로컬 터미널 이스케이프 시퀀스나 <code>kiln activity</code>, <code>kiln notify</code> 명령으로 활동을 보고하고 알림을 보낼 수 있습니다. 이때 프롬프트가 다른 서비스로 전송되지는 않습니다. 알림 센터는 최근 알림을 보관하고 각 알림을 해당 세션과 연결해 두며, 알림을 읽으면 그 세션의 확인 필요 상태가 풀립니다. Windows에서는 에이전트 알림이 Windows 토스트로도 뜹니다. 자세한 내용은 <a href="terminal.html#activity-and-notifications">터미널</a>을 참고하세요.</p>
+<h2 id="what-you-need">준비 사항</h2>
+<ul>
+<li>Apple Silicon 기반 macOS 11 이상, 또는 x64·ARM64 기반 Windows 11</li>
+<li>사용할 에이전트 CLI(Claude Code, Codex, Antigravity의 <code>agy</code>)와 GitHub용 <code>gh</code>. Kiln에는 어떤 에이전트의 구독도 포함되어 있지 않으니, 쓰려는 도구를 직접 설치하고 로그인하세요.</li>
+</ul>
+<p>앱은 영어, 한국어, 일본어, 중국어 간체를 지원합니다.</p>
+<h2 id="where-to-go-next">다음 단계</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>페이지</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="install.html">설치와 업데이트</a></td>
+<td>macOS·Windows 설치, 첫 실행, 업데이트, 언어</td>
+</tr>
+<tr>
+<td><a href="workspaces.html">워크스페이스와 작업</a></td>
+<td>이름 붙인 워크스페이스, 여러 저장소를 담은 폴더, 작업 목록, 분할 화면, 초안</td>
+</tr>
+<tr>
+<td><a href="terminal.html">터미널</a></td>
+<td>셸 통합, 활동, 명령 기록, 자동 완성, 연결 복구</td>
+</tr>
+<tr>
+<td><a href="agents.html">에이전트</a></td>
+<td>Claude Code·Codex·Antigravity 작업 시작과 상태 확인</td>
+</tr>
+<tr>
+<td><a href="accounts.html">계정</a></td>
+<td>에이전트 프로필, 브라우저 로그인, 계정 전환</td>
+</tr>
+<tr>
+<td><a href="conversations.html">대화와 업데이트</a></td>
+<td>에이전트 간 대화 동기화, CLI 업데이트</td>
+</tr>
+<tr>
+<td><a href="git.html">Git과 GitHub</a></td>
+<td>기록, 스쿼시, 체리픽, diff, 풀 리퀘스트</td>
+</tr>
+<tr>
+<td><a href="editor.html">편집기와 검색</a></td>
+<td>파일 편집, 언어 서버, 검색, 문제</td>
+</tr>
+<tr>
+<td><a href="databases.html">데이터베이스</a></td>
+<td>연결, SQL 콘솔, 테이블 편집</td>
+</tr>
+<tr>
+<td><a href="remote.html">원격 파일과 SSH</a></td>
+<td>오브젝트 스토리지, FTP/SFTP, SSH 터미널</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="이전 / 다음"><span></span><a class="pn next" href="install.html"><small>다음</small>설치와 업데이트</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="0.0"></div><p class="crumb">ドキュメント<b>はじめに</b></p></div><h1>はじめに</h1><p class="desc">Kiln はエージェント作業のためのターミナルファースト IDE です。ターミナル、AI エージェント、Git、ファイル、データベースを 1 つのネイティブなワークスペースにまとめます。</p><p>Kiln はエージェント作業のためのターミナルファースト IDE です。ターミナル、AI エージェント、Git、ファイル、データベースを macOS と Windows 向けの 1 つのネイティブアプリにまとめるので、作業の全体をいつでも見渡せます。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="0.0"><img src="../assets/shots/agents-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<p>リポジトリを 1 つだけ開くことも、フロントエンド、バックエンド、共有ライブラリをまとめた親フォルダーを開くこともできます。ターミナルパネルで Claude Code、Codex、Antigravity を動かし、対応が必要な作業を把握して、結果のレビューまでウィンドウを離れずに進められます。</p>
+<h2 id="core-concepts">基本概念</h2>
+<h3 id="workspace">ワークスペース</h3>
+<p>ワークスペースは、フォルダーに名前を付けて開くビューです。作業、ターミナルセッション、分割レイアウト、未送信のリクエストはワークスペースごとに保持されます。1 つのフォルダーに <strong>API レビュー</strong>と<strong>ドキュメント</strong>のように複数のワークスペースを作ることができ、Kiln を開き直すとそれぞれが個別に復元されます。ファイルと Git 履歴はフォルダーに属するので、同じフォルダーのワークスペースはすべてこれらを共有します。</p>
+<p>フォルダーには、1 つのリポジトリも、複数のリポジトリを含む親ディレクトリも指定できます。エージェントはその共通のルートで作業し、Git 操作は選択したリポジトリに対して実行されます。詳しくは<a href="workspaces.html">ワークスペースと作業</a>を参照してください。</p>
+<h3 id="task">作業</h3>
+<p>作業とは、ワークスペースのターミナルで動いている処理のことです。直接操作するシェルの場合もあれば、<strong>新しい作業</strong>で開始したエージェントの場合もあります。サイドバーにはワークスペースごとに作業が並び、各作業が報告した状態が表示されます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>状態</th>
+<th>意味</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>作業中</td>
+<td>エージェントまたはコマンドが処理中だと報告しています。</td>
+</tr>
+<tr>
+<td>入力待ち</td>
+<td>エージェントが回答を待っています。</td>
+</tr>
+<tr>
+<td>完了</td>
+<td>エージェントが完了を報告しました。</td>
+</tr>
+<tr>
+<td>失敗</td>
+<td>エージェントまたはコマンドが失敗を報告しました。</td>
+</tr>
+</tbody>
+</table></div>
+<p>状態を報告しないセッションは、ターミナルの出力から推測せずに、開いているセッションとして表示します。アイドル状態のターミナルを完了した作業とは見なしません。作業をクリックすると、そのワークスペース、タブ、分割へすぐに移動します。</p>
+<h3 id="panels-and-splits">パネルと分割</h3>
+<p>ターミナルはそれぞれパネルに表示されます。パネルヘッダーには、右に分割、下に分割、閉じるの各操作があります。パネルのタイトルを別のパネルにドラッグすると、レイアウトを組み替えられます。移動しても、ターミナルセッションと実行中のプロセスはそのまま残ります。詳しくは<a href="workspaces.html#splits-and-pane-layout">分割とパネルのレイアウト</a>を参照してください。</p>
+<h3 id="inspector-and-tools">インスペクターとツール</h3>
+<p>ワークスペース右側のインスペクターには、<strong>ファイル</strong>、<strong>変更</strong>、<strong>GitHub</strong> と、接続・テーブル・SQL コンソールを扱うデータベースアイコンがあります。タイトルバーの<strong>ツール</strong>メニューには、ファイル、検索、ソース管理、GitHub、データベース、リモート接続、問題がまとめて並び、選んだものは現在の作業の横に開きます。ウィンドウが狭いときは、<strong>作業に戻る</strong>でターミナルに戻れます。</p>
+<h3 id="session-daemon">セッションデーモン</h3>
+<p>ターミナルは、独立したローカルデーモンが管理しています。Kiln のウィンドウを閉じてもシェルやエージェントは動き続け、Kiln を開き直せばそのセッションに戻れます。アップデートしても、実行中のターミナルは維持されます。一方、システムの再起動やデーモンの明示的な停止はウィンドウを閉じるのとは違い、セッションが終了することがあります。詳しくは<a href="terminal.html#sessions-that-outlive-the-window">ウィンドウを閉じても続くセッション</a>を参照してください。</p>
+<h3 id="notifications">通知</h3>
+<p>エージェントやスクリプトは、ローカルのターミナルエスケープシーケンスか、<code>kiln activity</code> コマンドと <code>kiln notify</code> コマンドで、アクティビティを報告したり通知を送ったりできます。どちらの方法でも、プロンプトが外部のサービスに送られることはありません。通知センターには最近の通知が残り、各通知は対応するセッションにひも付いています。通知を読むと、そのセッションの要確認状態が解除されます。Windows では、エージェントの通知が Windows のトースト通知としても表示されます。詳しくは<a href="terminal.html#activity-and-notifications">ターミナル</a>を参照してください。</p>
+<h2 id="what-you-need">必要なもの</h2>
+<ul>
+<li>Apple Silicon 搭載 Mac の macOS 11 以降、または Windows 11（x64 / ARM64）。</li>
+<li>Claude Code、Codex、Antigravity（<code>agy</code>）のうち、使うエージェントの CLI と、GitHub 用の <code>gh</code>。Kiln にはエージェントのサブスクリプションは含まれていません。使うツールは各自でインストールし、ログインしておいてください。</li>
+</ul>
+<p>アプリの表示言語は、英語、韓国語、日本語、簡体字中国語に対応しています。</p>
+<h2 id="where-to-go-next">次のステップ</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>ページ</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="install.html">インストールとアップデート</a></td>
+<td>macOS / Windows へのインストール、初回起動、アップデート、表示言語</td>
+</tr>
+<tr>
+<td><a href="workspaces.html">ワークスペースと作業</a></td>
+<td>名前付きワークスペース、複数リポジトリのフォルダー、作業一覧、分割、下書き</td>
+</tr>
+<tr>
+<td><a href="terminal.html">ターミナル</a></td>
+<td>シェル連携、アクティビティ、コマンド履歴、補完、接続の復旧</td>
+</tr>
+<tr>
+<td><a href="agents.html">エージェント</a></td>
+<td>Claude Code、Codex、Antigravity の作業の開始と状態の見方</td>
+</tr>
+<tr>
+<td><a href="accounts.html">アカウント</a></td>
+<td>エージェントのプロファイル、ブラウザーでのログイン、アカウントの切り替え</td>
+</tr>
+<tr>
+<td><a href="conversations.html">会話とアップデート</a></td>
+<td>エージェント間の会話の同期と CLI のアップデート</td>
+</tr>
+<tr>
+<td><a href="git.html">Git と GitHub</a></td>
+<td>履歴、スカッシュ、チェリーピック、diff、プルリクエスト</td>
+</tr>
+<tr>
+<td><a href="editor.html">エディターと検索</a></td>
+<td>ファイル編集、言語サーバー、検索、問題</td>
+</tr>
+<tr>
+<td><a href="databases.html">データベース</a></td>
+<td>接続、SQL コンソール、テーブルの編集</td>
+</tr>
+<tr>
+<td><a href="remote.html">リモートファイルと SSH</a></td>
+<td>オブジェクトストレージ、FTP/SFTP、SSH ターミナル</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="前へ / 次へ"><span></span><a class="pn next" href="install.html"><small>次へ</small>インストールとアップデート</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="0.0"></div><p class="crumb">文档<b>入门</b></p></div><h1>简介</h1><p class="desc">Kiln 是面向代理工作、以终端为核心的 IDE，终端、AI 代理、Git、文件和数据库都在同一个原生工作区里。</p><p>Kiln 是面向代理工作、以终端为核心的 IDE。终端、AI 代理、Git、文件和数据库集中在一个 macOS 和 Windows 原生应用里，整个任务始终在眼前。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="0.0"><img src="../assets/shots/agents-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<p>打开单个仓库，或者打开一个同时包含前端、后端和共享库的父文件夹。在终端面板里运行 Claude Code、Codex 或 Antigravity，随时看到哪些任务在等你处理，不离开窗口就能审阅结果。</p>
+<h2 id="core-concepts">核心概念</h2>
+<h3 id="workspace">工作区</h3>
+<p>工作区是文件夹的一个命名视图，各自保存任务、终端会话、拆分布局和尚未发送的请求。同一个文件夹可以有多个工作区，比如 <strong>API 审查</strong>和<strong>文档</strong>；Kiln 重新打开时会分别恢复每个工作区。文件和 Git 历史属于文件夹，因此同一文件夹下的所有工作区共用它们。</p>
+<p>这个文件夹可以是一个仓库，也可以是包含多个仓库的父目录。代理在这个共同的根目录下工作，Git 操作则针对你选中的仓库。详见<a href="workspaces.html">工作区与任务</a>。</p>
+<h3 id="task">任务</h3>
+<p>任务就是工作区终端里正在进行的工作：可以是你直接使用的 Shell，也可以是通过<strong>新建任务</strong>启动的代理。侧边栏按工作区列出任务，并显示它们上报的状态：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>状态</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>处理中</td>
+<td>代理或命令上报正在工作。</td>
+</tr>
+<tr>
+<td>等待输入</td>
+<td>代理在等你回复。</td>
+</tr>
+<tr>
+<td>已完成</td>
+<td>代理上报已经完成。</td>
+</tr>
+<tr>
+<td>失败</td>
+<td>代理或命令上报失败。</td>
+</tr>
+</tbody>
+</table></div>
+<p>会话没有上报状态时，Kiln 只把它显示为打开的会话，不会根据终端输出去猜。空闲的终端不算已完成的任务。点击任务，即可直接跳到它所在的工作区、标签页和拆分视图。</p>
+<h3 id="panels-and-splits">面板与拆分视图</h3>
+<p>每个终端都在一个面板里。面板标题栏上有向右拆分、向下拆分和关闭按钮。把面板标题拖到另一个面板上即可调整布局，移动后终端会话和正在运行的进程都保持不变。详见<a href="workspaces.html#splits-and-pane-layout">拆分与面板布局</a>。</p>
+<h3 id="inspector-and-tools">检查器与工具</h3>
+<p>右侧的工作区检查器包含<strong>文件</strong>、<strong>更改</strong>、<strong>GitHub</strong>，以及一个数据库图标，用于管理连接、表和 SQL 控制台。标题栏的<strong>工具</strong>菜单汇总了文件、搜索、源代码管理、GitHub、数据库、远程连接和问题，每一项都会在当前工作旁边打开。窗口较窄时，点击<strong>返回任务</strong>回到终端。</p>
+<h3 id="session-daemon">会话守护进程</h3>
+<p>终端由一个独立的本地守护进程托管。关闭 Kiln 窗口后，其中的 Shell 和代理继续运行，重新打开 Kiln 就能回到它们。更新时，正在运行的终端也不会中断。系统重启或手动停止守护进程则不同于关闭窗口，可能会结束会话。详见<a href="terminal.html#sessions-that-outlive-the-window">关闭窗口后保留的会话</a>。</p>
+<h3 id="notifications">通知</h3>
+<p>代理和脚本可以通过本地终端转义序列，或者 <code>kiln activity</code> 和 <code>kiln notify</code> 命令上报活动、发送通知。这些方式不会把你的提示词发送给其他服务。通知中心保留最近的通知，每条通知都关联到对应的会话；读过通知后，该会话的待处理状态随即清除。在 Windows 上，代理通知还会以 Windows 弹窗通知的形式出现。详见<a href="terminal.html#activity-and-notifications">终端</a>。</p>
+<h2 id="what-you-need">准备工作</h2>
+<ul>
+<li>Apple Silicon 上的 macOS 11 或更高版本，或者 x64 / ARM64 上的 Windows 11。</li>
+<li>你打算使用的代理 CLI：Claude Code、Codex 或 Antigravity（<code>agy</code>），以及用于 GitHub 的 <code>gh</code>。Kiln 不含任何代理的订阅，请自行安装并登录要用的工具。</li>
+</ul>
+<p>应用界面支持英语、韩语、日语和简体中文。</p>
+<h2 id="where-to-go-next">下一步</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>页面</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="install.html">安装与更新</a></td>
+<td>在 macOS 或 Windows 上安装、首次启动、更新和语言</td>
+</tr>
+<tr>
+<td><a href="workspaces.html">工作区与任务</a></td>
+<td>命名工作区、多仓库文件夹、任务列表、拆分视图和草稿</td>
+</tr>
+<tr>
+<td><a href="terminal.html">终端</a></td>
+<td>Shell 集成、活动、命令历史、补全和连接恢复</td>
+</tr>
+<tr>
+<td><a href="agents.html">代理</a></td>
+<td>启动 Claude Code、Codex 和 Antigravity 任务，查看任务状态</td>
+</tr>
+<tr>
+<td><a href="accounts.html">账户</a></td>
+<td>代理配置、浏览器登录和账户切换</td>
+</tr>
+<tr>
+<td><a href="conversations.html">对话与更新</a></td>
+<td>代理之间的对话同步和 CLI 更新</td>
+</tr>
+<tr>
+<td><a href="git.html">Git 与 GitHub</a></td>
+<td>历史、压缩、拣选、diff 和拉取请求</td>
+</tr>
+<tr>
+<td><a href="editor.html">编辑器与搜索</a></td>
+<td>文件编辑、语言服务器、搜索和问题</td>
+</tr>
+<tr>
+<td><a href="databases.html">数据库</a></td>
+<td>连接、SQL 控制台和表编辑</td>
+</tr>
+<tr>
+<td><a href="remote.html">远程文件与 SSH</a></td>
+<td>对象存储、FTP/SFTP 和 SSH 终端</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="上一页 / 下一页"><span></span><a class="pn next" href="install.html"><small>下一页</small>安装与更新</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Introduction", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "소개", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "はじめに", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "简介", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

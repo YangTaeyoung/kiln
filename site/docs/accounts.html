@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Accounts · Kiln Docs</title>
+<meta name="description" content="Save several Claude Code, Codex and Antigravity accounts, sign in through your browser, switch between them and keep usage up to date.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html" class="on" aria-current="page">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html" class="on" aria-current="page">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html" class="on" aria-current="page">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html" class="on" aria-current="page">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="11.5"></div><p class="crumb">Documentation<b>Using Kiln</b></p></div><h1>Accounts</h1><p class="desc">Save several Claude Code, Codex and Antigravity accounts, sign in through your browser, switch between them and keep usage up to date.</p><p>Kiln keeps a profile for each agent account you use, so you can move between personal and work subscriptions without logging out. Open <strong>Settings → Accounts</strong> to manage Claude Code and Codex subscription accounts, and Antigravity Google accounts on macOS.</p>
+<p>Install the official CLI for each agent first. Kiln uses that CLI to sign in and never implements its own OAuth provider or bypasses a provider's account policies.</p>
+<h2 id="add-an-account">Add an account</h2>
+<ol>
+<li>Choose <strong>Add Account</strong> on the agent's card.</li>
+<li>Give the profile a name, such as <strong>Personal</strong> or <strong>Work</strong>.</li>
+<li>Choose <strong>Sign in with browser</strong> and complete authentication in your browser.</li>
+</ol>
+<p>Kiln waits in the background and saves the profile as soon as the CLI reports a successful sign-in. You do not need to open a terminal or run a login command. While the account settings are open you can follow progress, reopen the sign-in page or cancel. An attempt expires after five minutes.</p>
+<p>If the browser callback is unavailable, Claude Code may show a sign-in code instead. Kiln then shows a masked field where you paste that code.</p>
+<blockquote class="callout"><p><strong>Warning</strong> Paste only the sign-in code into that field. Never enter your password or an API key there.</p>
+</blockquote>
+<p>Already signed in with the official CLI? Choose <strong>Save Current Login</strong> to import that login as a profile.</p>
+<h2 id="choose-which-account-to-use">Choose which account to use</h2>
+<p>Signing in saves a profile without touching the account your existing CLI sessions use.</p>
+<ul>
+<li>Choose <strong>Apply</strong> beside a newly signed-in profile to use it for new sessions.</li>
+<li>Choose <strong>Switch</strong> on an existing profile to make it the active one.</li>
+<li>Rename a profile from its row's menu.</li>
+</ul>
+<p>Every saved account keeps its own configuration for the panels Kiln opens, so all of them stay signed in at once. Running agent sessions keep the account they started with. After switching, open a new agent panel to use the new account. A CLI you typed into an ordinary shell keeps using that shell's configuration, and Kiln never restarts it or replaces its credentials.</p>
+<p>Kiln does not rotate a running panel to another account when it reaches a usage limit. Choose another account here and open a new panel instead.</p>
+<h2 id="sign-in-again">Sign in again</h2>
+<p>Use this when a profile's login needs repairing. You keep the profile instead of deleting and recreating it.</p>
+<ol>
+<li>Open the account row's menu and choose <strong>Sign in again</strong>.</li>
+<li>Check the account name and email shown, then choose <strong>Sign in with browser</strong>.</li>
+<li>Sign in with the same account and choose <strong>Apply</strong> when it completes.</li>
+</ol>
+<p>Kiln keeps the profile's name, its place in the list and its conversation history, and does not restart a running terminal. If you pick a different account in the browser, the attempt is rejected. Cancelled and failed attempts also leave the profile intact.</p>
+<p>New credentials wait until you choose <strong>Apply</strong>, so a browser sign-in never silently replaces the login your sessions use. A running CLI that cached its previous login may need to be resumed after you apply the new one.</p>
+<h3 id="sign-in-required">Sign-in required</h3>
+<p>When the local credential store confirms that a profile's credentials are gone, its row shows <strong>Login Required</strong> with a <strong>Sign in again</strong> button. Kiln checks this in the background while account settings are open and when you refresh.</p>
+<p>This is a local check, not proof that the account is valid online. Network failures and an expired access token are not treated as a logout, because the CLI refreshes tokens itself. If a provider rejects a login while local credentials still exist, use <strong>Sign in again</strong> from the row menu.</p>
+<h2 id="usage-updates">Usage updates</h2>
+<p>Kiln checks every saved Claude Code and Codex account in the background when the app starts and then every five minutes, including inactive profiles. Keep Kiln open. The account settings do not need to stay visible.</p>
+<ul>
+<li>Each card shows the time of the last successful check and keeps the last known bars when a check fails.</li>
+<li>The refresh button requests another check, subject to the provider's rate limits.</li>
+<li>Codex usage windows are labeled only when their reported length matches five hours or seven days.</li>
+</ul>
+<p>These checks are read-only. Kiln does not send a model prompt or use reset credits.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What Kiln does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Provider rate limiting</td>
+<td>Waits as long as the provider asks (between one minute and one day), or five minutes when it does not say. This also delays manual checks.</td>
+</tr>
+<tr>
+<td>Rejected credential (401)</td>
+<td>Pauses checks for that credential for an hour. A newly refreshed token can be checked without waiting.</td>
+</tr>
+<tr>
+<td>Other failures</td>
+<td>Tries again on the next cycle. You can also retry manually.</td>
+</tr>
+<tr>
+<td>Unrecognized response</td>
+<td>Shows usage as unavailable instead of inventing values.</td>
+</tr>
+</tbody>
+</table></div>
+<p>An expired or revoked token can block usage checks while a running CLI still works. If the failure persists, choose <strong>Sign in again</strong> in that profile's menu.</p>
+<h2 id="antigravity-accounts">Antigravity accounts</h2>
+<blockquote class="callout"><p><strong>Note</strong> Antigravity accounts are new in Kiln 0.2.12 and available on macOS only. On Windows, sign in by running <code>agy</code> in a terminal.</p>
+</blockquote>
+<p>Save several Google accounts for the Antigravity CLI (<code>agy</code>) and choose which one new tasks use.</p>
+<ol>
+<li>Open <strong>Settings → Accounts → Antigravity</strong> and choose <strong>Add Account</strong>. Kiln starts the installed CLI's Google sign-in in a temporary private terminal.</li>
+<li>Complete the login in your browser, then choose <strong>Apply</strong>.</li>
+<li>Repeat for another account, then choose <strong>Switch</strong> to use it for new tasks.</li>
+</ol>
+<p>Running tasks keep their original account. The row menu offers rename, delete and sign in again with the same Google account. <strong>Save Current Login</strong> imports the ordinary CLI's Google login.</p>
+<p>Each account has its own private home and macOS keychain, which also keep its Antigravity preferences, settings and conversations separate. Kiln never replaces the ordinary CLI's login or changes your default keychain. The account home does not include files from your usual home, such as shell, Git or SSH configuration. Your workspace files remain available.</p>
+<p>Antigravity accounts do not show usage bars or rotate automatically. When <code>agy</code> reports that its quota is reached, Kiln shows a notification with the reset time. Sign-in uses Google OAuth; Google Cloud project setup is not automated.</p>
+<p>Conversations from these accounts take part in conversation sync, and restarting in the same conversation keeps the original account. See <a href="conversations.html">Conversations and updates</a>.</p>
+<h2 id="where-credentials-are-stored">Where credentials are stored</h2>
+<p>On macOS, Kiln stores saved credentials in the Keychain and never resets or replaces it. On Windows, saved credentials are private files protected with your Windows user key. The account list contains only profile names and metadata, never access or refresh tokens. Sign-in links and codes are not written to settings or logs.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<ul>
+<li><strong>Sign-in fails:</strong> check your browser and network connection, then try again.</li>
+<li><strong>CLI not found:</strong> a missing CLI is reported on the account card. Install the official CLI for that agent.</li>
+</ul>
+<p>To update the CLIs themselves, see <a href="conversations.html#cli-updates">Conversations and updates</a>.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="agents.html"><small>Previous</small>Agents</a><a class="pn next" href="conversations.html"><small>Next</small>Conversations and updates</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="11.5"></div><p class="crumb">문서<b>Kiln 사용하기</b></p></div><h1>계정</h1><p class="desc">Claude Code, Codex, Antigravity 계정을 여러 개 저장하고, 브라우저로 로그인하고, 계정을 전환하고, 사용량을 최신 상태로 확인합니다.</p><p>Kiln은 사용하는 에이전트 계정마다 프로필을 따로 저장하므로, 로그아웃하지 않고도 개인 구독과 회사 구독을 오갈 수 있습니다. <strong>설정 → 계정</strong>에서 Claude Code·Codex 구독 계정과, macOS에서는 Antigravity Google 계정까지 관리합니다.</p>
+<p>먼저 에이전트마다 공식 CLI를 설치하세요. Kiln은 그 CLI를 통해 로그인하며, 자체 OAuth 제공자를 구현하거나 제공자의 계정 정책을 우회하지 않습니다.</p>
+<h2 id="add-an-account">계정 추가하기</h2>
+<ol>
+<li>에이전트 카드에서 <strong>새 계정 추가</strong>를 선택합니다.</li>
+<li><strong>개인</strong>이나 <strong>회사</strong>처럼 프로필 이름을 정합니다.</li>
+<li><strong>브라우저에서 로그인</strong>을 선택하고 브라우저에서 인증을 마칩니다.</li>
+</ol>
+<p>Kiln은 백그라운드에서 기다리다가 CLI가 로그인 성공을 알리면 바로 프로필을 저장합니다. 터미널을 열거나 로그인 명령을 실행할 필요는 없습니다. 계정 설정을 열어 두면 진행 상황을 보거나, 로그인 페이지를 다시 열거나, 취소할 수 있습니다. 로그인 시도는 5분이 지나면 만료됩니다.</p>
+<p>브라우저 콜백을 쓸 수 없으면 Claude Code가 대신 로그인 코드를 보여 줄 수 있습니다. 이때 Kiln에 가려진 입력란이 나타나며, 여기에 코드를 붙여 넣으면 됩니다.</p>
+<blockquote class="callout"><p><strong>주의</strong> 이 입력란에는 로그인 코드만 붙여 넣으세요. 비밀번호나 API 키는 절대 입력하지 마세요.</p>
+</blockquote>
+<p>공식 CLI로 이미 로그인해 두었다면 <strong>현재 로그인한 계정 저장</strong>을 선택해 그 로그인을 프로필로 가져오세요.</p>
+<h2 id="choose-which-account-to-use">사용할 계정 고르기</h2>
+<p>로그인하면 프로필만 저장되고, 기존 CLI 세션이 쓰는 계정은 그대로입니다.</p>
+<ul>
+<li>새로 로그인한 프로필 옆의 <strong>적용</strong>을 선택하면 새 세션부터 그 프로필을 씁니다.</li>
+<li>기존 프로필에서 <strong>전환</strong>을 선택하면 그 프로필이 활성 프로필이 됩니다.</li>
+<li>프로필 이름은 해당 행의 메뉴에서 바꿉니다.</li>
+</ul>
+<p>저장된 계정마다 Kiln이 여는 패널용 설정을 따로 두므로, 모든 계정이 동시에 로그인 상태를 유지합니다. 실행 중인 에이전트 세션은 시작할 때의 계정을 계속 씁니다. 전환한 계정을 쓰려면 새 에이전트 패널을 여세요. 일반 셸에서 직접 실행한 CLI는 그 셸의 설정을 계속 쓰며, Kiln은 이 CLI를 재시작하거나 자격 증명을 바꾸지 않습니다.</p>
+<p>실행 중인 패널이 사용량 한도에 도달해도 Kiln이 다른 계정으로 바꿔 주지는 않습니다. 이 화면에서 다른 계정을 고르고 새 패널을 여세요.</p>
+<h2 id="sign-in-again">다시 로그인하기</h2>
+<p>프로필의 로그인을 복구해야 할 때 씁니다. 프로필을 지우고 다시 만들 필요 없이 그대로 유지됩니다.</p>
+<ol>
+<li>계정 행의 메뉴를 열고 <strong>다시 로그인</strong>을 선택합니다.</li>
+<li>표시된 계정 이름과 이메일을 확인한 뒤 <strong>브라우저에서 로그인</strong>을 선택합니다.</li>
+<li>같은 계정으로 로그인하고, 완료되면 <strong>적용</strong>을 선택합니다.</li>
+</ol>
+<p>프로필 이름, 목록에서의 위치, 대화 기록은 그대로 유지되고, 실행 중인 터미널도 재시작되지 않습니다. 브라우저에서 다른 계정을 고르면 로그인 시도가 거부됩니다. 시도를 취소하거나 시도가 실패해도 프로필은 그대로입니다.</p>
+<p>새 자격 증명은 <strong>적용</strong>을 선택해야 반영되므로, 브라우저 로그인이 세션에서 쓰는 로그인을 모르는 사이에 바꾸는 일은 없습니다. 실행 중인 CLI가 이전 로그인을 캐시해 두었다면, 새 로그인을 적용한 뒤 그 CLI를 재개해야 할 수 있습니다.</p>
+<h3 id="sign-in-required">로그인 필요</h3>
+<p>로컬 자격 증명 저장소에서 프로필의 자격 증명이 사라졌다고 확인되면 해당 행에 <strong>로그인 필요</strong>와 <strong>다시 로그인</strong> 버튼이 표시됩니다. Kiln은 계정 설정이 열려 있는 동안과 새로 고침할 때 백그라운드에서 이를 확인합니다.</p>
+<p>이 확인은 로컬에서만 이루어지므로, 계정이 온라인에서도 유효하다는 보장은 아닙니다. 토큰은 CLI가 스스로 갱신하므로, 네트워크 오류나 만료된 액세스 토큰은 로그아웃으로 보지 않습니다. 로컬 자격 증명은 남아 있는데 제공자가 로그인을 거부한다면 행 메뉴에서 <strong>다시 로그인</strong>을 사용하세요.</p>
+<h2 id="usage-updates">사용량 업데이트</h2>
+<p>Kiln은 앱이 시작될 때, 그리고 그 뒤로 5분마다 저장된 모든 Claude Code·Codex 계정의 사용량을 백그라운드에서 확인합니다. 비활성 프로필도 포함됩니다. Kiln을 열어 두기만 하면 되고, 계정 설정 화면을 띄워 둘 필요는 없습니다.</p>
+<ul>
+<li>각 카드에는 마지막으로 확인에 성공한 시각이 표시되며, 확인에 실패하면 마지막으로 받은 막대가 그대로 남습니다.</li>
+<li>새로 고침 버튼을 누르면 제공자의 요청 한도 안에서 다시 확인합니다.</li>
+<li>Codex 사용량 구간에는 보고된 길이가 5시간이나 7일과 일치할 때만 이름이 붙습니다.</li>
+</ul>
+<p>이 확인은 읽기 전용입니다. Kiln은 모델 프롬프트를 보내지 않고 초기화 크레딧도 쓰지 않습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>상황</th>
+<th>Kiln의 동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>제공자의 요청 한도 제한</td>
+<td>제공자가 요청한 시간(1분~1일)만큼, 따로 알려 주지 않으면 5분 동안 기다립니다. 직접 확인할 때도 이만큼 늦어집니다.</td>
+</tr>
+<tr>
+<td>자격 증명 거부(401)</td>
+<td>해당 자격 증명의 확인을 1시간 동안 멈춥니다. 새로 갱신된 토큰은 기다리지 않고 확인할 수 있습니다.</td>
+</tr>
+<tr>
+<td>그 밖의 실패</td>
+<td>다음 주기에 다시 시도합니다. 직접 다시 시도할 수도 있습니다.</td>
+</tr>
+<tr>
+<td>인식할 수 없는 응답</td>
+<td>값을 지어내지 않고 사용량을 확인할 수 없다고 표시합니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>토큰이 만료되거나 취소되면, 실행 중인 CLI는 여전히 잘 동작하는데 사용량 확인만 막힐 수 있습니다. 실패가 계속되면 해당 프로필 메뉴에서 <strong>다시 로그인</strong>을 선택하세요.</p>
+<h2 id="antigravity-accounts">Antigravity 계정</h2>
+<blockquote class="callout"><p><strong>참고</strong> Antigravity 계정은 Kiln 0.2.12에서 새로 추가되었으며 macOS에서만 쓸 수 있습니다. Windows에서는 터미널에서 <code>agy</code>를 실행해 로그인하세요.</p>
+</blockquote>
+<p>Antigravity CLI(<code>agy</code>)용 Google 계정을 여러 개 저장해 두고, 새 작업에 쓸 계정을 고를 수 있습니다.</p>
+<ol>
+<li><strong>설정 → 계정 → Antigravity</strong>를 열고 <strong>새 계정 추가</strong>를 선택합니다. Kiln이 임시 비공개 터미널에서, 설치된 CLI의 Google 로그인을 시작합니다.</li>
+<li>브라우저에서 로그인을 마친 뒤 <strong>적용</strong>을 선택합니다.</li>
+<li>다른 계정도 같은 방법으로 추가하고, 새 작업에서 그 계정을 쓰려면 <strong>전환</strong>을 선택합니다.</li>
+</ol>
+<p>실행 중인 작업은 원래 계정을 계속 씁니다. 행 메뉴에서 이름 변경, 삭제, 같은 Google 계정으로 다시 로그인을 할 수 있습니다. <strong>현재 로그인한 계정 저장</strong>을 선택하면 일반 CLI의 Google 로그인을 가져옵니다.</p>
+<p>계정마다 비공개 홈과 macOS 키체인이 따로 있으므로, Antigravity 환경설정, 설정, 대화도 계정별로 분리됩니다. Kiln은 일반 CLI의 로그인을 바꾸거나 기본 키체인을 변경하지 않습니다. 계정 홈에는 셸, Git, SSH 설정처럼 평소 홈 디렉터리에 있는 파일이 들어 있지 않습니다. 워크스페이스 파일은 그대로 쓸 수 있습니다.</p>
+<p>Antigravity 계정에는 사용량 막대가 표시되지 않고, 자동으로 전환되지도 않습니다. <code>agy</code>가 할당량에 도달했다고 보고하면 Kiln이 초기화 시각과 함께 알림을 띄웁니다. 로그인에는 Google OAuth를 쓰며, Google Cloud 프로젝트 설정은 자동으로 해 주지 않습니다.</p>
+<p>이 계정들의 대화도 대화 동기화에 포함되며, 같은 대화로 재시작해도 원래 계정이 유지됩니다. <a href="conversations.html">대화와 업데이트</a>를 참고하세요.</p>
+<h2 id="where-credentials-are-stored">자격 증명 저장 위치</h2>
+<p>macOS에서 Kiln은 저장된 자격 증명을 키체인에 보관하며, 키체인을 초기화하거나 교체하지 않습니다. Windows에서는 저장된 자격 증명을 Windows 사용자 키로 보호되는 비공개 파일에 보관합니다. 계정 목록에는 프로필 이름과 메타데이터만 들어 있고, 액세스 토큰이나 리프레시 토큰은 들어 있지 않습니다. 로그인 링크와 코드는 설정이나 로그에 남기지 않습니다.</p>
+<h2 id="troubleshooting">문제 해결</h2>
+<ul>
+<li><strong>로그인이 실패할 때:</strong> 브라우저와 네트워크 연결을 확인한 뒤 다시 시도하세요.</li>
+<li><strong>CLI를 찾을 수 없을 때:</strong> CLI가 없으면 계정 카드에 표시됩니다. 해당 에이전트의 공식 CLI를 설치하세요.</li>
+</ul>
+<p>CLI 자체를 업데이트하는 방법은 <a href="conversations.html#cli-updates">대화와 업데이트</a>를 참고하세요.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="agents.html"><small>이전</small>에이전트</a><a class="pn next" href="conversations.html"><small>다음</small>대화와 업데이트</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="11.5"></div><p class="crumb">ドキュメント<b>Kiln を使う</b></p></div><h1>アカウント</h1><p class="desc">Claude Code、Codex、Antigravity のアカウントを複数保存し、ブラウザーでのログイン、アカウントの切り替え、使用量の更新を行う方法を説明します。</p><p>Kiln はエージェントのアカウントごとにプロファイルを保持するので、ログアウトしなくても個人用と仕事用のサブスクリプションを切り替えて使えます。<strong>設定 → アカウント</strong>では、Claude Code と Codex のサブスクリプションアカウントと、macOS では Antigravity の Google アカウントを管理できます。</p>
+<p>まず、各エージェントの公式 CLI をインストールしてください。ログインはその CLI を通じて行います。Kiln が独自の OAuth プロバイダーを実装したり、プロバイダーのアカウントポリシーを回避したりすることはありません。</p>
+<h2 id="add-an-account">アカウントを追加する</h2>
+<ol>
+<li>エージェントのカードで<strong>アカウントを追加</strong>を選びます。</li>
+<li>プロファイルに<strong>個人用</strong>や<strong>仕事用</strong>などの名前を付けます。</li>
+<li><strong>ブラウザーでログイン</strong>を選び、ブラウザーで認証を完了します。</li>
+</ol>
+<p>Kiln はバックグラウンドで待機し、CLI がログインの成功を報告するとすぐにプロファイルを保存します。ターミナルを開いたり、ログインコマンドを実行したりする必要はありません。アカウントの設定を開いている間は、進行状況の確認、ログインページの再表示、キャンセルができます。ログインの試行は 5 分で期限切れになります。</p>
+<p>ブラウザーのコールバックが使えない場合、Claude Code が代わりにログインコードを表示することがあります。そのときは、コードを貼り付けるための伏せ字の入力欄が Kiln に表示されます。</p>
+<blockquote class="callout"><p><strong>警告</strong> この入力欄にはログインコードだけを貼り付けてください。パスワードや API キーは絶対に入力しないでください。</p>
+</blockquote>
+<p>公式 CLI ですでにログインしている場合は、<strong>現在のログインを保存</strong>を選ぶと、そのログインをプロファイルとして取り込めます。</p>
+<h2 id="choose-which-account-to-use">使うアカウントを選ぶ</h2>
+<p>ログインするとプロファイルが保存されますが、既存の CLI セッションが使っているアカウントには影響しません。</p>
+<ul>
+<li>新しくログインしたプロファイルの横にある<strong>適用</strong>を選ぶと、新しいセッションでそのプロファイルが使われます。</li>
+<li>既存のプロファイルで<strong>切り替え</strong>を選ぶと、そのプロファイルが使用中になります。</li>
+<li>プロファイルの名前は、その行のメニューから変更できます。</li>
+</ul>
+<p>保存したアカウントは、Kiln が開くパネル用の構成をそれぞれ個別に持つので、すべてのアカウントで同時にログイン状態を保てます。実行中のエージェントセッションは、開始時のアカウントを使い続けます。切り替えた後に新しいアカウントを使うには、エージェントのパネルを新しく開いてください。通常のシェルでコマンドを入力して起動した CLI はそのシェルの構成を使い続けます。Kiln がその CLI を再起動したり、認証情報を置き換えたりすることはありません。</p>
+<p>実行中のパネルが使用量の上限に達しても、Kiln が別のアカウントに自動で切り替えることはありません。ここで別のアカウントを選び、新しいパネルを開いてください。</p>
+<h2 id="sign-in-again">再ログインする</h2>
+<p>プロファイルのログインを直したいときに使います。プロファイルを削除して作り直す必要はありません。</p>
+<ol>
+<li>アカウントの行のメニューを開き、<strong>再ログイン</strong>を選びます。</li>
+<li>表示されたアカウント名とメールアドレスを確認し、<strong>ブラウザーでログイン</strong>を選びます。</li>
+<li>同じアカウントでログインし、完了したら<strong>適用</strong>を選びます。</li>
+</ol>
+<p>プロファイルの名前、一覧内の位置、会話の履歴はそのまま残り、実行中のターミナルも再起動されません。ブラウザーで別のアカウントを選ぶと、そのログインは拒否されます。キャンセルしたり失敗したりした場合も、プロファイルは元のままです。</p>
+<p>新しい認証情報は<strong>適用</strong>を選ぶまで保留されるため、ブラウザーでのログインによって、セッションが使っているログインが知らないうちに置き換わることはありません。以前のログインをキャッシュしている実行中の CLI は、新しいログインを適用した後に再開が必要な場合があります。</p>
+<h3 id="sign-in-required">ログインが必要</h3>
+<p>プロファイルの認証情報がローカルの認証情報ストアから失われていることが確認されると、その行に<strong>ログインが必要</strong>と<strong>再ログイン</strong>ボタンが表示されます。この確認は、アカウントの設定を開いている間と更新したときに、バックグラウンドで行われます。</p>
+<p>これはローカルでの確認なので、オンラインでアカウントが有効であることまでは保証しません。トークンは CLI 自身が更新するため、ネットワークの障害やアクセストークンの期限切れはログアウトとは見なしません。ローカルの認証情報が残っているのにプロバイダーがログインを拒否する場合は、行のメニューから<strong>再ログイン</strong>を使ってください。</p>
+<h2 id="usage-updates">使用量の更新</h2>
+<p>Kiln は、保存済みのすべての Claude Code と Codex のアカウントを、使用中でないプロファイルも含めて、アプリの起動時とその後 5 分ごとにバックグラウンドで確認します。Kiln を開いたままにしておいてください。アカウントの設定を表示し続ける必要はありません。</p>
+<ul>
+<li>各カードには最後に確認が成功した時刻が表示され、確認に失敗した場合は最後に取得したバーが残ります。</li>
+<li>更新ボタンを押すと、プロバイダーのレート制限の範囲内で再度確認します。</li>
+<li>Codex の使用量の期間は、報告された長さが 5 時間または 7 日に一致する場合にだけラベルが付きます。</li>
+</ul>
+<p>これらの確認は読み取り専用です。Kiln がモデルにプロンプトを送ったり、リセット用のクレジットを使ったりすることはありません。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>状況</th>
+<th>Kiln の動作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>プロバイダーのレート制限</td>
+<td>プロバイダーが指定する時間（1 分から 1 日の間）、指定がなければ 5 分待ちます。手動の確認もこの間は待たされます。</td>
+</tr>
+<tr>
+<td>認証情報の拒否（401）</td>
+<td>その認証情報の確認を 1 時間停止します。新しく更新されたトークンは待たずに確認できます。</td>
+</tr>
+<tr>
+<td>その他の失敗</td>
+<td>次の周期で再試行します。手動で再試行することもできます。</td>
+</tr>
+<tr>
+<td>認識できない応答</td>
+<td>値を推測で埋めず、使用量を取得不可として表示します。</td>
+</tr>
+</tbody>
+</table></div>
+<p>トークンが期限切れになったり失効したりすると、実行中の CLI は動いていても、使用量を確認できなくなることがあります。失敗が続く場合は、そのプロファイルのメニューで<strong>再ログイン</strong>を選んでください。</p>
+<h2 id="antigravity-accounts">Antigravity アカウント</h2>
+<blockquote class="callout"><p><strong>注意</strong> Antigravity アカウントは Kiln 0.2.12 で追加された機能で、macOS でのみ利用できます。Windows では、ターミナルで <code>agy</code> を実行してログインします。</p>
+</blockquote>
+<p>Antigravity CLI（<code>agy</code>）用に Google アカウントを複数保存し、新しい作業で使うアカウントを選べます。</p>
+<ol>
+<li><strong>設定 → アカウント → Antigravity</strong> を開き、<strong>アカウントを追加</strong>を選びます。Kiln が一時的な専用ターミナルで、インストール済み CLI の Google ログインを開始します。</li>
+<li>ブラウザーでログインを完了し、<strong>適用</strong>を選びます。</li>
+<li>別のアカウントも同じ手順で追加し、新しい作業でそのアカウントを使うときは<strong>切り替え</strong>を選びます。</li>
+</ol>
+<p>実行中の作業は元のアカウントを使い続けます。行のメニューからは、名前の変更、削除、同じ Google アカウントでの再ログインができます。<strong>現在のログインを保存</strong>を選ぶと、通常の CLI の Google ログインを取り込めます。</p>
+<p>各アカウントは専用のホームと macOS キーチェーンを持ち、Antigravity の環境設定、設定、会話もアカウントごとに分かれます。Kiln が通常の CLI のログインを置き換えたり、既定のキーチェーンを変更したりすることはありません。アカウントのホームには、シェル、Git、SSH の設定など、普段のホームにあるファイルは含まれません。ワークスペースのファイルは引き続き使えます。</p>
+<p>Antigravity アカウントには使用量のバーは表示されず、自動で切り替わることもありません。<code>agy</code> がクォータの上限に達したと報告すると、Kiln はリセット時刻を添えて通知を表示します。ログインには Google OAuth を使います。Google Cloud プロジェクトのセットアップは自動化されていません。</p>
+<p>これらのアカウントの会話も会話の同期の対象になり、同じ会話で再起動しても元のアカウントが保たれます。詳しくは<a href="conversations.html">会話とアップデート</a>を参照してください。</p>
+<h2 id="where-credentials-are-stored">認証情報の保存場所</h2>
+<p>macOS では、保存した認証情報はキーチェーンに格納されます。Kiln がキーチェーンをリセットしたり置き換えたりすることはありません。Windows では、Windows のユーザーキーで保護された非公開のファイルに保存されます。アカウントの一覧にはプロファイル名とメタデータだけが含まれ、アクセストークンやリフレッシュトークンは含まれません。ログイン用のリンクやコードは、設定にもログにも書き込まれません。</p>
+<h2 id="troubleshooting">トラブルシューティング</h2>
+<ul>
+<li><strong>ログインに失敗する:</strong> ブラウザーとネットワーク接続を確認してから、もう一度試してください。</li>
+<li><strong>CLI が見つからない:</strong> CLI が見つからないことは、アカウントのカードに表示されます。そのエージェントの公式 CLI をインストールしてください。</li>
+</ul>
+<p>CLI 自体をアップデートするには、<a href="conversations.html#cli-updates">会話とアップデート</a>を参照してください。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="agents.html"><small>前へ</small>エージェント</a><a class="pn next" href="conversations.html"><small>次へ</small>会話とアップデート</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="11.5"></div><p class="crumb">文档<b>使用 Kiln</b></p></div><h1>账户</h1><p class="desc">保存多个 Claude Code、Codex 和 Antigravity 账户，通过浏览器登录，在账户之间切换，并让用量信息保持最新。</p><p>Kiln 为你使用的每个代理账户各保存一份配置，在个人订阅和工作订阅之间切换时无需退出登录。打开<strong>设置 → 账户</strong>，即可管理 Claude Code 和 Codex 的订阅账户，以及 macOS 上 Antigravity 使用的 Google 账户。</p>
+<p>请先为每个代理安装官方 CLI。Kiln 通过该 CLI 登录，从不自行实现 OAuth 提供方，也不会绕过提供方的账户政策。</p>
+<h2 id="add-an-account">添加账户</h2>
+<ol>
+<li>在代理卡片上选择<strong>添加账户</strong>。</li>
+<li>为配置命名，例如<strong>个人</strong>或<strong>工作</strong>。</li>
+<li>选择<strong>通过浏览器登录</strong>，在浏览器中完成身份验证。</li>
+</ol>
+<p>Kiln 在后台等待，CLI 一报告登录成功就保存这份配置。不需要打开终端，也不需要运行登录命令。账户设置打开期间，可以查看进度、重新打开登录页面或取消登录。每次登录尝试五分钟后失效。</p>
+<p>如果浏览器回调不可用，Claude Code 可能会改为显示登录代码。这时 Kiln 会显示一个掩码输入框，把代码粘贴进去即可。</p>
+<blockquote class="callout"><p><strong>警告</strong> 这个输入框只用来粘贴登录代码，切勿在其中输入密码或 API 密钥。</p>
+</blockquote>
+<p>已经用官方 CLI 登录过？选择<strong>保存当前登录账户</strong>，即可把这次登录导入为一份配置。</p>
+<h2 id="choose-which-account-to-use">选择要用的账户</h2>
+<p>登录只会保存配置，不会改动现有 CLI 会话正在使用的账户。</p>
+<ul>
+<li>在新登录的配置旁选择<strong>应用</strong>，新会话就会使用它。</li>
+<li>在已有配置上选择<strong>切换</strong>，将其设为当前账户。</li>
+<li>在配置所在行的菜单中可以重命名配置。</li>
+</ul>
+<p>对于 Kiln 打开的面板，每个已保存的账户都有各自独立的配置，因此所有账户可以同时保持登录。正在运行的代理会话继续使用启动时的账户；切换后，新开一个代理面板才会用上新账户。在普通 Shell 中手动运行的 CLI 继续使用该 Shell 的配置，Kiln 绝不会重启它，也不会替换它的凭据。</p>
+<p>运行中的面板达到用量限制时，Kiln 不会把它轮换到其他账户。请在这里改选其他账户，再新开一个面板。</p>
+<h2 id="sign-in-again">重新登录</h2>
+<p>某份配置的登录需要修复时，用这个功能即可保留配置，不必删掉重建。</p>
+<ol>
+<li>打开该账户行的菜单，选择<strong>重新登录</strong>。</li>
+<li>核对显示的账户名称和电子邮件，然后选择<strong>通过浏览器登录</strong>。</li>
+<li>用同一个账户登录，完成后选择<strong>应用</strong>。</li>
+</ol>
+<p>Kiln 会保留配置的名称、在列表中的位置和对话历史，也不会重启正在运行的终端。如果在浏览器中选了其他账户，本次尝试会被拒绝。取消或失败的尝试同样不会影响这份配置。</p>
+<p>新凭据要等你选择<strong>应用</strong>后才生效，因此浏览器登录绝不会在你不知情时替换会话正在使用的登录信息。正在运行的 CLI 如果缓存了旧的登录信息，应用新登录后可能需要恢复会话。</p>
+<h3 id="sign-in-required">需要重新登录</h3>
+<p>本地凭据存储确认某份配置的凭据已经不存在时，该行会显示<strong>需要重新登录</strong>，并提供<strong>重新登录</strong>按钮。账户设置打开期间以及你手动刷新时，Kiln 会在后台做这项检查。</p>
+<p>这只是本地检查，不能证明账户在线上仍然有效。网络故障和访问令牌过期都不算退出登录，因为 CLI 会自行刷新令牌。如果提供方拒绝了登录，而本地凭据仍在，请从该行菜单中选择<strong>重新登录</strong>。</p>
+<h2 id="usage-updates">用量更新</h2>
+<p>应用启动时，以及之后每隔五分钟，Kiln 会在后台检查每个已保存的 Claude Code 和 Codex 账户，未在使用的配置也包括在内。只要 Kiln 保持打开即可，账户设置不必一直显示。</p>
+<ul>
+<li>每张卡片显示上次成功检查的时间；检查失败时，保留上次已知的用量条。</li>
+<li>刷新按钮会请求再检查一次，但受提供方速率限制约束。</li>
+<li>只有上报的时长恰好是五小时或七天时，Codex 的用量窗口才会显示对应标签。</li>
+</ul>
+<p>这些检查是只读的。Kiln 不会发送模型提示词，也不会消耗重置额度。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>情况</th>
+<th>Kiln 的处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>提供方限速</td>
+<td>按提供方要求的时长等待（一分钟到一天之间）；提供方未说明时等待五分钟。手动检查也会顺延。</td>
+</tr>
+<tr>
+<td>凭据被拒绝（401）</td>
+<td>暂停检查该凭据一小时。刚刷新的令牌可以立即检查，无需等待。</td>
+</tr>
+<tr>
+<td>其他失败</td>
+<td>在下一个周期重试，也可以手动重试。</td>
+</tr>
+<tr>
+<td>无法识别的响应</td>
+<td>将用量显示为不可用，不会编造数值。</td>
+</tr>
+</tbody>
+</table></div>
+<p>令牌过期或被撤销时，用量检查可能无法进行，但正在运行的 CLI 仍能正常工作。如果一直失败，请在该配置的菜单中选择<strong>重新登录</strong>。</p>
+<h2 id="antigravity-accounts">Antigravity 账户</h2>
+<blockquote class="callout"><p><strong>注意</strong> Antigravity 账户是 Kiln 0.2.12 新增的功能，仅限 macOS。在 Windows 上，请在终端中运行 <code>agy</code> 登录。</p>
+</blockquote>
+<p>可以为 Antigravity CLI（<code>agy</code>）保存多个 Google 账户，并选择新任务使用哪一个。</p>
+<ol>
+<li>打开<strong>设置 → 账户 → Antigravity</strong>，选择<strong>添加账户</strong>。Kiln 会在一个临时的私有终端中启动已安装 CLI 的 Google 登录流程。</li>
+<li>在浏览器中完成登录，然后选择<strong>应用</strong>。</li>
+<li>对其他账户重复以上步骤，再选择<strong>切换</strong>，让新任务使用该账户。</li>
+</ol>
+<p>正在运行的任务继续使用原来的账户。行菜单提供重命名、删除，以及用同一个 Google 账户重新登录。<strong>保存当前登录账户</strong>会导入普通 CLI 的 Google 登录。</p>
+<p>每个账户都有自己的私有主目录和 macOS 钥匙串，Antigravity 的偏好设置、设置和对话也都按账户分开保存。Kiln 绝不会替换普通 CLI 的登录，也不会改动你的默认钥匙串。账户主目录里没有你平时主目录中的文件，例如 Shell、Git 或 SSH 配置，但工作区文件仍然可以访问。</p>
+<p>Antigravity 账户不显示用量条，也不会自动轮换。<code>agy</code> 上报配额已用完时，Kiln 会显示一条通知并注明重置时间。登录使用 Google OAuth；Google Cloud 项目的设置不会自动完成。</p>
+<p>这些账户的对话同样参与对话同步，在同一对话中重启时也会沿用原来的账户。详见<a href="conversations.html">对话与更新</a>。</p>
+<h2 id="where-credentials-are-stored">凭据存储位置</h2>
+<p>在 macOS 上，Kiln 把已保存的凭据存放在钥匙串中，绝不会重置或替换钥匙串。在 Windows 上，已保存的凭据是私有文件，由你的 Windows 用户密钥保护。账户列表只包含配置名称和元数据，从不包含访问令牌或刷新令牌。登录链接和代码不会写入设置或日志。</p>
+<h2 id="troubleshooting">故障排除</h2>
+<ul>
+<li><strong>登录失败：</strong>检查浏览器和网络连接，然后重试。</li>
+<li><strong>找不到 CLI：</strong>账户卡片上会提示缺少 CLI。请为该代理安装官方 CLI。</li>
+</ul>
+<p>要更新 CLI 本身，详见<a href="conversations.html#cli-updates">对话与更新</a>。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="agents.html"><small>上一页</small>代理</a><a class="pn next" href="conversations.html"><small>下一页</small>对话与更新</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Accounts", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "계정", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "アカウント", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "账户", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

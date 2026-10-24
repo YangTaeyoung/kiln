@@ -1,0 +1,12 @@
+!title Fix flaky checkout retry
+!activity running
+!clear
+[36mFLAKY RETRY[0m
+
+The retry test raced the idempotency cache.
+[32m✓[0m Pin the clock in payment/retry_test.go
+[32m✓[0m 200 runs, 0 failures
+
+Done. One commit on services/api.
+!activity done
+!hold

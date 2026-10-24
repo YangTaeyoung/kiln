@@ -1,0 +1,11 @@
+!title Bump the Rust toolchain
+!activity running
+!clear
+[36mTOOLCHAIN BUMP[0m
+
+[31merror[E0658][0m: use of unstable library feature
+  --> tools/bench/src/main.rs:41:9
+
+Stopped. The bench crate needs a pinned nightly.
+!activity failed
+!hold

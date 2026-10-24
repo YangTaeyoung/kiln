@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agents · Kiln Docs</title>
+<meta name="description" content="Start Claude Code, Codex and Antigravity tasks from a workspace, follow their state, and let Kiln retry Codex turns when the server is overloaded.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html" class="on" aria-current="page">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html" class="on" aria-current="page">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html" class="on" aria-current="page">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html" class="on" aria-current="page">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="9.2"></div><p class="crumb">Documentation<b>Using Kiln</b></p></div><h1>Agents</h1><p class="desc">Start Claude Code, Codex and Antigravity tasks from a workspace, follow their state, and let Kiln retry Codex turns when the server is overloaded.</p><p>Kiln runs Claude Code, Codex and Google's Antigravity CLI (<code>agy</code>) inside workspace panels. You write a request, pick an agent, and follow every task's state from the sidebar without hunting through terminals.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="6.8"><img src="../assets/shots/agents-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<h2 id="before-you-start">Before you start</h2>
+<p>The agents are external tools. Install the official CLI for each agent you use and sign in to it. Kiln does not include a subscription to any of them.</p>
+<ul>
+<li><strong>Claude Code</strong> and <strong>Codex</strong>: install the CLI, then add your accounts in <strong>Settings → Accounts</strong>. See <a href="accounts.html">Accounts</a>.</li>
+<li><strong>Antigravity</strong>: install <code>agy</code> with Google's installer. On macOS, sign in from <strong>Settings → Accounts → Antigravity</strong>. On Windows, sign in by running <code>agy</code> in a terminal. Kiln looks for <code>agy</code> in your <code>PATH</code>, <code>~/.local/bin</code>, <code>/opt/homebrew/bin</code> and <code>/usr/local/bin</code>.</li>
+</ul>
+<p>On Windows, Claude Code and Codex run as native Windows programs with their homes in <code>%USERPROFILE%\.codex</code> and <code>%USERPROFILE%\.claude</code>.</p>
+<h2 id="start-a-task">Start a task</h2>
+<p>Choose <strong>New Task</strong>, enter a request, pick an agent and start. The agent selector (Claude Code, Codex or Antigravity) stays directly below the request input. Repository context scrolls separately, so a long summary never pushes the start action out of reach.</p>
+<p>For Antigravity you can also use:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Action</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>New task → Antigravity</strong></td>
+<td>Starts <code>agy</code> in the current workspace.</td>
+</tr>
+<tr>
+<td><strong>New task → Open in folder → Antigravity</strong></td>
+<td>Asks for a folder first, then starts <code>agy</code> there.</td>
+</tr>
+<tr>
+<td><strong>New Antigravity task</strong> (command palette, <code>⌘K</code>)</td>
+<td>Starts an Antigravity task.</td>
+</tr>
+</tbody>
+</table></div>
+<p>When you choose Antigravity below a request, Kiln passes the request and the repository summary to <code>agy</code> as its initial prompt. The <code>antigravity</code> command opens the Antigravity editor, so Kiln does not treat it as an agent.</p>
+<p>Unsent requests are saved with the workspace and restored when Kiln reopens. Closing a workspace asks before discarding them.</p>
+<h2 id="work-across-several-repositories">Work across several repositories</h2>
+<p>Open a parent folder, such as <code>~/dev/projects</code>, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.</p>
+<p>Inspecting a repository in the Git or GitHub tools does not change the task's working directory. Use the repository selector in those tools to target one repository for Git operations. See <a href="workspaces.html">Workspaces and tasks</a> and <a href="git.html">Git and GitHub</a>.</p>
+<h2 id="follow-task-state">Follow task state</h2>
+<p>Each task row in the sidebar shows the state its agent reports.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Working</td>
+<td>The agent is working.</td>
+</tr>
+<tr>
+<td>Waiting for Input</td>
+<td>The agent needs your input.</td>
+</tr>
+<tr>
+<td>Done</td>
+<td>The agent finished.</td>
+</tr>
+<tr>
+<td>Failed</td>
+<td>The agent reported a failure.</td>
+</tr>
+<tr>
+<td>Session Open</td>
+<td>No state was reported. Kiln shows the session as open instead of guessing.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Running work appears first, followed by requests waiting for input and then older failures. Click a task to jump to its workspace, tab and split, including a pane hidden by zoom.</p>
+<h3 id="how-kiln-knows-the-state">How Kiln knows the state</h3>
+<p>An agent must report its state, or show a running title Kiln recognizes, for Kiln to display it accurately.</p>
+<ul>
+<li>Kiln recognizes the activity markers in Claude Code and Codex terminal titles, so running activity shows without extra setup.</li>
+<li>Claude Code's <code>✳</code> marker is not treated as completion, because it also appears while a dialog is open.</li>
+<li>Explicit waiting and failure signals take priority over title markers.</li>
+<li>An idle terminal is never treated as a completed task, and an unfinished launch command does not mark an idle agent as running.</li>
+</ul>
+<p>Scripts and other tools can report state with <code>kiln activity running</code>, <code>waiting</code>, <code>done</code> or <code>failed</code>. See <a href="terminal.html">Terminal</a> for activity reporting and notifications.</p>
+<h3 id="indicator-colors">Indicator colors</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Indicator</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td>Orange</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>Blue</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td>Antigravity mark in the tab, task list and sidebar</td>
+</tr>
+<tr>
+<td>Unidentified session</td>
+<td>Neutral</td>
+</tr>
+</tbody>
+</table></div>
+<p>Indicators appear in the sidebar, the tab and the panel header. In a split tab, the focused pane wins when states have equal priority. Warnings always take priority.</p>
+<h2 id="notifications-and-usage-limits">Notifications and usage limits</h2>
+<p>The notification center keeps recent notifications and links each one to its session. Reading a notification clears that session's attention state. On Windows, agent notifications appear as Windows toasts.</p>
+<p>When Antigravity reports that its quota is reached, Kiln shows a usage-limit notification with the reset time. For Claude Code and Codex, a panel keeps the account it was opened with. When an account reaches its usage limit, switch to another account in <strong>Settings → Accounts</strong> and open a new panel. See <a href="accounts.html#choose-which-account-to-use">Accounts</a>.</p>
+<h2 id="codex-capacity-recovery">Codex capacity recovery</h2>
+<p>While Kiln is open, managed Codex panels retry a turn that Codex ended because its server was overloaded. Only that specific Codex error starts a retry. Usage limits, sign-in failures, stream errors, cancelled turns and successful turns are left alone.</p>
+<ul>
+<li>Retries wait 15, 30, 60, 120 and 240 seconds. The panel shows a countdown and a <strong>Cancel auto-retry</strong> button.</li>
+<li>Typing in the panel after the failure cancels the pending retry, including a partly typed prompt.</li>
+<li>A new request you submit yourself starts a fresh set of retries.</li>
+<li>Retries keep the same account and model.</li>
+</ul>
+<p>If the Codex CLI is still open, Kiln sends one continuation prompt in the same conversation. If the CLI has exited, Kiln resumes the same conversation with its original account and working directory, then sends the prompt. The prompt asks Codex to check the current state before repeating a completed action. It does not replay your original request, and changes made during the failed turn are not rolled back.</p>
+<p>Retries apply to Codex panels opened with a saved account whose conversation Kiln has confirmed. Failures from before Kiln started watching a running CLI are left for you to handle.</p>
+<h2 id="codex-background-server-settings">Codex background-server settings</h2>
+<p>New Codex panels opened by Kiln run with <code>--no-daemon</code>, independent of Codex's own shared background server. If a Codex session reports <strong>Background server has incompatible feature settings</strong>, the session's feature flags differ from the ones that server saved. You can choose:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Run without daemon this time</strong></td>
+<td>Starts this session without restarting the shared Codex server. The CLI equivalent is <code>codex --no-daemon</code>.</td>
+</tr>
+<tr>
+<td><strong>Restart with these settings</strong></td>
+<td>Changes the shared settings. This can interrupt other clients' active or queued work, so check them first.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="accounts.html">Accounts</a>: sign in, switch accounts and watch usage.</li>
+<li><a href="conversations.html">Conversations and updates</a>: continue a conversation in another CLI and restart after updates.</li>
+</ul><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="terminal.html"><small>Previous</small>Terminal</a><a class="pn next" href="accounts.html"><small>Next</small>Accounts</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="9.2"></div><p class="crumb">문서<b>Kiln 사용하기</b></p></div><h1>에이전트</h1><p class="desc">워크스페이스에서 Claude Code, Codex, Antigravity 작업을 시작하고 상태를 확인하며, 서버 과부하로 중단된 Codex 턴을 Kiln이 다시 시도하게 합니다.</p><p>Kiln은 Claude Code, Codex, Google의 Antigravity CLI(<code>agy</code>)를 워크스페이스 패널 안에서 실행합니다. 요청을 쓰고 에이전트를 고르면, 터미널을 일일이 뒤질 필요 없이 사이드바에서 모든 작업의 상태를 확인할 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="6.8"><img src="../assets/shots/agents-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<h2 id="before-you-start">시작하기 전에</h2>
+<p>에이전트는 외부 도구입니다. 사용할 에이전트마다 공식 CLI를 설치하고 로그인하세요. Kiln에는 어떤 에이전트의 구독도 포함되어 있지 않습니다.</p>
+<ul>
+<li><strong>Claude Code</strong>와 <strong>Codex</strong>: CLI를 설치한 뒤 <strong>설정 → 계정</strong>에서 계정을 추가합니다. <a href="accounts.html">계정</a>을 참고하세요.</li>
+<li><strong>Antigravity</strong>: Google 설치 프로그램으로 <code>agy</code>를 설치합니다. macOS에서는 <strong>설정 → 계정 → Antigravity</strong>에서, Windows에서는 터미널에서 <code>agy</code>를 실행해 로그인합니다. Kiln은 <code>PATH</code>, <code>~/.local/bin</code>, <code>/opt/homebrew/bin</code>, <code>/usr/local/bin</code>에서 <code>agy</code>를 찾습니다.</li>
+</ul>
+<p>Windows에서 Claude Code와 Codex는 네이티브 Windows 프로그램으로 실행되며, 홈 디렉터리는 각각 <code>%USERPROFILE%\.codex</code>와 <code>%USERPROFILE%\.claude</code>입니다.</p>
+<h2 id="start-a-task">작업 시작하기</h2>
+<p><strong>새 작업</strong>을 선택하고 요청을 입력한 뒤 에이전트를 골라 시작합니다. 에이전트 선택기(Claude Code, Codex, Antigravity)는 요청 입력란 바로 아래에 고정되어 있습니다. 저장소 컨텍스트는 따로 스크롤되므로, 요약이 길어도 시작 버튼이 화면 밖으로 밀려나지 않습니다.</p>
+<p>Antigravity는 다음 방법으로도 시작할 수 있습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>동작</th>
+<th>하는 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>새 작업 → Antigravity</strong></td>
+<td>현재 워크스페이스에서 <code>agy</code>를 시작합니다.</td>
+</tr>
+<tr>
+<td><strong>새 작업 → 폴더에서 열기 → Antigravity</strong></td>
+<td>먼저 폴더를 고르게 한 뒤 그 폴더에서 <code>agy</code>를 시작합니다.</td>
+</tr>
+<tr>
+<td><strong>Antigravity로 새 작업</strong> (명령 팔레트, <code>⌘K</code>)</td>
+<td>Antigravity 작업을 시작합니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>요청 아래에서 Antigravity를 고르면 Kiln은 요청과 저장소 요약을 <code>agy</code>의 첫 프롬프트로 넘깁니다. <code>antigravity</code> 명령은 Antigravity 편집기를 여는 명령이므로 Kiln은 이를 에이전트로 다루지 않습니다.</p>
+<p>보내지 않은 요청은 워크스페이스와 함께 저장되고, Kiln을 다시 열면 복원됩니다. 워크스페이스를 닫을 때는 요청을 버리기 전에 확인을 받습니다.</p>
+<h2 id="work-across-several-repositories">여러 저장소 함께 다루기</h2>
+<p>프론트엔드, 백엔드, 공유 라이브러리가 각각 다른 Git 저장소에 있다면 <code>~/dev/projects</code> 같은 상위 폴더를 여세요. Kiln은 이 폴더를 에이전트의 작업 루트로 유지하고 찾아낸 저장소 구성을 요청에 함께 넣을 수 있으므로, 요청 하나로 모든 저장소를 다룰 수 있습니다.</p>
+<p>Git이나 GitHub 도구에서 저장소를 살펴봐도 작업이 실행되는 디렉터리는 바뀌지 않습니다. Git 작업을 적용할 저장소는 해당 도구의 저장소 선택기에서 고릅니다. <a href="workspaces.html">워크스페이스와 작업</a>과 <a href="git.html">Git과 GitHub</a>를 참고하세요.</p>
+<h2 id="follow-task-state">작업 상태 확인하기</h2>
+<p>사이드바의 각 작업 행에는 에이전트가 보고한 상태가 표시됩니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>상태</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>작업 중</td>
+<td>에이전트가 작업하고 있습니다.</td>
+</tr>
+<tr>
+<td>입력 대기</td>
+<td>에이전트가 내 입력을 기다립니다.</td>
+</tr>
+<tr>
+<td>완료</td>
+<td>에이전트가 작업을 마쳤습니다.</td>
+</tr>
+<tr>
+<td>실패</td>
+<td>에이전트가 실패를 보고했습니다.</td>
+</tr>
+<tr>
+<td>세션 열림</td>
+<td>보고된 상태가 없습니다. Kiln은 짐작하지 않고 세션이 열려 있다고만 표시합니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>실행 중인 작업이 맨 위에 오고, 입력을 기다리는 요청, 이전에 실패한 작업 순으로 이어집니다. 작업을 클릭하면 해당 워크스페이스, 탭, 분할 화면으로 이동하며, 확대 때문에 가려진 패널도 다시 보입니다.</p>
+<h3 id="how-kiln-knows-the-state">Kiln이 상태를 파악하는 방법</h3>
+<p>Kiln이 상태를 정확히 표시하려면 에이전트가 상태를 보고하거나 Kiln이 인식하는 실행 중 제목을 띄워야 합니다.</p>
+<ul>
+<li>Kiln은 Claude Code와 Codex의 터미널 제목에 나오는 활동 표시를 인식하므로, 따로 설정하지 않아도 실행 중 활동이 표시됩니다.</li>
+<li>Claude Code의 <code>✳</code> 표시는 대화상자가 열려 있을 때도 나타나므로 완료로 보지 않습니다.</li>
+<li>명시적인 대기·실패 신호가 있으면 제목 표시보다 우선합니다.</li>
+<li>유휴 상태의 터미널을 완료된 작업으로 보는 일은 없으며, 끝나지 않은 실행 명령 때문에 유휴 에이전트가 실행 중으로 표시되지도 않습니다.</li>
+</ul>
+<p>스크립트나 다른 도구는 <code>kiln activity running</code>, <code>waiting</code>, <code>done</code>, <code>failed</code>로 상태를 보고할 수 있습니다. 활동 보고와 알림은 <a href="terminal.html">터미널</a>을 참고하세요.</p>
+<h3 id="indicator-colors">표시 색상</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>에이전트</th>
+<th>표시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td>주황색</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>파란색</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td>탭, 작업 목록, 사이드바에 Antigravity 마크</td>
+</tr>
+<tr>
+<td>식별되지 않은 세션</td>
+<td>중립색</td>
+</tr>
+</tbody>
+</table></div>
+<p>표시는 사이드바, 탭, 패널 헤더에 나타납니다. 분할된 탭에서 상태의 우선순위가 같으면 포커스된 패널의 상태를 따릅니다. 경고는 언제나 우선합니다.</p>
+<h2 id="notifications-and-usage-limits">알림과 사용량 한도</h2>
+<p>알림 센터는 최근 알림을 보관하고 각 알림을 해당 세션과 연결해 둡니다. 알림을 읽으면 그 세션의 확인 필요 상태가 풀립니다. Windows에서는 에이전트 알림이 Windows 토스트로 뜹니다.</p>
+<p>Antigravity가 할당량에 도달했다고 보고하면 Kiln은 초기화 시각과 함께 사용량 한도 알림을 띄웁니다. Claude Code와 Codex 패널은 처음 열 때 쓴 계정을 계속 씁니다. 계정이 사용량 한도에 도달하면 <strong>설정 → 계정</strong>에서 다른 계정으로 전환하고 새 패널을 여세요. <a href="accounts.html#choose-which-account-to-use">계정</a>을 참고하세요.</p>
+<h2 id="codex-capacity-recovery">Codex 용량 초과 복구</h2>
+<p>Kiln이 열려 있는 동안, Kiln이 관리하는 Codex 패널은 서버 과부하로 Codex가 중단한 턴을 다시 시도합니다. 재시도는 이 Codex 오류에서만 시작되며, 사용량 한도, 로그인 실패, 스트림 오류, 취소된 턴, 성공한 턴에는 관여하지 않습니다.</p>
+<ul>
+<li>재시도 간격은 15, 30, 60, 120, 240초입니다. 패널에는 카운트다운과 <strong>자동 재시도 취소</strong> 버튼이 표시됩니다.</li>
+<li>실패한 뒤 패널에 입력하면 대기 중인 재시도가 취소됩니다. 프롬프트를 일부만 입력해도 마찬가지입니다.</li>
+<li>직접 새 요청을 보내면 재시도가 처음부터 다시 시작됩니다.</li>
+<li>재시도할 때도 같은 계정과 모델을 씁니다.</li>
+</ul>
+<p>Codex CLI가 아직 열려 있으면 Kiln은 같은 대화에 이어 가기 프롬프트를 한 번 보냅니다. CLI가 이미 종료되었다면 원래 계정과 작업 디렉터리로 같은 대화를 재개한 뒤 프롬프트를 보냅니다. 이 프롬프트는 이미 끝낸 동작을 반복하기 전에 현재 상태부터 확인하라고 Codex에 요청합니다. 원래 요청을 다시 보내지 않으며, 실패한 턴에서 생긴 변경도 되돌리지 않습니다.</p>
+<p>재시도는 저장된 계정으로 연 Codex 패널 가운데 Kiln이 대화를 확인한 패널에만 적용됩니다. Kiln이 실행 중인 CLI를 지켜보기 전에 일어난 실패는 직접 처리해야 합니다.</p>
+<h2 id="codex-background-server-settings">Codex 백그라운드 서버 설정</h2>
+<p>Kiln이 여는 새 Codex 패널은 <code>--no-daemon</code>으로 실행되므로 Codex 자체의 공유 백그라운드 서버와 별개로 동작합니다. Codex 세션에 <strong>Background server has incompatible feature settings</strong>가 표시되면, 그 세션의 기능 플래그가 서버에 저장된 값과 다르다는 뜻입니다. 이때는 다음 중 하나를 고를 수 있습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>옵션</th>
+<th>효과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Run without daemon this time</strong></td>
+<td>공유 Codex 서버를 재시작하지 않고 이 세션을 시작합니다. CLI의 <code>codex --no-daemon</code>과 같습니다.</td>
+</tr>
+<tr>
+<td><strong>Restart with these settings</strong></td>
+<td>공유 설정을 바꿉니다. 다른 클라이언트에서 진행 중이거나 대기 중인 작업이 중단될 수 있으니 먼저 확인하세요.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="accounts.html">계정</a>: 로그인, 계정 전환, 사용량 확인</li>
+<li><a href="conversations.html">대화와 업데이트</a>: 다른 CLI에서 대화 이어 가기, 업데이트 후 재시작</li>
+</ul><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="terminal.html"><small>이전</small>터미널</a><a class="pn next" href="accounts.html"><small>다음</small>계정</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="9.2"></div><p class="crumb">ドキュメント<b>Kiln を使う</b></p></div><h1>エージェント</h1><p class="desc">ワークスペースから Claude Code、Codex、Antigravity の作業を開始して状態を確認する方法と、サーバーの混雑時に Kiln が Codex のターンを再試行する仕組みを説明します。</p><p>Kiln は、Claude Code、Codex、Google の Antigravity CLI（<code>agy</code>）をワークスペースのパネルで実行します。リクエストを書いてエージェントを選ぶだけで、ターミナルを探し回らなくても、すべての作業の状態をサイドバーで確認できます。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="6.8"><img src="../assets/shots/agents-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<h2 id="before-you-start">始める前に</h2>
+<p>エージェントは外部のツールです。使うエージェントごとに公式の CLI をインストールし、ログインしておいてください。Kiln にはどのエージェントのサブスクリプションも含まれていません。</p>
+<ul>
+<li><strong>Claude Code</strong> と <strong>Codex</strong>: CLI をインストールしてから、<strong>設定 → アカウント</strong>でアカウントを追加します。詳しくは<a href="accounts.html">アカウント</a>を参照してください。</li>
+<li><strong>Antigravity</strong>: Google のインストーラーで <code>agy</code> をインストールします。macOS では<strong>設定 → アカウント → Antigravity</strong> からログインします。Windows では、ターミナルで <code>agy</code> を実行してログインします。Kiln は <code>agy</code> を <code>PATH</code>、<code>~/.local/bin</code>、<code>/opt/homebrew/bin</code>、<code>/usr/local/bin</code> から探します。</li>
+</ul>
+<p>Windows では、Claude Code と Codex はネイティブの Windows プログラムとして動作し、ホームディレクトリは <code>%USERPROFILE%\.codex</code> と <code>%USERPROFILE%\.claude</code> です。</p>
+<h2 id="start-a-task">作業を開始する</h2>
+<p><strong>新しい作業</strong>を選んでリクエストを入力し、エージェントを選んで開始します。エージェントの選択欄（Claude Code、Codex、Antigravity）は、常にリクエスト入力欄のすぐ下にあります。リポジトリのコンテキストは別にスクロールするので、概要が長くても開始ボタンが画面の外に押し出されることはありません。</p>
+<p>Antigravity では、次の方法も使えます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>新しい作業 → Antigravity</strong></td>
+<td>現在のワークスペースで <code>agy</code> を起動します。</td>
+</tr>
+<tr>
+<td><strong>新しい作業 → フォルダーで開く → Antigravity</strong></td>
+<td>先にフォルダーを選ぶよう求め、そのフォルダーで <code>agy</code> を起動します。</td>
+</tr>
+<tr>
+<td><strong>Antigravity の新規タスク</strong>（コマンドパレット、<code>⌘K</code>）</td>
+<td>Antigravity の作業を開始します。</td>
+</tr>
+</tbody>
+</table></div>
+<p>リクエストの下で Antigravity を選ぶと、Kiln はリクエストとリポジトリの概要を最初のプロンプトとして <code>agy</code> に渡します。<code>antigravity</code> コマンドは Antigravity のエディターを開くものなので、Kiln はエージェントとして扱いません。</p>
+<p>未送信のリクエストはワークスペースと一緒に保存され、Kiln を再び開くと復元されます。ワークスペースを閉じるときは、破棄する前に確認が表示されます。</p>
+<h2 id="work-across-several-repositories">複数のリポジトリにまたがって作業する</h2>
+<p>フロントエンド、バックエンド、共有ライブラリが別々の Git リポジトリにある場合は、<code>~/dev/projects</code> のような親フォルダーを開きます。Kiln はそのフォルダーをエージェントの作業ルートとして保ち、検出したリポジトリ構成をリクエストに含めることができるため、1 つのリクエストですべてのリポジトリを扱えます。</p>
+<p>Git や GitHub のツールでリポジトリを確認しても、作業ディレクトリは変わりません。Git 操作の対象を 1 つのリポジトリにするには、それらのツールにあるリポジトリセレクターを使います。詳しくは<a href="workspaces.html">ワークスペースと作業</a>と <a href="git.html">Git と GitHub</a> を参照してください。</p>
+<h2 id="follow-task-state">作業の状態を確認する</h2>
+<p>サイドバーの各作業の行には、エージェントが報告した状態が表示されます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>状態</th>
+<th>意味</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>作業中</td>
+<td>エージェントが作業しています。</td>
+</tr>
+<tr>
+<td>入力待ち</td>
+<td>エージェントが入力を求めています。</td>
+</tr>
+<tr>
+<td>完了</td>
+<td>エージェントが作業を終えました。</td>
+</tr>
+<tr>
+<td>失敗</td>
+<td>エージェントが失敗を報告しました。</td>
+</tr>
+<tr>
+<td>セッション開始済み</td>
+<td>状態が報告されていません。Kiln は推測せず、開いているセッションとして表示します。</td>
+</tr>
+</tbody>
+</table></div>
+<p>並び順は、実行中の作業、入力待ちのリクエスト、以前に失敗した作業の順です。作業をクリックすると、そのワークスペース、タブ、分割に移動します。拡大表示で隠れているパネルも表示されます。</p>
+<h3 id="how-kiln-knows-the-state">Kiln が状態を知る仕組み</h3>
+<p>Kiln が状態を正確に表示するには、エージェントが状態を報告するか、Kiln が認識できる実行中のタイトルを表示する必要があります。</p>
+<ul>
+<li>Kiln は Claude Code と Codex のターミナルタイトルにあるアクティビティマーカーを認識するため、追加の設定なしで実行中のアクティビティが表示されます。</li>
+<li>Claude Code の <code>✳</code> マーカーはダイアログが開いている間にも表示されるため、完了とは見なしません。</li>
+<li>明示的な入力待ちと失敗のシグナルは、タイトルのマーカーより優先されます。</li>
+<li>アイドル状態のターミナルが完了した作業として扱われることはなく、終了していない起動コマンドによって、アイドル状態のエージェントが実行中と表示されることもありません。</li>
+</ul>
+<p>スクリプトやその他のツールは、<code>kiln activity running</code>、<code>waiting</code>、<code>done</code>、<code>failed</code> で状態を報告できます。アクティビティの報告と通知については<a href="terminal.html">ターミナル</a>を参照してください。</p>
+<h3 id="indicator-colors">インジケーターの色</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>エージェント</th>
+<th>インジケーター</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td>オレンジ</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>青</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td>タブ、作業一覧、サイドバーに Antigravity のマーク</td>
+</tr>
+<tr>
+<td>識別できないセッション</td>
+<td>無彩色</td>
+</tr>
+</tbody>
+</table></div>
+<p>インジケーターは、サイドバー、タブ、パネルヘッダーに表示されます。分割したタブで状態の優先度が同じときは、フォーカスのあるパネルの状態が表示されます。警告は常に優先されます。</p>
+<h2 id="notifications-and-usage-limits">通知と使用量の上限</h2>
+<p>通知センターには最近の通知が残り、各通知は対応するセッションにひも付いています。通知を読むと、そのセッションの要確認状態が解除されます。Windows では、エージェントの通知が Windows のトースト通知として表示されます。</p>
+<p>Antigravity がクォータの上限に達したと報告すると、Kiln はリセット時刻を添えて使用量上限の通知を表示します。Claude Code と Codex では、パネルは開いたときのアカウントを使い続けます。アカウントが使用量の上限に達したら、<strong>設定 → アカウント</strong>で別のアカウントに切り替え、新しいパネルを開いてください。詳しくは<a href="accounts.html#choose-which-account-to-use">アカウント</a>を参照してください。</p>
+<h2 id="codex-capacity-recovery">Codex の混雑時の自動復旧</h2>
+<p>Kiln が開いている間、Kiln が管理する Codex のパネルでは、サーバーの混雑が原因で Codex が終了したターンを再試行します。再試行が始まるのは、この特定の Codex エラーのときだけです。使用量の上限、ログインの失敗、ストリームのエラー、キャンセルされたターン、成功したターンは再試行の対象外です。</p>
+<ul>
+<li>再試行までの待ち時間は 15、30、60、120、240 秒です。パネルにはカウントダウンと<strong>自動再試行をキャンセル</strong>ボタンが表示されます。</li>
+<li>失敗の後にパネルで何か入力すると、入力途中のプロンプトであっても、保留中の再試行はキャンセルされます。</li>
+<li>自分で新しいリクエストを送信した場合、再試行は改めて 1 回目から数えられます。</li>
+<li>再試行では同じアカウントとモデルを使います。</li>
+</ul>
+<p>Codex CLI がまだ開いている場合、Kiln は同じ会話に続行用のプロンプトを 1 回送ります。CLI が終了している場合は、元のアカウントと作業ディレクトリで同じ会話を再開してから、そのプロンプトを送ります。このプロンプトは、完了済みの操作を繰り返す前に現在の状態を確認するよう Codex に求めるものです。元のリクエストを再送することはなく、失敗したターンの間に行われた変更が元に戻されることもありません。</p>
+<p>再試行の対象は、保存済みのアカウントで開いた Codex のパネルのうち、Kiln が会話を確認できたものです。実行中の CLI を Kiln が監視し始める前に起きた失敗は、自分で対処してください。</p>
+<h2 id="codex-background-server-settings">Codex のバックグラウンドサーバーの設定</h2>
+<p>Kiln が新しく開く Codex のパネルは <code>--no-daemon</code> で実行されるので、Codex 本体の共有バックグラウンドサーバーからは独立しています。Codex のセッションが <strong>Background server has incompatible feature settings</strong>（バックグラウンドサーバーの機能設定に互換性がありません）と報告した場合は、そのセッションの機能フラグが、サーバーに保存されている設定と食い違っています。次のいずれかを選べます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>オプション</th>
+<th>効果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Run without daemon this time</strong>（今回はデーモンなしで実行）</td>
+<td>共有の Codex サーバーを再起動せずに、このセッションを開始します。CLI では <code>codex --no-daemon</code> に相当します。</td>
+</tr>
+<tr>
+<td><strong>Restart with these settings</strong>（この設定で再起動）</td>
+<td>共有の設定を変更します。ほかのクライアントの実行中または待機中の処理が中断される場合があるため、先に確認してください。</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="next-steps">次のステップ</h2>
+<ul>
+<li><a href="accounts.html">アカウント</a>では、ログイン、アカウントの切り替え、使用量の確認について説明しています。</li>
+<li><a href="conversations.html">会話とアップデート</a>では、別の CLI で会話を続ける方法と、アップデート後に再起動する方法を説明しています。</li>
+</ul><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="terminal.html"><small>前へ</small>ターミナル</a><a class="pn next" href="accounts.html"><small>次へ</small>アカウント</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="9.2"></div><p class="crumb">文档<b>使用 Kiln</b></p></div><h1>代理</h1><p class="desc">在工作区中启动 Claude Code、Codex 和 Antigravity 任务，跟踪任务状态，并在服务器过载时由 Kiln 重试 Codex 回合。</p><p>Kiln 在工作区面板中运行 Claude Code、Codex 和 Google 的 Antigravity CLI（<code>agy</code>）。写好请求、选好代理，每个任务的状态都能在侧边栏看到，不必在一个个终端之间翻找。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="6.8"><img src="../assets/shots/agents-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<h2 id="before-you-start">开始之前</h2>
+<p>这些代理都是外部工具。请为要用的每个代理安装官方 CLI 并登录。Kiln 不含其中任何一个的订阅。</p>
+<ul>
+<li><strong>Claude Code</strong> 和 <strong>Codex</strong>：安装 CLI，然后在<strong>设置 → 账户</strong>中添加账户。详见<a href="accounts.html">账户</a>。</li>
+<li><strong>Antigravity</strong>：用 Google 提供的安装程序安装 <code>agy</code>。在 macOS 上，从<strong>设置 → 账户 → Antigravity</strong> 登录；在 Windows 上，在终端中运行 <code>agy</code> 登录。Kiln 会在 <code>PATH</code>、<code>~/.local/bin</code>、<code>/opt/homebrew/bin</code> 和 <code>/usr/local/bin</code> 中查找 <code>agy</code>。</li>
+</ul>
+<p>在 Windows 上，Claude Code 和 Codex 以原生 Windows 程序运行，主目录分别是 <code>%USERPROFILE%\.codex</code> 和 <code>%USERPROFILE%\.claude</code>。</p>
+<h2 id="start-a-task">启动任务</h2>
+<p>选择<strong>新建任务</strong>，输入请求，选择代理并启动。代理选择器（Claude Code、Codex 或 Antigravity）固定在请求输入框正下方。仓库上下文单独滚动，摘要再长也不会把启动按钮挤出视野。</p>
+<p>Antigravity 还有以下入口：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>新建任务 → Antigravity</strong></td>
+<td>在当前工作区中启动 <code>agy</code>。</td>
+</tr>
+<tr>
+<td><strong>新建任务 → 在文件夹中打开 → Antigravity</strong></td>
+<td>先选择文件夹，再在该文件夹中启动 <code>agy</code>。</td>
+</tr>
+<tr>
+<td><strong>新建 Antigravity 任务</strong>（命令面板，<code>⌘K</code>）</td>
+<td>启动一个 Antigravity 任务。</td>
+</tr>
+</tbody>
+</table></div>
+<p>在请求下方选择 Antigravity 时，Kiln 会把请求和仓库摘要作为初始提示词传给 <code>agy</code>。<code>antigravity</code> 命令打开的是 Antigravity 编辑器，因此 Kiln 不把它当作代理。</p>
+<p>未发送的请求随工作区一起保存，Kiln 重新打开时会恢复。关闭工作区时，丢弃这些请求前会先询问。</p>
+<h2 id="work-across-several-repositories">跨多个仓库工作</h2>
+<p>如果前端、后端和共享库分属不同的 Git 仓库，就打开它们的父文件夹，例如 <code>~/dev/projects</code>。Kiln 把这个文件夹作为代理的工作根目录，还可以把扫描到的仓库结构随请求一起附上，一个请求就能覆盖所有仓库。</p>
+<p>在 Git 或 GitHub 工具中查看某个仓库，不会改变任务的工作目录。要让 Git 操作针对某个仓库，请使用这些工具中的仓库选择器。详见<a href="workspaces.html">工作区与任务</a>和 <a href="git.html">Git 与 GitHub</a>。</p>
+<h2 id="follow-task-state">跟踪任务状态</h2>
+<p>侧边栏中的每一行任务都显示其代理上报的状态。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>状态</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>处理中</td>
+<td>代理正在工作。</td>
+</tr>
+<tr>
+<td>等待输入</td>
+<td>代理需要你输入。</td>
+</tr>
+<tr>
+<td>已完成</td>
+<td>代理已完成。</td>
+</tr>
+<tr>
+<td>失败</td>
+<td>代理上报失败。</td>
+</tr>
+<tr>
+<td>会话已打开</td>
+<td>没有上报任何状态。Kiln 只把会话显示为打开，不做猜测。</td>
+</tr>
+</tbody>
+</table></div>
+<p>运行中的工作排在最前，其次是等待输入的请求，再往后是较早的失败。点击任务即可跳到它所在的工作区、标签页和拆分视图，即使该面板因缩放而被隐藏。</p>
+<h3 id="how-kiln-knows-the-state">Kiln 如何获知状态</h3>
+<p>代理必须上报自己的状态，或者显示 Kiln 能识别的运行中标题，Kiln 才能准确显示状态。</p>
+<ul>
+<li>Kiln 能识别 Claude Code 和 Codex 终端标题中的活动标记，无需额外设置就能显示运行中的活动。</li>
+<li>Claude Code 的 <code>✳</code> 标记不算作完成，因为对话框打开时它也会出现。</li>
+<li>显式的等待和失败信号优先于标题标记。</li>
+<li>空闲的终端绝不会被当作已完成的任务；启动命令尚未结束，也不会让空闲的代理显示为运行中。</li>
+</ul>
+<p>脚本和其他工具可以用 <code>kiln activity running</code>、<code>waiting</code>、<code>done</code> 或 <code>failed</code> 上报状态。活动上报和通知详见<a href="terminal.html">终端</a>。</p>
+<h3 id="indicator-colors">指示器颜色</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>代理</th>
+<th>指示器</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td>橙色</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>蓝色</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td>标签页、任务列表和侧边栏中显示 Antigravity 标志</td>
+</tr>
+<tr>
+<td>无法识别的会话</td>
+<td>中性色</td>
+</tr>
+</tbody>
+</table></div>
+<p>指示器出现在侧边栏、标签页和面板标题栏中。在有拆分视图的标签页里，各状态优先级相同时，以获得焦点的面板为准。警告始终优先。</p>
+<h2 id="notifications-and-usage-limits">通知与用量限制</h2>
+<p>通知中心保留最近的通知，每条通知都关联到对应的会话。读过通知后，该会话的待处理状态随即清除。在 Windows 上，代理通知以 Windows 弹窗通知的形式出现。</p>
+<p>Antigravity 上报配额已用完时，Kiln 会显示一条用量限制通知，并注明重置时间。对于 Claude Code 和 Codex，面板始终使用打开时的账户。某个账户达到用量限制后，请在<strong>设置 → 账户</strong>中切换到其他账户，再新开一个面板。详见<a href="accounts.html#choose-which-account-to-use">账户</a>。</p>
+<h2 id="codex-capacity-recovery">Codex 容量恢复</h2>
+<p>Kiln 打开期间，如果 Codex 因服务器过载而结束了某个回合，由 Kiln 管理的 Codex 面板会重试该回合。只有这一种 Codex 错误会触发重试。用量限制、登录失败、流错误、已取消的回合和成功的回合都不会处理。</p>
+<ul>
+<li>重试间隔依次为 15、30、60、120 和 240 秒。面板上会显示倒计时和<strong>取消自动重试</strong>按钮。</li>
+<li>失败后在面板中输入任何内容，都会取消待执行的重试，输入到一半的提示词也算。</li>
+<li>你自己提交新请求时，会重新开始一轮重试。</li>
+<li>重试沿用同一个账户和模型。</li>
+</ul>
+<p>如果 Codex CLI 仍然开着，Kiln 会在同一对话中发送一条继续提示词。如果 CLI 已经退出，Kiln 会用原来的账户和工作目录恢复同一对话，再发送这条提示词。提示词会要求 Codex 先检查当前状态，再决定是否重复已完成的操作。它不会重放你的原始请求，失败回合中做出的更改也不会回滚。</p>
+<p>重试只适用于用已保存账户打开、且 Kiln 已确认其对话的 Codex 面板。Kiln 开始监视运行中的 CLI 之前发生的失败，需要你自行处理。</p>
+<h2 id="codex-background-server-settings">Codex 后台服务器设置</h2>
+<p>Kiln 新开的 Codex 面板以 <code>--no-daemon</code> 运行，与 Codex 自己的共享后台服务器相互独立。如果某个 Codex 会话提示 <strong>Background server has incompatible feature settings</strong>，说明该会话的功能标志与服务器保存的不一致。可以选择：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>选项</th>
+<th>效果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Run without daemon this time</strong></td>
+<td>不重启共享的 Codex 服务器，直接启动本次会话。对应的 CLI 命令是 <code>codex --no-daemon</code>。</td>
+</tr>
+<tr>
+<td><strong>Restart with these settings</strong></td>
+<td>更改共享设置。这可能会中断其他客户端正在进行或排队的工作，请先确认。</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="next-steps">后续步骤</h2>
+<ul>
+<li><a href="accounts.html">账户</a>：登录、切换账户和查看用量。</li>
+<li><a href="conversations.html">对话与更新</a>：在另一个 CLI 中继续对话，更新后重启。</li>
+</ul><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="terminal.html"><small>上一页</small>终端</a><a class="pn next" href="accounts.html"><small>下一页</small>账户</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Agents", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "에이전트", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "エージェント", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "代理", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

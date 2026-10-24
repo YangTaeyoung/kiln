@@ -25,6 +25,12 @@ and verify the intended version does not already exist as a published tag/releas
 Use a stable numeric version such as `0.1.1` for this channel; prerelease delivery
 needs a separate feed and must not replace the stable appcast.
 
+Bring the product site up to date before building. Run
+`python3 site/_build/check-site.py --ref origin/main`, reflect every listed user-facing
+change in `site/` (guide in all four languages, landing tiles, screenshots), rebuild with
+`python3 site/_build/build-docs.py`, and set the release version and commit in
+`site/_build/source.json`. See the [site README](../../site/README.md).
+
 Before the first public push, inspect both the files to be committed and existing
 Git history for credentials, private paths, real terminal captures and internal
 documents. `.gitignore` does not remove anything from existing commits. Inspect

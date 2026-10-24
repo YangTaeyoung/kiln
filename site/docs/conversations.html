@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Conversations and updates · Kiln Docs</title>
+<meta name="description" content="Continue a conversation between Claude Code and Codex, bring Antigravity conversations into both, and update agent CLIs without losing your place.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html" class="on" aria-current="page">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html" class="on" aria-current="page">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html" class="on" aria-current="page">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html" class="on" aria-current="page">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="13.8"></div><p class="crumb">Documentation<b>Using Kiln</b></p></div><h1>Conversations and updates</h1><p class="desc">Continue a conversation between Claude Code and Codex, bring Antigravity conversations into both, and update agent CLIs without losing your place.</p><p>Kiln can copy a workspace's conversations between Claude Code and Codex, so you can pick up where the other agent left off with <code>/resume</code>. It also ties each panel to its conversation, so a CLI update or restart returns you to the same place.</p>
+<h2 id="link-a-workspace">Link a workspace</h2>
+<ol>
+<li>Sign in to a Claude Code account and a Codex account in <strong>Settings → Accounts</strong>. See <a href="accounts.html">Accounts</a>.</li>
+<li>Right-click a workspace in the sidebar and choose <strong>Link conversations</strong>.</li>
+<li>In the dialog, set <strong>Recent conversations</strong> to the number of conversations to keep in sync. The default is <strong>20</strong>, and you can choose from 1 to 4096.</li>
+</ol>
+<p>Sync is opt-in for each workspace and runs while Kiln is open. It includes conversations anywhere inside the workspace folder, including ones you started outside Kiln.</p>
+<p>The limit counts the most recently active conversations in the workspace. Resuming an older conversation makes it eligible again. Lowering the limit stops syncing the rest, and their existing copies stay available.</p>
+<p>To stop, choose <strong>Unlink conversations</strong> from the same menu. Copies already made stay available in <code>/resume</code>. Closing a workspace pauses its sync.</p>
+<p>The link stays with the account pair shown in the status dialog, even if you later switch accounts.</p>
+<h2 id="continue-in-the-other-cli">Continue in the other CLI</h2>
+<p>Open the same project in the other CLI and use <code>/resume</code> to pick the conversation. Each linked conversation appears once in each CLI's resume list with the same title, in ordinary terminals and in Kiln account panels alike.</p>
+<p>The earlier messages show up in the CLI's normal conversation view and become part of the next request to the model. Kiln makes no model requests of its own.</p>
+<h3 id="what-carries-over">What carries over</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Content</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Your requests and the agent's answers</td>
+<td>Copied with their wording, line breaks and code blocks.</td>
+</tr>
+<tr>
+<td>Conversation name</td>
+<td>Shared by every copy. A rename in either CLI applies everywhere, and the most recent rename wins.</td>
+</tr>
+<tr>
+<td>Shell commands and file edits</td>
+<td>Shown as the other CLI's own tool records where it has a matching tool, otherwise as readable text.</td>
+</tr>
+<tr>
+<td>Images</td>
+<td>Kept.</td>
+</tr>
+<tr>
+<td>Reasoning, provider instructions, encrypted records</td>
+<td>Not copied.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Tool calls from the history never run again. A conversation with content Kiln cannot copy, such as documents or audio, fails visibly instead of being marked complete with something missing.</p>
+<h3 id="when-sync-runs">When sync runs</h3>
+<p>Automatic sync pauses for a workspace while any agent CLI in it is running, including while it waits for input. About a second after a CLI exits back to its shell, or its terminal closes, Kiln syncs again. Background checks run again 60 seconds after each check finishes.</p>
+<p>Only completed responses are copied. A conversation still being written is read once it has been unchanged for 10 seconds.</p>
+<h2 id="antigravity-conversations">Antigravity conversations</h2>
+<p>Antigravity (<code>agy</code>) conversations in a linked folder are copied to Claude Code and Codex, so <code>/resume</code> in either CLI continues them. Copying goes one way: Kiln only reads Antigravity's files and never writes to them.</p>
+<ul>
+<li>Requests, answers and tool calls are copied. Antigravity's reasoning stays in Antigravity.</li>
+<li>A turn appears once Antigravity answers it. A request Antigravity never answered, for example after its quota ran out, appears after five minutes without changes, followed by a note that Antigravity stopped before answering.</li>
+<li>Turns continued in Claude Code or Codex do not reach Antigravity.</li>
+<li>On macOS, conversations from <a href="accounts.html#antigravity-accounts">Antigravity accounts</a> are included.</li>
+</ul>
+<h2 id="when-both-sides-continue">When both sides continue</h2>
+<p>If the same conversation was continued in two CLIs before Kiln synced it, the side used most recently becomes the main history. The other continuation is kept as an archived branch and removed from that CLI's resume list. Choose <strong>Restore</strong> in the status dialog to turn the branch into a separate conversation in every CLI.</p>
+<p>If the copies of an Antigravity conversation win, the original stays unchanged in Antigravity and Kiln stops following it.</p>
+<h3 id="opening-a-linked-conversation-inside-kiln">Opening a linked conversation inside Kiln</h3>
+<p>When you open a linked conversation in a new Kiln panel while another Kiln panel holds it, Kiln stops the previous CLI, waits for it to exit, syncs the final state and opens only the new panel. If a CLI does not exit, the new panel waits with a visible status. Kiln never force-quits it.</p>
+<blockquote class="callout"><p><strong>Note</strong> External terminals and other apps do not take part in this handover. Close them before continuing the conversation in Kiln.</p>
+</blockquote>
+<h2 id="check-sync-status">Check sync status</h2>
+<p>Click a workspace's sync icon, or choose <strong>View conversation sync status</strong> from its context menu. The icon and dialog show waiting, working, attention needed, paused, or a green check when every completed conversation is synced.</p>
+<p>Each row shows a conversation's title, the CLIs that hold it and where to continue it with <code>/resume</code>. <strong>Conversation details</strong> lets you copy each conversation ID and a failed item's diagnostic.</p>
+<p>Warnings appear only for problems you can fix:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Warning</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A connected account folder is missing</td>
+<td><strong>Open account settings</strong></td>
+</tr>
+<tr>
+<td>Storage is full or cannot be written</td>
+<td><strong>Retry</strong></td>
+</tr>
+<tr>
+<td>The Codex CLI is missing</td>
+<td>Install Codex so conversations can be registered for <code>/resume</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Ignore</strong> hides a warning from the badge until a different problem occurs; it stays listed under <em>Show ignored warnings</em>. Conditions that need nothing from you appear in grey. <strong>Check again</strong> starts a fresh check right away.</p>
+<h2 id="cli-updates">CLI updates</h2>
+<p>Open <strong>Settings → Accounts → CLI updates</strong> to see each CLI's installed executable and version, and the latest published version where available.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>CLI</th>
+<th>How Kiln updates it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td><code>claude update</code>, keeping your configured update channel.</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>The Homebrew or npm installer it was installed with. Custom installations report that their own installer is required.</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td><code>agy update</code>. Antigravity checks its own latest version, so Kiln shows none.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Update a CLI from this page, or turn on <strong>Automatically update Codex, Claude Code, and Antigravity</strong> (off by default) to check every six hours while Kiln is open. Kiln never uses sudo.</p>
+<h2 id="restart-in-the-same-conversation">Restart in the same conversation</h2>
+<p>Choose <strong>… → Restart in the same conversation</strong> on a panel to reopen it in its current conversation. To do this after every update, turn on <strong>Restart sessions in the same conversation immediately after updates</strong> (off by default). It interrupts the panel's current response once the update has installed and the CLI reports its new version. The restart keeps the panel, layout, working directory and account. It does not resend your last request or repeat tool calls.</p>
+<p>Kiln stops the CLI with its normal <code>Ctrl-C</code> sequence. If the CLI refuses to stop, Kiln leaves it running and shows an error. If Kiln cannot confirm the original conversation after relaunch, it warns you and offers a retry.</p>
+<h3 id="which-panels-can-restart">Which panels can restart</h3>
+<p>Kiln tracks the conversation of each new Claude Code and Codex panel it opens, even when two panels share a folder. Open the panel menu to see its CLI version and conversation ID. Panels that existed before tracking and CLIs typed into an ordinary shell are not tracked, so open a new agent panel.</p>
+<blockquote class="callout"><p><strong>Tip</strong> Codex asks you to trust new hooks. If tracking stays pending, open <code>/hooks</code> in Codex, trust the Kiln hooks and send your next message. If hooks are disabled, automatic restart is unavailable.</p>
+</blockquote>
+<p>Antigravity panels are tracked without hooks. On Windows, Antigravity panels have no recorded conversation and are not restarted automatically.</p>
+<p>If a task's terminal disappears, Kiln resumes its recorded conversation instead of sending the original request again.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="accounts.html"><small>Previous</small>Accounts</a><a class="pn next" href="git.html"><small>Next</small>Git and GitHub</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="13.8"></div><p class="crumb">문서<b>Kiln 사용하기</b></p></div><h1>대화와 업데이트</h1><p class="desc">Claude Code와 Codex 사이에서 대화를 이어 가고, Antigravity 대화를 두 CLI로 가져오고, 하던 곳을 잃지 않고 에이전트 CLI를 업데이트합니다.</p><p>Kiln은 워크스페이스의 대화를 Claude Code와 Codex 사이에 복사할 수 있습니다. 그래서 한 에이전트가 멈춘 곳부터 다른 에이전트에서 <code>/resume</code>으로 이어 갈 수 있습니다. 또한 패널마다 대화를 연결해 두므로, CLI를 업데이트하거나 재시작해도 하던 곳으로 돌아옵니다.</p>
+<h2 id="link-a-workspace">워크스페이스 연동하기</h2>
+<ol>
+<li><strong>설정 → 계정</strong>에서 Claude Code 계정과 Codex 계정에 로그인합니다. <a href="accounts.html">계정</a>을 참고하세요.</li>
+<li>사이드바에서 워크스페이스를 우클릭하고 <strong>대화 연동</strong>을 선택합니다.</li>
+<li>대화상자의 <strong>최근 대화 수</strong>에 동기화할 대화 개수를 지정합니다. 기본값은 <strong>20</strong>이며, 1부터 4096까지 고를 수 있습니다.</li>
+</ol>
+<p>동기화는 워크스페이스마다 직접 켜야 하며, Kiln이 열려 있는 동안 실행됩니다. 워크스페이스 폴더 안이라면 어디서 시작한 대화든 포함되며, Kiln 밖에서 시작한 대화도 마찬가지입니다.</p>
+<p>한도는 워크스페이스에서 가장 최근에 활동한 대화부터 셉니다. 오래된 대화도 재개하면 다시 동기화 대상이 됩니다. 한도를 낮추면 나머지 대화는 동기화가 멈추지만, 이미 만든 사본은 계속 쓸 수 있습니다.</p>
+<p>연동을 끝내려면 같은 메뉴에서 <strong>대화 연동 해제</strong>를 선택합니다. 이미 만든 사본은 <code>/resume</code>에서 계속 쓸 수 있습니다. 워크스페이스를 닫으면 그 워크스페이스의 동기화는 일시 중지됩니다.</p>
+<p>연동은 상태 대화상자에 표시된 계정 쌍에 묶이며, 나중에 계정을 전환해도 바뀌지 않습니다.</p>
+<h2 id="continue-in-the-other-cli">다른 CLI에서 이어 가기</h2>
+<p>다른 CLI에서 같은 프로젝트를 열고 <code>/resume</code>으로 대화를 고릅니다. 연동된 대화는 일반 터미널이든 Kiln 계정 패널이든 각 CLI의 재개 목록에 같은 제목으로 한 번씩 나타납니다.</p>
+<p>이전 메시지는 CLI의 일반 대화 화면에 표시되고, 다음 모델 요청에 함께 포함됩니다. Kiln이 따로 모델에 요청을 보내지는 않습니다.</p>
+<h3 id="what-carries-over">넘어가는 내용</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>내용</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>내 요청과 에이전트의 답변</td>
+<td>문구, 줄바꿈, 코드 블록까지 그대로 복사됩니다.</td>
+</tr>
+<tr>
+<td>대화 이름</td>
+<td>모든 사본이 같은 이름을 씁니다. 어느 CLI에서 이름을 바꾸든 모든 곳에 반영되며, 가장 최근에 바꾼 이름이 우선합니다.</td>
+</tr>
+<tr>
+<td>셸 명령과 파일 편집</td>
+<td>상대 CLI에 대응하는 도구가 있으면 그 CLI의 도구 기록으로, 없으면 읽을 수 있는 텍스트로 표시됩니다.</td>
+</tr>
+<tr>
+<td>이미지</td>
+<td>유지됩니다.</td>
+</tr>
+<tr>
+<td>추론, 제공자 지침, 암호화된 기록</td>
+<td>복사되지 않습니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>기록 속의 도구 호출은 다시 실행되지 않습니다. 문서나 오디오처럼 Kiln이 복사할 수 없는 내용이 있는 대화는, 일부가 빠진 채 완료로 표시되지 않고 실패로 분명히 표시됩니다.</p>
+<h3 id="when-sync-runs">동기화 시점</h3>
+<p>워크스페이스에서 에이전트 CLI가 실행 중이면 그 워크스페이스의 자동 동기화는 일시 중지됩니다. CLI가 입력을 기다리는 동안에도 마찬가지입니다. CLI가 종료되어 셸로 돌아가거나 터미널이 닫히면 약 1초 뒤에 Kiln이 다시 동기화합니다. 백그라운드 확인은 이전 확인이 끝나고 60초 뒤에 다시 실행됩니다.</p>
+<p>완료된 응답만 복사됩니다. 아직 작성 중인 대화는 10초 동안 바뀌지 않으면 읽어 옵니다.</p>
+<h2 id="antigravity-conversations">Antigravity 대화</h2>
+<p>연동된 폴더의 Antigravity(<code>agy</code>) 대화는 Claude Code와 Codex로 복사되므로, 어느 CLI에서든 <code>/resume</code>으로 이어 갈 수 있습니다. 복사는 한 방향으로만 이루어집니다. Kiln은 Antigravity의 파일을 읽기만 하고 쓰지 않습니다.</p>
+<ul>
+<li>요청, 답변, 도구 호출이 복사됩니다. Antigravity의 추론은 Antigravity에만 남습니다.</li>
+<li>턴은 Antigravity가 답한 뒤에 나타납니다. 할당량이 바닥난 경우처럼 Antigravity가 끝내 답하지 않은 요청은 5분 동안 변화가 없으면 나타나고, 그 뒤에 Antigravity가 답하기 전에 멈췄다는 메모가 붙습니다.</li>
+<li>Claude Code나 Codex에서 이어 간 턴은 Antigravity로 넘어가지 않습니다.</li>
+<li>macOS에서는 <a href="accounts.html#antigravity-accounts">Antigravity 계정</a>의 대화도 포함됩니다.</li>
+</ul>
+<h2 id="when-both-sides-continue">양쪽에서 모두 이어 간 경우</h2>
+<p>Kiln이 동기화하기 전에 같은 대화를 두 CLI에서 각각 이어 갔다면, 가장 최근에 쓴 쪽이 기본 기록이 됩니다. 다른 쪽에서 이어 간 내용은 보관된 분기로 남고, 그 CLI의 재개 목록에서는 빠집니다. 상태 대화상자에서 <strong>복구</strong>를 선택하면 그 분기가 모든 CLI에서 별도의 대화가 됩니다.</p>
+<p>Antigravity 대화의 사본 쪽이 기본 기록이 되면, 원본은 Antigravity에 그대로 남고 Kiln은 원본을 더 이상 따라가지 않습니다.</p>
+<h3 id="opening-a-linked-conversation-inside-kiln">Kiln에서 연동된 대화 열기</h3>
+<p>다른 Kiln 패널에서 쓰고 있는 연동된 대화를 새 Kiln 패널에서 열면, Kiln은 이전 CLI를 중지하고 종료될 때까지 기다린 뒤 최종 상태를 동기화하고 새 패널만 엽니다. CLI가 종료되지 않으면 새 패널은 상태를 표시하며 기다립니다. Kiln은 CLI를 강제로 종료하지 않습니다.</p>
+<blockquote class="callout"><p><strong>참고</strong> 외부 터미널과 다른 앱은 이 인계 과정에 참여하지 않습니다. Kiln에서 대화를 이어 가기 전에 닫으세요.</p>
+</blockquote>
+<h2 id="check-sync-status">동기화 상태 확인하기</h2>
+<p>워크스페이스의 동기화 아이콘을 클릭하거나, 컨텍스트 메뉴에서 <strong>대화 연동 상태 보기</strong>를 선택합니다. 아이콘과 대화상자에는 대기, 진행 중, 확인 필요, 일시 중지 상태가 표시되고, 완료된 대화가 모두 동기화되면 초록색 체크가 표시됩니다.</p>
+<p>각 행에는 대화 제목, 그 대화가 있는 CLI, <code>/resume</code>으로 이어 갈 위치가 나옵니다. <strong>대화 정보</strong>에서는 각 대화 ID와 실패한 항목의 진단 정보를 복사할 수 있습니다.</p>
+<p>경고는 직접 해결할 수 있는 문제일 때만 나타납니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>경고</th>
+<th>조치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>연결된 계정 폴더가 없습니다</td>
+<td><strong>계정 설정 열기</strong></td>
+</tr>
+<tr>
+<td>저장 공간이 가득 찼거나 쓸 수 없습니다</td>
+<td><strong>다시 시도</strong></td>
+</tr>
+<tr>
+<td>Codex CLI가 없습니다</td>
+<td>대화를 <code>/resume</code>에 등록할 수 있도록 Codex를 설치합니다</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>무시</strong>를 선택하면 다른 문제가 생길 때까지 배지에 그 경고가 나타나지 않으며, 경고는 <em>무시한 경고 보기</em> 아래에 계속 남습니다. 따로 조치할 필요가 없는 상태는 회색으로 표시됩니다. <strong>다시 확인</strong>을 선택하면 바로 새로 확인합니다.</p>
+<h2 id="cli-updates">CLI 업데이트</h2>
+<p><strong>설정 → 계정 → CLI 업데이트</strong>를 열면 각 CLI의 설치된 실행 파일과 버전을 볼 수 있고, 확인 가능한 경우 최신 공개 버전도 함께 표시됩니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>CLI</th>
+<th>Kiln의 업데이트 방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td><code>claude update</code>. 설정해 둔 업데이트 채널을 유지합니다.</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>설치할 때 쓴 Homebrew 또는 npm 설치 프로그램. 그 밖의 방식으로 설치했다면 해당 설치 프로그램이 필요하다고 알려 줍니다.</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td><code>agy update</code>. 최신 버전은 Antigravity가 직접 확인하므로 Kiln은 표시하지 않습니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>이 페이지에서 CLI를 업데이트하거나, <strong>Codex·Claude Code·Antigravity 자동 업데이트</strong>(기본값: 꺼짐)를 켜서 Kiln이 열려 있는 동안 6시간마다 확인하게 할 수 있습니다. Kiln은 sudo를 쓰지 않습니다.</p>
+<h2 id="restart-in-the-same-conversation">같은 대화로 재시작하기</h2>
+<p>패널에서 <strong>… → 같은 대화로 재시작</strong>을 선택하면 지금 대화 그대로 패널을 다시 엽니다. 업데이트할 때마다 이렇게 하려면 <strong>업데이트 직후 같은 대화로 세션 재시작</strong>(기본값: 꺼짐)을 켜세요. 이 옵션을 켜면 업데이트가 설치되고 CLI가 새 버전을 보고하는 시점에 패널의 현재 응답이 중단됩니다. 재시작해도 패널, 레이아웃, 작업 디렉터리, 계정은 그대로입니다. 마지막 요청을 다시 보내거나 도구 호출을 반복하지는 않습니다.</p>
+<p>Kiln은 CLI의 일반적인 <code>Ctrl-C</code> 순서로 CLI를 중지합니다. CLI가 중지를 거부하면 그대로 실행되게 두고 오류를 표시합니다. 다시 실행한 뒤 원래 대화를 확인하지 못하면 경고를 띄우고 다시 시도할 수 있게 합니다.</p>
+<h3 id="which-panels-can-restart">재시작할 수 있는 패널</h3>
+<p>Kiln은 자신이 여는 새 Claude Code·Codex 패널의 대화를 패널마다 추적하며, 두 패널이 같은 폴더를 써도 따로 추적합니다. 패널 메뉴를 열면 CLI 버전과 대화 ID를 볼 수 있습니다. 추적 기능이 생기기 전부터 있던 패널과 일반 셸에서 직접 실행한 CLI는 추적되지 않으므로, 새 에이전트 패널을 여세요.</p>
+<blockquote class="callout"><p><strong>팁</strong> Codex는 새 훅을 신뢰할지 묻습니다. 추적이 계속 대기 상태라면 Codex에서 <code>/hooks</code>를 열고 Kiln 훅을 신뢰한 뒤 다음 메시지를 보내세요. 훅이 비활성화되어 있으면 자동 재시작을 쓸 수 없습니다.</p>
+</blockquote>
+<p>Antigravity 패널은 훅 없이 추적됩니다. Windows에서는 Antigravity 패널에 기록된 대화가 없으므로 자동으로 재시작되지 않습니다.</p>
+<p>작업의 터미널이 사라지면 Kiln은 원래 요청을 다시 보내지 않고, 기록해 둔 대화를 재개합니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="accounts.html"><small>이전</small>계정</a><a class="pn next" href="git.html"><small>다음</small>Git과 GitHub</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="13.8"></div><p class="crumb">ドキュメント<b>Kiln を使う</b></p></div><h1>会話とアップデート</h1><p class="desc">Claude Code と Codex の間での会話の引き継ぎ、Antigravity の会話の取り込み、作業の続きを失わずにエージェントの CLI をアップデートする方法を説明します。</p><p>Kiln はワークスペースの会話を Claude Code と Codex の間でコピーできるので、もう一方のエージェントが止めたところから <code>/resume</code> で作業を続けられます。また、各パネルを会話とひも付けて管理するので、CLI をアップデートしたり再起動したりしても、元の場所に戻れます。</p>
+<h2 id="link-a-workspace">ワークスペースを連携する</h2>
+<ol>
+<li><strong>設定 → アカウント</strong>で Claude Code のアカウントと Codex のアカウントにログインします。詳しくは<a href="accounts.html">アカウント</a>を参照してください。</li>
+<li>サイドバーでワークスペースを右クリックし、<strong>会話を連携</strong>を選びます。</li>
+<li>ダイアログで、同期を保つ会話の数を<strong>最近の会話数</strong>に設定します。既定値は <strong>20</strong> で、1 から 4096 まで選べます。</li>
+</ol>
+<p>同期はワークスペースごとに必要に応じて有効にするもので、Kiln が開いている間に実行されます。対象は、ワークスペースのフォルダー内にあるすべての会話です。Kiln の外で始めた会話も含まれます。</p>
+<p>上限の数は、ワークスペース内で最近使われた会話から順に数えます。古い会話を再開すると、再び同期の対象になります。上限を下げると、上限から外れた会話の同期は止まりますが、既存のコピーは引き続き使えます。</p>
+<p>同期をやめるには、同じメニューから<strong>会話の連携を解除</strong>を選びます。すでに作成されたコピーは <code>/resume</code> で引き続き使えます。ワークスペースを閉じると、その同期は一時停止します。</p>
+<p>連携は、状況ダイアログに表示されているアカウントの組み合わせにひも付いています。後でアカウントを切り替えても、この組み合わせは変わりません。</p>
+<h2 id="continue-in-the-other-cli">もう一方の CLI で続ける</h2>
+<p>もう一方の CLI で同じプロジェクトを開き、<code>/resume</code> で会話を選びます。連携された会話は、通常のターミナルでも Kiln のアカウントパネルでも、各 CLI の再開リストに同じタイトルで 1 回ずつ表示されます。</p>
+<p>以前のメッセージは CLI の通常の会話表示に現れ、次にモデルへ送るリクエストの一部になります。Kiln が独自にモデルへリクエストを送ることはありません。</p>
+<h3 id="what-carries-over">引き継がれる内容</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>内容</th>
+<th>結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>リクエストとエージェントの回答</td>
+<td>文言、改行、コードブロックを保ったままコピーされます。</td>
+</tr>
+<tr>
+<td>会話の名前</td>
+<td>すべてのコピーで共有されます。どちらの CLI で名前を変えてもすべてに反映され、最も新しい変更が優先されます。</td>
+</tr>
+<tr>
+<td>シェルコマンドとファイルの編集</td>
+<td>もう一方の CLI に対応するツールがあればそのツールの記録として、なければ読めるテキストとして表示されます。</td>
+</tr>
+<tr>
+<td>画像</td>
+<td>保持されます。</td>
+</tr>
+<tr>
+<td>推論、プロバイダーの指示、暗号化された記録</td>
+<td>コピーされません。</td>
+</tr>
+</tbody>
+</table></div>
+<p>履歴にあるツール呼び出しは再実行されません。ドキュメントや音声など、Kiln がコピーできない内容を含む会話は、一部が欠けたまま完了扱いにはせず、失敗として明示します。</p>
+<h3 id="when-sync-runs">同期が実行されるタイミング</h3>
+<p>ワークスペース内でエージェントの CLI が動いている間は、入力待ちのときも含め、そのワークスペースの自動同期は一時停止します。CLI が終了してシェルに戻るか、ターミナルが閉じてから約 1 秒後に、Kiln は再び同期します。バックグラウンドの確認は、前回の確認が終わってから 60 秒後に再び実行されます。</p>
+<p>コピーされるのは完了した応答だけです。書き込み中の会話は、10 秒間変更がなかった時点で読み込まれます。</p>
+<h2 id="antigravity-conversations">Antigravity の会話</h2>
+<p>連携したフォルダー内の Antigravity（<code>agy</code>）の会話は Claude Code と Codex にコピーされるため、どちらの CLI でも <code>/resume</code> で続けられます。コピーは一方向です。Kiln は Antigravity のファイルを読むだけで、書き込むことはありません。</p>
+<ul>
+<li>リクエスト、回答、ツール呼び出しがコピーされます。Antigravity の推論は Antigravity に残ります。</li>
+<li>ターンは、Antigravity が回答した時点で表示されます。クォータ切れなどで Antigravity が回答しなかったリクエストは、5 分間変更がなければ表示され、その後に Antigravity が回答前に停止したことを示すメモが付きます。</li>
+<li>Claude Code や Codex で続けたターンは、Antigravity には反映されません。</li>
+<li>macOS では、<a href="accounts.html#antigravity-accounts">Antigravity アカウント</a>の会話も含まれます。</li>
+</ul>
+<h2 id="when-both-sides-continue">両方で続けた場合</h2>
+<p>Kiln が同期する前に同じ会話を 2 つの CLI で続けた場合は、最後に使われた側がメインの履歴になります。もう一方の続きはアーカイブされたブランチとして保持され、その CLI の再開リストから外れます。状況ダイアログで<strong>復元</strong>を選ぶと、そのブランチがすべての CLI で独立した会話になります。</p>
+<p>Antigravity の会話のコピーが優先された場合、元の会話は Antigravity 内でそのまま残り、Kiln はそれ以降その会話を追跡しません。</p>
+<h3 id="opening-a-linked-conversation-inside-kiln">連携された会話を Kiln 内で開く</h3>
+<p>ある Kiln パネルで開いている連携済みの会話を、新しい Kiln パネルで開くと、Kiln は前の CLI を停止し、終了を待って最終状態を同期してから、新しいパネルだけを開きます。CLI が終了しない場合、新しいパネルは状況を表示したまま待機します。Kiln が強制終了することはありません。</p>
+<blockquote class="callout"><p><strong>注意</strong> 外部のターミナルやほかのアプリは、この引き継ぎの対象外です。Kiln で会話を続ける前に、それらを閉じてください。</p>
+</blockquote>
+<h2 id="check-sync-status">同期の状況を確認する</h2>
+<p>ワークスペースの同期アイコンをクリックするか、コンテキストメニューから<strong>会話の同期状況を表示</strong>を選びます。アイコンとダイアログには、待機中、処理中、要確認、一時停止のいずれかの状態が表示されます。完了した会話がすべて同期済みなら、緑のチェックが表示されます。</p>
+<p>各行には、会話のタイトル、その会話を保持している CLI、<code>/resume</code> で続けられる場所が表示されます。<strong>会話の詳細</strong>では、各会話の ID と、失敗した項目の診断情報をコピーできます。</p>
+<p>警告が表示されるのは、自分で解決できる問題の場合だけです。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>警告</th>
+<th>対処</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>接続しているアカウントのフォルダーが見つからない</td>
+<td><strong>アカウント設定を開く</strong></td>
+</tr>
+<tr>
+<td>ストレージがいっぱい、または書き込めない</td>
+<td><strong>再試行</strong></td>
+</tr>
+<tr>
+<td>Codex CLI が見つからない</td>
+<td><code>/resume</code> 用に会話を登録できるよう、Codex をインストールします</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>無視</strong>を選ぶと、別の問題が起きるまでその警告はバッジに表示されなくなります。無視した警告は、<em>無視した警告を表示</em> の下で引き続き確認できます。対応が不要な状態はグレーで表示されます。<strong>再確認</strong>を選ぶと、すぐに確認をやり直します。</p>
+<h2 id="cli-updates">CLI のアップデート</h2>
+<p><strong>設定 → アカウント → CLI 更新</strong>を開くと、各 CLI のインストール済みの実行ファイルとバージョンに加え、取得できる場合は公開済みの最新バージョンも表示されます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>CLI</th>
+<th>Kiln によるアップデート方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td>設定済みのアップデートチャネルを保ったまま <code>claude update</code> を実行します。</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>インストール時に使った Homebrew または npm のインストーラーでアップデートします。独自の方法でインストールした場合は、そのインストーラーが必要である旨が表示されます。</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td><code>agy update</code> を実行します。最新バージョンは Antigravity が自分で確認するため、Kiln には表示されません。</td>
+</tr>
+</tbody>
+</table></div>
+<p>CLI はこのページからアップデートできます。<strong>Codex・Claude Code・Antigravity を自動更新</strong>（既定ではオフ）をオンにすると、Kiln が開いている間、6 時間ごとに確認します。Kiln は sudo を使いません。</p>
+<h2 id="restart-in-the-same-conversation">同じ会話で再起動する</h2>
+<p>パネルで <strong>… → 同じ会話で再起動</strong>を選ぶと、現在の会話のままパネルを開き直します。アップデートのたびにこれを行うには、<strong>更新直後に同じ会話でセッションを再起動</strong>（既定ではオフ）をオンにします。この設定では、アップデートがインストールされ、CLI が新しいバージョンを報告した時点で、パネルで生成中の応答が中断されます。再起動してもパネル、レイアウト、作業ディレクトリ、アカウントは保たれます。直前のリクエストを再送したり、ツール呼び出しを繰り返したりはしません。</p>
+<p>Kiln は通常の <code>Ctrl-C</code> のシーケンスで CLI を停止します。CLI が停止に応じない場合は、そのまま実行させておき、エラーを表示します。再起動後に元の会話を確認できない場合は、警告を表示して再試行を提案します。</p>
+<h3 id="which-panels-can-restart">再起動できるパネル</h3>
+<p>Kiln は、自身が新しく開いた Claude Code と Codex のパネルの会話を、パネルごとに追跡します。2 つのパネルが同じフォルダーを使っていても区別されます。パネルのメニューを開くと、その CLI のバージョンと会話 ID を確認できます。追跡が始まる前からあったパネルや、通常のシェルで入力して起動した CLI は追跡されないため、新しいエージェントのパネルを開いてください。</p>
+<blockquote class="callout"><p><strong>ヒント</strong> Codex は新しいフックを信頼するかどうかを尋ねます。追跡が保留のままの場合は、Codex で <code>/hooks</code> を開き、Kiln のフックを信頼してから次のメッセージを送ってください。フックが無効になっている場合、自動の再起動は使えません。</p>
+</blockquote>
+<p>Antigravity のパネルはフックなしで追跡されます。Windows では、Antigravity のパネルには記録された会話がないため、自動では再起動されません。</p>
+<p>作業のターミナルがなくなった場合、Kiln は元のリクエストを再送せず、記録されている会話を再開します。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="accounts.html"><small>前へ</small>アカウント</a><a class="pn next" href="git.html"><small>次へ</small>Git と GitHub</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="13.8"></div><p class="crumb">文档<b>使用 Kiln</b></p></div><h1>对话与更新</h1><p class="desc">在 Claude Code 和 Codex 之间接续对话，把 Antigravity 对话同步到这两者，并在更新代理 CLI 时保留进度。</p><p>Kiln 可以在 Claude Code 和 Codex 之间复制工作区的对话，用 <code>/resume</code> 就能从另一个代理停下的地方接着做。它还会把每个面板绑定到对应的对话，CLI 更新或重启后都能回到原处。</p>
+<h2 id="link-a-workspace">关联工作区</h2>
+<ol>
+<li>在<strong>设置 → 账户</strong>中登录一个 Claude Code 账户和一个 Codex 账户。详见<a href="accounts.html">账户</a>。</li>
+<li>在侧边栏中右键点击工作区，选择<strong>关联对话</strong>。</li>
+<li>在对话框中，把<strong>最近对话数量</strong>设为要保持同步的对话数。默认值为 <strong>20</strong>，可设范围为 1 到 4096。</li>
+</ol>
+<p>同步需要按工作区逐个开启，并在 Kiln 打开期间运行。工作区文件夹内任何位置的对话都在同步范围内，包括你在 Kiln 之外发起的对话。</p>
+<p>上限按工作区中最近活跃的对话计算。恢复一个较早的对话，它就会重新进入同步范围。调低上限后，超出部分不再同步，但已有的副本仍然可用。</p>
+<p>要停止同步，从同一菜单中选择<strong>取消对话关联</strong>。已生成的副本仍可在 <code>/resume</code> 中使用。关闭工作区会暂停该工作区的同步。</p>
+<p>关联绑定在状态对话框中显示的那一对账户上，之后即使切换账户也不变。</p>
+<h2 id="continue-in-the-other-cli">在另一个 CLI 中继续</h2>
+<p>在另一个 CLI 中打开同一项目，用 <code>/resume</code> 选择对话。每个已关联的对话在每个 CLI 的恢复列表中都只出现一次，标题相同；无论是在普通终端还是 Kiln 的账户面板中都是如此。</p>
+<p>之前的消息会出现在 CLI 常规的对话视图中，并作为下一次模型请求的一部分发送。Kiln 本身不会发起任何模型请求。</p>
+<h3 id="what-carries-over">同步的内容</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>内容</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>你的请求和代理的回答</td>
+<td>原样复制，保留措辞、换行和代码块。</td>
+</tr>
+<tr>
+<td>对话名称</td>
+<td>所有副本共用。在任一 CLI 中重命名都会同步到各处，以最近一次重命名为准。</td>
+</tr>
+<tr>
+<td>Shell 命令和文件编辑</td>
+<td>另一个 CLI 有对应工具时，显示为该 CLI 自己的工具记录；否则显示为可读文本。</td>
+</tr>
+<tr>
+<td>图片</td>
+<td>保留。</td>
+</tr>
+<tr>
+<td>推理过程、提供方指令、加密记录</td>
+<td>不复制。</td>
+</tr>
+</tbody>
+</table></div>
+<p>历史中的工具调用绝不会再次执行。如果对话中有 Kiln 无法复制的内容（例如文档或音频），同步会明确显示失败，而不会在缺失内容的情况下标记为完成。</p>
+<h3 id="when-sync-runs">同步时机</h3>
+<p>工作区中只要有代理 CLI 在运行（包括等待输入时），该工作区的自动同步就会暂停。CLI 退回 Shell 或终端关闭后约一秒，Kiln 会再次同步。每次检查结束 60 秒后，后台会再检查一次。</p>
+<p>只复制已完成的回复。仍在写入的对话，要在 10 秒内没有变化后才会被读取。</p>
+<h2 id="antigravity-conversations">Antigravity 对话</h2>
+<p>已关联文件夹中的 Antigravity（<code>agy</code>）对话会复制到 Claude Code 和 Codex，在任一 CLI 中用 <code>/resume</code> 都能继续。复制是单向的：Kiln 只读取 Antigravity 的文件，从不写入。</p>
+<ul>
+<li>请求、回答和工具调用会被复制，Antigravity 的推理过程留在 Antigravity 中。</li>
+<li>每个回合在 Antigravity 回答后出现。Antigravity 始终没有回答的请求（例如配额用完后）会在五分钟内无变化后出现，后面附一条说明，指出 Antigravity 在回答前就已停止。</li>
+<li>在 Claude Code 或 Codex 中继续的回合不会同步回 Antigravity。</li>
+<li>在 macOS 上，<a href="accounts.html#antigravity-accounts">Antigravity 账户</a>的对话也包括在内。</li>
+</ul>
+<h2 id="when-both-sides-continue">两边都继续了对话</h2>
+<p>如果在 Kiln 同步之前，同一对话已在两个 CLI 中分别继续，最近使用的一方会成为主历史。另一方的后续内容保留为归档分支，并从该 CLI 的恢复列表中移除。在状态对话框中选择<strong>恢复</strong>，可将该分支变为每个 CLI 中的独立对话。</p>
+<p>如果 Antigravity 对话的副本成为主历史，原对话在 Antigravity 中保持不变，Kiln 也不再跟踪它。</p>
+<h3 id="opening-a-linked-conversation-inside-kiln">在 Kiln 中打开已关联的对话</h3>
+<p>在新的 Kiln 面板中打开一个已关联的对话时，如果另一个 Kiln 面板正占用这个对话，Kiln 会停止之前的 CLI，等它退出，同步最终状态，然后只保留新面板。如果 CLI 没有退出，新面板会等待并显示当前状态。Kiln 绝不会强制退出 CLI。</p>
+<blockquote class="callout"><p><strong>注意</strong> 外部终端和其他应用不参与这次交接。在 Kiln 中继续对话之前，请先关闭它们。</p>
+</blockquote>
+<h2 id="check-sync-status">查看同步状态</h2>
+<p>点击工作区的同步图标，或者从工作区的右键菜单中选择<strong>查看对话同步状态</strong>。图标和对话框会显示等待中、处理中、需要处理、已暂停；所有已完成的对话都同步后，显示绿色对勾。</p>
+<p>每一行显示对话标题、保存该对话的 CLI，以及在哪里用 <code>/resume</code> 继续。在<strong>对话详情</strong>中可以复制每个对话的 ID，以及失败项的诊断信息。</p>
+<p>只有你能自行解决的问题才会显示警告：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>警告</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>已连接的账户文件夹缺失</td>
+<td><strong>打开账户设置</strong></td>
+</tr>
+<tr>
+<td>存储空间已满或无法写入</td>
+<td><strong>重试</strong></td>
+</tr>
+<tr>
+<td>未安装 Codex CLI</td>
+<td>安装 Codex，以便为 <code>/resume</code> 注册对话</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>忽略</strong>会让该警告从徽标上隐藏，直到出现其他问题；它仍会列在 <em>显示已忽略的警告</em> 下。不需要你处理的情况以灰色显示。<strong>重新检查</strong>会立即重新检查一次。</p>
+<h2 id="cli-updates">CLI 更新</h2>
+<p>打开<strong>设置 → 账户 → CLI 更新</strong>，可以查看每个 CLI 已安装的可执行文件和版本，以及能获取时的最新发布版本。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>CLI</th>
+<th>Kiln 的更新方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td><code>claude update</code>，保留你配置的更新渠道。</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>使用安装时所用的 Homebrew 或 npm 安装程序。自定义安装会提示需要使用其自己的安装程序。</td>
+</tr>
+<tr>
+<td>Antigravity</td>
+<td><code>agy update</code>。Antigravity 自行检查最新版本，因此 Kiln 不显示最新版本。</td>
+</tr>
+</tbody>
+</table></div>
+<p>可以在此页面更新 CLI，也可以开启<strong>自动更新 Codex、Claude Code 和 Antigravity</strong>（默认关闭），让 Kiln 在打开期间每六小时检查一次。Kiln 从不使用 sudo。</p>
+<h2 id="restart-in-the-same-conversation">在同一对话中重启</h2>
+<p>在面板上选择 <strong>… → 在同一对话中重启</strong>，即可在当前对话中重新打开该面板。要在每次更新后都自动这样做，开启<strong>更新后立即在同一对话中重启会话</strong>（默认关闭）。更新安装完成、CLI 报告新版本后，它会中断面板当前的回复。重启会保留面板、布局、工作目录和账户，不会重新发送你的上一条请求，也不会重复执行工具调用。</p>
+<p>Kiln 用 CLI 常规的 <code>Ctrl-C</code> 序列停止 CLI。如果 CLI 拒绝停止，Kiln 会让它继续运行并显示错误。如果重新启动后无法确认原来的对话，Kiln 会发出警告并提供重试。</p>
+<h3 id="which-panels-can-restart">可以重启的面板</h3>
+<p>Kiln 会跟踪它新开的每个 Claude Code 和 Codex 面板的对话，即使两个面板共用一个文件夹也一样。打开面板菜单可以查看 CLI 版本和对话 ID。开始跟踪之前就已存在的面板，以及在普通 Shell 中手动运行的 CLI 都不会被跟踪，请新开一个代理面板。</p>
+<blockquote class="callout"><p><strong>提示</strong> Codex 会要求你信任新的钩子。如果跟踪一直处于待定状态，请在 Codex 中打开 <code>/hooks</code>，信任 Kiln 的钩子，然后发送下一条消息。钩子被禁用时，无法使用自动重启。</p>
+</blockquote>
+<p>Antigravity 面板无需钩子即可被跟踪。在 Windows 上，Antigravity 面板没有记录的对话，因此不会自动重启。</p>
+<p>如果任务的终端消失了，Kiln 会恢复记录的对话，而不是重新发送原始请求。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="accounts.html"><small>上一页</small>账户</a><a class="pn next" href="git.html"><small>下一页</small>Git 与 GitHub</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Conversations and updates", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "대화와 업데이트", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "会話とアップデート", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "对话与更新", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

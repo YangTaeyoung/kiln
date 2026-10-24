@@ -1,0 +1,31 @@
+!title Review the integration tests
+!read
+!clear
+!sleep 4.2
+!activity running
+[36mINTEGRATION REVIEW[0m
+
+Checked the checkout flow across both repositories.
+
+!sleep 0.8
+[32mPASS[0m  successful payment
+!sleep 0.35
+[32mPASS[0m  invalid card details
+!sleep 0.35
+[32mPASS[0m  network retry
+!sleep 0.35
+[32mPASS[0m  duplicate submission
+
+[2m24 tests passed · 0 failed[0m
+
+!sleep 0.8
+The API and frontend agree on the error response.
+
+!sleep 0.6
+[33mOne decision needs your input[0m
+Should a timed-out payment retry automatically,
+or ask the customer to try again?
+
+!activity waiting
+!read
+!hold
