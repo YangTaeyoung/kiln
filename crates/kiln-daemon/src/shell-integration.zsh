@@ -1,4 +1,16 @@
 # Standard OSC 133 boundaries; command text is hex to keep control bytes out of OSC.
+# Only Kiln's shells receive this wrapper; the ordinary CLI login stays intact.
+function agy {
+  local launcher=${KILN_AGENT_LAUNCHER:-}
+  case "${1:-}" in
+    --version|-v|--help|-h|update) command agy "$@"; return $? ;;
+  esac
+  if [[ -n $launcher && -x $launcher ]]; then
+    "$launcher" agent-shell --cwd "$PWD" -- "$@"
+  else
+    command agy "$@"
+  fi
+}
 autoload -Uz add-zsh-hook
 _kiln_preexec() {
   local hex=$(printf '%s' "$1" | /usr/bin/od -An -tx1 | /usr/bin/tr -d ' \n')

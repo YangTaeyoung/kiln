@@ -84,7 +84,7 @@ pub(crate) fn bounded_output_with_input(command: &mut std::process::Command, tim
     let mut child = command.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().context("credential store could not start")?;
     if let Some(input) = input {
         let sent = child.stdin.take().context("credential input unavailable").and_then(|mut stdin| stdin.write_all(input).map_err(Into::into));
-        if let Err(error) = sent { let _ = child.kill(); let _ = child.wait(); return Err(error); }
+        if let Err(error) = sent { reap_after_kill(child); return Err(error); }
     }
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -94,15 +94,25 @@ pub(crate) fn bounded_output_with_input(command: &mut std::process::Command, tim
     let started = std::time::Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait()? { break status; }
-        if started.elapsed() >= timeout { let _ = child.kill(); let _ = child.wait(); bail!("credential store timed out"); }
+        if started.elapsed() >= timeout { reap_after_kill(child); bail!("credential store timed out"); }
         std::thread::sleep(std::time::Duration::from_millis(10));
     };
+    while !out.is_finished() || !err.is_finished() {
+        if started.elapsed() >= timeout { bail!("credential store read timed out"); }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let (result, stdout) = out.join().map_err(|_| anyhow::anyhow!("credential store read failed"))?;
     result.context("credential store read failed")?;
     let (result, stderr) = err.join().map_err(|_| anyhow::anyhow!("credential store read failed"))?;
     result.context("credential store read failed")?;
     if stdout.len() > 262_144 || stderr.len() > 262_144 { bail!("credential store response too large"); }
     Ok(std::process::Output { status, stdout, stderr })
+}
+
+fn reap_after_kill(mut child: std::process::Child) {
+    let _ = child.kill();
+    // No shared mutex is held if macOS delays final process teardown.
+    std::thread::spawn(move || { let _ = child.wait(); });
 }
 
 fn security_result(operation: &str, success: bool, code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<Option<String>> {

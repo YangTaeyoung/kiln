@@ -12,6 +12,7 @@ mod limit;
 mod manager;
 mod login;
 mod usage_http;
+mod antigravity_usage;
 pub mod store;
 mod ui;
 
@@ -96,7 +97,16 @@ pub struct Usage {
     /// Codex rate-limit reset credits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets: Option<ResetCredits>,
+    /// Provider model groups, each with its own quota windows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<QuotaGroup>,
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QuotaGroup { pub name: String, pub buckets: Vec<QuotaBucket> }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QuotaBucket { pub window: String, pub used: Option<f32>, pub reset: Option<i64> }
 
 /// The result of redeeming a Codex rate-limit reset credit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

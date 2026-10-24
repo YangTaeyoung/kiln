@@ -26,6 +26,7 @@ pub(crate) struct LoginControl {
     pub status: Mutex<LoginStatus>,
     input: Mutex<Option<Box<dyn Write + Send>>>,
     terminal_input: AtomicBool,
+    code_submitted: AtomicBool,
     stop_readers: AtomicBool,
     child: Mutex<Option<Arc<Mutex<Child>>>>,
     finished: Mutex<bool>,
@@ -64,6 +65,13 @@ impl LoginControl {
 
     pub(crate) fn send_code(&self, code: &str) -> Result<()> {
         let code = code.trim();
+        let compact;
+        let code = if self.terminal_input.load(Ordering::Relaxed) && code.len() <= 4096 {
+            // Browser selection can include wrapping; single-line TextEdit turns
+            // pasted newlines into spaces. Remove this layout whitespace from the Google code.
+            compact = code.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            compact.as_str()
+        } else { code };
         if code.is_empty() || code.len() > 4096 || code.chars().any(char::is_control) {
             bail!(kiln_common::i18n::tr("브라우저에서 받은 로그인 코드를 입력하세요"));
         }
@@ -79,6 +87,10 @@ impl LoginControl {
         input.write_all(code.as_bytes()).and_then(|_| input.write_all(enter))
             .map_err(|_| anyhow::anyhow!(kiln_common::i18n::tr("로그인 코드를 전달하지 못했습니다. 다시 시도하세요")))?;
         input.flush()?;
+        if self.terminal_input.load(Ordering::Relaxed) {
+            self.code_submitted.store(true, Ordering::Relaxed);
+            self.status.lock().accepts_code = false;
+        }
         Ok(())
     }
 }
@@ -207,7 +219,27 @@ impl Drop for IsolatedLogin {
 
 struct OwnedChild(Arc<Mutex<Child>>);
 impl Drop for OwnedChild {
-    fn drop(&mut self) { let mut child = self.0.lock(); let _ = child.kill(); let _ = child.wait(); }
+    fn drop(&mut self) {
+        let _ = self.0.lock().kill();
+        let deadline = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < deadline {
+            let status = self.0.lock().try_wait();
+            match status {
+                Ok(Some(_)) | Err(_) => return,
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        // macOS may keep a killed PTY process in its exiting state. Never hold
+        // the shared child mutex inside wait(): GUI cancellation uses it too.
+        let child = self.0.clone();
+        std::thread::spawn(move || loop {
+            let status = child.lock().try_wait();
+            match status {
+                Ok(Some(_)) | Err(_) => break,
+                Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            }
+        });
+    }
 }
 
 struct LoginCompletion<'a>(&'a LoginControl);
@@ -282,7 +314,7 @@ pub(crate) fn run_login(source: &Env, tool: Tool, binary: &Path, control: &Arc<L
             Ok(None) => std::thread::sleep(Duration::from_millis(60)),
         }
     };
-    { let mut child = child.0.lock(); let _ = child.kill(); let _ = child.wait(); }
+    let _ = child.0.lock().kill();
     control.input.lock().take();
     control.stop_readers.store(true, Ordering::Relaxed);
     // Unix readers are nonblocking and stop within one polling interval. A
@@ -340,6 +372,7 @@ fn run_antigravity_login(source: &Env, binary: &Path, control: &Arc<LoginControl
                 screen.extend_from_slice(&bytes[..n]);
                 if screen.len() > 65536 { screen.drain(..screen.len()-65536); }
                 let text = plain_terminal(&screen);
+                if let Some(error) = antigravity_login_error(&text) { bail!("{error}"); }
                 if !selected && text.contains("Select login method:") && text.contains("1. Google OAuth") {
                     if let Some(input) = control.input.lock().as_mut() { input.write_all(b"\r")?; input.flush()?; }
                     selected = true;
@@ -360,6 +393,18 @@ fn run_antigravity_login(source: &Env, binary: &Path, control: &Arc<LoginControl
 #[cfg(not(target_os = "macos"))]
 fn run_antigravity_login(_: &Env, _: &Path, _: &Arc<LoginControl>, _: Duration, _: Arc<dyn Fn() + Send + Sync>) -> Result<LoginCredentials> {
     bail!("Antigravity account isolation currently requires macOS")
+}
+
+/// Agy keeps its terminal alive on a failed OAuth exchange, waiting for a key.
+/// Surface only our own messages: provider output may contain codes or tokens.
+fn antigravity_login_error(text: &str) -> Option<&'static str> {
+    let (_, error) = text.rsplit_once("Got an error:")?;
+    let (line, _) = error.split_once('\n')?;
+    Some(if line.contains("invalid_grant") {
+        kiln_common::i18n::tr("로그인 코드가 만료되었거나 유효하지 않습니다. 로그인을 다시 시작해 새 코드를 입력하세요")
+    } else {
+        kiln_common::i18n::tr("로그인을 완료하지 못했습니다. 브라우저와 네트워크 상태를 확인한 뒤 다시 시도하세요")
+    })
 }
 /// Strip CSI styling and OSC controls without copying terminal contents to logs.
 #[cfg(target_os = "macos")]
@@ -397,7 +442,7 @@ impl OutputScanner {
             }
             Tool::Codex => false,
         };
-        if asks_for_code { status.accepts_code = true; }
+        if asks_for_code && !control.code_submitted.load(Ordering::Relaxed) { status.accepts_code = true; }
         let delimiter = |c: char| c.is_whitespace() || c.is_control() || matches!(c, '\"' | '\'' | '<' | '>');
         // URLs may be split between reads or wrapped in an OSC-8 hyperlink by
         // Claude. Find their actual start and require a terminating separator.
@@ -423,6 +468,87 @@ impl OutputScanner {
 mod tests {
     use super::*;
     use crate::CredentialStore;
+
+    #[test]
+    fn antigravity_errors_wait_for_the_full_line_and_redact_provider_output() {
+        assert!(antigravity_login_error("Got an error: token exchange failed:").is_none());
+        let error = antigravity_login_error("Got an error: token exchange failed: invalid_grant fixture-secret\nPress any key to go back.").unwrap();
+        assert!(error.contains("새 코드"));
+        assert!(!error.contains("fixture-secret"));
+        let error = antigravity_login_error("Got an error: network failure fixture-secret\n").unwrap();
+        assert!(error.contains("네트워크"));
+        assert!(!error.contains("fixture-secret"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_failed_exchange_does_not_wait_for_the_cli_to_exit() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(root.path(), false);
+        let binary = root.path().join("fake-agy");
+        std::fs::write(&binary, r#"#!/bin/sh
+printf 'Select login method:\n1. Google OAuth\n'
+read choice
+printf 'Got an error: token exchange failed: oauth2: "invalid_grant" "fixture-secret"\n\nPress any key to go back.\n'
+sleep 30
+"#).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let control = Arc::new(LoginControl::default());
+        let start = Instant::now();
+        let error = run_login(&env, Tool::Antigravity, &binary, &control, Duration::from_secs(5), Arc::new(|| {})).err().unwrap().to_string();
+        assert!(start.elapsed() < Duration::from_secs(3));
+        assert!(error.contains("새 코드"));
+        assert!(!error.contains("fixture-secret"));
+        assert!(control.wait_for_cleanup(Instant::now()+Duration::from_secs(1)));
+        assert!(control.input.lock().is_none());
+    }
+
+    #[test]
+    fn submitted_antigravity_code_cannot_be_reenabled_by_an_old_prompt() {
+        let control = LoginControl::default();
+        control.terminal_input.store(true, Ordering::Relaxed);
+        *control.input.lock() = Some(Box::new(Vec::<u8>::new()));
+        let mut scanner = OutputScanner::default();
+        scanner.feed(b"Paste the authorization code below:\n", Tool::Antigravity, &control);
+        control.send_code("fixture-code").unwrap();
+        assert!(!control.status.lock().accepts_code);
+        scanner.feed(b"Paste the authorization code below:\nSigning in...", Tool::Antigravity, &control);
+        assert!(!control.status.lock().accepts_code);
+        assert!(control.send_code("fixture-code").is_err());
+    }
+
+    /// Submits only a deliberately invalid fixture code, never a real credential.
+    #[test]
+    #[ignore = "requires KILN_AGY_KEYCHAIN_TEST=1, KILN_AGY_PROMPT_BINARY and Google OAuth connectivity"]
+    #[cfg(target_os = "macos")]
+    fn native_antigravity_rejected_code_finishes_with_an_actionable_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let real_cli = std::env::var("KILN_AGY_PROMPT_BINARY").expect("explicit agy executable required");
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        env.antigravity_keychains = true;
+        let wrapper = root.path().join("agy-code-probe");
+        std::fs::write(&wrapper, format!("#!/bin/sh\nexport SSH_CONNECTION='fixture fixture fixture fixture'\nexport BROWSER=/usr/bin/true\nexec '{}'\n", real_cli.replace('\'', "'\\''"))).unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let control = Arc::new(LoginControl::default());
+        let sender = control.clone();
+        let send = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !sender.status.lock().accepts_code {
+                assert!(Instant::now() < deadline, "manual code input not offered");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            sender.send_code("kiln-invalid-authorization-fixture").unwrap();
+        });
+        let result = run_login(&env, Tool::Antigravity, &wrapper, &control, Duration::from_secs(30), Arc::new(|| {}));
+        send.join().unwrap();
+        let error = result.err().expect("synthetic code must be rejected").to_string();
+        assert!(error.contains("새 코드"), "unexpected sanitized error: {error}");
+        assert!(!error.contains("kiln-invalid"));
+        assert!(!control.status.lock().accepts_code);
+        assert!(control.wait_for_cleanup(Instant::now()+Duration::from_secs(1)));
+    }
 
     #[test]
     #[cfg(target_os = "macos")]
@@ -485,7 +611,7 @@ time.sleep(30)
                 std::thread::sleep(Duration::from_millis(10));
             }
             assert!(send.send_code("bad\x1bcode").is_err());
-            send.send_code(" 4/fixture-code ").unwrap();
+            send.send_code(" 4/fixture-\r\ncode \t").unwrap();
         });
         let result = run_login(&env, Tool::Antigravity, &binary, &control, Duration::from_secs(6), Arc::new(|| {}));
         sender.join().unwrap();

@@ -106,7 +106,9 @@ pub fn configure_zsh(cmd: &mut std::process::Command, program: &str, spec: &kiln
             std::fs::rename(temporary,path)?;
         }
     }
-    cmd.env("KILN_ORIGINAL_ZDOTDIR", original).env("KILN_INTEGRATION_DIR", &dir).env("ZDOTDIR", dir);
+    let launcher = crate::client::cli_executable(&std::env::current_exe()?);
+    cmd.env("KILN_AGENT_LAUNCHER", launcher)
+        .env("KILN_ORIGINAL_ZDOTDIR", original).env("KILN_INTEGRATION_DIR", &dir).env("ZDOTDIR", dir);
     Ok(())
 }
 
@@ -163,6 +165,35 @@ pub fn cmd_prompt(program: &str, spec: &kiln_proto::SpawnSpec) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn bare_agy_forwards_exact_arguments_to_kiln_and_keeps_version_commands_direct() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let integration = root.path().join("wrapper.zsh");
+        std::fs::write(&integration, include_str!("shell-integration.zsh").split("autoload -Uz").next().unwrap()).unwrap();
+        let launcher = root.path().join("kiln-fixture");
+        let capture = root.path().join("argv.json");
+        std::fs::write(&launcher, "#!/usr/bin/python3\nimport os,sys,json\nfrom pathlib import Path\nPath(os.environ['KILN_FIXTURE_CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n").unwrap();
+        std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let agy = root.path().join("agy");
+        std::fs::write(&agy, "#!/bin/sh\nprintf '1.4.7\\n'\n").unwrap();
+        std::fs::set_permissions(&agy, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let run = |script: &str| std::process::Command::new("/bin/zsh")
+            .args(["-f", "-c", script]).current_dir(root.path())
+            .env("INTEGRATION", &integration).env("KILN_AGENT_LAUNCHER", &launcher)
+            .env("KILN_FIXTURE_CAPTURE", &capture).env("PATH", format!("{}:/usr/bin:/bin", root.path().display())).output().unwrap();
+        let result = run("source \"$INTEGRATION\"; agy --model 'safe model' 'literal;$(no)' ");
+        assert!(result.status.success());
+        let before = std::fs::read(&capture).unwrap();
+        let argv: Vec<String> = serde_json::from_slice(&before).unwrap();
+        assert_eq!(&argv[..2], &["agent-shell", "--cwd"]);
+        assert_eq!(&argv[3..], &["--", "--model", "safe model", "literal;$(no)"]);
+        let version = run("source \"$INTEGRATION\"; agy --version");
+        assert_eq!(String::from_utf8_lossy(&version.stdout).trim(), "1.4.7");
+        assert_eq!(before, std::fs::read(capture).unwrap());
+    }
     #[test] fn captures_lifecycle_across_chunks_and_does_not_guess_agent_status() {
         let mut t = Tracker::default();
         for c in b"\x1b]777;kiln-command;6563686f206f6b\x07\x1b]133;C\x07ok\r\n\x1b]133;D;0\x07".chunks(3) { t.feed(c, Some("/tmp")); }
