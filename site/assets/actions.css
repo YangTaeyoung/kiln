@@ -1,0 +1,16 @@
+/* Shared, high-contrast action icons for the product site and guide. */
+.icon-link, .f-link { display: inline-flex; align-items: center; gap: 8px; }
+.action-icon, .btn svg.action-icon { width: 20px; height: 20px; flex: none; fill: none; }
+.nav .gh { color: var(--ink); font-weight: 600; }
+.nav .gh .action-icon { width: 23px; height: 23px; }
+.btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+.btn .download-tail { width: 18px; height: 18px; margin-left: 4px; }
+.nav-links a, .top-links a { min-height: 40px; }
+footer .icon-link, .foot .icon-link { min-height: 32px; }
+footer .action-icon, .foot .action-icon { color: var(--ink); width: 18px; height: 18px; }
+.f-link { min-height: 40px; }
+.lang > .action-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 17px; height: 17px; pointer-events: none; color: var(--ink); }
+.nav .lang select { padding-left: 34px; }
+@media (max-width: 1100px) { .nav .wrap { gap: 16px; } .nav-links { gap: 14px; } }
+@media (max-width: 860px) { .nav .wrap { gap: 14px; } .nav .gh { display: inline-flex; min-height: 44px; } }
+@media (max-width: 380px) { .nav .wrap { gap: 8px; } .nav .gh { gap: 5px; font-size: 13px; } }
