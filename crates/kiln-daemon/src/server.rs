@@ -68,6 +68,7 @@ impl SessionImages {
 struct Client {
     id: u64,
     hello_sent: AtomicBool,
+    upgrade_only: AtomicBool,
     out: Sender<ServerMsg>,
     wake: Sender<()>,
     attached: Mutex<HashMap<SessionId, AttachState>>,
@@ -666,6 +667,7 @@ impl Daemon {
         let client = Arc::new(Client {
             id: self.next_client.fetch_add(1, Ordering::SeqCst),
             hello_sent: AtomicBool::new(false),
+            upgrade_only: AtomicBool::new(false),
             out: out_tx,
             wake: wake_tx,
             attached: Mutex::new(HashMap::new()),
@@ -711,7 +713,8 @@ impl Daemon {
             let _ = client.out.send(m);
         };
         match msg {
-            ClientMsg::Hello { .. } => {
+            ClientMsg::Hello { client: name, .. } => {
+                client.upgrade_only.store(name == "kiln-upgrade", Ordering::Relaxed);
                 reply(ServerMsg::Hello {
                     proto: PROTO_VERSION,
                     build: build_id().to_string(),
@@ -868,7 +871,7 @@ impl Daemon {
                     // Legacy upgrade clients discard replies and wait for EOF.
                     // Drain the error and close only this control connection;
                     // terminal ownership stays with the current daemon.
-                    return false;
+                    if client.upgrade_only.load(Ordering::Relaxed) { return false; }
                 }
             }
             ClientMsg::Shutdown => {
@@ -1516,6 +1519,7 @@ mod palette_tests {
         let client = Arc::new(Client {
             id: 1,
             hello_sent: AtomicBool::new(false),
+            upgrade_only: AtomicBool::new(false),
             out,
             wake,
             attached: Mutex::new(HashMap::new()),

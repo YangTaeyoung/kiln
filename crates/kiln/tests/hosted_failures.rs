@@ -310,8 +310,8 @@ fn hosted_invalid_executable_rollback_keeps_existing_reader_and_writer() {
     let (mut fixture, client) = Fixture::start();
     let session = fixture.spawn(&client, None);
     let before = wait_info(&client, session, |s| s.fg_process.as_deref() == Some("sh"));
-    // An existing non-executable file passes the path-exists preflight but
-    // fails process creation after hosts have detached and state was written.
+    // Reject an existing non-executable file in the helper-version preflight,
+    // before hosts detach; the current reader and writer remain usable.
     let invalid = fixture.dir.path().join("invalid-executable");
     std::fs::write(&invalid, b"not an executable image\n").unwrap();
     std::fs::set_permissions(&invalid, std::fs::Permissions::from_mode(0o600)).unwrap();
