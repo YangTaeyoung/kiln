@@ -48,8 +48,9 @@ conversation continuation contract.
 ## Accounts on macOS
 
 **Settings → Accounts → Antigravity → Add account** starts the installed CLI's Google
-OAuth sign-in in a temporary private terminal. Complete the browser login, then choose
-**Apply**. Repeat for another account and choose **Switch** to use it for new tasks.
+OAuth sign-in in a temporary private terminal. Complete the browser login. If the browser
+shows an authorization code, copy it into **Login code** in Kiln and choose **Confirm**
+(or press Enter). Once authentication finishes, choose **Apply**. Repeat for another account and choose **Switch** to use it for new tasks.
 Running tasks keep their original account. The row menu offers rename, delete and
 same-account sign-in again; a different Google identity cannot replace that profile.
 **Save current signed-in account** imports the ordinary CLI's Google login. Importing

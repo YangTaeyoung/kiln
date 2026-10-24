@@ -247,7 +247,7 @@ fn empty_rows(ui: &mut Ui, _tool: Tool) {
 
 fn login_form(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
     let t = Theme::current();
-    let index = if tool == Tool::Claude { 0 } else { 1 };
+    let index = tool_idx(tool);
     let status = mgr.login_status(tool);
     if let Some(status) = status {
         if let Some(profile) = mgr.login_profile(tool) {
@@ -272,7 +272,9 @@ fn login_form(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                 let field = widgets::input_frame(ui.memory(|memory| memory.has_focus(field_id)), false).inner_margin(egui::Margin::symmetric(9, 6))
                     .show(ui, |ui| ui.add(egui::TextEdit::singleline(&mut code).id(field_id).frame(egui::Frame::NONE).font(fonts::regular(12.0)).password(true).hint_text(kiln_common::i18n::tr("로그인 코드")).desired_width((width - 18.0).max(40.0)))).inner;
                 field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), kiln_common::i18n::tr("로그인 코드")));
-                if ui.add_enabled_ui(!code.trim().is_empty(), |ui| widgets::button(ui, kiln_common::i18n::tr("확인"), ButtonKind::Secondary)).inner.clicked() {
+                let submitted = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                if ui.add_enabled_ui(!code.trim().is_empty(), |ui| widgets::button(ui, kiln_common::i18n::tr("확인"), ButtonKind::Secondary)).inner.clicked()
+                    || (submitted && !code.trim().is_empty()) {
                     if let Err(error) = mgr.submit_login_code(tool, &code) {
                         mgr.with_state(|s| s.error[index] = Some(error.to_string()));
                     } else { code.clear(); }
@@ -1087,24 +1089,54 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_code_input_keeps_codex_draft_and_reports_its_own_errors() {
+        use egui_kittest::kittest::Queryable;
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = crate::Env::sandbox(root.path(), false);
+        let manager = AccountManager::with_env(env);
+        manager.login_fixture(Tool::Antigravity, crate::LoginStatus { browser_url: None, accepts_code: true });
+        manager.ui_state().login_code[tool_idx(Tool::Codex)] = "codex-fixture-draft".into();
+        manager.ui_state().login_code[tool_idx(Tool::Antigravity)] = "agy-fixture-code".into();
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(420.0, 600.0))
+            .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { login_form(ui, manager, Tool::Antigravity); } }, manager.clone());
+        for _ in 0..4 { harness.step(); }
+        assert_eq!(harness.query_all_by_label("로그인 코드").count(), 1);
+        harness.get_by_label("확인").click();
+        for _ in 0..4 { harness.step(); }
+        // The fixture has no stdin: report failure under Agy, retaining the code for retry.
+        manager.with_state(|state| assert!(state.error[tool_idx(Tool::Antigravity)].is_some()));
+        manager.with_state(|state| assert!(state.error[tool_idx(Tool::Codex)].is_none()));
+        assert_eq!(manager.ui_state().login_code[tool_idx(Tool::Codex)], "codex-fixture-draft");
+        assert_eq!(manager.ui_state().login_code[tool_idx(Tool::Antigravity)], "agy-fixture-code");
+        manager.with_state(|state| state.error[tool_idx(Tool::Antigravity)] = None);
+        harness.get_by_label("로그인 코드").click();
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        manager.with_state(|state| assert!(state.error[tool_idx(Tool::Antigravity)].is_some(), "Enter submits the Agy code"));
+        manager.with_state(|state| assert!(state.error[tool_idx(Tool::Codex)].is_none()));
+        manager.cancel_login(Tool::Antigravity);
+    }
+
+    #[test]
     fn browser_login_forms_fit_four_languages_and_narrow_scaled_settings() {
         use egui_kittest::kittest::Queryable;
         for language in kiln_common::i18n::Language::ALL {
             kiln_common::i18n::with_language(language, || {
                 for width in [420.0, 720.0] {
                     for scale in [1.0, 1.3] {
-                        for waiting in [false, true] {
+                        for (tool, waiting) in [Tool::Claude, Tool::Antigravity].into_iter().flat_map(|tool| [false, true].map(|waiting| (tool, waiting))) {
                             let root = tempfile::tempdir().unwrap();
                             let (env, _) = crate::Env::sandbox(root.path(), false);
                             let manager = AccountManager::with_env(env);
                             if waiting {
-                                manager.login_fixture(Tool::Claude, crate::LoginStatus {
+                                manager.login_fixture(tool, crate::LoginStatus {
                                     browser_url: Some("https://claude.ai/oauth/authorize?client_id=x&redirect_uri=x&state=x".into()),
                                     accepts_code: true,
                                 });
-                            } else { manager.ui_state().adding = Some((Tool::Claude, "Work".into())); }
+                            } else { manager.ui_state().adding = Some((tool, "Work".into())); }
                             let mut harness = egui_kittest::Harness::builder().with_size(vec2(width, 600.0))
-                                .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { login_form(ui, manager, Tool::Claude); } }, manager);
+                                .build_ui_state(|ui, manager: &mut AccountManager| { if test_fonts(ui) { login_form(ui, manager, tool); } }, manager);
                             harness.ctx.set_fonts(kiln_common::fonts::definitions(false));
                             harness.ctx.set_zoom_factor(scale);
                             for _ in 0..4 { harness.step(); }
