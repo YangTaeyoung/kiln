@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="../assets/fonts.css">
 <link rel="stylesheet" href="../assets/docs.css">
+<link rel="stylesheet" href="../assets/actions.css">
 </head>
 <body>
 <header class="top">
@@ -17,15 +18,15 @@
     <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
     <nav class="top-links" aria-label="Site">
-      <a href="../index.html#persist" data-ui="features">Features</a>
-      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
-      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+      <a href="../index.html#features" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-ui="features">Features</span></a>
+      <a href="index.html" aria-current="page" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-ui="docs">Documentation</span></a>
+      <a href="https://github.com/YangTaeyoung/kiln" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg><span>GitHub</span></a>
     </nav>
     <div class="top-right">
       <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
         <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
       </label>
-      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+      <a class="icon-link btn" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-ui="download">Download</span></a>
     </div>
   </div>
 </header>
@@ -390,7 +391,7 @@
 <p>要更新 CLI 本身，详见<a href="conversations.html#cli-updates">对话与更新</a>。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="agents.html"><small>上一页</small>代理</a><a class="pn next" href="conversations.html"><small>下一页</small>对话与更新</a></nav></article></main>
   <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
 </div>
-<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span data-ui="issue">Report an issue</span></a></nav></div></footer>
 <script>window.KILN_DOC_UI = {"en": {"title": "Accounts", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "계정", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "アカウント", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "账户", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
 <script src="../assets/glaze.js"></script>
 <script src="../assets/docs.js"></script>

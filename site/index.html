@@ -47,10 +47,10 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .lang::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 10px; color: var(--dim); pointer-events: none; }
 .btn { display: inline-flex; align-items: center; gap: 8px; font: 600 14px/1 var(--sans); padding: 12px 16px; border-radius: 8px; text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--paper); white-space: nowrap; transition: transform .2s ease, background-color .2s ease; }
 .btn:hover { transform: translateY(-1px); }
-.btn svg { width: 15px; height: 15px; fill: currentColor; }
+.btn svg { width: 21px; height: 21px; flex: none; fill: currentColor; }
 .btn.ink { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .btn.sm { padding: 9px 13px; font-size: 13px; }
-@media (max-width: 860px) { .nav-links, .nav .gh { display: none; } .nav .btn.sm { display: none; } }
+@media (max-width: 860px) { .nav-links { display: none; } .nav .btn.sm { display: none; } }
 
 .hero { padding-block: clamp(48px, 9vh, 96px) 36px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px 48px; align-items: end; }
 .hero h1 { margin: 0; font-weight: 600; font-size: clamp(34px, 4.6vw, 64px); line-height: 1.05; letter-spacing: -.035em; text-wrap: balance; }
@@ -106,7 +106,7 @@ html:is([lang="ko"], [lang="ja"], [lang="zh-CN"]) .f-copy h2 { letter-spacing: -
 .more h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
 .more-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 24px; }
 .more-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; text-decoration: none; color: var(--ink); font-size: 15.5px; font-weight: 500; border-bottom: 1px solid var(--line); }
-.more-item .ki { width: 17px; height: 17px; color: var(--dim); flex: none; }
+.more-item .ki { width: 22px; height: 22px; color: var(--celadon); flex: none; }
 .more-item::after { content: "→"; margin-left: auto; color: var(--faint); transition: transform .2s ease, color .2s ease; }
 .more-item:hover::after { transform: translateX(3px); color: var(--celadon); }
 @media (max-width: 900px) {
@@ -140,6 +140,7 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
 @media (max-width: 760px) { footer .wrap { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } footer .wrap > :first-child { grid-column: 1 / -1; } }
 @media (prefers-reduced-motion: reduce) { .shot, .shot img, .btn { transition: none; } }
 </style>
+<link rel="stylesheet" href="assets/actions.css">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -174,14 +175,14 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
   <div class="wrap">
     <a class="brand" href="#top"><img src="assets/kiln.svg" alt="">Kiln</a>
     <nav class="nav-links" aria-label="Site">
-      <a href="#features" data-i18n="nav_features">Features</a>
-      <a href="docs/index.html" data-i18n="nav_docs">Docs</a>
-      <a href="https://github.com/YangTaeyoung/kiln/releases" data-i18n="nav_changelog">Changelog</a>
+      <a href="#features" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-i18n="nav_features">Features</span></a>
+      <a href="docs/index.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-i18n="nav_docs">Docs</span></a>
+      <a href="https://github.com/YangTaeyoung/kiln/releases" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 4v5h5M3 9a9 9 0 1 1 0 6m9-9v6l4 2"/></svg><span data-i18n="nav_changelog">Changelog</span></a>
     </nav>
     <span class="sp"></span>
-    <a class="gh" href="https://github.com/YangTaeyoung/kiln">GitHub</a>
-    <label class="lang"><select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select></label>
-    <a class="btn ink sm" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-i18n="nav_download">Download</a>
+    <a class="icon-link gh" href="https://github.com/YangTaeyoung/kiln"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg><span>GitHub</span></a>
+    <label class="lang"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></svg><select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select></label>
+    <a class="icon-link btn ink sm" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="nav_download">Download</span></a>
   </div>
 </header>
 
@@ -190,8 +191,8 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
     <div class="hero-copy"><h1 data-i18n="h1">The terminal IDE for agents</h1><p class="lede" data-i18n="sub">Every agent in one window. Close it, and they keep working.</p></div>
     <div class="hero-side">
       <div class="ctas" id="dl-row">
-        <a class="btn ink" id="dl-mac" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span></a>
-        <a class="btn" id="dl-win" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span></a>
+        <a class="btn ink" id="dl-mac" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
+        <a class="btn" id="dl-win" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
       </div>
       <p class="fine" data-i18n="fine">Free · Open source · macOS & Windows</p>
     </div>
@@ -279,9 +280,9 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
       <h2 data-i18n="c_title">Open a folder. Get to work.</h2>
       <p data-i18n="c_body">Free on macOS and Windows.</p>
       <div class="ctas">
-        <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span></a>
-        <a class="btn ghost" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span></a>
-        <a class="btn ghost" href="docs/install.html" data-i18n="c_docs">Installation guide</a>
+        <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
+        <a class="btn ghost" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
+        <a class="icon-link btn ghost" href="docs/install.html"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="c_docs">Installation guide</span></a>
       </div>
       <span class="glabel" data-label="tenmoku"></span>
     </div>
@@ -291,9 +292,9 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
 <footer>
   <div class="wrap">
     <div><a class="brand" href="#top"><img src="assets/kiln.svg" alt="">Kiln</a><p style="margin:0" data-i18n="ft_tag">The terminal IDE for agents.</p></div>
-    <div><h4 data-i18n="ft_start">Get started</h4><ul><li><a href="docs/install.html" data-i18n="ft_install">Install and update</a></li><li><a href="docs/index.html" data-i18n="ft_intro">Introduction</a></li><li><a href="docs/workspaces.html" data-i18n="ft_ws">Workspaces and tasks</a></li></ul></div>
-    <div><h4 data-i18n="ft_guides">Guides</h4><ul><li><a href="docs/agents.html" data-i18n="ft_agents">Agents</a></li><li><a href="docs/git.html">Git &amp; GitHub</a></li><li><a href="docs/databases.html" data-i18n="ft_db">Databases</a></li></ul></div>
-    <div><h4 data-i18n="ft_project">Project</h4><ul><li><a href="https://github.com/YangTaeyoung/kiln">GitHub</a></li><li><a href="https://github.com/YangTaeyoung/kiln/releases" data-i18n="nav_changelog">Changelog</a></li><li><a href="https://github.com/YangTaeyoung/kiln/issues" data-i18n="ft_issue">Report an issue</a></li></ul></div>
+    <div><h4 data-i18n="ft_start">Get started</h4><ul><li><a href="docs/install.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="ft_install">Install and update</span></a></li><li><a href="docs/index.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-i18n="ft_intro">Introduction</span></a></li><li><a href="docs/workspaces.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-i18n="ft_ws">Workspaces and tasks</span></a></li></ul></div>
+    <div><h4 data-i18n="ft_guides">Guides</h4><ul><li><a href="docs/agents.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z"/></svg><span data-i18n="ft_agents">Agents</span></a></li><li><a href="docs/git.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10m12-8c0 6-12 3-12 8"/></svg><span>Git &amp; GitHub</span></a></li><li><a href="docs/databases.html" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></svg><span data-i18n="ft_db">Databases</span></a></li></ul></div>
+    <div><h4 data-i18n="ft_project">Project</h4><ul><li><a href="https://github.com/YangTaeyoung/kiln" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg><span>GitHub</span></a></li><li><a href="https://github.com/YangTaeyoung/kiln/releases" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 4v5h5M3 9a9 9 0 1 1 0 6m9-9v6l4 2"/></svg><span data-i18n="nav_changelog">Changelog</span></a></li><li><a href="https://github.com/YangTaeyoung/kiln/issues" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span data-i18n="ft_issue">Report an issue</span></a></li></ul></div>
   </div>
 </footer>
 
