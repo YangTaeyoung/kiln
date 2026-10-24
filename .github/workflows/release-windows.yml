@@ -1,4 +1,4 @@
-name: Verify 0.2.13 Windows archives
+name: Verify 0.2.15 Windows archives
 on:
   workflow_dispatch:
     inputs:
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: 40051481951
+          run-id: 40117109764
           pattern: kiln-windows-*
           path: archives
           merge-multiple: true
@@ -43,7 +43,7 @@ jobs:
             exit 0
           }
           $archives=(Resolve-Path archives).Path
-          Copy-Item scripts/0.2.13-SHA256SUMS.txt (Join-Path $archives 'SHA256SUMS.txt')
+          Copy-Item scripts/0.2.15-SHA256SUMS.txt (Join-Path $archives 'SHA256SUMS.txt')
           $portFile=Join-Path $env:RUNNER_TEMP 'kiln-mirror-port'
           $server=Start-Process python -ArgumentList @('scripts/release-archive-mirror.py',$archives,$portFile) -PassThru
           try {

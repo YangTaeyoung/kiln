@@ -1,7 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$Mirror, [ValidateSet("arm64","x64")][string]$NativeArch="arm64")
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
-$fixture=Join-Path $env:TEMP ('kiln-release-0.2.13-'+[Guid]::NewGuid().ToString('N'))
+$fixture=Join-Path $env:TEMP ('kiln-release-0.2.15-'+[Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixture | Out-Null
 $reg=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true)
 $pathPresent=$reg.GetValueNames() -contains 'Path'
@@ -15,7 +15,7 @@ try {
  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot '..\install.ps1')
  if($LASTEXITCODE -ne 0){throw 'First install failed'}
  $cli=Join-Path $env:KILN_INSTALL_DIR 'bin\kiln.exe'
- if((& $cli --version) -ne 'kiln 0.2.13'){throw 'Installed version mismatch'}
+ if((& $cli --version) -ne 'kiln 0.2.15'){throw 'Installed version mismatch'}
  $before=@(Get-ChildItem $env:KILN_INSTALL_DIR -File -Recurse | ForEach-Object { $_.FullName+'|'+(Get-FileHash $_.FullName -Algorithm SHA256).Hash+'|'+$_.LastWriteTimeUtc.Ticks })
  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot '..\install.ps1')
  if($LASTEXITCODE -ne 0){throw 'Second install failed'}
@@ -24,11 +24,11 @@ try {
  $arches=if($NativeArch -eq 'arm64'){@('arm64','x64')}else{@('x64')}
  foreach($arch in $arches) {
   $zip=Join-Path $fixture ($arch+'.zip');$extract=Join-Path $fixture $arch
-  & curl.exe -fLsS --max-time 300 -o $zip "$Mirror/releases/download/v0.2.13/Kiln-0.2.13-windows-$arch.zip"
+  & curl.exe -fLsS --max-time 300 -o $zip "$Mirror/releases/download/v0.2.15/Kiln-0.2.15-windows-$arch.zip"
   if($LASTEXITCODE -ne 0){throw 'Archive download failed'}
   Expand-Archive -LiteralPath $zip -DestinationPath $extract
   $binary=Get-ChildItem $extract -Filter kiln.exe -File -Recurse | Where-Object {$_.Directory.Name -eq 'bin'} | Select-Object -First 1
-  if((& $binary.FullName --version) -ne 'kiln 0.2.13'){throw "$arch CLI version mismatch"}
+  if((& $binary.FullName --version) -ne 'kiln 0.2.15'){throw "$arch CLI version mismatch"}
   if($arch -eq $NativeArch) {
    $root=$binary.Directory.Parent.FullName
    foreach($file in Get-ChildItem $root -File -Recurse) {
