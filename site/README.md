@@ -81,3 +81,15 @@ owns guide search titles/descriptions. Generated output includes canonical, href
 Open Graph/Twitter, JSON-LD, robots.txt, sitemap.xml and a noindex 404 page.
 CI checks all canonical URLs, reciprocal alternates, internal links/fragments, assets,
 unique headings/IDs/titles and JSON-LD syntax before deployment. See `_build/SEO-AUDIT.md`.
+
+## Platform-aware downloads
+
+`assets/downloads.js` recommends macOS or Windows across the landing page and guide
+headers, using available browser platform hints with a legacy fallback. Both desktop
+platforms remain linked. Mobile devices (including iPads using a desktop Mac identity),
+Linux and unknown platforms get a neutral choice. Download links continue to open the
+latest Releases page; the browser does not guess CPU architecture or start a download.
+
+Localized labels live in `assets/site-i18n.js` and are included in every published
+page by `build-site.py`. The controls work independently of the animation libraries.
+Run `node --test site/_build/downloads.test.cjs` for platform detection fixtures.

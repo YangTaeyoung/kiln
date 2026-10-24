@@ -9,6 +9,7 @@
 <link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="../assets/fonts.css">
+<script defer src="../assets/downloads.js"></script>
 <link rel="stylesheet" href="../assets/docs.css">
 <link rel="stylesheet" href="../assets/actions.css">
 </head>
@@ -26,13 +27,14 @@
       <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
         <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
       </label>
-      <a class="icon-link btn" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-ui="download">Download</span></a>
+      <a class="icon-link btn" data-download-primary href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-ui="download">Download</span></a>
     </div>
   </div>
 </header>
 <div class="layout">
   <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">AI agent IDE: getting started</a></li><li><a href="install.html" class="on" aria-current="page">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">AI terminal: sessions, shells and recovery</a></li><li><a href="agents.html">Run Claude Code, Codex and Antigravity</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">AI 에이전트 IDE 시작하기</a></li><li><a href="install.html" class="on" aria-current="page">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">AI 터미널: 세션·셸·연결 복구</a></li><li><a href="agents.html">Claude Code·Codex·Antigravity 함께 실행하기</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">AI エージェント IDE を使い始める</a></li><li><a href="install.html" class="on" aria-current="page">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">AI ターミナル：セッション・シェル・復旧</a></li><li><a href="agents.html">Claude Code・Codex・Antigravity の実行</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">开始使用 AI 智能体 IDE</a></li><li><a href="install.html" class="on" aria-current="page">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">AI 终端：会话、Shell 与恢复</a></li><li><a href="agents.html">运行 Claude Code、Codex 和 Antigravity</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
   <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">Documentation<b>Get started</b></p></div><h1>Install and update</h1><p class="desc">Install Kiln on macOS or Windows, open your first workspace, keep the app up to date and choose its language.</p><p>Install Kiln with one command or download it from GitHub Releases. Kiln then keeps itself up to date, and updates leave your running terminals alone.</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<p>On the website, download buttons prioritize the platform reported by your browser. The other platform remains available. Mobile devices and unrecognized platforms show both choices. The buttons open GitHub Releases, where you select the archive for your computer.</p>
 <h2 id="requirements">Requirements</h2>
 <div class="table"><table>
 <thead>
@@ -139,6 +141,7 @@
 <li><a href="agents.html">Agents</a> to start your first agent task.</li>
 <li><a href="terminal.html">Terminal</a> to set up shell integration and activity reporting.</li>
 </ul><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="index.html"><small>Previous</small>AI agent IDE: getting started</a><a class="pn next" href="workspaces.html"><small>Next</small>Workspaces and tasks</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">문서<b>시작하기</b></p></div><h1>설치와 업데이트</h1><p class="desc">macOS나 Windows에 Kiln을 설치하고, 첫 워크스페이스를 열고, 앱을 최신 상태로 유지하고, 언어를 고릅니다.</p><p>Kiln은 명령 한 줄로 설치하거나 GitHub Releases에서 내려받을 수 있습니다. 설치한 뒤에는 Kiln이 알아서 업데이트하며, 업데이트해도 실행 중인 터미널은 그대로입니다.</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<p>웹사이트의 다운로드 버튼은 브라우저에서 확인한 OS를 먼저 표시합니다. 다른 OS도 선택할 수 있습니다. 모바일 기기이거나 OS를 확인할 수 없으면 두 플랫폼을 함께 표시합니다. 버튼을 누르면 GitHub Releases에서 컴퓨터에 맞는 압축 파일을 선택할 수 있습니다.</p>
 <h2 id="requirements">요구 사항</h2>
 <div class="table"><table>
 <thead>
@@ -245,6 +248,7 @@
 <li><a href="agents.html">에이전트</a>: 첫 에이전트 작업 시작하기</li>
 <li><a href="terminal.html">터미널</a>: 셸 통합과 활동 보고 설정하기</li>
 </ul><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="index.html"><small>이전</small>AI 에이전트 IDE 시작하기</a><a class="pn next" href="workspaces.html"><small>다음</small>워크스페이스와 작업</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">ドキュメント<b>はじめに</b></p></div><h1>インストールとアップデート</h1><p class="desc">macOS と Windows への Kiln のインストール、最初のワークスペースの作成、アップデート、表示言語の設定について説明します。</p><p>Kiln はコマンド 1 つでインストールできます。GitHub Releases からダウンロードしてもかまいません。インストール後は Kiln が自動でアップデートされ、実行中のターミナルはアップデートの影響を受けません。</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<p>ウェブサイトのダウンロードボタンは、ブラウザーが示す OS を優先して表示します。もう一方の OS も選べます。モバイル端末や OS を判別できない場合は両方を表示します。ボタンから GitHub Releases を開き、お使いのコンピューターに合うアーカイブを選んでください。</p>
 <h2 id="requirements">動作環境</h2>
 <div class="table"><table>
 <thead>
@@ -351,6 +355,7 @@
 <li><a href="agents.html">エージェント</a>で、最初のエージェント作業を始められます。</li>
 <li><a href="terminal.html">ターミナル</a>で、シェル連携とアクティビティの報告を設定できます。</li>
 </ul><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="index.html"><small>前へ</small>AI エージェント IDE を使い始める</a><a class="pn next" href="workspaces.html"><small>次へ</small>ワークスペースと作業</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">文档<b>入门</b></p></div><h1>安装与更新</h1><p class="desc">在 macOS 或 Windows 上安装 Kiln，打开第一个工作区，让应用保持最新，并选择界面语言。</p><p>一条命令即可安装 Kiln，也可以从 GitHub Releases 下载。安装后 Kiln 会自动更新，更新时不会打扰正在运行的终端。</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<p>网站会优先显示浏览器报告的操作系统对应的下载按钮，另一平台仍可选择。移动设备或无法识别的系统会同时显示两个选项。点击按钮后，可在 GitHub Releases 中选择适合电脑的压缩包。</p>
 <h2 id="requirements">系统要求</h2>
 <div class="table"><table>
 <thead>

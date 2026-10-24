@@ -59,6 +59,7 @@
     document.getElementById("toc-h").textContent = ui.toc || "On this page";
     if (ui.title && !window.KILN_ROUTES) document.title = ui.title + " · Kiln";
     select.value = lang;
+    if (window.KilnDownloads) KilnDownloads.refresh();
     buildToc();
     if (window.KilnGlaze) requestAnimationFrame(function () { KilnGlaze.refresh(); });
     try { localStorage.setItem("kiln-site-lang", lang); } catch (e) {}

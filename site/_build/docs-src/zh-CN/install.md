@@ -5,6 +5,8 @@ description: 在 macOS 或 Windows 上安装 Kiln，打开第一个工作区，�
 
 一条命令即可安装 Kiln，也可以从 GitHub Releases 下载。安装后 Kiln 会自动更新，更新时不会打扰正在运行的终端。
 
+网站会优先显示浏览器报告的操作系统对应的下载按钮，另一平台仍可选择。移动设备或无法识别的系统会同时显示两个选项。点击按钮后，可在 GitHub Releases 中选择适合电脑的压缩包。
+
 ## 系统要求 {#requirements}
 
 | 平台 | 要求 |
