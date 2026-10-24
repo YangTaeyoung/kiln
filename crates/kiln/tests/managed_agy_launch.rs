@@ -15,7 +15,7 @@ from pathlib import Path
 if '--version' in sys.argv:
     print('1.4.7')
 else:
-    Path(os.environ['AGY_FIXTURE_CAPTURE']).write_text(json.dumps({k:os.environ.get(k) for k in ['HOME','KILN_CONFIG_DIR','KILN_AGENT_PROFILE','ANTIGRAVITY_APP_DATA_DIR']}))
+    Path(os.environ['AGY_FIXTURE_CAPTURE']).write_text(json.dumps(dict({k:os.environ.get(k) for k in ['HOME','KILN_CONFIG_DIR','KILN_AGENT_PROFILE','ANTIGRAVITY_APP_DATA_DIR']},cwd=os.getcwd())))
 "#).unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700)).unwrap();
     unsafe {
@@ -36,6 +36,7 @@ else:
         .env("AGY_FIXTURE_CAPTURE", &capture).output().unwrap();
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     let actual: serde_json::Value = serde_json::from_slice(&std::fs::read(capture).unwrap()).unwrap();
+    assert_eq!(std::path::Path::new(actual["cwd"].as_str().unwrap()).canonicalize().unwrap(), root.path().canonicalize().unwrap());
     assert_eq!(actual["KILN_CONFIG_DIR"], config.to_string_lossy().as_ref());
     assert_eq!(actual["KILN_AGENT_PROFILE"], profile.id);
     assert!(actual["HOME"].as_str().unwrap().contains("agent-accounts/antigravity"));
