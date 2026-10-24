@@ -11,6 +11,12 @@ pub(super) struct Transfers {
     reader: Option<reader::Reader>,
     leases: HashMap<PathBuf, WriterLease>,
     jobs: HashMap<String, Job>,
+    granted: HashMap<String, u128>,
+}
+impl Transfers {
+    fn pending_owner(&self, group: &str, owner: &handover::Owner) -> bool {
+        !owner.ready && self.granted.get(group) != Some(&owner.sequence)
+    }
 }
 struct WriterLease {
     _file: File,
@@ -135,9 +141,10 @@ impl KilnApp {
         self.agent_handover.jobs.retain(|group, job| {
             owners
                 .get(group)
-                .is_some_and(|o| !o.ready && o.sequence == job.sequence)
+                .is_some_and(|o| !o.ready && o.sequence == job.sequence && self.agent_handover.granted.get(group) != Some(&o.sequence))
         });
         for (group, owner) in owners.iter().filter(|(_, o)| !o.ready) {
+            if !self.agent_handover.pending_owner(group, owner) { continue; }
             let Some((winner, winner_session, _, winner_record, _)) = records
                 .iter()
                 .find(|(_, _, path, record, _)| handover::pending_matches(owner, path, record))
@@ -261,6 +268,7 @@ impl KilnApp {
             })();
             match result {
                 Ok(spec) => {
+                    self.agent_handover.granted.insert(group.clone(), owner.sequence);
                     if !self.conn.kill(*winner_session) {
                         continue;
                     }
@@ -350,6 +358,18 @@ mod tests {
         assert!(!record_matches(&path, &renewed, "newer-launch", &owners));
         handover::grant(config, "group", 1, &path, &renewed).unwrap();
         assert!(handover::owners(config).unwrap()["group"].ready);
+    }
+
+    #[test]
+    fn a_snapshot_taken_between_renewal_and_grant_cannot_restart_the_winner() {
+        let mut transfers = Transfers::default();
+        let mut pending = handover::Owner { record: PathBuf::from("record.json"), generation: "old-launch".into(),
+            id: "old-id".into(), canonical_id: "new-id".into(), ready: false, sequence: 10 };
+        assert!(transfers.pending_owner("group", &pending));
+        transfers.granted.insert("group".into(), pending.sequence);
+        assert!(!transfers.pending_owner("group", &pending), "an already granted request remains completed even if a queued snapshot still says pending");
+        pending.sequence = 9;
+        assert!(transfers.pending_owner("group", &pending), "a new request can have an earlier wall-clock timestamp");
     }
 
 }
