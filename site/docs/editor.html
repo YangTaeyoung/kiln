@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Editor and search · Kiln Docs</title>
+<meta name="description" content="Open and edit files with syntax highlighting, language detection, language-server completion and a file explorer that shows ignored files.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">Documentation<b>Tools</b></p></div><h1>Editor and search</h1><p class="desc">Open and edit files with syntax highlighting, language detection, language-server completion and a file explorer that shows ignored files.</p><p>Kiln includes a file editor next to your terminals, with syntax highlighting, completion from language servers and a file explorer. Open files, search and problems from the same workspace without leaving your task.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<h2 id="open-the-editor-and-tools">Open the editor and tools</h2>
+<p>The workspace inspector includes <strong>Files</strong>, which opens the file explorer. The titlebar <strong>Tools</strong> menu lists files, search, source control, GitHub, databases, remote connections and problems together. Choosing one opens it alongside your current work. In compact windows, <strong>Back to Task</strong> returns you to the terminal.</p>
+<h2 id="file-explorer">File explorer</h2>
+<p>The explorer shows Git-ignored files and folders by default, including <code>.env</code>, <code>.env.prod</code>, logs and generated directories. You can open them like any other file, by clicking or with keyboard navigation.</p>
+<ul>
+<li>Ignored entries have muted names and icons and a small <strong>Ignored</strong> badge.</li>
+<li>Hover an ignored entry to see which rule excludes it.</li>
+<li>Folders load only when you expand them.</li>
+<li>Choose <strong>Hide ignored files</strong> to filter them out of the view.</li>
+</ul>
+<p>Showing or hiding ignored files does not change Git tracking or your repository's ignore rules. Internal <code>.git</code> and <code>.DS_Store</code> metadata always stays hidden.</p>
+<h2 id="language-detection">Language detection</h2>
+<p>The editor highlights files with bundled grammars. It picks a language from the filename and extension first, then from a shebang or a recognizable content signature such as a JSON document, XML, an HTML doctype or a PHP header. It does not guess a language from ordinary prose.</p>
+<p>To override detection, use the language selector above the document. Choose a language, including <strong>Plain Text</strong>, or return to <strong>Auto detect</strong>.</p>
+<ul>
+<li>Your choice is kept across restarts, for both saved files and files with unsaved changes.</li>
+<li>Editing a script's shebang, or reloading a file changed outside Kiln, updates detection.</li>
+<li>The selected language controls highlighting, comment commands, and the language sent to a configured language server.</li>
+</ul>
+<h2 id="completion">Completion</h2>
+<p>Completion suggestions appear when you type an identifier prefix. You can also open the list yourself.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Action</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Open suggestions</td>
+<td><code>⌃Space</code>, <code>⌥Esc</code>, or click <strong>Complete</strong></td>
+</tr>
+<tr>
+<td>Choose a candidate</td>
+<td>Arrow keys</td>
+</tr>
+<tr>
+<td>Insert</td>
+<td><code>Enter</code> or <code>Tab</code></td>
+</tr>
+<tr>
+<td>Close the list</td>
+<td><code>Esc</code></td>
+</tr>
+<tr>
+<td>See a full name and details</td>
+<td>Hover a truncated entry</td>
+</tr>
+</tbody>
+</table></div>
+<p>While you compose text with an input method (IME), the IME keeps its own input and candidate keys. Kiln's completion does not take them over.</p>
+<p>When you accept a suggestion, Kiln applies the server's full replacement and any additional edits as one undo step. A suggestion that arrives after you have moved the caret or changed the document is discarded.</p>
+<h3 id="language-servers">Language servers</h3>
+<p>Installed language servers provide semantic suggestions. Kiln has defaults for these languages:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Language</th>
+<th>Language server</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rust</td>
+<td><code>rust-analyzer</code></td>
+</tr>
+<tr>
+<td>Go</td>
+<td><code>gopls</code></td>
+</tr>
+<tr>
+<td>JavaScript and TypeScript</td>
+<td><code>typescript-language-server</code></td>
+</tr>
+<tr>
+<td>Python</td>
+<td><code>pyright-langserver</code> or <code>pylsp</code></td>
+</tr>
+<tr>
+<td>C and C++</td>
+<td><code>clangd</code></td>
+</tr>
+<tr>
+<td>Lua</td>
+<td><code>lua-language-server</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Install the server for your language, and Kiln uses it. To change languages, file extensions, commands or arguments, edit the <code>lsp.json</code> configuration.</p>
+<p>Language servers start with your normal <code>PATH</code> plus supported install locations and the server's own folder, so servers launched through an interpreter can run. In a project with nested sub-projects, each file uses the nearest recognized project marker. This does not change the working directory of your terminal or workspace.</p>
+<h3 id="without-a-language-server">Without a language server</h3>
+<p>When no language server is connected, Kiln still offers local suggestions, labeled <strong>Language suggestion</strong> or <strong>Document word</strong>.</p>
+<ul>
+<li>Common keywords, literals and built-in names are bundled per language. JavaScript and TypeScript have separate lists.</li>
+<li>Other grammars suggest matching words from the open document.</li>
+<li>Local suggestions are not semantic. They do not resolve imports, types or symbols from other files.</li>
+<li>Scanning is limited so large documents stay responsive. Binary and large-file modes do not offer completion.</li>
+</ul>
+<h2 id="search-and-problems">Search and problems</h2>
+<p>Project search and the problems list are in the titlebar <strong>Tools</strong> menu, next to files and source control. Either one opens beside your current work, so your terminal task stays in place.</p>
+<h2 id="remote-files">Remote files</h2>
+<p>Files on S3, OCI, GCS, R2, FTP and SFTP open in this same editor. See <a href="remote.html#browse-and-edit">Remote files and SSH</a>.</p>
+<h2 id="windows">Windows</h2>
+<p>The editor works the same on Windows. Korean IME composition and commit work in the editor as they do in terminals.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="git.html"><small>Previous</small>Git and GitHub</a><a class="pn next" href="databases.html"><small>Next</small>Databases</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">문서<b>도구</b></p></div><h1>편집기와 검색</h1><p class="desc">구문 강조, 언어 감지, 언어 서버 자동 완성을 지원하는 편집기와 무시된 파일까지 보여 주는 파일 탐색기로 파일을 열고 편집합니다.</p><p>Kiln에는 터미널 옆에서 쓸 수 있는 파일 편집기가 있습니다. 구문 강조, 언어 서버 자동 완성, 파일 탐색기를 갖추고 있어, 작업을 벗어나지 않고 같은 워크스페이스에서 파일, 검색, 문제를 열 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<h2 id="open-the-editor-and-tools">편집기와 도구 열기</h2>
+<p>워크스페이스 인스펙터의 <strong>파일</strong>을 누르면 파일 탐색기가 열립니다. 제목 표시줄의 <strong>도구</strong> 메뉴에는 파일, 검색, 소스 제어, GitHub, 데이터베이스, 원격 연결, 문제가 한데 모여 있습니다. 무엇을 고르든 현재 작업 옆에 열립니다. 창이 좁을 때는 <strong>작업으로 돌아가기</strong>를 눌러 터미널로 돌아옵니다.</p>
+<h2 id="file-explorer">파일 탐색기</h2>
+<p>탐색기는 기본적으로 Git에서 무시하는 파일과 폴더도 보여 줍니다. <code>.env</code>, <code>.env.prod</code>, 로그, 생성된 디렉터리 등이 여기에 해당합니다. 이런 파일도 다른 파일처럼 클릭하거나 키보드로 이동해 열 수 있습니다.</p>
+<ul>
+<li>무시된 항목은 이름과 아이콘이 흐리게 표시되고 작은 <strong>제외됨</strong> 배지가 붙습니다.</li>
+<li>무시된 항목에 마우스를 올리면 어떤 규칙 때문에 제외되었는지 볼 수 있습니다.</li>
+<li>폴더 내용은 펼칠 때만 불러옵니다.</li>
+<li><strong>무시된 파일 숨기기</strong>를 선택하면 목록에서 무시된 파일이 빠집니다.</li>
+</ul>
+<p>무시된 파일을 보이거나 숨겨도 Git 추적 상태나 저장소의 ignore 규칙은 바뀌지 않습니다. 내부 메타데이터인 <code>.git</code>과 <code>.DS_Store</code>는 항상 숨겨져 있습니다.</p>
+<h2 id="language-detection">언어 감지</h2>
+<p>편집기는 내장 문법으로 구문을 강조합니다. 언어는 먼저 파일 이름과 확장자로 판단하고, 그다음 shebang이나 JSON 문서, XML, HTML doctype, PHP 헤더처럼 알아볼 수 있는 내용 특징으로 판단합니다. 일반 문장만 보고 언어를 추측하지는 않습니다.</p>
+<p>감지된 언어를 바꾸려면 문서 위의 언어 선택기를 사용합니다. <strong>일반 텍스트</strong>를 포함해 원하는 언어를 고르거나, <strong>자동 감지</strong>로 되돌릴 수 있습니다.</p>
+<ul>
+<li>선택한 언어는 저장된 파일이든 저장하지 않은 변경이 있는 파일이든 재시작한 뒤에도 유지됩니다.</li>
+<li>스크립트의 shebang을 고치거나 Kiln 밖에서 바뀐 파일을 다시 불러오면 감지 결과가 갱신됩니다.</li>
+<li>선택한 언어에 따라 구문 강조, 주석 명령, 설정된 언어 서버에 전달하는 언어가 정해집니다.</li>
+</ul>
+<h2 id="completion">자동 완성</h2>
+<p>식별자의 앞부분을 입력하면 자동 완성 제안이 나타납니다. 목록을 직접 열 수도 있습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>동작</th>
+<th>방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>제안 열기</td>
+<td><code>⌃Space</code>, <code>⌥Esc</code>, 또는 <strong>자동완성</strong> 클릭</td>
+</tr>
+<tr>
+<td>후보 선택</td>
+<td>화살표 키</td>
+</tr>
+<tr>
+<td>삽입</td>
+<td><code>Enter</code> 또는 <code>Tab</code></td>
+</tr>
+<tr>
+<td>목록 닫기</td>
+<td><code>Esc</code></td>
+</tr>
+<tr>
+<td>전체 이름과 세부 정보 보기</td>
+<td>잘린 항목에 마우스 올리기</td>
+</tr>
+</tbody>
+</table></div>
+<p>입력기(IME)로 글자를 조합하는 동안에는 입력 키와 후보 선택 키를 IME가 그대로 씁니다. Kiln의 자동 완성이 이 키를 가로채지 않습니다.</p>
+<p>제안을 수락하면 Kiln은 서버가 보낸 전체 치환과 추가 편집을 한 번의 실행 취소 단위로 적용합니다. 커서를 옮기거나 문서를 고친 뒤에 도착한 제안은 버립니다.</p>
+<h3 id="language-servers">언어 서버</h3>
+<p>설치된 언어 서버가 의미 기반 제안을 제공합니다. Kiln에는 다음 언어의 기본 설정이 들어 있습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>언어</th>
+<th>언어 서버</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rust</td>
+<td><code>rust-analyzer</code></td>
+</tr>
+<tr>
+<td>Go</td>
+<td><code>gopls</code></td>
+</tr>
+<tr>
+<td>JavaScript, TypeScript</td>
+<td><code>typescript-language-server</code></td>
+</tr>
+<tr>
+<td>Python</td>
+<td><code>pyright-langserver</code> 또는 <code>pylsp</code></td>
+</tr>
+<tr>
+<td>C, C++</td>
+<td><code>clangd</code></td>
+</tr>
+<tr>
+<td>Lua</td>
+<td><code>lua-language-server</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>사용하는 언어의 서버를 설치하기만 하면 Kiln이 사용합니다. 언어, 파일 확장자, 명령, 인수를 바꾸려면 <code>lsp.json</code> 설정을 편집하세요.</p>
+<p>언어 서버는 평소의 <code>PATH</code>에 지원되는 설치 위치와 서버 자체 폴더를 더한 경로로 시작합니다. 그래서 인터프리터를 거쳐 실행되는 서버도 동작합니다. 하위 프로젝트가 중첩된 프로젝트에서는 파일마다 가장 가까운 프로젝트 표식을 기준으로 삼습니다. 이 동작은 터미널이나 워크스페이스의 작업 디렉터리에 영향을 주지 않습니다.</p>
+<h3 id="without-a-language-server">언어 서버가 없을 때</h3>
+<p>언어 서버가 연결되어 있지 않아도 Kiln은 <strong>언어 제안</strong> 또는 <strong>문서의 단어</strong>로 표시된 로컬 제안을 보여 줍니다.</p>
+<ul>
+<li>자주 쓰는 키워드, 리터럴, 내장 이름이 언어별로 들어 있습니다. JavaScript와 TypeScript는 목록이 따로 있습니다.</li>
+<li>그 밖의 문법에서는 열린 문서에서 일치하는 단어를 제안합니다.</li>
+<li>로컬 제안은 의미 기반이 아니므로 다른 파일의 import, 타입, 심볼을 해석하지 않습니다.</li>
+<li>큰 문서에서도 반응 속도를 유지하도록 검사 범위를 제한합니다. 바이너리 모드와 대용량 파일 모드에서는 자동 완성을 제공하지 않습니다.</li>
+</ul>
+<h2 id="search-and-problems">검색과 문제</h2>
+<p>프로젝트 검색과 문제 목록은 제목 표시줄의 <strong>도구</strong> 메뉴에서 파일, 소스 제어 옆에 있습니다. 둘 다 현재 작업 옆에 열리므로 터미널 작업은 그대로 둔 채 쓸 수 있습니다.</p>
+<h2 id="remote-files">원격 파일</h2>
+<p>S3, OCI, GCS, R2, FTP, SFTP의 파일도 같은 편집기에서 열립니다. <a href="remote.html#browse-and-edit">원격 파일과 SSH</a>를 참고하세요.</p>
+<h2 id="windows">Windows</h2>
+<p>편집기는 Windows에서도 똑같이 동작합니다. 한국어 IME 조합과 확정도 터미널에서와 마찬가지로 편집기에서 동작합니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="git.html"><small>이전</small>Git과 GitHub</a><a class="pn next" href="databases.html"><small>다음</small>데이터베이스</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>エディターと検索</h1><p class="desc">シンタックスハイライト、言語の自動検出、言語サーバーによる補完と、無視対象のファイルも表示するファイルエクスプローラーを使って、ファイルを開いて編集する方法を説明します。</p><p>Kiln では、ターミナルの横でファイルを編集できます。エディターには、シンタックスハイライト、言語サーバーによる補完、ファイルエクスプローラーが備わっています。作業を離れずに、同じワークスペースからファイル、検索、問題を開けます。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<h2 id="open-the-editor-and-tools">エディターとツールを開く</h2>
+<p>ワークスペースインスペクターには、ファイルエクスプローラーを開く<strong>ファイル</strong>があります。タイトルバーの<strong>ツール</strong>メニューには、ファイル、検索、ソース管理、GitHub、データベース、リモート接続、問題がまとめて並んでいます。いずれかを選ぶと、現在の作業の横に開きます。ウィンドウが狭いときは、<strong>作業に戻る</strong>でターミナルに戻れます。</p>
+<h2 id="file-explorer">ファイルエクスプローラー</h2>
+<p>エクスプローラーは既定で、<code>.env</code>、<code>.env.prod</code>、ログ、生成されたディレクトリなど、Git で無視されているファイルとフォルダーも表示します。ほかのファイルと同じように、クリックやキーボード操作で開けます。</p>
+<ul>
+<li>無視対象の項目は、名前とアイコンが薄く表示され、小さな<strong>対象外</strong>バッジが付きます。</li>
+<li>無視対象の項目にポインタを合わせると、どのルールで除外されているかがわかります。</li>
+<li>フォルダーは展開したときにだけ読み込まれます。</li>
+<li><strong>無視対象のファイルを非表示</strong>を選ぶと、一覧から外せます。</li>
+</ul>
+<p>無視対象のファイルを表示または非表示にしても、Git の追跡やリポジトリの ignore ルールは変わりません。内部の <code>.git</code> と <code>.DS_Store</code> のメタデータは常に非表示です。</p>
+<h2 id="language-detection">言語の検出</h2>
+<p>エディターは、同梱の文法定義でファイルをハイライトします。言語はまずファイル名と拡張子から判定し、次に shebang や、JSON ドキュメント、XML、HTML の doctype、PHP のヘッダーなど識別できる内容の特徴から判定します。普通の文章からは言語を推測しません。</p>
+<p>検出結果を上書きするには、ドキュメントの上にある言語セレクターを使います。言語（<strong>プレーンテキスト</strong>も選べます）を選ぶか、<strong>自動検出</strong>に戻します。</p>
+<ul>
+<li>選んだ言語は、保存済みのファイルと未保存の変更があるファイルのどちらでも、再起動後も保持されます。</li>
+<li>スクリプトの shebang を編集したり、Kiln の外で変更されたファイルを再読み込みしたりすると、検出結果が更新されます。</li>
+<li>選んだ言語によって、ハイライト、コメント用のコマンド、設定済みの言語サーバーに送られる言語が決まります。</li>
+</ul>
+<h2 id="completion">補完</h2>
+<p>識別子の先頭を入力すると、補完の候補が表示されます。一覧を自分で開くこともできます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>候補を開く</td>
+<td><code>⌃Space</code>、<code>⌥Esc</code>、または<strong>補完</strong>をクリック</td>
+</tr>
+<tr>
+<td>候補を選ぶ</td>
+<td>矢印キー</td>
+</tr>
+<tr>
+<td>挿入する</td>
+<td><code>Enter</code> または <code>Tab</code></td>
+</tr>
+<tr>
+<td>一覧を閉じる</td>
+<td><code>Esc</code></td>
+</tr>
+<tr>
+<td>完全な名前と詳細を見る</td>
+<td>省略表示された項目にポインタを合わせる</td>
+</tr>
+</tbody>
+</table></div>
+<p>入力メソッド（IME）で文字を変換している間は、入力キーと候補選択キーを IME がそのまま使います。Kiln の補完がそれらのキーを横取りすることはありません。</p>
+<p>候補を確定すると、Kiln はサーバーが返した置換内容全体と追加の編集を、1 回で取り消せるひとまとまりの編集として適用します。カーソルを移動した後や、ドキュメントを変更した後に届いた候補は破棄されます。</p>
+<h3 id="language-servers">言語サーバー</h3>
+<p>インストール済みの言語サーバーが、意味解析に基づく候補を提供します。Kiln には次の言語の既定設定があります。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>言語</th>
+<th>言語サーバー</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rust</td>
+<td><code>rust-analyzer</code></td>
+</tr>
+<tr>
+<td>Go</td>
+<td><code>gopls</code></td>
+</tr>
+<tr>
+<td>JavaScript と TypeScript</td>
+<td><code>typescript-language-server</code></td>
+</tr>
+<tr>
+<td>Python</td>
+<td><code>pyright-langserver</code> または <code>pylsp</code></td>
+</tr>
+<tr>
+<td>C と C++</td>
+<td><code>clangd</code></td>
+</tr>
+<tr>
+<td>Lua</td>
+<td><code>lua-language-server</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>使う言語のサーバーをインストールするだけで、Kiln がそのサーバーを使います。言語、ファイル拡張子、コマンド、引数を変更するには、<code>lsp.json</code> の設定を編集します。</p>
+<p>言語サーバーは、通常の <code>PATH</code> に、対応するインストール場所とサーバー自身のフォルダーを加えた環境で起動するため、インタープリター経由で起動するサーバーも動作します。サブプロジェクトが入れ子になったプロジェクトでは、ファイルごとに、最も近くにある認識可能なプロジェクトマーカーが使われます。これによってターミナルやワークスペースの作業ディレクトリが変わることはありません。</p>
+<h3 id="without-a-language-server">言語サーバーがない場合</h3>
+<p>言語サーバーが接続されていなくても、Kiln は<strong>言語の候補</strong>または<strong>文書内の単語</strong>というラベルの付いたローカルの候補を表示します。</p>
+<ul>
+<li>よく使うキーワード、リテラル、組み込みの名前が言語ごとに同梱されています。JavaScript と TypeScript は別々のリストです。</li>
+<li>その他の文法では、開いているドキュメント内の一致する単語が候補になります。</li>
+<li>ローカルの候補は意味解析に基づくものではありません。import、型、ほかのファイルのシンボルは解決しません。</li>
+<li>大きなドキュメントでも操作が重くならないよう、スキャンする範囲は制限されています。バイナリモードと大きなファイルのモードでは補完は使えません。</li>
+</ul>
+<h2 id="search-and-problems">検索と問題</h2>
+<p>プロジェクト検索と問題の一覧は、タイトルバーの<strong>ツール</strong>メニューにあり、ファイルやソース管理と並んでいます。どちらも現在の作業の横に開くため、ターミナルの作業はそのまま残ります。</p>
+<h2 id="remote-files">リモートファイル</h2>
+<p>S3、OCI、GCS、R2、FTP、SFTP 上のファイルも、同じエディターで開けます。詳しくは<a href="remote.html#browse-and-edit">リモートファイルと SSH</a> を参照してください。</p>
+<h2 id="windows">Windows</h2>
+<p>エディターは Windows でも同じように動作します。韓国語 IME の変換と確定は、ターミナルと同様にエディターでも使えます。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="git.html"><small>前へ</small>Git と GitHub</a><a class="pn next" href="databases.html"><small>次へ</small>データベース</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">文档<b>工具</b></p></div><h1>编辑器与搜索</h1><p class="desc">打开和编辑文件，支持语法高亮、语言检测和语言服务器补全，文件浏览器还会显示已忽略的文件。</p><p>Kiln 在终端旁边内置了文件编辑器，提供语法高亮、语言服务器补全和文件浏览器。文件、搜索和问题列表都在同一个工作区中打开，不必离开当前任务。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<h2 id="open-the-editor-and-tools">打开编辑器和工具</h2>
+<p>工作区检查器中的<strong>文件</strong>用于打开文件浏览器。标题栏的<strong>工具</strong>菜单汇总了文件、搜索、源代码管理、GitHub、数据库、远程连接和问题，选中的项目会在当前工作旁边打开。窗口较窄时，点击<strong>返回任务</strong>回到终端。</p>
+<h2 id="file-explorer">文件浏览器</h2>
+<p>文件浏览器默认显示被 Git 忽略的文件和文件夹，包括 <code>.env</code>、<code>.env.prod</code>、日志和生成的目录。它们和其他文件一样，可以点击打开，也可以用键盘导航打开。</p>
+<ul>
+<li>已忽略的条目名称和图标以淡色显示，并带有小小的<strong>已忽略</strong>标记。</li>
+<li>把指针悬停在已忽略的条目上，可以看到是哪条规则排除了它。</li>
+<li>文件夹只在展开时才加载。</li>
+<li>选择<strong>隐藏已忽略的文件</strong>，可以把它们从视图中过滤掉。</li>
+</ul>
+<p>显示或隐藏已忽略的文件，不会改变 Git 的跟踪状态，也不会改动仓库的忽略规则。内部的 <code>.git</code> 和 <code>.DS_Store</code> 元数据始终隐藏。</p>
+<h2 id="language-detection">语言检测</h2>
+<p>编辑器使用内置的语法定义来高亮文件。它先根据文件名和扩展名确定语言，再参考 shebang 或可识别的内容特征，例如 JSON 文档、XML、HTML doctype 或 PHP 头部。它不会根据普通文本猜测语言。</p>
+<p>要覆盖检测结果，使用文档上方的语言选择器。可以选择某种语言（包括<strong>纯文本</strong>），也可以改回<strong>自动检测</strong>。</p>
+<ul>
+<li>选择在重启后依然保留，对已保存的文件和有未保存更改的文件都有效。</li>
+<li>修改脚本的 shebang，或重新加载在 Kiln 外部改动过的文件，都会更新检测结果。</li>
+<li>所选语言决定高亮、注释命令，以及发送给已配置语言服务器的语言。</li>
+</ul>
+<h2 id="completion">补全</h2>
+<p>输入标识符前缀时会出现补全建议，也可以手动打开建议列表。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>打开建议</td>
+<td><code>⌃Space</code>、<code>⌥Esc</code>，或点击<strong>补全</strong></td>
+</tr>
+<tr>
+<td>选择候选项</td>
+<td>方向键</td>
+</tr>
+<tr>
+<td>插入</td>
+<td><code>Enter</code> 或 <code>Tab</code></td>
+</tr>
+<tr>
+<td>关闭列表</td>
+<td><code>Esc</code></td>
+</tr>
+<tr>
+<td>查看完整名称和详情</td>
+<td>把指针悬停在被截断的条目上</td>
+</tr>
+</tbody>
+</table></div>
+<p>用输入法（IME）组字时，输入法保留自己的输入键和候选键，Kiln 的补全不会抢占它们。</p>
+<p>接受建议时，Kiln 会把服务器给出的完整替换内容和所有附加编辑作为一次撤销操作应用。如果建议到达前你已经移动了光标或修改了文档，这条建议会被丢弃。</p>
+<h3 id="language-servers">语言服务器</h3>
+<p>已安装的语言服务器提供语义建议。Kiln 为以下语言提供了默认配置：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>语言</th>
+<th>语言服务器</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rust</td>
+<td><code>rust-analyzer</code></td>
+</tr>
+<tr>
+<td>Go</td>
+<td><code>gopls</code></td>
+</tr>
+<tr>
+<td>JavaScript 和 TypeScript</td>
+<td><code>typescript-language-server</code></td>
+</tr>
+<tr>
+<td>Python</td>
+<td><code>pyright-langserver</code> 或 <code>pylsp</code></td>
+</tr>
+<tr>
+<td>C 和 C++</td>
+<td><code>clangd</code></td>
+</tr>
+<tr>
+<td>Lua</td>
+<td><code>lua-language-server</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>装好对应语言的服务器，Kiln 就会使用它。要更改语言、文件扩展名、命令或参数，编辑 <code>lsp.json</code> 配置即可。</p>
+<p>语言服务器启动时使用你平常的 <code>PATH</code>，并加上受支持的安装位置和服务器自身所在的文件夹，因此通过解释器启动的服务器也能运行。在包含嵌套子项目的项目中，每个文件使用离它最近的可识别项目标记。这不会改变终端或工作区的工作目录。</p>
+<h3 id="without-a-language-server">没有语言服务器时</h3>
+<p>没有连接语言服务器时，Kiln 仍会提供本地建议，标为<strong>语言建议</strong>或<strong>文档中的词语</strong>。</p>
+<ul>
+<li>每种语言都内置了常用关键字、字面量和内置名称。JavaScript 和 TypeScript 各有一份列表。</li>
+<li>其他语法会从当前打开的文档中建议匹配的词语。</li>
+<li>本地建议不具备语义能力，不会解析其他文件中的导入、类型或符号。</li>
+<li>扫描范围有限，以保证大型文档依然流畅。二进制模式和大文件模式不提供补全。</li>
+</ul>
+<h2 id="search-and-problems">搜索和问题</h2>
+<p>项目搜索和问题列表都在标题栏的<strong>工具</strong>菜单中，与文件和源代码管理并列。两者都在当前工作旁边打开，终端任务保持原位。</p>
+<h2 id="remote-files">远程文件</h2>
+<p>S3、OCI、GCS、R2、FTP 和 SFTP 上的文件也在同一个编辑器中打开。详见<a href="remote.html#browse-and-edit">远程文件与 SSH</a>。</p>
+<h2 id="windows">Windows</h2>
+<p>编辑器在 Windows 上的用法完全相同。韩语输入法的组字和上屏在编辑器中与在终端中一样正常。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="git.html"><small>上一页</small>Git 与 GitHub</a><a class="pn next" href="databases.html"><small>下一页</small>数据库</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Editor and search", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "편집기와 검색", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "エディターと検索", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "编辑器与搜索", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

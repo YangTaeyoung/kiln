@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kiln</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Kiln is the terminal IDE for agents. Run Claude Code, Codex and Antigravity in one window.">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/fonts.css">
+<style>
+/* Layout: quiet stone page; product shots rest on fired glaze. Core features alternate text and a large glazed shot; the rest is a short linked list. */
+:root {
+  --stone: #e9e7e2;
+  --paper: #f4f2ee;
+  --ink: #1c1b19;
+  --dim: #66635d;
+  --faint: #8a877f;
+  --line: #d3cfc7;
+  --celadon: #3f6b5c;
+  --sans: "Pretendard", "Hiragino Sans", "PingFang SC", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--stone); }
+body { margin: 0; background: var(--stone); color: var(--ink); font: 400 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+html[lang="ko"] body { word-break: keep-all; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--celadon); outline-offset: 3px; border-radius: 4px; }
+.wrap { max-width: 1320px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); }
+@media (min-width: 900px) { .wrap { padding-left: max(40px, env(safe-area-inset-left, 0px)); padding-right: max(40px, env(safe-area-inset-right, 0px)); } }
+
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); background: var(--stone); z-index: 20; }
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: color-mix(in srgb, var(--stone) 88%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.nav .wrap { display: flex; align-items: center; gap: 26px; height: 64px; font-size: 14px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 16px; text-decoration: none; }
+.brand img { width: 24px; height: 24px; }
+.nav-links { display: flex; gap: 22px; }
+.nav-links a, .nav .gh { color: var(--dim); text-decoration: none; }
+.nav-links a:hover, .nav .gh:hover { color: var(--ink); }
+.sp { flex: 1; }
+.lang { position: relative; }
+.lang select { appearance: none; -webkit-appearance: none; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 500 13px/1 var(--sans); padding: 8px 26px 8px 11px; border-radius: 8px; cursor: pointer; }
+.lang::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 10px; color: var(--dim); pointer-events: none; }
+.btn { display: inline-flex; align-items: center; gap: 8px; font: 600 14px/1 var(--sans); padding: 12px 16px; border-radius: 8px; text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--paper); white-space: nowrap; transition: transform .2s ease, background-color .2s ease; }
+.btn:hover { transform: translateY(-1px); }
+.btn svg { width: 15px; height: 15px; fill: currentColor; }
+.btn.ink { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn.sm { padding: 9px 13px; font-size: 13px; }
+@media (max-width: 860px) { .nav-links, .nav .gh { display: none; } .nav .btn.sm { display: none; } }
+
+.hero { padding-block: clamp(48px, 9vh, 96px) 36px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px 48px; align-items: end; }
+.hero h1 { margin: 0; font-weight: 600; font-size: clamp(34px, 4.6vw, 64px); line-height: 1.05; letter-spacing: -.035em; text-wrap: balance; }
+.hero .lede { margin: 16px 0 0; font-size: 18px; line-height: 1.5; color: var(--dim); max-width: 40ch; }
+html:is([lang="ko"], [lang="ja"], [lang="zh-CN"]) .hero h1 { letter-spacing: -.02em; line-height: 1.15; }
+.hero-side { display: grid; gap: 12px; justify-items: start; }
+.ctas { display: flex; gap: 8px; flex-wrap: wrap; }
+.fine { font-size: 13px; color: var(--faint); margin: 0; }
+@media (max-width: 900px) { .hero { grid-template-columns: minmax(0, 1fr); } }
+
+.plate { position: relative; overflow: hidden; border-radius: 6px; background: #2a1d15; isolation: isolate; }
+.plate > .glaze-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: -1; }
+.glabel { position: absolute; right: 12px; bottom: 9px; z-index: 3; font: 400 10.5px/1.3 var(--mono); letter-spacing: .02em; color: rgba(255, 250, 240, .7); text-shadow: 0 1px 2px rgba(0, 0, 0, .3); pointer-events: none; }
+.plate[data-glaze="shino"] .glabel, .plate[data-glaze="celadon"] .glabel { color: rgba(40, 32, 24, .6); text-shadow: none; }
+.hero-plate { aspect-ratio: 16 / 10.4; display: grid; place-items: center; }
+.hero-win { position: relative; width: 86%; }
+.hero-win video { width: 100%; display: block; border-radius: .72% / 1.14%; background: #14171c; box-shadow: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 40px 80px -24px rgba(0, 0, 0, .6), 0 14px 28px -14px rgba(0, 0, 0, .45); }
+.vbtn { position: absolute; right: 2%; bottom: 3%; width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .22); background: rgba(16, 18, 22, .7); color: #f3efe7; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(6px); }
+.vbtn svg { width: 12px; height: 12px; fill: currentColor; }
+.works { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 26px; margin: 22px 0 0; font-size: 14px; color: var(--dim); }
+.works .agent { color: var(--ink); }
+
+
+.shot { position: absolute; left: 7%; right: 7%; top: 9%; overflow: hidden; border-radius: 6px 6px 0 0; box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), 0 24px 40px -18px rgba(0, 0, 0, .55); background: #14171c; }
+.shot.full { top: 50%; transform: translateY(-50%); border-radius: 5px; }
+.shot img { position: absolute; display: block; max-width: none; height: auto; }
+.type { position: absolute; z-index: 2; font: 400 13px/1.7 var(--mono); }
+.type.dark { color: #f1e9de; }
+.type .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
+.type .row:last-child { border-bottom: 0; }
+.type .row > span:last-child { font-variant-numeric: tabular-nums; opacity: .8; }
+.agent { display: inline-flex; align-items: center; gap: .45em; font-weight: 500; white-space: nowrap; --ac: currentColor; }
+.agent svg { width: 1.1em; height: 1.1em; flex: none; fill: currentColor; color: var(--ac); }
+.agent.claude { --ac: #b23f00; } .agent.codex { --ac: #1363c5; } .agent.agy { --ac: #8045c7; } .agent.shell svg { fill: none; }
+.type.dark .agent.claude { --ac: #ff9f5a; } .type.dark .agent.codex { --ac: #5eb1ff; } .type.dark .agent.agy { --ac: #c49bff; }
+.works .agent { color: var(--ink); }
+
+.features { display: grid; gap: clamp(72px, 12vh, 140px); margin-top: clamp(96px, 14vh, 160px); }
+.feature { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 32px 64px; align-items: center; }
+.feature.flip { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); }
+.feature.flip .f-copy { order: 2; }
+.f-copy h2 { margin: 0; font-weight: 600; font-size: clamp(26px, 2.6vw, 36px); line-height: 1.15; letter-spacing: -.025em; text-wrap: balance; }
+html:is([lang="ko"], [lang="ja"], [lang="zh-CN"]) .f-copy h2 { letter-spacing: -.015em; line-height: 1.25; }
+.f-copy p { margin: 14px 0 18px; color: var(--dim); font-size: 17px; line-height: 1.55; max-width: 34ch; }
+.f-link { font-size: 14px; color: var(--celadon); text-decoration: none; font-weight: 500; }
+.f-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.f-plate { aspect-ratio: 16 / 10.4; }
+.f-plate .shot { left: 6%; right: 6%; top: 8%; }
+.f-plate .shot.full { left: 7%; right: 7%; top: 50%; }
+.big-type { inset: 50% 10% auto; transform: translateY(-50%); font-size: clamp(14px, 1.5vw, 19px); }
+.big-type .row { padding: 14px 0; }
+.more { border-top: 1px solid var(--line); padding-top: 32px; display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 24px 64px; }
+.more h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+.more-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 24px; }
+.more-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; text-decoration: none; color: var(--ink); font-size: 15.5px; font-weight: 500; border-bottom: 1px solid var(--line); }
+.more-item .ki { width: 17px; height: 17px; color: var(--dim); flex: none; }
+.more-item::after { content: "→"; margin-left: auto; color: var(--faint); transition: transform .2s ease, color .2s ease; }
+.more-item:hover::after { transform: translateX(3px); color: var(--celadon); }
+@media (max-width: 900px) {
+  .feature, .feature.flip, .more { grid-template-columns: minmax(0, 1fr); }
+  .feature.flip .f-copy { order: 0; }
+  .more-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) { .more-grid { grid-template-columns: minmax(0, 1fr); } .big-type { font-size: 12.5px; } .big-type .row { padding: 8px 0; } }
+
+.spec { margin: clamp(96px, 14vh, 160px) 0 0; display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 24px 48px; }
+.spec h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.spec h2 small { display: block; font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
+.spec dl { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); border-top: 1px solid var(--ink); }
+.spec dt, .spec dd { margin: 0; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.spec dt { color: var(--dim); }
+@media (max-width: 860px) { .spec { grid-template-columns: minmax(0, 1fr); } }
+
+.final { margin: clamp(96px, 14vh, 160px) 0 0; }
+.final .plate { min-height: 340px; display: grid; align-content: end; padding: clamp(28px, 5vw, 64px); }
+.final h2 { margin: 0; color: #f6efe5; font-weight: 600; font-size: clamp(26px, 3vw, 40px); letter-spacing: -.02em; line-height: 1.15; max-width: 18ch; }
+.final p { color: rgba(246, 239, 229, .75); margin: 12px 0 24px; max-width: 48ch; }
+.final .btn { background: #f6efe5; color: #1c1612; border-color: #f6efe5; }
+.final .btn.ghost { background: transparent; color: #f6efe5; border-color: rgba(246, 239, 229, .35); }
+footer { padding-block: 56px 64px; color: var(--dim); font-size: 14px; }
+footer .wrap { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 28px; }
+footer h4 { margin: 0 0 10px; font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+footer a { text-decoration: none; }
+footer a:hover { color: var(--ink); }
+footer .brand { margin-bottom: 10px; color: var(--ink); }
+@media (max-width: 760px) { footer .wrap { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } footer .wrap > :first-child { grid-column: 1 / -1; } }
+@media (prefers-reduced-motion: reduce) { .shot, .shot img, .btn { transition: none; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-apple" viewBox="0 0 24 24"><path d="M16.4 12.6c0-2.4 2-3.5 2-3.6-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.8-3.5.8-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.6ZM14.1 5.6c.6-.8 1.1-1.9 1-3-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.9 1 .1 2.1-.5 2.7-1.3Z"/></symbol>
+    <symbol id="i-windows" viewBox="0 0 24 24"><path d="M3 5.1 10.4 4v7.2H3V5.1Zm8.4-1.2L21 2.5v8.7h-9.6V3.9ZM3 12.7h7.4V20L3 18.9v-6.2Zm8.4 0H21v8.8l-9.6-1.4v-7.4Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 16 16"><rect x="3" y="2" width="3.5" height="12" rx="1"/><rect x="9.5" y="2" width="3.5" height="12" rx="1"/></symbol>
+    <symbol id="i-play" viewBox="0 0 16 16"><path d="M4 2.5v11a.8.8 0 0 0 1.2.7l9-5.5a.8.8 0 0 0 0-1.4l-9-5.5A.8.8 0 0 0 4 2.5Z"/></symbol>
+    <symbol id="mk-claude" viewBox="0 0 24 24"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"></path></symbol>
+    <symbol id="mk-codex" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"></path></symbol>
+    <symbol id="mk-antigravity" viewBox="0 0 24 24"><path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z"></path></symbol>
+    <symbol id="ki-terminal" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="-7,-4 -2.5,0 -7,4"/><line x1="0" y1="5" x2="7" y2="5"/></symbol>
+    <symbol id="ki-database" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="0" cy="-5.5" rx="7" ry="2.6"/><line x1="-7" y1="-5.5" x2="-7" y2="5.5"/><line x1="7" y1="-5.5" x2="7" y2="5.5"/><path d="M-7 0A7 2.6 0 0 0 7 0M-7 5.5A7 2.6 0 0 0 7 5.5"/></symbol>
+    <symbol id="ki-gear" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle r="3"/><circle r="5.4"/><path stroke-width="2.1" d="M5.2 0H7.6M3.68 3.68L5.37 5.37M0 5.2V7.6M-3.68 3.68L-5.37 5.37M-5.2 0H-7.6M-3.68 -3.68L-5.37 -5.37M0 -5.2V-7.6M3.68 -3.68L5.37 -5.37"/></symbol>
+    <symbol id="ki-refresh" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.72 -5.35A6 6 0 1 1 -4.85 -3.53"/><polyline points="-0.78,-6.35 2.72,-5.35 3.22,-9.15"/></symbol>
+    <symbol id="ki-code" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="-3.5,-5.5 -8,0 -3.5,5.5"/><polyline points="3.5,-5.5 8,0 3.5,5.5"/><line x1="1.5" y1="-7" x2="-1.5" y2="7"/></symbol>
+    <symbol id="ki-history" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle r="7"/><polyline points="0,-4 0,0 3,2"/></symbol>
+    <symbol id="ki-bell" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="-6,4 -4.5,2 -4.5,-2.5 -2,-6 2,-6 4.5,-2.5 4.5,2 6,4"/><line x1="-1.5" y1="6.5" x2="1.5" y2="6.5"/></symbol>
+    <symbol id="ki-server" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="-7" y="-7" width="14" height="6" rx="1"/><rect x="-7" y="1" width="14" height="6" rx="1"/><circle cx="-4" cy="-4" r=".8" fill="currentColor" stroke="none"/><circle cx="-4" cy="4" r=".8" fill="currentColor" stroke="none"/><line x1="0" y1="-4" x2="4" y2="-4"/><line x1="0" y1="4" x2="4" y2="4"/></symbol>
+    <symbol id="ki-split" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="-7.5" y="-6" width="15" height="12" rx="2"/><line x1="0" y1="-6" x2="0" y2="6"/></symbol>
+    <symbol id="ki-sidebar" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="-8" y="-6.5" width="16" height="13" rx="2.5"/><line x1="-2.5" y1="-6.5" x2="-2.5" y2="6.5"/></symbol>
+    <symbol id="ki-key" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="-3.5" cy="3.5" r="3.5"/><line x1="-1" y1="1" x2="6.5" y2="-6.5"/><line x1="4" y1="-4" x2="6.5" y2="-1.5"/><line x1="2" y1="-2" x2="3.8" y2="-0.2"/></symbol>
+    <symbol id="ki-download" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="0" y1="-7" x2="0" y2="3"/><polyline points="-4,-1 0,3 4,-1"/><polyline points="-7,3.5 -7,7 7,7 7,3.5"/></symbol>
+    <symbol id="ki-columns" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="-7.5" y="-6.5" width="15" height="13" rx="2"/><line x1="-2.5" y1="-6.5" x2="-2.5" y2="6.5"/><line x1="2.5" y1="-6.5" x2="2.5" y2="6.5"/></symbol>
+    <symbol id="ki-sparkle" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon fill="currentColor" stroke="none" points="0,-8 2,-2 8,0 2,2 0,8 -2,2 -8,0 -2,-2"/></symbol>
+    <symbol id="ki-folder" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="-8,-5.5 -3,-5.5 -1,-3.5 8,-3.5 8,6.5 -8,6.5"/></symbol>
+    <symbol id="ki-branch" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="-4" cy="-6" r="2.2"/><circle cx="-4" cy="6.5" r="2.2"/><circle cx="5" cy="-3" r="2.2"/><line x1="-4" y1="-3.8" x2="-4" y2="4.3"/><polyline points="5,-0.8 5,1 0,3 -4,4.3"/></symbol>
+  </defs>
+</svg>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="assets/kiln.svg" alt="">Kiln</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="#features" data-i18n="nav_features">Features</a>
+      <a href="docs/index.html" data-i18n="nav_docs">Docs</a>
+      <a href="https://github.com/YangTaeyoung/kiln/releases" data-i18n="nav_changelog">Changelog</a>
+    </nav>
+    <span class="sp"></span>
+    <a class="gh" href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    <label class="lang"><select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select></label>
+    <a class="btn ink sm" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-i18n="nav_download">Download</a>
+  </div>
+</header>
+
+<main id="top" class="wrap">
+  <section class="hero">
+    <div class="hero-copy"><h1 data-i18n="h1">The terminal IDE for agents</h1><p class="lede" data-i18n="sub">Every agent in one window. Close it, and they keep working.</p></div>
+    <div class="hero-side">
+      <div class="ctas" id="dl-row">
+        <a class="btn ink" id="dl-mac" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span></a>
+        <a class="btn" id="dl-win" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span></a>
+      </div>
+      <p class="fine" data-i18n="fine">Free · Open source · macOS & Windows</p>
+    </div>
+  </section>
+
+  <div class="plate hero-plate" data-glaze="tenmoku" data-seed="2.1" id="hero-plate">
+    <div class="hero-win" id="hero-win">
+      <video id="hero-video" muted loop playsinline preload="metadata" poster="assets/hero-poster-en.webp" aria-label="Kiln running Claude Code, Codex and Antigravity side by side">
+        <source id="v-webm" src="assets/hero-loop-en.webm" type="video/webm"><source id="v-mp4" src="assets/hero-loop-en.mp4" type="video/mp4">
+      </video>
+      <button class="vbtn" type="button" id="vbtn" aria-label="Pause video"><svg aria-hidden="true"><use href="#i-pause"/></svg></button>
+    </div>
+    <span class="glabel" data-label="tenmoku"></span>
+  </div>
+  <p class="works"><span data-i18n="works">Works with</span>
+    <span class="agent claude"><svg><use href="#mk-claude"/></svg>Claude Code</span>
+    <span class="agent codex"><svg><use href="#mk-codex"/></svg>Codex</span>
+    <span class="agent agy"><svg><use href="#mk-antigravity"/></svg>Antigravity</span>
+  </p>
+
+  <section id="features" class="features">
+      <article class="feature">
+        <div class="f-copy">
+          <h2 data-i18n="f_agents_t">Agents, side by side</h2>
+          <p data-i18n="f_agents_d">Each agent works in its own terminal. The sidebar shows which one needs you.</p>
+          <a class="f-link" href="docs/agents.html"><span data-i18n="learn">Learn more</span> →</a>
+        </div>
+        <div class="plate f-plate" data-glaze="tenmoku" data-seed="5.3"><div class="shot full" data-shot="agents" data-crop="0 0 1 1"></div><span class="glabel" data-label="tenmoku"></span></div>
+      </article>
+      <article class="feature flip">
+        <div class="f-copy">
+          <h2 data-i18n="f_daemon_t">Sessions that never stop</h2>
+          <p data-i18n="f_daemon_d">Close or update Kiln. Your shells and agents keep running.</p>
+          <a class="f-link" href="docs/terminal.html#sessions-that-outlive-the-window"><span data-i18n="learn">Learn more</span> →</a>
+        </div>
+        <div class="plate f-plate" data-glaze="kaki" data-seed="7.7"><div class="type dark big-type" aria-hidden="true">
+          <div class="row"><span class="agent claude"><svg><use href="#mk-claude"/></svg>Claude Code</span><span data-up="2537">42:17</span></div>
+          <div class="row"><span class="agent codex"><svg><use href="#mk-codex"/></svg>Codex</span><span data-up="1185">19:45</span></div>
+          <div class="row"><span class="agent agy"><svg><use href="#mk-antigravity"/></svg>Antigravity</span><span data-up="611">10:11</span></div>
+          <div class="row"><span class="agent shell"><svg><use href="#ki-terminal"/></svg>pnpm dev</span><span data-up="10422">2:53:42</span></div>
+        </div><span class="glabel" data-label="kaki"></span></div>
+      </article>
+      <article class="feature">
+        <div class="f-copy">
+          <h2 data-i18n="f_review_t">Review in the same window</h2>
+          <p data-i18n="f_review_d">Browse history, squash commits and check diffs next to the work.</p>
+          <a class="f-link" href="docs/git.html"><span data-i18n="learn">Learn more</span> →</a>
+        </div>
+        <div class="plate f-plate" data-glaze="celadon" data-seed="7.1"><div class="shot" data-shot="git" data-crop="0.165 0.04 0.835 0.62"></div><span class="glabel" data-label="celadon"></span></div>
+      </article>
+      <article class="feature flip">
+        <div class="f-copy">
+          <h2 data-i18n="f_db_t">Databases at hand</h2>
+          <p data-i18n="f_db_d">Open PostgreSQL, MySQL, MariaDB or SQLite beside your terminal.</p>
+          <a class="f-link" href="docs/databases.html"><span data-i18n="learn">Learn more</span> →</a>
+        </div>
+        <div class="plate f-plate" data-glaze="shino" data-seed="4.2"><div class="shot" data-shot="db" data-crop="0.165 0.04 0.835 0.6"></div><span class="glabel" data-label="shino"></span></div>
+      </article>
+      <div class="more">
+        <h2 data-i18n="more_title">And more</h2>
+        <div class="more-grid">
+        <a class="more-item" href="docs/conversations.html"><svg class="ki" aria-hidden="true"><use href="#ki-refresh"/></svg><span data-i18n="m_sync">Shared conversations</span></a>
+        <a class="more-item" href="docs/accounts.html"><svg class="ki" aria-hidden="true"><use href="#ki-key"/></svg><span data-i18n="m_accounts">Multiple accounts</span></a>
+        <a class="more-item" href="docs/editor.html"><svg class="ki" aria-hidden="true"><use href="#ki-code"/></svg><span data-i18n="m_editor">Code editor</span></a>
+        <a class="more-item" href="docs/remote.html"><svg class="ki" aria-hidden="true"><use href="#ki-server"/></svg><span data-i18n="m_remote">Remote files and SSH</span></a>
+        <a class="more-item" href="docs/terminal.html#activity-and-notifications"><svg class="ki" aria-hidden="true"><use href="#ki-bell"/></svg><span data-i18n="m_notify">Notifications</span></a>
+        <a class="more-item" href="docs/install.html"><svg class="ki" aria-hidden="true"><use href="#ki-gear"/></svg><span data-i18n="m_settings">Themes and languages</span></a>
+        </div>
+      </div>
+    </section>
+
+  <section class="spec" aria-labelledby="spec-h">
+    <h2 id="spec-h"><small data-i18n="spec_kicker">Firing notes</small><span data-i18n="spec_title">Requirements</span></h2>
+    <dl>
+      <dt>macOS</dt><dd data-i18n="sp_mac_v">macOS 11+ on Apple Silicon</dd>
+      <dt>Windows</dt><dd data-i18n="sp_win_v">Windows 11 (x64, ARM64) · not code-signed yet</dd>
+      <dt data-i18n="sp_agents">Agents</dt><dd data-i18n="sp_agents_v">Bring your own Claude Code, Codex or Antigravity account</dd>
+      <dt data-i18n="sp_lang">Languages</dt><dd>English · 한국어 · 日本語 · 简体中文</dd>
+      <dt data-i18n="sp_license">License</dt><dd data-i18n="sp_license_v">MIT</dd>
+    </dl>
+  </section>
+
+  <section class="final">
+    <div class="plate" data-glaze="tenmoku" data-seed="3.7">
+      <h2 data-i18n="c_title">Open a folder. Get to work.</h2>
+      <p data-i18n="c_body">Free on macOS and Windows.</p>
+      <div class="ctas">
+        <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span></a>
+        <a class="btn ghost" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span></a>
+        <a class="btn ghost" href="docs/install.html" data-i18n="c_docs">Installation guide</a>
+      </div>
+      <span class="glabel" data-label="tenmoku"></span>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div><a class="brand" href="#top"><img src="assets/kiln.svg" alt="">Kiln</a><p style="margin:0" data-i18n="ft_tag">The terminal IDE for agents.</p></div>
+    <div><h4 data-i18n="ft_start">Get started</h4><ul><li><a href="docs/install.html" data-i18n="ft_install">Install and update</a></li><li><a href="docs/index.html" data-i18n="ft_intro">Introduction</a></li><li><a href="docs/workspaces.html" data-i18n="ft_ws">Workspaces and tasks</a></li></ul></div>
+    <div><h4 data-i18n="ft_guides">Guides</h4><ul><li><a href="docs/agents.html" data-i18n="ft_agents">Agents</a></li><li><a href="docs/git.html">Git &amp; GitHub</a></li><li><a href="docs/databases.html" data-i18n="ft_db">Databases</a></li></ul></div>
+    <div><h4 data-i18n="ft_project">Project</h4><ul><li><a href="https://github.com/YangTaeyoung/kiln">GitHub</a></li><li><a href="https://github.com/YangTaeyoung/kiln/releases" data-i18n="nav_changelog">Changelog</a></li><li><a href="https://github.com/YangTaeyoung/kiln/issues" data-i18n="ft_issue">Report an issue</a></li></ul></div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="assets/glaze.js"></script>
+<script src="assets/site-i18n.js"></script>
+<script>
+(function () {
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var I = window.KILN_I18N || {}, EN = {};
+  document.querySelectorAll("[data-i18n]").forEach(function (el) { EN[el.dataset.i18n] = el.textContent; });
+  I.en = Object.assign({}, EN, I.en || {});
+  var lang = "en";
+  function t(k) { return (I[lang] && I[lang][k] != null) ? I[lang][k] : (I.en[k] != null ? I.en[k] : ""); }
+
+  var SW = 2000, SH = 1257;
+  function layoutShot(el) {
+    var c = el.dataset.crop.split(" ").map(Number), img = el.querySelector("img");
+    if (!img) { img = document.createElement("img"); img.alt = ""; img.decoding = "async"; el.appendChild(img); }
+    el.style.aspectRatio = (c[2] * SW).toFixed(1) + " / " + (c[3] * SH).toFixed(1);
+    img.style.width = (100 / c[2]) + "%";
+    img.style.left = (-c[0] / c[2] * 100) + "%";
+    img.style.top = (-c[1] / c[3] * 100) + "%";
+    img.src = "assets/shots/" + el.dataset.shot + "-" + lang + ".webp";
+  }
+
+  function apply(next) {
+    lang = I[next] ? next : "en";
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.dataset.i18n); });
+    var CONE = { tenmoku: "10", celadon: "10", shino: "10", kaki: "9" };
+    document.querySelectorAll(".glabel[data-label]").forEach(function (el) { el.textContent = t("gl_" + el.dataset.label) + " · " + t("cone") + " " + CONE[el.dataset.label]; });
+    document.querySelectorAll(".shot[data-crop]").forEach(layoutShot);
+    document.getElementById("lang").value = lang;
+    setVideoLang();
+    syncVideo();
+    try { localStorage.setItem("kiln-site-lang", lang); } catch (e) {}
+  }
+  document.getElementById("lang").addEventListener("change", function (e) { apply(e.target.value); });
+
+  var video = document.getElementById("hero-video"), vbtn = document.getElementById("vbtn"), userPaused = reduce, inView = false;
+  var videoLang = "en";
+  function setVideoLang() {
+    if (videoLang === lang) return;
+    videoLang = lang;
+    video.poster = "assets/hero-poster-" + lang + ".webp";
+    document.getElementById("v-webm").src = "assets/hero-loop-" + lang + ".webm";
+    document.getElementById("v-mp4").src = "assets/hero-loop-" + lang + ".mp4";
+    video.load(); updateVideo();
+  }
+  function syncVideo() { var playing = !video.paused; vbtn.setAttribute("aria-label", t(playing ? "pause" : "play")); vbtn.querySelector("use").setAttribute("href", playing ? "#i-pause" : "#i-play"); }
+  function updateVideo() { if (inView && !userPaused) { var p = video.play(); if (p && p.catch) p.catch(function () {}); } else video.pause(); }
+  video.addEventListener("play", syncVideo); video.addEventListener("pause", syncVideo);
+  vbtn.addEventListener("click", function () { userPaused = !video.paused; if (userPaused) video.pause(); else updateVideo(); });
+  if ("IntersectionObserver" in window) new IntersectionObserver(function (es) { inView = es[0].isIntersecting; updateVideo(); }, { threshold: .25 }).observe(video);
+  else { inView = true; updateVideo(); }
+
+  if (/Windows/i.test(navigator.userAgent)) { var mac = document.getElementById("dl-mac"), win = document.getElementById("dl-win"); mac.classList.remove("ink"); win.classList.add("ink"); win.parentNode.insertBefore(win, mac); }
+
+  function fmt(s) { var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); }
+  if (!reduce) setInterval(function () {
+    document.querySelectorAll("[data-up]").forEach(function (el) { var v = +el.dataset.up + 1; el.dataset.up = v; el.textContent = fmt(v); });
+  }, 1000);
+
+  if (!reduce && window.gsap) {
+    gsap.registerPlugin(ScrollTrigger);
+    gsap.from(".hero-copy, .hero-side", { y: 14, opacity: 0, duration: 1, stagger: .1, ease: "expo.out" });
+    gsap.from("#hero-win", { y: 36, scale: .975, opacity: 0, duration: 1.5, ease: "expo.out", delay: .15 });
+    gsap.to("#hero-win", { y: -32, ease: "none", scrollTrigger: { trigger: "#hero-plate", start: "top 40%", end: "bottom top", scrub: true } });
+    gsap.utils.toArray(".feature").forEach(function (el) {
+      gsap.from(el.querySelector(".f-copy"), { y: 24, duration: 1, ease: "expo.out", scrollTrigger: { trigger: el, start: "top 80%", once: true } });
+      gsap.from(el.querySelector(".f-plate"), { y: 48, duration: 1.2, ease: "expo.out", scrollTrigger: { trigger: el, start: "top 85%", once: true } });
+    });
+  }
+
+  var saved = null; try { saved = localStorage.getItem("kiln-site-lang"); } catch (e) {}
+  apply(saved || "en");
+  window.addEventListener("load", function () { if (window.KilnGlaze) KilnGlaze.refresh(); });
+})();
+</script>
+</body>
+</html>

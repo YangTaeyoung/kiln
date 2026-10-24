@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Kiln — the open furnace</title>
+  <desc>An ivory tile, a graphite kiln mouth with a diagonal opening, and a copper ember.</desc>
+  <rect x="96" y="96" width="832" height="832" rx="184" fill="#F3EFE7"/>
+  <path d="M280 724V500a232 232 0 0 1 464 0v224q0 12-12 12H620q-12 0-12-12V500a96 96 0 0 0-192 0v224q0 12-12 12H292q-12 0-12-12Z" fill="#24272A"/>
+  <path d="m548 490 203-170 38 47-203 170Z" fill="#F3EFE7"/>
+  <rect x="461" y="665" width="102" height="71" rx="9" fill="#C55B2D"/>
+</svg>

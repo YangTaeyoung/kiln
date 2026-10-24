@@ -1,0 +1,47 @@
+name: Product site
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check translations and build the guide
+        run: |
+          pip install markdown==3.7
+          python3 site/_build/check-site.py
+          python3 site/_build/build-docs.py
+          git diff --exit-code -- site/docs || { echo "site/docs is out of date; run site/_build/build-docs.py and commit"; exit 1; }
+      - name: Assemble the published files
+        run: |
+          mkdir -p public
+          cp -R site/index.html site/assets site/docs public/
+          touch public/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Workspaces and tasks · Kiln Docs</title>
+<meta name="description" content="Create named workspaces for a folder, work across several repositories, follow tasks in the sidebar and arrange terminal splits.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html" class="on" aria-current="page">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html" class="on" aria-current="page">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html" class="on" aria-current="page">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html" class="on" aria-current="page">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">Documentation<b>Using Kiln</b></p></div><h1>Workspaces and tasks</h1><p class="desc">Create named workspaces for a folder, work across several repositories, follow tasks in the sidebar and arrange terminal splits.</p><p>A workspace is a named view of a folder with its own tasks, terminals, splits and drafts. Create several for the same folder when different pieces of work need their own terminals and layouts.</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<h2 id="create-a-workspace">Create a workspace</h2>
+<ol>
+<li>Choose <strong>+</strong> in the workspace sidebar, or press <code>⌘N</code>.</li>
+<li>Enter a name and choose a folder.</li>
+</ol>
+<p>The same dialog lists the workspaces that already exist for the selected folder, so you can open one of those instead of creating another. Cancelling the dialog does not start a terminal.</p>
+<h2 id="several-workspaces-one-folder">Several workspaces, one folder</h2>
+<p>One folder can have as many workspaces as you need, for example <strong>API review</strong> and <strong>Documentation</strong>. Each workspace keeps its own:</p>
+<ul>
+<li>tasks and terminal sessions,</li>
+<li>split layout,</li>
+<li>unsent requests (drafts).</li>
+</ul>
+<p>Kiln restores each workspace independently when it reopens. Files and Git history belong to the folder, so every workspace for that folder sees the same files and the same history.</p>
+<h2 id="one-workspace-several-repositories">One workspace, several repositories</h2>
+<p>When your frontend, backend and shared libraries live in separate Git repositories, open their parent folder, such as <code>~/dev/projects</code>, as the workspace folder.</p>
+<ul>
+<li><strong>Agents work from the parent folder.</strong> Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request. Inspecting a repository does not change the task's working directory.</li>
+<li><strong>Git targets one repository.</strong> Use the repository selector inside the Git and GitHub tools to choose which repository an operation applies to. See <a href="git.html">Git and GitHub</a>.</li>
+</ul>
+<p>A workspace is a boundary for navigation and agent context. Each repository keeps its own Git history.</p>
+<h2 id="the-task-list">The task list</h2>
+<p>The sidebar shows the tasks of each workspace and the state each one reports: Working, Waiting for Input, Done or Failed.</p>
+<ul>
+<li>The sidebar previews up to three tasks per workspace, with an option to show all.</li>
+<li>Running work comes first, followed by requests awaiting your input and then older failures.</li>
+<li>Recent work uses the same activity state and keeps its order stable while you have it open.</li>
+<li>Linked worktrees are distinguished from the main repository's workspace.</li>
+</ul>
+<p>Click a task to reveal its workspace, tab and split, including a pane hidden by zoom.</p>
+<h3 id="how-states-are-reported">How states are reported</h3>
+<p>Kiln shows a state only when it is reported. An agent has to report its state, or show a running title Kiln recognizes, before Kiln marks it as running. Shell-integrated commands can report their own running state.</p>
+<p>Sessions that report nothing appear as open sessions. An idle terminal is not treated as a completed task, and an agent launch command that has not finished does not mark an idle agent as running. See <a href="agents.html">Agents</a> for agent states and indicators, and <a href="terminal.html#activity-and-notifications">Terminal</a> for reporting activity from your own scripts.</p>
+<h2 id="start-a-task">Start a task</h2>
+<p>Choose <strong>New Task</strong>, enter a request, pick Claude Code, Codex or Antigravity, and start. The agent picker stays directly below the request input. Repository context scrolls separately, so it never pushes the start action out of reach.</p>
+<p>The agent's CLI must already be installed and signed in. See <a href="install.html#install-the-tools-you-use">Install and update</a> and <a href="agents.html">Agents</a>.</p>
+<h2 id="splits-and-pane-layout">Splits and pane layout</h2>
+<p>Each panel header has controls to split right, split down and close the panel. When a split is very narrow, these actions move into the panel menu so their click targets do not overlap.</p>
+<h3 id="move-a-pane">Move a pane</h3>
+<p>Drag a pane's title to the left, right, top or bottom edge of another pane. A highlight shows where it will land in the resulting layout. Moving a pane keeps its terminal session and running process; Kiln does not open a replacement shell.</p>
+<h3 id="resize-panes">Resize panes</h3>
+<p>Drag a divider to resize the panes on either side.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Where you drag</th>
+<th>What moves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Away from an aligned intersection</td>
+<td>Only that segment of the divider.</td>
+</tr>
+<tr>
+<td>Near an aligned intersection</td>
+<td>The connected segments, highlighted together, move as one boundary.</td>
+</tr>
+<tr>
+<td>At the intersection itself</td>
+<td>Your first horizontal or vertical movement chooses the axis.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The selected range stays fixed for the rest of that drag.</p>
+<p>Dividers snap to halves, thirds and quarters of the whole terminal area, and to the positions of adjacent dividers. A captured line becomes brighter and thicker and stays attached through a short release margin.</p>
+<blockquote class="callout"><p><strong>Tip</strong> Hold <code>⌥</code> while dragging to bypass snapping and linked movement. Press <code>Esc</code> to cancel the drag and restore the layout from before it started.</p>
+</blockquote>
+<p>Highlights appear only while you drag. A destination that is blocked cannot change the layout.</p>
+<h2 id="switch-workspaces-and-tasks">Switch workspaces and tasks</h2>
+<p>Use the sidebar to move between workspaces and tasks. Switching workspaces keeps every running process alive.</p>
+<h2 id="close-panels-workspaces-and-the-window">Close panels, workspaces and the window</h2>
+<ul>
+<li><strong>Closing a workspace</strong> ends only that workspace's sessions. Kiln still asks before it discards drafts.</li>
+<li><strong>Closing a running process</strong> asks for confirmation. Select <strong>Don’t ask again</strong> to turn off process-termination prompts for panels, tabs and workspaces. The choice is saved only after you confirm the close, and you can turn the prompts back on in <strong>Settings → Behavior</strong>. Warnings about unsaved content and launch requests stay on.</li>
+<li><strong>Closing the window</strong> asks about unsaved files and drafts, and waits for running transfers, database writes and worktree creation. Your terminals keep running in the background. See <a href="terminal.html#sessions-that-outlive-the-window">Terminal</a>.</li>
+</ul>
+<h2 id="keyboard-shortcuts">Keyboard shortcuts</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>macOS</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>⌘N</code></td>
+<td>New workspace</td>
+</tr>
+<tr>
+<td><code>⌘K</code></td>
+<td>Commands and navigation</td>
+</tr>
+<tr>
+<td><code>⌘J</code></td>
+<td>Recent work</td>
+</tr>
+<tr>
+<td><code>⌘B</code></td>
+<td>Show or hide the workspace sidebar</td>
+</tr>
+<tr>
+<td><code>⌘,</code></td>
+<td>Settings</td>
+</tr>
+<tr>
+<td><code>Ctrl</code> + <code>`</code></td>
+<td>Quick terminal</td>
+</tr>
+</tbody>
+</table></div>
+<p>You can customize navigation shortcuts in Settings.</p>
+<p>On Windows, app shortcuts shown with <code>⌘</code> use <code>Ctrl+Shift</code>, <code>⇧⌘</code> uses <code>Ctrl+Shift+Alt</code> and <code>⌥⌘</code> uses <code>Ctrl+Alt</code>.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="install.html"><small>Previous</small>Install and update</a><a class="pn next" href="terminal.html"><small>Next</small>Terminal</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">문서<b>Kiln 사용하기</b></p></div><h1>워크스페이스와 작업</h1><p class="desc">폴더에 이름 붙인 워크스페이스를 만들고, 여러 저장소를 함께 다루고, 사이드바에서 작업을 확인하고, 터미널 분할 화면을 배치합니다.</p><p>워크스페이스는 폴더에 이름을 붙여 만든 보기로, 작업·터미널·분할 화면·초안을 따로 가집니다. 같은 폴더에서 여러 일을 각자의 터미널과 레이아웃으로 진행하려면 워크스페이스를 여러 개 만드세요.</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<h2 id="create-a-workspace">워크스페이스 만들기</h2>
+<ol>
+<li>워크스페이스 사이드바에서 <strong>+</strong>를 선택하거나 <code>⌘N</code>을 누릅니다.</li>
+<li>이름을 입력하고 폴더를 선택합니다.</li>
+</ol>
+<p>이 대화상자에는 선택한 폴더에 이미 있는 워크스페이스도 나열되므로, 새로 만들지 않고 기존 워크스페이스를 열어도 됩니다. 대화상자를 취소하면 터미널은 시작되지 않습니다.</p>
+<h2 id="several-workspaces-one-folder">폴더 하나에 워크스페이스 여러 개</h2>
+<p>한 폴더에 <strong>API 리뷰</strong>, <strong>문서</strong>처럼 워크스페이스를 필요한 만큼 만들 수 있습니다. 워크스페이스마다 다음을 따로 관리합니다.</p>
+<ul>
+<li>작업과 터미널 세션</li>
+<li>분할 레이아웃</li>
+<li>보내지 않은 요청(초안)</li>
+</ul>
+<p>Kiln을 다시 열면 워크스페이스가 각각 따로 복원됩니다. 파일과 Git 기록은 폴더에 속하므로, 같은 폴더의 워크스페이스는 모두 같은 파일과 같은 기록을 봅니다.</p>
+<h2 id="one-workspace-several-repositories">워크스페이스 하나에 저장소 여러 개</h2>
+<p>프론트엔드, 백엔드, 공유 라이브러리가 각각 다른 Git 저장소에 있다면 <code>~/dev/projects</code> 같은 상위 폴더를 워크스페이스 폴더로 여세요.</p>
+<ul>
+<li><strong>에이전트는 상위 폴더에서 작업합니다.</strong> Kiln은 이 폴더를 에이전트의 작업 루트로 유지하고, 찾아낸 저장소 구성을 요청에 함께 넣을 수 있습니다. 저장소를 살펴봐도 작업이 실행되는 디렉터리는 바뀌지 않습니다.</li>
+<li><strong>Git은 저장소 하나를 대상으로 합니다.</strong> Git·GitHub 도구 안의 저장소 선택기에서 작업을 적용할 저장소를 고르세요. <a href="git.html">Git과 GitHub</a>를 참고하세요.</li>
+</ul>
+<p>워크스페이스는 탐색과 에이전트 컨텍스트를 나누는 경계입니다. Git 기록은 저장소마다 따로 유지됩니다.</p>
+<h2 id="the-task-list">작업 목록</h2>
+<p>사이드바에는 워크스페이스별 작업과 각 작업이 보고한 상태(작업 중, 입력 대기, 완료, 실패)가 표시됩니다.</p>
+<ul>
+<li>워크스페이스마다 작업을 최대 세 개까지 미리 보여 주며, 모두 보기를 선택해 펼칠 수 있습니다.</li>
+<li>실행 중인 작업이 맨 위에 오고, 입력을 기다리는 요청, 이전에 실패한 작업 순으로 이어집니다.</li>
+<li>최근 작업도 같은 활동 상태를 쓰며, 열어 두는 동안에는 순서가 바뀌지 않습니다.</li>
+<li>연결된 worktree는 메인 저장소의 워크스페이스와 구분해 표시합니다.</li>
+</ul>
+<p>작업을 클릭하면 해당 워크스페이스, 탭, 분할 화면이 나타납니다. 확대 때문에 가려진 패널도 다시 보입니다.</p>
+<h3 id="how-states-are-reported">상태를 보고하는 방식</h3>
+<p>Kiln은 보고된 상태만 표시합니다. 에이전트가 상태를 보고하거나 Kiln이 인식하는 실행 중 제목을 띄워야 실행 중으로 표시합니다. 셸 통합이 적용된 명령은 실행 중 상태를 직접 보고할 수 있습니다.</p>
+<p>아무것도 보고하지 않는 세션은 열린 세션으로 표시됩니다. 유휴 상태의 터미널을 완료된 작업으로 보지 않으며, 아직 끝나지 않은 에이전트 실행 명령 때문에 유휴 에이전트가 실행 중으로 표시되지도 않습니다. 에이전트 상태와 표시는 <a href="agents.html">에이전트</a>를, 직접 만든 스크립트에서 활동을 보고하는 방법은 <a href="terminal.html#activity-and-notifications">터미널</a>을 참고하세요.</p>
+<h2 id="start-a-task">작업 시작하기</h2>
+<p><strong>새 작업</strong>을 선택하고 요청을 입력한 뒤 Claude Code, Codex, Antigravity 중 하나를 골라 시작합니다. 에이전트 선택기는 요청 입력란 바로 아래에 고정되어 있습니다. 저장소 컨텍스트는 따로 스크롤되므로 시작 버튼이 화면 밖으로 밀려나지 않습니다.</p>
+<p>에이전트 CLI는 미리 설치하고 로그인해 두어야 합니다. <a href="install.html#install-the-tools-you-use">설치와 업데이트</a>와 <a href="agents.html">에이전트</a>를 참고하세요.</p>
+<h2 id="splits-and-pane-layout">분할 화면과 패널 레이아웃</h2>
+<p>패널 헤더마다 오른쪽으로 나누기, 아래로 나누기, 패널 닫기 버튼이 있습니다. 분할 화면이 아주 좁아지면 클릭 영역이 겹치지 않도록 이 버튼들이 패널 메뉴로 들어갑니다.</p>
+<h3 id="move-a-pane">패널 옮기기</h3>
+<p>패널 제목을 다른 패널의 왼쪽, 오른쪽, 위, 아래 가장자리로 끌어다 놓습니다. 바뀐 레이아웃에서 패널이 놓일 자리가 강조 표시됩니다. 패널을 옮겨도 터미널 세션과 실행 중인 프로세스는 그대로이며, Kiln이 대신할 셸을 새로 열지 않습니다.</p>
+<h3 id="resize-panes">패널 크기 조절하기</h3>
+<p>구분선을 드래그하면 양쪽 패널의 크기가 바뀝니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>드래그하는 위치</th>
+<th>움직이는 대상</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>정렬된 교차점에서 먼 곳</td>
+<td>그 구분선 구간만</td>
+</tr>
+<tr>
+<td>정렬된 교차점 근처</td>
+<td>함께 강조 표시된 연결 구간이 하나의 경계로 움직임</td>
+</tr>
+<tr>
+<td>교차점 바로 위</td>
+<td>처음 움직인 방향(가로 또는 세로)으로 축이 정해짐</td>
+</tr>
+</tbody>
+</table></div>
+<p>한 번 정해진 범위는 그 드래그가 끝날 때까지 바뀌지 않습니다.</p>
+<p>구분선은 전체 터미널 영역의 1/2, 1/3, 1/4 지점과 이웃한 구분선 위치에 맞춰 붙습니다. 붙은 선은 더 밝고 두꺼워지며, 조금 더 끌어도 짧은 여유 구간 동안은 떨어지지 않습니다.</p>
+<blockquote class="callout"><p><strong>팁</strong> 드래그하는 동안 <code>⌥</code>를 누르고 있으면 스냅과 연결 이동이 적용되지 않습니다. <code>Esc</code>를 누르면 드래그를 취소하고 시작 전 레이아웃으로 되돌립니다.</p>
+</blockquote>
+<p>강조 표시는 드래그하는 동안에만 나타납니다. 막힌 위치에 놓으면 레이아웃은 바뀌지 않습니다.</p>
+<h2 id="switch-workspaces-and-tasks">워크스페이스와 작업 전환하기</h2>
+<p>사이드바에서 워크스페이스와 작업 사이를 오갑니다. 워크스페이스를 전환해도 실행 중인 프로세스는 모두 계속 실행됩니다.</p>
+<h2 id="close-panels-workspaces-and-the-window">패널, 워크스페이스, 창 닫기</h2>
+<ul>
+<li><strong>워크스페이스를 닫으면</strong> 그 워크스페이스의 세션만 종료됩니다. 다만 초안을 버리기 전에는 확인을 받습니다.</li>
+<li><strong>실행 중인 프로세스를 닫을 때</strong>는 확인을 받습니다. <strong>다시 묻지 않기</strong>를 선택하면 패널, 탭, 워크스페이스에서 프로세스 종료를 더 이상 묻지 않습니다. 이 선택은 닫기를 확인해야 저장되며, <strong>설정 → 동작</strong>에서 다시 켤 수 있습니다. 저장하지 않은 내용과 실행 요청에 대한 경고는 계속 표시됩니다.</li>
+<li><strong>창을 닫으면</strong> 저장하지 않은 파일과 초안을 확인하고, 진행 중인 전송, 데이터베이스 쓰기, worktree 생성이 끝나기를 기다립니다. 터미널은 백그라운드에서 계속 실행됩니다. <a href="terminal.html#sessions-that-outlive-the-window">터미널</a>을 참고하세요.</li>
+</ul>
+<h2 id="keyboard-shortcuts">키보드 단축키</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>macOS</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>⌘N</code></td>
+<td>새 워크스페이스</td>
+</tr>
+<tr>
+<td><code>⌘K</code></td>
+<td>명령과 탐색</td>
+</tr>
+<tr>
+<td><code>⌘J</code></td>
+<td>최근 작업</td>
+</tr>
+<tr>
+<td><code>⌘B</code></td>
+<td>워크스페이스 사이드바 보기/숨기기</td>
+</tr>
+<tr>
+<td><code>⌘,</code></td>
+<td>설정</td>
+</tr>
+<tr>
+<td><code>Ctrl</code> + <code>`</code></td>
+<td>빠른 터미널</td>
+</tr>
+</tbody>
+</table></div>
+<p>탐색 단축키는 설정에서 바꿀 수 있습니다.</p>
+<p>Windows에서는 <code>⌘</code>로 표시된 앱 단축키 대신 <code>Ctrl+Shift</code>를, <code>⇧⌘</code> 대신 <code>Ctrl+Shift+Alt</code>를, <code>⌥⌘</code> 대신 <code>Ctrl+Alt</code>를 씁니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="install.html"><small>이전</small>설치와 업데이트</a><a class="pn next" href="terminal.html"><small>다음</small>터미널</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">ドキュメント<b>Kiln を使う</b></p></div><h1>ワークスペースと作業</h1><p class="desc">フォルダーに名前付きのワークスペースを作り、複数のリポジトリをまとめて扱い、サイドバーで作業を確認しながらターミナルを分割して配置する方法を説明します。</p><p>ワークスペースは、フォルダーに名前を付けて開くビューです。作業、ターミナル、分割、下書きをワークスペースごとに持ちます。同じフォルダーでも、作業ごとにターミナルやレイアウトを分けたいときは、ワークスペースを複数作成します。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<h2 id="create-a-workspace">ワークスペースを作成する</h2>
+<ol>
+<li>ワークスペースのサイドバーで <strong>+</strong> を選ぶか、<code>⌘N</code> を押します。</li>
+<li>名前を入力し、フォルダーを選びます。</li>
+</ol>
+<p>このダイアログには、選んだフォルダーにすでにあるワークスペースも表示されるので、新しく作る代わりにそれを開くこともできます。ダイアログをキャンセルした場合、ターミナルは起動しません。</p>
+<h2 id="several-workspaces-one-folder">1 つのフォルダーに複数のワークスペース</h2>
+<p>1 つのフォルダーに、<strong>API レビュー</strong>や<strong>ドキュメント</strong>のようなワークスペースを必要なだけ作れます。各ワークスペースは、次のものを個別に保持します。</p>
+<ul>
+<li>作業とターミナルセッション</li>
+<li>分割レイアウト</li>
+<li>未送信のリクエスト（下書き）</li>
+</ul>
+<p>Kiln を開き直すと、各ワークスペースは個別に復元されます。ファイルと Git 履歴はフォルダーに属するので、同じフォルダーのワークスペースからは、どれも同じファイルと同じ履歴が見えます。</p>
+<h2 id="one-workspace-several-repositories">1 つのワークスペースに複数のリポジトリ</h2>
+<p>フロントエンド、バックエンド、共有ライブラリが別々の Git リポジトリにある場合は、<code>~/dev/projects</code> のような親フォルダーをワークスペースのフォルダーとして開きます。</p>
+<ul>
+<li><strong>エージェントは親フォルダーで作業します。</strong> Kiln はそのフォルダーをエージェントの作業ルートとして維持し、検出したリポジトリ構成をリクエストに添えることができます。リポジトリの中身を確認しても、作業ディレクトリは変わりません。</li>
+<li><strong>Git は 1 つのリポジトリを対象にします。</strong> Git と GitHub のツールにあるリポジトリセレクターで、操作を適用するリポジトリを選びます。詳しくは <a href="git.html">Git と GitHub</a> を参照してください。</li>
+</ul>
+<p>ワークスペースは、画面の移動とエージェントのコンテキストの範囲を区切るものです。Git 履歴は、リポジトリごとに別々に保持されます。</p>
+<h2 id="the-task-list">作業一覧</h2>
+<p>サイドバーには、ワークスペースごとの作業と、各作業が報告した状態（実行中、入力待ち、完了、失敗）が表示されます。</p>
+<ul>
+<li>作業はワークスペースごとに最大 3 件までプレビュー表示され、すべてを表示するオプションもあります。</li>
+<li>並び順は、実行中の作業、入力待ちのリクエスト、以前に失敗した作業の順です。</li>
+<li>最近の作業にも同じアクティビティ状態が使われ、開いている間は並び順が変わりません。</li>
+<li>リンクされた worktree は、メインリポジトリのワークスペースと区別して表示されます。</li>
+</ul>
+<p>作業をクリックすると、そのワークスペース、タブ、分割が表示されます。拡大表示で隠れているパネルも表示されます。</p>
+<h3 id="how-states-are-reported">状態の報告方法</h3>
+<p>Kiln が表示するのは、報告された状態だけです。エージェントが実行中と表示されるには、エージェント自身が状態を報告するか、Kiln が認識できる実行中のタイトルを表示する必要があります。シェル連携が有効なコマンドは、実行中であることを自分で報告できます。</p>
+<p>何も報告しないセッションは、開いているセッションとして表示されます。アイドル状態のターミナルを完了した作業とは見なしません。また、エージェントの起動コマンドが終わっていなくても、アイドル状態のエージェントを実行中とは表示しません。エージェントの状態とインジケーターについては<a href="agents.html">エージェント</a>を、独自のスクリプトからアクティビティを報告する方法については<a href="terminal.html#activity-and-notifications">ターミナル</a>を参照してください。</p>
+<h2 id="start-a-task">作業を開始する</h2>
+<p><strong>新しい作業</strong>を選び、リクエストを入力して、Claude Code、Codex、Antigravity のいずれかを選んで開始します。エージェントの選択欄は、常にリクエスト入力欄のすぐ下にあります。リポジトリのコンテキストは別にスクロールするので、開始ボタンが画面の外に押し出されることはありません。</p>
+<p>エージェントの CLI は、あらかじめインストールしてログインしておく必要があります。詳しくは<a href="install.html#install-the-tools-you-use">インストールとアップデート</a>と<a href="agents.html">エージェント</a>を参照してください。</p>
+<h2 id="splits-and-pane-layout">分割とパネルのレイアウト</h2>
+<p>各パネルヘッダーには、右に分割、下に分割、パネルを閉じるの各操作があります。分割したパネルがごく狭いときは、クリック範囲が重ならないよう、これらの操作はパネルメニューに移ります。</p>
+<h3 id="move-a-pane">パネルを移動する</h3>
+<p>パネルのタイトルを、別のパネルの上下左右いずれかの端にドラッグします。移動後のレイアウトでどこに収まるかが、ハイライトで示されます。パネルを移動しても、ターミナルセッションと実行中のプロセスはそのまま残り、Kiln が代わりのシェルを開くことはありません。</p>
+<h3 id="resize-panes">パネルのサイズを変更する</h3>
+<p>区切り線をドラッグすると、両側のパネルのサイズを変更できます。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>ドラッグする位置</th>
+<th>動く範囲</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>揃った交点から離れた位置</td>
+<td>区切り線のその部分だけ。</td>
+</tr>
+<tr>
+<td>揃った交点の近く</td>
+<td>つながった部分がまとめてハイライトされ、1 本の境界として動きます。</td>
+</tr>
+<tr>
+<td>交点そのもの</td>
+<td>最初に水平・垂直のどちらに動かしたかで軸が決まります。</td>
+</tr>
+</tbody>
+</table></div>
+<p>選ばれた範囲は、そのドラッグが終わるまで変わりません。</p>
+<p>区切り線は、ターミナル領域全体の 1/2、1/3、1/4 の位置と、隣の区切り線の位置にスナップします。吸着した線は明るく太く表示され、少し離してもわずかな範囲内なら吸着したままになります。</p>
+<blockquote class="callout"><p><strong>ヒント</strong> ドラッグ中に <code>⌥</code> を押し続けると、スナップと連動した移動を無効にできます。<code>Esc</code> を押すとドラッグがキャンセルされ、ドラッグ前のレイアウトに戻ります。</p>
+</blockquote>
+<p>ハイライトはドラッグ中にだけ表示されます。移動できない位置にドロップしても、レイアウトは変わりません。</p>
+<h2 id="switch-workspaces-and-tasks">ワークスペースと作業を切り替える</h2>
+<p>ワークスペースや作業の移動にはサイドバーを使います。ワークスペースを切り替えても、実行中のプロセスはすべて動き続けます。</p>
+<h2 id="close-panels-workspaces-and-the-window">パネル、ワークスペース、ウィンドウを閉じる</h2>
+<ul>
+<li><strong>ワークスペースを閉じる</strong>と、そのワークスペースのセッションだけが終了します。下書きがある場合は、破棄する前に確認が表示されます。</li>
+<li><strong>実行中のプロセスを閉じる</strong>ときは、確認が表示されます。<strong>次回から確認しない</strong>を選ぶと、パネル、タブ、ワークスペースでプロセスを終了するときの確認がオフになります。この選択は閉じる操作を確定したときにだけ保存され、確認は<strong>設定 → 動作</strong>で再びオンにできます。未保存の内容や起動リクエストに関する警告は、引き続き有効です。</li>
+<li><strong>ウィンドウを閉じる</strong>ときは、未保存のファイルと下書きについて確認が表示され、実行中の転送、データベースへの書き込み、worktree の作成が終わるまで待ちます。ターミナルはバックグラウンドで動き続けます。詳しくは<a href="terminal.html#sessions-that-outlive-the-window">ターミナル</a>を参照してください。</li>
+</ul>
+<h2 id="keyboard-shortcuts">キーボードショートカット</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>macOS</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>⌘N</code></td>
+<td>新しいワークスペース</td>
+</tr>
+<tr>
+<td><code>⌘K</code></td>
+<td>コマンドとナビゲーション</td>
+</tr>
+<tr>
+<td><code>⌘J</code></td>
+<td>最近の作業</td>
+</tr>
+<tr>
+<td><code>⌘B</code></td>
+<td>ワークスペースのサイドバーの表示 / 非表示</td>
+</tr>
+<tr>
+<td><code>⌘,</code></td>
+<td>設定</td>
+</tr>
+<tr>
+<td><code>Ctrl</code> + <code>`</code></td>
+<td>クイックターミナル</td>
+</tr>
+</tbody>
+</table></div>
+<p>ナビゲーションのショートカットは設定で変更できます。</p>
+<p>Windows では、<code>⌘</code> で表記されたアプリのショートカットは <code>Ctrl+Shift</code>、<code>⇧⌘</code> は <code>Ctrl+Shift+Alt</code>、<code>⌥⌘</code> は <code>Ctrl+Alt</code> に置き換わります。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="install.html"><small>前へ</small>インストールとアップデート</a><a class="pn next" href="terminal.html"><small>次へ</small>ターミナル</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">文档<b>使用 Kiln</b></p></div><h1>工作区与任务</h1><p class="desc">为文件夹创建命名工作区，跨多个仓库工作，在侧边栏跟踪任务，并排布终端拆分视图。</p><p>工作区是文件夹的一个命名视图，有自己的任务、终端、拆分视图和草稿。如果同一个文件夹里的几项工作各需要一套终端和布局，就为它创建多个工作区。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<h2 id="create-a-workspace">创建工作区</h2>
+<ol>
+<li>在工作区侧边栏中选择 <strong>+</strong>，或按 <code>⌘N</code>。</li>
+<li>输入名称并选择文件夹。</li>
+</ol>
+<p>对话框里还会列出所选文件夹已有的工作区，可以直接打开其中一个，不必另建。取消对话框不会启动终端。</p>
+<h2 id="several-workspaces-one-folder">一个文件夹，多个工作区</h2>
+<p>一个文件夹可以按需创建任意多个工作区，比如 <strong>API 审查</strong>和<strong>文档</strong>。每个工作区各自保存：</p>
+<ul>
+<li>任务和终端会话；</li>
+<li>拆分布局；</li>
+<li>未发送的请求（草稿）。</li>
+</ul>
+<p>Kiln 重新打开时会分别恢复每个工作区。文件和 Git 历史属于文件夹，因此同一文件夹下的所有工作区看到的文件和历史都相同。</p>
+<h2 id="one-workspace-several-repositories">一个工作区，多个仓库</h2>
+<p>如果前端、后端和共享库分属不同的 Git 仓库，就把它们的父文件夹（例如 <code>~/dev/projects</code>）作为工作区文件夹打开。</p>
+<ul>
+<li><strong>代理从父文件夹工作。</strong> Kiln 把这个文件夹作为代理的工作根目录，还可以把扫描到的仓库结构随请求一起附上。查看某个仓库不会改变任务的工作目录。</li>
+<li><strong>Git 只作用于一个仓库。</strong>在 Git 和 GitHub 工具里用仓库选择器指定操作针对哪个仓库。详见 <a href="git.html">Git 与 GitHub</a>。</li>
+</ul>
+<p>工作区划定的是导航和代理上下文的范围，每个仓库仍保留各自的 Git 历史。</p>
+<h2 id="the-task-list">任务列表</h2>
+<p>侧边栏按工作区显示任务，以及每个任务上报的状态：运行中、等待输入、已完成或失败。</p>
+<ul>
+<li>每个工作区下最多预览三个任务，并提供查看全部的选项。</li>
+<li>运行中的工作排在最前，其次是等你输入的请求，再往后是较早的失败。</li>
+<li>最近的工作沿用同一套活动状态，打开期间顺序保持不变。</li>
+<li>关联的 worktree 与主仓库的工作区分开显示。</li>
+</ul>
+<p>点击任务即可定位到它所在的工作区、标签页和拆分视图，即使该面板因缩放而被隐藏。</p>
+<h3 id="how-states-are-reported">状态如何上报</h3>
+<p>Kiln 只显示上报过的状态。代理必须上报自己的状态，或者显示 Kiln 能识别的运行中标题，Kiln 才会把它标为运行中。启用了 Shell 集成的命令可以自行上报运行状态。</p>
+<p>什么都不上报的会话显示为打开的会话。空闲的终端不算已完成的任务；代理启动命令尚未结束，也不会让空闲的代理显示为运行中。代理的状态和指示器见<a href="agents.html">代理</a>，从自己的脚本上报活动见<a href="terminal.html#activity-and-notifications">终端</a>。</p>
+<h2 id="start-a-task">启动任务</h2>
+<p>选择<strong>新建任务</strong>，输入请求，选择 Claude Code、Codex 或 Antigravity，然后启动。代理选择器固定在请求输入框正下方。仓库上下文单独滚动，不会把启动按钮挤出视野。</p>
+<p>代理的 CLI 必须事先安装并登录。详见<a href="install.html#install-the-tools-you-use">安装与更新</a>和<a href="agents.html">代理</a>。</p>
+<h2 id="splits-and-pane-layout">拆分与面板布局</h2>
+<p>每个面板标题栏上都有向右拆分、向下拆分和关闭面板的按钮。拆分视图很窄时，这些操作会收进面板菜单，避免点击区域互相重叠。</p>
+<h3 id="move-a-pane">移动面板</h3>
+<p>把面板标题拖到另一个面板的左、右、上或下边缘，高亮区域会标出它在新布局中的位置。移动后，面板里的终端会话和正在运行的进程都会保留，Kiln 不会另开一个 Shell 来代替。</p>
+<h3 id="resize-panes">调整面板大小</h3>
+<p>拖动分隔线即可调整两侧面板的大小。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>拖动位置</th>
+<th>移动的部分</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>远离对齐的交叉点</td>
+<td>只移动分隔线的这一段。</td>
+</tr>
+<tr>
+<td>靠近对齐的交叉点</td>
+<td>相连的几段会一起高亮，作为一条边界整体移动。</td>
+</tr>
+<tr>
+<td>交叉点上</td>
+<td>由第一次水平或垂直移动决定拖动方向。</td>
+</tr>
+</tbody>
+</table></div>
+<p>选定的范围在这次拖动结束前不会改变。</p>
+<p>分隔线会吸附到整个终端区域的二分之一、三分之一和四分之一处，也会吸附到相邻分隔线的位置。吸附中的线会变亮、变粗，松开前留有一小段余量保持吸附。</p>
+<blockquote class="callout"><p><strong>提示</strong> 拖动时按住 <code>⌥</code> 可跳过吸附和联动移动。按 <code>Esc</code> 取消拖动，布局恢复到拖动开始前的样子。</p>
+</blockquote>
+<p>高亮只在拖动时出现。被阻止的目标位置不会改变布局。</p>
+<h2 id="switch-workspaces-and-tasks">切换工作区和任务</h2>
+<p>在侧边栏中切换工作区和任务。切换工作区时，所有正在运行的进程都会继续运行。</p>
+<h2 id="close-panels-workspaces-and-the-window">关闭面板、工作区和窗口</h2>
+<ul>
+<li><strong>关闭工作区</strong>只结束该工作区的会话。丢弃草稿前，Kiln 仍会先询问。</li>
+<li><strong>关闭正在运行的进程</strong>时需要确认。勾选<strong>不再询问</strong>后，关闭面板、标签页和工作区时都不再提示终止进程。这个选择在你确认关闭后才会保存，之后可以在<strong>设置 → 行为</strong>中重新开启提示。关于未保存内容和启动请求的警告始终保留。</li>
+<li><strong>关闭窗口</strong>时会询问如何处理未保存的文件和草稿，并等待进行中的传输、数据库写入和 worktree 创建完成。终端会在后台继续运行。详见<a href="terminal.html#sessions-that-outlive-the-window">终端</a>。</li>
+</ul>
+<h2 id="keyboard-shortcuts">键盘快捷键</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>macOS</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>⌘N</code></td>
+<td>新建工作区</td>
+</tr>
+<tr>
+<td><code>⌘K</code></td>
+<td>命令与导航</td>
+</tr>
+<tr>
+<td><code>⌘J</code></td>
+<td>最近的工作</td>
+</tr>
+<tr>
+<td><code>⌘B</code></td>
+<td>显示或隐藏工作区侧边栏</td>
+</tr>
+<tr>
+<td><code>⌘,</code></td>
+<td>设置</td>
+</tr>
+<tr>
+<td><code>Ctrl</code> + <code>`</code></td>
+<td>快捷终端</td>
+</tr>
+</tbody>
+</table></div>
+<p>导航快捷键可以在设置中自定义。</p>
+<p>在 Windows 上，标为 <code>⌘</code> 的应用快捷键对应 <code>Ctrl+Shift</code>，<code>⇧⌘</code> 对应 <code>Ctrl+Shift+Alt</code>，<code>⌥⌘</code> 对应 <code>Ctrl+Alt</code>。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="install.html"><small>上一页</small>安装与更新</a><a class="pn next" href="terminal.html"><small>下一页</small>终端</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Workspaces and tasks", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "워크스페이스와 작업", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "ワークスペースと作業", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "工作区与任务", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

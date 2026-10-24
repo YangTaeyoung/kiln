@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Install and update · Kiln Docs</title>
+<meta name="description" content="Install Kiln on macOS or Windows, open your first workspace, keep the app up to date and choose its language.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html" class="on" aria-current="page">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html" class="on" aria-current="page">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html" class="on" aria-current="page">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html" class="on" aria-current="page">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">Documentation<b>Get started</b></p></div><h1>Install and update</h1><p class="desc">Install Kiln on macOS or Windows, open your first workspace, keep the app up to date and choose its language.</p><p>Install Kiln with one command or download it from GitHub Releases. Kiln then keeps itself up to date, and updates leave your running terminals alone.</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<h2 id="requirements">Requirements</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td>macOS 11 or later on an Apple Silicon Mac. Builds are notarized.</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>Windows 11 on x64 or ARM64. Builds are not code-signed yet.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Intel Mac and Linux builds are not currently provided. Windows 10 is not tested.</p>
+<h2 id="install-on-macos">Install on macOS</h2>
+<h3 id="use-the-install-script">Use the install script</h3>
+<p>Run this in Terminal:</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | sh
+</code></pre>
+<p>The script downloads the latest stable Apple Silicon app and checks the release checksum, Developer ID signature, bundle identity and Apple notarization before installing it in <code>/Applications</code>. If Kiln is already installed, the script leaves it in place; use <strong>Kiln → Check for Updates</strong> to upgrade instead.</p>
+<p>To install somewhere else, set <code>KILN_INSTALL_DIR</code>:</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | KILN_INSTALL_DIR=&quot;$HOME/Applications&quot; sh
+</code></pre>
+<h3 id="download-the-app">Download the app</h3>
+<ol>
+<li>Download the Apple Silicon archive from <a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a>.</li>
+<li>Extract it.</li>
+<li>Move <strong>Kiln.app</strong> into <strong>Applications</strong> before you open it.</li>
+</ol>
+<h2 id="install-on-windows">Install on Windows</h2>
+<h3 id="use-the-powershell-script">Use the PowerShell script</h3>
+<p>Run this in PowerShell:</p>
+<pre><code class="language-powershell">irm https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.ps1 | iex
+</code></pre>
+<p>The script picks the x64 or ARM64 archive for your machine, checks the release checksum and the archive's paths and version, and then:</p>
+<ul>
+<li>installs Kiln into <code>%LOCALAPPDATA%\Programs\Kiln</code>,</li>
+<li>adds a <strong>Kiln</strong> shortcut to the Start menu,</li>
+<li>adds the <code>bin</code> folder to your user <code>PATH</code>, for the <code>kiln</code> command.</li>
+</ul>
+<p>Set <code>KILN_INSTALL_DIR</code> to choose another folder. An existing installation is left in place.</p>
+<h3 id="download-the-archive">Download the archive</h3>
+<p>You can also download the archive for your architecture from <a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a>.</p>
+<blockquote class="callout"><p><strong>Note</strong> Windows builds are not code-signed yet. The install script's download does not trigger SmartScreen, but an archive downloaded with a browser may. Choose <strong>More info → Run anyway</strong> only for archives from the Releases page.</p>
+</blockquote>
+<h2 id="first-launch">First launch</h2>
+<ol>
+<li>Open <strong>Kiln</strong> from Applications or the Start menu.</li>
+<li>Create a workspace with the <strong>+</strong> button in the workspace sidebar (<code>⌘N</code> on macOS). Give it a name and choose your project folder.</li>
+<li>Use the terminal directly, or choose <strong>New Task</strong>, type a request, pick an agent and start.</li>
+</ol>
+<p>The folder can be a single repository or a parent folder that contains several repositories. See <a href="workspaces.html">Workspaces and tasks</a> for how workspaces, tasks and splits fit together.</p>
+<p>On Windows, starting Kiln again while it is running brings the existing window forward and opens the folder you gave it there.</p>
+<h2 id="install-the-tools-you-use">Install the tools you use</h2>
+<p>Kiln runs the agent and GitHub command-line tools you already have. It does not bundle them or include a subscription. Install and sign in to the ones you use:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code (<code>claude</code>)</td>
+<td>Claude tasks</td>
+</tr>
+<tr>
+<td>Codex (<code>codex</code>)</td>
+<td>Codex tasks</td>
+</tr>
+<tr>
+<td>Antigravity (<code>agy</code>)</td>
+<td>Antigravity tasks. Install it with Google's installer.</td>
+</tr>
+<tr>
+<td><code>gh</code></td>
+<td>GitHub features</td>
+</tr>
+</tbody>
+</table></div>
+<p>Kiln looks for <code>agy</code> in your <code>PATH</code>, <code>~/.local/bin</code>, <code>/opt/homebrew/bin</code> and <code>/usr/local/bin</code>. On Windows, Claude Code and Codex run as native Windows programs and keep their data in <code>%USERPROFILE%\.codex</code> and <code>%USERPROFILE%\.claude</code>.</p>
+<p>You can sign in to Claude Code and Codex accounts from <strong>Settings → Accounts</strong>, and to Antigravity on macOS from <strong>Settings → Accounts → Antigravity</strong>. On Windows, sign in to Antigravity by running <code>agy</code> in a terminal. See <a href="accounts.html">Accounts</a>. To check installed CLI versions or update them, open <strong>Settings → Accounts → CLI updates</strong>; see <a href="conversations.html">Conversations and updates</a>.</p>
+<h2 id="update-kiln">Update Kiln</h2>
+<p>Updates keep your running terminal sessions intact.</p>
+<h3 id="macos">macOS</h3>
+<p>Kiln checks for updates automatically and installs them through the Sparkle update dialog. To check yourself, choose <strong>Kiln → Check for Updates</strong>, or use the update control in <strong>Settings → About</strong>. You can turn off automatic checks in Settings.</p>
+<h3 id="windows">Windows</h3>
+<p>Kiln checks for updates once a day. To check yourself, open <strong>Settings → About → Check for Updates</strong>, then choose <strong>Install and Restart</strong>. Kiln verifies that the downloaded archive matches the release signing key before it replaces any files. Running terminals keep running.</p>
+<blockquote class="callout"><p><strong>Tip</strong> On macOS 15 and later, if a command that reaches your local network fails in a panel that was open before the update, open a new terminal panel and retry it there. See <a href="terminal.html#local-network-access-on-macos">Local network access on macOS</a>.</p>
+</blockquote>
+<h2 id="choose-a-language">Choose a language</h2>
+<p>Open <strong>Settings → Appearance → Language</strong> and choose English, Korean, Japanese or Simplified Chinese. The change applies immediately and is saved for the next launch.</p>
+<p>Only Kiln's own interface changes. Terminal output, filenames, code, commit messages and agent requests keep their original contents. Installations from earlier versions stay in Korean until you choose a language.</p>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="workspaces.html">Workspaces and tasks</a> to organize your folders and tasks.</li>
+<li><a href="agents.html">Agents</a> to start your first agent task.</li>
+<li><a href="terminal.html">Terminal</a> to set up shell integration and activity reporting.</li>
+</ul><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="index.html"><small>Previous</small>Introduction</a><a class="pn next" href="workspaces.html"><small>Next</small>Workspaces and tasks</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">문서<b>시작하기</b></p></div><h1>설치와 업데이트</h1><p class="desc">macOS나 Windows에 Kiln을 설치하고, 첫 워크스페이스를 열고, 앱을 최신 상태로 유지하고, 언어를 고릅니다.</p><p>Kiln은 명령 한 줄로 설치하거나 GitHub Releases에서 내려받을 수 있습니다. 설치한 뒤에는 Kiln이 알아서 업데이트하며, 업데이트해도 실행 중인 터미널은 그대로입니다.</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<h2 id="requirements">요구 사항</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>플랫폼</th>
+<th>요구 사항</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td>Apple Silicon Mac, macOS 11 이상. 빌드는 공증(notarization)을 거칩니다.</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>x64 또는 ARM64 기반 Windows 11. 빌드는 아직 코드 서명이 되어 있지 않습니다.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Intel Mac과 Linux용 빌드는 현재 제공하지 않습니다. Windows 10에서는 테스트하지 않았습니다.</p>
+<h2 id="install-on-macos">macOS에 설치하기</h2>
+<h3 id="use-the-install-script">설치 스크립트로 설치</h3>
+<p>터미널에서 다음 명령을 실행합니다.</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | sh
+</code></pre>
+<p>스크립트는 최신 안정 버전의 Apple Silicon 앱을 내려받은 뒤 릴리스 체크섬, Developer ID 서명, 번들 식별 정보, Apple 공증을 확인하고 <code>/Applications</code>에 설치합니다. Kiln이 이미 설치되어 있으면 기존 설치는 건드리지 않습니다. 이때 업그레이드하려면 <strong>Kiln → 업데이트 확인</strong>을 사용하세요.</p>
+<p>다른 위치에 설치하려면 <code>KILN_INSTALL_DIR</code>을 지정합니다.</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | KILN_INSTALL_DIR=&quot;$HOME/Applications&quot; sh
+</code></pre>
+<h3 id="download-the-app">앱 직접 내려받기</h3>
+<ol>
+<li><a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a>에서 Apple Silicon용 압축 파일을 내려받습니다.</li>
+<li>압축을 풉니다.</li>
+<li>앱을 열기 전에 <strong>Kiln.app</strong>을 <strong>응용 프로그램(Applications)</strong> 폴더로 옮깁니다.</li>
+</ol>
+<h2 id="install-on-windows">Windows에 설치하기</h2>
+<h3 id="use-the-powershell-script">PowerShell 스크립트로 설치</h3>
+<p>PowerShell에서 다음 명령을 실행합니다.</p>
+<pre><code class="language-powershell">irm https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.ps1 | iex
+</code></pre>
+<p>스크립트는 컴퓨터에 맞는 x64 또는 ARM64 압축 파일을 고르고, 릴리스 체크섬과 압축 파일의 경로·버전을 확인한 다음 아래 작업을 합니다.</p>
+<ul>
+<li><code>%LOCALAPPDATA%\Programs\Kiln</code>에 Kiln을 설치합니다.</li>
+<li>시작 메뉴에 <strong>Kiln</strong> 바로 가기를 만듭니다.</li>
+<li><code>kiln</code> 명령을 쓸 수 있도록 <code>bin</code> 폴더를 사용자 <code>PATH</code>에 추가합니다.</li>
+</ul>
+<p>다른 폴더에 설치하려면 <code>KILN_INSTALL_DIR</code>을 지정하세요. 이미 설치되어 있으면 기존 설치를 그대로 둡니다.</p>
+<h3 id="download-the-archive">압축 파일 직접 내려받기</h3>
+<p><a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a>에서 아키텍처에 맞는 압축 파일을 직접 내려받아도 됩니다.</p>
+<blockquote class="callout"><p><strong>참고</strong> Windows 빌드는 아직 코드 서명이 되어 있지 않습니다. 설치 스크립트로 내려받으면 SmartScreen 경고가 뜨지 않지만, 브라우저로 내려받은 압축 파일에서는 뜰 수 있습니다. <strong>추가 정보 → 실행(More info → Run anyway)</strong>은 Releases 페이지에서 받은 압축 파일일 때만 선택하세요.</p>
+</blockquote>
+<h2 id="first-launch">처음 실행하기</h2>
+<ol>
+<li>응용 프로그램 폴더나 시작 메뉴에서 <strong>Kiln</strong>을 엽니다.</li>
+<li>워크스페이스 사이드바의 <strong>+</strong> 버튼(macOS에서는 <code>⌘N</code>)으로 워크스페이스를 만듭니다. 이름을 정하고 프로젝트 폴더를 선택합니다.</li>
+<li>터미널을 바로 쓰거나, <strong>새 작업</strong>을 선택해 요청을 입력하고 에이전트를 골라 시작합니다.</li>
+</ol>
+<p>폴더는 저장소 하나여도 되고, 여러 저장소를 담은 상위 폴더여도 됩니다. 워크스페이스, 작업, 분할 화면이 어떻게 맞물리는지는 <a href="workspaces.html">워크스페이스와 작업</a>에서 설명합니다.</p>
+<p>Windows에서는 Kiln이 실행 중일 때 다시 실행하면 기존 창이 앞으로 나오고, 넘겨준 폴더를 그 창에서 엽니다.</p>
+<h2 id="install-the-tools-you-use">사용할 도구 설치하기</h2>
+<p>Kiln은 이미 설치된 에이전트 CLI와 GitHub CLI를 실행합니다. 이 도구들은 Kiln에 포함되어 있지 않고, 구독도 포함되어 있지 않습니다. 사용할 도구를 설치하고 로그인하세요.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>도구</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code (<code>claude</code>)</td>
+<td>Claude 작업</td>
+</tr>
+<tr>
+<td>Codex (<code>codex</code>)</td>
+<td>Codex 작업</td>
+</tr>
+<tr>
+<td>Antigravity (<code>agy</code>)</td>
+<td>Antigravity 작업. Google 설치 프로그램으로 설치합니다.</td>
+</tr>
+<tr>
+<td><code>gh</code></td>
+<td>GitHub 기능</td>
+</tr>
+</tbody>
+</table></div>
+<p>Kiln은 <code>PATH</code>, <code>~/.local/bin</code>, <code>/opt/homebrew/bin</code>, <code>/usr/local/bin</code>에서 <code>agy</code>를 찾습니다. Windows에서 Claude Code와 Codex는 네이티브 Windows 프로그램으로 실행되며, 데이터는 <code>%USERPROFILE%\.codex</code>와 <code>%USERPROFILE%\.claude</code>에 저장합니다.</p>
+<p>Claude Code와 Codex 계정은 <strong>설정 → 계정</strong>에서, macOS의 Antigravity는 <strong>설정 → 계정 → Antigravity</strong>에서 로그인할 수 있습니다. Windows에서는 터미널에서 <code>agy</code>를 실행해 Antigravity에 로그인합니다. 자세한 내용은 <a href="accounts.html">계정</a>을 참고하세요. 설치된 CLI 버전을 확인하거나 업데이트하려면 <strong>설정 → 계정 → CLI 업데이트</strong>를 여세요. <a href="conversations.html">대화와 업데이트</a>에서 자세히 설명합니다.</p>
+<h2 id="update-kiln">Kiln 업데이트</h2>
+<p>업데이트해도 실행 중인 터미널 세션은 그대로 유지됩니다.</p>
+<h3 id="macos">macOS</h3>
+<p>Kiln은 업데이트를 자동으로 확인하고 Sparkle 업데이트 대화상자로 설치합니다. 직접 확인하려면 <strong>Kiln → 업데이트 확인</strong>을 선택하거나 <strong>설정 → 앱 정보</strong>의 업데이트 항목을 사용하세요. 자동 확인은 설정에서 끌 수 있습니다.</p>
+<h3 id="windows">Windows</h3>
+<p>Kiln은 하루에 한 번 업데이트를 확인합니다. 직접 확인하려면 <strong>설정 → 앱 정보 → 업데이트 확인</strong>을 연 다음 <strong>설치하고 다시 시작</strong>을 선택합니다. Kiln은 파일을 교체하기 전에 내려받은 압축 파일이 릴리스 서명 키와 맞는지 검증합니다. 실행 중인 터미널은 계속 실행됩니다.</p>
+<blockquote class="callout"><p><strong>팁</strong> macOS 15 이상에서, 업데이트 전부터 열려 있던 패널에서 로컬 네트워크에 접근하는 명령이 실패하면 새 터미널 패널을 열고 다시 실행하세요. <a href="terminal.html#local-network-access-on-macos">macOS의 로컬 네트워크 접근</a>을 참고하세요.</p>
+</blockquote>
+<h2 id="choose-a-language">언어 선택하기</h2>
+<p><strong>설정 → 모양 → 언어</strong>를 열고 영어, 한국어, 일본어, 중국어 간체 중 하나를 고릅니다. 변경 사항은 바로 적용되고, 다음에 실행할 때도 유지됩니다.</p>
+<p>바뀌는 것은 Kiln 자체의 인터페이스뿐입니다. 터미널 출력, 파일 이름, 코드, 커밋 메시지, 에이전트 요청은 원래 내용 그대로입니다. 이전 버전에서 설치했다면 언어를 고르기 전까지 한국어로 표시됩니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="workspaces.html">워크스페이스와 작업</a>: 폴더와 작업 정리하기</li>
+<li><a href="agents.html">에이전트</a>: 첫 에이전트 작업 시작하기</li>
+<li><a href="terminal.html">터미널</a>: 셸 통합과 활동 보고 설정하기</li>
+</ul><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="index.html"><small>이전</small>소개</a><a class="pn next" href="workspaces.html"><small>다음</small>워크스페이스와 작업</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">ドキュメント<b>はじめに</b></p></div><h1>インストールとアップデート</h1><p class="desc">macOS と Windows への Kiln のインストール、最初のワークスペースの作成、アップデート、表示言語の設定について説明します。</p><p>Kiln はコマンド 1 つでインストールできます。GitHub Releases からダウンロードしてもかまいません。インストール後は Kiln が自動でアップデートされ、実行中のターミナルはアップデートの影響を受けません。</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<h2 id="requirements">動作環境</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>プラットフォーム</th>
+<th>要件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td>Apple Silicon 搭載 Mac の macOS 11 以降。ビルドは Apple の公証（notarization）済みです。</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>x64 または ARM64 の Windows 11。ビルドはまだコード署名されていません。</td>
+</tr>
+</tbody>
+</table></div>
+<p>Intel Mac 版と Linux 版は現在提供していません。Windows 10 での動作は検証していません。</p>
+<h2 id="install-on-macos">macOS へのインストール</h2>
+<h3 id="use-the-install-script">インストールスクリプトを使う</h3>
+<p>ターミナルで次のコマンドを実行します。</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | sh
+</code></pre>
+<p>スクリプトは最新の安定版 Apple Silicon アプリをダウンロードし、リリースのチェックサム、Developer ID 署名、バンドルの識別情報、Apple の公証を確認してから <code>/Applications</code> にインストールします。Kiln がすでにインストールされている場合、スクリプトは既存のアプリに手を加えません。アップグレードには <strong>Kiln → アップデートを確認…</strong> を使ってください。</p>
+<p>別の場所にインストールするには <code>KILN_INSTALL_DIR</code> を指定します。</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | KILN_INSTALL_DIR=&quot;$HOME/Applications&quot; sh
+</code></pre>
+<h3 id="download-the-app">アプリをダウンロードする</h3>
+<ol>
+<li><a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a> から Apple Silicon 用のアーカイブをダウンロードします。</li>
+<li>アーカイブを展開します。</li>
+<li><strong>Kiln.app</strong> を<strong>アプリケーション</strong>フォルダーに移動してから開きます。</li>
+</ol>
+<h2 id="install-on-windows">Windows へのインストール</h2>
+<h3 id="use-the-powershell-script">PowerShell スクリプトを使う</h3>
+<p>PowerShell で次のコマンドを実行します。</p>
+<pre><code class="language-powershell">irm https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.ps1 | iex
+</code></pre>
+<p>スクリプトはマシンに合った x64 または ARM64 のアーカイブを選び、リリースのチェックサムと、アーカイブ内のパスおよびバージョンを確認したうえで、次の処理を行います。</p>
+<ul>
+<li>Kiln を <code>%LOCALAPPDATA%\Programs\Kiln</code> にインストールします。</li>
+<li>スタートメニューに <strong>Kiln</strong> のショートカットを追加します。</li>
+<li><code>kiln</code> コマンドを使えるように、<code>bin</code> フォルダーをユーザーの <code>PATH</code> に追加します。</li>
+</ul>
+<p>別のフォルダーにインストールするには <code>KILN_INSTALL_DIR</code> を指定します。既存のインストールがある場合は、そのまま残します。</p>
+<h3 id="download-the-archive">アーカイブをダウンロードする</h3>
+<p>お使いのアーキテクチャ用のアーカイブを <a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a> からダウンロードすることもできます。</p>
+<blockquote class="callout"><p><strong>注意</strong> Windows 版のビルドはまだコード署名されていません。インストールスクリプトによるダウンロードでは SmartScreen は表示されませんが、ブラウザーでダウンロードしたアーカイブでは表示される場合があります。<strong>詳細情報 (More info) → 実行 (Run anyway)</strong> を選ぶのは、Releases ページから入手したアーカイブだけにしてください。</p>
+</blockquote>
+<h2 id="first-launch">初回起動</h2>
+<ol>
+<li>アプリケーションフォルダーまたはスタートメニューから <strong>Kiln</strong> を開きます。</li>
+<li>ワークスペースのサイドバーにある <strong>+</strong> ボタン（macOS では <code>⌘N</code>）でワークスペースを作成します。名前を付け、プロジェクトのフォルダーを選んでください。</li>
+<li>ターミナルをそのまま使うか、<strong>新しい作業</strong>を選んでリクエストを入力し、エージェントを選んで開始します。</li>
+</ol>
+<p>フォルダーには、1 つのリポジトリも、複数のリポジトリを含む親フォルダーも指定できます。ワークスペース、作業、分割の関係については<a href="workspaces.html">ワークスペースと作業</a>を参照してください。</p>
+<p>Windows では、Kiln の実行中にもう一度 Kiln を起動すると既存のウィンドウが前面に表示され、渡したフォルダーがそのウィンドウで開きます。</p>
+<h2 id="install-the-tools-you-use">使うツールをインストールする</h2>
+<p>Kiln は、手元にインストールされているエージェントと GitHub のコマンドラインツールをそのまま実行します。これらのツールは同梱しておらず、サブスクリプションも含まれていません。使うツールをインストールし、ログインしておいてください。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>ツール</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code（<code>claude</code>）</td>
+<td>Claude の作業</td>
+</tr>
+<tr>
+<td>Codex（<code>codex</code>）</td>
+<td>Codex の作業</td>
+</tr>
+<tr>
+<td>Antigravity（<code>agy</code>）</td>
+<td>Antigravity の作業。Google のインストーラーでインストールします。</td>
+</tr>
+<tr>
+<td><code>gh</code></td>
+<td>GitHub の機能</td>
+</tr>
+</tbody>
+</table></div>
+<p>Kiln は <code>agy</code> を <code>PATH</code>、<code>~/.local/bin</code>、<code>/opt/homebrew/bin</code>、<code>/usr/local/bin</code> から探します。Windows では、Claude Code と Codex はネイティブの Windows プログラムとして動作し、データを <code>%USERPROFILE%\.codex</code> と <code>%USERPROFILE%\.claude</code> に保存します。</p>
+<p>Claude Code と Codex のアカウントには<strong>設定 → アカウント</strong>から、macOS の Antigravity には<strong>設定 → アカウント → Antigravity</strong> からログインできます。Windows では、ターミナルで <code>agy</code> を実行して Antigravity にログインします。詳しくは<a href="accounts.html">アカウント</a>を参照してください。インストール済みの CLI のバージョンを確認したりアップデートしたりするには、<strong>設定 → アカウント → CLI 更新</strong>を開きます。詳しくは<a href="conversations.html">会話とアップデート</a>を参照してください。</p>
+<h2 id="update-kiln">Kiln をアップデートする</h2>
+<p>アップデートしても、実行中のターミナルセッションはそのまま保たれます。</p>
+<h3 id="macos">macOS</h3>
+<p>Kiln は自動でアップデートを確認し、Sparkle のアップデートダイアログからインストールします。手動で確認するには、<strong>Kiln → アップデートを確認…</strong> を選ぶか、<strong>設定 → このアプリについて</strong>にあるアップデートの項目を使います。アップデートの自動確認は設定でオフにできます。</p>
+<h3 id="windows">Windows</h3>
+<p>Kiln は 1 日に 1 回アップデートを確認します。手動で確認するには<strong>設定 → このアプリについて → アップデートを確認…</strong> を開き、<strong>インストールして再起動</strong>を選びます。Kiln は、ダウンロードしたアーカイブがリリースの署名鍵と一致することを確かめてから、ファイルを置き換えます。実行中のターミナルはそのまま動き続けます。</p>
+<blockquote class="callout"><p><strong>ヒント</strong> macOS 15 以降では、アップデート前から開いていたパネルでローカルネットワークに接続するコマンドが失敗することがあります。その場合は新しいターミナルパネルを開き、そこで再実行してください。詳しくは <a href="terminal.html#local-network-access-on-macos">macOS のローカルネットワークアクセス</a>を参照してください。</p>
+</blockquote>
+<h2 id="choose-a-language">言語を選ぶ</h2>
+<p><strong>設定 → 外観 → 言語</strong>を開き、英語、韓国語、日本語、簡体字中国語から選びます。変更はすぐに反映され、次回の起動時にも引き継がれます。</p>
+<p>切り替わるのは Kiln 自体の画面表示だけです。ターミナルの出力、ファイル名、コード、コミットメッセージ、エージェントへのリクエストは元の内容のままです。以前のバージョンからインストールしている環境では、言語を選ぶまで韓国語で表示されます。</p>
+<h2 id="next-steps">次のステップ</h2>
+<ul>
+<li><a href="workspaces.html">ワークスペースと作業</a>で、フォルダーと作業を整理する方法を確認できます。</li>
+<li><a href="agents.html">エージェント</a>で、最初のエージェント作業を始められます。</li>
+<li><a href="terminal.html">ターミナル</a>で、シェル連携とアクティビティの報告を設定できます。</li>
+</ul><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="index.html"><small>前へ</small>はじめに</a><a class="pn next" href="workspaces.html"><small>次へ</small>ワークスペースと作業</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="celadon" data-seed="2.3"></div><p class="crumb">文档<b>入门</b></p></div><h1>安装与更新</h1><p class="desc">在 macOS 或 Windows 上安装 Kiln，打开第一个工作区，让应用保持最新，并选择界面语言。</p><p>一条命令即可安装 Kiln，也可以从 GitHub Releases 下载。安装后 Kiln 会自动更新，更新时不会打扰正在运行的终端。</p><figure class="shot"><div class="plate" data-glaze="shino" data-seed="1.7"><img src="../assets/shots/settings-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<h2 id="requirements">系统要求</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>平台</th>
+<th>要求</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td>搭载 Apple Silicon 的 Mac，macOS 11 或更高版本。构建已通过公证。</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>x64 或 ARM64 上的 Windows 11。构建暂未进行代码签名。</td>
+</tr>
+</tbody>
+</table></div>
+<p>目前不提供 Intel Mac 和 Linux 构建。Windows 10 未经测试。</p>
+<h2 id="install-on-macos">在 macOS 上安装</h2>
+<h3 id="use-the-install-script">使用安装脚本</h3>
+<p>在终端中运行：</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | sh
+</code></pre>
+<p>脚本会下载最新的 Apple Silicon 稳定版，先校验发布校验和、Developer ID 签名、应用包标识和 Apple 公证，再安装到 <code>/Applications</code>。如果已经装有 Kiln，脚本不会动现有安装；升级请改用 <strong>Kiln → 检查更新</strong>。</p>
+<p>要安装到其他位置，设置 <code>KILN_INSTALL_DIR</code>：</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.sh | KILN_INSTALL_DIR=&quot;$HOME/Applications&quot; sh
+</code></pre>
+<h3 id="download-the-app">下载应用</h3>
+<ol>
+<li>从 <a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a> 下载 Apple Silicon 压缩包。</li>
+<li>解压。</li>
+<li>先把 <strong>Kiln.app</strong> 移到<strong>应用程序</strong>文件夹，再打开。</li>
+</ol>
+<h2 id="install-on-windows">在 Windows 上安装</h2>
+<h3 id="use-the-powershell-script">使用 PowerShell 脚本</h3>
+<p>在 PowerShell 中运行：</p>
+<pre><code class="language-powershell">irm https://raw.githubusercontent.com/YangTaeyoung/kiln/main/install.ps1 | iex
+</code></pre>
+<p>脚本会按设备架构选择 x64 或 ARM64 压缩包，校验发布校验和以及压缩包内的路径和版本，然后：</p>
+<ul>
+<li>把 Kiln 安装到 <code>%LOCALAPPDATA%\Programs\Kiln</code>；</li>
+<li>在“开始”菜单中添加 <strong>Kiln</strong> 快捷方式；</li>
+<li>把 <code>bin</code> 文件夹加入用户 <code>PATH</code>，以便使用 <code>kiln</code> 命令。</li>
+</ul>
+<p>要安装到其他文件夹，设置 <code>KILN_INSTALL_DIR</code>。已有的安装会原样保留。</p>
+<h3 id="download-the-archive">下载压缩包</h3>
+<p>也可以从 <a href="https://github.com/YangTaeyoung/kiln/releases/latest">GitHub Releases</a> 下载与你的架构对应的压缩包。</p>
+<blockquote class="callout"><p><strong>注意</strong> Windows 构建暂未进行代码签名。通过安装脚本下载不会触发 SmartScreen，用浏览器下载的压缩包则可能触发。只有来自 Releases 页面的压缩包，才应选择<strong>更多信息 → 仍要运行</strong>。</p>
+</blockquote>
+<h2 id="first-launch">首次启动</h2>
+<ol>
+<li>从“应用程序”或“开始”菜单打开 <strong>Kiln</strong>。</li>
+<li>点击工作区侧边栏中的 <strong>+</strong> 按钮（macOS 上为 <code>⌘N</code>）创建工作区，为它命名并选择项目文件夹。</li>
+<li>直接使用终端，或者选择<strong>新建任务</strong>，输入请求，选好代理后启动。</li>
+</ol>
+<p>这个文件夹可以是单个仓库，也可以是包含多个仓库的父文件夹。工作区、任务和拆分视图如何配合，详见<a href="workspaces.html">工作区与任务</a>。</p>
+<p>在 Windows 上，如果 Kiln 已在运行，再次启动会把现有窗口切到前台，并在其中打开你指定的文件夹。</p>
+<h2 id="install-the-tools-you-use">安装所需工具</h2>
+<p>Kiln 调用的是你已安装的代理和 GitHub 命令行工具，既不内置这些工具，也不含订阅。请安装并登录你要用的工具：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>工具</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code（<code>claude</code>）</td>
+<td>Claude 任务</td>
+</tr>
+<tr>
+<td>Codex（<code>codex</code>）</td>
+<td>Codex 任务</td>
+</tr>
+<tr>
+<td>Antigravity（<code>agy</code>）</td>
+<td>Antigravity 任务。请用 Google 提供的安装程序安装。</td>
+</tr>
+<tr>
+<td><code>gh</code></td>
+<td>GitHub 功能</td>
+</tr>
+</tbody>
+</table></div>
+<p>Kiln 会在 <code>PATH</code>、<code>~/.local/bin</code>、<code>/opt/homebrew/bin</code> 和 <code>/usr/local/bin</code> 中查找 <code>agy</code>。在 Windows 上，Claude Code 和 Codex 以原生 Windows 程序运行，数据保存在 <code>%USERPROFILE%\.codex</code> 和 <code>%USERPROFILE%\.claude</code>。</p>
+<p>Claude Code 和 Codex 账户在<strong>设置 → 账户</strong>中登录；macOS 上的 Antigravity 在<strong>设置 → 账户 → Antigravity</strong> 中登录。在 Windows 上，请在终端中运行 <code>agy</code> 登录 Antigravity。详见<a href="accounts.html">账户</a>。要查看已安装的 CLI 版本或更新它们，打开<strong>设置 → 账户 → CLI 更新</strong>，详见<a href="conversations.html">对话与更新</a>。</p>
+<h2 id="update-kiln">更新 Kiln</h2>
+<p>更新不会中断正在运行的终端会话。</p>
+<h3 id="macos">macOS</h3>
+<p>Kiln 会自动检查更新，并通过 Sparkle 更新对话框安装。要手动检查，选择 <strong>Kiln → 检查更新</strong>，或者使用<strong>设置 → 关于</strong>中的更新控件。自动检查可以在设置中关闭。</p>
+<h3 id="windows">Windows</h3>
+<p>Kiln 每天检查一次更新。要手动检查，打开<strong>设置 → 关于 → 检查更新</strong>，然后选择<strong>安装并重新启动</strong>。替换任何文件之前，Kiln 会先验证下载的压缩包与发布签名密钥是否匹配。正在运行的终端不受影响。</p>
+<blockquote class="callout"><p><strong>提示</strong> 在 macOS 15 及更高版本上，如果某条访问本地网络的命令在更新前就已打开的面板中失败，请新开一个终端面板再试。详见 <a href="terminal.html#local-network-access-on-macos">macOS 上的本地网络访问</a>。</p>
+</blockquote>
+<h2 id="choose-a-language">选择语言</h2>
+<p>打开<strong>设置 → 外观 → 语言</strong>，选择英语、韩语、日语或简体中文。更改立即生效，下次启动时依然保留。</p>
+<p>这只会改变 Kiln 自身的界面。终端输出、文件名、代码、提交信息和代理请求都保持原样。从早期版本升级上来的安装会继续使用韩语界面，直到你选择语言为止。</p>
+<h2 id="next-steps">后续步骤</h2>
+<ul>
+<li><a href="workspaces.html">工作区与任务</a>：整理文件夹和任务。</li>
+<li><a href="agents.html">代理</a>：启动第一个代理任务。</li>
+<li><a href="terminal.html">终端</a>：设置 Shell 集成和活动上报。</li>
+</ul><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="index.html"><small>上一页</small>简介</a><a class="pn next" href="workspaces.html"><small>下一页</small>工作区与任务</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Install and update", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "설치와 업데이트", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "インストールとアップデート", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "安装与更新", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>

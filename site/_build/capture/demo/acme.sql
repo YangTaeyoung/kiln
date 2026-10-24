@@ -1,0 +1,17 @@
+PRAGMA foreign_keys=OFF;
+BEGIN TRANSACTION;
+CREATE TABLE orders(id integer primary key, status text, customer text, created_at text);
+INSERT INTO orders VALUES(1042,'pending','c_81f2','2026-10-24 09:12');
+INSERT INTO orders VALUES(1043,'pending','c_19aa','2026-10-24 09:20');
+INSERT INTO orders VALUES(1044,'paid','c_77d0','2026-10-24 09:31');
+INSERT INTO orders VALUES(1047,'pending','c_3b2e','2026-10-24 10:02');
+INSERT INTO orders VALUES(1051,'pending','c_c901','2026-10-24 10:40');
+INSERT INTO orders VALUES(1052,'refunded','c_19aa','2026-10-24 11:05');
+CREATE TABLE payments(id integer primary key, order_id integer references orders(id), amount numeric, currency text, provider_ref text, created_at text);
+INSERT INTO payments VALUES(1,1042,49,'USD','pi_3Q8eYxL2','2026-10-24 09:12');
+INSERT INTO payments VALUES(2,1043,120.5,'USD','pi_3Q8eZaK9','2026-10-24 09:20');
+INSERT INTO payments VALUES(3,1044,64,'USD','pi_3Q8f0bM1','2026-10-24 09:31');
+INSERT INTO payments VALUES(4,1047,18.9,'USD','pi_3Q8f1cP4','2026-10-24 10:02');
+INSERT INTO payments VALUES(5,1051,310,'USD','pi_3Q8f4kR7','2026-10-24 10:40');
+INSERT INTO payments VALUES(6,1052,22,'USD','pi_3Q8f6tW3','2026-10-24 11:05');
+COMMIT;

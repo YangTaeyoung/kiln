@@ -7,6 +7,7 @@ the user's shells, agents, builds, or servers.
 ## Start here
 
 - [Documentation index](docs/README.md)
+- [Product site](site/README.md) — landing page and four-language user guide; update it with every user-facing change.
 - [Architecture and code map](docs/architecture.md)
 - [Development and meaningful verification](docs/development.md)
 - [Pane layout](docs/pane-layout.md) — accepted movement, boundary scope and snapping behavior.
@@ -93,6 +94,12 @@ the user's shells, agents, builds, or servers.
    relaunch. State any unverified boundary honestly.
 7. Follow the active user's authorization for publication. Do not infer permission
    to publish future releases solely from this document.
+8. Keep the product site in step with the app. A change that adds, removes or renames a
+   user-facing feature or UI label updates `site/` in the same change: the English guide
+   source, its `ko`/`ja`/`zh-CN` translations, the landing tile and strings when relevant, and
+   any affected screenshots. Before a release, run `python3 site/_build/check-site.py
+   --ref origin/main`, reflect every listed change, and record the version in
+   `site/_build/source.json`.
 
 ## Common commands
 
@@ -110,5 +117,6 @@ Windows changes are cross-checked from the Mac with `cargo xwin check -p kiln --
 scenarios behind each feature.
 
 Tests must use isolated configuration/socket/account paths. Do not shut down the
-real session daemon to make a test pass. Public-facing documentation is English;
-keep README short and put detailed guides under `docs/` with relative links.
+real session daemon to make a test pass. Repository documentation is English;
+keep README short and put detailed guides under `docs/` with relative links. The product
+site guide under `site/` is maintained in English, Korean, Japanese and Simplified Chinese.

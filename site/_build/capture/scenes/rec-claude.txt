@@ -1,0 +1,29 @@
+!title Connect the frontend and API
+!read
+!clear
+!sleep 2.5
+!activity running
+[2m~/dev/acme[0m
+!type [38;5;209m›[0m Connect the checkout page to the payments API. Keep the frontend and backend contract aligned.
+
+!sleep 0.6
+[2mReading workspace…[0m
+!sleep 0.5
+  apps/web        React + TypeScript
+  services/api    Go
+  packages/ui     Shared components
+
+!sleep 0.6
+[32m✓[0m Read workspace instructions
+!sleep 0.7
+[32m✓[0m Compare request and response types
+!sleep 0.7
+[32m✓[0m Add payment validation
+!sleep 0.6
+
+[36mWorking on error handling…[0m
+
+  [33mM[0m services/api/payment/handler.go
+!sleep 0.4
+  [33mM[0m apps/web/src/checkout.tsx
+!hold

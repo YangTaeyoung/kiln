@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Git and GitHub · Kiln Docs</title>
+<meta name="description" content="Browse commit history, open diffs, and squash, cherry-pick, drop or reword commits in the repository you select.">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <button class="menu-btn" type="button" id="menu-btn" aria-expanded="false" aria-controls="side"><span class="sr-only" data-ui="menu">Pages</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    <a class="brand" href="../index.html"><img src="../assets/kiln.svg" alt="">Kiln <span data-ui="docs">Documentation</span></a>
+    <nav class="top-links" aria-label="Site">
+      <a href="../index.html#persist" data-ui="features">Features</a>
+      <a href="index.html" aria-current="page" data-ui="docs">Documentation</a>
+      <a href="https://github.com/YangTaeyoung/kiln">GitHub</a>
+    </nav>
+    <div class="top-right">
+      <label class="lang"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select>
+      </label>
+      <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest" data-ui="download">Download</a>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">Introduction</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">Terminal</a></li><li><a href="agents.html">Agents</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html" class="on" aria-current="page">Git and GitHub</a></li><li><a href="editor.html">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">소개</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">터미널</a></li><li><a href="agents.html">에이전트</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html" class="on" aria-current="page">Git과 GitHub</a></li><li><a href="editor.html">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">はじめに</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">ターミナル</a></li><li><a href="agents.html">エージェント</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html" class="on" aria-current="page">Git と GitHub</a></li><li><a href="editor.html">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">简介</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">终端</a></li><li><a href="agents.html">代理</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html" class="on" aria-current="page">Git 与 GitHub</a></li><li><a href="editor.html">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="16.1"></div><p class="crumb">Documentation<b>Tools</b></p></div><h1>Git and GitHub</h1><p class="desc">Browse commit history, open diffs, and squash, cherry-pick, drop or reword commits in the repository you select.</p><p>Kiln puts commit history, diffs and pull requests in the workspace inspector, next to your terminals. Every Git operation runs against the repository you select, so you can rewrite history safely even when a workspace spans several repositories.</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="11.9"><img src="../assets/shots/git-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+<h2 id="open-git-tools">Open Git tools</h2>
+<p>The right-hand workspace inspector includes <strong>Changes</strong> and <strong>GitHub</strong>. You can also open source control and GitHub from the titlebar <strong>Tools</strong> menu, which opens them alongside your current work without replacing your terminal task.</p>
+<p>GitHub features use the GitHub CLI. Install <code>gh</code> and sign in with it before you use them. See <a href="install.html">Install and update</a>.</p>
+<h2 id="choose-a-repository">Choose a repository</h2>
+<p>A workspace can point at a single repository or at a parent folder such as <code>~/dev/projects</code> that contains several. In a multi-repository workspace, use the repository selector inside the Git and GitHub tools to choose the repository you want to work on.</p>
+<p>Selecting a repository only changes where Git operations apply. The task's working directory stays at the workspace folder, and an agent is not moved into the repository you inspect. See <a href="workspaces.html">Workspaces and tasks</a>.</p>
+<blockquote class="callout"><p><strong>Warning</strong> In a multi-repository workspace, confirm the selected repository before you change history.</p>
+</blockquote>
+<h2 id="browse-history-and-diffs">Browse history and diffs</h2>
+<p>Open <strong>Changes</strong> and select a repository to see its <strong>Commit history</strong>. The list is interactive right away. There is no separate edit mode.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Action</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Select a commit</td>
+<td>Click it</td>
+</tr>
+<tr>
+<td>Select a range</td>
+<td>Drag across rows, or Shift-click</td>
+</tr>
+<tr>
+<td>Open a commit's diff</td>
+<td>Double-click the commit</td>
+</tr>
+<tr>
+<td>Show commit actions</td>
+<td>Right-click a commit or a selection</td>
+</tr>
+<tr>
+<td>Browse another branch</td>
+<td>Use the branch filter</td>
+</tr>
+<tr>
+<td>Open a larger view</td>
+<td>Click the expand icon</td>
+</tr>
+</tbody>
+</table></div>
+<p>The branch filter lets you browse another branch without checking it out. The expand icon opens the same history, with the same interactions, in a larger tab. In the multi-repository overview, the history icon beside each repository opens that larger view directly.</p>
+<p>Press <code>⇧⌘L</code> to open history. In a single-repository workspace it opens the history directly. With several repositories it opens the repository overview so you can pick one first.</p>
+<blockquote class="callout"><p><strong>Note</strong> Shortcuts on this page use macOS keys. On Windows, app shortcuts read <code>⌘</code> as <code>Ctrl+Shift</code>, so <code>⇧⌘</code> becomes <code>Ctrl+Shift+Alt</code>.</p>
+</blockquote>
+<h2 id="edit-a-commit-message">Edit a commit message</h2>
+<ol>
+<li>Right-click a commit on the current branch.</li>
+<li>Choose <strong>Edit message</strong>.</li>
+<li>Edit the message in the confirmation dialog and apply it.</li>
+</ol>
+<p>If the commit is already published, the remote history needs updating too. Read the warning in the dialog before you continue.</p>
+<h2 id="squash-commits">Squash commits</h2>
+<ol>
+<li>Drag across commit rows, or Shift-click, to select a range.</li>
+<li>Choose <strong>Squash</strong> from the selection actions or the context menu.</li>
+<li>Review the target branch and the commits, then edit the combined message.</li>
+<li>Review any shared-history warning and confirm.</li>
+</ol>
+<p>Squashing works on consecutive commits in a supported linear segment of the current branch.</p>
+<blockquote class="callout"><p><strong>Tip</strong> Option-drag (Alt-drag on Windows) keeps its own behavior: it reorders commits instead of selecting a range.</p>
+</blockquote>
+<h2 id="cherry-pick-from-another-branch">Cherry-pick from another branch</h2>
+<ol>
+<li>Choose the source branch in the history filter.</li>
+<li>Select the commits you want.</li>
+<li>Choose <strong>Cherry-pick</strong>.</li>
+</ol>
+<p>Kiln applies the selected changes as new commits on your current branch. The filter only changes what you are browsing. It never checks out the source branch.</p>
+<h2 id="drop-commits">Drop commits</h2>
+<p>Select one or more commits and choose <strong>Drop commits</strong>. Kiln removes their changes from the current branch by rewriting history. This is different from a revert, which adds a new commit. Review the affected range before you confirm.</p>
+<h2 id="shared-history-and-recovery">Shared history and recovery</h2>
+<p>Squash, drop and cherry-pick follow the same safety steps.</p>
+<ul>
+<li><strong>Checks first.</strong> Before running, Kiln checks the worktree, branch, <code>HEAD</code> and remote state.</li>
+<li><strong>Backup ref.</strong> Kiln stores the original <code>HEAD</code> in a backup ref. You can find the backup information in the result details.</li>
+<li><strong>Shared-history warning.</strong> The review warns you when the affected commits are part of the remote default branch, or when Kiln cannot tell.</li>
+<li><strong>Guarded push.</strong> When you squash or drop published commits, Kiln offers to push automatically using <code>--force-with-lease</code> with an explicit expectation. If the remote changed in the meantime, the push refuses to overwrite it.</li>
+<li><strong>Server rules still apply.</strong> Branch protection on the server stays in force. Kiln does not bypass it.</li>
+</ul>
+<h3 id="conflicts">Conflicts</h3>
+<p>A conflict stops the operation and offers actions to continue, skip or abort. Nothing is pushed while the operation is stopped.</p>
+<h3 id="failed-pushes">Failed pushes</h3>
+<p>If the local rewrite finishes but the push fails afterwards, Kiln shows the two results separately: the local rewrite completed, and the remote update did not. The backup information stays available in the result details.</p>
+<h2 id="pull-requests">Pull requests</h2>
+<p>Open <strong>GitHub</strong> in the inspector to review pull requests for the selected repository without leaving your workspace. As with Git history, use the repository selector in a multi-repository workspace.</p>
+<h2 id="related">Related</h2>
+<ul>
+<li><a href="workspaces.html">Workspaces and tasks</a> for parent folders that contain several repositories</li>
+<li><a href="editor.html">Editor and search</a> for the file explorer and ignored files</li>
+</ul><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="conversations.html"><small>Previous</small>Conversations and updates</a><a class="pn next" href="editor.html"><small>Next</small>Editor and search</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="16.1"></div><p class="crumb">문서<b>도구</b></p></div><h1>Git과 GitHub</h1><p class="desc">선택한 저장소에서 커밋 기록을 살펴보고, diff를 열고, 커밋을 스쿼시·체리픽·삭제하거나 메시지를 고칩니다.</p><p>Kiln은 커밋 기록, diff, 풀 리퀘스트를 터미널 옆 워크스페이스 인스펙터에 보여 줍니다. 모든 Git 작업은 선택한 저장소에서 실행되므로, 워크스페이스가 여러 저장소에 걸쳐 있어도 기록을 안전하게 다시 쓸 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="11.9"><img src="../assets/shots/git-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<h2 id="open-git-tools">Git 도구 열기</h2>
+<p>오른쪽 워크스페이스 인스펙터에 <strong>변경</strong>과 <strong>GitHub</strong>가 있습니다. 제목 표시줄의 <strong>도구</strong> 메뉴에서도 소스 제어와 GitHub를 열 수 있으며, 이때 터미널 작업은 그대로 두고 현재 작업 옆에 열립니다.</p>
+<p>GitHub 기능은 GitHub CLI를 사용합니다. 쓰기 전에 <code>gh</code>를 설치하고 로그인하세요. <a href="install.html">설치와 업데이트</a>를 참고하세요.</p>
+<h2 id="choose-a-repository">저장소 선택하기</h2>
+<p>워크스페이스는 저장소 하나를 가리킬 수도 있고, <code>~/dev/projects</code>처럼 여러 저장소를 담은 상위 폴더를 가리킬 수도 있습니다. 저장소가 여러 개인 워크스페이스에서는 Git·GitHub 도구 안의 저장소 선택기로 작업할 저장소를 고르세요.</p>
+<p>저장소를 선택해도 바뀌는 것은 Git 작업이 적용되는 위치뿐입니다. 작업이 실행되는 디렉터리는 워크스페이스 폴더 그대로이고, 에이전트도 내가 살펴보는 저장소로 옮겨 가지 않습니다. <a href="workspaces.html">워크스페이스와 작업</a>을 참고하세요.</p>
+<blockquote class="callout"><p><strong>주의</strong> 저장소가 여러 개인 워크스페이스에서는 기록을 바꾸기 전에 어떤 저장소가 선택되어 있는지 확인하세요.</p>
+</blockquote>
+<h2 id="browse-history-and-diffs">기록과 diff 살펴보기</h2>
+<p><strong>변경</strong>을 열고 저장소를 선택하면 <strong>커밋 기록</strong>이 나타납니다. 목록은 바로 조작할 수 있으며, 따로 편집 모드로 들어갈 필요가 없습니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>동작</th>
+<th>방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>커밋 선택</td>
+<td>클릭</td>
+</tr>
+<tr>
+<td>범위 선택</td>
+<td>여러 행에 걸쳐 드래그하거나 Shift-클릭</td>
+</tr>
+<tr>
+<td>커밋의 diff 열기</td>
+<td>커밋을 더블클릭</td>
+</tr>
+<tr>
+<td>커밋 동작 보기</td>
+<td>커밋이나 선택 영역을 우클릭</td>
+</tr>
+<tr>
+<td>다른 브랜치 살펴보기</td>
+<td>브랜치 필터 사용</td>
+</tr>
+<tr>
+<td>큰 화면으로 열기</td>
+<td>확장 아이콘 클릭</td>
+</tr>
+</tbody>
+</table></div>
+<p>브랜치 필터를 쓰면 체크아웃하지 않고도 다른 브랜치를 살펴볼 수 있습니다. 확장 아이콘을 누르면 같은 기록이 더 큰 탭에서 열리며, 조작 방법도 똑같습니다. 여러 저장소 개요에서는 저장소마다 옆에 있는 기록 아이콘으로 큰 화면을 바로 열 수 있습니다.</p>
+<p><code>⇧⌘L</code>을 누르면 기록이 열립니다. 저장소가 하나인 워크스페이스에서는 기록이 바로 열리고, 저장소가 여러 개면 먼저 저장소를 고를 수 있도록 저장소 개요가 열립니다.</p>
+<blockquote class="callout"><p><strong>참고</strong> 이 페이지의 단축키는 macOS 키 기준입니다. Windows에서는 앱 단축키의 <code>⌘</code>가 <code>Ctrl+Shift</code>이므로 <code>⇧⌘</code>는 <code>Ctrl+Shift+Alt</code>가 됩니다.</p>
+</blockquote>
+<h2 id="edit-a-commit-message">커밋 메시지 고치기</h2>
+<ol>
+<li>현재 브랜치의 커밋을 우클릭합니다.</li>
+<li><strong>메시지 수정</strong>을 선택합니다.</li>
+<li>확인 대화상자에서 메시지를 고친 뒤 적용합니다.</li>
+</ol>
+<p>이미 게시한 커밋이라면 원격 기록도 갱신해야 합니다. 계속하기 전에 대화상자의 경고를 읽어 보세요.</p>
+<h2 id="squash-commits">커밋 스쿼시하기</h2>
+<ol>
+<li>여러 커밋 행에 걸쳐 드래그하거나 Shift-클릭해 범위를 선택합니다.</li>
+<li>선택 동작이나 컨텍스트 메뉴에서 <strong>스쿼시</strong>를 선택합니다.</li>
+<li>대상 브랜치와 커밋을 검토한 뒤, 합쳐질 메시지를 편집합니다.</li>
+<li>공유 기록 경고가 나오면 내용을 검토하고 확인합니다.</li>
+</ol>
+<p>스쿼시는 현재 브랜치 중 지원되는 선형 구간에 있는 연속된 커밋에 쓸 수 있습니다.</p>
+<blockquote class="callout"><p><strong>팁</strong> Option-드래그(Windows에서는 Alt-드래그)는 원래 동작대로 범위를 선택하지 않고 커밋 순서를 바꿉니다.</p>
+</blockquote>
+<h2 id="cherry-pick-from-another-branch">다른 브랜치에서 체리픽하기</h2>
+<ol>
+<li>기록 필터에서 원본 브랜치를 선택합니다.</li>
+<li>가져올 커밋을 선택합니다.</li>
+<li><strong>체리픽</strong>을 선택합니다.</li>
+</ol>
+<p>Kiln은 선택한 변경을 현재 브랜치에 새 커밋으로 적용합니다. 필터는 살펴보는 대상만 바꿀 뿐, 원본 브랜치를 체크아웃하지 않습니다.</p>
+<h2 id="drop-commits">커밋 삭제하기</h2>
+<p>커밋을 하나 이상 선택하고 <strong>커밋 삭제</strong>를 선택합니다. Kiln은 기록을 다시 써서 현재 브랜치에서 해당 변경을 없앱니다. 새 커밋을 추가하는 revert와는 다릅니다. 확인하기 전에 영향을 받는 범위를 검토하세요.</p>
+<h2 id="shared-history-and-recovery">공유 기록과 복구</h2>
+<p>스쿼시, 커밋 삭제, 체리픽은 모두 같은 안전 절차를 따릅니다.</p>
+<ul>
+<li><strong>사전 확인.</strong> 실행하기 전에 worktree, 브랜치, <code>HEAD</code>, 원격 상태를 확인합니다.</li>
+<li><strong>백업 ref.</strong> 원래 <code>HEAD</code>를 백업 ref에 저장합니다. 백업 정보는 결과 세부 정보에서 볼 수 있습니다.</li>
+<li><strong>공유 기록 경고.</strong> 영향을 받는 커밋이 원격 기본 브랜치에 포함되어 있거나 포함 여부를 판단할 수 없으면 검토 단계에서 경고합니다.</li>
+<li><strong>보호된 push.</strong> 게시된 커밋을 스쿼시하거나 삭제하면, 명시적인 기대값과 함께 <code>--force-with-lease</code>로 자동 push하도록 제안합니다. 그사이 원격이 바뀌었다면 push가 덮어쓰기를 거부합니다.</li>
+<li><strong>서버 규칙 유지.</strong> 서버의 브랜치 보호 규칙은 계속 적용되며, Kiln은 이를 우회하지 않습니다.</li>
+</ul>
+<h3 id="conflicts">충돌</h3>
+<p>충돌이 생기면 작업이 멈추고 계속, 건너뛰기, 중단 중에서 고를 수 있습니다. 작업이 멈춰 있는 동안에는 아무것도 push되지 않습니다.</p>
+<h3 id="failed-pushes">push 실패</h3>
+<p>로컬 재작성은 끝났는데 그 뒤 push가 실패하면, Kiln은 로컬 재작성은 완료되었고 원격 갱신은 완료되지 않았다고 두 결과를 따로 보여 줍니다. 백업 정보는 결과 세부 정보에서 계속 확인할 수 있습니다.</p>
+<h2 id="pull-requests">풀 리퀘스트</h2>
+<p>인스펙터에서 <strong>GitHub</strong>를 열면 워크스페이스를 벗어나지 않고 선택한 저장소의 풀 리퀘스트를 검토할 수 있습니다. 저장소가 여러 개인 워크스페이스에서는 Git 기록과 마찬가지로 저장소 선택기를 사용하세요.</p>
+<h2 id="related">관련 문서</h2>
+<ul>
+<li>여러 저장소를 담은 상위 폴더: <a href="workspaces.html">워크스페이스와 작업</a></li>
+<li>파일 탐색기와 무시된 파일: <a href="editor.html">편집기와 검색</a></li>
+</ul><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="conversations.html"><small>이전</small>대화와 업데이트</a><a class="pn next" href="editor.html"><small>다음</small>편집기와 검색</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="16.1"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>Git と GitHub</h1><p class="desc">選択したリポジトリでコミット履歴と diff を確認し、コミットのスカッシュ、チェリーピック、削除、メッセージの修正を行う方法を説明します。</p><p>Kiln では、コミット履歴、diff、プルリクエストを、ターミナルの横のワークスペースインスペクターで扱えます。Git の操作はすべて選択したリポジトリに対して実行されるので、複数のリポジトリにまたがるワークスペースでも安全に履歴を書き換えられます。</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="11.9"><img src="../assets/shots/git-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<h2 id="open-git-tools">Git ツールを開く</h2>
+<p>右側のワークスペースインスペクターには<strong>変更</strong>と <strong>GitHub</strong> があります。タイトルバーの<strong>ツール</strong>メニューからもソース管理と GitHub を開けます。この場合、ターミナルの作業を置き換えずに、現在の作業の横に開きます。</p>
+<p>GitHub の機能には GitHub CLI を使います。使う前に <code>gh</code> をインストールし、ログインしておいてください。詳しくは<a href="install.html">インストールとアップデート</a>を参照してください。</p>
+<h2 id="choose-a-repository">リポジトリを選ぶ</h2>
+<p>ワークスペースのフォルダーには、1 つのリポジトリも、<code>~/dev/projects</code> のように複数のリポジトリを含む親フォルダーも指定できます。複数リポジトリのワークスペースでは、Git と GitHub のツールにあるリポジトリセレクターで、作業したいリポジトリを選びます。</p>
+<p>リポジトリを選んで変わるのは、Git 操作の適用先だけです。作業ディレクトリはワークスペースのフォルダーのままで、確認中のリポジトリにエージェントが移動することもありません。詳しくは<a href="workspaces.html">ワークスペースと作業</a>を参照してください。</p>
+<blockquote class="callout"><p><strong>警告</strong> 複数リポジトリのワークスペースでは、履歴を変更する前に選択中のリポジトリを確認してください。</p>
+</blockquote>
+<h2 id="browse-history-and-diffs">履歴と diff を閲覧する</h2>
+<p><strong>変更</strong>を開いてリポジトリを選ぶと、その<strong>コミット履歴</strong>が表示されます。一覧はそのまま操作でき、編集モードに切り替える必要はありません。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>コミットを選ぶ</td>
+<td>クリックする</td>
+</tr>
+<tr>
+<td>範囲を選ぶ</td>
+<td>行をまたいでドラッグする、または Shift キーを押しながらクリックする</td>
+</tr>
+<tr>
+<td>コミットの diff を開く</td>
+<td>コミットをダブルクリックする</td>
+</tr>
+<tr>
+<td>コミットの操作を表示する</td>
+<td>コミットまたは選択範囲を右クリックする</td>
+</tr>
+<tr>
+<td>別のブランチを閲覧する</td>
+<td>ブランチフィルターを使う</td>
+</tr>
+<tr>
+<td>大きな表示で開く</td>
+<td>展開アイコンをクリックする</td>
+</tr>
+</tbody>
+</table></div>
+<p>ブランチフィルターを使うと、チェックアウトせずに別のブランチを閲覧できます。展開アイコンを押すと、同じ履歴を同じ操作のまま大きなタブで開きます。複数リポジトリの概要では、各リポジトリの横にある履歴アイコンからその大きな表示を直接開けます。</p>
+<p><code>⇧⌘L</code> で履歴を開けます。リポジトリが 1 つのワークスペースでは履歴が直接開きます。複数ある場合はリポジトリの概要が開くので、先にリポジトリを選びます。</p>
+<blockquote class="callout"><p><strong>注意</strong> このページのショートカットは macOS のキーで表記しています。Windows ではアプリのショートカットの <code>⌘</code> を <code>Ctrl+Shift</code> と読み替えるので、<code>⇧⌘</code> は <code>Ctrl+Shift+Alt</code> になります。</p>
+</blockquote>
+<h2 id="edit-a-commit-message">コミットメッセージを修正する</h2>
+<ol>
+<li>現在のブランチのコミットを右クリックします。</li>
+<li><strong>メッセージを修正</strong>を選びます。</li>
+<li>確認ダイアログでメッセージを編集し、適用します。</li>
+</ol>
+<p>コミットをすでにプッシュしている場合は、リモートの履歴も更新する必要があります。続ける前に、ダイアログの警告を確認してください。</p>
+<h2 id="squash-commits">コミットをスカッシュする</h2>
+<ol>
+<li>コミットの行をまたいでドラッグするか、Shift キーを押しながらクリックして範囲を選びます。</li>
+<li>選択範囲の操作またはコンテキストメニューから<strong>スカッシュ</strong>を選びます。</li>
+<li>対象のブランチとコミットを確認し、まとめたメッセージを編集します。</li>
+<li>共有履歴に関する警告があれば確認し、確定します。</li>
+</ol>
+<p>スカッシュできるのは、現在のブランチのうち、対応している直線的な区間にある連続したコミットです。</p>
+<blockquote class="callout"><p><strong>ヒント</strong> Option キーを押しながらのドラッグ（Windows では Alt キー）は別の操作として扱われ、範囲を選ぶ代わりにコミットを並べ替えます。</p>
+</blockquote>
+<h2 id="cherry-pick-from-another-branch">別のブランチからチェリーピックする</h2>
+<ol>
+<li>履歴フィルターで取り込み元のブランチを選びます。</li>
+<li>取り込みたいコミットを選びます。</li>
+<li><strong>チェリーピック</strong>を選びます。</li>
+</ol>
+<p>Kiln は選んだ変更を、現在のブランチに新しいコミットとして適用します。フィルターで変わるのは閲覧対象だけで、取り込み元のブランチがチェックアウトされることはありません。</p>
+<h2 id="drop-commits">コミットを削除する</h2>
+<p>コミットを 1 つ以上選び、<strong>コミットを削除</strong>を選びます。Kiln は履歴を書き換えて、それらの変更を現在のブランチから取り除きます。新しいコミットを追加する revert とは異なります。確定する前に、影響を受ける範囲を確認してください。</p>
+<h2 id="shared-history-and-recovery">共有履歴と復旧</h2>
+<p>スカッシュ、削除、チェリーピックには、共通の安全策があります。</p>
+<ul>
+<li><strong>事前チェック。</strong>実行前に、Kiln は worktree、ブランチ、<code>HEAD</code>、リモートの状態を確認します。</li>
+<li><strong>バックアップ ref。</strong> Kiln は元の <code>HEAD</code> をバックアップ ref に保存します。バックアップの情報は結果の詳細で確認できます。</li>
+<li><strong>共有履歴の警告。</strong>影響を受けるコミットがリモートのデフォルトブランチに含まれている場合や、Kiln が判断できない場合は、確認画面で警告が表示されます。</li>
+<li><strong>保護されたプッシュ。</strong>プッシュ済みのコミットをスカッシュまたは削除すると、Kiln は期待する状態を明示した <code>--force-with-lease</code> での自動プッシュを提案します。その間にリモートが変更されていた場合、プッシュは上書きせずに拒否されます。</li>
+<li><strong>サーバーのルールは引き続き適用されます。</strong>サーバー側のブランチ保護は有効なままです。Kiln がそれを回避することはありません。</li>
+</ul>
+<h3 id="conflicts">コンフリクト</h3>
+<p>コンフリクトが起きると操作は停止し、続行、スキップ、中止を選べるようになります。操作が停止している間は何もプッシュされません。</p>
+<h3 id="failed-pushes">プッシュの失敗</h3>
+<p>ローカルでの書き換えは完了したもののプッシュに失敗した場合、Kiln は 2 つの結果を分けて表示し、ローカルの書き換えは完了したこと、リモートの更新は完了していないことがわかるようにします。バックアップの情報は結果の詳細で引き続き確認できます。</p>
+<h2 id="pull-requests">プルリクエスト</h2>
+<p>インスペクターで <strong>GitHub</strong> を開くと、ワークスペースを離れずに選択中のリポジトリのプルリクエストを確認できます。Git の履歴と同様に、複数リポジトリのワークスペースではリポジトリセレクターを使います。</p>
+<h2 id="related">関連ページ</h2>
+<ul>
+<li>複数のリポジトリを含む親フォルダーについては、<a href="workspaces.html">ワークスペースと作業</a>を参照してください。</li>
+<li>ファイルエクスプローラーと無視対象のファイルについては、<a href="editor.html">エディターと検索</a>を参照してください。</li>
+</ul><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="conversations.html"><small>前へ</small>会話とアップデート</a><a class="pn next" href="editor.html"><small>次へ</small>エディターと検索</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="kaki" data-seed="16.1"></div><p class="crumb">文档<b>工具</b></p></div><h1>Git 与 GitHub</h1><p class="desc">在所选仓库中浏览提交历史、打开 diff，并压缩、拣选、删除提交或修改提交信息。</p><p>Kiln 把提交历史、diff 和拉取请求放在工作区检查器中，紧挨着终端。每个 Git 操作都只针对你选中的仓库，即使工作区横跨多个仓库，改写历史也很安全。</p><figure class="shot"><div class="plate" data-glaze="tenmoku" data-seed="11.9"><img src="../assets/shots/git-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<h2 id="open-git-tools">打开 Git 工具</h2>
+<p>右侧的工作区检查器包含<strong>更改</strong>和 <strong>GitHub</strong>。也可以从标题栏的<strong>工具</strong>菜单打开源代码管理和 GitHub，它们会在当前工作旁边打开，不会替换终端任务。</p>
+<p>GitHub 功能依赖 GitHub CLI。使用前请先安装 <code>gh</code> 并登录。详见<a href="install.html">安装与更新</a>。</p>
+<h2 id="choose-a-repository">选择仓库</h2>
+<p>工作区可以指向单个仓库，也可以指向包含多个仓库的父文件夹，例如 <code>~/dev/projects</code>。在多仓库工作区中，请用 Git 和 GitHub 工具里的仓库选择器指定要操作的仓库。</p>
+<p>选择仓库只改变 Git 操作的作用对象。任务的工作目录仍是工作区文件夹，代理也不会被移到你正在查看的仓库里。详见<a href="workspaces.html">工作区与任务</a>。</p>
+<blockquote class="callout"><p><strong>警告</strong> 在多仓库工作区中改写历史之前，请先确认选中的仓库。</p>
+</blockquote>
+<h2 id="browse-history-and-diffs">浏览历史和 diff</h2>
+<p>打开<strong>更改</strong>并选择一个仓库，即可查看它的<strong>提交历史</strong>。列表打开后就能直接操作，没有单独的编辑模式。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>操作</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>选择提交</td>
+<td>点击提交</td>
+</tr>
+<tr>
+<td>选择范围</td>
+<td>在多行上拖动，或按住 Shift 点击</td>
+</tr>
+<tr>
+<td>打开提交的 diff</td>
+<td>双击提交</td>
+</tr>
+<tr>
+<td>显示提交操作</td>
+<td>右键点击提交或选中的内容</td>
+</tr>
+<tr>
+<td>浏览其他分支</td>
+<td>使用分支筛选器</td>
+</tr>
+<tr>
+<td>打开更大的视图</td>
+<td>点击展开图标</td>
+</tr>
+</tbody>
+</table></div>
+<p>用分支筛选器可以浏览其他分支，无需签出。展开图标会在更大的标签页中打开同一份历史，操作方式不变。在多仓库概览中，点击仓库旁的历史图标可直接打开这个大视图。</p>
+<p>按 <code>⇧⌘L</code> 打开历史。单仓库工作区会直接打开历史；有多个仓库时，会先打开仓库概览，让你选择一个。</p>
+<blockquote class="callout"><p><strong>注意</strong> 本页快捷键以 macOS 按键表示。在 Windows 上，应用快捷键中的 <code>⌘</code> 对应 <code>Ctrl+Shift</code>，因此 <code>⇧⌘</code> 对应 <code>Ctrl+Shift+Alt</code>。</p>
+</blockquote>
+<h2 id="edit-a-commit-message">修改提交信息</h2>
+<ol>
+<li>右键点击当前分支上的某个提交。</li>
+<li>选择<strong>修改信息</strong>。</li>
+<li>在确认对话框中编辑信息并应用。</li>
+</ol>
+<p>如果该提交已经发布，远程历史也需要更新。继续之前，请先阅读对话框中的警告。</p>
+<h2 id="squash-commits">压缩提交</h2>
+<ol>
+<li>在提交行上拖动，或按住 Shift 点击，选中一个范围。</li>
+<li>从选中内容的操作或右键菜单中选择<strong>压缩</strong>。</li>
+<li>核对目标分支和提交，然后编辑合并后的提交信息。</li>
+<li>如有共享历史警告，查看后确认。</li>
+</ol>
+<p>压缩适用于当前分支上受支持的线性区段内的连续提交。</p>
+<blockquote class="callout"><p><strong>提示</strong> 按住 Option 拖动（Windows 上按住 Alt 拖动）保持原有行为：重新排列提交顺序，而不是选择范围。</p>
+</blockquote>
+<h2 id="cherry-pick-from-another-branch">从其他分支拣选</h2>
+<ol>
+<li>在历史筛选器中选择源分支。</li>
+<li>选中需要的提交。</li>
+<li>选择<strong>拣选</strong>。</li>
+</ol>
+<p>Kiln 会把选中的更改作为新提交应用到当前分支。筛选器只改变你浏览的内容，绝不会签出源分支。</p>
+<h2 id="drop-commits">删除提交</h2>
+<p>选中一个或多个提交，然后选择<strong>删除提交</strong>。Kiln 通过改写历史，从当前分支中移除这些提交的更改。这和 revert 不同，revert 会新增一个提交。确认前请检查受影响的范围。</p>
+<h2 id="shared-history-and-recovery">共享历史与恢复</h2>
+<p>压缩、删除和拣选都遵循同样的安全步骤。</p>
+<ul>
+<li><strong>先检查。</strong>执行前，Kiln 会检查 worktree、分支、<code>HEAD</code> 和远程状态。</li>
+<li><strong>备份引用。</strong> Kiln 把原始的 <code>HEAD</code> 保存到一个备份引用中，备份信息可以在结果详情中找到。</li>
+<li><strong>共享历史警告。</strong>受影响的提交属于远程默认分支，或者 Kiln 无法判断时，审阅界面会发出警告。</li>
+<li><strong>受保护的推送。</strong>压缩或删除已发布的提交时，Kiln 会提供自动推送，使用带明确预期值的 <code>--force-with-lease</code>。如果远程在此期间有变化，推送会拒绝覆盖。</li>
+<li><strong>服务器规则照常生效。</strong>服务器上的分支保护规则仍然有效，Kiln 不会绕过。</li>
+</ul>
+<h3 id="conflicts">冲突</h3>
+<p>遇到冲突时操作会停下，并提供继续、跳过或中止选项。操作停止期间不会推送任何内容。</p>
+<h3 id="failed-pushes">推送失败</h3>
+<p>如果本地改写已完成，但随后推送失败，Kiln 会分别显示两个结果：本地改写已完成，远程更新未完成。备份信息仍可在结果详情中找到。</p>
+<h2 id="pull-requests">拉取请求</h2>
+<p>在检查器中打开 <strong>GitHub</strong>，不离开工作区就能审阅所选仓库的拉取请求。与 Git 历史一样，多仓库工作区中请使用仓库选择器。</p>
+<h2 id="related">相关内容</h2>
+<ul>
+<li><a href="workspaces.html">工作区与任务</a>：包含多个仓库的父文件夹</li>
+<li><a href="editor.html">编辑器与搜索</a>：文件浏览器和已忽略的文件</li>
+</ul><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="conversations.html"><small>上一页</small>对话与更新</a><a class="pn next" href="editor.html"><small>下一页</small>编辑器与搜索</a></nav></article></main>
+  <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
+</div>
+<footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" data-ui="issue">Report an issue</a></nav></div></footer>
+<script>window.KILN_DOC_UI = {"en": {"title": "Git and GitHub", "toc": "On this page", "features": "Features", "docs": "Documentation", "download": "Download", "menu": "Pages", "issue": "Report an issue", "releases": "Releases"}, "ko": {"title": "Git과 GitHub", "toc": "이 페이지에서", "features": "기능", "docs": "문서", "download": "다운로드", "menu": "목차", "issue": "문제 신고", "releases": "릴리스"}, "ja": {"title": "Git と GitHub", "toc": "このページの内容", "features": "機能", "docs": "ドキュメント", "download": "ダウンロード", "menu": "ページ一覧", "issue": "問題を報告", "releases": "リリース"}, "zh-CN": {"title": "Git 与 GitHub", "toc": "本页内容", "features": "功能", "docs": "文档", "download": "下载", "menu": "页面目录", "issue": "报告问题", "releases": "发布"}};</script>
+<script src="../assets/glaze.js"></script>
+<script src="../assets/docs.js"></script>
+</body>
+</html>
