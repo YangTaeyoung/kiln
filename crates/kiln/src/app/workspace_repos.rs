@@ -2803,11 +2803,15 @@ mod tests {
     #[test]
     fn pending_git_refresh_wakes_the_ui_at_its_next_slot() {
         let mut workspace = fixture(3);
+        // The fixture starts discovery before replacing it with ready repositories.
+        // Its detached worker may still request a repaint on the original context.
+        workspace.ctx = egui::Context::default();
         for repo in workspace.repos.values_mut() { repo.status_dirty = true; }
-        workspace.next_status = Instant::now() + Duration::from_millis(250);
         for _ in 0..3 { workspace.ctx.begin_pass(Default::default()); let mut out = workspace.ctx.end_pass(); out.textures_delta.clear(); }
         let (tx, rx) = std::sync::mpsc::channel();
         workspace.ctx.set_request_repaint_callback(move |info| { tx.send(info.delay).unwrap(); });
+        // Context initialization is outside the scheduling interval being tested.
+        workspace.next_status = Instant::now() + Duration::from_millis(250);
         workspace.tick();
         let delay = rx.try_recv().expect("pending jobs need their own wakeup, even with idle terminals");
         assert!(delay > Duration::from_millis(150) && delay <= Duration::from_millis(250));

@@ -77,14 +77,16 @@ An expired or revoked token can block usage checks while a running CLI still wor
 Save several Google accounts for the Antigravity CLI (`agy`) and choose which one new tasks use.
 
 1. Open **Settings → Accounts → Antigravity** and choose **Add Account**. Kiln starts the installed CLI's Google sign-in in a temporary private terminal.
-2. Complete the login in your browser, then choose **Apply**.
+2. Complete the login in your browser. If it displays a code, paste it into **Sign-in code** and choose **Confirm** or press Enter. Whitespace introduced by copied line wrapping is removed. Kiln shows **Verifying the sign-in code** and prevents duplicate submissions while checking it. A rejected or expired code ends the attempt with an error; restart sign-in to obtain a new code. After authentication succeeds, choose **Apply**.
 3. Repeat for another account, then choose **Switch** to use it for new tasks.
 
 Running tasks keep their original account. The row menu offers rename, delete and sign in again with the same Google account. **Save Current Login** imports the ordinary CLI's Google login.
 
 Each account has its own private home and macOS keychain, which also keep its Antigravity preferences, settings and conversations separate. Kiln never replaces the ordinary CLI's login or changes your default keychain. The account home does not include files from your usual home, such as shell, Git or SSH configuration. Your workspace files remain available.
 
-Antigravity accounts do not show usage bars or rotate automatically. When `agy` reports that its quota is reached, Kiln shows a notification with the reset time. Sign-in uses Google OAuth; Google Cloud project setup is not automated.
+Applied accounts show used percentages and reset times for each model group reported by the official CLI. Usage is checked on startup and every five minutes; you can also refresh manually. These read-only checks require agy 1.1.11 or later and do not start an agent turn or spend model quota. Stale or failed checks hide the percentages. Automatic rotation is not included. When `agy` reaches its quota, Kiln shows the reset time in a notification. Sign-in uses Google OAuth; Google Cloud project setup is not automated.
+
+New Kiln zsh terminals also use the selected account when you type `agy`, preserving the arguments and current folder. Open a new terminal after updating. With a custom shell, choose **New Task → Antigravity**. Kiln keeps its own shell integration active when Kiro is installed, so its selected-account routing also works in those new terminals.
 
 Conversations from these accounts take part in conversation sync, and restarting in the same conversation keeps the original account. See [Conversations and updates](conversations.html).
 

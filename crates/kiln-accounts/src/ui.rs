@@ -117,7 +117,6 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                 ui.add(egui::Label::new(RichText::new(format!("{}{count}", subtitle(tool))).font(fonts::regular(12.0)).color(t.text_faint)).truncate());
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if tool == Tool::Antigravity { return; }
                 if refreshing {
                     ui.add(egui::Spinner::new().size(14.0).color(t.text_dim));
                 } else {
@@ -358,6 +357,11 @@ fn usage_color(u: f32) -> Color32 {
 fn usage_line(ui: &mut Ui, label: &str, w: Option<(f32, Option<i64>)>, now: i64) {
     let t = Theme::current();
     let (rect, response) = ui.allocate_exact_size(vec2(236.0, 16.0), Sense::hover());
+    let accessible = match w {
+        Some((used, reset)) => format!("{label} · {:.0}%{}", used * 100.0, reset.map(|at| format!(" · {}", fmt_reset(at, now))).unwrap_or_default()),
+        None => format!("{label} · —"),
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &accessible));
     let p = ui.painter();
     let label = p.layout_no_wrap(label.to_string(), fonts::medium(11.0), t.text_faint);
     let bar_offset = (label.size().x + 8.0).max(34.0);
@@ -612,6 +616,29 @@ fn usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched_at: Option<
     });
 }
 
+fn antigravity_usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched: Option<i64>, refreshing: bool) {
+    if refreshing || !fetched.is_some_and(|at| now.saturating_sub(at) < 300)
+        || usage.is_none_or(|u| u.is_unavailable() || u.groups.is_empty()) {
+        usage_block(ui, usage, now, fetched, refreshing);
+        return;
+    }
+    for group in &usage.unwrap().groups {
+        ui.add_space(6.0);
+        ui.label(RichText::new(&group.name).font(fonts::semibold(11.5)).color(Theme::current().text_dim));
+        for bucket in &group.buckets {
+            let label = match bucket.window.as_str() {
+                "5h" => kiln_common::i18n::tr("5시간"),
+                "weekly" => kiln_common::i18n::tr("7일"),
+                other => other,
+            };
+            usage_line(ui, label, bucket.used.map(|used| (used, bucket.reset)), now);
+        }
+    }
+    if let Some(at) = fetched {
+        ui.label(RichText::new(checked_ago(now, at)).font(fonts::regular(10.5)).color(Theme::current().text_faint));
+    }
+}
+
 fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, usage: Option<Usage>, now: i64, busy: bool) {
     let t = Theme::current();
     let tool = p.tool;
@@ -769,6 +796,9 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
         });
     });
     if compact && !login_required && tool != Tool::Antigravity { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
+    if tool == Tool::Antigravity && !login_required {
+        antigravity_usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(tool, &p.id), mgr.is_refreshing(tool));
+    }
     if let Some(caption) = caption.as_ref().filter(|_| compact) {
         ui.add(egui::Label::new(RichText::new(caption).font(fonts::regular(11.0)).color(t.text_dim)).wrap()).on_hover_text(caption);
     }
@@ -806,6 +836,32 @@ fn menu_item(ui: &mut Ui, icon: Icon, label: &str, color: Color32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn antigravity_model_quota_groups_fit_and_hide_stale_or_refreshing_numbers() {
+        use egui_kittest::kittest::Queryable;
+        for language in kiln_common::i18n::Language::ALL {
+            kiln_common::i18n::with_language(language, || {
+                for (age, refreshing) in [(0, false), (301, false), (0, true)] {
+                    let usage = Usage { groups: ["Gemini Models", "Claude and GPT models", "Gemini 4 Argon"].into_iter().map(|name| crate::QuotaGroup {
+                        name: name.into(), buckets: vec![crate::QuotaBucket { window: "5h".into(), used: Some(0.25), reset: None }, crate::QuotaBucket { window: "weekly".into(), used: None, reset: None }],
+                    }).collect(), status: "allowed".into(), ..Default::default() };
+                    let mut h = egui_kittest::Harness::builder().with_size(vec2(420.0, 600.0)).build_ui(move |ui| {
+                        if test_fonts(ui) { antigravity_usage_block(ui, Some(&usage), 1000, Some(1000-age), refreshing); }
+                    });
+                    h.ctx.set_zoom_factor(1.3);
+                    for _ in 0..4 { h.step(); }
+                    if age == 0 && !refreshing {
+                        for name in ["Gemini Models", "Claude and GPT models", "Gemini 4 Argon"] {
+                            assert!(h.ctx.content_rect().contains_rect(h.get_by_label(name).rect()));
+                        }
+                        assert_eq!(h.query_all_by_label(&format!("{} · 25%", kiln_common::i18n::tr("5시간"))).count(), 3);
+                        assert_eq!(h.query_all_by_label(&format!("{} · —", kiln_common::i18n::tr("7일"))).count(), 3);
+                    } else { assert!(h.query_by_label("Gemini Models").is_none()); }
+                }
+            });
+        }
+    }
     use crate::CredentialStore;
 
     fn test_fonts(ui: &mut Ui) -> bool {
@@ -1274,7 +1330,7 @@ mod tests {
                     h.ctx.set_zoom_factor(1.3);
                     for _ in 0..4 { h.step(); }
                     assert!(h.query_by_label(kiln_common::i18n::tr("자동 전환")).is_none());
-                    assert!(h.query_by_label(kiln_common::i18n::tr("사용량 정보 없음")).is_none());
+                    assert!(h.query_all_by_label(kiln_common::i18n::tr("사용량 정보 없음")).count() > 0);
                     for label in ["새 계정 추가", "전환"] {
                         assert!(h.ctx.content_rect().contains_rect(h.get_by_label(kiln_common::i18n::tr(label)).rect()));
                     }

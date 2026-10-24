@@ -133,6 +133,17 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
     attach(&mut spec, &path, &record)?;
     launch_spec(&path, &record, false, None)
 }
+
+/// Bare `agy` in a Kiln shell uses the account selected at invocation time.
+pub fn run_antigravity_shell(cwd: PathBuf, args: Vec<String>) -> Result<()> {
+    let accounts = AccountManager::with_env(kiln_accounts::Env::real());
+    let spec = managed(Tool::Antigravity, cwd, &accounts)?;
+    let path = record_path(&spec).context("missing launch record")?;
+    let mut record = read(&path)?;
+    record.spec.args.extend(args);
+    private_write(&path, &serde_json::to_vec(&record)?)?;
+    run_request(&path, &record.generation, None, false)
+}
 /// The launch record and generation in a `kiln agent-run --record <path> --generation <id>`
 /// command line.
 #[cfg(any(windows, test))]
@@ -308,6 +319,10 @@ fn launch_spec(
     request: Option<&Path>,
 ) -> Result<SpawnSpec> {
     let mut spec = record.spec.clone();
+    // A managed Agy account changes HOME. The Kiln helper must keep using the
+    // GUI's config directory for its launch record and request validation.
+    spec.env.retain(|(key, _)| key != "KILN_CONFIG_DIR");
+    spec.env.push(("KILN_CONFIG_DIR".into(), kiln_common::paths::config_dir().to_string_lossy().into_owned()));
     spec.program = Some(helper_exe()?.to_string_lossy().into_owned());
     spec.args = vec![
         "agent-run".into(),
@@ -416,7 +431,10 @@ pub fn run_request(
     }
     let (program, lead) = agent_launch::launcher(Path::new(&spec.program.context("missing CLI executable")?));
     let mut cmd = Command::new(program);
-    cmd.args(lead).args(&spec.args).envs(spec.env).env_remove("KILN_CAPACITY_RETRY_TURN");
+    if let Some(cwd) = &spec.cwd { cmd.current_dir(cwd); }
+    cmd.args(lead).args(&spec.args).envs(spec.env)
+        .env("KILN_CONFIG_DIR", kiln_common::paths::config_dir())
+        .env_remove("KILN_CAPACITY_RETRY_TURN");
     if !resumed && let Some(payload) = payload {
         // agy takes the initial prompt as --prompt-interactive.
         if record.tool == Tool::Antigravity {

@@ -20,6 +20,7 @@ pub struct Env {
     pub home: PathBuf,
     pub antigravity_keychains: bool,
     pub antigravity_identity: Arc<dyn Fn(&str) -> Result<String> + Send + Sync>,
+    pub antigravity_usage: Arc<dyn Fn(&Path) -> Result<Usage> + Send + Sync>,
     pub claude_config_dir: Option<PathBuf>,
     pub codex_home: PathBuf,
     /// true 면 Claude Code 의 현재 자격증명을 `store` 의 `Claude Code-credentials` 항목으로 다룬다(macOS).
@@ -58,11 +59,16 @@ impl Env {
         let codex_env = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
         let codex_home = codex::codex_home(&home, codex_env.as_deref());
         let macos = cfg!(target_os = "macos");
+        let agy_home = home.clone();
         let files = FileStore { base_dir: kiln_common::paths::config_file("accounts-credentials") };
         let store: Arc<dyn CredentialStore> = if macos { Arc::new(SecurityCli) } else { platform_store(files) };
         Env {
             antigravity_keychains: cfg!(target_os = "macos"),
             antigravity_identity: Arc::new(antigravity::identity),
+            antigravity_usage: Arc::new(move |runtime| {
+                let binary = crate::login::find_cli(&agy_home, Tool::Antigravity).context("Antigravity CLI not installed")?;
+                crate::antigravity_usage::probe(&binary, runtime)
+            }),
             home,
             claude_config_dir,
             codex_home,
@@ -85,6 +91,7 @@ impl Env {
         let home = root.join("home");
         let env = Env {
             antigravity_keychains: false,
+            antigravity_usage: Arc::new(|_| Err(anyhow!("probe disabled"))),
             antigravity_identity: Arc::new(|_| Err(anyhow!("identity probe disabled"))),
             codex_home: home.join(".codex"),
             home,
@@ -296,7 +303,7 @@ impl AccountManager {
     pub fn with_env(env: Env) -> Self {
         let settings: Settings = kiln_common::store::load_json(&env.settings_path);
         let mut usage = HashMap::new();
-        for t in Tool::ACCOUNTS {
+        for t in Tool::ALL.into_iter().filter(|tool| tool.has_accounts()) {
             for p in &settings.tool(t).profiles {
                 if let Some(u) = &p.last_usage {
                     usage.insert((t, p.profile.id.clone()), u.clone());
@@ -484,9 +491,19 @@ impl AccountManager {
     }
 
     pub fn submit_login_code(&self, tool: Tool, code: &str) -> Result<()> {
-        let job = self.inner.login.lock()[idx(tool)].clone()
+        let jobs = self.inner.login.lock();
+        let job = jobs[idx(tool)].as_ref()
             .ok_or_else(|| anyhow!(kiln_common::i18n::tr("로그인 대기가 종료되었습니다. 다시 시도하세요")))?;
-        job.send_code(code)
+        job.send_code(code)?;
+        if tool == Tool::Antigravity {
+            self.with_state(|s| {
+                s.error[idx(tool)] = None;
+                s.busy[idx(tool)] = Some(kiln_common::i18n::tr("로그인 코드를 확인하고 있습니다").to_string());
+            });
+        }
+        drop(jobs);
+        self.repaint();
+        Ok(())
     }
 
     /// The browser authenticates the user; no terminal panel or live credential
@@ -1101,7 +1118,7 @@ impl AccountManager {
                     p.last_usage_at = Some(now_unix());
                 }
             } else if let Some(prev) = s.usage.get(&key)
-                && (prev.five_hour.is_some() || prev.seven_day.is_some())
+                && (prev.five_hour.is_some() || prev.seven_day.is_some() || !prev.groups.is_empty())
             {
                 let mut kept = prev.clone();
                 kept.status = u.status.clone();
@@ -1128,7 +1145,7 @@ impl AccountManager {
                 if inner.shutting_down.load(Ordering::Relaxed) { break; }
                 let manager = AccountManager { inner };
                 let periodic = std::time::Instant::now() >= next;
-                for tool in Tool::ACCOUNTS {
+                for tool in Tool::ALL.into_iter().filter(|tool| tool.has_accounts()) {
                     if periodic || manager.usage_due(tool, now_unix()) {
                         manager.refresh_usage_impl(tool, false);
                     }
@@ -1163,7 +1180,7 @@ impl AccountManager {
             opened
         });
         if opened {
-            for tool in Tool::ACCOUNTS { self.refresh_usage(tool); }
+            for tool in Tool::ALL.into_iter().filter(|tool| tool.has_accounts()) { self.refresh_usage(tool); }
         }
     }
 
@@ -1172,13 +1189,15 @@ impl AccountManager {
 
     fn refresh_usage_impl(&self, tool: Tool, manual: bool) {
         use std::sync::atomic::Ordering;
-        if tool == Tool::Antigravity || self.inner.shutting_down.load(Ordering::Relaxed) || self.profiles(tool).is_empty() { return; }
+        if !tool.has_accounts() || self.inner.shutting_down.load(Ordering::Relaxed) || self.profiles(tool).is_empty() { return; }
         let started = self.with_state(|s| !std::mem::replace(&mut s.refreshing[idx(tool)], true));
         if !started { return; }
         self.repaint();
         let m = self.clone();
         std::thread::spawn(move || {
-            if tool == Tool::Codex && m.inner.env.codex_native_probe.is_some() {
+            if tool == Tool::Antigravity {
+                m.refresh_antigravity_usage(manual);
+            } else if tool == Tool::Codex && m.inner.env.codex_native_probe.is_some() {
                 m.refresh_native_codex(manual);
             } else {
                 m.check_profile_credentials();
@@ -1196,6 +1215,41 @@ impl AccountManager {
     pub fn refresh_usage_blocking(&self, tool: Tool) {
         self.refresh_usage(tool);
         while self.is_refreshing(tool) { std::thread::sleep(std::time::Duration::from_millis(5)); }
+    }
+
+    fn refresh_antigravity_usage(&self, manual: bool) {
+        let tool = Tool::Antigravity;
+        for profile in self.profiles(tool) {
+            if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
+            if self.pending_login(tool, &profile.id) { continue; }
+            let due = self.with_state(|state| {
+                let poll = state.usage_poll.entry((tool, profile.id.clone())).or_default();
+                now_unix() >= poll.blocked_until && (manual || now_unix() >= poll.next_at)
+            });
+            if !due { continue; }
+            let runtime = self.runtime_dir(tool, &profile.id);
+            let result = (|| -> Result<Usage> {
+                {
+                    let _op = self.inner.op.lock();
+                    self.runtime_secret(tool, &profile.id)?.context("Antigravity sign-in required")?;
+                    antigravity::prepare(&self.inner.env, &runtime)?;
+                }
+                let usage = (self.inner.env.antigravity_usage)(&runtime)?;
+                let secret = self.runtime_secret(tool, &profile.id)?.context("Antigravity sign-in required")?;
+                let actual = (self.inner.env.antigravity_identity)(&secret)?;
+                ensure!(profile.email.as_ref().is_some_and(|email| email.eq_ignore_ascii_case(&actual)), "account credentials do not match saved profile");
+                Ok(usage)
+            })();
+            let _op = self.inner.op.lock();
+            if self.pending_login(tool, &profile.id) || !self.profiles(tool).iter().any(|p| p.id == profile.id && p.email == profile.email) { continue; }
+            self.with_state(|state| {
+                let poll = state.usage_poll.entry((tool, profile.id.clone())).or_default();
+                poll.next_at = now_unix() + 300;
+                poll.blocked_until = if result.is_err() { poll.next_at } else { 0 };
+            });
+            self.set_usage(tool, &profile.id, result.unwrap_or_else(Usage::unavailable));
+            self.repaint();
+        }
     }
 
     fn refresh_native_codex(&self, manual: bool) {
@@ -2521,6 +2575,84 @@ mod tests {
         assert!(!events.iter().any(|event| matches!(event, AccountsEvent::RunLogin(_))));
         let settings = std::fs::read_to_string(&env.settings_path).unwrap();
         assert!(!settings.contains("access-new") && !settings.contains("refresh-new"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_submission_updates_progress_and_clears_busy_after_rejection() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(root.path(), false);
+        let manager = AccountManager::with_env(env);
+        let gate = root.path().join("release-error");
+        let script = root.path().join("fake-agy");
+        std::fs::write(&script, format!(r#"#!/usr/bin/python3
+import os, tty, time
+from pathlib import Path
+print('Select login method:\n1. Google OAuth', flush=True)
+input()
+tty.setraw(0)
+print('Paste the authorization code below:', flush=True)
+while os.read(0, 1) != b'\r': pass
+while not Path({:?}).exists(): time.sleep(.01)
+print('Got an error: token exchange failed: invalid_grant fixture-secret\nPress any key to go back.', flush=True)
+time.sleep(30)
+"#, gate.to_string_lossy())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        manager.start_login_with_binary(Tool::Antigravity, "Fixture".into(), script, Duration::from_secs(6));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !manager.login_status(Tool::Antigravity).is_some_and(|s| s.accepts_code) {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        manager.submit_login_code(Tool::Antigravity, "fixture-code").unwrap();
+        manager.with_state(|state| assert_eq!(state.busy[idx(Tool::Antigravity)].as_deref(), Some("로그인 코드를 확인하고 있습니다")));
+        assert!(!manager.login_status(Tool::Antigravity).unwrap().accepts_code);
+        std::fs::write(&gate, b"ready").unwrap();
+        while manager.with_state(|state| state.busy[idx(Tool::Antigravity)].is_some()) {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(manager.login_status(Tool::Antigravity).is_none());
+        assert!(manager.profiles(Tool::Antigravity).is_empty());
+        manager.with_state(|state| {
+            let error = state.error[idx(Tool::Antigravity)].as_deref().unwrap();
+            assert!(error.contains("새 코드"));
+            assert!(!error.contains("fixture-secret"));
+            assert!(state.error[idx(Tool::Codex)].is_none());
+        });
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_usage_is_scoped_to_each_runtime_and_rejects_another_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), false);
+        env.antigravity_identity = Arc::new(|secret| Ok(format!("{}@example.test", antigravity::access_token(secret)?)));
+        let homes = Arc::new(Mutex::new(Vec::new()));
+        let observed = homes.clone();
+        env.antigravity_usage = Arc::new(move |home| {
+            observed.lock().push(home.to_path_buf());
+            Ok(Usage { groups: vec![crate::QuotaGroup { name: "Gemini Models".into(), buckets: vec![crate::QuotaBucket { window: "weekly".into(), used: Some(0.25), reset: None }] }], status: "allowed".into(), ..Default::default() })
+        });
+        let manager = AccountManager::with_env(env);
+        let token = |who| serde_json::json!({"token":{"access_token":who,"refresh_token":"fixture"}}).to_string();
+        store.set(antigravity::SERVICE, antigravity::ACCOUNT, &token("first")).unwrap();
+        let first = manager.save_current(Tool::Antigravity, "First").unwrap();
+        manager.launch_environment(Tool::Antigravity).unwrap();
+        store.set(antigravity::SERVICE, antigravity::ACCOUNT, &token("second")).unwrap();
+        let second = manager.save_current(Tool::Antigravity, "Second").unwrap();
+        manager.launch_environment(Tool::Antigravity).unwrap();
+        manager.refresh_usage_blocking(Tool::Antigravity);
+        assert_eq!(manager.usage(Tool::Antigravity, &first.id).unwrap().groups[0].buckets[0].used, Some(0.25));
+        assert_eq!(manager.usage(Tool::Antigravity, &second.id).unwrap().groups.len(), 1);
+        assert!(homes.lock().contains(&manager.runtime_dir(Tool::Antigravity, &first.id)));
+        assert!(homes.lock().contains(&manager.runtime_dir(Tool::Antigravity, &second.id)));
+        manager.restore_runtime(Tool::Antigravity, &first.id, Some(&token("wrong")), None).unwrap();
+        manager.refresh_usage_blocking(Tool::Antigravity);
+        assert!(manager.usage(Tool::Antigravity, &first.id).unwrap().is_unavailable());
+        assert!(!manager.usage(Tool::Antigravity, &second.id).unwrap().is_unavailable());
     }
 
     #[test]

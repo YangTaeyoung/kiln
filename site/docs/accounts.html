@@ -108,12 +108,13 @@
 <p>Save several Google accounts for the Antigravity CLI (<code>agy</code>) and choose which one new tasks use.</p>
 <ol>
 <li>Open <strong>Settings → Accounts → Antigravity</strong> and choose <strong>Add Account</strong>. Kiln starts the installed CLI's Google sign-in in a temporary private terminal.</li>
-<li>Complete the login in your browser, then choose <strong>Apply</strong>.</li>
+<li>Complete the login in your browser. If it displays a code, paste it into <strong>Sign-in code</strong> and choose <strong>Confirm</strong> or press Enter. Whitespace introduced by copied line wrapping is removed. Kiln shows <strong>Verifying the sign-in code</strong> and prevents duplicate submissions while checking it. A rejected or expired code ends the attempt with an error; restart sign-in to obtain a new code. After authentication succeeds, choose <strong>Apply</strong>.</li>
 <li>Repeat for another account, then choose <strong>Switch</strong> to use it for new tasks.</li>
 </ol>
 <p>Running tasks keep their original account. The row menu offers rename, delete and sign in again with the same Google account. <strong>Save Current Login</strong> imports the ordinary CLI's Google login.</p>
 <p>Each account has its own private home and macOS keychain, which also keep its Antigravity preferences, settings and conversations separate. Kiln never replaces the ordinary CLI's login or changes your default keychain. The account home does not include files from your usual home, such as shell, Git or SSH configuration. Your workspace files remain available.</p>
-<p>Antigravity accounts do not show usage bars or rotate automatically. When <code>agy</code> reports that its quota is reached, Kiln shows a notification with the reset time. Sign-in uses Google OAuth; Google Cloud project setup is not automated.</p>
+<p>Applied accounts show used percentages and reset times for each model group reported by the official CLI. Usage is checked on startup and every five minutes; you can also refresh manually. These read-only checks require agy 1.1.11 or later and do not start an agent turn or spend model quota. Stale or failed checks hide the percentages. Automatic rotation is not included. When <code>agy</code> reaches its quota, Kiln shows the reset time in a notification. Sign-in uses Google OAuth; Google Cloud project setup is not automated.</p>
+<p>New Kiln zsh terminals also use the selected account when you type <code>agy</code>, preserving the arguments and current folder. Open a new terminal after updating. With a custom shell, choose <strong>New Task → Antigravity</strong>. Kiln keeps its own shell integration active when Kiro is installed, so its selected-account routing also works in those new terminals.</p>
 <p>Conversations from these accounts take part in conversation sync, and restarting in the same conversation keeps the original account. See <a href="conversations.html">Conversations and updates</a>.</p>
 <h2 id="where-credentials-are-stored">Where credentials are stored</h2>
 <p>On macOS, Kiln stores saved credentials in the Keychain and never resets or replaces it. On Windows, saved credentials are private files protected with your Windows user key. The account list contains only profile names and metadata, never access or refresh tokens. Sign-in links and codes are not written to settings or logs.</p>
@@ -197,12 +198,13 @@
 <p>Antigravity CLI(<code>agy</code>)용 Google 계정을 여러 개 저장해 두고, 새 작업에 쓸 계정을 고를 수 있습니다.</p>
 <ol>
 <li><strong>설정 → 계정 → Antigravity</strong>를 열고 <strong>새 계정 추가</strong>를 선택합니다. Kiln이 임시 비공개 터미널에서, 설치된 CLI의 Google 로그인을 시작합니다.</li>
-<li>브라우저에서 로그인을 마친 뒤 <strong>적용</strong>을 선택합니다.</li>
+<li>브라우저에서 로그인합니다. 코드가 표시되면 <strong>로그인 코드</strong>에 붙여넣고 <strong>확인</strong>을 누르거나 Enter를 누릅니다. 복사 과정에서 생긴 줄바꿈과 공백은 제거됩니다. 확인하는 동안 <strong>로그인 코드를 확인하고 있습니다</strong>가 표시되고 중복 제출은 차단됩니다. 코드가 거절되거나 만료되면 오류와 함께 시도가 종료됩니다. 로그인을 다시 시작해 새 코드를 받으세요. 인증이 완료되면 <strong>적용</strong>을 선택합니다.</li>
 <li>다른 계정도 같은 방법으로 추가하고, 새 작업에서 그 계정을 쓰려면 <strong>전환</strong>을 선택합니다.</li>
 </ol>
 <p>실행 중인 작업은 원래 계정을 계속 씁니다. 행 메뉴에서 이름 변경, 삭제, 같은 Google 계정으로 다시 로그인을 할 수 있습니다. <strong>현재 로그인한 계정 저장</strong>을 선택하면 일반 CLI의 Google 로그인을 가져옵니다.</p>
 <p>계정마다 비공개 홈과 macOS 키체인이 따로 있으므로, Antigravity 환경설정, 설정, 대화도 계정별로 분리됩니다. Kiln은 일반 CLI의 로그인을 바꾸거나 기본 키체인을 변경하지 않습니다. 계정 홈에는 셸, Git, SSH 설정처럼 평소 홈 디렉터리에 있는 파일이 들어 있지 않습니다. 워크스페이스 파일은 그대로 쓸 수 있습니다.</p>
-<p>Antigravity 계정에는 사용량 막대가 표시되지 않고, 자동으로 전환되지도 않습니다. <code>agy</code>가 할당량에 도달했다고 보고하면 Kiln이 초기화 시각과 함께 알림을 띄웁니다. 로그인에는 Google OAuth를 쓰며, Google Cloud 프로젝트 설정은 자동으로 해 주지 않습니다.</p>
+<p>적용한 계정에는 공식 CLI가 알려 주는 모델 그룹별 사용 비율과 초기화 시각이 표시됩니다. 앱 시작 시와 5분마다 확인하며 직접 새로 고칠 수도 있습니다. 이 읽기 전용 확인에는 agy 1.1.11 이상이 필요하며 에이전트 턴을 시작하거나 모델 할당량을 소비하지 않습니다. 오래되었거나 실패한 결과의 비율은 숨깁니다. 자동 전환은 제공하지 않습니다. <code>agy</code>가 할당량에 도달하면 초기화 시각과 함께 알림을 띄웁니다. 로그인에는 Google OAuth를 쓰며 Google Cloud 프로젝트 설정은 자동으로 해 주지 않습니다.</p>
+<p>새 Kiln zsh 터미널에서 <code>agy</code>를 입력해도 선택한 계정을 사용하며 인수와 현재 폴더를 유지합니다. 업데이트 후에는 새 터미널을 여세요. 다른 셸에서는 <strong>새 작업 → Antigravity</strong>를 선택하세요. Kiro가 설치되어 있어도 Kiln의 셸 연동을 유지하므로 새 터미널에서 선택한 계정이 사용됩니다.</p>
 <p>이 계정들의 대화도 대화 동기화에 포함되며, 같은 대화로 재시작해도 원래 계정이 유지됩니다. <a href="conversations.html">대화와 업데이트</a>를 참고하세요.</p>
 <h2 id="where-credentials-are-stored">자격 증명 저장 위치</h2>
 <p>macOS에서 Kiln은 저장된 자격 증명을 키체인에 보관하며, 키체인을 초기화하거나 교체하지 않습니다. Windows에서는 저장된 자격 증명을 Windows 사용자 키로 보호되는 비공개 파일에 보관합니다. 계정 목록에는 프로필 이름과 메타데이터만 들어 있고, 액세스 토큰이나 리프레시 토큰은 들어 있지 않습니다. 로그인 링크와 코드는 설정이나 로그에 남기지 않습니다.</p>
@@ -286,12 +288,13 @@
 <p>Antigravity CLI（<code>agy</code>）用に Google アカウントを複数保存し、新しい作業で使うアカウントを選べます。</p>
 <ol>
 <li><strong>設定 → アカウント → Antigravity</strong> を開き、<strong>アカウントを追加</strong>を選びます。Kiln が一時的な専用ターミナルで、インストール済み CLI の Google ログインを開始します。</li>
-<li>ブラウザーでログインを完了し、<strong>適用</strong>を選びます。</li>
+<li>ブラウザーでログインします。コードが表示された場合は、<strong>ログインコード</strong>に貼り付けて<strong>確認</strong>または Enter を押します。コピー時に混入した改行や空白は除去されます。確認中は<strong>ログインコードを確認しています</strong>と表示され、重複送信はできません。コードが拒否された場合や期限切れの場合は、エラーを表示して試行を終了します。ログインをやり直して新しいコードを取得してください。認証が完了したら<strong>適用</strong>を選びます。</li>
 <li>別のアカウントも同じ手順で追加し、新しい作業でそのアカウントを使うときは<strong>切り替え</strong>を選びます。</li>
 </ol>
 <p>実行中の作業は元のアカウントを使い続けます。行のメニューからは、名前の変更、削除、同じ Google アカウントでの再ログインができます。<strong>現在のログインを保存</strong>を選ぶと、通常の CLI の Google ログインを取り込めます。</p>
 <p>各アカウントは専用のホームと macOS キーチェーンを持ち、Antigravity の環境設定、設定、会話もアカウントごとに分かれます。Kiln が通常の CLI のログインを置き換えたり、既定のキーチェーンを変更したりすることはありません。アカウントのホームには、シェル、Git、SSH の設定など、普段のホームにあるファイルは含まれません。ワークスペースのファイルは引き続き使えます。</p>
-<p>Antigravity アカウントには使用量のバーは表示されず、自動で切り替わることもありません。<code>agy</code> がクォータの上限に達したと報告すると、Kiln はリセット時刻を添えて通知を表示します。ログインには Google OAuth を使います。Google Cloud プロジェクトのセットアップは自動化されていません。</p>
+<p>適用したアカウントには、公式 CLI が返すモデルグループごとの使用率とリセット時刻が表示されます。起動時と5分ごとに確認し、手動更新もできます。この読み取り専用の確認には agy 1.1.11 以降が必要で、エージェントのターンを開始せず、モデルの割り当ても消費しません。古い結果や失敗した結果の使用率は表示しません。自動切り替えは提供していません。割り当てに達するとリセット時刻を通知します。認証には Google OAuth を使用し、Google Cloud プロジェクトの設定は自動化していません。</p>
+<p>新しい Kiln の zsh ターミナルで <code>agy</code> を入力した場合も、選択したアカウントを使用し、引数と現在のフォルダーを維持します。更新後は新しいターミナルを開いてください。カスタムシェルでは <strong>新しいタスク → Antigravity</strong> を選びます。 Kiro がインストールされていても Kiln のシェル連携を維持するため、新しいターミナルで選択したアカウントを使用できます。</p>
 <p>これらのアカウントの会話も会話の同期の対象になり、同じ会話で再起動しても元のアカウントが保たれます。詳しくは<a href="conversations.html">会話とアップデート</a>を参照してください。</p>
 <h2 id="where-credentials-are-stored">認証情報の保存場所</h2>
 <p>macOS では、保存した認証情報はキーチェーンに格納されます。Kiln がキーチェーンをリセットしたり置き換えたりすることはありません。Windows では、Windows のユーザーキーで保護された非公開のファイルに保存されます。アカウントの一覧にはプロファイル名とメタデータだけが含まれ、アクセストークンやリフレッシュトークンは含まれません。ログイン用のリンクやコードは、設定にもログにも書き込まれません。</p>
@@ -375,12 +378,13 @@
 <p>可以为 Antigravity CLI（<code>agy</code>）保存多个 Google 账户，并选择新任务使用哪一个。</p>
 <ol>
 <li>打开<strong>设置 → 账户 → Antigravity</strong>，选择<strong>添加账户</strong>。Kiln 会在一个临时的私有终端中启动已安装 CLI 的 Google 登录流程。</li>
-<li>在浏览器中完成登录，然后选择<strong>应用</strong>。</li>
+<li>在浏览器中登录。如果显示代码，请将其粘贴到<strong>登录代码</strong>，然后选择<strong>确认</strong>或按 Enter。复制时混入的换行和空格会被移除。验证时会显示<strong>正在验证登录代码</strong>，并阻止重复提交。代码被拒绝或过期时，本次尝试会结束并显示错误；请重新开始登录以获取新代码。认证成功后，选择<strong>应用</strong>。</li>
 <li>对其他账户重复以上步骤，再选择<strong>切换</strong>，让新任务使用该账户。</li>
 </ol>
 <p>正在运行的任务继续使用原来的账户。行菜单提供重命名、删除，以及用同一个 Google 账户重新登录。<strong>保存当前登录账户</strong>会导入普通 CLI 的 Google 登录。</p>
 <p>每个账户都有自己的私有主目录和 macOS 钥匙串，Antigravity 的偏好设置、设置和对话也都按账户分开保存。Kiln 绝不会替换普通 CLI 的登录，也不会改动你的默认钥匙串。账户主目录里没有你平时主目录中的文件，例如 Shell、Git 或 SSH 配置，但工作区文件仍然可以访问。</p>
-<p>Antigravity 账户不显示用量条，也不会自动轮换。<code>agy</code> 上报配额已用完时，Kiln 会显示一条通知并注明重置时间。登录使用 Google OAuth；Google Cloud 项目的设置不会自动完成。</p>
+<p>已应用的账户会显示官方 CLI 返回的各模型组已用比例和重置时间。应用启动时及之后每五分钟检查，也可手动刷新。这种只读检查需要 agy 1.1.11 或更高版本，不会启动代理回合或消耗模型配额。过期或失败的结果不会显示百分比。不提供自动切换。达到配额时，Kiln 会通知重置时间。登录使用 Google OAuth，不会自动设置 Google Cloud 项目。</p>
+<p>在新的 Kiln zsh 终端中输入 <code>agy</code> 也会使用所选账户，并保留参数和当前目录。更新后请打开新终端。使用自定义 shell 时，请选择<strong>新建任务 → Antigravity</strong>。 即使安装了 Kiro，Kiln 也会保留自己的 shell 集成，因此新终端仍会使用所选账户。</p>
 <p>这些账户的对话同样参与对话同步，在同一对话中重启时也会沿用原来的账户。详见<a href="conversations.html">对话与更新</a>。</p>
 <h2 id="where-credentials-are-stored">凭据存储位置</h2>
 <p>在 macOS 上，Kiln 把已保存的凭据存放在钥匙串中，绝不会重置或替换钥匙串。在 Windows 上，已保存的凭据是私有文件，由你的 Windows 用户密钥保护。账户列表只包含配置名称和元数据，从不包含访问令牌或刷新令牌。登录链接和代码不会写入设置或日志。</p>

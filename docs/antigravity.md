@@ -16,6 +16,13 @@ on other platforms, sign in by running `agy` in a terminal. Kiln finds it in you
   the sidebar. A command such as `antigravity` opens the Antigravity editor, not the CLI,
   and is not treated as an agent.
 
+
+New Kiln zsh terminals route a typed `agy` command through the currently selected account,
+preserving its arguments and working directory. Open a new terminal after updating Kiln.
+Version/help and CLI-update commands go directly to the CLI. Custom shells can use
+**New task → Antigravity**. The Kiln helper pins its config directory before applying the
+private account home, so launch records stay readable. Integrated zsh launches set `Q_TERM_DISABLED=1` to prevent Kiro from replacing the shell before Kiln installs its account wrapper. User startup files still load; other terminals keep their existing Kiro setup.
+
 ## Conversations and restart
 
 agy has no command-line option for lifecycle hooks, so Kiln does not add hooks or change
@@ -40,17 +47,25 @@ the six-hour checks.
 
 ## Usage limits
 
-When agy reports `Individual quota reached … Resets in …`, Kiln shows a usage-limit
-notification with the reset time. Antigravity accounts do not show quota bars or offer
-automatic rotation: Kiln has not established a supported quota API or cross-account
-conversation continuation contract.
+Applied Antigravity accounts show the quota groups reported by the official CLI in
+**Settings → Accounts**. Each group has its own five-hour and/or weekly used percentage
+and reset time. Kiln checks on startup and every five minutes; the refresh button also
+requests a check. Failed, expired or unrecognized results do not display cached percentages.
+
+Checks use the official read-only `agy -p /usage --output-format json` command in that
+account's private home, require agy 1.1.11 or later, and verify the Google identity before
+attributing the result to a profile. They do not start an agent turn or spend model quota.
+Automatic account rotation is not included.
+
+When agy reports `Individual quota reached … Resets in …`, Kiln also shows a usage-limit
+notification with the reset time.
 
 ## Accounts on macOS
 
 **Settings → Accounts → Antigravity → Add account** starts the installed CLI's Google
 OAuth sign-in in a temporary private terminal. Complete the browser login. If the browser
-shows an authorization code, copy it into **Login code** in Kiln and choose **Confirm**
-(or press Enter). Once authentication finishes, choose **Apply**. Repeat for another account and choose **Switch** to use it for new tasks.
+shows an authorization code, copy it into **Sign-in code** in Kiln and choose **Confirm**
+(or press Enter). Whitespace introduced by copied line wrapping is removed. Kiln shows **Verifying the sign-in code** while the CLI checks it and prevents duplicate submissions. A rejected or expired code ends the attempt with an error; restart sign-in to obtain a new code. Once authentication finishes, choose **Apply**. Repeat for another account and choose **Switch** to use it for new tasks.
 Running tasks keep their original account. The row menu offers rename, delete and
 same-account sign-in again; a different Google identity cannot replace that profile.
 **Save current signed-in account** imports the ordinary CLI's Google login. Importing

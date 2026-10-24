@@ -11698,5 +11698,15 @@
     "en": "No signed-in Antigravity account to save. Sign in using Add account.",
     "ja": "保存できる Antigravity アカウントがありません。「アカウントを追加」からログインしてください。",
     "zh-CN": "没有可保存的 Antigravity 登录账号。请通过“添加账号”登录。"
+  },
+  "로그인 코드가 만료되었거나 유효하지 않습니다. 로그인을 다시 시작해 새 코드를 입력하세요": {
+    "en": "The sign-in code has expired or is invalid. Restart sign-in and enter a new code.",
+    "ja": "ログインコードが期限切れか無効です。ログインをやり直して、新しいコードを入力してください。",
+    "zh-CN": "登录代码已过期或无效。请重新开始登录并输入新代码。"
+  },
+  "로그인 코드를 확인하고 있습니다": {
+    "en": "Verifying the sign-in code",
+    "ja": "ログインコードを確認しています",
+    "zh-CN": "正在验证登录代码"
   }
 }
