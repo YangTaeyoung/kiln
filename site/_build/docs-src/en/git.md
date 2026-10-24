@@ -5,6 +5,9 @@ description: Browse commit history, open diffs, and squash, cherry-pick, drop or
 
 Kiln puts commit history, diffs and pull requests in the workspace inspector, next to your terminals. Every Git operation runs against the repository you select, so you can rewrite history safely even when a workspace spans several repositories.
 
+
+Automatic repository status checks pause in inactive workspaces. The last results stay visible, and checks resume when you return to the workspace.
+
 ## Open Git tools {#open-git-tools}
 
 The right-hand workspace inspector includes **Changes** and **GitHub**. You can also open source control and GitHub from the titlebar **Tools** menu, which opens them alongside your current work without replacing your terminal task.
