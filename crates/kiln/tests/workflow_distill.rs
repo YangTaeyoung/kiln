@@ -8,6 +8,7 @@ fn git(path:&Path,args:&[&str]) {
 }
 struct Cleanup(PathBuf);
 impl Drop for Cleanup {fn drop(&mut self){if let Ok(c)=kiln_daemon::client::Client::connect(&self.0.join("d.sock").to_string_lossy(),None){c.send(kiln_proto::ClientMsg::Shutdown);}}}
+#[track_caller]
 fn pump(h:&mut Harness<'_,KilnApp>,mut f:impl FnMut(&Harness<'_,KilnApp>)->bool){let until=Instant::now()+Duration::from_secs(12);loop{h.step();if f(h){return;}assert!(Instant::now()<until,"workflow timed out");std::thread::sleep(Duration::from_millis(25));}}
 #[test]
 fn parent_main_worktree_navigation_and_quiet_chrome(){

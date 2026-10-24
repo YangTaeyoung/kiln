@@ -262,6 +262,31 @@ fn wait_text(client: &Client, session: u64, expected: &str) {
 }
 
 #[test]
+fn rejected_upgrade_closes_legacy_control_connection_and_preserves_terminal() {
+    let (fixture, observer)=Fixture::start(false);
+    let session=spawn(&observer,"stty -echo; printf 'UPGRADE_READY\\r\\n'; read line; printf 'UPGRADE_ECHO=%s\\r\\n' \"$line\"; read hold");
+    wait_text(&observer,session,"UPGRADE_READY");
+    let ServerMsg::Sessions{sessions,..}=observer.request(|req|ClientMsg::ListSessions{req},Duration::from_secs(2)).unwrap() else{panic!("expected sessions");};
+    let pid=sessions.iter().find(|s|s.id==session).unwrap().pid;
+    let mut control=UnixStream::connect(&fixture.socket).unwrap();
+    control.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    write_msg(&mut control,&ClientMsg::Hello{proto:kiln_proto::PROTO_VERSION,build:"legacy".into(),client:"kiln-upgrade".into()}).unwrap();
+    assert!(matches!(read_msg::<_,ServerMsg>(&mut control).unwrap(),Some(ServerMsg::Hello{..})));
+    write_msg(&mut control,&ClientMsg::Upgrade{req:0,exe:fixture._dir.path().join("missing-helper").to_string_lossy().into_owned()}).unwrap();
+    assert!(matches!(read_msg::<_,ServerMsg>(&mut control).unwrap(),Some(ServerMsg::Error{req:0,..})));
+    // Legacy clients ignore Error and wait for EOF. Keep that path bounded too.
+    let deadline=Instant::now()+Duration::from_secs(2);
+    while read_msg::<_,ServerMsg>(&mut control).unwrap().is_some() {
+        assert!(Instant::now()<deadline,"rejected control connection stayed open");
+    }
+    observer.send(ClientMsg::Input{session,data:b"still-alive\n".to_vec()});
+    wait_text(&observer,session,"UPGRADE_ECHO=still-alive");
+    let ServerMsg::Sessions{sessions,..}=observer.request(|req|ClientMsg::ListSessions{req},Duration::from_secs(2)).unwrap() else{panic!("expected sessions");};
+    let retained=sessions.iter().find(|s|s.id==session).unwrap();
+    assert_eq!(retained.pid,pid);assert!(retained.exited.is_none());
+}
+
+#[test]
 fn incomplete_tui_redraw_recovers_input_echo_frames_and_reattachment_for_both_pty_modes() {
     for hosted in [false, true] {
         let (fixture, client) = Fixture::start(hosted);
