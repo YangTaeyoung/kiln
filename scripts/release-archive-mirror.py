@@ -5,10 +5,10 @@ os.chdir(sys.argv[1])
 class Handler(SimpleHTTPRequestHandler):
  def do_GET(self):
   if self.path=='/releases/latest':
-   self.send_response(302);self.send_header('Location','/releases/tag/v0.2.12');self.end_headers();return
-  if self.path=='/releases/tag/v0.2.12':
-   self.send_response(200);self.end_headers();self.wfile.write(b'Kiln 0.2.12 verification mirror');return
-  prefix='/releases/download/v0.2.12/'
+   self.send_response(302);self.send_header('Location','/releases/tag/v0.2.13');self.end_headers();return
+  if self.path=='/releases/tag/v0.2.13':
+   self.send_response(200);self.end_headers();self.wfile.write(b'Kiln 0.2.13 verification mirror');return
+  prefix='/releases/download/v0.2.13/'
   if self.path.startswith(prefix):self.path='/'+self.path[len(prefix):]
   else:self.send_error(404);return
   return super().do_GET()

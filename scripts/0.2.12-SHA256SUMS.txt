@@ -1,3 +1,0 @@
-b01fead7e434b831175f4f4d2e1996c2c596bf2a0ffb40b85db64102afa2e37b  Kiln-0.2.12-macos-arm64.zip
-9d6651a52ba3132ef52d20aacd65b19b4161db68b8c48233cb99d8a5f910fd67  Kiln-0.2.12-windows-x64.zip
-a3af85c168d3a6fb9906ed3e316bbfaf3c05edbbb73e1b5cc113057508e39450  Kiln-0.2.12-windows-arm64.zip
