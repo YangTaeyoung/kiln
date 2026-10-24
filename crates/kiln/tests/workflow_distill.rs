@@ -45,7 +45,9 @@ fn parent_main_worktree_navigation_and_quiet_chrome(){
  for label in ["파일","변경","GitHub"] {h.get_by_label(label);}
  h.render().unwrap().save(output.join("inspector-files-1440.png")).unwrap();
  h.get_by_label("변경").click();h.run_steps(5);
- if let Some(expand)=h.query_by_label("web 변경 펼치기") {expand.click();h.run_steps(3);}
+ // Status jobs are paced; the second repository can arrive after opening the sheet.
+ pump(&mut h,|h|h.query_by_label("web 변경 펼치기").is_some());
+ h.get_by_label("web 변경 펼치기").click();h.run_steps(3);
  pump(&mut h,|h|h.query_by_label_contains("app.ts").is_some());
  assert_eq!(h.state().debug_active_workspace_root(),parent.canonical().unwrap());
  h.render().unwrap().save(output.join("inspector-changes-1440.png")).unwrap();
