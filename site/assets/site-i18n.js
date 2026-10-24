@@ -97,7 +97,8 @@ window.KILN_I18N = {
     "gl_kaki": "Kaki",
     "cone": "cone",
     "pause": "Pause video",
-    "play": "Play video"
+    "play": "Play video",
+    "dl_windows": "Download for Windows"
   },
   "ko": {
     "f_agents_t": "에이전트를 나란히",
@@ -197,7 +198,8 @@ window.KILN_I18N = {
     "gl_kaki": "감유",
     "cone": "콘",
     "pause": "영상 일시정지",
-    "play": "영상 재생"
+    "play": "영상 재생",
+    "dl_windows": "Windows용 다운로드"
   },
   "ja": {
     "f_agents_t": "エージェントを並べて",
@@ -297,7 +299,8 @@ window.KILN_I18N = {
     "gl_kaki": "柿釉",
     "cone": "コーン",
     "pause": "動画を一時停止",
-    "play": "動画を再生"
+    "play": "動画を再生",
+    "dl_windows": "Windows 版をダウンロード"
   },
   "zh-CN": {
     "f_agents_t": "代理并排运行",
@@ -397,6 +400,7 @@ window.KILN_I18N = {
     "gl_kaki": "柿釉",
     "cone": "测温锥",
     "pause": "暂停视频",
-    "play": "播放视频"
+    "play": "播放视频",
+    "dl_windows": "下载 Windows 版"
   }
 };

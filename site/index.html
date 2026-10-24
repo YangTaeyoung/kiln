@@ -10,6 +10,7 @@
 <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="stylesheet" href="assets/fonts.css">
+<script defer src="assets/downloads.js"></script>
 <style>
 /* Layout: quiet stone page; product shots rest on fired glaze. Core features alternate text and a large glazed shot; the rest is a short linked list. */
 :root {
@@ -182,7 +183,7 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
     <span class="sp"></span>
     <a class="icon-link gh" href="https://github.com/YangTaeyoung/kiln"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.4 1.1 2.9.8.1-.6.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2Z"/></svg><span>GitHub</span></a>
     <label class="lang"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></svg><select id="lang" aria-label="Language"><option value="en">English</option><option value="ko">한국어</option><option value="ja">日本語</option><option value="zh-CN">简体中文</option></select></label>
-    <a class="icon-link btn ink sm" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="nav_download">Download</span></a>
+    <a class="icon-link btn ink sm" data-download-primary href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="nav_download">Download</span></a>
   </div>
 </header>
 
@@ -190,9 +191,9 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
   <section class="hero">
     <div class="hero-copy"><h1 data-i18n="h1">The terminal IDE for agents</h1><p class="lede" data-i18n="sub">Every agent in one window. Close it, and they keep working.</p></div>
     <div class="hero-side">
-      <div class="ctas" id="dl-row">
-        <a class="btn ink" id="dl-mac" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
-        <a class="btn" id="dl-win" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
+      <div class="ctas" id="dl-row" data-download-options>
+        <a class="btn ink" id="dl-mac" data-download-platform="mac" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
+        <a class="btn" id="dl-win" data-download-platform="windows" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span data-i18n="dl_windows">Download for Windows</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
       </div>
       <p class="fine" data-i18n="fine">Free · Open source · macOS & Windows</p>
     </div>
@@ -279,9 +280,9 @@ footer .brand { margin-bottom: 10px; color: var(--ink); }
     <div class="plate" data-glaze="tenmoku" data-seed="3.7">
       <h2 data-i18n="c_title">Open a folder. Get to work.</h2>
       <p data-i18n="c_body">Free on macOS and Windows.</p>
-      <div class="ctas">
-        <a class="btn" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
-        <a class="btn ghost" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Windows</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
+      <div class="ctas" data-download-options>
+        <a class="btn" data-download-platform="mac" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-apple"/></svg><span data-i18n="dl_mac">Download for macOS</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
+        <a class="btn ghost" data-download-platform="windows" href="https://github.com/YangTaeyoung/kiln/releases/latest"><svg aria-hidden="true"><use href="#i-windows"/></svg><span data-i18n="dl_windows">Download for Windows</span><svg class="action-icon download-tail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></a>
         <a class="icon-link btn ghost" href="docs/install.html"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span data-i18n="c_docs">Installation guide</span></a>
       </div>
       <span class="glabel" data-label="tenmoku"></span>
@@ -332,6 +333,7 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("lang").value = lang;
     setVideoLang();
     syncVideo();
+    if (window.KilnDownloads) KilnDownloads.refresh();
     try { localStorage.setItem("kiln-site-lang", lang); } catch (e) {}
   }
   document.getElementById("lang").addEventListener("change", function (e) { if (window.KILN_ROUTES) location.assign(window.KILN_ROUTES[e.target.value] + location.hash); else apply(e.target.value); });
@@ -353,7 +355,6 @@ document.addEventListener("DOMContentLoaded", function () {
   if ("IntersectionObserver" in window) new IntersectionObserver(function (es) { inView = es[0].isIntersecting; updateVideo(); }, { threshold: .25 }).observe(video);
   else { inView = true; updateVideo(); }
 
-  if (/Windows/i.test(navigator.userAgent)) { var mac = document.getElementById("dl-mac"), win = document.getElementById("dl-win"); mac.classList.remove("ink"); win.classList.add("ink"); win.parentNode.insertBefore(win, mac); }
 
   function fmt(s) { var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); }
   if (!reduce) setInterval(function () {

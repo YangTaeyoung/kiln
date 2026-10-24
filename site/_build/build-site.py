@@ -33,6 +33,8 @@ def build(lang, slug=None):
         if text is not None: el.string = text
         return el
     soup.html['lang'] = lang
+    for platform, key in [('mac', 'dl_mac'), ('windows', 'dl_windows'), ('generic', 'nav_download')]:
+        soup.html['data-download-' + platform + '-text'] = I18N[lang][key]
     routes = {l: route(l, slug) for l in LANGS}
     if slug:
         meta, _ = docs.read(lang, slug)

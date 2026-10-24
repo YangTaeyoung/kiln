@@ -31,6 +31,7 @@ jobs:
       - name: Check translations and build the guide
         run: |
           pip install -r site/_build/requirements.txt
+          node --test site/_build/downloads.test.cjs
           python3 site/_build/check-site.py
           python3 site/_build/build-docs.py
           git diff --exit-code -- site/docs || { echo "site/docs is out of date; run site/_build/build-docs.py and commit"; exit 1; }

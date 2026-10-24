@@ -5,6 +5,8 @@ description: Install Kiln on macOS or Windows, open your first workspace, keep t
 
 Install Kiln with one command or download it from GitHub Releases. Kiln then keeps itself up to date, and updates leave your running terminals alone.
 
+On the website, download buttons prioritize the platform reported by your browser. The other platform remains available. Mobile devices and unrecognized platforms show both choices. The buttons open GitHub Releases, where you select the archive for your computer.
+
 ## Requirements {#requirements}
 
 | Platform | Requirement |
