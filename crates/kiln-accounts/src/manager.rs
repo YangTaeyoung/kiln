@@ -2625,6 +2625,7 @@ time.sleep(30)
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn antigravity_usage_is_scoped_to_each_runtime_and_rejects_another_identity() {
         let root = tempfile::tempdir().unwrap();
         let (mut env, store) = Env::sandbox(root.path(), false);
