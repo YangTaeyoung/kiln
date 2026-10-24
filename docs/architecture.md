@@ -108,3 +108,21 @@ is alive.
 
 References: [Apple process metadata](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/proc_info.h),
 [Apple libproc](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.h).
+
+
+## Periodic work and input responsiveness
+
+Only the active workspace schedules periodic repository status and discovery work.
+An initial inventory may still load when a workspace is created. In-flight results
+remain available after switching away. Status jobs run one at a time, with starts
+at least 250 ms apart; completion times stagger later checks. Worktree identity
+is reused until its minute-long refresh or a branch change. Explicit Git refresh
+and repository views retain their existing actions.
+
+The daemon client distinguishes terminal output frames from status-only updates
+and important events. Output-only redraws share a 33 ms deadline; keyboard input
+keeps its echoes immediate for 250 ms, and important events remain immediate. This
+reduces output-driven redraws without adding a buffered input queue or changing
+low-latency GPU presentation. Daemon replacement attempts are scoped to the server
+identity with a 30-second retry backoff; helpers are version-checked before
+terminal handover so older installations cannot downgrade the daemon.

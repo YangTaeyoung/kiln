@@ -1,6 +1,8 @@
 //! GUI 쪽 데몬 연결: 재연결, 자동 데몬 업그레이드, 세션 화면 캐시.
 
 use kiln_daemon::client::Client;
+mod repaint;
+mod upgrade;
 use kiln_proto::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -97,7 +99,9 @@ pub struct Conn {
     last_attempt: Option<Instant>,
     pub daemon_pid: u32,
     pub daemon_build: String,
-    upgrade_requested: bool,
+    upgrades: upgrade::Attempts,
+    target_build: String,
+    repaint: Arc<repaint::Repaint>,
     pub sessions_listed: bool,
     /// (세션, 이미지 id) → 텍스처.
     pub textures: HashMap<(SessionId, u32), egui::TextureHandle>,
@@ -113,6 +117,8 @@ pub struct Conn {
 
 impl Conn {
     pub fn new(ctx: egui::Context) -> Self {
+        let exe = daemon_exe();
+        let target_build = kiln_daemon::exe_build_id(&exe);
         let mut c = Conn {
             input_times: Default::default(),
             observed_since: std::time::SystemTime::now(),
@@ -133,11 +139,13 @@ impl Conn {
             events: Vec::new(),
             ctx,
             socket: socket_name(),
-            exe: daemon_exe(),
+            exe,
             last_attempt: None,
             daemon_pid: 0,
             daemon_build: String::new(),
-            upgrade_requested: false,
+            upgrades: Default::default(),
+            target_build,
+            repaint: Arc::default(),
             sessions_listed: false,
             textures: HashMap::new(),
             pending_copy: Default::default(),
@@ -179,7 +187,9 @@ impl Conn {
             last_attempt: Some(Instant::now() + Duration::from_secs(3600)),
             daemon_pid: 0,
             daemon_build: String::new(),
-            upgrade_requested: false,
+            upgrades: Default::default(),
+            target_build: String::new(),
+            repaint: Arc::default(),
             sessions_listed: false,
             textures: HashMap::new(),
             pending_copy: Default::default(),
@@ -200,13 +210,8 @@ impl Conn {
         self.last_attempt = Some(Instant::now());
         let ctx = self.ctx.clone();
         // 화면·연결 변화는 즉시, 세션 상태 갱신은 짧게 모아서 다시 그린다.
-        let notify: kiln_daemon::client::Notify = Arc::new(move |status_only| {
-            if status_only {
-                ctx.request_repaint_after(STATUS_REPAINT_DELAY);
-            } else {
-                ctx.request_repaint();
-            }
-        });
+        let repaint = self.repaint.clone();
+        let notify: kiln_daemon::client::Notify = Arc::new(move |kind| repaint.notify(kind, &ctx));
         match Client::connect_or_spawn(&self.socket, &self.exe, Some(notify)) {
             Ok(c) => {
                 self.shell_completions.clear();
@@ -214,8 +219,8 @@ impl Conn {
                 self.daemon_pid = c.server_pid;
                 self.daemon_build = c.server_build.clone();
                 // 실행 파일이 데몬보다 새로우면 데몬을 교체한다(세션은 유지된다).
-                if c.server_build != kiln_daemon::exe_build_id(&self.exe) && c.can_upgrade && !self.upgrade_requested && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_none() {
-                    self.upgrade_requested = true;
+                if c.can_upgrade && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_none()
+                    && self.upgrades.request(Instant::now(), c.server_pid, &c.server_build, &self.target_build) {
                     c.send(ClientMsg::Upgrade { req: c.next_req(), exe: self.exe.to_string_lossy().into_owned() });
                     self.events.push(ConnEvent::Upgrading);
                     self.state = State::Disconnected { since: Instant::now(), last_error: "upgrading daemon".into() };
@@ -250,11 +255,22 @@ impl Conn {
 
     /// 매 프레임 호출: 서버 메시지를 처리하고 끊겼으면 재연결한다.
     pub fn pump(&mut self) {
+        self.repaint.frame();
         self.pumps += 1;
         if self.is_connected() {
             self.detach_hidden();
         }
         self.sync_palette();
+        // A failed attempt may reconnect to the same daemon. Retry with backoff;
+        // another daemon identity is checked immediately, without probing files.
+        let retry = self.client.as_ref().is_some_and(|c| c.can_upgrade
+            && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_none()
+            && self.upgrades.request(Instant::now(), c.server_pid, &c.server_build, &self.target_build));
+        if retry {
+            self.send(ClientMsg::Upgrade { req: 0, exe: self.exe.to_string_lossy().into_owned() });
+            self.events.push(ConnEvent::Upgrading);
+            self.connection_lost();
+        }
         let mut disconnected = false;
         let mut msgs = Vec::new();
         if let Some(c) = &self.client {
@@ -507,6 +523,7 @@ impl Conn {
 
     pub fn input(&self, sid: SessionId, data: Vec<u8>) {
         if !data.is_empty() && self.terminal_health.get(&sid).is_none_or(|h|h.state==TerminalState::Healthy) {
+            self.repaint.input();
             self.input_times.borrow_mut().insert(sid, std::time::SystemTime::now());
             self.send(ClientMsg::Input { session: sid, data });
         }

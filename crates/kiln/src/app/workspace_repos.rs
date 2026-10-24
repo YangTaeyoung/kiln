@@ -76,6 +76,7 @@ struct Repository {
     status_dirty: bool,
     status_at: Option<Instant>,
     worktree: Option<kiln_git::worktrees::WorktreeIdentity>,
+    identity_at: Option<Instant>,
     expanded: bool,
     git: Option<GitPanel>,
     hub: Option<GithubHub>,
@@ -100,6 +101,7 @@ impl Repository {
             status_dirty: false,
             status_at: None,
             worktree: None,
+            identity_at: None,
             expanded: false,
             git: None,
             hub: None,
@@ -160,7 +162,7 @@ pub(super) struct RepositoryWorkspace {
     discard: Option<PathBuf>,
     context_cache: String,
     context_language: kiln_common::i18n::Language,
-    last_refresh: Instant,
+    next_status: Instant,
     last_scan: Instant,
 }
 impl RepositoryWorkspace {
@@ -188,7 +190,7 @@ impl RepositoryWorkspace {
             discard: None,
             context_cache: String::new(),
             context_language: kiln_common::i18n::language(),
-            last_refresh: Instant::now(),
+            next_status: Instant::now(),
             last_scan: Instant::now(),
         }
     }
@@ -314,20 +316,17 @@ impl RepositoryWorkspace {
         self.last_scan = Instant::now();
         self.scan = None;
     }
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) { self.tick_active(true); }
+    pub fn tick_active(&mut self, active: bool) {
         if let Some(found) = self.scan.as_mut().and_then(Task::take) {
             self.accept_inventory(found);
         }
         // Agents can create or remove sibling repositories without reopening the workspace.
-        if self.scan.is_none() && self.last_scan.elapsed() >= Duration::from_secs(60) {
+        if active && self.scan.is_none() && self.last_scan.elapsed() >= Duration::from_secs(60) {
             let root = self.root.clone();
             self.scan = Some(Task::spawn(&self.ctx, move || {
                 kiln_git::discovery::discover(&root)
             }));
-        }
-        let refresh = self.last_refresh.elapsed() > Duration::from_secs(15);
-        if refresh {
-            self.last_refresh = Instant::now();
         }
         for repo in self.repos.values_mut() {
             if let Some((result, worktree)) = repo.status_task.as_mut().and_then(Task::take) {
@@ -399,7 +398,7 @@ impl RepositoryWorkspace {
                 // None, the recreated hub follows this checkout's newly detected target.
                 repo.github_hub_stale = false;
             }
-            if refresh {
+            if active && repo.status_at.is_some_and(|at| at.elapsed() >= Duration::from_secs(15)) {
                 repo.status_dirty = true;
             }
         }
@@ -432,6 +431,14 @@ impl RepositoryWorkspace {
             repo.github_refresh_error = error;
             repo.pr_dirty = false;
         }
+        if !active { return; }
+        if Instant::now() < self.next_status {
+            if !self.pending_status_roots().is_empty() {
+                let predicted = self.ctx.input(|i| Duration::try_from_secs_f32(i.predicted_dt).unwrap_or_default());
+                self.ctx.request_repaint_after(self.next_status.saturating_duration_since(Instant::now()) + predicted);
+            }
+            return;
+        }
         let jobs = self
             .repos
             .values()
@@ -440,13 +447,20 @@ impl RepositoryWorkspace {
         for path in self
             .pending_status_roots()
             .into_iter()
-            .take(4usize.saturating_sub(jobs))
+            .take(1usize.saturating_sub(jobs))
         {
             let repo = self.repos.get_mut(&path).expect("queued repository exists");
             repo.status_dirty = false;
+            self.next_status = Instant::now() + Duration::from_millis(250);
+            let identity_stale = repo.identity_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(60));
+            if identity_stale { repo.identity_at = Some(Instant::now()); }
+            let previous_branch = repo.status.as_ref().and_then(|s| s.as_ref().ok()).and_then(|s| s.branch.head.clone());
+            let previous_worktree = repo.worktree.clone();
             repo.status_task = Some(Task::spawn(&self.ctx, move || {
                 let status = kiln_git::repo::status(&path).map_err(|e| e.to_string());
-                let worktree = kiln_git::worktrees::identity(&path).ok().flatten();
+                let worktree = if identity_stale || status.as_ref().is_ok_and(|s| s.branch.head != previous_branch) {
+                    kiln_git::worktrees::identity(&path).ok().flatten()
+                } else { previous_worktree };
                 (status, worktree)
             }));
         }
@@ -1687,11 +1701,11 @@ mod tests {
     }
 
     #[test]
-    fn periodic_refresh_retains_all_snapshots_while_only_four_repositories_reload() {
+    fn periodic_refresh_retains_all_snapshots_while_one_repository_reloads() {
         let mut workspace = fixture(12);
         let before = workspace.summary().unwrap();
         let decorations_before = workspace.decorations().len();
-        workspace.last_refresh = Instant::now() - Duration::from_secs(16);
+        for repo in workspace.repos.values_mut() { repo.status_at = Some(Instant::now() - Duration::from_secs(16)); }
 
         workspace.tick();
 
@@ -1711,11 +1725,11 @@ mod tests {
                 .values()
                 .filter(|r| r.status_task.is_some())
                 .count(),
-            4
+            1
         );
         assert_eq!(
             workspace.repos.values().filter(|r| r.status_dirty).count(),
-            8
+            11
         );
         let after = workspace.summary().unwrap();
         assert_eq!(after.branch, before.branch);
@@ -2758,4 +2772,45 @@ mod tests {
             .save(std::env::temp_dir().join("kiln-workspace-multi-minimum.png"))
             .unwrap();
     }
+    #[test]
+    fn inactive_workspaces_keep_snapshots_without_periodic_git_jobs() {
+        let mut workspace = fixture(12);
+        workspace.last_scan = Instant::now() - Duration::from_secs(61);
+        for repo in workspace.repos.values_mut() { repo.status_at = Some(Instant::now() - Duration::from_secs(30)); }
+        let before = workspace.decorations();
+        workspace.tick_active(false);
+        assert!(workspace.scan.is_none());
+        assert!(workspace.repos.values().all(|r| r.status_task.is_none()));
+        assert_eq!(workspace.decorations().len(), before.len());
+        workspace.tick_active(true);
+        assert!(workspace.scan.is_some());
+        assert_eq!(workspace.repos.values().filter(|r| r.status_task.is_some()).count(), 1);
+    }
+    #[test]
+    fn completing_one_git_job_does_not_launch_the_next_before_its_slot() {
+        let mut workspace = fixture(3);
+        for repo in workspace.repos.values_mut() { repo.status_dirty = true; }
+        workspace.tick();
+        let repo = workspace.repos.values_mut().find(|r| r.status_task.is_some()).unwrap();
+        repo.status_task = Some(Task::ready((repo.status.clone().unwrap(), repo.worktree.clone())));
+        workspace.tick();
+        assert!(workspace.repos.values().all(|r| r.status_task.is_none()));
+        workspace.next_status = Instant::now() - Duration::from_secs(1);
+        workspace.tick();
+        assert_eq!(workspace.repos.values().filter(|r| r.status_task.is_some()).count(), 1);
+    }
+
+    #[test]
+    fn pending_git_refresh_wakes_the_ui_at_its_next_slot() {
+        let mut workspace = fixture(3);
+        for repo in workspace.repos.values_mut() { repo.status_dirty = true; }
+        workspace.next_status = Instant::now() + Duration::from_millis(250);
+        for _ in 0..3 { workspace.ctx.begin_pass(Default::default()); let mut out = workspace.ctx.end_pass(); out.textures_delta.clear(); }
+        let (tx, rx) = std::sync::mpsc::channel();
+        workspace.ctx.set_request_repaint_callback(move |info| { tx.send(info.delay).unwrap(); });
+        workspace.tick();
+        let delay = rx.try_recv().expect("pending jobs need their own wakeup, even with idle terminals");
+        assert!(delay > Duration::from_millis(150) && delay <= Duration::from_millis(250));
+    }
+
 }

@@ -18,9 +18,10 @@ pub struct Client {
     pub can_upgrade: bool,
 }
 
-/// Called after each received message is queued. The argument is `true` when that
-/// message only refreshes session status (info, telemetry or health).
-pub type Notify = Arc<dyn Fn(bool) + Send + Sync>;
+/// Events that need immediate UI handling are separate from output-only frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotifyKind { Frame, Status, Event }
+pub type Notify = Arc<dyn Fn(NotifyKind) + Send + Sync>;
 
 impl Client {
     /// 연결 후 Hello 를 주고받는다. `notify` 는 서버 메시지가 도착할 때마다 호출된다.
@@ -55,22 +56,21 @@ impl Client {
         })?;
         std::thread::Builder::new().name("kiln-client-r".into()).spawn(move || {
             while let Ok(Some(m)) = read_msg::<_, ServerMsg>(&mut reader) {
-                let status_only = matches!(
-                    m,
-                    ServerMsg::SessionUpdated(_)
-                        | ServerMsg::SessionTelemetry { .. }
-                        | ServerMsg::TerminalHealth { .. }
-                );
+                let kind = match &m {
+                    ServerMsg::Frame(_) => NotifyKind::Frame,
+                    ServerMsg::SessionUpdated(_) | ServerMsg::SessionTelemetry { .. } | ServerMsg::TerminalHealth { .. } => NotifyKind::Status,
+                    _ => NotifyKind::Event,
+                };
                 if in_tx.send(m).is_err() {
                     break;
                 }
                 if let Some(n) = &notify {
-                    n(status_only);
+                    n(kind);
                 }
             }
             drop(in_tx);
             if let Some(n) = &notify {
-                n(false);
+                n(NotifyKind::Event);
             }
         })?;
         Ok(Client { tx, rx, next_req: Arc::new(AtomicU32::new(1)), server_build, server_pid, can_upgrade })
@@ -403,4 +403,77 @@ mod tests {
         touch(&only);
         assert_eq!(cli_executable(&only), only);
     }
+}
+
+/// Build IDs start with a numeric release version; unknown development IDs remain compatible.
+fn release_version(build: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = build.split('-').next()?.split('.');
+    let version = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+    parts.next().is_none().then_some(version)
+}
+pub fn is_downgrade(current: &str, target: &str) -> bool {
+    release_version(current).zip(release_version(target)).is_some_and(|(current, target)| target < current)
+}
+#[cfg(test)]
+mod release_version_tests {
+    use super::*;
+    #[test]
+    fn older_helpers_cannot_replace_newer_daemons() {
+        assert!(is_downgrade("0.2.12-build", "0.2.8-build"));
+        assert!(!is_downgrade("0.2.8-build", "0.2.12-build"));
+        assert!(!is_downgrade("0.2.12-old", "0.2.12-new"));
+        assert!(!is_downgrade("unknown", "new"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod upgrade_target_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn old_or_unresponsive_upgrade_targets_are_rejected_before_handover() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("kiln");
+        std::fs::write(&exe, "#!/bin/sh\necho 'kiln 0.0.1'\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(validate_upgrade_target(exe.to_str().unwrap()).is_err());
+        std::fs::write(&exe, format!("#!/bin/sh\necho 'kiln {}'\n", env!("CARGO_PKG_VERSION"))).unwrap();
+        validate_upgrade_target(exe.to_str().unwrap()).unwrap();
+        std::fs::write(&exe, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+        let started=Instant::now();
+        assert!(validate_upgrade_target(exe.to_str().unwrap()).is_err());
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
+}
+
+/// Validate before pausing readers or transferring terminal ownership.
+/// Probing the helper runs only on an explicit upgrade, never on a GUI frame.
+pub(crate) fn validate_upgrade_target(exe: &str) -> anyhow::Result<()> {
+    use std::io::Read;
+    use anyhow::Context;
+    use std::process::{Command, Stdio};
+    let mut command = Command::new(exe);
+    command.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)] {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn()?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let status = loop {
+        if let Some(status) = child.try_wait()? { break status; }
+        if Instant::now() >= deadline {
+            let _ = child.kill(); let _ = child.wait();
+            anyhow::bail!("upgrade helper version probe timed out");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    anyhow::ensure!(status.success(), "upgrade helper version probe failed");
+    let mut bytes = Vec::new();
+    child.stdout.take().context("missing upgrade helper output")?.take(4096).read_to_end(&mut bytes)?;
+    let output = String::from_utf8(bytes)?;
+    let target = output.trim().strip_prefix("kiln ").context("unrecognized upgrade helper")?;
+    anyhow::ensure!(release_version(target).is_some(), "unrecognized upgrade helper version");
+    anyhow::ensure!(!is_downgrade(env!("CARGO_PKG_VERSION"), target), "refusing to replace daemon with an older helper");
+    Ok(())
 }

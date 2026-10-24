@@ -997,6 +997,7 @@ impl Daemon {
 
     #[cfg(unix)]
     fn upgrade(self: Arc<Self>, exe: &str) -> anyhow::Result<()> {
+        crate::client::validate_upgrade_target(exe)?;
         let _change = self.session_changes.lock();
         anyhow::ensure!(!self.upgrading.load(Ordering::SeqCst), "upgrade already in progress");
         // A retained native child must keep this parent, even when new sessions
@@ -1155,6 +1156,7 @@ impl Daemon {
 
     #[cfg(windows)]
     fn upgrade(self: Arc<Self>, exe: &str) -> anyhow::Result<()> {
+        crate::client::validate_upgrade_target(exe)?;
         let _change = self.session_changes.lock();
         self.clone().upgrade_hosted(exe)
     }

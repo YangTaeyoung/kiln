@@ -3,16 +3,24 @@ use kiln_common::paths::Canonical;
 use super::*;
 use conversation_sync::handover;
 use std::fs::File;
+mod reader;
 
 #[derive(Default)]
 pub(super) struct Transfers {
     next: Option<Instant>,
+    reader: Option<reader::Reader>,
     leases: HashMap<PathBuf, WriterLease>,
     jobs: HashMap<String, Job>,
 }
 struct WriterLease {
     _file: File,
     pid: Option<u32>,
+}
+fn record_matches(path: &Path, record: &agent_runtime::Record, generation: &str, owners: &handover::Owners) -> bool {
+    record.generation == generation || !record.confirmed && owners.values().any(|owner| {
+        !owner.ready && owner.record == path && owner.generation == generation
+            && record.conversation.as_deref() == Some(&owner.canonical_id)
+    })
 }
 fn writer_may_be_running(exited: Option<bool>, pid: Option<u32>) -> bool {
     if let Some(exited) = exited {
@@ -65,34 +73,36 @@ struct Job {
 impl KilnApp {
     /// Runs every 250 ms while a transfer is in progress and every second otherwise.
     pub(super) fn tick_agent_handover(&mut self, ctx: &egui::Context) {
+        if !self.conn.is_connected() { return; }
         let transferring = !self.agent_handover.jobs.is_empty();
-        if transferring {
-            ctx.request_repaint_after(Duration::from_millis(250));
-        }
-        if !self.conn.is_connected()
-            || self
-                .agent_handover
-                .next
-                .is_some_and(|next| Instant::now() < next)
-        {
-            return;
-        }
-        self.agent_handover.next = Some(
-            Instant::now()
-                + if transferring {
-                    Duration::from_millis(250)
-                } else {
-                    Duration::from_secs(1)
-                },
-        );
+        let period = if transferring { Duration::from_millis(250) } else { Duration::from_secs(1) };
+        ctx.request_repaint_after(period);
         let config = kiln_common::paths::config_dir();
+        let reader = self.agent_handover.reader.get_or_insert_with(|| reader::Reader::new(ctx.clone()));
+        let response = reader.poll();
+        if self.agent_handover.next.is_none_or(|next| Instant::now() >= next) {
+            let mut request = reader::Request { config: config.clone(), enabled: self.settings.conversation_sync_enabled, ..Default::default() };
+            for (pane, spec) in &self.launch_specs {
+                let Some(info) = self.panes.get(pane).and_then(|p| p.session()).and_then(|session| self.conn.infos.get(&session)) else { continue; };
+                let Some(path) = agent_runtime::record_path(spec) else { continue; };
+                request.paths.push(path.clone());
+                if info.exited.is_none() && !self.agent_handover.leases.contains_key(&path) {
+                    request.leases.push((path, (info.pid > 1).then_some(info.pid)));
+                }
+            }
+            if reader.request(request) { self.agent_handover.next = Some(Instant::now() + period); }
+        }
+        let Some(response) = response else { return; };
+        for (path, lease) in response.leases { self.agent_handover.leases.entry(path).or_insert(lease); }
         let records: Vec<_> = self
             .launch_specs
             .iter()
             .filter_map(|(pane, spec)| {
                 let session = self.panes.get(pane)?.session()?;
                 let path = agent_runtime::record_path(spec)?;
-                let record = agent_runtime::read(&path).ok()?;
+                let record = response.records.get(&path)?.clone();
+                let (_, generation) = agent_runtime::launch_of(spec)?;
+                if !record_matches(&path, &record, &generation, &response.owners) { return None; }
                 let exited = self
                     .conn
                     .infos
@@ -109,18 +119,7 @@ impl KilnApp {
                 .map(|(_, _, _, _, exited)| *exited);
             writer_may_be_running(exited, lease.pid)
         });
-        for (_, session, path, _, exited) in &records {
-            if !exited && !self.agent_handover.leases.contains_key(path) {
-                if let Ok(lease) = handover::live_lease(path) {
-                    self.agent_handover.leases.insert(
-                        path.clone(),
-                        WriterLease {
-                            _file: lease,
-                            pid: None,
-                        },
-                    );
-                }
-            }
+        for (_, session, path, _, _) in &records {
             if let Some(lease) = self.agent_handover.leases.get_mut(path)
                 && let Some(info) = self.conn.infos.get(session)
                 && info.pid > 1
@@ -131,9 +130,8 @@ impl KilnApp {
         if !self.settings.conversation_sync_enabled {
             return;
         }
-        let (Ok(links), Ok(owners)) = (handover::links(&config), handover::owners(&config)) else {
-            return;
-        };
+        if !response.valid { return; }
+        let (links, owners) = (response.links, response.owners);
         self.agent_handover.jobs.retain(|group, job| {
             owners
                 .get(group)
@@ -326,4 +324,32 @@ mod tests {
         );
         assert!(!writer_may_be_running(Some(true), None));
     }
+    #[test]
+    fn failed_grant_can_retry_renewed_record_without_accepting_old_snapshots() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path();
+        let path = config.join("agent-sessions/owner.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let id = "11111111-1234-1234-1234-123456789abc";
+        let record = agent_runtime::Record { tool: kiln_accounts::Tool::Codex,
+            spec: SpawnSpec::default(), version: String::new(), conversation: Some(id.into()),
+            generation: "launch".into(), confirmed: true, request_started: false };
+        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let owners = handover::Owners::from([("group".into(), handover::Owner {
+            record: path.clone(), generation: "launch".into(), id: id.into(), canonical_id: id.into(), ready: false, sequence: 1,
+        })]);
+        std::fs::create_dir_all(config.join("conversation-sync")).unwrap();
+        std::fs::write(config.join("conversation-sync/owners.json"), serde_json::to_vec(&owners).unwrap()).unwrap();
+        agent_runtime::renew(&path).unwrap();
+        let renewed = agent_runtime::read(&path).unwrap();
+        let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(config.join("conversation-sync/ownership.lock")).unwrap();
+        lock.try_lock().unwrap();
+        assert!(handover::grant(config, "group", 1, &path, &renewed).is_err());
+        drop(lock);
+        assert!(record_matches(&path, &renewed, "launch", &owners), "failed grant must retain the pending renewal retry path");
+        assert!(!record_matches(&path, &renewed, "newer-launch", &owners));
+        handover::grant(config, "group", 1, &path, &renewed).unwrap();
+        assert!(handover::owners(config).unwrap()["group"].ready);
+    }
+
 }

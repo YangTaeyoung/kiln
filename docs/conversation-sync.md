@@ -302,3 +302,12 @@ Native indexing reference: [Codex thread/read and list regression](https://githu
 Title references: [Claude session naming](https://code.claude.com/docs/en/sessions),
 [Codex name persistence regression](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/tests/suite/v2/thread_name_persistence.rs),
 and [Codex append-only title index](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/rollout/src/session_index.rs).
+
+
+## Background metadata and input responsiveness
+
+Periodic handover checks read runtime records, native links and ownership metadata
+on a bounded background reader. Unchanged file stamps reuse parsed results. The
+GUI consumes snapshots and validates launch generations; a pending, unconfirmed
+renewal can still retry after an ownership grant fails. Writer leases remain held
+until the daemon confirms exit or the writer process is gone.

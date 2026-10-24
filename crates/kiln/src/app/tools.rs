@@ -734,13 +734,13 @@ impl WorkspaceTools {
     /// 매 프레임: 저장소 요약 갱신, 파일 트리 git 색상 반영.
     pub fn tick(&mut self, active: bool) {
         if let Some(panel) = &mut self.remote_panel { panel.tick(&self.ctx); }
-        self.repositories.tick();
+        self.repositories.tick_active(active);
         if let Some(task) = &mut self.worktree_identity_task
             && let Some(identity) = task.take() {
                 self.worktree_identity = identity;
                 self.worktree_identity_task = None;
             }
-        if self.worktree_identity_task.is_none() && self.worktree_identity_at.is_none_or(|at| at.elapsed() > Duration::from_secs(60)) {
+        if active && self.worktree_identity_task.is_none() && self.worktree_identity_at.is_none_or(|at| at.elapsed() > Duration::from_secs(60)) {
             self.worktree_identity_at = Some(Instant::now());
             let root = self.root.clone();
             self.worktree_identity_task = Some(Task::spawn(&self.ctx, move || kiln_git::worktrees::identity(&root).ok().flatten()));
@@ -751,7 +751,7 @@ impl WorkspaceTools {
                 self.summary_task = None;
             }
         let period = if active { Duration::from_secs(15) } else { Duration::from_secs(60) };
-        if !self.repositories.loading() && !self.repositories.is_multi() && self.summary_task.is_none() && self.summary_at.is_none_or(|t| t.elapsed() > period) {
+        if active && !self.repositories.loading() && !self.repositories.is_multi() && self.summary_task.is_none() && self.summary_at.is_none_or(|t| t.elapsed() > period) {
             self.summary_at = Some(Instant::now());
             let root = self.root.clone();
             self.summary_task = Some(Task::spawn(&self.ctx, move || kiln_git::repo_summary(&root)));
@@ -1301,4 +1301,17 @@ impl ToolTab for RemoteTab {
     fn discard_recovery(&mut self,suppress:bool){self.suppress_recovery=suppress;}
     fn tick(&mut self){self.browser.tick(&self.ctx);}
     fn paint_icon(&self,ui:&egui::Ui,rect:egui::Rect)->bool{kiln_common::icons::paint(ui.painter(),rect,kiln_remote::ui::provider_icon(self.browser.profile()),kiln_common::Theme::current().text);true}
+}
+
+#[cfg(test)]
+mod inactive_background_tests {
+    use super::*;
+    #[test]
+    fn inactive_workspace_does_not_start_duplicate_git_identity_or_summary_jobs() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut tools = WorkspaceTools::new(temp.path(), &egui::Context::default(), DbManager::in_memory(), 1);
+        tools.tick(false);
+        assert!(tools.worktree_identity_task.is_none());
+        assert!(tools.summary_task.is_none());
+    }
 }
