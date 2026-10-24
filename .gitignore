@@ -16,3 +16,5 @@
 *.key
 *.pem
 __pycache__/
+
+/public/

@@ -1,0 +1,12 @@
+.seo-guide{max-width:1160px;margin:0 auto;padding:64px 24px 80px;border-top:1px solid var(--line,#d6d3cb)}
+.seo-guide h2{font-size:clamp(24px,4vw,36px);line-height:1.2;margin:0 0 24px;letter-spacing:-.03em}
+.seo-guide h2:not(:first-child){margin-top:64px}
+.seo-guide h3{font-size:20px;margin:32px 0 12px}
+.seo-guide p{max-width:76ch;line-height:1.7;margin:12px 0;color:var(--muted,#55554e)}
+.seo-guide>a{text-decoration:underline;text-underline-offset:4px}
+.seo-guide details{border-top:1px solid var(--line,#d6d3cb);padding:20px 0}
+.seo-guide summary{font-weight:600;cursor:pointer;line-height:1.5}
+.locale-links{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;padding:24px;font-size:14px}
+.locale-links a{text-decoration:underline;text-underline-offset:4px}
+/* Language names must not download every locale's webfont on every page. */
+.locale-links, .locale-names, #lang { font-family: system-ui, sans-serif; }

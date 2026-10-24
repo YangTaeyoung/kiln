@@ -79,7 +79,8 @@
   }
   function size(t) {
     var d = Math.min(window.devicePixelRatio || 1, 2), rc = t.el.getBoundingClientRect();
-    var w = Math.max(1, Math.round(rc.width * d)), h = Math.max(1, Math.round(rc.height * d));
+    var scale = Math.min(d, 640 / Math.max(rc.width, rc.height, 1));
+    var w = Math.max(1, Math.round(rc.width * scale)), h = Math.max(1, Math.round(rc.height * scale));
     if (t.cv.width !== w || t.cv.height !== h) { t.cv.width = w; t.cv.height = h; }
     t.dirty = true;
   }

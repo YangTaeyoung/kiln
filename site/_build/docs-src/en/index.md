@@ -1,5 +1,5 @@
 ---
-title: Introduction
+title: AI agent IDE: getting started
 description: Kiln is a terminal-first IDE for agent work that keeps terminals, AI agents, Git, files and databases in one native workspace.
 ---
 

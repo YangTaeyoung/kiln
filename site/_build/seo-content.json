@@ -1,0 +1,194 @@
+{
+  "en": {
+    "title": "Kiln — AI Agent IDE & Terminal for macOS and Windows",
+    "description": "Run Claude Code, Codex and Antigravity in Kiln, a free, open-source AI agent IDE. Keep terminal sessions running and review Git, code and databases in one workspace.",
+    "h1": "The AI agent IDE, built around your terminal",
+    "sub": "Claude Code, Codex and Antigravity in one workspace. Close the window; your sessions keep running.",
+    "section": "An AI terminal with room for the whole task",
+    "intro": "Kiln is a terminal-first AI IDE for developers who work with coding agents. Run your existing agent CLIs beside shells and development servers, then inspect files, Git changes and databases in the same native app.",
+    "items": [
+      [
+        "Run agents in parallel",
+        "Give Claude Code, Codex or Antigravity a task in its own terminal panel. Follow running and waiting states, then jump to the session that needs a decision.",
+        "agents"
+      ],
+      [
+        "Keep terminal work running",
+        "A local daemon owns your sessions. Closing the GUI leaves those processes running; reopening Kiln restores your workspace. A reboot or an exited process still ends that running process.",
+        "terminal"
+      ],
+      [
+        "Review across repositories",
+        "Open a parent folder for frontend and backend repositories. Keep the shared task context while selecting the repository for each Git operation.",
+        "workspaces"
+      ]
+    ],
+    "faq_title": "Before you choose an AI IDE",
+    "faq": [
+      [
+        "Is Kiln an AI model or an AI agent terminal?",
+        "Kiln is an AI agent terminal and development workspace. Claude Code, Codex and Antigravity are separate CLI tools that you install and authenticate. Kiln does not include a model subscription."
+      ],
+      [
+        "How is Kiln different from a plain terminal?",
+        "It combines persistent terminal sessions, agent task states, a file editor, Git review and SQL tools in one workspace. You can still use your normal shell commands and existing agent accounts."
+      ],
+      [
+        "Can I use Claude Code and Codex side by side?",
+        "Yes. Run them in separate panels, track which task needs input and review their changes. Opt-in conversation linking also makes supported completed conversations available in the other CLI."
+      ],
+      [
+        "Is Kiln free, and which operating systems does it support?",
+        "Kiln is free and open source under the MIT license. Downloads are available for Apple Silicon Macs and Windows x64 or ARM64. Check the installation guide for current requirements."
+      ]
+    ],
+    "guide": "Read the setup guide",
+    "home": "Home",
+    "docs": "Documentation",
+    "languages": "Languages"
+  },
+  "ko": {
+    "title": "Kiln — AI 에이전트 IDE와 AI 터미널 | macOS·Windows",
+    "description": "Claude Code, Codex, Antigravity를 한곳에서 실행하는 무료 오픈소스 AI IDE, Kiln. AI 에이전트 터미널의 세션을 유지하고 Git·코드·데이터베이스를 같은 작업 공간에서 확인하세요.",
+    "h1": "터미널 중심의 AI 에이전트 IDE",
+    "sub": "Claude Code, Codex, Antigravity를 하나의 작업 공간에서. 창을 닫아도 세션은 계속 실행됩니다.",
+    "section": "작업 전체를 담는 AI 터미널",
+    "intro": "Kiln은 코딩 에이전트와 함께 개발하는 사람을 위한 터미널 중심 AI IDE입니다. 기존 에이전트 CLI, 셸, 개발 서버를 나란히 실행하고 파일·Git 변경 사항·데이터베이스를 같은 네이티브 앱에서 확인하세요.",
+    "items": [
+      [
+        "AI 에이전트를 나란히 실행",
+        "Claude Code, Codex, Antigravity에 각각 터미널 패널을 배정하세요. 실행 중·입력 대기 상태를 확인하고 판단이 필요한 세션으로 바로 이동합니다.",
+        "agents"
+      ],
+      [
+        "창을 닫아도 이어지는 터미널 작업",
+        "로컬 데몬이 세션을 소유하므로 GUI를 닫아도 프로세스는 계속 실행됩니다. Kiln을 다시 열면 작업 공간으로 돌아옵니다. 컴퓨터를 재시작하거나 프로세스가 종료되면 해당 실행은 끝납니다.",
+        "terminal"
+      ],
+      [
+        "여러 저장소의 변경 사항 검토",
+        "프론트엔드·백엔드 저장소를 담은 상위 폴더를 여세요. 작업 맥락을 유지하면서 Git 작업을 적용할 저장소는 따로 선택합니다.",
+        "workspaces"
+      ]
+    ],
+    "faq_title": "AI IDE를 선택하기 전에",
+    "faq": [
+      [
+        "Kiln은 AI 모델인가요, AI 에이전트 터미널인가요?",
+        "Kiln은 AI 에이전트 터미널과 개발 작업 공간입니다. Claude Code, Codex, Antigravity는 별도로 설치하고 로그인하는 CLI 도구이며, Kiln에 모델 구독은 포함되지 않습니다."
+      ],
+      [
+        "일반 터미널과 무엇이 다른가요?",
+        "지속되는 터미널 세션, 에이전트 작업 상태, 파일 편집기, Git 리뷰, SQL 도구를 하나의 작업 공간에 모읍니다. 기존 셸 명령과 에이전트 계정도 그대로 사용할 수 있습니다."
+      ],
+      [
+        "Claude Code와 Codex를 동시에 사용할 수 있나요?",
+        "네. 별도 패널에서 나란히 실행하고 입력이 필요한 작업과 변경 사항을 확인할 수 있습니다. 대화 연결을 켜면 지원되는 완료 대화를 다른 CLI에서도 이어갈 수 있습니다."
+      ],
+      [
+        "무료인가요? 어떤 운영체제를 지원하나요?",
+        "Kiln은 MIT 라이선스의 무료 오픈소스입니다. Apple Silicon Mac과 Windows x64·ARM64용 다운로드를 제공합니다. 최신 요구 사항은 설치 가이드에서 확인하세요."
+      ]
+    ],
+    "guide": "설치 가이드 읽기",
+    "home": "홈",
+    "docs": "문서",
+    "languages": "언어"
+  },
+  "ja": {
+    "title": "Kiln — AI エージェント IDE・AI ターミナル",
+    "description": "Claude Code、Codex、Antigravity をひとつのワークスペースで実行。Kiln は永続ターミナル、Git レビュー、コード編集、SQL ツールを備えた無料のオープンソース AI IDE です。macOS と Windows に対応。",
+    "h1": "ターミナル中心の AI エージェント IDE",
+    "sub": "Claude Code、Codex、Antigravity をひとつのワークスペースで。ウィンドウを閉じてもセッションは動き続けます。",
+    "section": "タスク全体を扱う AI ターミナル",
+    "intro": "Kiln はコーディングエージェントと開発する人のための、ターミナル中心の AI IDE です。使い慣れたエージェント CLI、シェル、開発サーバーを並べ、ファイル、Git の変更、データベースを同じネイティブアプリで確認できます。",
+    "items": [
+      [
+        "エージェントを並列実行",
+        "Claude Code、Codex、Antigravity をそれぞれのターミナルパネルで実行。実行中と入力待ちの状態を確認し、判断が必要なセッションへ移動します。",
+        "agents"
+      ],
+      [
+        "ウィンドウを閉じても作業を継続",
+        "ローカルデーモンがセッションを保持するため、GUI を閉じてもプロセスは動き続けます。Kiln を開き直すとワークスペースに戻れます。再起動やプロセスの終了により、その実行は終了します。",
+        "terminal"
+      ],
+      [
+        "複数リポジトリをレビュー",
+        "フロントエンドとバックエンドの親フォルダを開きます。タスクの文脈を共有しながら、Git 操作の対象は個別に選べます。",
+        "workspaces"
+      ]
+    ],
+    "faq_title": "AI IDE を選ぶ前に",
+    "faq": [
+      [
+        "Kiln は AI モデルですか、AI エージェントターミナルですか？",
+        "Kiln は AI エージェントターミナルと開発ワークスペースです。Claude Code、Codex、Antigravity は別途インストールしてログインする CLI ツールです。モデルのサブスクリプションは含まれません。"
+      ],
+      [
+        "通常のターミナルとの違いは？",
+        "永続セッション、エージェントの状態、ファイルエディタ、Git レビュー、SQL ツールをひとつにまとめます。既存のシェルコマンドやエージェントアカウントも利用できます。"
+      ],
+      [
+        "Claude Code と Codex を同時に使えますか？",
+        "はい。別々のパネルで実行し、入力が必要なタスクや変更を確認できます。会話のリンクを有効にすると、対応する完了済み会話をもう一方の CLI で継続できます。"
+      ],
+      [
+        "無料ですか？ 対応 OS は？",
+        "Kiln は MIT ライセンスの無料オープンソースです。Apple Silicon Mac と Windows x64・ARM64 向けの配布があります。最新要件はインストールガイドを確認してください。"
+      ]
+    ],
+    "guide": "セットアップガイドを読む",
+    "home": "ホーム",
+    "docs": "ドキュメント",
+    "languages": "言語"
+  },
+  "zh-CN": {
+    "title": "Kiln — AI 智能体 IDE 与 AI 终端",
+    "description": "在一个工作区运行 Claude Code、Codex 和 Antigravity。Kiln 是免费开源的 AI IDE，集成持久终端会话、Git 审查、代码编辑和数据库工具，支持 macOS 与 Windows。",
+    "h1": "以终端为中心的 AI 智能体 IDE",
+    "sub": "在同一工作区运行 Claude Code、Codex 和 Antigravity。关闭窗口，会话仍继续运行。",
+    "section": "容纳整个任务的 AI 终端",
+    "intro": "Kiln 是面向使用编程智能体的开发者的终端优先 AI IDE。并排运行现有智能体 CLI、Shell 和开发服务器，在同一原生应用中查看文件、Git 更改和数据库。",
+    "items": [
+      [
+        "并行运行智能体",
+        "在各自的终端面板中运行 Claude Code、Codex 或 Antigravity。查看运行中与等待输入的状态，直接跳转到需要你决策的会话。",
+        "agents"
+      ],
+      [
+        "关闭窗口后继续终端工作",
+        "本地守护进程持有会话，因此关闭 GUI 后进程仍继续运行。重新打开 Kiln 即可返回工作区。重启电脑或进程退出仍会结束该次运行。",
+        "terminal"
+      ],
+      [
+        "跨仓库审查更改",
+        "打开包含前后端仓库的上级文件夹。在共享任务上下文的同时，单独选择每次 Git 操作的目标仓库。",
+        "workspaces"
+      ]
+    ],
+    "faq_title": "选择 AI IDE 前需要了解",
+    "faq": [
+      [
+        "Kiln 是 AI 模型还是 AI 智能体终端？",
+        "Kiln 是 AI 智能体终端和开发工作区。Claude Code、Codex 与 Antigravity 是需要单独安装并登录的 CLI 工具。Kiln 不包含模型订阅。"
+      ],
+      [
+        "它与普通终端有什么不同？",
+        "它将持久终端会话、智能体任务状态、文件编辑器、Git 审查和 SQL 工具集中在同一工作区。你仍可使用现有 Shell 命令和智能体账户。"
+      ],
+      [
+        "能同时使用 Claude Code 和 Codex 吗？",
+        "可以。在不同面板中运行它们，跟踪需要输入的任务并审查更改。启用对话关联后，还能在另一个 CLI 中继续受支持的已完成对话。"
+      ],
+      [
+        "Kiln 免费吗？支持哪些系统？",
+        "Kiln 是采用 MIT 许可的免费开源软件，提供 Apple Silicon Mac 和 Windows x64、ARM64 版本。最新系统要求请查看安装指南。"
+      ]
+    ],
+    "guide": "阅读安装指南",
+    "home": "首页",
+    "docs": "文档",
+    "languages": "语言"
+  }
+}
