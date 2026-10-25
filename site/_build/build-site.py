@@ -133,7 +133,7 @@ def main():
     sitemap = ET.Element('urlset', xmlns='http://www.sitemaps.org/schemas/sitemap/0.9')
     for url in urls: ET.SubElement(ET.SubElement(sitemap,'url'),'loc').text=url
     ET.ElementTree(sitemap).write(OUT/'sitemap.xml',encoding='utf-8',xml_declaration=True)
-    (OUT/'robots.txt').write_text('User-agent: *\nAllow: /\n\nSitemap: '+BASE+'/sitemap.xml\n')
+    shutil.copyfile(ROOT/'_build/robots.txt', OUT/'robots.txt')
     (OUT/'.nojekyll').touch()
     (OUT/'404.html').write_text('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex"><title>Page not found · Kiln</title><h1>Page not found</h1><p>This address does not exist.</p><a href="/">Kiln</a> · <a href="/docs/">Documentation</a></html>')
     print(f'Built {len(urls)} canonical pages in {OUT}')
