@@ -142,3 +142,17 @@ Official search crawler references:
 - https://www.mojeek.com/bot.html
 - https://help.sogou.com/guide.html
 - https://search.brave.com/help/brave-search-crawler
+
+### Naver, Bing and Brave registration
+
+`index.html` also holds the intentionally public `naver-site-verification` and
+`msvalidate.01` ownership proofs. The build preserves all three providers' proofs
+on every language's landing page, and the SEO gate checks them before publication.
+Naver and Bing are registered manually in their signed-in webmaster portals, using
+HTML meta verification and `https://kiln.melona.cloud/sitemap.xml`; no additional
+Google account access is needed for a cross-service import.
+
+Brave exposes a public URL re-fetch form at https://search.brave.com/submit-url.
+A successful submission acknowledges a request, not indexing or Claude citations.
+The wildcard/Googlebot permissions and sitemap discovery remain in effect for its
+crawler, following https://search.brave.com/help/brave-search-crawler.

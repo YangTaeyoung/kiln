@@ -19,14 +19,16 @@ def document(path):
     return cache[p]
 def check(ok, message):
     if not ok: errors.append(message)
-verification = BeautifulSoup((ROOT.parent/'site/index.html').read_text(), 'html.parser').select_one('meta[name=google-site-verification]')['content']
+source_head = BeautifulSoup((ROOT.parent/'site/index.html').read_text(), 'html.parser')
+verifications = {name: source_head.find('meta', attrs={'name': name})['content'] for name in ['google-site-verification', 'naver-site-verification', 'msvalidate.01']}
 search_bots = ['Googlebot', 'Googlebot-Image', 'Googlebot-Video', 'bingbot', 'Yeti', 'Daum', 'DuckDuckBot', 'Slurp', 'Baiduspider', 'YandexBot', 'YandexImages', 'Applebot', 'MojeekBot', 'Sogou web spider', 'Sogou inst spider']
 titles=set()
 for url in urls:
     path = urlsplit(url).path; s = document(path)
     if not s.select_one('article.doc'):
-        proof = s.select_one('meta[name=google-site-verification]')
-        check(proof and proof.get('content') == verification, f'{path}: Search Console verification preserved')
+        for name, value in verifications.items():
+            proof = s.find('meta', attrs={'name': name})
+            check(value and proof and proof.get('content') == value, f'{path}: {name} ownership proof preserved')
     check(len(s.select('h1'))==1, f'{path}: one h1')
     check(s.title and s.title.text not in titles, f'{path}: unique title'); titles.add(s.title.text)
     check(s.select_one('meta[name=description]')['content'], f'{path}: description')
