@@ -24,6 +24,7 @@ mod state;
 pub mod terminal;
 mod terminal_completion;
 mod tools;
+mod open_files;
 mod workspace_repos;
 mod workspace_activity;
 mod workspace_dialog;
@@ -50,6 +51,10 @@ use std::time::{Duration, Instant};
 use terminal::{LinkTarget, TermView};
 
 pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
+    run_paths(path.into_iter().collect())
+}
+
+pub fn run_paths(paths: Vec<PathBuf>) -> anyhow::Result<()> {
     kiln_common::i18n::set_language(kiln_common::i18n::load_language());
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Kiln")
@@ -69,7 +74,12 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
         surface: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY,
         ..Default::default()
     };
-    let options = eframe::NativeOptions { viewport, persistence_path, wgpu_options, ..Default::default() };
+    let options = eframe::NativeOptions {
+        viewport, persistence_path, wgpu_options,
+        #[cfg(target_os = "macos")]
+        event_loop_builder: Some(Box::new(|_| macos::prepare_open_file_events())),
+        ..Default::default()
+    };
     eframe::run_native("Kiln", options, Box::new(move |cc| {
         #[cfg(target_os = "macos")]
         macos::install_quit_guard(&cc.egui_ctx);
@@ -82,7 +92,7 @@ pub fn run(path: Option<PathBuf>) -> anyhow::Result<()> {
             }
             updater_windows::check_daily();
         }
-        let mut app = KilnApp::new(&cc.egui_ctx, path);
+        let mut app = KilnApp::new_paths(&cc.egui_ctx, paths);
         app.quick.register(&cc.egui_ctx);
         if let Some(error)=app.quick.error.clone(){app.toast(kiln_common::i18n::tr("빠른 터미널"),error,ToastKind::Error,None);}
         Ok(Box::new(app))
@@ -382,11 +392,17 @@ struct PreparingAgent {
 
 impl KilnApp {
     pub fn new(ctx: &egui::Context, open_path: Option<PathBuf>) -> Self {
+        Self::new_paths(ctx, open_path.into_iter().collect())
+    }
+
+    fn new_paths(ctx: &egui::Context, open_paths: Vec<PathBuf>) -> Self {
         kiln_common::i18n::set_language(kiln_common::i18n::load_language());
         kiln_common::fonts::install(ctx);
         let load_report = state::load_with_report();
         let persisted = load_report.state;
-        let first_run = persisted.workspaces.is_empty() && open_path.is_none();
+        let first_run = persisted.workspaces.is_empty() && open_paths.is_empty();
+        #[cfg(target_os = "macos")]
+        let first_run = first_run && !macos::has_open_requests();
         Theme::set_current(&persisted.settings.theme);
         let theme = Theme::current();
         theme.apply(ctx);
@@ -462,14 +478,9 @@ impl KilnApp {
                 Err(error)=>app.recovery_messages.push(kiln_common::trf!("복원 전 상태 백업 실패: {error}")),
             }
         }
-        if let Some(p) = open_path {
-            let p = normalize_path(p.canonical().unwrap_or(p));
-            if let Some(i) = app.workspaces.get(app.active).filter(|w|w.root==p).map(|_|app.active).or_else(||app.workspaces.iter().position(|w| w.root == p)) {
-                app.active = i;
-            } else {
-                app.add_workspace(p, ctx);
-            }
-        }
+        app.open_paths(open_paths, ctx);
+        #[cfg(target_os = "macos")]
+        app.open_native_paths(ctx);
         if app.workspaces.is_empty() {
             let home = kiln_common::paths::home().unwrap_or_else(|| PathBuf::from("."));
             app.add_workspace(first_workspace(std::env::current_dir().ok(), home), ctx);
@@ -2503,6 +2514,8 @@ pub(crate) fn short_path(p: &Path) -> String {
 
 impl eframe::App for KilnApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        self.open_native_paths(ctx);
         {
             #[cfg(target_os="macos")]
             let menu_request = macos::take_settings_request();

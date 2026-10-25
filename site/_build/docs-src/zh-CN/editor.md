@@ -1,6 +1,6 @@
 ---
 title: 编辑器与搜索
-description: 打开和编辑文件，支持语法高亮、语言检测和语言服务器补全，文件浏览器还会显示已忽略的文件。
+description: 从 Finder 打开文件，使用语法高亮编辑源代码和配置文件，并使用语言服务器补全和项目搜索。
 ---
 
 Kiln 在终端旁边内置了文件编辑器，提供语法高亮、语言服务器补全和文件浏览器。文件、搜索和问题列表都在同一个工作区中打开，不必离开当前任务。
@@ -8,6 +8,12 @@ Kiln 在终端旁边内置了文件编辑器，提供语法高亮、语言服务
 ## 打开编辑器和工具 {#open-the-editor-and-tools}
 
 工作区检查器中的**文件**用于打开文件浏览器。标题栏的**工具**菜单汇总了文件、搜索、源代码管理、GitHub、数据库、远程连接和问题，选中的项目会在当前工作旁边打开。窗口较窄时，点击**返回任务**回到终端。
+
+### 从 macOS 的 Finder 打开 {#open-from-finder-on-macos}
+
+在 Finder 中选择文件，然后选择**打开方式 (Open With) → Kiln**。普通文件、点号开头的文件和没有扩展名的文件都能在编辑器中打开。可以一次打开多个文件，Kiln 已经运行或因本次打开请求而启动时均可使用。
+
+打开文件夹会打开对应的工作区，或切换到已有工作区。如果多个已有工作区包含该文件，会选择目录层级最深的工作区。如果没有对应的工作区，Kiln 会将文件的父文件夹作为工作区打开。再次打开已打开的文件时，会切换到原有编辑器并保留未保存的更改，即使该编辑器位于另一个工作区中也是如此。
 
 ## 文件浏览器 {#file-explorer}
 
@@ -23,6 +29,22 @@ Kiln 在终端旁边内置了文件编辑器，提供语法高亮、语言服务
 ## 语言检测 {#language-detection}
 
 编辑器使用内置的语法定义来高亮文件。它先根据文件名和扩展名确定语言，再参考 shebang 或可识别的内容特征，例如 JSON 文档、XML、HTML doctype 或 PHP 头部。它不会根据普通文本猜测语言。
+
+常见配置文件的检测方式如下：
+
+| 文件 | 语言 |
+| --- | --- |
+| `.env`, `.env.local`, `.env.production.local`, `service.env` | DotENV |
+| `.envrc` | Bourne Again Shell (bash) |
+| `~/.ssh/config`, `ssh_config`, `~/.ssh/config.d/*.conf`, `ssh_config.d/*.conf` | SSH Config |
+| `sshd_config`, `sshd_config.d/*.conf` | SSHD Config |
+| `.git/config`, `.gitconfig`, `.gitmodules` | Git Config |
+| `.editorconfig`, `.npmrc` | INI |
+| `.eslintrc`, `.prettierrc`, `tsconfig.json` | JSON |
+
+在浅色和深色主题下，DotENV 都能区分键、赋值符号、值和 `#` 注释，也适用于赋值符号周围带空格的写法。转义字符和跨行的引号值会保持高亮，引号内的 `#` 仍显示为值的一部分。SSH 配置会区分指令、值、端口、引号、注释，以及 `%h`、`${HOME}` 等展开表达式，并高亮 `Host`、`Match` 和 `Include`。`.environment`、`.envoy` 等名称不会被检测为 DotENV。
+
+语言检测支持常见格式。如果文件需要其他语法，请手动选择语言；无法识别的内容按纯文本显示。
 
 要覆盖检测结果，使用文档上方的语言选择器。可以选择某种语言（包括**纯文本**），也可以改回**自动检测**。
 

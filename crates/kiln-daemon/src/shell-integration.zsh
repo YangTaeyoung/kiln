@@ -52,23 +52,15 @@ _kiln_complete_preview() {
   emulate -L zsh
   setopt localoptions extendedglob
   [[ ${KILN_COMPLETION_PREVIEW:-1} != 0 ]] || return
-  [[ $BUFFER == ${_KILN_LAST_PREVIEW:-} ]] && return
-  _KILN_LAST_PREVIEW=$BUFFER
-  if [[ $BUFFER == 'cd '* || $BUFFER == (git|npm|docker|cargo|ls)' '[a-zA-Z0-9-]# ]]; then
-    [[ $BUFFER != *[\;\|\&\$\`\(\)\<\>]* && $BUFFER != *$'\n'* ]] || { printf '\e]777;kiln-complete-cancel\a'; return; }
-    if [[ $BUFFER != 'cd '* ]]; then
-      local command=${BUFFER%% *} prefix=${BUFFER#* } option matched=0
-      local -a options
-      case $command in
-        git) options=(status diff log switch add commit --help) ;;
-        docker) options=(ps images build run compose --help) ;;
-        npm) options=(install run test --help) ;;
-        cargo) options=(check build test run --help) ;;
-        ls) options=(-a -l -h) ;;
-      esac
-      for option in $options; do [[ $option == "$prefix"* ]] && matched=1; done
-      if (( ! matched )); then printf '\e]777;kiln-complete-cancel\a'; return; fi
-    fi
+  local snapshot="$CURSOR:$PWD:$BUFFER"
+  [[ $snapshot == ${_KILN_LAST_PREVIEW:-} ]] && return
+  _KILN_LAST_PREVIEW=$snapshot
+  # Forward plain edit contexts, never evaluate them. Native shell completion
+  # retains expansions, pipelines, redirections and editing before the caret.
+  local command=${BUFFER%%[[:space:]]*}
+  if [[ -n $command && $command == [a-zA-Z0-9_+.-]## && $CURSOR == ${#BUFFER} && ${#BUFFER} -le 1024 &&
+        $BUFFER != *[\;\|\&\$\`\(\)\<\>]* && $BUFFER != *$'\n'* && $BUFFER != *$'\r'* &&
+        ( $BUFFER == *[[:space:]]* || ${#command} -ge 2 ) ]]; then
     _kiln_complete_request preview
   else
     printf '\e]777;kiln-complete-cancel\a'
@@ -76,6 +68,7 @@ _kiln_complete_preview() {
 }
 _kiln_complete_request() {
   emulate -L zsh
+  setopt localoptions extendedglob
   (( ${#BUFFER} <= 1024 )) || return
   if [[ -z ${_KILN_COMPLETION_DIR:-} ]]; then
     _KILN_COMPLETION_DIR=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/kiln-completion.XXXXXXXX") || return
@@ -90,11 +83,19 @@ _kiln_complete_request() {
   _kiln_complete_hex "$PWD"; cwd=$REPLY
   local prefix=${BUFFER[1,CURSOR]}
   local -a matches
-  if [[ $explicit == 1 && $prefix != *[[:space:]]* && $prefix != *[\;\|\&\$\`\(\)]* ]]; then
+  if [[ $prefix != *[[:space:]]* && $prefix != *[\;\|\&\$\`\(\)]* ]]; then
     matches=(${(f)$(builtin whence -pm -- "${prefix}*" 2>/dev/null)})
     matches=(${matches:t})
     local names_text="${(F)matches[1,80]}"
     _kiln_complete_hex "$names_text"; names=${REPLY[1,2048]}
+  else
+    # The shell supplies its actual PATH resolution. The GUI never guesses an
+    # executable from its own PATH and receives no command argument values here.
+    local command=${BUFFER%%[[:space:]]*} executable
+    if [[ $command == [a-zA-Z0-9_+.-]## ]]; then
+      executable=$(builtin whence -p -- "$command" 2>/dev/null)
+      [[ $executable == /* && $executable != *$'\n'* ]] && { _kiln_complete_hex "$executable"; names=$REPLY; }
+    fi
   fi
   _kiln_complete_hex "$file"; pathhex=$REPLY
   (( ${#buffer}+${#cwd}+${#pathhex}+${#names} < 7900 )) || return

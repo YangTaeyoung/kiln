@@ -20,6 +20,7 @@ for path in [root/'LICENSE',root/'THIRD_PARTY_NOTICES.md',
              root/'crates/kiln-common/fonts/JetBrainsMono-OFL.txt',
              root/'crates/kiln-common/fonts/NotoSansCJK-OFL.txt',
              root/'crates/kiln-db/assets/logos/LICENSE-simple-icons.md',
+             root/'crates/kiln/src/app/terminal_completion/LICENSE-docker.txt',
              *sorted((root/'crates/kiln-common/assets').glob('*LICENSE*')),
              *sorted((root/'target/vendor/sparkle').glob('LICENSE*'))]:
     if path.is_file():sections.append(path.name+'\n'+path.read_text(encoding='utf-8',errors='replace'))

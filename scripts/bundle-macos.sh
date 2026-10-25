@@ -37,6 +37,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+python3 scripts/configure-document-types.py "$APP/Contents/Info.plist"
+python3 scripts/configure-document-types.py --verify "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Frameworks"
 ditto target/vendor/sparkle/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 python3 - "$APP/Contents/Info.plist" <<'PY'

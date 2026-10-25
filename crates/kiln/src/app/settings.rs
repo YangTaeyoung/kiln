@@ -268,7 +268,7 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
         widgets::setting_toggle(ui, kiln_common::i18n::tr("Option 키를 Meta 로"), kiln_common::i18n::tr("Option+B 같은 조합을 셸 단축키로 보냅니다"), &mut s.option_as_meta);
     });
     widgets::group(ui, kiln_common::i18n::tr("셸"), |ui| {
-        widgets::setting_toggle(ui, kiln_common::i18n::tr("명령어 입력 힌트"), &kiln_common::trf!("zsh에서 경로와 명령어 후보를 표시합니다. {}로 후보를 선택할 수 있습니다.",kiln_common::widgets::shortcut_text("⌃Space")), &mut s.terminal_completion_preview);
+        widgets::setting_toggle(ui, kiln_common::i18n::tr("명령어 입력 힌트"), &kiln_common::i18n::tr("입력 중인 명령, 옵션과 경로를 제안합니다. Tab으로 삽입하고 ↓로 목록을 선택하세요."), &mut s.terminal_completion_preview);
         widgets::divider(ui);
         let (empty, example) = if cfg!(windows) { (kiln_common::i18n::tr("비워 두면 PowerShell을 씁니다"), "pwsh.exe") } else { (kiln_common::i18n::tr("비워 두면 로그인 셸($SHELL)을 씁니다"), "/bin/zsh") };
         widgets::setting_row(ui, kiln_common::i18n::tr("기본 셸"), empty, |ui| {

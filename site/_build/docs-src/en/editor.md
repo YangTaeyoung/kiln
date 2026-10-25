@@ -1,6 +1,6 @@
 ---
 title: Editor and search
-description: Open and edit files with syntax highlighting, language detection, language-server completion and a file explorer that shows ignored files.
+description: Open files from Finder, edit source and configuration files with syntax highlighting, and use language-server completion and project search.
 ---
 
 Kiln includes a file editor next to your terminals, with syntax highlighting, completion from language servers and a file explorer. Open files, search and problems from the same workspace without leaving your task.
@@ -8,6 +8,12 @@ Kiln includes a file editor next to your terminals, with syntax highlighting, co
 ## Open the editor and tools {#open-the-editor-and-tools}
 
 The workspace inspector includes **Files**, which opens the file explorer. The titlebar **Tools** menu lists files, search, source control, GitHub, databases, remote connections and problems together. Choosing one opens it alongside your current work. In compact windows, **Back to Task** returns you to the terminal.
+
+### Open from Finder on macOS {#open-from-finder-on-macos}
+
+In Finder, select a file and choose **Open With → Kiln**. Ordinary files, dotfiles and files without an extension open in the editor. You can open several files together, whether Kiln is already running or starts for the request.
+
+Folders open or focus a workspace. A file uses the most specific existing workspace that contains it. If none exists, Kiln opens a workspace at the file's parent folder. Opening a file that is already open focuses its existing editor and preserves unsaved changes, even when that editor belongs to another workspace.
 
 ## File explorer {#file-explorer}
 
@@ -23,6 +29,22 @@ Showing or hiding ignored files does not change Git tracking or your repository'
 ## Language detection {#language-detection}
 
 The editor highlights files with bundled grammars. It picks a language from the filename and extension first, then from a shebang or a recognizable content signature such as a JSON document, XML, an HTML doctype or a PHP header. It does not guess a language from ordinary prose.
+
+Common configuration names include:
+
+| Files | Language |
+| --- | --- |
+| `.env`, `.env.local`, `.env.production.local`, `service.env` | DotENV |
+| `.envrc` | Bourne Again Shell (bash) |
+| `~/.ssh/config`, `ssh_config`, `~/.ssh/config.d/*.conf`, `ssh_config.d/*.conf` | SSH Config |
+| `sshd_config`, `sshd_config.d/*.conf` | SSHD Config |
+| `.git/config`, `.gitconfig`, `.gitmodules` | Git Config |
+| `.editorconfig`, `.npmrc` | INI |
+| `.eslintrc`, `.prettierrc`, `tsconfig.json` | JSON |
+
+In light and dark themes, DotENV separates keys, assignment signs, values and `#` comments, including spaced assignments. Escaped characters and multiline quoted values keep their highlighting; a `#` inside quotes stays part of the value. SSH settings distinguish directives, values, ports, quotes, comments and expansions such as `%h` and `${HOME}`, with highlighting for `Host`, `Match` and `Include`. Names such as `.environment` and `.envoy` do not select DotENV.
+
+Detection covers common formats. If a file needs a different grammar, choose it manually; unrecognized content stays plain text.
 
 To override detection, use the language selector above the document. Choose a language, including **Plain Text**, or return to **Auto detect**.
 

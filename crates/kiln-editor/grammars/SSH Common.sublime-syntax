@@ -1,0 +1,59 @@
+%YAML 1.2
+---
+# Original Kiln grammar. OpenSSH references:
+# https://man.openbsd.org/ssh_config#DESCRIPTION
+# https://man.openbsd.org/ssh_config#TOKENS
+# https://man.openbsd.org/ssh_config#ENVIRONMENT_VARIABLES
+# https://man.openbsd.org/sshd_config#TOKENS
+name: Kiln SSH Common
+scope: source.kiln-ssh
+hidden: true
+contexts:
+  main:
+    - include: values
+  comments:
+    - match: '#.*$'
+      scope: comment.line.number-sign.ssh
+  values:
+    - match: '$'
+      pop: true
+    - include: comments
+    - match: '"'
+      scope: punctuation.definition.string.begin.ssh
+      push: double-quoted
+    - match: "'"
+      scope: punctuation.definition.string.begin.ssh
+      push: single-quoted
+    - include: expansions
+    - match: '\\.'
+      scope: constant.character.escape.ssh
+    - match: '(?i)\b(?:yes|no|true|false|ask|auto|none|any|all|accept-new|prohibit-password|without-password|forced-commands-only)\b'
+      scope: constant.language.ssh
+    - match: '(?<![\w.])\d+(?:\.\d+)*(?![\w.])'
+      scope: constant.numeric.ssh
+    - match: '[!*?]'
+      scope: keyword.operator.logical.ssh
+    - match: '='
+      scope: keyword.operator.assignment.ssh
+  expansions:
+    - match: '%%|%[A-Za-z]'
+      scope: constant.other.placeholder.ssh
+    - match: '\$\{[A-Za-z_][A-Za-z0-9_]*\}'
+      scope: variable.language.ssh
+  double-quoted:
+    - meta_scope: string.quoted.double.ssh
+    - match: '\\.'
+      scope: constant.character.escape.ssh
+    - match: '"'
+      scope: punctuation.definition.string.end.ssh
+      pop: true
+    - match: '$'
+      pop: true
+    - include: expansions
+  single-quoted:
+    - meta_scope: string.quoted.single.ssh
+    - match: "'"
+      scope: punctuation.definition.string.end.ssh
+      pop: true
+    - match: '$'
+      pop: true

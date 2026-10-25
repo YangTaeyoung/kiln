@@ -1,0 +1,19 @@
+%YAML 1.2
+---
+# Keep the bundled parser for comments, escapes, interpolation and multiline
+# quotes. Its assignment regex accepts at most one space before '='; this small
+# overlay handles ordinary spaced assignments as documented by Node.js:
+# https://nodejs.org/api/environment_variables.html#spacing
+name: DotENV
+hidden: true
+scope: source.kiln-env
+# Extensions are inherited from the bundled grammar by syntax::assets().
+contexts:
+  main:
+    - meta_scope: source.env
+    - match: '^[ \t]*(?:(export)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*(=)'
+      captures:
+        1: keyword.other.env
+        2: variable.other.env
+        3: keyword.operator.assignment.env
+    - include: scope:source.env

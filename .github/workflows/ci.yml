@@ -33,11 +33,12 @@ jobs:
           python3 scripts/test-make-appcast.py
       - name: Library unit tests
         run: KILN_PTY_HOST=0 cargo nextest run --locked --profile ci --workspace --lib
-      - name: Native IME regressions
+      - name: Native IME and document-opening regressions
         run: |
           members=$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; print(" ".join("-p " + p["name"] for p in json.load(sys.stdin)["packages"]))')
           cargo test --locked $members -p egui-winit --lib kiln_ime_tests
           cargo test --locked --workspace --test native_ime
+          cargo test --locked --workspace --test native_open_files
       - name: Integration tests
         run: |
           tests=$(for f in crates/kiln-editor/tests/*.rs crates/kiln-git/tests/*.rs; do printf -- '--test %s ' "$(basename "$f" .rs)"; done)
@@ -57,8 +58,9 @@ jobs:
         run: |
           sh -n install.sh
           bash -n scripts/bundle-macos.sh scripts/release-macos.sh
-          python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py scripts/configure-network-privacy.py scripts/prepare-updater-test.py
+          python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py scripts/configure-network-privacy.py scripts/prepare-updater-test.py scripts/configure-document-types.py scripts/update-completion-docker.py
           python3 scripts/test-network-privacy.py
+          python3 scripts/test-document-types.py
 
   windows:
     name: ${{ matrix.target.name }} ${{ matrix.part }}

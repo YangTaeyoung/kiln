@@ -1,63 +1,27 @@
-//! Bounded, local shell suggestions. No subprocess, history file, or network lookup.
+//! Cursor-attached shell completion with local arguments and bounded CLI help discovery.
 use std::path::Path;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Choice {
+    pub hint: String,
+    pub kind: ChoiceKind,
     pub label: String,
     pub description: String,
     pub buffer: String,
     pub cursor: usize,
 }
-const COMMANDS: &[(&str, &str)] = &[
-    ("cd", "디렉터리 이동"),
-    ("ls", "파일 목록 보기"),
-    ("git", "버전 관리"),
-    ("npm", "Node 패키지 관리"),
-    ("docker", "컨테이너 관리"),
-    ("cargo", "Rust 패키지 관리"),
-    ("mkdir", "디렉터리 만들기"),
-    ("pwd", "현재 경로 출력"),
-];
-fn options(command: &str) -> &'static [(&'static str, &'static str)] {
-    match command {
-        "git" => &[
-            ("status", "작업 트리 변경 사항 보기"),
-            ("diff", "변경 사항 비교"),
-            ("log", "커밋 기록 보기"),
-            ("switch", "브랜치 전환"),
-            ("add", "파일 변경 사항 스테이징"),
-            ("commit", "스테이징한 변경 사항 커밋"),
-            ("--help", "Git 도움말 열기"),
-        ],
-        "docker" => &[
-            ("ps", "컨테이너 목록 보기"),
-            ("images", "이미지 목록 보기"),
-            ("build", "이미지 빌드"),
-            ("run", "컨테이너 실행"),
-            ("compose", "Compose 서비스 관리"),
-            ("--help", "Docker 도움말 열기"),
-        ],
-        "npm" => &[
-            ("install", "의존성 설치"),
-            ("run", "패키지 스크립트 실행"),
-            ("test", "테스트 스크립트 실행"),
-            ("--help", "npm 도움말 열기"),
-        ],
-        "cargo" => &[
-            ("check", "실행 파일 생성 없이 검사"),
-            ("build", "패키지 빌드"),
-            ("test", "패키지 테스트 실행"),
-            ("run", "빌드 후 실행"),
-            ("--help", "Cargo 도움말 열기"),
-        ],
-        "ls" => &[
-            ("-a", "숨김 항목 포함"),
-            ("-l", "자세한 목록 형식 사용"),
-            ("-h", "읽기 쉬운 크기 표시"),
-        ],
-        "cd" => &[("..", "상위 디렉터리"), ("-", "이전 디렉터리")],
-        _ => &[],
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChoiceKind {
+    Command,
+    Subcommand,
+    Option,
+    Value,
+    Directory,
+    File,
+    Branch,
+    Script,
 }
+mod discovery;
+mod suggestions;
 /// Simple words only. Shell expressions are deliberately left to native completion.
 fn words(input: &str) -> Option<Vec<(usize, String)>> {
     let mut result = Vec::new();
@@ -66,7 +30,8 @@ fn words(input: &str) -> Option<Vec<(usize, String)>> {
     let mut quote = None;
     let mut escaped = false;
     let mut active = false;
-    for (i, ch) in input.char_indices() {
+    let mut chars = input.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
         if !active && !ch.is_whitespace() {
             start = i;
             active = true;
@@ -77,6 +42,16 @@ fn words(input: &str) -> Option<Vec<(usize, String)>> {
             continue;
         }
         if ch == '\\' && quote != Some('\'') {
+            // Double quotes preserve a backslash before ordinary characters.
+            // Only $, `, ", \\ and newline can be escaped in this context.
+            if quote == Some('"')
+                && chars
+                    .peek()
+                    .is_some_and(|(_, next)| !matches!(next, '$' | '`' | '"' | '\\' | '\n'))
+            {
+                word.push(ch);
+                continue;
+            }
             escaped = true;
             continue;
         }
@@ -96,6 +71,11 @@ fn words(input: &str) -> Option<Vec<(usize, String)>> {
             continue;
         }
         if matches!(ch, ';' | '|' | '&' | '$' | '`' | '(' | ')' | '<' | '>') {
+            return None;
+        }
+        // Leave home expansion to Zsh, while quoted/escaped literal ~ paths
+        // remain traversable after accepting a directory suggestion.
+        if ch == '~' && (word.is_empty() || word.ends_with('=')) {
             return None;
         }
         if ch.is_whitespace() {
@@ -120,7 +100,7 @@ fn words(input: &str) -> Option<Vec<(usize, String)>> {
 fn quoted(value: &str) -> String {
     if value
         .chars()
-        .all(|c| c.is_alphanumeric() || "/_-.".contains(c))
+        .all(|c| c.is_alphanumeric() || "/_-.:@%".contains(c))
     {
         value.into()
     } else {
@@ -133,95 +113,7 @@ pub fn candidates(
     cwd: &Path,
     native_commands: &[String],
 ) -> Vec<Choice> {
-    if buffer.len() > 4096 || buffer.contains(['\n', '\r']) {
-        return vec![];
-    }
-    let Some(byte) = buffer
-        .char_indices()
-        .map(|(i, _)| i)
-        .chain(std::iter::once(buffer.len()))
-        .nth(cursor)
-    else {
-        return vec![];
-    };
-    // Replacing a token before unconsumed text needs a full shell parser. Fail closed.
-    if byte != buffer.len() {
-        return vec![];
-    }
-    let Some(tokens) = words(buffer) else {
-        return vec![];
-    };
-    let Some((start, prefix)) = tokens.last() else {
-        return vec![];
-    };
-    let command = &tokens[0].1;
-    let mut raw = Vec::<(String, String)>::new();
-    if tokens.len() == 1 {
-        raw.extend(COMMANDS.iter().map(|(a, b)| (a.to_string(), b.to_string())));
-        raw.extend(
-            native_commands
-                .iter()
-                .filter(|n| !n.contains(['\n', '\r', '\0']))
-                .map(|n| (n.clone(), "설치된 명령".into())),
-        );
-    } else if command == "cd" || prefix.contains('/') {
-        let slash = prefix.rfind('/');
-        let (base, leaf) = slash
-            .map(|i| (&prefix[..=i], &prefix[i + 1..]))
-            .unwrap_or(("", prefix.as_str()));
-        // Tilde expansion is not guessed from the GUI's HOME; use the shell's native Tab.
-        if !base.starts_with('~') {
-            let dir = if Path::new(base).is_absolute() {
-                Path::new(base).to_path_buf()
-            } else {
-                cwd.join(base)
-            };
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.take(2048).flatten() {
-                    let name = entry.file_name();
-                    let Some(name) = name.to_str() else { continue };
-                    if !name.starts_with(leaf) || (!leaf.starts_with('.') && name.starts_with('.'))
-                    {
-                        continue;
-                    }
-                    let is_dir = entry.path().is_dir();
-                    if command == "cd" && !is_dir {
-                        continue;
-                    }
-                    if name.chars().any(char::is_control) {
-                        continue;
-                    }
-                    raw.push((
-                        format!("{base}{name}{}", if is_dir { "/" } else { "" }),
-                        if is_dir { "디렉터리" } else { "파일" }.into(),
-                    ));
-                }
-            }
-        }
-    } else {
-        raw.extend(
-            options(command)
-                .iter()
-                .map(|(a, b)| (a.to_string(), b.to_string())),
-        );
-    }
-    raw.retain(|(label, _)| label.starts_with(prefix));
-    raw.sort_by(|a, b| a.0.cmp(&b.0));
-    raw.dedup_by(|a, b| a.0 == b.0);
-    raw.into_iter()
-        .take(80)
-        .map(|(label, description)| {
-            let replacement = quoted(&label);
-            let buffer = format!("{}{}", &buffer[..*start], replacement);
-            let cursor = buffer.chars().count();
-            Choice {
-                label,
-                description,
-                buffer,
-                cursor,
-            }
-        })
-        .collect()
+    suggestions::candidates(buffer, cursor, cwd, native_commands)
 }
 #[cfg(test)]
 mod tests {
@@ -249,6 +141,144 @@ mod tests {
         assert_eq!(
             candidates("git st", 6, d.path(), &[])[0].buffer,
             "git status"
+        );
+    }
+
+    #[test]
+    fn command_context_offers_nested_subcommands_and_only_relevant_options() {
+        let dir = tempfile::tempdir().unwrap();
+        for (input, wanted) in [
+            ("git pu", "push"),
+            ("git commit --a", "--amend"),
+            ("docker compose u", "up"),
+            ("docker compose up --d", "--detach"),
+            ("cargo test --n", "--no-default-features"),
+            ("pnpm run ", "build"),
+        ] {
+            std::fs::write(
+                dir.path().join("package.json"),
+                r#"{"scripts":{"build":"echo fixture"}}"#,
+            )
+            .unwrap();
+            let rows = candidates(input, input.chars().count(), dir.path(), &[]);
+            assert!(
+                rows.iter().any(|r| r.label == wanted),
+                "{input:?}: {rows:?}"
+            );
+        }
+        for input in [
+            "git commit -m secret",
+            "git commit --message=secret",
+            "git switch $(touch bad)",
+            "TOKEN=secret git ",
+        ] {
+            assert!(
+                candidates(input, input.chars().count(), dir.path(), &[]).is_empty(),
+                "{input:?}"
+            );
+        }
+        let input = "git commit --amend --a";
+        assert!(
+            !candidates(input, input.chars().count(), dir.path(), &[])
+                .iter()
+                .any(|r| r.label == "--amend")
+        );
+    }
+
+    #[test]
+    fn quoted_inline_options_replace_the_complete_shell_word() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("plain notes.txt"), "fixture").unwrap();
+        for input in [
+            "docker compose \"--file=pl",
+            "docker compose '--file=pl",
+            "docker compose --file=\"pl",
+        ] {
+            let rows = candidates(input, input.chars().count(), dir.path(), &[]);
+            assert_eq!(
+                rows[0].buffer, "docker compose --file='plain notes.txt'",
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_equals_in_positional_and_option_paths_remain_completable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("a=b-dir")).unwrap();
+        std::fs::write(dir.path().join("a=b.txt"), "fixture").unwrap();
+        for (input, expected) in [
+            ("cd a=b", "cd 'a=b-dir/'"),
+            (
+                "docker compose --file a=b.t",
+                "docker compose --file 'a=b.txt'",
+            ),
+            (
+                "docker compose --file=a=b.t",
+                "docker compose --file='a=b.txt'",
+            ),
+        ] {
+            let rows = candidates(input, input.chars().count(), dir.path(), &[]);
+            assert!(
+                rows.iter().any(|r| r.buffer == expected),
+                "{input}: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn double_quoted_literal_backslashes_follow_shell_quoting() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("back\\slash")).unwrap();
+        std::fs::create_dir(dir.path().join("backslash")).unwrap();
+        let input = "cd \"back\\slash";
+        let rows = candidates(input, input.chars().count(), dir.path(), &[]);
+        assert_eq!(rows[0].buffer, "cd 'back\\slash/'");
+    }
+
+    #[test]
+    fn quoted_literal_tilde_directories_continue_without_home_expansion() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("~literal/child")).unwrap();
+        let input = "cd '~literal/'";
+        let rows = candidates(input, input.chars().count(), dir.path(), &[]);
+        assert_eq!(rows[0].buffer, "cd '~literal/child/'");
+        for input in ["cd ~literal/", "docker compose --file=~/"] {
+            assert!(candidates(input, input.chars().count(), dir.path(), &[]).is_empty());
+        }
+    }
+
+    #[test]
+    fn local_project_arguments_are_read_without_running_scripts_or_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git/refs/heads/feature")).unwrap();
+        std::fs::write(
+            dir.path().join(".git/refs/heads/feature/checkout"),
+            "0123456789012345678901234567890123456789\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"scripts":{"dev:web":"touch must-not-exist","build":"echo fixture"}}"#,
+        )
+        .unwrap();
+        for (input, expected) in [
+            ("git switch fe", "git switch feature/checkout"),
+            ("npm run dev", "npm run dev:web"),
+        ] {
+            let rows = candidates(input, input.chars().count(), dir.path(), &[]);
+            assert!(
+                rows.iter().any(|r| r.buffer == expected),
+                "{input:?}: {rows:?}"
+            );
+        }
+        assert!(!dir.path().join("must-not-exist").exists());
+        std::fs::write(dir.path().join("plain notes.txt"), "fixture").unwrap();
+        let input = "cat pl";
+        assert_eq!(
+            candidates(input, input.len(), dir.path(), &[])[0].buffer,
+            "cat 'plain notes.txt'"
         );
     }
 }
@@ -298,6 +328,7 @@ pub struct Popup {
     rx: Option<std::sync::mpsc::Receiver<Vec<Choice>>>,
     selected: usize,
     closed_revision: Option<u64>,
+    navigated: bool,
     #[cfg(test)]
     last_rect: Option<egui::Rect>,
 }
@@ -309,6 +340,7 @@ impl Popup {
         self.request = None;
         self.rows.clear();
         self.rx = None;
+        self.navigated = false;
     }
     pub fn ui(
         &mut self,
@@ -319,6 +351,7 @@ impl Popup {
         preview_enabled: bool,
         rect: egui::Rect,
         anchor: egui::Pos2,
+        font_size: f32,
     ) {
         let snapshot = conn.shell_completions.get(&session).cloned();
         if !allowed || snapshot.is_none() {
@@ -344,6 +377,7 @@ impl Popup {
             self.rx = Some(rx);
             self.rows.clear();
             self.selected = 0;
+            self.navigated = false;
         }
         if let Some(rx) = &self.rx {
             match rx.try_recv() {
@@ -358,74 +392,69 @@ impl Popup {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
         }
-        let engaged = self.request.as_ref().is_some_and(|r| r.explicit);
-        let loading = engaged && self.rx.is_some();
-        let ready = engaged && !self.rows.is_empty() && self.rx.is_none();
+        let explicit = self.request.as_ref().is_some_and(|r| r.explicit);
+        let engaged = explicit || self.navigated;
+        let loading = explicit && self.rx.is_some();
+        let ready = !self.rows.is_empty() && self.rx.is_none();
+        let terminal_focus = ui.memory(|m| m.focused());
         let mut moved = false;
         let mut accept = false;
         let mut dismiss = false;
         ui.input_mut(|input| {
-            input.events.retain(|e| match e {
+            input.events.retain(|event| match event {
                 egui::Event::Key {
                     key,
                     pressed: true,
                     modifiers,
                     ..
-                } if modifiers.is_none()
-                    && loading
-                    && matches!(
-                        key,
-                        egui::Key::Enter
-                            | egui::Key::Tab
-                            | egui::Key::ArrowUp
-                            | egui::Key::ArrowDown
-                    ) =>
-                {
-                    false
+                } if modifiers.is_none() => {
+                    if loading
+                        && matches!(
+                            key,
+                            egui::Key::Enter
+                                | egui::Key::Tab
+                                | egui::Key::ArrowUp
+                                | egui::Key::ArrowDown
+                        )
+                    {
+                        return false;
+                    }
+                    match key {
+                        egui::Key::Tab if ready => {
+                            accept = true;
+                            false
+                        }
+                        egui::Key::Enter if ready && engaged => {
+                            accept = true;
+                            false
+                        }
+                        egui::Key::ArrowDown if ready => {
+                            if engaged {
+                                self.selected = (self.selected + 1).min(self.rows.len() - 1);
+                            }
+                            self.navigated = true;
+                            moved = true;
+                            false
+                        }
+                        egui::Key::ArrowUp if ready && engaged => {
+                            self.selected = self.selected.saturating_sub(1);
+                            moved = true;
+                            false
+                        }
+                        egui::Key::Escape if ready || explicit => {
+                            dismiss = true;
+                            false
+                        }
+                        _ => {
+                            dismiss = true;
+                            true
+                        }
+                    }
                 }
-                egui::Event::Key {
-                    key: egui::Key::Escape,
-                    pressed: true,
-                    modifiers,
-                    ..
-                } if modifiers.is_none() && engaged => {
-                    dismiss = true;
-                    false
-                }
-                egui::Event::Key {
-                    key,
-                    pressed: true,
-                    modifiers,
-                    ..
-                } if modifiers.is_none() && ready => match key {
-                    egui::Key::ArrowDown => {
-                        moved = true;
-                        self.selected = (self.selected + 1).min(self.rows.len().saturating_sub(1));
-                        false
-                    }
-                    egui::Key::ArrowUp => {
-                        moved = true;
-                        self.selected = self.selected.saturating_sub(1);
-                        false
-                    }
-                    egui::Key::Tab | egui::Key::Enter => {
-                        accept = true;
-                        false
-                    }
-                    egui::Key::Escape => {
-                        dismiss = true;
-                        false
-                    }
-                    _ => {
-                        dismiss = true;
-                        true
-                    }
-                },
-                egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Ime(_) => {
-                    dismiss = true;
-                    true
-                }
-                egui::Event::Key { pressed: true, .. } => {
+                egui::Event::Text(_)
+                | egui::Event::Paste(_)
+                | egui::Event::Ime(_)
+                | egui::Event::Key { pressed: true, .. } => {
                     dismiss = true;
                     true
                 }
@@ -437,75 +466,78 @@ impl Popup {
             return;
         }
         let theme = kiln_common::Theme::current();
-        let frame = egui::Frame::popup(ui.style()).fill(theme.bg_elevated);
-        let margin = frame.total_margin().sum();
-        let outer_width = (rect.width() - 8.0).clamp(1.0, 436.0);
-        let outer_height = (rect.height() - 8.0).clamp(1.0, 260.0);
-        let width = (outer_width - margin.x).max(1.0);
-        let content_height = (outer_height - margin.y).max(1.0);
-        if !engaged && self.rows.is_empty() {
+        if !explicit && self.rows.is_empty() {
+            if self.rx.is_some() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(30));
+            }
             return;
         }
-        let height = outer_height;
+        let frame = egui::Frame::new()
+            .fill(theme.bg_elevated)
+            .stroke(egui::Stroke::new(1.0, theme.border))
+            .corner_radius(6)
+            .inner_margin(4.0);
+        let margin = frame.total_margin().sum();
+        let outer_width = (rect.width() - 8.0).clamp(1.0, 400.0);
+        let row_height = ui
+            .fonts_mut(|f| f.row_height(&egui::FontId::monospace(font_size)))
+            .max(16.0)
+            + 8.0;
+        let requested_height = self.rows.len().clamp(1, 7) as f32 * row_height + 42.0 + margin.y;
+        let outer_height = requested_height.min((rect.height() - 8.0).max(1.0));
+        let width = (outer_width - margin.x).max(1.0);
+        let content_height = (outer_height - margin.y).max(1.0);
         let pos = egui::pos2(
             anchor.x.clamp(
                 rect.left() + 4.0,
                 (rect.right() - outer_width - 4.0).max(rect.left() + 4.0),
             ),
-            if anchor.y + height < rect.bottom() {
-                anchor.y
+            if anchor.y + outer_height + 2.0 <= rect.bottom() {
+                anchor.y + 2.0
             } else {
-                (anchor.y - height - 16.0).max(rect.top() + 4.0)
+                (anchor.y - outer_height - row_height + 6.0).max(rect.top() + 4.0)
             },
         );
-        let popup_response=egui::Area::new(egui::Id::new(("shell-completion", session)))
+        let popup_response = egui::Area::new(egui::Id::new(("shell-completion", session)))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .constrain_to(rect)
             .show(ui.ctx(), |ui| {
                 frame.show(ui, |ui| {
                     ui.set_width(width);
-                    egui::ScrollArea::vertical().id_salt("completion-body").max_height(content_height).min_scrolled_height(0.0).show(ui,|ui|{
-                        ui.set_width(width);
-                        ui.label(egui::RichText::new(kiln_common::i18n::tr("명령 자동완성")).strong());
-                        if self.rx.is_some() {
-                            ui.label(kiln_common::i18n::tr("추천 항목을 찾는 중…"));
-                            ui.ctx()
-                                .request_repaint_after(std::time::Duration::from_millis(30));
-                        } else if self.rows.is_empty() {
-                            ui.label(kiln_common::i18n::tr("추천 항목이 없습니다. Esc로 닫거나 Tab으로 셸 자동완성을 사용하세요."));
-                        }
-                        ui.scope(|ui| {
-                                for (i, row) in self.rows.iter().enumerate() {
-                                    let response = ui
-                                        .selectable_label(self.selected == i, &row.label)
-                                        .on_hover_text(kiln_common::i18n::tr(&row.description));
-                                    if self.selected == i && moved {
-                                        response.scroll_to_me(Some(egui::Align::Center));
-                                    }
-                                    if response.clicked() {
-                                        self.selected = i;
-                                        accept = true;
-                                    }
-                                }
-                            });
-                        if let Some(row) = self.rows.get(self.selected) {
-                            ui.label(
-                                egui::RichText::new(kiln_common::i18n::tr(&row.description))
-                                    .small()
-                                    .color(theme.text_dim),
-                            );
-                        }
-                        ui.label(
-                            egui::RichText::new(if engaged {
-                                kiln_common::i18n::tr("↑↓ 선택 · Tab 삽입 · Esc 닫기")
-                            } else {
-                                kiln_common::i18n::tr("Ctrl+Space로 선택 · Tab은 셸 자동완성")
-                            })
-                            .small()
-                            .color(theme.text_dim),
-                        );
-                    });
+                    ui.set_min_height(content_height);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    let list_height = (content_height - 42.0).max(1.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("completion-list")
+                        .max_height(list_height)
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(0.0)
+                        .show(ui, |ui| {
+                            ui.set_width(width);
+                            if self.rx.is_some() {
+                                ui.label(kiln_common::i18n::tr("추천 항목을 찾는 중…"));
+                                ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+                            } else if self.rows.is_empty() {
+                                ui.label(kiln_common::i18n::tr("추천 항목이 없습니다. Esc로 닫거나 Tab으로 셸 자동완성을 사용하세요."));
+                            }
+                            for (i, row) in self.rows.iter().enumerate() {
+                                let response = completion_row(ui, row, self.selected == i, width, row_height, font_size, &theme);
+                                if moved && self.selected == i { response.scroll_to_me(Some(egui::Align::Center)); }
+                                if response.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) { self.selected = i; }
+                                if response.clicked() { self.selected = i; accept = true; }
+                            }
+                        });
+                    ui.separator();
+                    if let Some(row) = self.rows.get(self.selected) {
+                        ui.add(egui::Label::new(egui::RichText::new(kiln_common::i18n::tr(&row.description))
+                            .size(12.0).color(theme.text_dim)).truncate());
+                    }
+                    let keys = if engaged { "↑↓ 선택 · Tab/Enter 삽입 · Esc 닫기" }
+                        else { "Tab 삽입 · ↓ 선택 · Enter 실행 · Esc 닫기" };
+                    ui.add(egui::Label::new(egui::RichText::new(kiln_common::i18n::tr(keys))
+                        .size(11.0).color(theme.text_faint)).truncate());
                 });
             });
         #[cfg(test)]
@@ -515,6 +547,9 @@ impl Popup {
         #[cfg(not(test))]
         let _ = popup_response;
         if accept {
+            if let Some(id) = terminal_focus {
+                ui.memory_mut(|m| m.request_focus(id));
+            }
             if let (Some(request), Some(row)) = (&self.request, self.rows.get(self.selected)) {
                 conn.send(kiln_proto::ClientMsg::ApplyShellCompletion {
                     session,
@@ -528,6 +563,101 @@ impl Popup {
     }
 }
 
+fn completion_row(
+    ui: &mut egui::Ui,
+    row: &Choice,
+    selected: bool,
+    width: f32,
+    height: f32,
+    font_size: f32,
+    theme: &kiln_common::Theme,
+) -> egui::Response {
+    use kiln_common::icons::{self, Icon};
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            true,
+            selected,
+            &row.label,
+        )
+    });
+    if ui.is_rect_visible(rect) {
+        if selected {
+            ui.painter()
+                .rect_filled(rect, 3, ui.visuals().selection.bg_fill);
+        } else if response.hovered() {
+            ui.painter().rect_filled(rect, 3, theme.bg_hover);
+        }
+        let icon = match row.kind {
+            ChoiceKind::Directory => Icon::Folder,
+            ChoiceKind::File => Icon::File,
+            ChoiceKind::Branch => Icon::Branch,
+            ChoiceKind::Script => Icon::Play,
+            ChoiceKind::Option => Icon::Filter,
+            ChoiceKind::Value => Icon::Tag,
+            _ => Icon::Terminal,
+        };
+        icons::paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 12.0, rect.center().y),
+                egui::vec2(14.0, 14.0),
+            ),
+            icon,
+            if selected {
+                ui.visuals().selection.stroke.color
+            } else {
+                theme.text_dim
+            },
+        );
+        let mut job = egui::text::LayoutJob::default();
+        let font = egui::FontId::monospace(font_size);
+        let color = if selected {
+            ui.visuals().selection.stroke.color
+        } else {
+            theme.text
+        };
+        job.append(
+            &row.label,
+            0.0,
+            egui::TextFormat {
+                font_id: font.clone(),
+                color,
+                ..Default::default()
+            },
+        );
+        if !row.hint.is_empty() {
+            job.append(
+                &format!(" {}", row.hint),
+                0.0,
+                egui::TextFormat {
+                    font_id: font,
+                    color: if selected {
+                        color.gamma_multiply(0.75)
+                    } else {
+                        theme.text_faint
+                    },
+                    ..Default::default()
+                },
+            );
+        }
+        job.wrap = egui::text::TextWrapping {
+            max_width: (width - 32.0).max(1.0),
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        };
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        ui.painter().galley(
+            egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y / 2.0),
+            galley,
+            color,
+        );
+    }
+    response
+}
+
 #[cfg(test)]
 mod popup_tests {
     use super::*;
@@ -537,7 +667,7 @@ mod popup_tests {
         for theme_name in ["kiln-dark", "kiln-light"] {
             kiln_common::Theme::set_current(theme_name);
             for (explicit, with_rows, loading, consumed) in [
-                (false, true, false, false),
+                (false, true, false, true),
                 (true, false, false, false),
                 (true, true, false, true),
                 (true, false, true, true),
@@ -584,6 +714,7 @@ mod popup_tests {
                             true,
                             rect,
                             rect.left_top() + egui::vec2(12.0, 24.0),
+                            13.5,
                         );
                         state.2 = ui.input(|i| {
                             i.events.iter().any(|e| {
@@ -604,7 +735,10 @@ mod popup_tests {
                 if explicit && with_rows {
                     h.render()
                         .unwrap()
-                        .save(std::env::temp_dir().join(format!("kiln-shell-completion-{theme_name}.png")))
+                        .save(
+                            std::env::temp_dir()
+                                .join(format!("kiln-shell-completion-{theme_name}.png")),
+                        )
                         .unwrap();
                 }
                 h.event(egui::Event::Key {
@@ -646,6 +780,8 @@ mod short_popup_tests {
                 let rows = (0..12)
                     .map(|i| Choice {
                         label: format!("fixture-option-{i:02}"),
+                        hint: String::new(),
+                        kind: ChoiceKind::Option,
                         description: "작업 트리 변경 사항 보기".into(),
                         buffer: format!("git fixture-{i}"),
                         cursor: 13,
@@ -679,6 +815,7 @@ mod short_popup_tests {
                                 true,
                                 s.2,
                                 s.2.left_top() + egui::vec2(8.0, 18.0),
+                                13.5,
                             );
                         },
                         (popup, conn, egui::Rect::NOTHING),
@@ -689,6 +826,10 @@ mod short_popup_tests {
                     h.state().2.expand(0.5).contains_rect(rect),
                     "popup {rect:?} exceeds {:?}",
                     h.state().2
+                );
+                assert!(
+                    rect.contains_rect(h.get_by_label("작업 트리 변경 사항 보기").rect()),
+                    "the selected command description must remain visible while the list scrolls"
                 );
                 for _ in 0..7 {
                     h.event(egui::Event::Key {
@@ -754,7 +895,7 @@ mod dismissal_tests {
                 }
                 kiln_common::Theme::current().apply(ui.ctx());
                 let rect = ui.available_rect_before_wrap();
-                s.0.ui(ui, &mut s.1, 1, s.2, true, rect, rect.left_top());
+                s.0.ui(ui, &mut s.1, 1, s.2, true, rect, rect.left_top(), 13.5);
             },
             (popup, conn, true),
         );

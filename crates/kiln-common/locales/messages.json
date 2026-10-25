@@ -8850,7 +8850,7 @@
     "zh-CN": "无法加载元数据"
   },
   "↑↓ 선택 · Tab/Enter 삽입 · Esc 닫기": {
-    "en": "↑↓ select · Tab/Enter insert · Esc close",
+    "en": "↑↓ choose · Tab/Enter insert · Esc close",
     "ja": "↑↓ 選択 · Tab/Enter 挿入 · Esc 閉じる",
     "zh-CN": "↑↓ 选择 · Tab/Enter 插入 · Esc 关闭"
   },
@@ -11708,5 +11708,215 @@
     "en": "Verifying the sign-in code",
     "ja": "ログインコードを確認しています",
     "zh-CN": "正在验证登录代码"
+  },
+  "명령 도움말 보기": {
+    "en": "Show command help",
+    "ja": "コマンドのヘルプを表示",
+    "zh-CN": "显示命令帮助"
+  },
+  "도구 버전 보기": {
+    "en": "Show tool version",
+    "ja": "ツールのバージョンを表示",
+    "zh-CN": "显示工具版本"
+  },
+  "로컬 파일 경로": {
+    "en": "Local file path",
+    "ja": "ローカルファイルのパス",
+    "zh-CN": "本地文件路径"
+  },
+  "로컬 Git 브랜치": {
+    "en": "Local Git branch",
+    "ja": "ローカル Git ブランチ",
+    "zh-CN": "本地 Git 分支"
+  },
+  "프로젝트 패키지 스크립트": {
+    "en": "Project package script",
+    "ja": "プロジェクトのパッケージスクリプト",
+    "zh-CN": "项目软件包脚本"
+  },
+  "명령 옵션": {
+    "en": "Command option",
+    "ja": "コマンドオプション",
+    "zh-CN": "命令选项"
+  },
+  "원격 저장소에 변경 사항 전송": {
+    "en": "Send changes to a remote repository",
+    "ja": "変更をリモートリポジトリに送信",
+    "zh-CN": "将更改发送到远程仓库"
+  },
+  "원격 변경 사항 가져와 통합": {
+    "en": "Fetch and integrate remote changes",
+    "ja": "リモートの変更を取得して統合",
+    "zh-CN": "获取并整合远程更改"
+  },
+  "저장소 복제": {
+    "en": "Clone a repository",
+    "ja": "リポジトリを複製",
+    "zh-CN": "克隆仓库"
+  },
+  "원격 저장소 정보 가져오기": {
+    "en": "Fetch remote repository data",
+    "ja": "リモートリポジトリの情報を取得",
+    "zh-CN": "获取远程仓库信息"
+  },
+  "브랜치 병합": {
+    "en": "Merge a branch",
+    "ja": "ブランチをマージ",
+    "zh-CN": "合并分支"
+  },
+  "작업 트리 파일 복원": {
+    "en": "Restore working tree files",
+    "ja": "作業ツリーのファイルを復元",
+    "zh-CN": "恢复工作区文件"
+  },
+  "커밋 메시지 지정": {
+    "en": "Set the commit message",
+    "ja": "コミットメッセージを指定",
+    "zh-CN": "指定提交消息"
+  },
+  "마지막 커밋 수정": {
+    "en": "Amend the last commit",
+    "ja": "最後のコミットを修正",
+    "zh-CN": "修改最后一次提交"
+  },
+  "스테이징한 변경 사항": {
+    "en": "Staged changes",
+    "ja": "ステージした変更",
+    "zh-CN": "已暂存的更改"
+  },
+  "모든 항목 포함": {
+    "en": "Include all entries",
+    "ja": "すべての項目を含める",
+    "zh-CN": "包括所有项"
+  },
+  "새 브랜치 만들기": {
+    "en": "Create a branch",
+    "ja": "ブランチを作成",
+    "zh-CN": "创建分支"
+  },
+  "간결한 출력": {
+    "en": "Short output",
+    "ja": "簡潔な出力",
+    "zh-CN": "简洁输出"
+  },
+  "커밋을 한 줄씩 표시": {
+    "en": "Show one line per commit",
+    "ja": "コミットを一行ずつ表示",
+    "zh-CN": "每次提交显示一行"
+  },
+  "작업 변경 사항 임시 보관": {
+    "en": "Temporarily store working changes",
+    "ja": "作業中の変更を一時保存",
+    "zh-CN": "暂存工作更改"
+  },
+  "백그라운드에서 실행": {
+    "en": "Run in the background",
+    "ja": "バックグラウンドで実行",
+    "zh-CN": "在后台运行"
+  },
+  "출력을 계속 따라가기": {
+    "en": "Follow output",
+    "ja": "出力を追跡",
+    "zh-CN": "持续跟踪输出"
+  },
+  "실행 중인 서비스 중지": {
+    "en": "Stop running services",
+    "ja": "実行中のサービスを停止",
+    "zh-CN": "停止运行中的服务"
+  },
+  "의존 서비스 제외": {
+    "en": "Skip dependent services",
+    "ja": "依存サービスを除外",
+    "zh-CN": "跳过依赖服务"
+  },
+  "서비스 로그 보기": {
+    "en": "Show service logs",
+    "ja": "サービスのログを表示",
+    "zh-CN": "显示服务日志"
+  },
+  "서비스에서 명령 실행": {
+    "en": "Execute a command in a service",
+    "ja": "サービスでコマンドを実行",
+    "zh-CN": "在服务中执行命令"
+  },
+  "서비스 다시 시작": {
+    "en": "Restart services",
+    "ja": "サービスを再起動",
+    "zh-CN": "重启服务"
+  },
+  "종료 후 컨테이너 제거": {
+    "en": "Remove the container after exit",
+    "ja": "終了後にコンテナを削除",
+    "zh-CN": "退出后删除容器"
+  },
+  "릴리스 프로필 사용": {
+    "en": "Use the release profile",
+    "ja": "リリースプロファイルを使用",
+    "zh-CN": "使用发布配置"
+  },
+  "Cargo 기능 선택": {
+    "en": "Select Cargo features",
+    "ja": "Cargo の機能を選択",
+    "zh-CN": "选择 Cargo 功能"
+  },
+  "기본 기능 제외": {
+    "en": "Disable default features",
+    "ja": "デフォルトの機能を無効化",
+    "zh-CN": "禁用默认功能"
+  },
+  "소스 코드 서식 정리": {
+    "en": "Format source code",
+    "ja": "ソースコードを整形",
+    "zh-CN": "格式化源代码"
+  },
+  "프로젝트 문서 생성": {
+    "en": "Build project documentation",
+    "ja": "プロジェクトのドキュメントを生成",
+    "zh-CN": "生成项目文档"
+  },
+  "파일 내용 보기": {
+    "en": "Read a file",
+    "ja": "ファイルを表示",
+    "zh-CN": "显示文件"
+  },
+  "파일을 페이지로 보기": {
+    "en": "View a file by page",
+    "ja": "ファイルをページ単位で表示",
+    "zh-CN": "分页查看文件"
+  },
+  "파일 또는 폴더 열기": {
+    "en": "Open a file or folder",
+    "ja": "ファイルまたはフォルダを開く",
+    "zh-CN": "打开文件或文件夹"
+  },
+  "파일 복사": {
+    "en": "Copy files",
+    "ja": "ファイルをコピー",
+    "zh-CN": "复制文件"
+  },
+  "파일 이동": {
+    "en": "Move files",
+    "ja": "ファイルを移動",
+    "zh-CN": "移动文件"
+  },
+  "Tab 삽입 · ↓ 선택 · Enter 실행 · Esc 닫기": {
+    "en": "Tab insert · ↓ choose · Enter run · Esc close",
+    "ja": "Tab 挿入 · ↓ 選択 · Enter 実行 · Esc 閉じる",
+    "zh-CN": "Tab 插入 · ↓ 选择 · Enter 执行 · Esc 关闭"
+  },
+  "입력 중인 명령, 옵션과 경로를 제안합니다. Tab으로 삽입하고 ↓로 목록을 선택하세요.": {
+    "en": "Suggest commands, options and paths as you type. Insert with Tab or choose with ↓.",
+    "ja": "入力中のコマンド、オプション、パスを提案します。Tab で挿入、↓ で選択します。",
+    "zh-CN": "输入时建议命令、选项和路径。按 Tab 插入，按 ↓ 选择。"
+  },
+  "명령과 옵션은 입력 중 표시됩니다. Tab으로 삽입, ↓로 선택, Esc로 닫습니다. 목록을 선택하기 전 Enter는 원래 명령을 실행합니다. Ctrl+Space로 다시 열 수 있습니다.": {
+    "en": "Commands and options appear as you type. Tab inserts, ↓ selects and Esc closes. Enter runs the original command until you select the menu. Ctrl+Space reopens it.",
+    "ja": "入力中にコマンドとオプションを表示します。Tab で挿入、↓ で選択、Esc で閉じます。一覧を選ぶ前の Enter は元のコマンドを実行します。Ctrl+Space で再表示します。",
+    "zh-CN": "输入时显示命令和选项。Tab 插入，↓ 选择，Esc 关闭。选择列表前，Enter 执行原命令。Ctrl+Space 可重新打开。"
+  },
+  "명령 자동완성: Zsh에서 입력하면 후보가 표시됩니다. Tab으로 삽입하거나 Ctrl+Space로 다시 여세요.": {
+    "en": "Command completion: type in Zsh to see suggestions. Insert with Tab or reopen with Ctrl+Space.",
+    "ja": "コマンド補完：Zsh で入力すると候補を表示します。Tab で挿入、Ctrl+Space で再表示します。",
+    "zh-CN": "命令补全：在 Zsh 中输入时显示建议。按 Tab 插入，Ctrl+Space 重新打开。"
   }
 }

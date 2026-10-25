@@ -10,7 +10,7 @@ use syntect::highlighting::{
     Color, FontStyle, Highlighter, ScopeSelectors, StyleModifier, Theme as SynTheme, ThemeItem,
     ThemeSettings,
 };
-use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::parsing::{SyntaxDefinition, SyntaxReference, SyntaxSet};
 
 /// 하이라이트에 필요한 전역 자산(문법 세트).
 pub struct SyntaxAssets {
@@ -23,7 +23,28 @@ static HIGHLIGHTERS: Mutex<Vec<(&'static str, &'static Highlighter<'static>)>> =
 
 /// 문법 세트를 (필요하면 로드해서) 돌려준다.
 pub fn assets() -> &'static SyntaxAssets {
-    ASSETS.get_or_init(|| SyntaxAssets { set: two_face::syntax::extra_newlines() })
+    ASSETS.get_or_init(|| {
+        let mut builder = two_face::syntax::extra_newlines().into_builder();
+        // Append focused overrides while preserving the bundled parsers/includes.
+        for source in [
+            include_str!("../grammars/DotENV.sublime-syntax"),
+            include_str!("../grammars/SSH Common.sublime-syntax"),
+            include_str!("../grammars/SSH Config.sublime-syntax"),
+            include_str!("../grammars/SSHD Config.sublime-syntax"),
+        ] {
+            let mut syntax = SyntaxDefinition::load_from_str(source, true, None)
+                .expect("valid bundled configuration grammar");
+            if syntax.name == "DotENV" {
+                syntax.file_extensions = builder.syntaxes().iter()
+                    .find(|s| s.name == "DotENV").expect("bundled DotENV grammar")
+                    .file_extensions.clone();
+            }
+            builder.add(syntax);
+        }
+        SyntaxAssets {
+            set: builder.build(),
+        }
+    })
 }
 
 /// 현재 앱 테마(`Theme::current()`)에 맞춘 syntect 하이라이터.
@@ -102,12 +123,15 @@ pub fn build_theme(t: &Theme) -> SynTheme {
         ("storage.type.function, storage.type.struct, storage.type.enum, storage.type.impl, storage.type.trait, storage.type.class, storage.type.module, storage.type.type", t.purple, FontStyle::empty()),
         ("entity.name.macro, support.macro, meta.macro entity.name, entity.name.function.macro", cyan, FontStyle::empty()),
         ("variable.parameter", mix(t.text, t.orange, 0.55), FontStyle::empty()),
+        // Bundled DotENV leaves bare values in the root scope; color keys separately.
+        ("source.env", t.green, FontStyle::empty()),
+        ("variable.other.env", t.blue, FontStyle::empty()),
         ("variable.language, variable.other.readwrite.instance", t.red, FontStyle::ITALIC),
         ("entity.name.tag, meta.tag.sgml, punctuation.definition.tag", t.red, FontStyle::empty()),
         ("entity.other.attribute-name", t.orange, FontStyle::empty()),
         ("entity.name.namespace, entity.name.module, meta.path entity.name", mix(t.text, t.yellow, 0.4), FontStyle::empty()),
         ("meta.annotation, meta.attribute, punctuation.definition.annotation, entity.name.attribute, storage.modifier.attribute", mix(t.text_dim, t.yellow, 0.4), FontStyle::empty()),
-        ("support.type.property-name, meta.mapping.key string, entity.name.tag.yaml, meta.object-literal.key", t.blue, FontStyle::empty()),
+        ("support.type.property-name, meta.mapping.key string.quoted, entity.name.tag.yaml, meta.object-literal.key", t.blue, FontStyle::empty()),
         ("entity.name.section, markup.heading, markup.heading punctuation.definition.heading", t.blue, FontStyle::BOLD),
         ("entity.name.label, entity.name.lifetime, storage.modifier.lifetime, punctuation.definition.lifetime", t.orange, FontStyle::ITALIC),
         ("markup.bold", t.orange, FontStyle::BOLD),
@@ -148,12 +172,45 @@ pub fn build_theme(t: &Theme) -> SynTheme {
 
 /// 경로(파일 이름·확장자)와 첫 줄로 문법을 찾는다. 찾지 못하면 `None`(일반 텍스트).
 pub fn detect(path: &Path, first_line: &str) -> Option<&'static SyntaxReference> {
+    detect_path(path)
+        .or_else(|| detect_first_line(first_line))
+        .and_then(non_plain)
+}
+
+/// Keep a recognized Plain Text extension here: it must also win over content
+/// inference. Only the public result turns that grammar into `None`.
+fn detect_path(path: &Path) -> Option<&'static SyntaxReference> {
     let set = &assets().set;
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if let Some(s) = set.find_syntax_by_extension(name) {
-        return non_plain(s);
-    }
     let lower = name.to_ascii_lowercase();
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let dir_is = |p: &Path, expected: &str| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case(expected))
+    };
+    let snippet = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_none_or(|e| matches!(e.to_ascii_lowercase().as_str(), "conf" | "config" | "inc"));
+    // A .conf suffix alone is ambiguous. Recognize OpenSSH's explicit names and
+    // established include directories before looking up generic extensions.
+    let ssh = if lower == "sshd_config"
+        || (snippet && parent.ancestors().any(|p| dir_is(p, "sshd_config.d")))
+    {
+        Some("SSHD Config")
+    } else if lower == "ssh_config"
+        || (lower == "config" && dir_is(parent, ".ssh"))
+        || (snippet
+            && parent.ancestors().any(|p| {
+                dir_is(p, "ssh_config.d")
+                    || (dir_is(p, "config.d") && p.parent().is_some_and(|p| dir_is(p, ".ssh")))
+            }))
+    {
+        Some("SSH Config")
+    } else {
+        None
+    };
     let special = match lower.as_str() {
         "dockerfile" | "containerfile" => Some("Dockerfile"),
         "makefile" | "gnumakefile" | "justfile" => Some("Makefile"),
@@ -161,14 +218,33 @@ pub fn detect(path: &Path, first_line: &str) -> Option<&'static SyntaxReference>
         ".zshrc" | ".bashrc" | ".profile" | ".zprofile" | ".bash_profile" | ".envrc" => {
             Some("Bourne Again Shell (bash)")
         }
-        _ if lower.starts_with("dockerfile.") || lower.ends_with(".dockerfile") => Some("Dockerfile"),
-        _ if lower.starts_with(".env") => Some("DotENV"),
+        ".editorconfig" | ".npmrc" => Some("INI"),
+        ".eslintrc" | ".prettierrc" | ".babelrc" | ".swcrc" | ".jshintrc" | ".jscsrc"
+        | ".stylelintrc" | ".bowerrc" | ".hintrc" => Some("JSON"),
+        "config" | "config.worktree" if dir_is(parent, ".git") => Some("Git Config"),
+        _ if lower.starts_with("dockerfile.")
+            || lower.starts_with("containerfile.")
+            || lower.ends_with(".dockerfile") =>
+        {
+            Some("Dockerfile")
+        }
+        _ if lower == ".env" || lower.strip_prefix(".env.").is_some_and(|s| !s.is_empty()) => {
+            Some("DotENV")
+        }
         _ => None,
     };
-    if let Some(n) = special.and_then(|n| set.find_syntax_by_name(n)) {
+    if let Some(n) = ssh.or(special).and_then(|n| set.find_syntax_by_name(n)) {
         return Some(n);
     }
-    let ext_override = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    if let Some(s) = set.find_syntax_by_extension(name) {
+        return Some(s);
+    }
+    let ext_override = match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("jsonc" | "json5") => Some("JSON"),
         Some("mdx") => Some("Markdown"),
         Some("h") => Some("C++"),
@@ -189,10 +265,66 @@ pub fn detect(path: &Path, first_line: &str) -> Option<&'static SyntaxReference>
             .find_syntax_by_extension(rest)
             .or_else(|| set.find_syntax_by_extension(&rest.to_ascii_lowercase()));
         if let Some(s) = ext_syntax {
-            return non_plain(s);
+            return Some(s);
         }
     }
-    set.find_syntax_by_first_line(first_line).and_then(non_plain)
+    None
+}
+
+fn detect_first_line(first_line: &str) -> Option<&'static SyntaxReference> {
+    let first_line = first_line.trim_start_matches('\u{feff}');
+    let set = &assets().set;
+    let Some(command) = first_line.strip_prefix("#!") else {
+        return set.find_syntax_by_first_line(first_line);
+    };
+    // Match the executable, not arbitrary interpreter names in an argument or
+    // path. Handle the usual env options, assignments and split-string shebangs.
+    let mut words = command.split_whitespace();
+    let mut executable = words.next()?.rsplit('/').next()?;
+    if executable == "env" {
+        loop {
+            executable = words.next()?;
+            if matches!(executable, "-u" | "--unset" | "-C" | "--chdir") {
+                words.next()?;
+            } else if !executable.starts_with('-') && !executable.contains('=') {
+                executable = executable.rsplit('/').next()?;
+                break;
+            }
+        }
+    }
+    let versioned = |base: &str| {
+        executable.strip_prefix(base).is_some_and(|v| {
+            v.is_empty()
+                || (v.starts_with(|c: char| c.is_ascii_digit())
+                    && v.split('.')
+                        .all(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit())))
+        })
+    };
+    let language = match executable {
+        _ if versioned("python") || versioned("pypy") => "Python",
+        _ if versioned("ruby") || executable == "jruby" => "Ruby",
+        "node" | "nodejs" | "bun" | "deno" | "js" => "JavaScript",
+        "sh" | "bash" | "zsh" | "ash" | "dash" | "ksh" | "tcsh" => "Bourne Again Shell (bash)",
+        "fish" => "Fish",
+        _ if versioned("perl") => "Perl",
+        _ if versioned("lua") || executable == "luajit" => "Lua",
+        _ if versioned("php") => "PHP",
+        _ if versioned("julia") => "Julia",
+        "awk" | "gawk" | "mawk" => "AWK",
+        "osascript" => "AppleScript",
+        "dmd" | "gdmd" => "D",
+        "erlang" | "escript" => "Erlang",
+        "make" => "Makefile",
+        "coffee" => "CoffeeScript",
+        "crystal" => "Crystal",
+        "elixir" | "elixirc" | "iex" => "Elixir",
+        "jq" | "gojq" | "jaq" | "yq" | "xq" => "JQ",
+        "pwsh" | "powershell" => "PowerShell",
+        "Rscript" => "R",
+        "swift" => "Swift",
+        _ => return None,
+    };
+    set.find_syntax_by_name(language)
 }
 
 fn non_plain(s: &'static SyntaxReference) -> Option<&'static SyntaxReference> {
@@ -300,21 +432,31 @@ mod tests {
 
 /// Bounded, conservative content detection. Explicit filenames/extensions take precedence.
 pub fn detect_document(path: &Path, text: &str) -> Option<&'static SyntaxReference> {
+    if let Some(s) = detect_path(path) {
+        return non_plain(s);
+    }
     let sample: String = text.chars().take(8192).collect();
-    let first = sample.lines().next().unwrap_or("").trim_start_matches('\u{feff}');
-    if let Some(s) = detect(path, "") { return Some(s); }
+    let first = sample
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('\u{feff}');
     let trimmed = sample.trim_start_matches('\u{feff}').trim_start();
-    let name = if trimmed.starts_with("#!/") {
-        let executable = first.split_whitespace().collect::<Vec<_>>();
-        if executable.iter().any(|s| s.contains("python")) { "Python" }
-        else if executable.iter().any(|s| s.ends_with("node") || s.ends_with("nodejs")) { "JavaScript" }
-        else if executable.iter().any(|s| s.ends_with("ruby")) { "Ruby" }
-        else { return detect(path, first); }
-    } else if trimmed.starts_with("<?xml") { "XML" }
-    else if trimmed.to_ascii_lowercase().starts_with("<!doctype html") { "HTML" }
-    else if trimmed.starts_with("<?php") { "PHP" }
-    else if (trimmed.starts_with('{') || trimmed.starts_with('[')) && serde_json::from_str::<serde_json::Value>(trimmed).is_ok() { "JSON" }
-    else { return detect(path,first); };
+    let name = if first.starts_with("#!") {
+        return detect_first_line(first).and_then(non_plain);
+    } else if trimmed.starts_with("<?xml") {
+        "XML"
+    } else if trimmed.to_ascii_lowercase().starts_with("<!doctype html") {
+        "HTML"
+    } else if trimmed.starts_with("<?php") {
+        "PHP"
+    } else if (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
+    {
+        "JSON"
+    } else {
+        return None;
+    };
     assets().set.find_syntax_by_name(name)
 }
 

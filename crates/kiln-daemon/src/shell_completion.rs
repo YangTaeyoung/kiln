@@ -234,6 +234,12 @@ mod pty_tests {
         writer.write_all(b"\x15git st").unwrap();
         let preview = request_mode(&mut reader, false, Some("git st"));
         assert_eq!(preview.buffer, "git st");
+        writer.write_all(b"\x15ls --").unwrap();
+        let options = request_mode(&mut reader, false, Some("ls --"));
+        assert!(options.commands.iter().any(|path| Path::new(path).is_absolute() && Path::new(path).file_name().is_some_and(|name| name == "ls")), "native executable path must come from the shell: {options:?}");
+        writer.write_all(b"\x15docker compose --project-directory ./").unwrap();
+        let nested = request_mode(&mut reader, false, Some("docker compose --project-directory ./"));
+        assert_eq!(nested.cwd, options.cwd);
         writer.write_all(b"\x15exit\r").unwrap();
     }
 }

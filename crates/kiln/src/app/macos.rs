@@ -6,6 +6,9 @@
 //! resolving edits the user can retry logout.
 //! https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/AppArchitecture/Tasks/GracefulAppTermination.html
 
+mod open_files;
+pub(super) use open_files::{prepare_open_file_events, has_open_requests, take_open_requests, finish_open_request};
+
 use kiln_common::i18n::tr;
 use objc2::{sel, Encode, ClassType, rc::Retained, runtime::ClassBuilder};
 use std::cell::RefCell;
@@ -33,6 +36,7 @@ use objc2_foundation::{MainThreadMarker, NSObject, NSString};
 
 pub(super) fn install_quit_guard(ctx: &egui::Context) {
     let _ = APP_CONTEXT.set(ctx.clone());
+    open_files::attach_open_file_context(ctx);
     let Some(main_thread) = MainThreadMarker::new() else {
         return;
     };
