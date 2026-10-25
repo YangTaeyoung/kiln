@@ -93,3 +93,27 @@ latest Releases page; the browser does not guess CPU architecture or start a dow
 Localized labels live in `assets/site-i18n.js` and are included in every published
 page by `build-site.py`. The controls work independently of the animation libraries.
 Run `node --test site/_build/downloads.test.cjs` for platform detection fixtures.
+
+## Crawler access and Search Console
+
+`_build/robots.txt` is the published robots policy. Its wildcard permits every crawler,
+including search engines and unlisted AI systems; explicit OpenAI, Anthropic, Perplexity
+and Google-Extended entries make AI search/training/user-fetch permission clear. The
+public site is served directly by GitHub Pages through a DNS-only CNAME, so Cloudflare
+proxy bot controls do not apply to its requests. Recheck that before any DNS/proxy change.
+
+The Search Console property is scoped to `https://kiln.melona.cloud/`. The public
+`google-site-verification` meta tag in `index.html` proves ownership; preserve it across
+rebuilds. This is an intentionally public ownership proof, not a private API credential.
+Submit `https://kiln.melona.cloud/sitemap.xml` in that property's Sitemaps report.
+A successful submission confirms discovery, not that all 48 URLs are indexed.
+
+`check-seo.py` checks the ownership proof on every localized landing, sitemap discovery,
+and crawl permission for search bots, named AI bots and an unlisted crawler. Robots
+permissions do not guarantee a crawler will visit, train on or cite the site.
+
+Official bot references:
+- https://developers.openai.com/api/docs/bots
+- https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler
+- https://docs.perplexity.ai/docs/resources/perplexity-crawlers
+- https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers#google-extended

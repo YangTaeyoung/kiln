@@ -1,5 +1,6 @@
 """Fail the publish job on crawlability, metadata or internal-link regressions."""
 import json
+from urllib.robotparser import RobotFileParser
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 from xml.etree import ElementTree as ET
@@ -18,9 +19,13 @@ def document(path):
     return cache[p]
 def check(ok, message):
     if not ok: errors.append(message)
+verification = BeautifulSoup((ROOT.parent/'site/index.html').read_text(), 'html.parser').select_one('meta[name=google-site-verification]')['content']
 titles=set()
 for url in urls:
     path = urlsplit(url).path; s = document(path)
+    if not s.select_one('article.doc'):
+        proof = s.select_one('meta[name=google-site-verification]')
+        check(proof and proof.get('content') == verification, f'{path}: Search Console verification preserved')
     check(len(s.select('h1'))==1, f'{path}: one h1')
     check(s.title and s.title.text not in titles, f'{path}: unique title'); titles.add(s.title.text)
     check(s.select_one('meta[name=description]')['content'], f'{path}: description')
@@ -47,5 +52,11 @@ for url in urls:
 check(len(urls)==48,'48 canonical URLs')
 check(not (ROOT/'_build').exists(),'private build sources excluded')
 check('Sitemap: '+BASE+'/sitemap.xml' in (ROOT/'robots.txt').read_text(),'robots sitemap')
+robots = RobotFileParser()
+robots.parse((ROOT/'robots.txt').read_text().splitlines())
+for bot in ['Googlebot', 'bingbot', 'Yeti', 'GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Unknown-AI-Crawler']:
+    for path in ['/', '/ko/', '/docs/', '/assets/hero-poster-en.webp']:
+        check(robots.can_fetch(bot, BASE+path), f'robots blocks {bot}: {path}')
+check(robots.site_maps() == [BASE+'/sitemap.xml'], 'robots canonical sitemap')
 if errors: raise SystemExit('\n'.join(errors))
 print(f'SEO checks passed: {len(urls)} pages, reciprocal locales, metadata, JSON-LD, assets, links and anchors')
