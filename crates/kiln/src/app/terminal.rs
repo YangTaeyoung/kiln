@@ -454,7 +454,7 @@ impl TermView {
             && !resp.context_menu_opened() && !self.inspector && self.search.as_ref().is_none_or(|s|!s.focus);
         let completion_allowed=conn.is_connected() && conn.is_alive(self.session) && accepts_input && self.preedit.is_empty() && term_mode & mode::ALT_SCREEN==0 && conn.infos.get(&self.session).and_then(|i|i.fg_process.as_deref()).is_some_and(|n|matches!(n,"zsh"|"-zsh"));
         let completion_anchor=conn.screens.get(&self.session).and_then(|s|s.cursor).map(|c|egui::pos2(inner.left()+c.col as f32*cell.x,inner.top()+(c.row as f32+1.0)*cell.y)).unwrap_or(rect.left_bottom());
-        self.completion.ui(ui,conn,self.session,completion_allowed,settings.completion_preview,rect,completion_anchor);
+        self.completion.ui(ui,conn,self.session,completion_allowed,settings.completion_preview,inner,completion_anchor,settings.font_size);
         if accepts_input {
             self.last_input_pass=Some(pass);
             self.handle_keyboard(ui, conn, term_mode, settings, exited, &mut out);
@@ -920,7 +920,7 @@ impl TermView {
             let body_height=(available_height-116.0).max(32.0);
             egui::ScrollArea::vertical().id_salt(("command-inspector",self.session)).max_height(body_height).auto_shrink([false,false]).show(ui, |ui| {
                 if self.integration_help {
-                    ui.label(kiln_common::i18n::tr("cd 경로와 자주 쓰는 명령은 입력 중 추천합니다. Ctrl+Space로 설치된 명령과 추천 항목을 선택하세요. ↑↓로 이동, Tab 또는 Enter로 삽입, Esc로 닫습니다. 다른 셸과 에이전트 채팅의 입력은 바뀌지 않습니다."));
+                    ui.label(kiln_common::i18n::tr("명령과 옵션은 입력 중 표시됩니다. Tab으로 삽입, ↓로 선택, Esc로 닫습니다. 목록을 선택하기 전 Enter는 원래 명령을 실행합니다. Ctrl+Space로 다시 열 수 있습니다."));
                     ui.label(if telemetry.shell_integration {kiln_common::i18n::tr("셸: 연결됨")} else {kiln_common::i18n::tr("셸: 명령 경계를 받지 못했습니다")});
                     ui.label(kiln_common::trf!("에이전트: {}",kiln_common::i18n::tr(telemetry.activity.label())));
                     ui.label(kiln_common::i18n::tr("설정 → 터미널에서 기본 셸을 /bin/zsh로 지정하고, Kiln의 + 버튼으로 새 작업을 여세요. 새 터미널은 자동 연결됩니다. 기존 zsh에는 그다음 아래 명령을 직접 실행하세요. 셸 안에서 zsh만 실행하면 연결 파일이 생성되지 않습니다."));

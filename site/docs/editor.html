@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Editor and search · Kiln Docs</title>
-<meta name="description" content="Open and edit files with syntax highlighting, language detection, language-server completion and a file explorer that shows ignored files.">
+<meta name="description" content="Open files from Finder, edit source and configuration files with syntax highlighting, and use language-server completion and project search.">
 <link rel="icon" href="../assets/favicon.ico" sizes="any">
 <link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
@@ -33,9 +33,12 @@
 </header>
 <div class="layout">
   <aside class="side" id="side"><div class="side-nav" data-lang="en"><p class="nav-group">Get started</p><ul><li><a href="index.html">AI agent IDE: getting started</a></li><li><a href="install.html">Install and update</a></li></ul><p class="nav-group">Using Kiln</p><ul><li><a href="workspaces.html">Workspaces and tasks</a></li><li><a href="terminal.html">AI terminal: sessions, shells and recovery</a></li><li><a href="agents.html">Run Claude Code, Codex and Antigravity</a></li><li><a href="accounts.html">Accounts</a></li><li><a href="conversations.html">Conversations and updates</a></li></ul><p class="nav-group">Tools</p><ul><li><a href="git.html">Git and GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">Editor and search</a></li><li><a href="databases.html">Databases</a></li><li><a href="remote.html">Remote files and SSH</a></li></ul></div><div class="side-nav" data-lang="ko" hidden><p class="nav-group">시작하기</p><ul><li><a href="index.html">AI 에이전트 IDE 시작하기</a></li><li><a href="install.html">설치와 업데이트</a></li></ul><p class="nav-group">Kiln 사용하기</p><ul><li><a href="workspaces.html">워크스페이스와 작업</a></li><li><a href="terminal.html">AI 터미널: 세션·셸·연결 복구</a></li><li><a href="agents.html">Claude Code·Codex·Antigravity 함께 실행하기</a></li><li><a href="accounts.html">계정</a></li><li><a href="conversations.html">대화와 업데이트</a></li></ul><p class="nav-group">도구</p><ul><li><a href="git.html">Git과 GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">편집기와 검색</a></li><li><a href="databases.html">데이터베이스</a></li><li><a href="remote.html">원격 파일과 SSH</a></li></ul></div><div class="side-nav" data-lang="ja" hidden><p class="nav-group">はじめに</p><ul><li><a href="index.html">AI エージェント IDE を使い始める</a></li><li><a href="install.html">インストールとアップデート</a></li></ul><p class="nav-group">Kiln を使う</p><ul><li><a href="workspaces.html">ワークスペースと作業</a></li><li><a href="terminal.html">AI ターミナル：セッション・シェル・復旧</a></li><li><a href="agents.html">Claude Code・Codex・Antigravity の実行</a></li><li><a href="accounts.html">アカウント</a></li><li><a href="conversations.html">会話とアップデート</a></li></ul><p class="nav-group">ツール</p><ul><li><a href="git.html">Git と GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">エディターと検索</a></li><li><a href="databases.html">データベース</a></li><li><a href="remote.html">リモートファイルと SSH</a></li></ul></div><div class="side-nav" data-lang="zh-CN" hidden><p class="nav-group">入门</p><ul><li><a href="index.html">开始使用 AI 智能体 IDE</a></li><li><a href="install.html">安装与更新</a></li></ul><p class="nav-group">使用 Kiln</p><ul><li><a href="workspaces.html">工作区与任务</a></li><li><a href="terminal.html">AI 终端：会话、Shell 与恢复</a></li><li><a href="agents.html">运行 Claude Code、Codex 和 Antigravity</a></li><li><a href="accounts.html">账户</a></li><li><a href="conversations.html">对话与更新</a></li></ul><p class="nav-group">工具</p><ul><li><a href="git.html">Git 与 GitHub</a></li><li><a href="editor.html" class="on" aria-current="page">编辑器与搜索</a></li><li><a href="databases.html">数据库</a></li><li><a href="remote.html">远程文件与 SSH</a></li></ul></div></aside>
-  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">Documentation<b>Tools</b></p></div><h1>Editor and search</h1><p class="desc">Open and edit files with syntax highlighting, language detection, language-server completion and a file explorer that shows ignored files.</p><p>Kiln includes a file editor next to your terminals, with syntax highlighting, completion from language servers and a file explorer. Open files, search and problems from the same workspace without leaving your task.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
+  <main class="main" id="main"><article class="doc" data-lang="en" lang="en"><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">Documentation<b>Tools</b></p></div><h1>Editor and search</h1><p class="desc">Open files from Finder, edit source and configuration files with syntax highlighting, and use language-server completion and project search.</p><p>Kiln includes a file editor next to your terminals, with syntax highlighting, completion from language servers and a file explorer. Open files, search and problems from the same workspace without leaving your task.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-en.webp" alt="" loading="lazy" decoding="async"></div><figcaption>Kiln running a demo workspace.</figcaption></figure>
 <h2 id="open-the-editor-and-tools">Open the editor and tools</h2>
 <p>The workspace inspector includes <strong>Files</strong>, which opens the file explorer. The titlebar <strong>Tools</strong> menu lists files, search, source control, GitHub, databases, remote connections and problems together. Choosing one opens it alongside your current work. In compact windows, <strong>Back to Task</strong> returns you to the terminal.</p>
+<h3 id="open-from-finder-on-macos">Open from Finder on macOS</h3>
+<p>In Finder, select a file and choose <strong>Open With → Kiln</strong>. Ordinary files, dotfiles and files without an extension open in the editor. You can open several files together, whether Kiln is already running or starts for the request.</p>
+<p>Folders open or focus a workspace. A file uses the most specific existing workspace that contains it. If none exists, Kiln opens a workspace at the file's parent folder. Opening a file that is already open focuses its existing editor and preserves unsaved changes, even when that editor belongs to another workspace.</p>
 <h2 id="file-explorer">File explorer</h2>
 <p>The explorer shows Git-ignored files and folders by default, including <code>.env</code>, <code>.env.prod</code>, logs and generated directories. You can open them like any other file, by clicking or with keyboard navigation.</p>
 <ul>
@@ -47,6 +50,47 @@
 <p>Showing or hiding ignored files does not change Git tracking or your repository's ignore rules. Internal <code>.git</code> and <code>.DS_Store</code> metadata always stays hidden.</p>
 <h2 id="language-detection">Language detection</h2>
 <p>The editor highlights files with bundled grammars. It picks a language from the filename and extension first, then from a shebang or a recognizable content signature such as a JSON document, XML, an HTML doctype or a PHP header. It does not guess a language from ordinary prose.</p>
+<p>Common configuration names include:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Files</th>
+<th>Language</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env</code>, <code>.env.local</code>, <code>.env.production.local</code>, <code>service.env</code></td>
+<td>DotENV</td>
+</tr>
+<tr>
+<td><code>.envrc</code></td>
+<td>Bourne Again Shell (bash)</td>
+</tr>
+<tr>
+<td><code>~/.ssh/config</code>, <code>ssh_config</code>, <code>~/.ssh/config.d/*.conf</code>, <code>ssh_config.d/*.conf</code></td>
+<td>SSH Config</td>
+</tr>
+<tr>
+<td><code>sshd_config</code>, <code>sshd_config.d/*.conf</code></td>
+<td>SSHD Config</td>
+</tr>
+<tr>
+<td><code>.git/config</code>, <code>.gitconfig</code>, <code>.gitmodules</code></td>
+<td>Git Config</td>
+</tr>
+<tr>
+<td><code>.editorconfig</code>, <code>.npmrc</code></td>
+<td>INI</td>
+</tr>
+<tr>
+<td><code>.eslintrc</code>, <code>.prettierrc</code>, <code>tsconfig.json</code></td>
+<td>JSON</td>
+</tr>
+</tbody>
+</table></div>
+<p>In light and dark themes, DotENV separates keys, assignment signs, values and <code>#</code> comments, including spaced assignments. Escaped characters and multiline quoted values keep their highlighting; a <code>#</code> inside quotes stays part of the value. SSH settings distinguish directives, values, ports, quotes, comments and expansions such as <code>%h</code> and <code>${HOME}</code>, with highlighting for <code>Host</code>, <code>Match</code> and <code>Include</code>. Names such as <code>.environment</code> and <code>.envoy</code> do not select DotENV.</p>
+<p>Detection covers common formats. If a file needs a different grammar, choose it manually; unrecognized content stays plain text.</p>
 <p>To override detection, use the language selector above the document. Choose a language, including <strong>Plain Text</strong>, or return to <strong>Auto detect</strong>.</p>
 <ul>
 <li>Your choice is kept across restarts, for both saved files and files with unsaved changes.</li>
@@ -138,9 +182,12 @@
 <h2 id="remote-files">Remote files</h2>
 <p>Files on S3, OCI, GCS, R2, FTP and SFTP open in this same editor. See <a href="remote.html#browse-and-edit">Remote files and SSH</a>.</p>
 <h2 id="windows">Windows</h2>
-<p>The editor works the same on Windows. Korean IME composition and commit work in the editor as they do in terminals.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="git.html"><small>Previous</small>Git and GitHub</a><a class="pn next" href="databases.html"><small>Next</small>Databases</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">문서<b>도구</b></p></div><h1>편집기와 검색</h1><p class="desc">구문 강조, 언어 감지, 언어 서버 자동 완성을 지원하는 편집기와 무시된 파일까지 보여 주는 파일 탐색기로 파일을 열고 편집합니다.</p><p>Kiln에는 터미널 옆에서 쓸 수 있는 파일 편집기가 있습니다. 구문 강조, 언어 서버 자동 완성, 파일 탐색기를 갖추고 있어, 작업을 벗어나지 않고 같은 워크스페이스에서 파일, 검색, 문제를 열 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<p>The editor works the same on Windows. Korean IME composition and commit work in the editor as they do in terminals.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="git.html"><small>Previous</small>Git and GitHub</a><a class="pn next" href="databases.html"><small>Next</small>Databases</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">문서<b>도구</b></p></div><h1>편집기와 검색</h1><p class="desc">Finder에서 파일을 열고, 구문 강조로 소스와 설정 파일을 편집하며, 언어 서버 자동 완성과 프로젝트 검색을 사용합니다.</p><p>Kiln에는 터미널 옆에서 쓸 수 있는 파일 편집기가 있습니다. 구문 강조, 언어 서버 자동 완성, 파일 탐색기를 갖추고 있어, 작업을 벗어나지 않고 같은 워크스페이스에서 파일, 검색, 문제를 열 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
 <h2 id="open-the-editor-and-tools">편집기와 도구 열기</h2>
 <p>워크스페이스 인스펙터의 <strong>파일</strong>을 누르면 파일 탐색기가 열립니다. 제목 표시줄의 <strong>도구</strong> 메뉴에는 파일, 검색, 소스 제어, GitHub, 데이터베이스, 원격 연결, 문제가 한데 모여 있습니다. 무엇을 고르든 현재 작업 옆에 열립니다. 창이 좁을 때는 <strong>작업으로 돌아가기</strong>를 눌러 터미널로 돌아옵니다.</p>
+<h3 id="open-from-finder-on-macos">macOS의 Finder에서 열기</h3>
+<p>Finder에서 파일을 선택하고 <strong>다음으로 열기 (Open With) → Kiln</strong>을 선택합니다. 일반 파일, 점으로 시작하는 파일, 확장자가 없는 파일도 편집기에서 열립니다. 여러 파일을 함께 열 수 있으며, Kiln이 이미 실행 중이거나 요청에 따라 새로 시작하는 경우 모두 사용할 수 있습니다.</p>
+<p>폴더를 열면 해당 워크스페이스를 열거나 기존 워크스페이스로 이동합니다. 파일을 포함하는 기존 워크스페이스가 여러 개면 가장 안쪽 폴더의 워크스페이스를 선택합니다. 해당하는 워크스페이스가 없으면 파일의 상위 폴더를 워크스페이스로 엽니다. 이미 열린 파일을 다시 열면 기존 편집기로 이동하고 저장하지 않은 변경을 유지합니다. 편집기가 다른 워크스페이스에 있어도 같습니다.</p>
 <h2 id="file-explorer">파일 탐색기</h2>
 <p>탐색기는 기본적으로 Git에서 무시하는 파일과 폴더도 보여 줍니다. <code>.env</code>, <code>.env.prod</code>, 로그, 생성된 디렉터리 등이 여기에 해당합니다. 이런 파일도 다른 파일처럼 클릭하거나 키보드로 이동해 열 수 있습니다.</p>
 <ul>
@@ -152,6 +199,47 @@
 <p>무시된 파일을 보이거나 숨겨도 Git 추적 상태나 저장소의 ignore 규칙은 바뀌지 않습니다. 내부 메타데이터인 <code>.git</code>과 <code>.DS_Store</code>는 항상 숨겨져 있습니다.</p>
 <h2 id="language-detection">언어 감지</h2>
 <p>편집기는 내장 문법으로 구문을 강조합니다. 언어는 먼저 파일 이름과 확장자로 판단하고, 그다음 shebang이나 JSON 문서, XML, HTML doctype, PHP 헤더처럼 알아볼 수 있는 내용 특징으로 판단합니다. 일반 문장만 보고 언어를 추측하지는 않습니다.</p>
+<p>자주 쓰는 설정 파일은 다음과 같이 감지합니다.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>파일</th>
+<th>언어</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env</code>, <code>.env.local</code>, <code>.env.production.local</code>, <code>service.env</code></td>
+<td>DotENV</td>
+</tr>
+<tr>
+<td><code>.envrc</code></td>
+<td>Bourne Again Shell (bash)</td>
+</tr>
+<tr>
+<td><code>~/.ssh/config</code>, <code>ssh_config</code>, <code>~/.ssh/config.d/*.conf</code>, <code>ssh_config.d/*.conf</code></td>
+<td>SSH Config</td>
+</tr>
+<tr>
+<td><code>sshd_config</code>, <code>sshd_config.d/*.conf</code></td>
+<td>SSHD Config</td>
+</tr>
+<tr>
+<td><code>.git/config</code>, <code>.gitconfig</code>, <code>.gitmodules</code></td>
+<td>Git Config</td>
+</tr>
+<tr>
+<td><code>.editorconfig</code>, <code>.npmrc</code></td>
+<td>INI</td>
+</tr>
+<tr>
+<td><code>.eslintrc</code>, <code>.prettierrc</code>, <code>tsconfig.json</code></td>
+<td>JSON</td>
+</tr>
+</tbody>
+</table></div>
+<p>밝은 테마와 어두운 테마 모두 DotENV의 키, 대입 기호, 값, <code>#</code> 주석을 구분하며, 대입 기호 주변에 공백이 있어도 적용됩니다. 이스케이프 문자와 여러 줄에 걸친 따옴표 값도 구문 강조를 유지하고, 따옴표 안의 <code>#</code>은 값의 일부로 표시합니다. SSH 설정에서는 지시어, 값, 포트, 따옴표, 주석, <code>%h</code>와 <code>${HOME}</code> 같은 확장 표현을 구분하고 <code>Host</code>, <code>Match</code>, <code>Include</code>도 강조합니다. <code>.environment</code>, <code>.envoy</code> 같은 이름은 DotENV로 감지하지 않습니다.</p>
+<p>언어 감지는 자주 쓰는 형식을 지원합니다. 다른 문법이 필요한 파일은 직접 언어를 선택하세요. 인식하지 못한 내용은 일반 텍스트로 표시합니다.</p>
 <p>감지된 언어를 바꾸려면 문서 위의 언어 선택기를 사용합니다. <strong>일반 텍스트</strong>를 포함해 원하는 언어를 고르거나, <strong>자동 감지</strong>로 되돌릴 수 있습니다.</p>
 <ul>
 <li>선택한 언어는 저장된 파일이든 저장하지 않은 변경이 있는 파일이든 재시작한 뒤에도 유지됩니다.</li>
@@ -243,9 +331,12 @@
 <h2 id="remote-files">원격 파일</h2>
 <p>S3, OCI, GCS, R2, FTP, SFTP의 파일도 같은 편집기에서 열립니다. <a href="remote.html#browse-and-edit">원격 파일과 SSH</a>를 참고하세요.</p>
 <h2 id="windows">Windows</h2>
-<p>편집기는 Windows에서도 똑같이 동작합니다. 한국어 IME 조합과 확정도 터미널에서와 마찬가지로 편집기에서 동작합니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="git.html"><small>이전</small>Git과 GitHub</a><a class="pn next" href="databases.html"><small>다음</small>데이터베이스</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>エディターと検索</h1><p class="desc">シンタックスハイライト、言語の自動検出、言語サーバーによる補完と、無視対象のファイルも表示するファイルエクスプローラーを使って、ファイルを開いて編集する方法を説明します。</p><p>Kiln では、ターミナルの横でファイルを編集できます。エディターには、シンタックスハイライト、言語サーバーによる補完、ファイルエクスプローラーが備わっています。作業を離れずに、同じワークスペースからファイル、検索、問題を開けます。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<p>편집기는 Windows에서도 똑같이 동작합니다. 한국어 IME 조합과 확정도 터미널에서와 마찬가지로 편집기에서 동작합니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="git.html"><small>이전</small>Git과 GitHub</a><a class="pn next" href="databases.html"><small>다음</small>데이터베이스</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>エディターと検索</h1><p class="desc">Finder からファイルを開き、シンタックスハイライトでソースや設定ファイルを編集し、言語サーバーの補完とプロジェクト検索を使う方法を説明します。</p><p>Kiln では、ターミナルの横でファイルを編集できます。エディターには、シンタックスハイライト、言語サーバーによる補完、ファイルエクスプローラーが備わっています。作業を離れずに、同じワークスペースからファイル、検索、問題を開けます。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
 <h2 id="open-the-editor-and-tools">エディターとツールを開く</h2>
 <p>ワークスペースインスペクターには、ファイルエクスプローラーを開く<strong>ファイル</strong>があります。タイトルバーの<strong>ツール</strong>メニューには、ファイル、検索、ソース管理、GitHub、データベース、リモート接続、問題がまとめて並んでいます。いずれかを選ぶと、現在の作業の横に開きます。ウィンドウが狭いときは、<strong>作業に戻る</strong>でターミナルに戻れます。</p>
+<h3 id="open-from-finder-on-macos">macOS の Finder から開く</h3>
+<p>Finder でファイルを選択し、<strong>このアプリケーションで開く (Open With) → Kiln</strong>を選びます。通常のファイル、ドットで始まるファイル、拡張子のないファイルもエディターで開けます。複数のファイルをまとめて開くこともできます。Kiln が起動済みの場合も、ファイルを開くために起動する場合も使えます。</p>
+<p>フォルダーを開くと、対応するワークスペースを開くか、既存のワークスペースに移動します。ファイルを含む既存のワークスペースが複数あれば、最も深いフォルダーをルートにしているものを使います。該当するものがなければ、ファイルの親フォルダーをワークスペースとして開きます。すでに開いているファイルを再び開くと、既存のエディターに移動して未保存の変更を保持します。そのエディターが別のワークスペースにあっても同じです。</p>
 <h2 id="file-explorer">ファイルエクスプローラー</h2>
 <p>エクスプローラーは既定で、<code>.env</code>、<code>.env.prod</code>、ログ、生成されたディレクトリなど、Git で無視されているファイルとフォルダーも表示します。ほかのファイルと同じように、クリックやキーボード操作で開けます。</p>
 <ul>
@@ -257,6 +348,47 @@
 <p>無視対象のファイルを表示または非表示にしても、Git の追跡やリポジトリの ignore ルールは変わりません。内部の <code>.git</code> と <code>.DS_Store</code> のメタデータは常に非表示です。</p>
 <h2 id="language-detection">言語の検出</h2>
 <p>エディターは、同梱の文法定義でファイルをハイライトします。言語はまずファイル名と拡張子から判定し、次に shebang や、JSON ドキュメント、XML、HTML の doctype、PHP のヘッダーなど識別できる内容の特徴から判定します。普通の文章からは言語を推測しません。</p>
+<p>よく使う設定ファイルは、次のように検出します。</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>ファイル</th>
+<th>言語</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env</code>, <code>.env.local</code>, <code>.env.production.local</code>, <code>service.env</code></td>
+<td>DotENV</td>
+</tr>
+<tr>
+<td><code>.envrc</code></td>
+<td>Bourne Again Shell (bash)</td>
+</tr>
+<tr>
+<td><code>~/.ssh/config</code>, <code>ssh_config</code>, <code>~/.ssh/config.d/*.conf</code>, <code>ssh_config.d/*.conf</code></td>
+<td>SSH Config</td>
+</tr>
+<tr>
+<td><code>sshd_config</code>, <code>sshd_config.d/*.conf</code></td>
+<td>SSHD Config</td>
+</tr>
+<tr>
+<td><code>.git/config</code>, <code>.gitconfig</code>, <code>.gitmodules</code></td>
+<td>Git Config</td>
+</tr>
+<tr>
+<td><code>.editorconfig</code>, <code>.npmrc</code></td>
+<td>INI</td>
+</tr>
+<tr>
+<td><code>.eslintrc</code>, <code>.prettierrc</code>, <code>tsconfig.json</code></td>
+<td>JSON</td>
+</tr>
+</tbody>
+</table></div>
+<p>ライトテーマとダークテーマのどちらでも、DotENV のキー、代入記号、値、<code>#</code> コメントを区別します。代入記号の前後に空白があっても使えます。エスケープ文字と複数行の引用符付きの値もハイライトされ、引用符の中の <code>#</code> は値の一部として表示されます。SSH の設定では、ディレクティブ、値、ポート、引用符、コメント、<code>%h</code> や <code>${HOME}</code> などの展開を区別し、<code>Host</code>、<code>Match</code>、<code>Include</code> もハイライトします。<code>.environment</code> や <code>.envoy</code> などの名前は DotENV として検出しません。</p>
+<p>言語の検出は、よく使う形式に対応しています。別の文法が必要なファイルは、言語を手動で選んでください。認識できない内容はプレーンテキストで表示します。</p>
 <p>検出結果を上書きするには、ドキュメントの上にある言語セレクターを使います。言語（<strong>プレーンテキスト</strong>も選べます）を選ぶか、<strong>自動検出</strong>に戻します。</p>
 <ul>
 <li>選んだ言語は、保存済みのファイルと未保存の変更があるファイルのどちらでも、再起動後も保持されます。</li>
@@ -348,9 +480,12 @@
 <h2 id="remote-files">リモートファイル</h2>
 <p>S3、OCI、GCS、R2、FTP、SFTP 上のファイルも、同じエディターで開けます。詳しくは<a href="remote.html#browse-and-edit">リモートファイルと SSH</a> を参照してください。</p>
 <h2 id="windows">Windows</h2>
-<p>エディターは Windows でも同じように動作します。韓国語 IME の変換と確定は、ターミナルと同様にエディターでも使えます。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="git.html"><small>前へ</small>Git と GitHub</a><a class="pn next" href="databases.html"><small>次へ</small>データベース</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">文档<b>工具</b></p></div><h1>编辑器与搜索</h1><p class="desc">打开和编辑文件，支持语法高亮、语言检测和语言服务器补全，文件浏览器还会显示已忽略的文件。</p><p>Kiln 在终端旁边内置了文件编辑器，提供语法高亮、语言服务器补全和文件浏览器。文件、搜索和问题列表都在同一个工作区中打开，不必离开当前任务。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<p>エディターは Windows でも同じように動作します。韓国語 IME の変換と確定は、ターミナルと同様にエディターでも使えます。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="git.html"><small>前へ</small>Git と GitHub</a><a class="pn next" href="databases.html"><small>次へ</small>データベース</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="tenmoku" data-seed="18.4"></div><p class="crumb">文档<b>工具</b></p></div><h1>编辑器与搜索</h1><p class="desc">从 Finder 打开文件，使用语法高亮编辑源代码和配置文件，并使用语言服务器补全和项目搜索。</p><p>Kiln 在终端旁边内置了文件编辑器，提供语法高亮、语言服务器补全和文件浏览器。文件、搜索和问题列表都在同一个工作区中打开，不必离开当前任务。</p><figure class="shot"><div class="plate" data-glaze="celadon" data-seed="13.6"><img src="../assets/shots/editor-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
 <h2 id="open-the-editor-and-tools">打开编辑器和工具</h2>
 <p>工作区检查器中的<strong>文件</strong>用于打开文件浏览器。标题栏的<strong>工具</strong>菜单汇总了文件、搜索、源代码管理、GitHub、数据库、远程连接和问题，选中的项目会在当前工作旁边打开。窗口较窄时，点击<strong>返回任务</strong>回到终端。</p>
+<h3 id="open-from-finder-on-macos">从 macOS 的 Finder 打开</h3>
+<p>在 Finder 中选择文件，然后选择<strong>打开方式 (Open With) → Kiln</strong>。普通文件、点号开头的文件和没有扩展名的文件都能在编辑器中打开。可以一次打开多个文件，Kiln 已经运行或因本次打开请求而启动时均可使用。</p>
+<p>打开文件夹会打开对应的工作区，或切换到已有工作区。如果多个已有工作区包含该文件，会选择目录层级最深的工作区。如果没有对应的工作区，Kiln 会将文件的父文件夹作为工作区打开。再次打开已打开的文件时，会切换到原有编辑器并保留未保存的更改，即使该编辑器位于另一个工作区中也是如此。</p>
 <h2 id="file-explorer">文件浏览器</h2>
 <p>文件浏览器默认显示被 Git 忽略的文件和文件夹，包括 <code>.env</code>、<code>.env.prod</code>、日志和生成的目录。它们和其他文件一样，可以点击打开，也可以用键盘导航打开。</p>
 <ul>
@@ -362,6 +497,47 @@
 <p>显示或隐藏已忽略的文件，不会改变 Git 的跟踪状态，也不会改动仓库的忽略规则。内部的 <code>.git</code> 和 <code>.DS_Store</code> 元数据始终隐藏。</p>
 <h2 id="language-detection">语言检测</h2>
 <p>编辑器使用内置的语法定义来高亮文件。它先根据文件名和扩展名确定语言，再参考 shebang 或可识别的内容特征，例如 JSON 文档、XML、HTML doctype 或 PHP 头部。它不会根据普通文本猜测语言。</p>
+<p>常见配置文件的检测方式如下：</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>语言</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env</code>, <code>.env.local</code>, <code>.env.production.local</code>, <code>service.env</code></td>
+<td>DotENV</td>
+</tr>
+<tr>
+<td><code>.envrc</code></td>
+<td>Bourne Again Shell (bash)</td>
+</tr>
+<tr>
+<td><code>~/.ssh/config</code>, <code>ssh_config</code>, <code>~/.ssh/config.d/*.conf</code>, <code>ssh_config.d/*.conf</code></td>
+<td>SSH Config</td>
+</tr>
+<tr>
+<td><code>sshd_config</code>, <code>sshd_config.d/*.conf</code></td>
+<td>SSHD Config</td>
+</tr>
+<tr>
+<td><code>.git/config</code>, <code>.gitconfig</code>, <code>.gitmodules</code></td>
+<td>Git Config</td>
+</tr>
+<tr>
+<td><code>.editorconfig</code>, <code>.npmrc</code></td>
+<td>INI</td>
+</tr>
+<tr>
+<td><code>.eslintrc</code>, <code>.prettierrc</code>, <code>tsconfig.json</code></td>
+<td>JSON</td>
+</tr>
+</tbody>
+</table></div>
+<p>在浅色和深色主题下，DotENV 都能区分键、赋值符号、值和 <code>#</code> 注释，也适用于赋值符号周围带空格的写法。转义字符和跨行的引号值会保持高亮，引号内的 <code>#</code> 仍显示为值的一部分。SSH 配置会区分指令、值、端口、引号、注释，以及 <code>%h</code>、<code>${HOME}</code> 等展开表达式，并高亮 <code>Host</code>、<code>Match</code> 和 <code>Include</code>。<code>.environment</code>、<code>.envoy</code> 等名称不会被检测为 DotENV。</p>
+<p>语言检测支持常见格式。如果文件需要其他语法，请手动选择语言；无法识别的内容按纯文本显示。</p>
 <p>要覆盖检测结果，使用文档上方的语言选择器。可以选择某种语言（包括<strong>纯文本</strong>），也可以改回<strong>自动检测</strong>。</p>
 <ul>
 <li>选择在重启后依然保留，对已保存的文件和有未保存更改的文件都有效。</li>

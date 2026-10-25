@@ -1,0 +1,40 @@
+%YAML 1.2
+---
+# Original Kiln grammar, based on https://man.openbsd.org/ssh_config
+# Match only the directive position so hostnames and commands are not keywords.
+name: SSH Config
+# The bundled grammar supplies the menu entry; name lookup selects this later
+# replacement. Hide it to avoid a duplicate language-selector entry.
+hidden: true
+scope: source.ssh_config
+file_extensions: [ssh_config]
+contexts:
+  main:
+    - include: scope:source.kiln-ssh#comments
+    - match: '^[ \t]*(?i:(Host))(?=[ \t=]|$)'
+      captures:
+        1: keyword.control.ssh
+      push: hosts
+    - match: '^[ \t]*(?i:(Match))(?=[ \t=]|$)'
+      captures:
+        1: keyword.control.ssh
+      push: conditions
+    - match: '^[ \t]*(?i:(Include))(?=[ \t=]|$)'
+      captures:
+        1: keyword.control.import.ssh
+      push: arguments
+    - match: '^[ \t]*([A-Za-z][A-Za-z0-9]*)(?=[ \t=]|$)'
+      captures:
+        1: keyword.other.ssh
+      push: arguments
+  arguments:
+    - meta_scope: string.unquoted.ssh
+    - include: scope:source.kiln-ssh#values
+  hosts:
+    - meta_scope: entity.name.section.ssh
+    - include: scope:source.kiln-ssh#values
+  conditions:
+    - meta_scope: string.unquoted.ssh
+    - match: '(?i)(?<!\S)!?(?:all|canonical|final|exec|localnetwork|host|originalhost|tagged|command|user|localuser|version)(?=[ \t=]|$)'
+      scope: keyword.control.ssh
+    - include: scope:source.kiln-ssh#values

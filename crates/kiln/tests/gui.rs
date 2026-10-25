@@ -2288,3 +2288,48 @@ int main(int argc,char **argv) {
     assert_eq!(h.state().debug_focused_session(),cancelled);
     assert_eq!(std::fs::read_to_string(root.join("fixture-count")).unwrap(),"2");
 }
+
+/// Exercise the whole terminal -> ZLE -> daemon -> attached menu -> ZLE edit
+/// path. Acceptance edits only; Enter still executes at an unselected prompt.
+#[cfg(unix)]
+#[test]
+fn shell_menu_inserts_local_directories_without_executing_and_follows_nested_paths() {
+    let _serial=SERIAL.lock().unwrap_or_else(|e|e.into_inner());
+    let home=tempfile::tempdir().unwrap();
+    struct Restore(Vec<(&'static str,Option<std::ffi::OsString>)>);
+    impl Drop for Restore {fn drop(&mut self){for (key,value) in &self.0 {unsafe{if let Some(value)=value{std::env::set_var(key,value);}else{std::env::remove_var(key);}}}}}
+    let _restore=Restore(["HOME","ZDOTDIR","SHELL","GIT_CONFIG_GLOBAL","GIT_CONFIG_NOSYSTEM"].into_iter().map(|k|(k,std::env::var_os(k))).collect());
+    // SAFETY: this test and all other GUI environment changes hold SERIAL.
+    unsafe {std::env::set_var("HOME",home.path());std::env::set_var("ZDOTDIR",home.path());std::env::set_var("SHELL","/bin/zsh");std::env::set_var("GIT_CONFIG_GLOBAL","/dev/null");std::env::set_var("GIT_CONFIG_NOSYSTEM","1");}
+    std::fs::write(home.path().join(".zshrc"),"PS1='fixture> '\n").unwrap();
+    let (base,proj)=setup("shell-menu");
+    struct Shutdown(PathBuf);
+    impl Drop for Shutdown{fn drop(&mut self){shutdown(&self.0);}}
+    let _shutdown=Shutdown(base.clone());
+    std::fs::create_dir_all(proj.join("source folder/nested 한글")).unwrap();
+    std::fs::write(proj.join("source-file.txt"),"fixture").unwrap();
+    let mut h=Harness::builder().with_size([1080.0,720.0]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|t|t.contains("fixture>"))));
+    h.event(egui::Event::Text("cd sou".into()));
+    assert!(pump_until(&mut h,10,|h|h.query_by_label("source folder/").is_some()),"typing cd must automatically open local directory choices");
+    assert!(h.query_by_label("source-file.txt").is_none(),"cd must exclude files");
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-shell-menu-directory-dark.png")).unwrap();
+    h.key_press(egui::Key::Tab);
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|t|t.contains("cd 'source folder/'"))));
+    assert!(pump_until(&mut h,10,|h|h.query_by_label("source folder/nested 한글/").is_some()),"after inserting a directory, the next level must be offered");
+    let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    let session=h.state().debug_focused_session().unwrap();
+    let cwd=||{
+        let kiln_proto::ServerMsg::Sessions{sessions,..}=client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(5)).unwrap() else{panic!("session list");};
+        sessions.into_iter().find(|s|s.id==session).and_then(|s|s.cwd).map(PathBuf::from)
+    };
+    assert_eq!(cwd().unwrap().canonicalize().unwrap(),proj.canonicalize().unwrap(),"Tab must not execute cd");
+    h.key_press(egui::Key::Escape);h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h,10,|_|cwd().is_some_and(|p|p.canonicalize().ok()==proj.join("source folder").canonicalize().ok())),"Enter after dismissal must execute the edited buffer");
+    let light_ctx=h.ctx.clone();h.state_mut().debug_set_theme(&light_ctx,"kiln-light");
+    h.event(egui::Event::Text("cd ne".into()));
+    assert!(pump_until(&mut h,10,|h|h.query_by_label("nested 한글/").is_some()));
+    h.render().unwrap().save(std::env::temp_dir().join("kiln-shell-menu-directory-light.png")).unwrap();
+    h.key_press(egui::Key::Escape);h.run_steps(2);
+}

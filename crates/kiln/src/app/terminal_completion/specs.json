@@ -1,0 +1,1576 @@
+[
+  {
+    "name": "git",
+    "description": "버전 관리",
+    "subcommands": [
+      {
+        "name": "push",
+        "description": "원격 저장소에 변경 사항 전송",
+        "hint": "[remote] [branch]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "commit",
+        "description": "스테이징한 변경 사항 커밋",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-m",
+              "--message"
+            ],
+            "description": "커밋 메시지 지정",
+            "hint": "<message>"
+          },
+          {
+            "name": [
+              "--amend"
+            ],
+            "description": "마지막 커밋 수정"
+          },
+          {
+            "name": [
+              "-a",
+              "--all"
+            ],
+            "description": "모든 항목 포함"
+          }
+        ]
+      },
+      {
+        "name": "switch",
+        "description": "브랜치 전환",
+        "hint": "<branch>",
+        "provider": "branches",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-c",
+              "--create"
+            ],
+            "description": "새 브랜치 만들기",
+            "hint": "<branch>"
+          }
+        ]
+      },
+      {
+        "name": "checkout",
+        "description": "브랜치 전환",
+        "hint": "<branch>",
+        "provider": "branches",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "clone",
+        "description": "저장소 복제",
+        "hint": "<repository> [directory]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "status",
+        "description": "작업 트리 변경 사항 보기",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-s",
+              "--short"
+            ],
+            "description": "간결한 출력"
+          },
+          {
+            "name": [
+              "-b",
+              "--branch"
+            ],
+            "description": "로컬 Git 브랜치"
+          }
+        ]
+      },
+      {
+        "name": "pull",
+        "description": "원격 변경 사항 가져와 통합",
+        "hint": "[remote] [branch]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "fetch",
+        "description": "원격 저장소 정보 가져오기",
+        "hint": "[remote]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "add",
+        "description": "파일 변경 사항 스테이징",
+        "hint": "<path>",
+        "provider": "files",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-A",
+              "--all"
+            ],
+            "description": "모든 항목 포함"
+          },
+          {
+            "name": [
+              "-p",
+              "--patch"
+            ],
+            "description": "변경 사항 비교"
+          }
+        ]
+      },
+      {
+        "name": "diff",
+        "description": "변경 사항 비교",
+        "hint": "[path]",
+        "provider": "files",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "--staged",
+              "--cached"
+            ],
+            "description": "스테이징한 변경 사항"
+          },
+          {
+            "name": [
+              "--stat"
+            ],
+            "description": "변경 사항 비교"
+          }
+        ]
+      },
+      {
+        "name": "log",
+        "description": "커밋 기록 보기",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "--oneline"
+            ],
+            "description": "커밋을 한 줄씩 표시"
+          },
+          {
+            "name": [
+              "--graph"
+            ],
+            "description": "커밋 기록 보기"
+          },
+          {
+            "name": [
+              "--all"
+            ],
+            "description": "모든 항목 포함"
+          }
+        ]
+      },
+      {
+        "name": "branch",
+        "description": "브랜치",
+        "hint": "[branch]",
+        "provider": "branches",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "merge",
+        "description": "브랜치 병합",
+        "hint": "<branch>",
+        "provider": "branches",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "restore",
+        "description": "작업 트리 파일 복원",
+        "hint": "<path>",
+        "provider": "files",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "--staged"
+            ],
+            "description": "스테이징한 변경 사항"
+          },
+          {
+            "name": [
+              "--source"
+            ],
+            "description": "로컬 Git 브랜치",
+            "hint": "<branch>",
+            "provider": "branches"
+          }
+        ]
+      },
+      {
+        "name": "stash",
+        "description": "작업 변경 사항 임시 보관",
+        "subcommands": [
+          {
+            "name": "push",
+            "description": "파일 변경 사항 스테이징",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "list",
+            "description": "커밋 기록 보기",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "pop",
+            "description": "작업 트리 파일 복원",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "apply",
+            "description": "작업 트리 파일 복원",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          }
+        ],
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "--version"
+        ],
+        "description": "도구 버전 보기"
+      }
+    ]
+  },
+  {
+    "name": "docker",
+    "description": "컨테이너 관리",
+    "subcommands": [
+      {
+        "name": "compose",
+        "description": "Compose 서비스 관리",
+        "subcommands": [
+          {
+            "name": "up",
+            "description": "컨테이너 실행",
+            "hint": "[service]",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              },
+              {
+                "name": [
+                  "-d",
+                  "--detach"
+                ],
+                "description": "백그라운드에서 실행"
+              },
+              {
+                "name": [
+                  "--build"
+                ],
+                "description": "이미지 빌드"
+              },
+              {
+                "name": [
+                  "--no-deps"
+                ],
+                "description": "의존 서비스 제외"
+              }
+            ]
+          },
+          {
+            "name": "down",
+            "description": "실행 중인 서비스 중지",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "build",
+            "description": "이미지 빌드",
+            "hint": "[service]",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "ps",
+            "description": "컨테이너 목록 보기",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "logs",
+            "description": "서비스 로그 보기",
+            "hint": "[service]",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              },
+              {
+                "name": [
+                  "-f",
+                  "--follow"
+                ],
+                "description": "출력을 계속 따라가기"
+              },
+              {
+                "name": [
+                  "--tail"
+                ],
+                "description": "출력을 계속 따라가기",
+                "hint": "<lines>"
+              }
+            ]
+          },
+          {
+            "name": "exec",
+            "description": "서비스에서 명령 실행",
+            "hint": "<service> <command>",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "restart",
+            "description": "서비스 다시 시작",
+            "hint": "[service]",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          },
+          {
+            "name": "stop",
+            "description": "실행 중인 서비스 중지",
+            "hint": "[service]",
+            "options": [
+              {
+                "name": [
+                  "--help"
+                ],
+                "description": "명령 도움말 보기",
+                "persistent": true
+              }
+            ]
+          }
+        ],
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-f",
+              "--file"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files",
+            "persistent": true
+          },
+          {
+            "name": [
+              "--env-file"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-p",
+              "--project-name"
+            ],
+            "description": "명령 옵션",
+            "hint": "<name>",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "ps",
+        "description": "컨테이너 목록 보기",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-a",
+              "--all"
+            ],
+            "description": "모든 항목 포함"
+          }
+        ]
+      },
+      {
+        "name": "images",
+        "description": "이미지 목록 보기",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "build",
+        "description": "이미지 빌드",
+        "hint": "<path>",
+        "provider": "directories",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-t",
+              "--tag"
+            ],
+            "description": "명령 옵션",
+            "hint": "<tag>"
+          },
+          {
+            "name": [
+              "-f",
+              "--file"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files"
+          }
+        ]
+      },
+      {
+        "name": "run",
+        "description": "컨테이너 실행",
+        "hint": "<image> [command]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-d",
+              "--detach"
+            ],
+            "description": "백그라운드에서 실행"
+          },
+          {
+            "name": [
+              "--rm"
+            ],
+            "description": "종료 후 컨테이너 제거"
+          },
+          {
+            "name": [
+              "-p",
+              "--publish"
+            ],
+            "description": "명령 옵션",
+            "hint": "<host:container>"
+          },
+          {
+            "name": [
+              "-e",
+              "--env"
+            ],
+            "description": "명령 옵션",
+            "hint": "<key=value>"
+          }
+        ]
+      },
+      {
+        "name": "logs",
+        "description": "출력을 계속 따라가기",
+        "hint": "<container>",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-f",
+              "--follow"
+            ],
+            "description": "출력을 계속 따라가기"
+          }
+        ]
+      },
+      {
+        "name": "exec",
+        "description": "서비스에서 명령 실행",
+        "hint": "<container> <command>",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "pull",
+        "description": "이미지 목록 보기",
+        "hint": "<image>",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "--version"
+        ],
+        "description": "도구 버전 보기"
+      }
+    ]
+  },
+  {
+    "name": "npm",
+    "description": "Node 패키지 관리",
+    "subcommands": [
+      {
+        "name": "run",
+        "description": "패키지 스크립트 실행",
+        "hint": "<script>",
+        "provider": "scripts",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "install",
+        "description": "의존성 설치",
+        "hint": "[package]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "test",
+        "description": "테스트 스크립트 실행",
+        "hint": "[pattern]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "ci",
+        "description": "의존성 설치",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "--version"
+        ],
+        "description": "도구 버전 보기"
+      }
+    ]
+  },
+  {
+    "name": "pnpm",
+    "description": "Node 패키지 관리",
+    "subcommands": [
+      {
+        "name": "run",
+        "description": "패키지 스크립트 실행",
+        "hint": "<script>",
+        "provider": "scripts",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "install",
+        "description": "의존성 설치",
+        "hint": "[package]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "test",
+        "description": "테스트 스크립트 실행",
+        "hint": "[pattern]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "add",
+        "description": "의존성 설치",
+        "hint": "<package>",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "--version"
+        ],
+        "description": "도구 버전 보기"
+      }
+    ]
+  },
+  {
+    "name": "yarn",
+    "description": "Node 패키지 관리",
+    "subcommands": [
+      {
+        "name": "run",
+        "description": "패키지 스크립트 실행",
+        "hint": "<script>",
+        "provider": "scripts",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "install",
+        "description": "의존성 설치",
+        "hint": "[package]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "test",
+        "description": "테스트 스크립트 실행",
+        "hint": "[pattern]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "add",
+        "description": "의존성 설치",
+        "hint": "<package>",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "--version"
+        ],
+        "description": "도구 버전 보기"
+      }
+    ]
+  },
+  {
+    "name": "bun",
+    "description": "Node 패키지 관리",
+    "subcommands": [
+      {
+        "name": "run",
+        "description": "패키지 스크립트 실행",
+        "hint": "<script>",
+        "provider": "scripts",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "install",
+        "description": "의존성 설치",
+        "hint": "[package]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "test",
+        "description": "테스트 스크립트 실행",
+        "hint": "[pattern]",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      },
+      {
+        "name": "add",
+        "description": "의존성 설치",
+        "hint": "<package>",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "--version"
+        ],
+        "description": "도구 버전 보기"
+      }
+    ]
+  },
+  {
+    "name": "cargo",
+    "description": "Rust 패키지 관리",
+    "subcommands": [
+      {
+        "name": "check",
+        "description": "실행 파일 생성 없이 검사",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-p",
+              "--package"
+            ],
+            "description": "패키지 빌드",
+            "hint": "<package>"
+          },
+          {
+            "name": [
+              "--release"
+            ],
+            "description": "릴리스 프로필 사용"
+          },
+          {
+            "name": [
+              "--features"
+            ],
+            "description": "Cargo 기능 선택",
+            "hint": "<features>"
+          },
+          {
+            "name": [
+              "--no-default-features"
+            ],
+            "description": "기본 기능 제외"
+          },
+          {
+            "name": [
+              "--all-features"
+            ],
+            "description": "모든 항목 포함"
+          },
+          {
+            "name": [
+              "--target"
+            ],
+            "description": "명령 옵션",
+            "hint": "<triple>"
+          },
+          {
+            "name": [
+              "--manifest-path"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files"
+          }
+        ]
+      },
+      {
+        "name": "build",
+        "description": "패키지 빌드",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-p",
+              "--package"
+            ],
+            "description": "패키지 빌드",
+            "hint": "<package>"
+          },
+          {
+            "name": [
+              "--release"
+            ],
+            "description": "릴리스 프로필 사용"
+          },
+          {
+            "name": [
+              "--features"
+            ],
+            "description": "Cargo 기능 선택",
+            "hint": "<features>"
+          },
+          {
+            "name": [
+              "--no-default-features"
+            ],
+            "description": "기본 기능 제외"
+          },
+          {
+            "name": [
+              "--all-features"
+            ],
+            "description": "모든 항목 포함"
+          },
+          {
+            "name": [
+              "--target"
+            ],
+            "description": "명령 옵션",
+            "hint": "<triple>"
+          },
+          {
+            "name": [
+              "--manifest-path"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files"
+          }
+        ]
+      },
+      {
+        "name": "test",
+        "description": "패키지 테스트 실행",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-p",
+              "--package"
+            ],
+            "description": "패키지 빌드",
+            "hint": "<package>"
+          },
+          {
+            "name": [
+              "--release"
+            ],
+            "description": "릴리스 프로필 사용"
+          },
+          {
+            "name": [
+              "--features"
+            ],
+            "description": "Cargo 기능 선택",
+            "hint": "<features>"
+          },
+          {
+            "name": [
+              "--no-default-features"
+            ],
+            "description": "기본 기능 제외"
+          },
+          {
+            "name": [
+              "--all-features"
+            ],
+            "description": "모든 항목 포함"
+          },
+          {
+            "name": [
+              "--target"
+            ],
+            "description": "명령 옵션",
+            "hint": "<triple>"
+          },
+          {
+            "name": [
+              "--manifest-path"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files"
+          }
+        ]
+      },
+      {
+        "name": "run",
+        "description": "빌드 후 실행",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-p",
+              "--package"
+            ],
+            "description": "패키지 빌드",
+            "hint": "<package>"
+          },
+          {
+            "name": [
+              "--release"
+            ],
+            "description": "릴리스 프로필 사용"
+          },
+          {
+            "name": [
+              "--features"
+            ],
+            "description": "Cargo 기능 선택",
+            "hint": "<features>"
+          },
+          {
+            "name": [
+              "--no-default-features"
+            ],
+            "description": "기본 기능 제외"
+          },
+          {
+            "name": [
+              "--all-features"
+            ],
+            "description": "모든 항목 포함"
+          },
+          {
+            "name": [
+              "--target"
+            ],
+            "description": "명령 옵션",
+            "hint": "<triple>"
+          },
+          {
+            "name": [
+              "--manifest-path"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files"
+          }
+        ]
+      },
+      {
+        "name": "clippy",
+        "description": "실행 파일 생성 없이 검사",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "-p",
+              "--package"
+            ],
+            "description": "패키지 빌드",
+            "hint": "<package>"
+          },
+          {
+            "name": [
+              "--release"
+            ],
+            "description": "릴리스 프로필 사용"
+          },
+          {
+            "name": [
+              "--features"
+            ],
+            "description": "Cargo 기능 선택",
+            "hint": "<features>"
+          },
+          {
+            "name": [
+              "--no-default-features"
+            ],
+            "description": "기본 기능 제외"
+          },
+          {
+            "name": [
+              "--all-features"
+            ],
+            "description": "모든 항목 포함"
+          },
+          {
+            "name": [
+              "--target"
+            ],
+            "description": "명령 옵션",
+            "hint": "<triple>"
+          },
+          {
+            "name": [
+              "--manifest-path"
+            ],
+            "description": "로컬 파일 경로",
+            "hint": "<file>",
+            "provider": "files"
+          }
+        ]
+      },
+      {
+        "name": "fmt",
+        "description": "소스 코드 서식 정리",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          },
+          {
+            "name": [
+              "--check"
+            ],
+            "description": "실행 파일 생성 없이 검사"
+          }
+        ]
+      },
+      {
+        "name": "doc",
+        "description": "프로젝트 문서 생성",
+        "options": [
+          {
+            "name": [
+              "--help"
+            ],
+            "description": "명령 도움말 보기",
+            "persistent": true
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "--version"
+        ],
+        "description": "도구 버전 보기"
+      }
+    ]
+  },
+  {
+    "name": "cd",
+    "description": "디렉터리 이동",
+    "hint": "<directory>",
+    "provider": "directories",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  },
+  {
+    "name": "ls",
+    "description": "파일 목록 보기",
+    "hint": "[path]",
+    "provider": "files",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      },
+      {
+        "name": [
+          "-a"
+        ],
+        "description": "숨김 항목 포함"
+      },
+      {
+        "name": [
+          "-l"
+        ],
+        "description": "자세한 목록 형식 사용"
+      },
+      {
+        "name": [
+          "-h"
+        ],
+        "description": "읽기 쉬운 크기 표시"
+      }
+    ]
+  },
+  {
+    "name": "cat",
+    "description": "파일 내용 보기",
+    "hint": "[path]",
+    "provider": "files",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  },
+  {
+    "name": "less",
+    "description": "파일을 페이지로 보기",
+    "hint": "[path]",
+    "provider": "files",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  },
+  {
+    "name": "open",
+    "description": "파일 또는 폴더 열기",
+    "hint": "[path]",
+    "provider": "files",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  },
+  {
+    "name": "cp",
+    "description": "파일 복사",
+    "hint": "[path]",
+    "provider": "files",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  },
+  {
+    "name": "mv",
+    "description": "파일 이동",
+    "hint": "[path]",
+    "provider": "files",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  },
+  {
+    "name": "mkdir",
+    "description": "디렉터리 만들기",
+    "hint": "<directory>",
+    "provider": "directories",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  },
+  {
+    "name": "pwd",
+    "description": "현재 경로 출력",
+    "options": [
+      {
+        "name": [
+          "--help"
+        ],
+        "description": "명령 도움말 보기",
+        "persistent": true
+      }
+    ]
+  }
+]

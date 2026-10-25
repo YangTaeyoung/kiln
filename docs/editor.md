@@ -1,9 +1,45 @@
 # File editor
 
+## Open from Finder on macOS
+
+In Finder, select a file and choose **Open With → Kiln**. Ordinary files,
+dotfiles and files without an extension open in the editor. You can open several
+files together, whether Kiln is already running or starts for the request.
+
+Folders open or focus a workspace. A file uses the most specific existing
+workspace that contains it; if none exists, Kiln opens a workspace at the file's
+parent folder. Opening a file that is already open focuses its existing editor,
+including across workspaces, and preserves unsaved changes.
+
+## Language detection
+
 The editor highlights files using bundled syntect grammars. Automatic detection
 uses the filename and extension first, then a shebang or a conservative content
 signature. Content inspection is bounded: it recognizes JSON documents, XML,
 HTML doctypes and PHP headers, rather than guessing from ordinary prose.
+
+Common configuration names include:
+
+| Files | Language |
+| --- | --- |
+| `.env`, `.env.local`, `.env.production.local`, `service.env` | DotENV |
+| `.envrc` | Bourne Again Shell (bash) |
+| `~/.ssh/config`, `ssh_config`, `~/.ssh/config.d/*.conf`, `ssh_config.d/*.conf` | SSH Config |
+| `sshd_config`, `sshd_config.d/*.conf` | SSHD Config |
+| `.git/config`, `.gitconfig`, `.gitmodules` | Git Config |
+| `.editorconfig`, `.npmrc` | INI |
+| `.eslintrc`, `.prettierrc`, `tsconfig.json` | JSON |
+
+In both light and dark themes, DotENV distinguishes keys, assignment signs,
+values and `#` comments, including spaced assignments. Quoted values keep
+escaped characters and multiline content; a `#` inside quotes remains part of
+the value. SSH client and server settings distinguish directives, values,
+ports, quoted strings, comments and expansions such as `%h` and `${HOME}`.
+`Host`, `Match` and `Include` also receive highlighting. Similar names such as
+`.environment` and `.envoy` do not select DotENV.
+
+Detection covers common formats. Use a manual language choice when a file needs
+a different grammar; unrecognized content stays plain text.
 
 Use the language selector above the document to override detection, including
 **Plain Text**, or return to **Auto detect**. The selection is preserved with clean and unsaved
@@ -56,6 +92,9 @@ after the document or caret changes are discarded.
 
 ## Implementation references
 
+- [Finder Open With](https://support.apple.com/guide/mac-help/choose-an-app-to-open-a-file-on-mac-mh35597/mac)
+- [DotENV values, comments and spacing](https://nodejs.org/api/environment_variables.html#dotenv)
+- [OpenSSH client configuration](https://man.openbsd.org/ssh_config), [OpenSSH server configuration](https://man.openbsd.org/sshd_config)
 - [syntect SyntaxSet detection](https://docs.rs/syntect/latest/syntect/parsing/struct.SyntaxSet.html)
 - [Language Server Protocol completion](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#completionItem)
 - [Java lexical structure](https://docs.oracle.com/javase/specs/jls/se25/html/jls-3.html#jls-3.9), [Kotlin keywords](https://kotlinlang.org/docs/keyword-reference.html), [Swift lexical structure](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/lexicalstructure/), [C# keywords](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/)

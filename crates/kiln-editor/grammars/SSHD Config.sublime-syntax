@@ -1,0 +1,31 @@
+%YAML 1.2
+---
+# Original Kiln grammar, based on https://man.openbsd.org/sshd_config
+# Keep the server Match criteria separate from the client configuration grammar.
+name: SSHD Config
+hidden: true
+scope: source.sshd_config
+file_extensions: [sshd_config]
+contexts:
+  main:
+    - include: scope:source.kiln-ssh#comments
+    - match: '^[ \t]*(?i:(Match))(?=[ \t]|$)'
+      captures:
+        1: keyword.control.ssh
+      push: conditions
+    - match: '^[ \t]*(?i:(Include))(?=[ \t]|$)'
+      captures:
+        1: keyword.control.import.ssh
+      push: arguments
+    - match: '^[ \t]*([A-Za-z][A-Za-z0-9]*)(?=[ \t]|$)'
+      captures:
+        1: keyword.other.ssh
+      push: arguments
+  arguments:
+    - meta_scope: string.unquoted.ssh
+    - include: scope:source.kiln-ssh#values
+  conditions:
+    - meta_scope: string.unquoted.ssh
+    - match: '(?i)(?<!\S)(?:all|invalid-user|user|group|host|localaddress|localport|version|rdomain|address)(?=[ \t]|$)'
+      scope: keyword.control.ssh
+    - include: scope:source.kiln-ssh#values

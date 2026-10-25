@@ -57,22 +57,32 @@ If you edit a command from history, it runs only when you choose its explicit ru
 
 ## Shell completion {#shell-completion}
 
-In a newly opened, integrated zsh terminal, Kiln suggests `cd` paths and common Git, Docker, npm and Cargo subcommands as you type.
+In a newly opened, integrated zsh terminal, suggestions appear automatically beside the cursor and follow it as you type. They include commands, subcommands, options and supported local arguments.
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+Space` | Open suggestions, or look up installed command names |
-| Arrow keys | Select a suggestion |
-| `Tab` or `Enter` | Insert the selected suggestion |
+| `Tab` | Insert the highlighted suggestion |
+| `Down` | Select the menu, then use arrow keys to choose a suggestion |
+| `Enter` | Insert once the menu is selected; otherwise run the command you typed |
 | `Esc` | Close the menu |
+| `Ctrl+Space` | Open or reopen and select the menu, or look up installed command names |
 
-Inserting a suggestion never runs the command. When the menu is closed, zsh's own `Tab` completion works as usual.
+Inserting a suggestion edits the command line. Press `Enter` again to run it. Pressing `Enter` before selecting an automatic menu runs your original command. When the menu is closed, zsh's own `Tab` completion works as usual.
 
-To hide automatic suggestions, turn off command suggestions in Terminal settings. `Ctrl+Space` keeps working. Set `KILN_COMPLETION_PREVIEW=0` in your shell to also stop the shell from producing preview data.
+Suggestions use the command and its arguments:
 
-Completion does not read your shell history files, run commands to generate help, or send anything to a cloud service.
+- `cd` suggests folders from the terminal's current directory. Choose a folder and continue into the next level.
+- File arguments offer local paths. `docker --config` and `docker compose --project-directory` suggest folders; `docker compose --file` suggests files.
+- Git commands can suggest local branches from the current repository.
+- `npm run`, `pnpm run`, `yarn run` and `bun run` suggest script names from the project's `package.json`.
 
-Completion supports zsh only. Bash, fish, SSH sessions, agent chats, full-screen applications and other shells keep their normal input behavior. Help for the integration is in the terminal's context menu.
+Kiln automatically reads command, subcommand and option information from supported installed CLIs' local help and caches the results. A bundled catalog provides an offline fallback, including Docker Engine, Buildx and Compose. If a command's help is unsupported or unavailable, Kiln uses the local or bundled suggestions available for it.
+
+Help requests run in an isolated temporary environment without your typed argument values. Completion does not use AI, read shell history files or send completion data to a cloud service.
+
+To hide automatic suggestions, turn off **Command suggestions** in **Settings → Terminal**. `Ctrl+Space` keeps working. Set `KILN_COMPLETION_PREVIEW=0` in your shell to also stop producing preview data.
+
+Completion supports zsh only. Open a new terminal to load updated integration; existing terminals keep their shell setup. Bash, fish, SSH sessions, agent chats, full-screen applications and other shells keep their normal input behavior. Integration help is in the terminal's context menu.
 
 ## Connection recovery {#connection-recovery}
 

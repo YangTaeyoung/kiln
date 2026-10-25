@@ -83,7 +83,7 @@ kiln activity failed
 <p>History is a reconstructed text view of each command's output. It is not a raw terminal log and does not record every intermediate screen of a full-screen TUI. Without command-boundary integration, only the currently visible output is available.</p>
 <p>If you edit a command from history, it runs only when you choose its explicit run action, and it runs in a new terminal.</p>
 <h2 id="shell-completion">Shell completion</h2>
-<p>In a newly opened, integrated zsh terminal, Kiln suggests <code>cd</code> paths and common Git, Docker, npm and Cargo subcommands as you type.</p>
+<p>In a newly opened, integrated zsh terminal, suggestions appear automatically beside the cursor and follow it as you type. They include commands, subcommands, options and supported local arguments.</p>
 <div class="table"><table>
 <thead>
 <tr>
@@ -93,27 +93,39 @@ kiln activity failed
 </thead>
 <tbody>
 <tr>
-<td><code>Ctrl+Space</code></td>
-<td>Open suggestions, or look up installed command names</td>
+<td><code>Tab</code></td>
+<td>Insert the highlighted suggestion</td>
 </tr>
 <tr>
-<td>Arrow keys</td>
-<td>Select a suggestion</td>
+<td><code>Down</code></td>
+<td>Select the menu, then use arrow keys to choose a suggestion</td>
 </tr>
 <tr>
-<td><code>Tab</code> or <code>Enter</code></td>
-<td>Insert the selected suggestion</td>
+<td><code>Enter</code></td>
+<td>Insert once the menu is selected; otherwise run the command you typed</td>
 </tr>
 <tr>
 <td><code>Esc</code></td>
 <td>Close the menu</td>
 </tr>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>Open or reopen and select the menu, or look up installed command names</td>
+</tr>
 </tbody>
 </table></div>
-<p>Inserting a suggestion never runs the command. When the menu is closed, zsh's own <code>Tab</code> completion works as usual.</p>
-<p>To hide automatic suggestions, turn off command suggestions in Terminal settings. <code>Ctrl+Space</code> keeps working. Set <code>KILN_COMPLETION_PREVIEW=0</code> in your shell to also stop the shell from producing preview data.</p>
-<p>Completion does not read your shell history files, run commands to generate help, or send anything to a cloud service.</p>
-<p>Completion supports zsh only. Bash, fish, SSH sessions, agent chats, full-screen applications and other shells keep their normal input behavior. Help for the integration is in the terminal's context menu.</p>
+<p>Inserting a suggestion edits the command line. Press <code>Enter</code> again to run it. Pressing <code>Enter</code> before selecting an automatic menu runs your original command. When the menu is closed, zsh's own <code>Tab</code> completion works as usual.</p>
+<p>Suggestions use the command and its arguments:</p>
+<ul>
+<li><code>cd</code> suggests folders from the terminal's current directory. Choose a folder and continue into the next level.</li>
+<li>File arguments offer local paths. <code>docker --config</code> and <code>docker compose --project-directory</code> suggest folders; <code>docker compose --file</code> suggests files.</li>
+<li>Git commands can suggest local branches from the current repository.</li>
+<li><code>npm run</code>, <code>pnpm run</code>, <code>yarn run</code> and <code>bun run</code> suggest script names from the project's <code>package.json</code>.</li>
+</ul>
+<p>Kiln automatically reads command, subcommand and option information from supported installed CLIs' local help and caches the results. A bundled catalog provides an offline fallback, including Docker Engine, Buildx and Compose. If a command's help is unsupported or unavailable, Kiln uses the local or bundled suggestions available for it.</p>
+<p>Help requests run in an isolated temporary environment without your typed argument values. Completion does not use AI, read shell history files or send completion data to a cloud service.</p>
+<p>To hide automatic suggestions, turn off <strong>Command suggestions</strong> in <strong>Settings → Terminal</strong>. <code>Ctrl+Space</code> keeps working. Set <code>KILN_COMPLETION_PREVIEW=0</code> in your shell to also stop producing preview data.</p>
+<p>Completion supports zsh only. Open a new terminal to load updated integration; existing terminals keep their shell setup. Bash, fish, SSH sessions, agent chats, full-screen applications and other shells keep their normal input behavior. Integration help is in the terminal's context menu.</p>
 <h2 id="connection-recovery">Connection recovery</h2>
 <p>Kiln keeps the terminal connection separate from the shell or agent running inside it. If a panel loses its connection or stops responding, Kiln repairs the connection, redraws the screen and asks the CLI to redraw. It does not restart the agent, send a prompt or run <code>/resume</code> for you.</p>
 <div class="table"><table>
@@ -214,7 +226,7 @@ kiln activity failed
 <p>기록은 각 명령의 출력을 재구성한 텍스트입니다. 원시 터미널 로그가 아니며, 전체 화면 TUI의 중간 화면을 모두 담지도 않습니다. 명령 경계를 추적하는 통합이 없으면 지금 화면에 보이는 출력만 볼 수 있습니다.</p>
 <p>기록에서 명령을 편집하면, 명시적으로 실행을 선택해야만 실행되며 새 터미널에서 실행됩니다.</p>
 <h2 id="shell-completion">셸 자동 완성</h2>
-<p>새로 연 zsh 터미널에 셸 통합이 적용되어 있으면, 입력하는 동안 Kiln이 <code>cd</code> 경로와 자주 쓰는 Git, Docker, npm, Cargo 하위 명령을 추천합니다.</p>
+<p>셸 통합이 적용된 새 zsh 터미널에서는 입력할 때 커서 옆에 추천 메뉴가 자동으로 나타나고 커서를 따라 움직입니다. 명령, 하위 명령, 옵션과 지원되는 로컬 인수를 추천합니다.</p>
 <div class="table"><table>
 <thead>
 <tr>
@@ -224,27 +236,39 @@ kiln activity failed
 </thead>
 <tbody>
 <tr>
-<td><code>Ctrl+Space</code></td>
-<td>추천 목록 열기, 또는 설치된 명령 이름 찾기</td>
+<td><code>Tab</code></td>
+<td>강조된 추천 항목 삽입</td>
 </tr>
 <tr>
-<td>화살표 키</td>
-<td>추천 항목 선택</td>
+<td><code>Down</code></td>
+<td>메뉴를 선택한 뒤 화살표 키로 추천 항목 이동</td>
 </tr>
 <tr>
-<td><code>Tab</code> 또는 <code>Enter</code></td>
-<td>선택한 추천 항목 삽입</td>
+<td><code>Enter</code></td>
+<td>메뉴를 선택한 상태면 삽입, 그 전에는 입력한 명령 실행</td>
 </tr>
 <tr>
 <td><code>Esc</code></td>
 <td>메뉴 닫기</td>
 </tr>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>메뉴를 열거나 다시 열어 선택, 또는 설치된 명령 이름 찾기</td>
+</tr>
 </tbody>
 </table></div>
-<p>추천 항목을 삽입해도 명령은 실행되지 않습니다. 메뉴가 닫혀 있을 때는 zsh 자체의 <code>Tab</code> 자동 완성이 평소처럼 동작합니다.</p>
-<p>자동 추천을 숨기려면 터미널 설정에서 명령어 입력 힌트를 끄세요. 그래도 <code>Ctrl+Space</code>는 계속 동작합니다. 셸이 미리보기 데이터를 아예 만들지 않게 하려면 셸에서 <code>KILN_COMPLETION_PREVIEW=0</code>도 설정하세요.</p>
-<p>자동 완성은 셸 기록 파일을 읽지 않고, 도움말을 만들려고 명령을 실행하지도 않으며, 클라우드 서비스로 아무것도 보내지 않습니다.</p>
-<p>자동 완성은 zsh에서만 동작합니다. Bash, fish, SSH 세션, 에이전트 채팅, 전체 화면 애플리케이션, 그 밖의 셸에서는 원래 입력 방식이 그대로 유지됩니다. 통합 관련 도움말은 터미널의 컨텍스트 메뉴에 있습니다.</p>
+<p>추천 항목을 삽입하면 명령줄만 바뀝니다. 실행하려면 <code>Enter</code>를 한 번 더 누릅니다. 자동으로 나타난 메뉴를 선택하기 전에 <code>Enter</code>를 누르면 원래 입력한 명령을 실행합니다. 메뉴가 닫혀 있을 때는 zsh 자체의 <code>Tab</code> 자동 완성이 평소처럼 동작합니다.</p>
+<p>입력한 명령과 인수에 따라 다음 항목을 추천합니다.</p>
+<ul>
+<li><code>cd</code>는 터미널의 현재 디렉터리를 기준으로 폴더를 추천합니다. 폴더를 선택한 뒤 다음 하위 경로를 이어서 완성할 수 있습니다.</li>
+<li>파일 인수에는 로컬 경로를 추천합니다. <code>docker --config</code>와 <code>docker compose --project-directory</code>는 폴더를, <code>docker compose --file</code>은 파일을 추천합니다.</li>
+<li>Git 명령에는 현재 저장소의 로컬 브랜치를 추천할 수 있습니다.</li>
+<li><code>npm run</code>, <code>pnpm run</code>, <code>yarn run</code>, <code>bun run</code>에는 프로젝트의 <code>package.json</code>에 정의된 스크립트 이름을 추천합니다.</li>
+</ul>
+<p>Kiln은 설치된 CLI의 로컬 도움말에서 명령, 하위 명령, 옵션 정보를 자동으로 읽고 결과를 캐시합니다. 오프라인에서도 쓸 수 있는 내장 추천 목록에는 Docker Engine, Buildx, Compose도 포함됩니다. 도움말을 해석하거나 불러올 수 없으면 해당 명령에 사용 가능한 로컬 또는 내장 추천을 사용합니다.</p>
+<p>도움말 요청은 입력한 인수 값을 전달하지 않고 분리된 임시 환경에서 실행합니다. 자동 완성은 AI를 사용하거나 셸 기록 파일을 읽지 않으며, 자동 완성 데이터를 클라우드 서비스로 보내지 않습니다.</p>
+<p>자동 추천을 숨기려면 <strong>설정 → 터미널</strong>에서 <strong>명령어 입력 힌트</strong>를 끄세요. 그래도 <code>Ctrl+Space</code>는 계속 동작합니다. 셸이 미리보기 데이터도 만들지 않게 하려면 셸에서 <code>KILN_COMPLETION_PREVIEW=0</code>을 설정하세요.</p>
+<p>자동 완성은 zsh에서만 동작합니다. 갱신된 통합을 불러오려면 새 터미널을 여세요. 기존 터미널은 현재 셸 설정을 유지합니다. Bash, fish, SSH 세션, 에이전트 채팅, 전체 화면 애플리케이션, 그 밖의 셸에서는 원래 입력 방식이 그대로 유지됩니다. 통합 관련 도움말은 터미널의 컨텍스트 메뉴에 있습니다.</p>
 <h2 id="connection-recovery">연결 복구</h2>
 <p>Kiln은 터미널 연결과 그 안에서 실행 중인 셸이나 에이전트를 분리해서 관리합니다. 패널의 연결이 끊기거나 응답이 멈추면 Kiln은 연결을 복구하고, 화면을 다시 그리고, CLI에도 다시 그리기를 요청합니다. 에이전트를 재시작하거나, 프롬프트를 보내거나, <code>/resume</code>을 대신 실행하지는 않습니다.</p>
 <div class="table"><table>
@@ -345,7 +369,7 @@ kiln activity failed
 <p>履歴は、各コマンドの出力を再構成したテキスト表示です。生のターミナルログではなく、フルスクリーン TUI の途中の画面をすべて記録するものでもありません。コマンドの区切りを追跡する連携がない場合、確認できるのは現在表示されている出力だけです。</p>
 <p>履歴のコマンドを編集しても、実行されるのは実行操作を明示的に選んだときだけです。その場合は新しいターミナルで実行されます。</p>
 <h2 id="shell-completion">シェル補完</h2>
-<p>シェル連携が有効な状態で新しく開いた zsh ターミナルでは、入力に合わせて <code>cd</code> のパスや、Git、Docker、npm、Cargo のよく使うサブコマンドを Kiln が候補として表示します。</p>
+<p>シェル連携が有効な状態で新しく開いた zsh ターミナルでは、入力するとカーソルの横に候補メニューが自動で表示され、カーソルに合わせて移動します。コマンド、サブコマンド、オプション、対応するローカルの引数が候補になります。</p>
 <div class="table"><table>
 <thead>
 <tr>
@@ -355,27 +379,39 @@ kiln activity failed
 </thead>
 <tbody>
 <tr>
-<td><code>Ctrl+Space</code></td>
-<td>候補を開く、またはインストール済みのコマンド名を検索する</td>
+<td><code>Tab</code></td>
+<td>ハイライトされた候補を挿入する</td>
 </tr>
 <tr>
-<td>矢印キー</td>
-<td>候補を選ぶ</td>
+<td><code>Down</code></td>
+<td>メニューを選択し、その後は矢印キーで候補を移動する</td>
 </tr>
 <tr>
-<td><code>Tab</code> または <code>Enter</code></td>
-<td>選んだ候補を挿入する</td>
+<td><code>Enter</code></td>
+<td>メニューを選択済みなら挿入し、それ以外は入力したコマンドを実行する</td>
 </tr>
 <tr>
 <td><code>Esc</code></td>
 <td>メニューを閉じる</td>
 </tr>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>メニューを開くか再び開いて選択する、またはインストール済みのコマンド名を検索する</td>
+</tr>
 </tbody>
 </table></div>
-<p>候補を挿入しても、コマンドは実行されません。メニューが閉じているときは、zsh 本来の <code>Tab</code> 補完が通常どおり動作します。</p>
-<p>候補を自動で表示しないようにするには、ターミナルの設定で「コマンド入力候補」をオフにします。この場合も <code>Ctrl+Space</code> は使えます。シェル側でもプレビュー用のデータを生成しないようにするには、シェルで <code>KILN_COMPLETION_PREVIEW=0</code> を設定します。</p>
-<p>補完のために、シェルの履歴ファイルを読んだり、ヘルプを得るためにコマンドを実行したり、クラウドサービスにデータを送ったりすることはありません。</p>
-<p>補完に対応しているのは zsh だけです。Bash、fish、SSH セッション、エージェントとのチャット、フルスクリーンのアプリケーション、その他のシェルでは、入力の動作は通常どおりです。連携のヘルプはターミナルのコンテキストメニューにあります。</p>
+<p>候補を挿入すると、コマンドラインの内容が変わります。実行するには、もう一度 <code>Enter</code> を押します。自動表示されたメニューを選択する前に <code>Enter</code> を押すと、元の入力どおりにコマンドを実行します。メニューが閉じているときは、zsh 本来の <code>Tab</code> 補完が通常どおり動作します。</p>
+<p>入力したコマンドと引数に応じて、次の候補が表示されます。</p>
+<ul>
+<li><code>cd</code> は、ターミナルの現在のディレクトリからフォルダーを候補として表示します。フォルダーを選んだ後、次の階層のパスを続けて補完できます。</li>
+<li>ファイルを指定する引数にはローカルのパスが表示されます。<code>docker --config</code> と <code>docker compose --project-directory</code> はフォルダー、<code>docker compose --file</code> はファイルが候補になります。</li>
+<li>Git のコマンドでは、現在のリポジトリのローカルブランチを候補にできます。</li>
+<li><code>npm run</code>、<code>pnpm run</code>、<code>yarn run</code>、<code>bun run</code> では、プロジェクトの <code>package.json</code> に定義されたスクリプト名が候補になります。</li>
+</ul>
+<p>Kiln は、対応するインストール済み CLI のローカルヘルプからコマンド、サブコマンド、オプションの情報を自動で読み取り、結果をキャッシュします。オフラインでも使える同梱の候補データには、Docker Engine、Buildx、Compose も含まれます。コマンドのヘルプに対応していない場合や取得できない場合は、そのコマンドで利用できるローカルまたは同梱の候補を使います。</p>
+<p>ヘルプの取得は、入力した引数の値を渡さず、分離した一時環境で実行します。補完に AI は使わず、シェルの履歴ファイルを読んだり、補完データをクラウドサービスへ送ったりすることもありません。</p>
+<p>候補を自動で表示しないようにするには、<strong>設定 → ターミナル</strong>で<strong>コマンド入力候補</strong>をオフにします。この場合も <code>Ctrl+Space</code> は使えます。シェル側でもプレビュー用のデータを生成しないようにするには、シェルで <code>KILN_COMPLETION_PREVIEW=0</code> を設定します。</p>
+<p>補完に対応しているのは zsh だけです。更新された連携を読み込むには、新しいターミナルを開いてください。既存のターミナルは現在のシェル設定を保持します。Bash、fish、SSH セッション、エージェントとのチャット、フルスクリーンのアプリケーション、その他のシェルでは、入力の動作は通常どおりです。連携のヘルプはターミナルのコンテキストメニューにあります。</p>
 <h2 id="connection-recovery">接続の復旧</h2>
 <p>Kiln は、ターミナルの接続と、その中で動くシェルやエージェントを分けて管理しています。パネルの接続が切れたり応答しなくなったりすると、Kiln は接続を修復して画面を再描画し、CLI にも再描画を求めます。エージェントの再起動、プロンプトの送信、<code>/resume</code> の代行は行いません。</p>
 <div class="table"><table>
@@ -476,7 +512,7 @@ kiln activity failed
 <p>历史是根据每条命令的输出重建的文本视图，不是原始终端日志，也不会记录全屏 TUI 的每一帧中间画面。没有命令边界集成时，只能查看当前可见的输出。</p>
 <p>编辑历史中的命令后，只有明确选择运行操作它才会执行，而且会在新终端中运行。</p>
 <h2 id="shell-completion">Shell 补全</h2>
-<p>在新打开且已集成的 zsh 终端中，Kiln 会在你输入时提示 <code>cd</code> 路径，以及 Git、Docker、npm 和 Cargo 的常用子命令。</p>
+<p>在新打开且已集成的 zsh 终端中，建议菜单会在输入时自动出现在光标旁，并随光标移动。建议包括命令、子命令、选项和支持的本地参数。</p>
 <div class="table"><table>
 <thead>
 <tr>
@@ -486,27 +522,39 @@ kiln activity failed
 </thead>
 <tbody>
 <tr>
-<td><code>Ctrl+Space</code></td>
-<td>打开建议，或查找已安装的命令名</td>
+<td><code>Tab</code></td>
+<td>插入高亮的建议</td>
 </tr>
 <tr>
-<td>方向键</td>
-<td>选择建议</td>
+<td><code>Down</code></td>
+<td>选中菜单，然后用方向键选择建议</td>
 </tr>
 <tr>
-<td><code>Tab</code> 或 <code>Enter</code></td>
-<td>插入所选建议</td>
+<td><code>Enter</code></td>
+<td>选中菜单后插入建议，否则执行已输入的命令</td>
 </tr>
 <tr>
 <td><code>Esc</code></td>
 <td>关闭菜单</td>
 </tr>
+<tr>
+<td><code>Ctrl+Space</code></td>
+<td>打开或重新打开并选中菜单，或查找已安装的命令名</td>
+</tr>
 </tbody>
 </table></div>
-<p>插入建议永远不会执行命令。菜单关闭时，zsh 自带的 <code>Tab</code> 补全照常可用。</p>
-<p>要隐藏自动建议，在终端设置中关闭“命令输入提示”，<code>Ctrl+Space</code> 仍然可用。在 Shell 中设置 <code>KILN_COMPLETION_PREVIEW=0</code>，Shell 也会停止生成预览数据。</p>
-<p>补全不会读取 Shell 历史文件，不会为了生成帮助而运行命令，也不会向云服务发送任何内容。</p>
-<p>补全只支持 zsh。Bash、fish、SSH 会话、代理对话、全屏应用和其他 Shell 的输入方式保持不变。集成的帮助位于终端的右键菜单中。</p>
+<p>插入建议会修改命令行，再按一次 <code>Enter</code> 才会运行命令。在选中自动出现的菜单之前按 <code>Enter</code>，会执行原先输入的命令。菜单关闭时，zsh 自带的 <code>Tab</code> 补全照常可用。</p>
+<p>建议会根据命令及其参数变化：</p>
+<ul>
+<li><code>cd</code> 从终端当前目录中提示文件夹，选中文件夹后可以继续补全下一层路径。</li>
+<li>文件参数会提供本地路径。<code>docker --config</code> 和 <code>docker compose --project-directory</code> 提示文件夹，<code>docker compose --file</code> 提示文件。</li>
+<li>Git 命令可以提示当前仓库中的本地分支。</li>
+<li><code>npm run</code>、<code>pnpm run</code>、<code>yarn run</code> 和 <code>bun run</code> 会提示项目 <code>package.json</code> 中定义的脚本名。</li>
+</ul>
+<p>Kiln 会自动从支持的已安装 CLI 的本地帮助中读取命令、子命令和选项信息，并缓存结果。内置目录提供离线回退建议，包括 Docker Engine、Buildx 和 Compose。如果命令的帮助不受支持或无法获取，Kiln 会使用该命令可用的本地或内置建议。</p>
+<p>帮助请求在独立的临时环境中运行，不传入你输入的参数值。补全不使用 AI，不读取 Shell 历史文件，也不向云服务发送补全数据。</p>
+<p>要隐藏自动建议，在<strong>设置 → 终端</strong>中关闭<strong>命令输入提示</strong>，<code>Ctrl+Space</code> 仍然可用。在 Shell 中设置 <code>KILN_COMPLETION_PREVIEW=0</code>，也会停止生成预览数据。</p>
+<p>补全只支持 zsh。请打开新终端以加载更新后的集成，已有终端会保留原来的 Shell 设置。Bash、fish、SSH 会话、代理对话、全屏应用和其他 Shell 的输入方式保持不变。集成的帮助位于终端的右键菜单中。</p>
 <h2 id="connection-recovery">连接恢复</h2>
 <p>Kiln 把终端连接和其中运行的 Shell 或代理分开管理。面板断开连接或停止响应时，Kiln 会修复连接、重绘屏幕，并让 CLI 重绘。它不会替你重启代理、发送提示词或运行 <code>/resume</code>。</p>
 <div class="table"><table>

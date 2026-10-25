@@ -12,12 +12,13 @@ const CLI_VERSION: &str = if cfg!(feature = "updater-test") {
 } else { env!("CARGO_PKG_VERSION") };
 
 #[derive(Parser)]
-#[command(name = "kiln", version = CLI_VERSION, about = "Kiln — terminal-first IDE with persistent sessions")]
+#[command(name = "kiln", version = CLI_VERSION, about = "Kiln: terminal-first IDE with persistent sessions", args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
-    /// 워크스페이스로 열 폴더.
-    path: Option<std::path::PathBuf>,
+    /// 에디터로 열 파일 또는 워크스페이스로 열 폴더. 첫 경로가 명령어와 같은 이름이면 -- 뒤에 쓴다.
+    #[arg(value_name = "PATH")]
+    path: Vec<std::path::PathBuf>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -312,16 +313,18 @@ pub fn main() -> anyhow::Result<()> {
     }
 }
 
-/// The GUI executable's entry point: an optional folder to open, no subcommands.
+/// The GUI executable's entry point: files/folders to open, no subcommands.
 pub fn gui_main() -> anyhow::Result<()> {
-    run_gui(std::env::args_os().nth(1).map(std::path::PathBuf::from))
+    run_gui(std::env::args_os().skip(1).map(std::path::PathBuf::from).collect())
 }
 
-fn run_gui(path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+fn run_gui(paths: Vec<std::path::PathBuf>) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     crate::status_bar::ensure_running();
     #[cfg(windows)]
-    if crate::gui_instance::hand_off(path.as_deref()) {
+    // The existing Windows IPC accepts one path. A multi-path invocation opens
+    // its own GUI so no trailing arguments are silently discarded.
+    if paths.len() <= 1 && crate::gui_instance::hand_off(paths.first().map(|p| p.as_path())) {
         return Ok(());
     }
     #[cfg(windows)]
@@ -335,5 +338,32 @@ fn run_gui(path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
         unsafe { windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };
     }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    app::run(path)
+    app::run_paths(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gui_paths_accept_multiple_files_and_folders() {
+        let cli = Cli::try_parse_from(["kiln", "notes.txt", "src", ".env", "한글 file"]).unwrap();
+        assert!(cli.cmd.is_none());
+        assert_eq!(cli.path.into_iter().collect::<Vec<_>>(),
+            ["notes.txt", "src", ".env", "한글 file"].map(std::path::PathBuf::from));
+    }
+
+    #[test]
+    fn subcommands_and_explicit_path_escape_keep_their_meaning() {
+        assert!(matches!(Cli::try_parse_from(["kiln", "ls", "--json"]).unwrap().cmd, Some(Cmd::Ls { json: true })));
+        assert!(matches!(Cli::try_parse_from(["kiln", "send", "42", "hello", "-e"]).unwrap().cmd, Some(Cmd::Send { session: 42, enter: true, .. })));
+        assert!(matches!(Cli::try_parse_from(["kiln", "agent-shell", "--cwd", "/tmp", "--", "bash", "-l"]).unwrap().cmd, Some(Cmd::AgentShell { args, .. }) if args == ["bash", "-l"]));
+        let cli = Cli::try_parse_from(["kiln", "--", "status", "-notes", "read"]).unwrap();
+        assert!(cli.cmd.is_none());
+        assert_eq!(cli.path.into_iter().collect::<Vec<_>>(), ["status", "-notes", "read"].map(std::path::PathBuf::from));
+        // After the first path every positional is literal, including command names.
+        let cli = Cli::try_parse_from(["kiln", "notes.txt", "status"]).unwrap();
+        assert!(cli.cmd.is_none());
+        assert_eq!(cli.path, ["notes.txt", "status"].map(std::path::PathBuf::from));
+    }
 }
