@@ -1,70 +1,128 @@
-name: Release (Windows)
+name: Verify 0.2.16 Windows archives
 
-# Builds the Windows archives of a release tag. The maintainer signs them with the update
-# key on the Mac and attaches them to the draft release (docs/maintainers/releases.md).
+# Verification branch ONLY. Reuse the registered workflow path without changing
+# main's packaging workflow, the release source, or any published artifact.
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: Tag or branch to build, such as v0.2.0
+      version:
+        description: Final release version
         required: true
-  pull_request:
-    paths:
-      - .github/workflows/release-windows.yml
-      - scripts/package-windows.ps1
+        default: '0.2.16'
+      package_run_id:
+        description: Successful Release (Windows) packaging run to download
+        required: true
+        default: '40245891313'
+      expected_x64_sha256:
+        description: SHA256 of the final locally downloaded x64 ZIP
+        required: true
+      expected_arm64_sha256:
+        description: SHA256 of the final locally downloaded ARM64 ZIP
+        required: true
+      release_url:
+        description: Optional public repository or release-page URL for a post-publication installer check
+        required: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  package:
-    name: ${{ matrix.name }}
+  install:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: windows-x64
+          - arch: x64
             runner: windows-latest
-            target: x86_64-pc-windows-msvc
-          - name: windows-arm64
+          - arch: arm64
             runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 25
+    env:
+      VERIFY_VERSION: ${{ inputs.version }}
+      VERIFY_PACKAGE_RUN_ID: ${{ inputs.package_run_id }}
+      VERIFY_X64_SHA256: ${{ inputs.expected_x64_sha256 }}
+      VERIFY_ARM64_SHA256: ${{ inputs.expected_arm64_sha256 }}
+      VERIFY_RELEASE_URL: ${{ inputs.release_url }}
     steps:
+      # Default checkout selects this verification branch and its scripts.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-      - name: Install stable Rust
-        shell: bash
-        run: |
-          if ! command -v rustup >/dev/null; then
-            arch=$([ "$RUNNER_ARCH" = ARM64 ] && echo aarch64 || echo x86_64)
-            curl -fsSLo rustup-init.exe "https://static.rust-lang.org/rustup/dist/$arch-pc-windows-msvc/rustup-init.exe"
-            ./rustup-init.exe -y --profile minimal --default-toolchain none
-            echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$USERPROFILE/.cargo/bin:$PATH"
-          fi
-          rustup toolchain install stable --profile minimal && rustup default stable
-      - name: Package
+      - name: Validate verification inputs and installer source
         shell: pwsh
-        run: ./scripts/package-windows.ps1 -Target ${{ matrix.target }} -OutDir dist
-      # Code signing through SignPath Foundation (free for open source) once the project is
-      # approved. Fill in the organization ID and slugs from the SignPath project.
-      # - name: Sign
-      #   uses: signpath/github-action-submit-signing-request@v1
-      #   with:
-      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-      #     organization-id: '<organization-id>'
-      #     project-slug: 'kiln'
-      #     signing-policy-slug: 'release-signing'
-      #     artifact-configuration-slug: 'windows-zip'
-      #     github-artifact-id: '<artifact id of the unsigned upload>'
-      #     wait-for-completion: true
-      #     output-artifact-directory: 'dist/signed'
-      - name: Upload
-        uses: actions/upload-artifact@v4
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -ne 'refs/heads/verify/0.2.16' -or $env:VERIFY_VERSION -ne '0.2.16') {
+            throw 'Run only verify/0.2.16 for version 0.2.16'
+          }
+          if ($env:VERIFY_PACKAGE_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'Invalid packaging run ID' }
+          foreach ($digest in @($env:VERIFY_X64_SHA256, $env:VERIFY_ARM64_SHA256)) {
+            if ($digest -notmatch '^[0-9a-fA-F]{64}$') { throw 'Both final SHA256 inputs are required' }
+          }
+          # release source: 45ebc98d3db654c9ce0d1738f29d17d68e7ac9a7
+          $installerBlob = git rev-parse HEAD:install.ps1
+          if ($LASTEXITCODE -ne 0 -or $installerBlob -ne '0b52314b293a0fed0471dc740eb93d5cbeaef593') {
+            throw 'install.ps1 differs from the release source'
+          }
+          foreach ($file in @('install.ps1', 'scripts/verify-windows-release.ps1')) {
+            $tokens = $null; $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
+      - uses: actions/download-artifact@v4
         with:
-          name: kiln-${{ matrix.name }}
-          path: dist/Kiln-*.zip
-          if-no-files-found: error
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.package_run_id }}
+          pattern: kiln-windows-*
+          path: archives
+          merge-multiple: true
+      - name: Assert final archive digests before starting any mirror or installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lines = foreach ($arch in @('x64', 'arm64')) {
+            $name = "Kiln-$($env:VERIFY_VERSION)-windows-$arch.zip"
+            $expected = if ($arch -eq 'x64') { $env:VERIFY_X64_SHA256 } else { $env:VERIFY_ARM64_SHA256 }
+            $actual = (Get-FileHash -LiteralPath (Join-Path 'archives' $name) -Algorithm SHA256).Hash
+            if ($actual -ne $expected) { throw "Final archive digest mismatch: $name" }
+            Write-Host "$name SHA256 $($actual.ToLowerInvariant()) PASS"
+            "$($expected.ToLowerInvariant())  $name"
+          }
+          $lines | Set-Content -LiteralPath archives/SHA256SUMS.txt -Encoding ascii
+      - name: Verify final archives through the unchanged installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $verify = @{
+            Version = $env:VERIFY_VERSION
+            NativeArch = '${{ matrix.arch }}'
+            ExpectedX64Sha256 = $env:VERIFY_X64_SHA256
+            ExpectedArm64Sha256 = $env:VERIFY_ARM64_SHA256
+          }
+          if ($env:VERIFY_RELEASE_URL) {
+            ./scripts/verify-windows-release.ps1 -Mirror $env:VERIFY_RELEASE_URL @verify
+          } else {
+            $archives = (Resolve-Path archives).Path
+            $portFile = Join-Path $env:RUNNER_TEMP ('kiln-mirror-' + [Guid]::NewGuid().ToString('N'))
+            $server = [Diagnostics.Process]::new()
+            $server.StartInfo = [Diagnostics.ProcessStartInfo]::new('python')
+            $server.StartInfo.UseShellExecute = $false
+            foreach ($argument in @('scripts/release-archive-mirror.py', $archives, $portFile, '--version', $env:VERIFY_VERSION)) {
+              $server.StartInfo.ArgumentList.Add($argument)
+            }
+            if (!$server.Start()) { throw 'Mirror did not start' }
+            try {
+              $deadline = (Get-Date).AddSeconds(20)
+              while (!(Test-Path -LiteralPath $portFile)) {
+                if ($server.HasExited -or (Get-Date) -gt $deadline) { throw 'Mirror did not become ready' }
+                Start-Sleep -Milliseconds 100
+              }
+              $port = (Get-Content -LiteralPath $portFile -Raw).Trim()
+              if ($port -notmatch '^[0-9]+$') { throw 'Invalid mirror port' }
+              ./scripts/verify-windows-release.ps1 -Mirror "http://127.0.0.1:$port" @verify
+            } finally {
+              if (!$server.HasExited) { $server.Kill(); $server.WaitForExit() }
+              $server.Dispose()
+              Remove-Item -LiteralPath $portFile -ErrorAction SilentlyContinue
+            }
+          }
