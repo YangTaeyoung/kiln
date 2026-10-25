@@ -20,6 +20,7 @@ def document(path):
 def check(ok, message):
     if not ok: errors.append(message)
 verification = BeautifulSoup((ROOT.parent/'site/index.html').read_text(), 'html.parser').select_one('meta[name=google-site-verification]')['content']
+search_bots = ['Googlebot', 'Googlebot-Image', 'Googlebot-Video', 'bingbot', 'Yeti', 'Daum', 'DuckDuckBot', 'Slurp', 'Baiduspider', 'YandexBot', 'YandexImages', 'Applebot', 'MojeekBot', 'Sogou web spider', 'Sogou inst spider']
 titles=set()
 for url in urls:
     path = urlsplit(url).path; s = document(path)
@@ -30,7 +31,10 @@ for url in urls:
     check(s.title and s.title.text not in titles, f'{path}: unique title'); titles.add(s.title.text)
     check(s.select_one('meta[name=description]')['content'], f'{path}: description')
     check(s.select_one('link[rel=canonical]')['href']==url, f'{path}: canonical')
-    check(not s.select_one('meta[name=robots][content*=noindex]'),f'{path}: indexable')
+    for meta in s.select('meta[name][content]'):
+        if meta['name'].lower() in {'robots', 'yandex', *(bot.lower() for bot in search_bots)}:
+            directives = set(meta['content'].lower().replace(',', ' ').split())
+            check(not directives.intersection({'noindex', 'none', 'nofollow'}), f'{path}: indexable for {meta["name"]}')
     alts=s.select('link[hreflang]'); check(len(alts)==5,f'{path}: five language alternates')
     for a in alts:
         check(a['href'] in urls, f'{path}: alternate in sitemap')
@@ -54,9 +58,9 @@ check(not (ROOT/'_build').exists(),'private build sources excluded')
 check('Sitemap: '+BASE+'/sitemap.xml' in (ROOT/'robots.txt').read_text(),'robots sitemap')
 robots = RobotFileParser()
 robots.parse((ROOT/'robots.txt').read_text().splitlines())
-for bot in ['Googlebot', 'bingbot', 'Yeti', 'GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Unknown-AI-Crawler']:
-    for path in ['/', '/ko/', '/docs/', '/assets/hero-poster-en.webp']:
-        check(robots.can_fetch(bot, BASE+path), f'robots blocks {bot}: {path}')
+for bot in search_bots + ['Unknown-Search-Crawler', 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)', 'GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Unknown-AI-Crawler']:
+    for url in urls + [BASE+'/robots.txt', BASE+'/sitemap.xml', BASE+'/assets/hero-poster-en.webp', BASE+'/assets/downloads.js']:
+        check(robots.can_fetch(bot, url), f'robots blocks {bot}: {url}')
 check(robots.site_maps() == [BASE+'/sitemap.xml'], 'robots canonical sitemap')
 if errors: raise SystemExit('\n'.join(errors))
 print(f'SEO checks passed: {len(urls)} pages, reciprocal locales, metadata, JSON-LD, assets, links and anchors')

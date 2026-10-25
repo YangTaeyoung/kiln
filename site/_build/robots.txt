@@ -3,6 +3,24 @@
 User-agent: *
 Allow: /
 
+# Major search indexing crawlers, including image and video indexing.
+User-agent: Googlebot
+User-agent: Googlebot-Image
+User-agent: Googlebot-Video
+User-agent: bingbot
+User-agent: Yeti
+User-agent: Daum
+User-agent: DuckDuckBot
+User-agent: Slurp
+User-agent: Baiduspider
+User-agent: YandexBot
+User-agent: YandexImages
+User-agent: Applebot
+User-agent: MojeekBot
+User-agent: Sogou web spider
+User-agent: Sogou inst spider
+Allow: /
+
 # Explicit AI crawler permissions; unlisted crawlers use the wildcard above.
 User-agent: GPTBot
 User-agent: OAI-SearchBot

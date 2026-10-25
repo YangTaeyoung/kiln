@@ -117,3 +117,28 @@ Official bot references:
 - https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler
 - https://docs.perplexity.ai/docs/resources/perplexity-crawlers
 - https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers#google-extended
+
+### Search indexing crawlers
+
+The robots policy explicitly allows Google (web, images and video), Bing, Naver Yeti,
+Daum, DuckDuckGo, Yahoo Slurp, Baidu, Yandex (web and images), Applebot, Mojeek and
+Sogou. The wildcard also permits every unlisted search crawler. Brave's published
+policy follows Googlebot crawlability, so it is covered by the Googlebot allowance.
+
+The SEO gate checks every sitemap URL and essential assets for each named search/AI
+bot, full Googlebot user-agent text and unknown crawler names. It rejects generic or
+bot-specific noindex/nofollow metadata on public canonical pages.
+
+Official search crawler references:
+- https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers
+- https://www.bing.com/webmasters/help/which-crawlers-does-bing-use-8c184ec0
+- https://help.naver.com/service/30010/contents/17638
+- https://cs.daum.net/faq/service/15/category/4118/detail/36354
+- https://duckduckgo.com/duckduckgo-help-pages/results/duckduckbot
+- https://help.yahoo.com/kb/search/slurp-crawling-page-sln22600.html
+- https://www.baidu.com/search/robots_english.html
+- https://www.yandex.com/support/webmaster/en/robot-workings/user-agent
+- https://support.apple.com/en-us/119829
+- https://www.mojeek.com/bot.html
+- https://help.sogou.com/guide.html
+- https://search.brave.com/help/brave-search-crawler
