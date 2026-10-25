@@ -1362,7 +1362,16 @@ fn main() {
         assert_eq!(cli.calls().lines().count(), 1);
         assert!(discover_cached(&cache, &cli.exe, "nova", &context(&["collect"])).is_some());
         let modified = fs::metadata(&cli.exe).unwrap().modified().unwrap();
-        fs::File::open(&cli.exe)
+        let mut attributes = fs::OpenOptions::new();
+        attributes.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // SetFileTime needs attribute access, without opening executable
+            // contents for writing. Unix retains the original read-only handle.
+            attributes.access_mode(windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES);
+        }
+        attributes.open(&cli.exe)
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(modified + Duration::from_secs(2)))
             .unwrap();
