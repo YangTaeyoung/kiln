@@ -52,6 +52,10 @@ Antigravity (`agy`) conversations in a linked folder are copied to Claude Code a
 - Turns continued in Claude Code or Codex do not reach Antigravity.
 - On macOS, conversations from [Antigravity accounts](accounts.html#antigravity-accounts) are included.
 
+The status dialog names the accounts that receive copies from the central history. These labels do not exclude Antigravity sources.
+
+Recognized Antigravity file reads, single file replacements and shell commands appear as native tools in Claude Code and Codex. Failures remain failures. Unknown tool shapes stay readable, and copying never executes a tool.
+
 ## When both sides continue {#when-both-sides-continue}
 
 If the same conversation was continued in two CLIs before Kiln synced it, the side used most recently becomes the main history. The other continuation is kept as an archived branch and removed from that CLI's resume list. Choose **Restore** in the status dialog to turn the branch into a separate conversation in every CLI.

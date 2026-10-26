@@ -22,7 +22,7 @@ pub(super) struct Sync<'a, M> {
 }
 
 /// Revision of the renderer that writes projections.
-pub(super) const RENDER: u32 = 3;
+pub(super) const RENDER: u32 = 4;
 /// Projections written again for the current renderer in one scan.
 const REFRESH_LIMIT: usize = 4;
 /// A projection is written again for the current renderer after it was unchanged this long.
@@ -874,8 +874,8 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         Ok(waiting)
     }
 
-    /// Writes a Claude projection Kiln made with an earlier renderer again when the canonical
-    /// history holds tool records or exceeds Claude Code's context budget, and the projection
+    /// Writes an earlier Claude projection with tools/large context, or a Codex projection
+    /// with Agy tools, again when the projection
     /// holds only Kiln's records and has been unchanged for `REFRESH_IDLE`: the earlier session
     /// leaves its resume list and the namespace receives a new projection. Other projections are
     /// marked current.
@@ -898,12 +898,13 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
         let all = events.as_ref().unwrap();
         let large = all.iter().map(super::context::size).sum::<usize>() > super::context::BUDGET;
         let tools = all.iter().any(|m| m.text.starts_with("[Tool call: ") || m.text.starts_with("[Tool result: "));
+        let agy_tools = all.iter().any(|m| m.text.starts_with("[Tool result: agy-"));
         let current = |hub: &mut Hub, i: usize| hub.state.conversations.get_mut(cid).unwrap().projections[i].rendered = RENDER;
         let mut rewrite = None;
         for i in stale {
             let p = &hub.state.conversations[cid].projections[i];
             let (source, known) = (p.source.clone(), p.stamp);
-            if !(large || tools) || source.tool != Tool::Claude || discovery::imported(self.config, &source)?.is_none() {
+            if !(large || tools) || !(source.tool == Tool::Claude || (source.tool == Tool::Codex && agy_tools)) || discovery::imported(self.config, &source)?.is_none() {
                 current(hub, i);
                 continue;
             }

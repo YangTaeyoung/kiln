@@ -11918,5 +11918,20 @@
     "en": "Command completion: type in Zsh to see suggestions. Insert with Tab or reopen with Ctrl+Space.",
     "ja": "コマンド補完：Zsh で入力すると候補を表示します。Tab で挿入、Ctrl+Space で再表示します。",
     "zh-CN": "命令补全：在 Zsh 中输入时显示建议。按 Tab 插入，Ctrl+Space 重新打开。"
+  },
+  "사본을 만들 계정": {
+    "en": "Accounts for conversation copies",
+    "ja": "会話のコピー先アカウント",
+    "zh-CN": "会话副本账号"
+  },
+  "중앙 대화 기록으로 연동합니다. Antigravity 원본도 수집하며, 변경 내용은 Claude Code와 Codex에만 복사합니다.": {
+    "en": "Conversations sync through a central history. Antigravity originals are included; changes are copied to Claude Code and Codex only.",
+    "ja": "中央の会話履歴を介して同期します。Antigravity の原本も取り込み、変更は Claude Code と Codex にのみコピーします。",
+    "zh-CN": "通过中央会话历史同步。也会收集 Antigravity 原始记录，更改仅复制到 Claude Code 和 Codex。"
+  },
+  "해당 폴더에서 Claude Code, Codex 또는 Antigravity 대화를 시작하면 자동으로 연결됩니다.": {
+    "en": "Start a Claude Code, Codex or Antigravity conversation in this folder to link it automatically.",
+    "ja": "このフォルダーで Claude Code、Codex または Antigravity の会話を始めると自動的に連携します。",
+    "zh-CN": "在此文件夹中开始 Claude Code、Codex 或 Antigravity 会话即可自动关联。"
   }
 }

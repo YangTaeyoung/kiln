@@ -101,6 +101,20 @@ conversations whose workspace is in that folder are copied to Claude Code and Co
   `conversations/<id>.db` exists,
 - `annotations/<id>.pbtxt` for the title agy shows in its resume picker.
 
+The status dialog shows the central history and names the accounts receiving copies;
+its Claude Code/Codex labels do not exclude Antigravity sources.
+
+For agy 1.4.7's recognized `read_file`, `edit_file` and `run_command` records, Claude
+Code shows native Read, Edit and Bash tools. Codex shows file changes, command execution
+and reads attributed to Antigravity. Successful single replacements include their
+recorded change; denied or failed tools keep their failure status, without inventing a
+process exit code. Command calls also become Codex-native model-history calls. Original
+Agy arguments and results are retained with integrity-checked annotations. Unknown
+arguments, unsupported tools and ambiguous parallel groups remain readable records.
+Tool history is never executed during copying. Earlier, unchanged Kiln-only tool copies
+are refreshed after ten idle minutes, with writer guards and archived previous IDs;
+conversations already continued in their CLI are preserved.
+
 User requests, answers, tool calls and tool results are copied. agy's reasoning, system and
 checkpoint steps stay in agy. A turn appears once agy answers it; a request agy never
 answered, for example after its quota ran out, appears once its transcript has been

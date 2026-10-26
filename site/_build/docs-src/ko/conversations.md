@@ -52,6 +52,10 @@ Kiln은 워크스페이스의 대화를 Claude Code와 Codex 사이에 복사할
 - Claude Code나 Codex에서 이어 간 턴은 Antigravity로 넘어가지 않습니다.
 - macOS에서는 [Antigravity 계정](accounts.html#antigravity-accounts)의 대화도 포함됩니다.
 
+상태창에는 중앙 대화 기록의 사본을 만들 계정이 표시됩니다. 여기에 Claude Code와 Codex만 표시되어도 Antigravity 원본은 수집됩니다.
+
+지원하는 Antigravity 파일 읽기, 단일 파일 교체, 셸 명령은 Claude Code와 Codex의 기본 도구 화면에 표시됩니다. 실패한 도구는 실패 상태로 유지합니다. 알 수 없는 형식은 읽을 수 있는 기록으로 남기며, 복사 중 도구를 실행하지 않습니다.
+
 ## 양쪽에서 모두 이어 간 경우 {#when-both-sides-continue}
 
 Kiln이 동기화하기 전에 같은 대화를 두 CLI에서 각각 이어 갔다면, 가장 최근에 쓴 쪽이 기본 기록이 됩니다. 다른 쪽에서 이어 간 내용은 보관된 분기로 남고, 그 CLI의 재개 목록에서는 빠집니다. 상태 대화상자에서 **복구**를 선택하면 그 분기가 모든 CLI에서 별도의 대화가 됩니다.

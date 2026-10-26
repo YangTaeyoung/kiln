@@ -3,6 +3,9 @@ use super::*;
 use format::Message;
 use serde_json::json;
 
+#[path = "agy_native_tool_tests.rs"]
+mod agy_native_tool_tests;
+
 /// Creates a symbolic link to a file on Unix and Windows.
 pub(super) fn symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
