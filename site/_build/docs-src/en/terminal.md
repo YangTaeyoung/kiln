@@ -103,6 +103,8 @@ During recovery, the session and its process keep running and the existing text 
 
 Your terminals belong to the session daemon, not to the window. Close Kiln and its shells and agents keep running; reopen it to return to them. Updates keep running terminals too. A system reboot or explicitly stopping the daemon can end sessions.
 
+If a daemon upgrade cannot finish, your sessions and the current connection stay active. Kiln reports the error once and stops automatically retrying that daemon upgrade. To retry, open **Settings → About** and, under **Session Daemon**, choose **Replace with This Version**.
+
 - **macOS:** the menu-bar icon opens a menu with **Settings…** and **Stop Background Sessions…**. Ending background sessions lists the live sessions and asks for confirmation, with **Cancel** as the default. It includes sessions in open workspaces, so unsaved shell or agent work can be lost.
 - **Windows:** the notification-area icon shows a session summary and a red dot when something needs attention or a notification is unread. Its menu has **Open Kiln**, **Settings** and **Stop Background Sessions…**.
 
