@@ -1582,8 +1582,7 @@ impl KilnApp {
             Action::CopyAgentRequest(index) => self.copy_agent_request(index,ctx),
             Action::OpenTerminalSettings => { self.settings_ui.section=1; self.settings_ui.open=true; },
             Action::UpgradeDaemon => {
-                let exe = conn::daemon_exe();
-                self.conn.send(kiln_proto::ClientMsg::Upgrade { req: 0, exe: exe.to_string_lossy().into_owned() });
+                self.conn.upgrade_daemon();
             }
             Action::OpenTab(factory) => {
                 // 같은 대상이 이미 카드로 열려 있으면 그 카드로 간다.
