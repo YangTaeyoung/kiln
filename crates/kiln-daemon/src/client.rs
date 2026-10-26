@@ -142,7 +142,8 @@ pub fn is_proto_mismatch(e: &std::io::Error) -> bool {
 
 /// 버전에 상관없이 인코딩이 고정된 Hello/Upgrade 만 써서 데몬에 업그레이드를 요청한다.
 pub fn request_upgrade(socket: &str, exe: &Path) -> std::io::Result<()> {
-    let Conn { mut reader, mut writer } = transport::connect(socket)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let Conn { mut reader, mut writer } = transport::connect_control(socket, deadline)?;
     write_msg(&mut writer, &ClientMsg::Hello { proto: PROTO_VERSION, build: crate::build_id().into(), client: "kiln-upgrade".into() })?;
     let hello: ServerMsg = read_msg(&mut reader)?.ok_or_else(|| std::io::Error::other("daemon closed"))?;
     match hello {
@@ -150,8 +151,7 @@ pub fn request_upgrade(socket: &str, exe: &Path) -> std::io::Result<()> {
             write_msg(&mut writer, &ClientMsg::Upgrade { req: 0, exe: exe.to_string_lossy().into_owned() })?;
             // Keep failure replies: a cancelled handover closes only this
             // control connection and must not be reported as a successful swap.
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while Instant::now() < deadline {
+            loop {
                 match read_msg::<_, ServerMsg>(&mut reader)? {
                     None => return Ok(()),
                     Some(ServerMsg::Error { req: 0, message }) => {
@@ -160,34 +160,32 @@ pub fn request_upgrade(socket: &str, exe: &Path) -> std::io::Result<()> {
                     Some(_) => {}
                 }
             }
-            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "daemon upgrade did not complete"))
         }
         ServerMsg::Hello { .. } => Err(std::io::Error::other("daemon cannot upgrade in place")),
         _ => Err(std::io::Error::other("unexpected hello")),
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod upgrade_reply_tests {
     use super::*;
-    use std::os::unix::net::UnixListener;
+    use crate::transport::Listener;
 
     fn run_reply(messages: Vec<ServerMsg>) -> std::io::Result<()> {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("upgrade.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
+        let listener = Listener::bind(socket.to_str().unwrap()).unwrap();
         let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-            assert!(matches!(read_msg::<_, ClientMsg>(&mut stream).unwrap(),
+            let Conn { mut reader, mut writer } = listener.accept().unwrap();
+            assert!(matches!(read_msg::<_, ClientMsg>(&mut reader).unwrap(),
                 Some(ClientMsg::Hello { client, .. }) if client == "kiln-upgrade"));
-            write_msg(&mut stream, &ServerMsg::Hello {
+            write_msg(&mut writer, &ServerMsg::Hello {
                 proto: PROTO_VERSION, build: "0.2.15-fixture".into(),
                 pid: 123, can_upgrade: true,
             }).unwrap();
-            assert!(matches!(read_msg::<_, ClientMsg>(&mut stream).unwrap(),
+            assert!(matches!(read_msg::<_, ClientMsg>(&mut reader).unwrap(),
                 Some(ClientMsg::Upgrade { req: 0, exe }) if exe == "/fixture/kiln"));
-            for message in messages { write_msg(&mut stream, &message).unwrap(); }
+            for message in messages { write_msg(&mut writer, &message).unwrap(); }
         });
         let result = request_upgrade(socket.to_str().unwrap(), Path::new("/fixture/kiln"));
         server.join().unwrap();
@@ -205,6 +203,104 @@ mod upgrade_reply_tests {
     #[test]
     fn an_announced_handover_can_close_its_control_connection() {
         run_reply(vec![ServerMsg::Upgrading]).unwrap();
+    }
+
+    #[test]
+    fn rejection_after_an_upgrade_announcement_still_returns_the_failure() {
+        let error = run_reply(vec![ServerMsg::Upgrading, ServerMsg::Error {
+            req: 0, message: "upgrade failed: owned pause timeout".into(),
+        }]).unwrap_err();
+        assert!(error.to_string().contains("owned pause timeout"));
+    }
+
+    #[derive(Clone, Copy)]
+    enum Stall { Hello, Upgrade, HeaderAfterSlowHello, BodyAfterProgress, Write }
+
+    fn stalled_control_request(stall: Stall) {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("deadline.sock");
+        let listener = Listener::bind(socket.to_str().unwrap()).unwrap();
+        let (release, hold) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let Conn { mut reader, mut writer } = listener.accept().unwrap();
+            assert!(matches!(read_msg::<_, ClientMsg>(&mut reader).unwrap(), Some(ClientMsg::Hello { .. })));
+            if !matches!(stall, Stall::Hello) {
+                // A new five-second budget after Hello would exceed the
+                // protocol-wide deadline in the partial-header case.
+                if matches!(stall, Stall::HeaderAfterSlowHello) {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+                write_msg(&mut writer, &ServerMsg::Hello {
+                    proto: PROTO_VERSION, build: "0.2.15-fixture".into(),
+                    pid: 123, can_upgrade: true,
+                }).unwrap();
+                if !matches!(stall, Stall::Write) {
+                    assert!(matches!(read_msg::<_, ClientMsg>(&mut reader).unwrap(), Some(ClientMsg::Upgrade { req: 0, .. })));
+                }
+                match stall {
+                    Stall::HeaderAfterSlowHello => {
+                        writer.write_all(&[32, 0]).unwrap();
+                        writer.flush().unwrap();
+                    }
+                    Stall::BodyAfterProgress => {
+                        let frame = encode(&ServerMsg::Error {
+                            req: 0, message: "owned incomplete error frame".into(),
+                        });
+                        writer.write_all(&frame[..5]).unwrap();
+                        writer.flush().unwrap();
+                        std::thread::sleep(Duration::from_secs(2));
+                        writer.write_all(&frame[5..6]).unwrap();
+                        writer.flush().unwrap();
+                    }
+                    _ => {}
+                }
+            }
+            // This watchdog closes only the owned peer if the old blocking
+            // implementation never observes its advertised five-second limit.
+            // Keep both halves alive so Windows cannot see a premature EOF.
+            let _ = hold.recv_timeout(Duration::from_secs(8));
+            drop((reader, writer));
+        });
+        // An oversized, nonexistent helper name fills this owned socket's
+        // send buffer; request_upgrade never executes the helper itself.
+        let exe = if matches!(stall, Stall::Write) {
+            std::path::PathBuf::from(format!("/fixture/{}", "x".repeat(16 * 1024 * 1024)))
+        } else {
+            std::path::PathBuf::from("/fixture/kiln")
+        };
+        let started = Instant::now();
+        let result = request_upgrade(socket.to_str().unwrap(), &exe);
+        let elapsed = started.elapsed();
+        let _ = release.send(());
+        server.join().unwrap();
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        assert!(elapsed >= Duration::from_millis(4500), "deadline expired too early: {elapsed:?}");
+        assert!(elapsed < Duration::from_millis(6500), "five-second protocol deadline was not enforced: {elapsed:?}");
+    }
+
+    #[test]
+    fn stalled_hello_obeys_the_five_second_protocol_deadline() {
+        stalled_control_request(Stall::Hello);
+    }
+
+    #[test]
+    fn stalled_upgrade_reply_obeys_the_five_second_protocol_deadline() {
+        stalled_control_request(Stall::Upgrade);
+    }
+
+    #[test]
+    fn partial_header_shares_the_deadline_with_a_slow_hello() {
+        stalled_control_request(Stall::HeaderAfterSlowHello);
+    }
+
+    #[test]
+    fn partial_frame_progress_does_not_extend_the_protocol_deadline() {
+        stalled_control_request(Stall::BodyAfterProgress);
+    }
+
+    #[test]
+    fn blocked_upgrade_write_obeys_the_protocol_deadline() {
+        stalled_control_request(Stall::Write);
     }
 }
 
