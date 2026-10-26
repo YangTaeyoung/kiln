@@ -284,7 +284,7 @@ impl Conn {
         }
         if disconnected {self.connection_lost();}
         if let Some(req) = self.upgrades.expire(Instant::now()) {
-            self.events.push(ConnEvent::Error { req, message:"upgrade failed: daemon did not complete the upgrade; retry manually".into() });
+            self.events.push(ConnEvent::Error { req, message:kiln_common::i18n::tr("데몬 교체를 완료하지 못했습니다. 설정에서 다시 시도하세요.").to_owned() });
         }
         if self.client.is_none() {
             let due = self.last_attempt.is_none_or(|t| t.elapsed() > Duration::from_millis(150));

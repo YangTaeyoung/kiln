@@ -467,32 +467,38 @@ mod socket_tests {
 
     #[test]
     fn incomplete_upgrade_times_out_once_and_keeps_the_same_socket_for_manual_retry() {
-        let server = Server::new();
-        let (mut conn, peer) = server.connect();
-        let req = peer.upgrade();
-        conn.upgrades.pending.as_mut().unwrap().started = Instant::now() - Duration::from_secs(31);
-        conn.pump();
-        for _ in 0..40 {
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::Korean, || {
+            let server = Server::new();
+            let (mut conn, peer) = server.connect();
+            let req = peer.upgrade();
+            conn.upgrades.pending.as_mut().unwrap().started =
+                Instant::now() - Duration::from_secs(31);
             conn.pump();
-        }
-        assert!(conn.is_connected());
-        assert_eq!(conn.screens[&7].version, 42);
-        assert_eq!(
-            conn.events
-                .iter()
-                .filter(|e| matches!(e, ConnEvent::Error { req:r, .. } if *r == req))
-                .count(),
-            1
-        );
-        assert!(
-            !conn
-                .events
-                .iter()
-                .any(|e| matches!(e, ConnEvent::Upgrading))
-        );
-        peer.no_upgrade_before_barrier(&conn);
-        assert!(conn.upgrade_daemon());
-        assert_ne!(peer.upgrade(), req);
+            for _ in 0..40 {
+                conn.pump();
+            }
+            assert!(conn.is_connected());
+            assert_eq!(conn.screens[&7].version, 42);
+            assert_eq!(
+                conn.events
+                    .iter()
+                    .filter(|e| matches!(e, ConnEvent::Error { req:r, .. } if *r == req))
+                    .count(),
+                1
+            );
+            assert!(
+                !conn
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, ConnEvent::Upgrading))
+            );
+            assert!(conn.events.iter().any(|e| matches!(e, ConnEvent::Error { req:r, message }
+            if *r == req && message == "데몬 교체를 완료하지 못했습니다. 설정에서 다시 시도하세요.")),
+            "the Korean UI must receive a localized timeout message");
+            peer.no_upgrade_before_barrier(&conn);
+            assert!(conn.upgrade_daemon());
+            assert_ne!(peer.upgrade(), req);
+        });
     }
 
     #[test]
