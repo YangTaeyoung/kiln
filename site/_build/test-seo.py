@@ -49,6 +49,55 @@ class PublishedSEOTests(unittest.TestCase):
         result = self.run_checker(PUBLIC)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def assert_page_mutation_rejected(self, mutate, diagnostic):
+        with tempfile.TemporaryDirectory(prefix='kiln-seo-metadata-test-') as temp:
+            root = Path(temp)
+            shutil.copytree(PUBLIC, root, dirs_exist_ok=True, ignore=shutil.ignore_patterns('assets'))
+            (root / 'assets').symlink_to(PUBLIC / 'assets', target_is_directory=True)
+            home = root / 'index.html'
+            soup = BeautifulSoup(home.read_text(), 'html.parser')
+            mutate(soup)
+            home.write_text(str(soup))
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(diagnostic, result.stdout + result.stderr)
+
+    def test_checker_requires_alternate_relation_on_head_hreflang_links(self):
+        for relation in (None, 'stylesheet', 'alternate stylesheet'):
+            with self.subTest(rel=relation):
+                def mutate(soup):
+                    link = soup.find('link', hreflang='ja')
+                    if relation is None:
+                        del link['rel']
+                    else:
+                        link['rel'] = relation
+                self.assert_page_mutation_rejected(mutate, 'hreflang')
+
+    def test_checker_validates_both_structured_image_objects(self):
+        invalid_fields = {
+            '@type': 'VideoObject',
+            'url': '/assets/kiln-social-card-v2.png',
+            'contentUrl': 'https://example.invalid/missing.png',
+            'width': 1200,
+            'height': 630,
+            'encodingFormat': 'image/jpeg',
+            'caption': 'Unrelated image',
+        }
+        for owner, property_name in [('WebPage', 'primaryImageOfPage'), ('SoftwareApplication', 'image')]:
+            cases = [*invalid_fields.items(), ('null object', None), ('string object', SOCIAL)]
+            for field, value in cases:
+                with self.subTest(owner=owner, property=property_name, field=field):
+                    def mutate(soup):
+                        script = soup.find('script', type='application/ld+json')
+                        data = json.loads(script.string)
+                        node = next(n for n in data['@graph'] if n['@type'] == owner)
+                        if field in invalid_fields:
+                            node[property_name][field] = value
+                        else:
+                            node[property_name] = value
+                        script.string = json.dumps(data)
+                    self.assert_page_mutation_rejected(mutate, 'ImageObject')
+
     def test_checker_rejects_regressions_in_rendered_documents(self):
         def drop_meta(soup):
             soup.find('meta', property='og:image:width').decompose()

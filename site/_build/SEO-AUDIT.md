@@ -1,4 +1,4 @@
-# Kiln search readiness: 2026-10-26
+# Kiln search readiness: 2026-10-27
 
 ## Current public HTTP evidence
 
@@ -78,8 +78,19 @@ than treating valid JSON alone as sufficient. It is deterministic and runs witho
 Full image decoding was an additional local check; PNG header/size validation runs in CI
 without introducing an image-library dependency.
 
-Final local run: 48-page checker passed; four artifact tests passed in 16.544 seconds,
-including 19 deliberate regression cases. `git diff --check` passed. The title-only
+Review follow-up on 2026-10-27 added 21 artifact mutations before changing the checker.
+The RED run reproduced 13 false-green results: hreflang links with missing, stylesheet
+or mixed rel values, an invalid primaryImageOfPage.contentUrl, and unchecked
+SoftwareApplication.image fields or shapes. The gate now requires exactly the five
+expected rel=alternate links in head. Both WebPage.primaryImageOfPage and
+SoftwareApplication.image must be ImageObject objects with the delivered image's
+absolute url/contentUrl, actual dimensions, image/png MIME and localized caption.
+The new cases independently corrupt each of those fields or replace the object with
+null/a string. The existing generated pages already satisfy these rules; the generator,
+content, image and published site were not changed by this follow-up.
+
+Final local run: 48-page checker passed; six artifact tests passed in 33.857 seconds,
+including 40 deliberate regression cases. `git diff --check` passed. The title-only
 source-landing edit changes no visual styling. Design-hook reports about existing CSS
 font sizes, colors and radii are outside this metadata diff; they were reviewed as
 unchanged context, with no design waivers or ignore configuration added.
@@ -117,6 +128,7 @@ appearance and field Core Web Vitals are not proved by these technical checks.
 - Robots scope and limits: https://developers.google.com/search/docs/crawling-indexing/robots/intro
 - App price, OS and rich-result requirements: https://developers.google.com/search/docs/appearance/structured-data/software-app
 - Software version and screenshot semantics: https://schema.org/SoftwareApplication
+- Image bytes URL, dimensions, MIME and caption: https://schema.org/ImageObject
 - OG image properties and locale arrays: https://ogp.me/
 
 Implementation: `build-site.py`, `check-seo.py`, `test-seo.py`, `seo-content.json`,

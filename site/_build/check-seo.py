@@ -69,6 +69,14 @@ def audit(root):
     except (OSError, struct.error) as exc:
         errors.append(f'social image: {exc}')
         width, height = 0, 0
+
+    def check_image_object(image, lang, label):
+        expected_image = {'@type': 'ImageObject', 'url': SOCIAL, 'contentUrl': SOCIAL,
+                          'width': width, 'height': height, 'encodingFormat': 'image/png',
+                          'caption': content[lang]['social_image_alt']}
+        check(isinstance(image, dict) and all(image.get(key) == value for key, value in expected_image.items()),
+              f'{label}: social ImageObject must match the delivered image and localized caption')
+
     source = BeautifulSoup((SITE / 'index.html').read_text(), 'html.parser')
     titles, descriptions = set(), set()
     bot_names = {'robots', 'yandex', *(b.lower() for b in BOTS)}
@@ -99,7 +107,9 @@ def audit(root):
                 check(proof and value == proof.get('content'), f'{path}: {name} ownership proof preserved')
         alternates = {**routes(suffix), 'x-default': routes(suffix)['en']}
         tags = soup.select('head link[hreflang]')
-        check(len(tags) == 5 and {a.get('hreflang'): a.get('href') for a in tags} == alternates, f'{path}: exact reciprocal hreflang cluster')
+        check(len(tags) == 5 and all(a.get('rel') == ['alternate'] for a in tags)
+              and {a.get('hreflang'): a.get('href') for a in tags} == alternates,
+              f'{path}: exact reciprocal hreflang cluster with rel=alternate in head')
         for target in routes(suffix).values():
             check(soup.find('a', href=urlsplit(target).path), f'{path}: crawlable language link {target}')
         og = {'og:type': 'website', 'og:site_name': 'Kiln', 'og:title': title,
@@ -129,16 +139,13 @@ def audit(root):
         pages = [n for n in graph if n.get('@type') == 'WebPage']
         check(len(pages) == 1 and pages[0].get('url') == url and pages[0].get('inLanguage') == lang, f'{path}: WebPage URL/language')
         if pages:
-            image = pages[0].get('primaryImageOfPage', {})
-            check(image.get('@type') == 'ImageObject' and image.get('url') == SOCIAL
-                  and image.get('width') == width and image.get('height') == height
-                  and image.get('encodingFormat') == 'image/png'
-                  and image.get('caption') == content[lang]['social_image_alt'], f'{path}: social ImageObject')
+            check_image_object(pages[0].get('primaryImageOfPage'), lang, f'{path}: WebPage.primaryImageOfPage')
         for node in graph:
             check('aggregateRating' not in node and 'review' not in node, f'{path}: no invented rating/review')
         apps = [n for n in graph if n.get('@type') == 'SoftwareApplication']
         check(len(apps) == (0 if guide else 1), f'{path}: SoftwareApplication on landing only')
         for app in apps:
+            check_image_object(app.get('image'), lang, f'{path}: SoftwareApplication.image')
             check(app.get('softwareVersion') == version, f'{path}: softwareVersion matches site source version')
             check(app.get('operatingSystem') == 'macOS 11 or later; Windows 11', f'{path}: operatingSystem')
             check(app.get('offers') == {'@type': 'Offer', 'price': '0', 'priceCurrency': 'USD'}, f'{path}: free offers with real currency')
