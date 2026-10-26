@@ -92,6 +92,7 @@ def build(lang, slug=None):
         if option['value'] == lang: option['selected'] = ''
     soup.title.string = title
     soup.select_one('meta[name="description"]')['content'] = description
+    soup.head.append(tag('meta', name='robots', content='index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'))
     canonical = BASE + routes[lang]
     soup.head.append(tag('link', rel='canonical', href=canonical))
     for l, path in {**routes, 'x-default': routes['en']}.items():

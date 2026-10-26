@@ -135,3 +135,11 @@ Implementation: `build-site.py`, `check-seo.py`, `test-seo.py`, `seo-content.jso
 `../index.html`. Image and prompt placement belong to the parent; guide copy and generated
 `site/docs/` belong to the documentation agent. Release version/source pin remain with
 the parent. No app, daemon, signing, release artifact or installed application changes.
+
+## Search preview policy
+
+All canonical pages explicitly allow indexing, following links and large image
+previews. Text and video preview limits are left unrestricted. The missing-page
+document retains its separate noindex policy. These settings permit previews;
+the search engine still decides how a result appears. See the official
+[robots meta documentation](https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag).

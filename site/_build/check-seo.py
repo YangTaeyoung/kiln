@@ -96,10 +96,12 @@ def audit(root):
         check(description not in descriptions, f'{path}: unique description'); descriptions.add(description)
         check(one(soup, 'head link[rel="canonical"]', f'{path}: canonical', 'href') == url, f'{path}: self canonical')
         one(soup, 'head meta[name="viewport"]', f'{path}: viewport', 'content')
+        previews = one(soup, 'head meta[name="robots"]', f'{path}: search preview policy', 'content')
+        check('max-image-preview:large' in previews.lower(), f'{path}: large image previews permitted')
         for meta in soup.select('meta[name][content]'):
             if meta['name'].lower() in bot_names:
                 directives = set(meta['content'].lower().replace(',', ' ').split())
-                check(not directives.intersection({'noindex', 'none', 'nofollow'}), f'{path}: indexable for {meta["name"]}')
+                check(not directives.intersection({'noindex', 'none', 'nofollow', 'noimageindex', 'nosnippet'}), f'{path}: indexable for {meta["name"]}')
         if not guide:
             for name in ['google-site-verification', 'naver-site-verification', 'msvalidate.01']:
                 proof = source.find('meta', attrs={'name': name})
