@@ -2159,7 +2159,9 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     h.get_by_label("대화 연동").click(); h.run_steps(3);
     assert!(h.query_by_label("같은 폴더에서 /resume으로 정본을 여세요. Kiln 안에서는 이전 에이전트를 중지한 뒤 이어갑니다.").is_some());
     assert!(pump_until(&mut h, 10, |h| h.query_by_label("연결됨 · 해당 폴더에서 대화를 찾지 못함").is_some()));
-    assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
+    assert!(h.query_by_label("Claude Code: Fixture Claude · Codex: Fixture Codex").is_some());
+    assert!(h.query_by_label("사본을 만들 계정").is_some());
+    assert!(h.query_by_label("중앙 대화 기록으로 연동합니다. Antigravity 원본도 수집하며, 변경 내용은 Claude Code와 Codex에만 복사합니다.").is_some());
     let panes_before = h.state().debug_pane_count();
     h.key_press_modifiers(cmd(), egui::Key::D); h.run_steps(3);
     assert_eq!(h.state().debug_pane_count(), panes_before, "status dialog must block underlying workspace shortcuts");
@@ -2174,7 +2176,7 @@ fn workspace_conversation_link_menu_requires_accounts_and_scopes_the_status_dial
     h.key_press(egui::Key::Escape); h.run_steps(2);
     assert!(pump_until(&mut h, 10, |h| h.query_by_label("대화 연동됨 · 대화 대기").is_some()), "restored workspace sync must finish discovery before clicking its idle badge");
     h.get_by_label("대화 연동됨 · 대화 대기").click(); h.run_steps(2);
-    assert!(h.query_by_label("Claude Code: Fixture Claude ↔ Codex: Fixture Codex").is_some());
+    assert!(h.query_by_label("Claude Code: Fixture Claude · Codex: Fixture Codex").is_some());
     h.get_by_label("닫기 (Esc)").click(); h.run_steps(2);
     h.query_all_by_label("Sync workspace").find(|n| n.rect().height() >= 44.0).expect("workspace row").click_secondary(); h.run_steps(2);
     assert!(h.query_by_label("대화 연동 해제").is_some());

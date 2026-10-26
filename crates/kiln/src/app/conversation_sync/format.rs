@@ -223,15 +223,17 @@ fn annotate_tool(row: &mut Value, original: &str) -> Result<()> {
 fn tool_pairs(messages: &[Message], changes: &super::tools::FileChanges) -> HashMap<usize, super::tools::Pair> {
     let mut pairs = HashMap::new();
     let mut i = 0;
-    while i + 2 < messages.len() {
+    while i + 1 < messages.len() {
         let (call, result) = (&messages[i], &messages[i + 1]);
+        let next = messages.get(i + 2);
+        let agy = result.text.starts_with("[Tool result: agy-");
         let candidate = call.role == "assistant"
             && result.role == "assistant"
-            && messages[i + 2].role == "assistant"
+            && (agy || next.is_some_and(|m| m.role == "assistant"))
             && call.images.is_empty()
             && result.images.is_empty()
             && !(i > 0 && messages[i - 1].text.starts_with("[Tool call: "))
-            && !messages[i + 2].text.starts_with("[Tool result: ");
+            && !next.is_some_and(|m| m.text.starts_with("[Tool result: "));
         if candidate && let Some(pair) = super::tools::pair(&call.text, &result.text, changes) {
             pairs.insert(i, pair);
             i += 2;
@@ -313,7 +315,7 @@ fn antigravity(rows: &[Value], end: Option<usize>) -> Vec<Message> {
                     .split_inclusive('\n')
                     .skip_while(|line| line.starts_with("Created At: ") || line.starts_with("Completed At: "))
                     .collect::<String>();
-                messages.push(Message { role: "assistant".into(), text: format!("[Tool result: {id}]\n{}", output.trim_end()), images: Vec::new() });
+                messages.push(Message { role: "assistant".into(), text: format!("[Tool result: {id}]\n{}{}", if row["status"] == "ERROR" { "[Tool error]\n" } else { "" }, output.trim_end()), images: Vec::new() });
             }
             _ => {}
         }
@@ -639,6 +641,14 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
         if row["type"] != "response_item" {
             continue;
         }
+        let metadata = &row["kiln_sync"];
+        if metadata["revision"] == 6
+            && metadata["payload_sha256"].as_str() == Some(super::digest(serde_json::to_string(p)?.as_bytes()).as_str())
+            && let Some(original) = metadata["original_text"].as_str()
+        {
+            messages.push(Message { role:"assistant".into(), text:original.into(), images:Vec::new() });
+            continue;
+        }
         match p["type"].as_str() {
             Some("message") => match p["role"].as_str() {
                 Some("user") => {
@@ -870,7 +880,13 @@ fn render_messages(
                 if let Some((pair, first)) = pair
                     && let Some((call, output)) = pair.codex_items()
                 {
-                    rows.push(json!({"timestamp":timestamp,"type":"response_item","payload":if first { call } else { output }}));
+                    let payload = if first { call } else { output };
+                    let mut row = json!({"timestamp":timestamp,"type":"response_item","payload":payload});
+                    if matches!(pair, super::tools::Pair::Antigravity(_)) {
+                        row["kiln_sync"] = json!({"revision":6,"original_text":m.text,
+                            "payload_sha256":super::digest(serde_json::to_string(&row["payload"])?.as_bytes())});
+                    }
+                    rows.push(row);
                     if !first {
                         for item in pair.codex_cells(&format!("{id}:{i}:exec"), cwd) {
                             rows.push(json!({"timestamp":timestamp,"type":"event_msg","payload":{"type":"item_completed","thread_id":id,"turn_id":turn,"item":item,"started_at_ms":0,"completed_at_ms":0}}));

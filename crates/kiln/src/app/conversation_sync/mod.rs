@@ -1456,8 +1456,10 @@ impl Manager {
                     ui.add(egui::Label::new(egui::RichText::new(root.display().to_string()).color(theme.text_dim)).truncate()).on_hover_text(root.display().to_string());
                 });
                 if let Some(pair) = &settings.conversation_sync_pair {
-                    ui.add(egui::Label::new(format!("Claude Code: {} ↔ Codex: {}", pair.claude.label, pair.codex.label)).truncate());
+                    ui.label(tr("사본을 만들 계정"));
+                    ui.add(egui::Label::new(format!("Claude Code: {} · Codex: {}", pair.claude.label, pair.codex.label)).truncate());
                 }
+                ui.add(egui::Label::new(egui::RichText::new(tr("중앙 대화 기록으로 연동합니다. Antigravity 원본도 수집하며, 변경 내용은 Claude Code와 Codex에만 복사합니다.")).small().color(theme.text_dim)).wrap());
                 ui.horizontal(|ui| {
                     let label=ui.label(tr("최근 대화 수"));
                     let mut limit=settings.conversation_sync_limits.get(root).copied().unwrap_or(DEFAULT_SYNC_LIMIT).clamp(1,MAX_SOURCES);
@@ -1468,7 +1470,7 @@ impl Manager {
                 ui.add(egui::Label::new(egui::RichText::new(tr("같은 대화의 사본은 하나로 계산합니다. 범위 밖 기록은 보존하며 추가 동기화만 중단합니다.")).small().color(theme.text_dim)).wrap());
                 if self.paused.iter().any(|p| p == root) { ui.label(tr("에이전트 실행 중에는 자동 동기화를 미룹니다. 종료 후 동기화하며, 보완 확인 주기는 60초입니다.")); }
                 // A single scroll surface; fixed summary and footer never reflow with polling.
-                let list_height = (ctx.content_rect().height() - 340.0).clamp(120.0, 520.0);
+                let list_height = (ctx.content_rect().height() - 420.0).clamp(120.0, 520.0);
                 actions = self.progress_status_ui(ui, enabled, &status, list_height);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -1576,7 +1578,7 @@ impl Manager {
                     ui.label(tr("동기화할 워크스페이스 폴더를 여세요."));
                 }
                 if enabled && status.rows.is_empty() && !self.busy && status.workspaces > 0 {
-                    ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code 또는 Codex 대화를 시작하면 자동으로 연결됩니다.")).wrap());
+                    ui.add(egui::Label::new(tr("해당 폴더에서 Claude Code, Codex 또는 Antigravity 대화를 시작하면 자동으로 연결됩니다.")).wrap());
                 }
                 ui.label(kiln_common::trf!("완료 {}개 · 확인 필요 {}개 · 대기 {}개", status.rows.values().filter(|r| r.phase == Phase::Synced).count(), failed, waiting));
                 if held > 0 {

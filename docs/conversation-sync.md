@@ -1,10 +1,13 @@
-# Claude Code ↔ Codex conversations
+# Central conversation history
 
 Connect both CLI accounts in **Settings → Accounts**, then right-click a workspace
 in the sidebar and choose **Link conversations**. Only explicitly linked workspace
 folders synchronize while Kiln is open. Existing enabled connections do not opt
 any workspace in automatically. Choose **Unlink conversations** in the same menu
 to stop future synchronization; existing CLI copies remain available.
+
+Synchronization uses Kiln's central history. The dialog labels the Claude Code and Codex
+accounts as copy destinations; Antigravity originals are also collected read-only.
 
 Synchronization discovers Claude Code and Codex transcripts within each selected
 folder, including subfolders. Existing sessions and sessions opened outside Kiln
@@ -100,13 +103,14 @@ Tool calls appear as the other CLI's own records where it has them:
   input to a running command) reads as `name(summary)` with its input in a code block and its
   result after a `⎿` marker; a printed command result shows its output.
 
-A call is converted only when its result and a later answer follow it, calls the model made in parallel stay
-text, and history is never re-run. A Claude Code copy written by an earlier version is
+A call is converted when its result and a later answer follow it; completed adjacent Agy
+call/results also retain their native display before the next user turn. Ambiguous parallel
+groups stay text, and history is never re-run. A Claude Code copy written by an earlier version is
 written again once when its conversation holds tool records or exceeds the context budget:
 when the Kiln-written copy has been unchanged for ten minutes and holds no records its CLI
 wrote itself, it is archived (recoverable) and Claude Code receives a new copy.
-Originals, copies continued in their CLI and copies imported by Codex Desktop are never
-rewritten.
+The same guarded refresh applies to earlier Codex copies containing Agy tools. Originals,
+copies continued in their CLI and copies imported by Codex Desktop are never rewritten.
 
 Complete JSON tool results are decoded into fields and multiline output, including
 adjacent JSON responses and nested text blocks. Invalid or truncated JSON stays

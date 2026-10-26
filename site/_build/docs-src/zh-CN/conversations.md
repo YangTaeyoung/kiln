@@ -52,6 +52,10 @@ Kiln 可以在 Claude Code 和 Codex 之间复制工作区的对话，用 `/resu
 - 在 Claude Code 或 Codex 中继续的回合不会同步回 Antigravity。
 - 在 macOS 上，[Antigravity 账户](accounts.html#antigravity-accounts)的对话也包括在内。
 
+状态对话框显示接收中央会话历史副本的账号。即使只列出 Claude Code 和 Codex，也会收集 Antigravity 原始记录。
+
+支持的 Antigravity 文件读取、单次文件替换和 Shell 命令会显示为 Claude Code 和 Codex 的原生工具。失败状态保持不变。未知格式保留为可读记录，复制时不会执行工具。
+
 ## 两边都继续了对话 {#when-both-sides-continue}
 
 如果在 Kiln 同步之前，同一对话已在两个 CLI 中分别继续，最近使用的一方会成为主历史。另一方的后续内容保留为归档分支，并从该 CLI 的恢复列表中移除。在状态对话框中选择**恢复**，可将该分支变为每个 CLI 中的独立对话。

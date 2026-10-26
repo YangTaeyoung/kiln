@@ -52,6 +52,10 @@ Kiln はワークスペースの会話を Claude Code と Codex の間でコピ�
 - Claude Code や Codex で続けたターンは、Antigravity には反映されません。
 - macOS では、[Antigravity アカウント](accounts.html#antigravity-accounts)の会話も含まれます。
 
+状態ダイアログには中央の会話履歴からコピーを受け取るアカウントが表示されます。Claude Code と Codex の表示でも Antigravity の原本は取り込まれます。
+
+対応する Antigravity のファイル読み取り、単一の置換、シェルコマンドは Claude Code と Codex の標準ツール表示になります。失敗状態も保持します。未対応の形式は読める記録として残り、コピー中にツールを実行しません。
+
 ## 両方で続けた場合 {#when-both-sides-continue}
 
 Kiln が同期する前に同じ会話を 2 つの CLI で続けた場合は、最後に使われた側がメインの履歴になります。もう一方の続きはアーカイブされたブランチとして保持され、その CLI の再開リストから外れます。状況ダイアログで**復元**を選ぶと、そのブランチがすべての CLI で独立した会話になります。

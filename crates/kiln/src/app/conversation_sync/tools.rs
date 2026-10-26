@@ -3,6 +3,8 @@
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 
+mod antigravity;
+
 /// How the command was recorded by the CLI it came from.
 pub(super) enum Native {
     /// Claude Code `Bash`: its input and tool result text.
@@ -408,6 +410,13 @@ fn call_command(text: &str) -> Option<(Option<String>, String)> {
             let [(command, dir)] = <[_; 1]>::try_from(exec_commands(body)?).ok()?;
             Some((dir, command))
         }
+        "run_command" => {
+            let input: Value = serde_json::from_str(body).ok()?;
+            let fields = input.as_object()?;
+            if !fields.keys().all(|k| matches!(k.as_str(), "CommandLine" | "Cwd" | "WaitMsBeforeAsync" | "toolSummary")) { return None; }
+            let cwd = match fields.get("Cwd") { Some(v) => Some(v.as_str()?.to_owned()), None => None };
+            Some((cwd, fields.get("CommandLine")?.as_str()?.to_owned()))
+        }
         "exec_command" => {
             let (command, dir) = exec_arguments(&serde_json::from_str(body).ok()?)?;
             Some((dir, command))
@@ -450,6 +459,13 @@ fn result_output(text: &str) -> Option<String> {
     }
     if let Some(outcome) = function_output(output) {
         return Some(claude_content(&outcome.output, outcome.exit_code, outcome.running));
+    }
+    let output = output.strip_prefix("[Tool error]\n").unwrap_or(output);
+    if let Some(rest) = output.strip_prefix("Command exited with code ")
+        && let Some((code, shown)) = rest.split_once(".\n\nCommand output:\n")
+        && let Ok(code) = code.parse::<i64>()
+    {
+        return Some(claude_content(shown, code, None));
     }
     Some(output.to_owned())
 }
@@ -741,6 +757,7 @@ pub(super) struct Command {
 /// A tool call and its result.
 pub(super) enum Pair {
     Shell(Shell),
+    Antigravity(antigravity::AgyTool),
     /// A Codex code-mode program running several `tools.exec_command` calls.
     Commands { id: String, commands: Vec<Command>, program: String, header: String, result: String },
     /// A Codex call that edits files, and may run commands, with its Codex call and output
@@ -760,6 +777,9 @@ pub(super) fn pair(call: &str, result: &str, changes: &FileChanges) -> Option<Pa
     }
     let (name, body) = record(call, "[Tool call: ")?;
     let (id, output) = record(result, "[Tool result: ")?;
+    if let Some(tool) = antigravity::parse(name, body, id, output) {
+        return Some(Pair::Antigravity(tool));
+    }
     if let Some(recorded) = changes.get(id)
         && let Some(edits) = edits(name, body, id, output, recorded)
     {
@@ -787,8 +807,8 @@ pub(super) fn pair(call: &str, result: &str, changes: &FileChanges) -> Option<Pa
             id: id.into(),
             name: name.into(),
             input: input.unwrap_or_else(|| json!({"input": body})),
-            output: super::portable::result_output(output),
-            error: refused,
+            output: super::portable::result_output(output.strip_prefix("[Tool error]\n").unwrap_or(output)),
+            error: refused || (id.starts_with("agy-") && antigravity::failed(output)),
         },
     })
 }
@@ -890,6 +910,7 @@ impl Pair {
     pub fn claude(&self, seed: &str, cwd: &str) -> Option<Vec<Record>> {
         let id = |k: usize| format!("toolu_{}", &super::digest(format!("{seed}:{k}").as_bytes())[..24]);
         match self {
+            Pair::Antigravity(tool) => Some(vec![tool.claude(seed, cwd)]),
             Pair::Shell(shell) => {
                 let (call, result, structured) = shell.claude(&shell.claude_id(seed), cwd);
                 Some(vec![(call, result, Some(structured))])
@@ -918,6 +939,7 @@ impl Pair {
     /// Codex call and output response items, for commands Codex recorded.
     pub fn codex_items(&self) -> Option<(Value, Value)> {
         match self {
+            Pair::Antigravity(tool) => tool.codex_items(),
             Pair::Shell(shell) => shell.codex_items(),
             Pair::Commands { id, program, header, result, .. } => Some(exec_items(id, program, header, result)),
             Pair::Edits { items, .. } => Some(items.clone()),
@@ -927,6 +949,7 @@ impl Pair {
     /// The Codex history items that show the call and its result.
     pub fn codex_cells(&self, seed: &str, cwd: &str) -> Vec<Value> {
         match self {
+            Pair::Antigravity(tool) => vec![tool.codex_cell(seed, cwd)],
             Pair::Shell(shell) => vec![shell.command_execution(&format!("exec-{}", super::stable_id(seed)), cwd)],
             Pair::Commands { commands, .. } => commands
                 .iter()
@@ -957,7 +980,7 @@ impl Pair {
                 vec![mcp_cell(id, "claude_code", name, input, &super::portable::result_output(content), false)]
             }
             Pair::Other { id, name, input, output, error } => {
-                let server = if id.starts_with("toolu_") { "claude_code" } else { "codex" };
+                let server = if id.starts_with("toolu_") { "claude_code" } else if id.starts_with("agy-") { "antigravity" } else { "codex" };
                 vec![mcp_cell(id, server, name, input, output, *error)]
             }
         }
