@@ -145,14 +145,14 @@ pub fn request_upgrade(socket: &str, exe: &Path) -> std::io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let Conn { mut reader, mut writer } = transport::connect_control(socket, deadline)?;
     write_msg(&mut writer, &ClientMsg::Hello { proto: PROTO_VERSION, build: crate::build_id().into(), client: "kiln-upgrade".into() })?;
-    let hello: ServerMsg = read_msg(&mut reader)?.ok_or_else(|| std::io::Error::other("daemon closed"))?;
+    let hello = read_upgrade_reply(&mut reader)?.ok_or_else(|| std::io::Error::other("daemon closed"))?;
     match hello {
         ServerMsg::Hello { can_upgrade: true, .. } => {
             write_msg(&mut writer, &ClientMsg::Upgrade { req: 0, exe: exe.to_string_lossy().into_owned() })?;
             // Keep failure replies: a cancelled handover closes only this
             // control connection and must not be reported as a successful swap.
             loop {
-                match read_msg::<_, ServerMsg>(&mut reader)? {
+                match read_upgrade_reply(&mut reader)? {
                     None => return Ok(()),
                     Some(ServerMsg::Error { req: 0, message }) => {
                         return Err(std::io::Error::other(message));
@@ -166,12 +166,25 @@ pub fn request_upgrade(socket: &str, exe: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Only EOF before the first header byte is a clean handover boundary. Keep
+/// the common payload decoder, but reject a truncated upgrade-control header.
+fn read_upgrade_reply<R: std::io::Read>(reader: &mut R) -> std::io::Result<Option<ServerMsg>> {
+    let mut header = [0; 4];
+    if reader.read(&mut header[..1])? == 0 { return Ok(None); }
+    reader.read_exact(&mut header[1..])?;
+    read_msg(&mut std::io::Read::chain(std::io::Cursor::new(header), reader))
+}
+
 #[cfg(test)]
 mod upgrade_reply_tests {
     use super::*;
     use crate::transport::Listener;
 
     fn run_reply(messages: Vec<ServerMsg>) -> std::io::Result<()> {
+        run_wire_reply(messages.iter().flat_map(encode).collect())
+    }
+
+    fn run_wire_reply(bytes: Vec<u8>) -> std::io::Result<()> {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("upgrade.sock");
         let listener = Listener::bind(socket.to_str().unwrap()).unwrap();
@@ -185,7 +198,8 @@ mod upgrade_reply_tests {
             }).unwrap();
             assert!(matches!(read_msg::<_, ClientMsg>(&mut reader).unwrap(),
                 Some(ClientMsg::Upgrade { req: 0, exe }) if exe == "/fixture/kiln"));
-            for message in messages { write_msg(&mut writer, &message).unwrap(); }
+            writer.write_all(&bytes).unwrap();
+            writer.flush().unwrap();
         });
         let result = request_upgrade(socket.to_str().unwrap(), Path::new("/fixture/kiln"));
         server.join().unwrap();
@@ -203,6 +217,12 @@ mod upgrade_reply_tests {
     #[test]
     fn an_announced_handover_can_close_its_control_connection() {
         run_reply(vec![ServerMsg::Upgrading]).unwrap();
+    }
+
+    #[test]
+    fn a_truncated_upgrade_header_is_not_a_successful_handover() {
+        let error = run_wire_reply(vec![32, 0]).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 
     #[test]
