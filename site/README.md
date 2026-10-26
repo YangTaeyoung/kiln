@@ -66,6 +66,7 @@ python3 site/_build/check-site.py
 python3 site/_build/build-docs.py
 python3 site/_build/build-site.py
 python3 site/_build/check-seo.py
+python3 site/_build/test-seo.py
 python3 -m http.server 8767 --directory public
 ```
 

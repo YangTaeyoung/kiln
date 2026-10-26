@@ -3,6 +3,7 @@ import importlib.util
 import json
 import pathlib
 import shutil
+import struct
 from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree as ET
 from bs4 import BeautifulSoup
@@ -14,6 +15,8 @@ OUT = ROOT.parent / 'public'
 BASE = 'https://kiln.melona.cloud'
 LANGS = {'en': '/', 'ko': '/ko/', 'ja': '/ja/', 'zh-CN': '/zh-cn/'}
 NAMES = {'en': 'English', 'ko': '한국어', 'ja': '日本語', 'zh-CN': '简体中文'}
+LOCALES = {'en': 'en_US', 'ko': 'ko_KR', 'ja': 'ja_JP', 'zh-CN': 'zh_CN'}
+SOCIAL_IMAGE = '/assets/kiln-social-card-v2.png'
 CONTENT = json.loads((ROOT / '_build/seo-content.json').read_text())
 I18N = json.loads((ROOT / 'assets/site-i18n.js').read_text().split('=', 1)[1].strip().rstrip(';'))
 spec = importlib.util.spec_from_file_location('docs', ROOT / '_build/build-docs.py')
@@ -89,18 +92,31 @@ def build(lang, slug=None):
         if option['value'] == lang: option['selected'] = ''
     soup.title.string = title
     soup.select_one('meta[name="description"]')['content'] = description
+    soup.head.append(tag('meta', name='robots', content='index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'))
     canonical = BASE + routes[lang]
     soup.head.append(tag('link', rel='canonical', href=canonical))
     for l, path in {**routes, 'x-default': routes['en']}.items():
         soup.head.append(tag('link', rel='alternate', hreflang=l, href=BASE+path))
-    image = BASE + f'/assets/hero-poster-{lang}.webp'
-    for key, value in {'og:type':'website', 'og:site_name':'Kiln', 'og:title':title, 'og:description':description, 'og:url':canonical, 'og:image':image, 'og:image:alt':c['section'], 'og:locale':{'en':'en_US','ko':'ko_KR','ja':'ja_JP','zh-CN':'zh_CN'}[lang]}.items():
+    image = BASE + SOCIAL_IMAGE
+    # Read the delivered asset rather than assuming a standard social-card size.
+    with (ROOT / SOCIAL_IMAGE.lstrip('/')).open('rb') as image_file:
+        header = image_file.read(24)
+    if header[:16] != b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR':
+        raise ValueError('The social image must be the supplied PNG')
+    width, height = struct.unpack('>II', header[16:24])
+    image_object = {'@type':'ImageObject', 'url':image, 'contentUrl':image,
+                    'width':width, 'height':height, 'encodingFormat':'image/png',
+                    'caption':c['social_image_alt']}
+    for key, value in {'og:type':'website', 'og:site_name':'Kiln', 'og:title':title, 'og:description':description, 'og:url':canonical, 'og:image':image, 'og:image:secure_url':image, 'og:image:type':'image/png', 'og:image:width':str(width), 'og:image:height':str(height), 'og:image:alt':c['social_image_alt'], 'og:locale':LOCALES[lang]}.items():
         soup.head.append(tag('meta', property=key, content=value))
-    for key,value in {'twitter:card':'summary_large_image','twitter:title':title,'twitter:description':description,'twitter:image':image}.items():
+    for other, locale in LOCALES.items():
+        if other != lang: soup.head.append(tag('meta', property='og:locale:alternate', content=locale))
+    for key,value in {'twitter:card':'summary_large_image','twitter:title':title,'twitter:description':description,'twitter:image':image,'twitter:image:alt':c['social_image_alt']}.items():
         soup.head.append(tag('meta', name=key, content=value))
-    graph = [{'@type':'WebSite','@id':BASE+'/#website','name':'Kiln','url':BASE+'/'}, {'@type':'WebPage','@id':canonical+'#page','url':canonical,'name':title,'description':description,'inLanguage':lang,'isPartOf':{'@id':BASE+'/#website'}}]
+    graph = [{'@type':'WebSite','@id':BASE+'/#website','name':'Kiln','url':BASE+'/'}, {'@type':'WebPage','@id':canonical+'#page','url':canonical,'name':title,'description':description,'inLanguage':lang,'isPartOf':{'@id':BASE+'/#website'},'primaryImageOfPage':image_object}]
     if not slug:
-        graph.append({'@type':'SoftwareApplication','@id':BASE+'/#app','name':'Kiln','url':BASE+'/','description':description,'applicationCategory':'DeveloperApplication','operatingSystem':'macOS 11 or later; Windows 11','license':'https://opensource.org/license/mit','isAccessibleForFree':True,'offers':{'@type':'Offer','price':'0','priceCurrency':'USD'},'downloadUrl':'https://github.com/YangTaeyoung/kiln/releases/latest','screenshot':image,'sameAs':'https://github.com/YangTaeyoung/kiln'})
+        version = json.loads((ROOT / '_build/source.json').read_text())['kiln_version']
+        graph.append({'@type':'SoftwareApplication','@id':BASE+'/#app','name':'Kiln','url':BASE+'/','description':description,'applicationCategory':'DeveloperApplication','operatingSystem':'macOS 11 or later; Windows 11','softwareVersion':version,'license':'https://opensource.org/license/mit','isAccessibleForFree':True,'offers':{'@type':'Offer','price':'0','priceCurrency':'USD'},'downloadUrl':'https://github.com/YangTaeyoung/kiln/releases/latest','image':image_object,'screenshot':BASE+f'/assets/hero-poster-{lang}.webp','sameAs':'https://github.com/YangTaeyoung/kiln'})
     else:
         crumbs = [(c['home'],BASE+LANGS[lang]),(c['docs'],BASE+route(lang,'index'))]
         if slug != 'index': crumbs.append((meta['title'],canonical))

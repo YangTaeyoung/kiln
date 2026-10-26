@@ -11918,5 +11918,10 @@
     "en": "Command completion: type in Zsh to see suggestions. Insert with Tab or reopen with Ctrl+Space.",
     "ja": "コマンド補完：Zsh で入力すると候補を表示します。Tab で挿入、Ctrl+Space で再表示します。",
     "zh-CN": "命令补全：在 Zsh 中输入时显示建议。按 Tab 插入，Ctrl+Space 重新打开。"
+  },
+  "데몬 교체를 완료하지 못했습니다. 설정에서 다시 시도하세요.": {
+    "en": "Could not finish replacing the daemon. Retry in Settings.",
+    "ja": "デーモンの更新を完了できませんでした。設定から再試行してください。",
+    "zh-CN": "无法完成守护进程更新，请在设置中重试。"
   }
 }

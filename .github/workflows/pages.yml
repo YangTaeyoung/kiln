@@ -39,6 +39,7 @@ jobs:
         run: |
           python3 site/_build/build-site.py
           python3 site/_build/check-seo.py
+          python3 site/_build/test-seo.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
