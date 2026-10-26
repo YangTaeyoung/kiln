@@ -34,6 +34,7 @@ The earlier messages show up in the CLI's normal conversation view and become pa
 | Shell commands and file edits | Shown as the other CLI's own tool records where it has a matching tool, otherwise as readable text. |
 | Images | Kept. |
 | Reasoning, provider instructions, encrypted records | Not copied. |
+| Available tool definitions | Each CLI keeps its own configured tools. Codex adding definitions does not block copying messages or recorded calls. |
 
 Tool calls from the history never run again. A conversation with content Kiln cannot copy, such as documents or audio, fails visibly instead of being marked complete with something missing.
 
@@ -42,6 +43,8 @@ Tool calls from the history never run again. A conversation with content Kiln ca
 Automatic sync pauses for a workspace while any agent CLI in it is running, including while it waits for input. About a second after a CLI exits back to its shell, or its terminal closes, Kiln syncs again. Background checks run again 60 seconds after each check finishes.
 
 Only completed responses are copied. A conversation still being written is read once it has been unchanged for 10 seconds.
+
+A Claude Code copy with an unanswered local request waits for that turn to finish. Other copies can still sync, and Kiln preserves the unfinished request.
 
 ## Antigravity conversations {#antigravity-conversations}
 

@@ -726,6 +726,15 @@ fn codex(rows: &[Value]) -> Result<Vec<Message>> {
                 }
                 messages.extend(text_blocks(&p["content"], "assistant")?);
             }
+            // Tool schemas describe the originating provider's execution environment,
+            // not a call or a user message. Other CLIs use their own tool definitions.
+            Some("additional_tools") => {
+                ensure!(p["tools"].is_array()
+                    && matches!(p["role"].as_str(), Some("unknown" | "user" | "assistant" | "system" | "critic" | "discriminator" | "developer" | "tool"))
+                    && p.get("id").is_none_or(|id| id.is_null() || id.is_string())
+                    && p.as_object().is_some_and(|fields| fields.keys().all(|key| matches!(key.as_str(), "type" | "id" | "role" | "tools"))),
+                    "Unsupported Codex tool definitions; this conversation was not synchronized");
+            }
             Some("reasoning" | "compaction") => {}
             Some(kind) => {
                 bail!("Unsupported Codex item ({kind}); this conversation was not synchronized")

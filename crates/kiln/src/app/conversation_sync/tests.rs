@@ -1,3 +1,6 @@
+#[path="provider_metadata_tests.rs"]
+mod provider_metadata_tests;
+
 use kiln_common::paths::Canonical;
 use super::*;
 use format::Message;

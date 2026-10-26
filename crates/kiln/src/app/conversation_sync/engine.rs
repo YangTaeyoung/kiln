@@ -973,7 +973,11 @@ impl<'a, M: FnMut(&Source, Metadata<'_>) -> Result<Option<String>>> Sync<'a, M> 
                 }
                 let all = events.as_ref().unwrap();
                 let changes = self.file_changes(hub, cid, &all[tail_start(all, tail)..]);
-                let changed = canonical::update(&source, all, &title, &timestamp(), &changes)?;
+                let changed = match canonical::update(&source, all, &title, &timestamp(), &changes) {
+                    Ok(changed) => changed,
+                    Err(error) if error.to_string() == canonical::UNFINISHED => return Ok(Some(WRITING.into())),
+                    Err(error) => return Err(error),
+                };
                 (changed, checkpoint::read(&source, &mut title.clone())?.1)
             }
         };

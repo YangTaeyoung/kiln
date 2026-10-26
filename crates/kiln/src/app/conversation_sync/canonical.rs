@@ -3,6 +3,9 @@
 use super::*;
 use std::collections::BTreeSet;
 
+/// An unanswered native request stays in its own CLI until that turn finishes.
+pub(super) const UNFINISHED: &str = "Claude conversation has an unfinished turn; retrying";
+
 /// Linked-conversation groups of a state, computed in one pass over its
 /// publication edges (lineage and recorded copies).
 pub(super) struct Links {
@@ -395,6 +398,11 @@ pub(super) fn update(
         && titles::raw_projection(source)?.is_none_or(|raw| raw == title)
     {
         return Ok(false);
+    }
+    if source.tool == Tool::Claude && messages.len() > current.len() {
+        let start = format::completion(Tool::Claude, &rows)?.map_or(0, |(index, _)| index + 1);
+        ensure!(!rows[start..].iter().any(|row| row["isSidechain"] != true
+            && matches!(row["type"].as_str(), Some("user" | "assistant"))), UNFINISHED);
     }
     #[derive(Deserialize)]
     struct Ordinal { ordinal: Option<u64> }
