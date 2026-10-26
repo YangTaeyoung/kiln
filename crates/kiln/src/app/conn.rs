@@ -59,6 +59,8 @@ pub enum ConnEvent {
     Exited { session: SessionId, code: Option<i32> },
     Created { req: u32, session: SessionId },
     Error { req: u32, message: String },
+    /// Ends the old client's request IDs, even if this pump also reconnects.
+    Disconnected,
     Connected,
     Upgrading,
     SearchResult { found: bool },
@@ -298,9 +300,12 @@ impl Conn {
     fn connection_lost(&mut self){
         self.client=None;
         self.upgrades.disconnected();
+        self.pending_copy.clear();
+        self.pending_text.clear();
         self.reported_terminal_focus=None;
         self.shell_completions.clear();
         self.state=State::Disconnected{since:Instant::now(),last_error:"connection lost".into()};
+        self.events.push(ConnEvent::Disconnected);
     }
 
     fn handle(&mut self, m: ServerMsg) {

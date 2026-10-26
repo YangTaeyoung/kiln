@@ -152,6 +152,7 @@ mod tests {
 
 #[cfg(all(test, unix))]
 mod socket_tests {
+    use super::super::super::{Action, Dir, KilnApp, PaneKind, ToastKind};
     use super::*;
     use std::net::Shutdown;
     use std::os::unix::net::{UnixListener, UnixStream};
@@ -304,6 +305,235 @@ mod socket_tests {
             );
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    fn isolated_app(name: &str, check: impl FnOnce(&Server, &egui::Context, KilnApp, Peer)) {
+        let Some(root) = std::env::var_os("KILN_RECONNECT_APP_TEST_ROOT") else {
+            let dir = tempfile::tempdir().unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--nocapture", "--test-threads=1"])
+                .env("KILN_RECONNECT_APP_TEST_ROOT", dir.path())
+                .env("KILN_CONFIG_DIR", dir.path().join("config"))
+                .env("KILN_SOCKET", dir.path().join("daemon.sock"))
+                .env("KILN_ACCOUNTS_SANDBOX", dir.path().join("accounts"))
+                .env("KILN_DB_NO_KEYCHAIN", "1")
+                .env("KILN_EXE", dir.path().join("no-executable"))
+                .env_remove("KILN_NO_AUTO_UPGRADE")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let root = std::path::Path::new(&root);
+        let socket = root.join("daemon.sock").to_string_lossy().into_owned();
+        let server = Server {
+            listener: UnixListener::bind(&socket).unwrap(),
+            socket,
+            _dir: tempfile::tempdir_in(root).unwrap(),
+        };
+        // A newer daemon skips the automatic upgrade, leaving Create as req 2.
+        let ready = server.listen(101, "99.0.0-newer");
+        let ctx = egui::Context::default();
+        let mut app = KilnApp::new(&ctx, Some(server._dir.path().to_owned()));
+        app.handle_conn_events(&ctx);
+        app.conn.screens.insert(
+            7,
+            Screen {
+                version: 42,
+                ..Default::default()
+            },
+        );
+        let peer = ready();
+        check(&server, &ctx, app, peer);
+    }
+
+    fn reconnect_app(server: &Server, app: &mut KilnApp, peer: Peer) -> Peer {
+        let rx = app.conn.client.as_ref().unwrap().rx.clone();
+        drop(peer);
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(3)),
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+        ));
+        let ready = server.listen(202, "0.2.15-old");
+        app.conn.last_attempt = Some(Instant::now() - Duration::from_secs(1));
+        app.conn.pump();
+        assert!(
+            app.conn.is_connected(),
+            "EOF and reconnection must occur in this single pump"
+        );
+        assert_eq!(app.conn.daemon_pid, 202);
+        let peer = ready();
+        assert_eq!(
+            peer.upgrade(),
+            2,
+            "the new connection reuses the old Create ID"
+        );
+        peer
+    }
+
+    fn create_request(peer: &Peer) -> u32 {
+        loop {
+            if let ClientMsg::Create { req, .. } =
+                peer.received.recv_timeout(Duration::from_secs(3)).unwrap()
+            {
+                return req;
+            }
+        }
+    }
+
+    #[test]
+    fn immediate_reconnect_preserves_pending_launch_before_colliding_upgrade_error() {
+        isolated_app(
+            "app::conn::upgrade::socket_tests::immediate_reconnect_preserves_pending_launch_before_colliding_upgrade_error",
+            |server, ctx, mut app, peer| {
+                let pane = app.focused_pane().unwrap();
+                app.pending_input
+                    .insert(pane, "printf 'keep my draft'\r".into());
+                app.spawn_for_pane(pane);
+                assert_eq!(create_request(&peer), 2);
+                let mut peer = reconnect_app(server, &mut app, peer);
+                peer.send(ServerMsg::Error {
+                    req: 2,
+                    message: "upgrade handoff rejected".into(),
+                });
+                pump_until(&mut app.conn, |conn| {
+                    conn.events
+                        .iter()
+                        .any(|event| matches!(event, ConnEvent::Error { req: 2, .. }))
+                });
+                app.handle_conn_events(ctx);
+
+                assert!(
+                    app.toasts.iter().any(|toast| toast.kind == ToastKind::Error
+                        && toast.body == "upgrade handoff rejected"),
+                    "the new upgrade error must be shown independently of the old launch"
+                );
+                let draft = &app.terminal_launch_drafts[&pane];
+                assert_eq!(draft.command.as_deref(), Some("printf 'keep my draft'"));
+                assert_eq!(
+                    draft.reason,
+                    kiln_common::i18n::tr(
+                        "시작 중 연결이 끊겼습니다. 실행 여부를 확인한 뒤 다시 시작하세요."
+                    )
+                );
+                assert!(app.pending_creates.is_empty());
+                assert!(matches!(
+                    app.panes[&pane].kind,
+                    PaneKind::Term {
+                        pending: None,
+                        session: None,
+                        ..
+                    }
+                ));
+                assert!(app.conn.is_connected());
+                assert_eq!(app.conn.screens[&7].version, 42);
+            },
+        );
+    }
+
+    #[test]
+    fn immediate_reconnect_clears_cancelled_and_pending_creates_before_reused_ids() {
+        isolated_app(
+            "app::conn::upgrade::socket_tests::immediate_reconnect_clears_cancelled_and_pending_creates_before_reused_ids",
+            |server, ctx, mut app, peer| {
+                let cancelled = app.focused_pane().unwrap();
+                app.spawn_for_pane(cancelled);
+                assert_eq!(create_request(&peer), 2);
+                app.apply(Action::Split(Dir::Horizontal), ctx);
+                let pending = app.focused_pane().unwrap();
+                app.pending_input
+                    .insert(pending, "echo 'second draft'\r".into());
+                app.spawn_for_pane(pending);
+                assert_eq!(create_request(&peer), 3);
+                app.apply(Action::ClosePane(cancelled, true), ctx);
+                assert!(app.cancelled_creates.contains(&2));
+
+                let mut peer = reconnect_app(server, &mut app, peer);
+                // An ordinary new request can also reuse an old pending Create ID.
+                app.conn.read_command_output(7, 10);
+                loop {
+                    if let ClientMsg::ReadCommandOutput { req, .. } =
+                        peer.received.recv_timeout(Duration::from_secs(3)).unwrap()
+                    {
+                        assert_eq!(req, 3);
+                        break;
+                    }
+                }
+                peer.send(ServerMsg::Error {
+                    req: 2,
+                    message: "upgrade handoff rejected".into(),
+                });
+                peer.send(ServerMsg::Error {
+                    req: 3,
+                    message: "command output unavailable".into(),
+                });
+                pump_until(&mut app.conn, |conn| {
+                    conn.events
+                        .iter()
+                        .filter(|event| matches!(event, ConnEvent::Error { .. }))
+                        .count()
+                        == 2
+                });
+                app.handle_conn_events(ctx);
+
+                for body in ["upgrade handoff rejected", "command output unavailable"] {
+                    assert!(
+                        app.toasts
+                            .iter()
+                            .any(|toast| toast.kind == ToastKind::Error && toast.body == body),
+                        "new-connection error was swallowed or treated as an old Create: {body}"
+                    );
+                }
+                assert!(app.cancelled_creates.is_empty());
+                assert!(app.pending_creates.is_empty());
+                assert!(!app.panes.contains_key(&cancelled));
+                let draft = &app.terminal_launch_drafts[&pending];
+                assert_eq!(draft.command.as_deref(), Some("echo 'second draft'"));
+                assert_eq!(
+                    draft.reason,
+                    kiln_common::i18n::tr(
+                        "시작 중 연결이 끊겼습니다. 실행 여부를 확인한 뒤 다시 시작하세요."
+                    )
+                );
+                assert!(matches!(
+                    app.panes[&pending].kind,
+                    PaneKind::Term {
+                        pending: None,
+                        session: None,
+                        ..
+                    }
+                ));
+                assert!(app.conn.is_connected());
+                assert_eq!(app.conn.screens[&7].version, 42);
+            },
+        );
+    }
+
+    #[test]
+    fn immediate_reconnect_forgets_old_text_and_clipboard_request_ids() {
+        isolated_app(
+            "app::conn::upgrade::socket_tests::immediate_reconnect_forgets_old_text_and_clipboard_request_ids",
+            |server, _ctx, mut app, peer| {
+                app.conn.copy_range(7, (0, 0), (0, 5));
+                app.conn.read_text(7);
+                assert!(app.conn.pending_copy.contains(&2));
+                assert_eq!(app.conn.pending_text.get(&3), Some(&7));
+                let _peer = reconnect_app(server, &mut app, peer);
+                assert!(
+                    app.conn.pending_copy.is_empty(),
+                    "old clipboard requests must not consume a new client's Text response"
+                );
+                assert!(
+                    app.conn.pending_text.is_empty(),
+                    "old text requests must not address a new response to an old session"
+                );
+            },
+        );
     }
 
     #[test]

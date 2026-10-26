@@ -1920,6 +1920,7 @@ impl KilnApp {
                         self.retain_terminal_launch(pane,message);
                     } else { self.toast(kiln_common::i18n::tr("오류"), message, ToastKind::Error, None); }
                 }
+                ConnEvent::Disconnected => self.retain_disconnected_launches(),
                 ConnEvent::Connected => {
                     if self.restored {
                         self.transient_info(kiln_common::i18n::tr("데몬에 다시 연결됨"), "");
@@ -1962,16 +1963,18 @@ impl KilnApp {
                 }
             }
         }
-        if !self.conn.is_connected() && !self.pending_creates.is_empty() {
-            for (_, p) in std::mem::take(&mut self.pending_creates) {
-                if let Some(Pane { kind: PaneKind::Term { pending, .. }, .. }) = self.panes.get_mut(&p) {
-                    *pending = None;
-                }
-                self.retain_terminal_launch(p,kiln_common::i18n::tr("시작 중 연결이 끊겼습니다. 실행 여부를 확인한 뒤 다시 시작하세요.").into());
+        if !self.conn.is_connected() { self.retain_disconnected_launches(); }
+    }
+
+    fn retain_disconnected_launches(&mut self) {
+        for (_, pane) in std::mem::take(&mut self.pending_creates) {
+            if let Some(Pane { kind: PaneKind::Term { pending, .. }, .. }) = self.panes.get_mut(&pane) {
+                *pending = None;
             }
+            self.retain_terminal_launch(pane,kiln_common::i18n::tr("시작 중 연결이 끊겼습니다. 실행 여부를 확인한 뒤 다시 시작하세요.").into());
         }
         // Request IDs belong to one connection; a new client may reuse them.
-        if !self.conn.is_connected() { self.cancelled_creates.clear(); }
+        self.cancelled_creates.clear();
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
@@ -2553,7 +2556,6 @@ impl eframe::App for KilnApp {
             }
         }
         self.conn.pump();
-        self.start_prepared_agents(ctx);
         let focused_now = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         if focused_now && !self.window_focused {
             let ids: Vec<PaneId> = self.workspaces.get(self.active).map(|w| w.all_panes()).unwrap_or_default();
@@ -2565,6 +2567,7 @@ impl eframe::App for KilnApp {
         }
         self.window_focused = focused_now;
         self.handle_conn_events(ctx);
+        self.start_prepared_agents(ctx);
         while let Ok(r) = self.clones.1.try_recv() {
             match r {
                 Ok(p) => self.add_workspace(p, ctx),
