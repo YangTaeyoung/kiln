@@ -117,6 +117,9 @@ Kiln validates their known envelope and leaves those definitions with Codex whil
 the actual messages, calls and outputs. Malformed records or definitions containing an
 unexpected content field remain visible failures. This applies to full reads and appended
 turns after a checkpoint. A new Kiln build retries earlier unchanged failures automatically.
+A Claude copy with native requests after its last completed turn waits without changing
+those requests. Other namespaces continue syncing. Finish the local turn before that
+copy can receive more completed history.
 See the [official response-item schema](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeParams.json).
 
 Complete JSON tool results are decoded into fields and multiline output, including

@@ -44,6 +44,8 @@ Kiln 可以在 Claude Code 和 Codex 之间复制工作区的对话，用 `/resu
 
 只复制已完成的回复。仍在写入的对话，要在 10 秒内没有变化后才会被读取。
 
+如果 Claude Code 副本中存在尚未回答的本地请求，该副本会等待此轮完成。其他副本仍可继续同步，未完成的请求会保留。
+
 ## Antigravity 对话 {#antigravity-conversations}
 
 已关联文件夹中的 Antigravity（`agy`）对话会复制到 Claude Code 和 Codex，在任一 CLI 中用 `/resume` 都能继续。复制是单向的：Kiln 只读取 Antigravity 的文件，从不写入。

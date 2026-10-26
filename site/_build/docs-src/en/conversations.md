@@ -44,6 +44,8 @@ Automatic sync pauses for a workspace while any agent CLI in it is running, incl
 
 Only completed responses are copied. A conversation still being written is read once it has been unchanged for 10 seconds.
 
+A Claude Code copy with an unanswered local request waits for that turn to finish. Other copies can still sync, and Kiln preserves the unfinished request.
+
 ## Antigravity conversations {#antigravity-conversations}
 
 Antigravity (`agy`) conversations in a linked folder are copied to Claude Code and Codex, so `/resume` in either CLI continues them. Copying goes one way: Kiln only reads Antigravity's files and never writes to them.

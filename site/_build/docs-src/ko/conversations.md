@@ -44,6 +44,8 @@ Kiln은 워크스페이스의 대화를 Claude Code와 Codex 사이에 복사할
 
 완료된 응답만 복사됩니다. 아직 작성 중인 대화는 10초 동안 바뀌지 않으면 읽어 옵니다.
 
+Claude Code 사본에 아직 답변이 끝나지 않은 로컬 요청이 있으면 해당 사본은 기다립니다. 다른 사본은 계속 동기화하며, 미완료 요청은 보존합니다.
+
 ## Antigravity 대화 {#antigravity-conversations}
 
 연동된 폴더의 Antigravity(`agy`) 대화는 Claude Code와 Codex로 복사되므로, 어느 CLI에서든 `/resume`으로 이어 갈 수 있습니다. 복사는 한 방향으로만 이루어집니다. Kiln은 Antigravity의 파일을 읽기만 하고 쓰지 않습니다.

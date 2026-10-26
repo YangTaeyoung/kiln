@@ -65,3 +65,25 @@ fn codex_tool_definitions_after_a_checkpoint_keep_the_new_turn_and_sync_once() {
     assert_eq!(read_messages(&f.peer()).unwrap(), expected);
     assert_eq!(f.scan().published, 0);
 }
+
+#[test]
+fn unfinished_claude_requests_wait_without_blocking_a_codex_continuation() {
+    let f = Fixture::new(Tool::Codex);
+    assert!(f.scan().errors.is_empty());
+    let claude = f.peer();
+    let data = rows(&fs::read(&claude.path).unwrap());
+    let leaf = data.iter().rev().find(|r| r["type"]=="assistant").unwrap()["uuid"].clone();
+    let pending=json!({"type":"user","uuid":stable_id("unfinished-request"),"parentUuid":leaf,"isSidechain":false,
+        "cwd":claude.cwd,"sessionId":claude.id,"version":"2.1.310","message":{"role":"user","content":"Keep this unanswered local request."}});
+    let mut file=fs::OpenOptions::new().append(true).open(&claude.path).unwrap();writeln!(file,"{pending}").unwrap();drop(file);
+    let original=fs::read(&claude.path).unwrap();
+    let mut continued=messages();continued.extend(turns(&["Continue in Codex.","Codex continued."]));
+    write_history(&f.source,&continued,SystemTime::now()+Duration::from_secs(30));
+    for _ in 0..3 {
+        let status=f.scan();
+        assert!(status.errors.is_empty(),"{:?}",status.errors);
+        assert!(status.rows.values().any(|row|row.phase==Phase::Waiting));
+        assert_eq!(fs::read(&claude.path).unwrap(),original,"unfinished local input must remain byte-for-byte intact");
+    }
+    assert_eq!(f.hub().conversations.values().next().unwrap().events, continued.len(), "the completed Codex continuation still reaches the hub");
+}

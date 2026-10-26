@@ -44,6 +44,8 @@ Kiln はワークスペースの会話を Claude Code と Codex の間でコピ�
 
 コピーされるのは完了した応答だけです。書き込み中の会話は、10 秒間変更がなかった時点で読み込まれます。
 
+Claude Code のコピーに未回答のローカルリクエストがある場合、そのターンの完了を待ちます。他のコピーは同期を続け、未完了のリクエストは保持します。
+
 ## Antigravity の会話 {#antigravity-conversations}
 
 連携したフォルダー内の Antigravity（`agy`）の会話は Claude Code と Codex にコピーされるため、どちらの CLI でも `/resume` で続けられます。コピーは一方向です。Kiln は Antigravity のファイルを読むだけで、書き込むことはありません。

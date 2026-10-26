@@ -86,6 +86,7 @@
 <h3 id="when-sync-runs">When sync runs</h3>
 <p>Automatic sync pauses for a workspace while any agent CLI in it is running, including while it waits for input. About a second after a CLI exits back to its shell, or its terminal closes, Kiln syncs again. Background checks run again 60 seconds after each check finishes.</p>
 <p>Only completed responses are copied. A conversation still being written is read once it has been unchanged for 10 seconds.</p>
+<p>A Claude Code copy with an unanswered local request waits for that turn to finish. Other copies can still sync, and Kiln preserves the unfinished request.</p>
 <h2 id="antigravity-conversations">Antigravity conversations</h2>
 <p>Antigravity (<code>agy</code>) conversations in a linked folder are copied to Claude Code and Codex, so <code>/resume</code> in either CLI continues them. Copying goes one way: Kiln only reads Antigravity's files and never writes to them.</p>
 <ul>
@@ -216,6 +217,7 @@
 <h3 id="when-sync-runs">동기화 시점</h3>
 <p>워크스페이스에서 에이전트 CLI가 실행 중이면 그 워크스페이스의 자동 동기화는 일시 중지됩니다. CLI가 입력을 기다리는 동안에도 마찬가지입니다. CLI가 종료되어 셸로 돌아가거나 터미널이 닫히면 약 1초 뒤에 Kiln이 다시 동기화합니다. 백그라운드 확인은 이전 확인이 끝나고 60초 뒤에 다시 실행됩니다.</p>
 <p>완료된 응답만 복사됩니다. 아직 작성 중인 대화는 10초 동안 바뀌지 않으면 읽어 옵니다.</p>
+<p>Claude Code 사본에 아직 답변이 끝나지 않은 로컬 요청이 있으면 해당 사본은 기다립니다. 다른 사본은 계속 동기화하며, 미완료 요청은 보존합니다.</p>
 <h2 id="antigravity-conversations">Antigravity 대화</h2>
 <p>연동된 폴더의 Antigravity(<code>agy</code>) 대화는 Claude Code와 Codex로 복사되므로, 어느 CLI에서든 <code>/resume</code>으로 이어 갈 수 있습니다. 복사는 한 방향으로만 이루어집니다. Kiln은 Antigravity의 파일을 읽기만 하고 쓰지 않습니다.</p>
 <ul>
@@ -346,6 +348,7 @@
 <h3 id="when-sync-runs">同期が実行されるタイミング</h3>
 <p>ワークスペース内でエージェントの CLI が動いている間は、入力待ちのときも含め、そのワークスペースの自動同期は一時停止します。CLI が終了してシェルに戻るか、ターミナルが閉じてから約 1 秒後に、Kiln は再び同期します。バックグラウンドの確認は、前回の確認が終わってから 60 秒後に再び実行されます。</p>
 <p>コピーされるのは完了した応答だけです。書き込み中の会話は、10 秒間変更がなかった時点で読み込まれます。</p>
+<p>Claude Code のコピーに未回答のローカルリクエストがある場合、そのターンの完了を待ちます。他のコピーは同期を続け、未完了のリクエストは保持します。</p>
 <h2 id="antigravity-conversations">Antigravity の会話</h2>
 <p>連携したフォルダー内の Antigravity（<code>agy</code>）の会話は Claude Code と Codex にコピーされるため、どちらの CLI でも <code>/resume</code> で続けられます。コピーは一方向です。Kiln は Antigravity のファイルを読むだけで、書き込むことはありません。</p>
 <ul>
@@ -476,6 +479,7 @@
 <h3 id="when-sync-runs">同步时机</h3>
 <p>工作区中只要有代理 CLI 在运行（包括等待输入时），该工作区的自动同步就会暂停。CLI 退回 Shell 或终端关闭后约一秒，Kiln 会再次同步。每次检查结束 60 秒后，后台会再检查一次。</p>
 <p>只复制已完成的回复。仍在写入的对话，要在 10 秒内没有变化后才会被读取。</p>
+<p>如果 Claude Code 副本中存在尚未回答的本地请求，该副本会等待此轮完成。其他副本仍可继续同步，未完成的请求会保留。</p>
 <h2 id="antigravity-conversations">Antigravity 对话</h2>
 <p>已关联文件夹中的 Antigravity（<code>agy</code>）对话会复制到 Claude Code 和 Codex，在任一 CLI 中用 <code>/resume</code> 都能继续。复制是单向的：Kiln 只读取 Antigravity 的文件，从不写入。</p>
 <ul>
