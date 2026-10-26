@@ -148,19 +148,63 @@ pub fn request_upgrade(socket: &str, exe: &Path) -> std::io::Result<()> {
     match hello {
         ServerMsg::Hello { can_upgrade: true, .. } => {
             write_msg(&mut writer, &ClientMsg::Upgrade { req: 0, exe: exe.to_string_lossy().into_owned() })?;
-            // 데몬이 교체되며 연결이 닫힐 때까지 기다린다.
-            let mut sink = [0u8; 4096];
+            // Keep failure replies: a cancelled handover closes only this
+            // control connection and must not be reported as a successful swap.
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
-                match std::io::Read::read(&mut reader, &mut sink) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
+                match read_msg::<_, ServerMsg>(&mut reader)? {
+                    None => return Ok(()),
+                    Some(ServerMsg::Error { req: 0, message }) => {
+                        return Err(std::io::Error::other(message));
+                    }
+                    Some(_) => {}
                 }
             }
-            Ok(())
+            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "daemon upgrade did not complete"))
         }
         ServerMsg::Hello { .. } => Err(std::io::Error::other("daemon cannot upgrade in place")),
         _ => Err(std::io::Error::other("unexpected hello")),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod upgrade_reply_tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+
+    fn run_reply(messages: Vec<ServerMsg>) -> std::io::Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("upgrade.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            assert!(matches!(read_msg::<_, ClientMsg>(&mut stream).unwrap(),
+                Some(ClientMsg::Hello { client, .. }) if client == "kiln-upgrade"));
+            write_msg(&mut stream, &ServerMsg::Hello {
+                proto: PROTO_VERSION, build: "0.2.15-fixture".into(),
+                pid: 123, can_upgrade: true,
+            }).unwrap();
+            assert!(matches!(read_msg::<_, ClientMsg>(&mut stream).unwrap(),
+                Some(ClientMsg::Upgrade { req: 0, exe }) if exe == "/fixture/kiln"));
+            for message in messages { write_msg(&mut stream, &message).unwrap(); }
+        });
+        let result = request_upgrade(socket.to_str().unwrap(), Path::new("/fixture/kiln"));
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn a_rejected_daemon_upgrade_returns_the_failure_instead_of_success() {
+        let error = run_reply(vec![ServerMsg::Error {
+            req: 0, message: "upgrade failed: input delivery incomplete; sessions retained".into(),
+        }]).unwrap_err();
+        assert!(error.to_string().contains("input delivery incomplete"));
+    }
+
+    #[test]
+    fn an_announced_handover_can_close_its_control_connection() {
+        run_reply(vec![ServerMsg::Upgrading]).unwrap();
     }
 }
 
