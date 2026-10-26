@@ -996,7 +996,9 @@ fn command_rows(declaration: &str, description: &str) -> Vec<Spec> {
     let name_end = declaration
         .find(|c: char| c.is_whitespace() || matches!(c, ',' | '('))
         .unwrap_or(declaration.len());
-    let main = &declaration[..name_end];
+    // Docker marks installed CLI plugins with one trailing '*'. It is display
+    // metadata, not part of the command passed to a help probe.
+    let main = declaration[..name_end].strip_suffix('*').unwrap_or(&declaration[..name_end]);
     if !safe_name(main) {
         return vec![];
     }
@@ -1773,6 +1775,13 @@ fn main() {
             assert!(root.subcommands.iter().any(|s| s.name == "run"));
             let child = discover(cli, "docker", &context(&["run"])).expect("Docker run --help");
             assert!(option(&child, "--workdir").provider.is_empty());
+            if root.subcommands.iter().any(|s| s.name == "compose") {
+                let dir = tempfile::tempdir().unwrap();
+                fs::create_dir(dir.path().join("source folder")).unwrap();
+                let input = "docker compose --project-directory ";
+                let rows = super::super::candidates(input, input.len(), dir.path(), &[cli.to_string_lossy().into_owned()]);
+                assert!(rows.iter().any(|r| r.buffer == "docker compose --project-directory 'source folder/'"), "installed Compose path completion: {rows:?}");
+            }
         }
     }
 
@@ -1816,5 +1825,18 @@ fn main() {
                 .collect::<Vec<_>>(),
             ["collect"]
         );
+    }
+
+    #[test]
+    fn docker_plugin_markers_keep_installed_command_names() {
+        let spec = parse_help(
+            "Usage: docker [OPTIONS] COMMAND\n\nManagement Commands:\n  buildx*  Docker Buildx\n  compose*    Docker Compose\n  odd**    Invalid wildcard\n  bad*name  Invalid embedded wildcard\n\nCommands:\n  run      Run a command in a new container\n\nGlobal Options:\n  --config string  Client configuration directory\n",
+            "docker",
+        ).unwrap();
+        let names: Vec<_> = spec.subcommands.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"buildx"), "{names:?}");
+        assert!(names.contains(&"compose"), "{names:?}");
+        assert!(names.contains(&"run"), "{names:?}");
+        assert!(!names.iter().any(|name| name.contains('*')));
     }
 }

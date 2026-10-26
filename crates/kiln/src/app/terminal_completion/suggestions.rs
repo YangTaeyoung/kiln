@@ -552,7 +552,7 @@ mod tests {
             r#"#!/bin/sh
 printf '%s\n' "$*" >> '{}'
 case "$*" in
-  --help) printf 'Usage: fresh-cli [COMMAND]\n\nCommands:\n  serve  Start the fixture service\n\nOptions:\n  --help  Show help\n' ;;
+  --help) printf 'Usage: fresh-cli [COMMAND]\n\nCommands:\n  serve*  Start the fixture service\n\nOptions:\n  --help  Show help\n' ;;
   'serve --help') printf 'Usage: fresh-cli serve [OPTIONS]\n\nOptions:\n  --directory <DIRECTORY>  Project directory\n  --file <FILE>            Input file\n  --message <MESSAGE>      Literal message\n  --help                   Show help\n' ;;
   *) exit 9 ;;
 esac
