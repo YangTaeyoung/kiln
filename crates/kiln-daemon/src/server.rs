@@ -867,7 +867,8 @@ impl Daemon {
             },
             ClientMsg::Upgrade { req, exe } => {
                 if let Err(e) = self.clone().upgrade(&exe) {
-                    reply(ServerMsg::Error { req, message: format!("upgrade failed: {e}") });
+                    log::warn!("daemon upgrade failed: {e:#}");
+                    reply(ServerMsg::Error { req, message: format!("upgrade failed: {e:#}") });
                     // Legacy upgrade clients discard replies and wait for EOF.
                     // Drain the error and close only this control connection;
                     // terminal ownership stays with the current daemon.

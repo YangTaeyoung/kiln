@@ -59,6 +59,8 @@ pub enum ConnEvent {
     Exited { session: SessionId, code: Option<i32> },
     Created { req: u32, session: SessionId },
     Error { req: u32, message: String },
+    /// Ends the old client's request IDs, even if this pump also reconnects.
+    Disconnected,
     Connected,
     Upgrading,
     SearchResult { found: bool },
@@ -218,14 +220,6 @@ impl Conn {
                 if self.daemon_pid != 0 && self.daemon_pid != c.server_pid { self.closing_sessions.clear(); }
                 self.daemon_pid = c.server_pid;
                 self.daemon_build = c.server_build.clone();
-                // 실행 파일이 데몬보다 새로우면 데몬을 교체한다(세션은 유지된다).
-                if c.can_upgrade && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_none()
-                    && self.upgrades.request(Instant::now(), c.server_pid, &c.server_build, &self.target_build) {
-                    c.send(ClientMsg::Upgrade { req: c.next_req(), exe: self.exe.to_string_lossy().into_owned() });
-                    self.events.push(ConnEvent::Upgrading);
-                    self.state = State::Disconnected { since: Instant::now(), last_error: "upgrading daemon".into() };
-                    return;
-                }
                 // Same-socket ordering installs the palette before any Create can
                 // start a child that immediately asks for its default colors.
                 self.terminal_palette = palette_for_theme(&kiln_common::Theme::current());
@@ -246,6 +240,7 @@ impl Conn {
                 self.client = Some(c);
                 self.state = State::Connected;
                 self.events.push(ConnEvent::Connected);
+                self.request_upgrade(false);
             }
             Err(e) => {
                 self.state = State::Disconnected { since: Instant::now(), last_error: e.to_string() };
@@ -261,16 +256,6 @@ impl Conn {
             self.detach_hidden();
         }
         self.sync_palette();
-        // A failed attempt may reconnect to the same daemon. Retry with backoff;
-        // another daemon identity is checked immediately, without probing files.
-        let retry = self.client.as_ref().is_some_and(|c| c.can_upgrade
-            && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_none()
-            && self.upgrades.request(Instant::now(), c.server_pid, &c.server_build, &self.target_build));
-        if retry {
-            self.send(ClientMsg::Upgrade { req: 0, exe: self.exe.to_string_lossy().into_owned() });
-            self.events.push(ConnEvent::Upgrading);
-            self.connection_lost();
-        }
         let mut disconnected = false;
         let mut msgs = Vec::new();
         if let Some(c) = &self.client {
@@ -300,6 +285,9 @@ impl Conn {
             self.ctx.request_repaint_after(Duration::from_secs(1));
         }
         if disconnected {self.connection_lost();}
+        if let Some(req) = self.upgrades.expire(Instant::now()) {
+            self.events.push(ConnEvent::Error { req, message:kiln_common::i18n::tr("데몬 교체를 완료하지 못했습니다. 설정에서 다시 시도하세요.").to_owned() });
+        }
         if self.client.is_none() {
             let due = self.last_attempt.is_none_or(|t| t.elapsed() > Duration::from_millis(150));
             if due {
@@ -311,9 +299,13 @@ impl Conn {
 
     fn connection_lost(&mut self){
         self.client=None;
+        self.upgrades.disconnected();
+        self.pending_copy.clear();
+        self.pending_text.clear();
         self.reported_terminal_focus=None;
         self.shell_completions.clear();
         self.state=State::Disconnected{since:Instant::now(),last_error:"connection lost".into()};
+        self.events.push(ConnEvent::Disconnected);
     }
 
     fn handle(&mut self, m: ServerMsg) {
@@ -358,8 +350,14 @@ impl Conn {
                 }
             }
             ServerMsg::Created { req, session } => self.events.push(ConnEvent::Created { req, session }),
-            ServerMsg::Error { req, message } => self.events.push(ConnEvent::Error { req, message: kiln_common::i18n::tr(&message).to_owned() }),
-            ServerMsg::Upgrading => self.events.push(ConnEvent::Upgrading),
+            ServerMsg::Error { req, message } => {
+                if self.upgrades.error(req).is_none_or(|first| first) {
+                    self.events.push(ConnEvent::Error { req, message: kiln_common::i18n::tr(&message).to_owned() });
+                }
+            }
+            ServerMsg::Upgrading => {
+                if self.upgrades.acknowledge() { self.events.push(ConnEvent::Upgrading); }
+            }
             ServerMsg::SearchResult { found, .. } => self.events.push(ConnEvent::SearchResult { found }),
             ServerMsg::Text { req, text } => {
                 if self.pending_copy.remove(&req) {
@@ -442,6 +440,23 @@ impl Conn {
         if let Some(c) = &self.client {
             c.send(m);
         }
+    }
+
+    /// Explicit retry shares the automatic request's tracking, including errors.
+    pub fn upgrade_daemon(&mut self) -> bool { self.request_upgrade(true) }
+
+    fn request_upgrade(&mut self, manual: bool) -> bool {
+        let Some(client) = &self.client else { return false; };
+        if !client.can_upgrade || (!manual && std::env::var_os("KILN_NO_AUTO_UPGRADE").is_some()) {
+            return false;
+        }
+        if !self.upgrades.request(client.server_pid, &client.server_build, &self.target_build, manual) {
+            return false;
+        }
+        let req = client.next_req();
+        self.upgrades.sent(req, Instant::now());
+        client.send(ClientMsg::Upgrade { req, exe:self.exe.to_string_lossy().into_owned() });
+        true
     }
 
     pub fn recover_terminal(&mut self, session: SessionId) {

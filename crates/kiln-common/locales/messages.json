@@ -11933,5 +11933,10 @@
     "en": "Start a Claude Code, Codex or Antigravity conversation in this folder to link it automatically.",
     "ja": "このフォルダーで Claude Code、Codex または Antigravity の会話を始めると自動的に連携します。",
     "zh-CN": "在此文件夹中开始 Claude Code、Codex 或 Antigravity 会话即可自动关联。"
+  },
+  "데몬 교체를 완료하지 못했습니다. 설정에서 다시 시도하세요.": {
+    "en": "Could not finish replacing the daemon. Retry in Settings.",
+    "ja": "デーモンの更新を完了できませんでした。設定から再試行してください。",
+    "zh-CN": "无法完成守护进程更新，请在设置中重试。"
   }
 }

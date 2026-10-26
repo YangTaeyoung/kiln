@@ -152,6 +152,7 @@ kiln activity failed
 </blockquote>
 <h2 id="sessions-that-outlive-the-window">Sessions that outlive the window</h2>
 <p>Your terminals belong to the session daemon, not to the window. Close Kiln and its shells and agents keep running; reopen it to return to them. Updates keep running terminals too. A system reboot or explicitly stopping the daemon can end sessions.</p>
+<p>If a daemon upgrade cannot finish, your sessions and the current connection stay active. Kiln reports the error once and stops automatically retrying that daemon upgrade. To retry, open <strong>Settings → About</strong> and, under <strong>Session Daemon</strong>, choose <strong>Replace with This Version</strong>.</p>
 <ul>
 <li><strong>macOS:</strong> the menu-bar icon opens a menu with <strong>Settings…</strong> and <strong>Stop Background Sessions…</strong>. Ending background sessions lists the live sessions and asks for confirmation, with <strong>Cancel</strong> as the default. It includes sessions in open workspaces, so unsaved shell or agent work can be lost.</li>
 <li><strong>Windows:</strong> the notification-area icon shows a session summary and a red dot when something needs attention or a notification is unread. Its menu has <strong>Open Kiln</strong>, <strong>Settings</strong> and <strong>Stop Background Sessions…</strong>.</li>
@@ -295,6 +296,7 @@ kiln activity failed
 </blockquote>
 <h2 id="sessions-that-outlive-the-window">창을 닫아도 유지되는 세션</h2>
 <p>터미널은 창이 아니라 세션 데몬에 속합니다. Kiln을 닫아도 셸과 에이전트는 계속 실행되고, 다시 열면 그 세션으로 돌아옵니다. 업데이트할 때도 실행 중인 터미널은 유지됩니다. 시스템을 재부팅하거나 데몬을 명시적으로 중지하면 세션이 종료될 수 있습니다.</p>
+<p>데몬 업그레이드를 완료하지 못해도 세션과 현재 연결은 유지됩니다. Kiln은 오류를 한 번 알리고 해당 데몬의 업그레이드를 자동으로 반복하지 않습니다. 다시 시도하려면 <strong>설정 → 앱 정보</strong>의 <strong>세션 데몬</strong>에서 <strong>이 버전으로 교체</strong>를 선택하세요.</p>
 <ul>
 <li><strong>macOS:</strong> 메뉴 막대 아이콘을 누르면 <strong>설정…</strong>과 <strong>백그라운드 세션 종료…</strong>가 있는 메뉴가 열립니다. 백그라운드 세션을 종료하려고 하면 실행 중인 세션 목록과 함께 확인 창이 뜨며, 기본 선택은 <strong>취소</strong>입니다. 열려 있는 워크스페이스의 세션도 함께 종료되므로, 저장하지 않은 셸이나 에이전트 작업을 잃을 수 있습니다.</li>
 <li><strong>Windows:</strong> 알림 영역 아이콘에는 세션 요약이 표시되고, 확인이 필요한 항목이나 읽지 않은 알림이 있으면 빨간 점이 붙습니다. 메뉴에는 <strong>Kiln 열기</strong>, <strong>설정</strong>, <strong>백그라운드 세션 종료…</strong>가 있습니다.</li>
@@ -438,6 +440,7 @@ kiln activity failed
 </blockquote>
 <h2 id="sessions-that-outlive-the-window">ウィンドウを閉じても続くセッション</h2>
 <p>ターミナルはウィンドウではなく、セッションデーモンに属しています。Kiln を閉じてもシェルとエージェントは動き続け、開き直せばそのセッションに戻れます。アップデートしても、実行中のターミナルは維持されます。システムの再起動やデーモンの明示的な停止では、セッションが終了する場合があります。</p>
+<p>デーモンの更新が完了しなくても、セッションと現在の接続は維持されます。Kiln はエラーを一度だけ通知し、そのデーモンの更新を自動で繰り返しません。再試行するには、<strong>設定 → このアプリについて</strong> の <strong>セッションデーモン</strong> で <strong>このバージョンに更新</strong> を選択してください。</p>
 <ul>
 <li><strong>macOS:</strong> メニューバーのアイコンのメニューには、<strong>設定…</strong> と<strong>バックグラウンドセッションを終了…</strong> があります。バックグラウンドセッションを終了しようとすると、稼働中のセッションの一覧と確認画面が表示されます。既定のボタンは<strong>キャンセル</strong>です。開いているワークスペースのセッションも対象になるため、未保存のシェルやエージェントの作業が失われることがあります。</li>
 <li><strong>Windows:</strong> 通知領域のアイコンにはセッションの概要が表示され、対応が必要なものや未読の通知があると赤い点が付きます。メニューには <strong>Kiln を開く</strong>、<strong>設定</strong>、<strong>バックグラウンドセッションを終了…</strong> があります。</li>
@@ -581,6 +584,7 @@ kiln activity failed
 </blockquote>
 <h2 id="sessions-that-outlive-the-window">关闭窗口后保留的会话</h2>
 <p>终端属于会话守护进程，而不是窗口。关闭 Kiln 后，其中的 Shell 和代理继续运行，重新打开即可回到它们。更新时，正在运行的终端也会保留。系统重启或手动停止守护进程可能会结束会话。</p>
+<p>如果守护进程升级未能完成，会话会继续运行，当前连接也会保留。Kiln 只报告一次错误，并停止自动重试此次升级。若要重试，请打开<strong>设置 → 关于</strong>，在<strong>会话守护进程</strong>中选择<strong>替换为此版本</strong>。</p>
 <ul>
 <li><strong>macOS：</strong>点击菜单栏图标会打开菜单，其中有<strong>设置…</strong> 和<strong>结束后台会话…</strong>。结束后台会话前，Kiln 会列出仍在运行的会话并请求确认，默认选项是<strong>取消</strong>。列表也包括已打开工作区中的会话，因此 Shell 或代理中未保存的工作可能会丢失。</li>
 <li><strong>Windows：</strong>通知区域图标显示会话摘要；有需要处理的事项或未读通知时会出现红点。图标菜单包含<strong>打开 Kiln</strong>、<strong>设置</strong>和<strong>结束后台会话…</strong>。</li>

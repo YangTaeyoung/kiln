@@ -20,6 +20,20 @@ visible during recovery. Input is paused while recovery is reported, so typing d
 silently queue new commands behind a broken connection.
 Completed panels retain their screen and ignore delayed connection-recovery events.
 
+## Session daemon upgrades
+
+If a daemon upgrade cannot finish, the existing sessions and GUI connection stay
+active. Kiln reports the error once and does not repeatedly disconnect to retry the
+same upgrade. To retry, open **Settings → About** and, under **Session Daemon**,
+choose **Replace with This Version**.
+
+Automatic attempts are scoped to the daemon's PID and build plus the GUI's target
+build. A failed or incomplete attempt blocks further automatic attempts for that
+identity. An explicit manual retry, a different daemon or a new target build allows
+another attempt. Queuing the request does not announce an upgrade or a successful
+reconnection. The GUI keeps reading the existing connection until the daemon
+actually closes it for handover.
+
 ## What this fixes
 
 - Continuously renewed synchronized redraw markers cannot hide the screen indefinitely.
@@ -38,6 +52,25 @@ is available in that situation, but it is not a promise to resume an internally 
 If connection repair does not help, open another panel and use the CLI's own resume flow.
 Already accepted input is never deliberately replayed; a partially decoded output chunk
 at transport loss is not byte-for-byte replayed into the terminal.
+
+For daemon-upgrade reports, record the GUI target build, daemon build and PID, and
+the socket in use. The GUI sends an upgrade with a unique request ID and matches
+the daemon's framed `ServerMsg::Error` to that request; unrelated errors must not
+complete the attempt, and duplicate errors must not produce repeated notices.
+`ServerMsg::Upgrading` announces handover, not completion. Check for actual EOF and
+the replacement daemon's `Hello` before treating a reconnect as a completed upgrade.
+The CLI's separate upgrade-only connection uses request ID zero and must decode
+the matching framed error rather than discard the bytes while waiting for EOF.
+See the [GUI upgrade handling](../crates/kiln/src/app/conn/upgrade.rs) and
+[CLI upgrade client](../crates/kiln-daemon/src/client.rs).
+
+Daemon upgrade failures emit a `daemon upgrade failed:` warning with the underlying
+cause. Check it for input-delivery or terminal-host pause failures, then verify that
+the current sessions resume and the GUI connection remains usable. Use private
+sockets and owned sessions to investigate; do not reproduce a retry loop by
+disconnecting a user's active GUI or daemon. Diagnostic evidence should identify
+builds, PIDs, request IDs and failure reasons without including terminal contents
+or credentials.
 
 The reported past freeze had already been resumed before investigation, so its exact
 cause is not established. The fixes above have separate local regression evidence.
