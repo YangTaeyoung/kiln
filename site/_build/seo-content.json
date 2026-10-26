@@ -1,7 +1,7 @@
 {
   "en": {
     "social_image_alt": "Kiln icon and ‘The terminal IDE for agents’ headline beside a Kiln workspace with agent terminals, on a warm stone background.",
-    "title": "Kiln — AI Agent IDE & Terminal for macOS and Windows",
+    "title": "Kiln | AI Agent IDE & Terminal for macOS and Windows",
     "description": "Run Claude Code, Codex and Antigravity in Kiln, a free, open-source AI agent IDE. Keep terminal sessions running and review Git, code and databases in one workspace.",
     "h1": "The AI agent IDE, built around your terminal",
     "sub": "Claude Code, Codex and Antigravity in one workspace. Close the window; your sessions keep running.",
@@ -50,7 +50,7 @@
   },
   "ko": {
     "social_image_alt": "따뜻한 돌 배경 위 Kiln 아이콘, ‘The terminal IDE for agents’ 문구와 에이전트 터미널이 열린 Kiln 작업 공간.",
-    "title": "Kiln — AI 에이전트 IDE와 AI 터미널 | macOS·Windows",
+    "title": "Kiln | AI 에이전트 IDE와 AI 터미널 | macOS·Windows",
     "description": "Claude Code, Codex, Antigravity를 한곳에서 실행하는 무료 오픈소스 AI IDE, Kiln. AI 에이전트 터미널의 세션을 유지하고 Git·코드·데이터베이스를 같은 작업 공간에서 확인하세요.",
     "h1": "터미널 중심의 AI 에이전트 IDE",
     "sub": "Claude Code, Codex, Antigravity를 하나의 작업 공간에서. 창을 닫아도 세션은 계속 실행됩니다.",
@@ -99,7 +99,7 @@
   },
   "ja": {
     "social_image_alt": "温かみのある石の背景に、Kiln のアイコン、「The terminal IDE for agents」の見出しと、エージェントのターミナルを開いた Kiln ワークスペース。",
-    "title": "Kiln — AI エージェント IDE・AI ターミナル",
+    "title": "Kiln | AI エージェント IDE・AI ターミナル",
     "description": "Claude Code、Codex、Antigravity をひとつのワークスペースで実行。Kiln は永続ターミナル、Git レビュー、コード編集、SQL ツールを備えた無料のオープンソース AI IDE です。macOS と Windows に対応。",
     "h1": "ターミナル中心の AI エージェント IDE",
     "sub": "Claude Code、Codex、Antigravity をひとつのワークスペースで。ウィンドウを閉じてもセッションは動き続けます。",
@@ -148,7 +148,7 @@
   },
   "zh-CN": {
     "social_image_alt": "暖色石材背景上的 Kiln 图标、“The terminal IDE for agents”标题，以及打开智能体终端的 Kiln 工作区。",
-    "title": "Kiln — AI 智能体 IDE 与 AI 终端",
+    "title": "Kiln | AI 智能体 IDE 与 AI 终端",
     "description": "在一个工作区运行 Claude Code、Codex 和 Antigravity。Kiln 是免费开源的 AI IDE，集成持久终端会话、Git 审查、代码编辑和数据库工具，支持 macOS 与 Windows。",
     "h1": "以终端为中心的 AI 智能体 IDE",
     "sub": "在同一工作区运行 Claude Code、Codex 和 Antigravity。关闭窗口，会话仍继续运行。",

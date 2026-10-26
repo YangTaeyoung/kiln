@@ -5,6 +5,9 @@ real product capture `../assets/hero-poster-en.webp` and existing application ic
 `../assets/icon-192.png`. The image is a branded marketing composition; the source
 product screenshots remain the application evidence.
 
+The original delivered PNG is 1733 × 907 pixels (2,103,619 bytes). Published
+image metadata uses these actual dimensions.
+
 ## Generation prompt
 
 Use case: ads-marketing.

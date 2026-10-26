@@ -1,4 +1,4 @@
-# Kiln search readiness — 2026-10-26
+# Kiln search readiness: 2026-10-26
 
 ## Current public HTTP evidence
 
