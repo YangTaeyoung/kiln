@@ -112,6 +112,13 @@ wrote itself, it is archived (recoverable) and Claude Code receives a new copy.
 The same guarded refresh applies to earlier Codex copies containing Agy tools. Originals,
 copies continued in their CLI and copies imported by Codex Desktop are never rewritten.
 
+Codex `additional_tools` records describe the tool definitions available to that provider.
+Kiln validates their known envelope and leaves those definitions with Codex while copying
+the actual messages, calls and outputs. Malformed records or definitions containing an
+unexpected content field remain visible failures. This applies to full reads and appended
+turns after a checkpoint. A new Kiln build retries earlier unchanged failures automatically.
+See the [official response-item schema](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeParams.json).
+
 Complete JSON tool results are decoded into fields and multiline output, including
 adjacent JSON responses and nested text blocks. Invalid or truncated JSON stays
 verbatim. Code and angle-bracket text stay inside fences, and source-reference

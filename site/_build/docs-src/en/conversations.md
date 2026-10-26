@@ -34,6 +34,7 @@ The earlier messages show up in the CLI's normal conversation view and become pa
 | Shell commands and file edits | Shown as the other CLI's own tool records where it has a matching tool, otherwise as readable text. |
 | Images | Kept. |
 | Reasoning, provider instructions, encrypted records | Not copied. |
+| Available tool definitions | Each CLI keeps its own configured tools. Codex adding definitions does not block copying messages or recorded calls. |
 
 Tool calls from the history never run again. A conversation with content Kiln cannot copy, such as documents or audio, fails visibly instead of being marked complete with something missing.
 
