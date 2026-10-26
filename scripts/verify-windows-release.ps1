@@ -23,12 +23,26 @@ function Fetch([string]$Url, [string]$Destination) {
     & curl.exe -fLsS --retry 3 --connect-timeout 10 --max-time 300 -o $Destination $Url
     if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
 }
-function FileManifest([string]$Root, [bool]$WithTimes = $false) {
+function FileManifest([string]$Root, [bool]$WithTimes = $false, [bool]$Diagnostics = $false) {
     Get-ChildItem -LiteralPath $Root -File -Recurse | Sort-Object FullName | ForEach-Object {
         $relative = $_.FullName.Substring($Root.Length + 1)
-        $value = $relative + '|' + $_.Length + '|' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        if ($Diagnostics) {
+            Write-Host "MANIFEST root=[$Root] root-length=$($Root.Length) full=[$($_.FullName)] relative=[$relative] length=$($_.Length) sha256=$hash attributes=$($_.Attributes)"
+        }
+        $value = $relative + '|' + $_.Length + '|' + $hash
         if ($WithTimes) { $value += '|' + $_.LastWriteTimeUtc.Ticks }
         $value
+    }
+}
+function AssertManifest([string[]]$Expected, [string[]]$Actual, [string]$Message) {
+    $difference = @(Compare-Object $Expected $Actual)
+    if ($difference.Count) {
+        Write-Host "MANIFEST MISMATCH: $Message"
+        $Expected | ForEach-Object { Write-Host "EXPECTED $_" }
+        $Actual | ForEach-Object { Write-Host "ACTUAL   $_" }
+        Write-Host ($difference | Format-Table -AutoSize -Wrap | Out-String)
+        throw $Message
     }
 }
 function AssertPeMachine([string]$File, [string]$Arch) {
@@ -102,14 +116,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'First install failed' }
     $cli = Join-Path $env:KILN_INSTALL_DIR 'bin\kiln.exe'
     AssertCliVersion $cli
-    $expectedFiles = @(FileManifest $nativeRoot)
-    $installedFiles = @(FileManifest $env:KILN_INSTALL_DIR)
-    if (Compare-Object $expectedFiles $installedFiles) { throw 'Installed files differ from the exact final archive' }
+    $expectedFiles = @(FileManifest $nativeRoot $false $true)
+    $installedFiles = @(FileManifest $env:KILN_INSTALL_DIR $false $true)
+    AssertManifest $expectedFiles $installedFiles 'Installed files differ from the exact final archive'
     $before = @(FileManifest $env:KILN_INSTALL_DIR $true)
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
     if ($LASTEXITCODE -ne 0) { throw 'Second install failed' }
     $after = @(FileManifest $env:KILN_INSTALL_DIR $true)
-    if (Compare-Object $before $after) { throw 'Second install changed file set, bytes, lengths, hashes, or mtimes' }
+    AssertManifest $before $after 'Second install changed file set, bytes, lengths, hashes, or mtimes'
     AssertCliVersion $cli
 
     try {
