@@ -42,7 +42,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
     parser.add_argument("port_file", type=Path)
-    parser.add_argument("--version", default="0.2.16")
+    parser.add_argument("--version", default="0.2.17")
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("version must be a stable numeric version")

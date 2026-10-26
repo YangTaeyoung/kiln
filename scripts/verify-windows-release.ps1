@@ -2,7 +2,7 @@
 # on an owned native Windows VM. Never install into an existing user app folder.
 param(
     [Parameter(Mandatory=$true)][string]$Mirror,
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.16',
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.17',
     [ValidateSet('arm64','x64')][string]$NativeArch = 'arm64',
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedX64Sha256,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedArm64Sha256

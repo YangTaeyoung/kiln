@@ -1,4 +1,4 @@
-name: Verify 0.2.16 Windows archives
+name: Verify 0.2.17 Windows archives
 
 # Verification branch ONLY. Reuse the registered workflow path without changing
 # main's packaging workflow, the release source, or any published artifact.
@@ -8,7 +8,7 @@ on:
       version:
         description: Final release version
         required: true
-        default: '0.2.16'
+        default: '0.2.17'
       package_run_id:
         description: Explicit final packaging run ID supplied by the maintainer
         required: true
@@ -51,8 +51,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:GITHUB_REF -ne 'refs/heads/verify/0.2.16' -or $env:VERIFY_VERSION -ne '0.2.16') {
-            throw 'Run only verify/0.2.16 for version 0.2.16'
+          if ($env:GITHUB_REF -ne 'refs/heads/verify/0.2.17' -or $env:VERIFY_VERSION -ne '0.2.17') {
+            throw 'Run only verify/0.2.17 for version 0.2.17'
           }
           if ($env:VERIFY_PACKAGE_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'Invalid packaging run ID' }
           foreach ($digest in @($env:VERIFY_X64_SHA256, $env:VERIFY_ARM64_SHA256)) {
