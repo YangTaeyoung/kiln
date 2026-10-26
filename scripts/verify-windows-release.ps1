@@ -24,11 +24,20 @@ function Fetch([string]$Url, [string]$Destination) {
     if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
 }
 function FileManifest([string]$Root, [bool]$WithTimes = $false, [bool]$Diagnostics = $false) {
-    Get-ChildItem -LiteralPath $Root -File -Recurse | Sort-Object FullName | ForEach-Object {
-        $relative = $_.FullName.Substring($Root.Length + 1)
+    # Use the provider's spelling for both root and children. Windows TEMP can
+    # contain RUNNER~1 while FileInfo.FullName expands it to runneradmin.
+    $rootItem = Get-Item -LiteralPath $Root -Force
+    if (!$rootItem.PSIsContainer) { throw "Manifest root is not a directory: $Root" }
+    $canonicalRoot = $rootItem.FullName
+    $prefix = $canonicalRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    Get-ChildItem -LiteralPath $canonicalRoot -File -Recurse | Sort-Object FullName | ForEach-Object {
+        if (!$_.FullName.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Manifest entry is outside the canonical root: [$canonicalRoot] [$($_.FullName)]"
+        }
+        $relative = $_.FullName.Substring($prefix.Length)
         $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
         if ($Diagnostics) {
-            Write-Host "MANIFEST root=[$Root] root-length=$($Root.Length) full=[$($_.FullName)] relative=[$relative] length=$($_.Length) sha256=$hash attributes=$($_.Attributes)"
+            Write-Host "MANIFEST root=[$Root] canonical-root=[$canonicalRoot] full=[$($_.FullName)] relative=[$relative] length=$($_.Length) sha256=$hash attributes=$($_.Attributes)"
         }
         $value = $relative + '|' + $_.Length + '|' + $hash
         if ($WithTimes) { $value += '|' + $_.LastWriteTimeUtc.Ticks }
