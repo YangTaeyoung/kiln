@@ -10,9 +10,8 @@ on:
         required: true
         default: '0.2.16'
       package_run_id:
-        description: Successful Release (Windows) packaging run to download
+        description: Explicit final packaging run ID supplied by the maintainer
         required: true
-        default: '40245891313'
       expected_x64_sha256:
         description: SHA256 of the final locally downloaded x64 ZIP
         required: true
@@ -59,7 +58,7 @@ jobs:
           foreach ($digest in @($env:VERIFY_X64_SHA256, $env:VERIFY_ARM64_SHA256)) {
             if ($digest -notmatch '^[0-9a-fA-F]{64}$') { throw 'Both final SHA256 inputs are required' }
           }
-          # release source: 45ebc98d3db654c9ce0d1738f29d17d68e7ac9a7
+          # Unchanged installer baseline: 45ebc98d3db654c9ce0d1738f29d17d68e7ac9a7
           $installerBlob = git rev-parse HEAD:install.ps1
           if ($LASTEXITCODE -ne 0 -or $installerBlob -ne '0b52314b293a0fed0471dc740eb93d5cbeaef593') {
             throw 'install.ps1 differs from the release source'
