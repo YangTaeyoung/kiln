@@ -76,7 +76,7 @@ Claude Code 和 Codex 会在终端标题中写入活动标记，Kiln 能识别�
 - Git 命令可以提示当前仓库中的本地分支。
 - `npm run`、`pnpm run`、`yarn run` 和 `bun run` 会提示项目 `package.json` 中定义的脚本名。
 
-Kiln 会自动从支持的已安装 CLI 的本地帮助中读取命令、子命令和选项信息，并缓存结果。内置目录提供离线回退建议，包括 Docker Engine、Buildx 和 Compose。如果命令的帮助不受支持或无法获取，Kiln 会使用该命令可用的本地或内置建议。
+Kiln 会自动从支持的已安装 CLI 的本地帮助中读取命令、子命令和选项信息，并缓存结果。Compose 和 Buildx 等 Docker Desktop 插件也会从同一本地帮助中自动识别。内置目录提供离线回退建议，包括 Docker Engine、Buildx 和 Compose。如果命令的帮助不受支持或无法获取，Kiln 会使用该命令可用的本地或内置建议。
 
 帮助请求在独立的临时环境中运行，不传入你输入的参数值。补全不使用 AI，不读取 Shell 历史文件，也不向云服务发送补全数据。
 

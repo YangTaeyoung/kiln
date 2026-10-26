@@ -122,7 +122,7 @@ kiln activity failed
 <li>Git commands can suggest local branches from the current repository.</li>
 <li><code>npm run</code>, <code>pnpm run</code>, <code>yarn run</code> and <code>bun run</code> suggest script names from the project's <code>package.json</code>.</li>
 </ul>
-<p>Kiln automatically reads command, subcommand and option information from supported installed CLIs' local help and caches the results. A bundled catalog provides an offline fallback, including Docker Engine, Buildx and Compose. If a command's help is unsupported or unavailable, Kiln uses the local or bundled suggestions available for it.</p>
+<p>Kiln automatically reads command, subcommand and option information from supported installed CLIs' local help and caches the results. Installed Docker Desktop plugins such as Compose and Buildx are discovered from the same help output. A bundled catalog provides an offline fallback, including Docker Engine, Buildx and Compose. If a command's help is unsupported or unavailable, Kiln uses the local or bundled suggestions available for it.</p>
 <p>Help requests run in an isolated temporary environment without your typed argument values. Completion does not use AI, read shell history files or send completion data to a cloud service.</p>
 <p>To hide automatic suggestions, turn off <strong>Command suggestions</strong> in <strong>Settings → Terminal</strong>. <code>Ctrl+Space</code> keeps working. Set <code>KILN_COMPLETION_PREVIEW=0</code> in your shell to also stop producing preview data.</p>
 <p>Completion supports zsh only. Open a new terminal to load updated integration; existing terminals keep their shell setup. Bash, fish, SSH sessions, agent chats, full-screen applications and other shells keep their normal input behavior. Integration help is in the terminal's context menu.</p>
@@ -265,7 +265,7 @@ kiln activity failed
 <li>Git 명령에는 현재 저장소의 로컬 브랜치를 추천할 수 있습니다.</li>
 <li><code>npm run</code>, <code>pnpm run</code>, <code>yarn run</code>, <code>bun run</code>에는 프로젝트의 <code>package.json</code>에 정의된 스크립트 이름을 추천합니다.</li>
 </ul>
-<p>Kiln은 설치된 CLI의 로컬 도움말에서 명령, 하위 명령, 옵션 정보를 자동으로 읽고 결과를 캐시합니다. 오프라인에서도 쓸 수 있는 내장 추천 목록에는 Docker Engine, Buildx, Compose도 포함됩니다. 도움말을 해석하거나 불러올 수 없으면 해당 명령에 사용 가능한 로컬 또는 내장 추천을 사용합니다.</p>
+<p>Kiln은 설치된 CLI의 로컬 도움말에서 명령, 하위 명령, 옵션 정보를 자동으로 읽고 결과를 캐시합니다. Compose와 Buildx 같은 Docker Desktop 플러그인도 같은 도움말에서 자동으로 인식합니다. 오프라인에서도 쓸 수 있는 내장 추천 목록에는 Docker Engine, Buildx, Compose도 포함됩니다. 도움말을 해석하거나 불러올 수 없으면 해당 명령에 사용 가능한 로컬 또는 내장 추천을 사용합니다.</p>
 <p>도움말 요청은 입력한 인수 값을 전달하지 않고 분리된 임시 환경에서 실행합니다. 자동 완성은 AI를 사용하거나 셸 기록 파일을 읽지 않으며, 자동 완성 데이터를 클라우드 서비스로 보내지 않습니다.</p>
 <p>자동 추천을 숨기려면 <strong>설정 → 터미널</strong>에서 <strong>명령어 입력 힌트</strong>를 끄세요. 그래도 <code>Ctrl+Space</code>는 계속 동작합니다. 셸이 미리보기 데이터도 만들지 않게 하려면 셸에서 <code>KILN_COMPLETION_PREVIEW=0</code>을 설정하세요.</p>
 <p>자동 완성은 zsh에서만 동작합니다. 갱신된 통합을 불러오려면 새 터미널을 여세요. 기존 터미널은 현재 셸 설정을 유지합니다. Bash, fish, SSH 세션, 에이전트 채팅, 전체 화면 애플리케이션, 그 밖의 셸에서는 원래 입력 방식이 그대로 유지됩니다. 통합 관련 도움말은 터미널의 컨텍스트 메뉴에 있습니다.</p>
@@ -408,7 +408,7 @@ kiln activity failed
 <li>Git のコマンドでは、現在のリポジトリのローカルブランチを候補にできます。</li>
 <li><code>npm run</code>、<code>pnpm run</code>、<code>yarn run</code>、<code>bun run</code> では、プロジェクトの <code>package.json</code> に定義されたスクリプト名が候補になります。</li>
 </ul>
-<p>Kiln は、対応するインストール済み CLI のローカルヘルプからコマンド、サブコマンド、オプションの情報を自動で読み取り、結果をキャッシュします。オフラインでも使える同梱の候補データには、Docker Engine、Buildx、Compose も含まれます。コマンドのヘルプに対応していない場合や取得できない場合は、そのコマンドで利用できるローカルまたは同梱の候補を使います。</p>
+<p>Kiln は、対応するインストール済み CLI のローカルヘルプからコマンド、サブコマンド、オプションの情報を自動で読み取り、結果をキャッシュします。Compose や Buildx などの Docker Desktop プラグインも、同じヘルプから自動で認識します。オフラインでも使える同梱の候補データには、Docker Engine、Buildx、Compose も含まれます。コマンドのヘルプに対応していない場合や取得できない場合は、そのコマンドで利用できるローカルまたは同梱の候補を使います。</p>
 <p>ヘルプの取得は、入力した引数の値を渡さず、分離した一時環境で実行します。補完に AI は使わず、シェルの履歴ファイルを読んだり、補完データをクラウドサービスへ送ったりすることもありません。</p>
 <p>候補を自動で表示しないようにするには、<strong>設定 → ターミナル</strong>で<strong>コマンド入力候補</strong>をオフにします。この場合も <code>Ctrl+Space</code> は使えます。シェル側でもプレビュー用のデータを生成しないようにするには、シェルで <code>KILN_COMPLETION_PREVIEW=0</code> を設定します。</p>
 <p>補完に対応しているのは zsh だけです。更新された連携を読み込むには、新しいターミナルを開いてください。既存のターミナルは現在のシェル設定を保持します。Bash、fish、SSH セッション、エージェントとのチャット、フルスクリーンのアプリケーション、その他のシェルでは、入力の動作は通常どおりです。連携のヘルプはターミナルのコンテキストメニューにあります。</p>
@@ -551,7 +551,7 @@ kiln activity failed
 <li>Git 命令可以提示当前仓库中的本地分支。</li>
 <li><code>npm run</code>、<code>pnpm run</code>、<code>yarn run</code> 和 <code>bun run</code> 会提示项目 <code>package.json</code> 中定义的脚本名。</li>
 </ul>
-<p>Kiln 会自动从支持的已安装 CLI 的本地帮助中读取命令、子命令和选项信息，并缓存结果。内置目录提供离线回退建议，包括 Docker Engine、Buildx 和 Compose。如果命令的帮助不受支持或无法获取，Kiln 会使用该命令可用的本地或内置建议。</p>
+<p>Kiln 会自动从支持的已安装 CLI 的本地帮助中读取命令、子命令和选项信息，并缓存结果。Compose 和 Buildx 等 Docker Desktop 插件也会从同一本地帮助中自动识别。内置目录提供离线回退建议，包括 Docker Engine、Buildx 和 Compose。如果命令的帮助不受支持或无法获取，Kiln 会使用该命令可用的本地或内置建议。</p>
 <p>帮助请求在独立的临时环境中运行，不传入你输入的参数值。补全不使用 AI，不读取 Shell 历史文件，也不向云服务发送补全数据。</p>
 <p>要隐藏自动建议，在<strong>设置 → 终端</strong>中关闭<strong>命令输入提示</strong>，<code>Ctrl+Space</code> 仍然可用。在 Shell 中设置 <code>KILN_COMPLETION_PREVIEW=0</code>，也会停止生成预览数据。</p>
 <p>补全只支持 zsh。请打开新终端以加载更新后的集成，已有终端会保留原来的 Shell 设置。Bash、fish、SSH 会话、代理对话、全屏应用和其他 Shell 的输入方式保持不变。集成的帮助位于终端的右键菜单中。</p>

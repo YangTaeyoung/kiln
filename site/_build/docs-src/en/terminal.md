@@ -76,7 +76,7 @@ Suggestions use the command and its arguments:
 - Git commands can suggest local branches from the current repository.
 - `npm run`, `pnpm run`, `yarn run` and `bun run` suggest script names from the project's `package.json`.
 
-Kiln automatically reads command, subcommand and option information from supported installed CLIs' local help and caches the results. A bundled catalog provides an offline fallback, including Docker Engine, Buildx and Compose. If a command's help is unsupported or unavailable, Kiln uses the local or bundled suggestions available for it.
+Kiln automatically reads command, subcommand and option information from supported installed CLIs' local help and caches the results. Installed Docker Desktop plugins such as Compose and Buildx are discovered from the same help output. A bundled catalog provides an offline fallback, including Docker Engine, Buildx and Compose. If a command's help is unsupported or unavailable, Kiln uses the local or bundled suggestions available for it.
 
 Help requests run in an isolated temporary environment without your typed argument values. Completion does not use AI, read shell history files or send completion data to a cloud service.
 
