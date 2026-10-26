@@ -552,7 +552,7 @@ mod tests {
             r#"#!/bin/sh
 printf '%s\n' "$*" >> '{}'
 case "$*" in
-  --help) printf 'Usage: fresh-cli [COMMAND]\n\nCommands:\n  serve*  Start the fixture service\n\nOptions:\n  --help  Show help\n' ;;
+  --help) printf 'Usage: fresh-cli [COMMAND]\n\nCommands:\n  serve*  Start the fixture service\n\nOptions:\n  --help  Show help\n\nGlobal Options:\n  --config <DIRECTORY>  Root configuration directory\n' ;;
   'serve --help') printf 'Usage: fresh-cli serve [OPTIONS]\n\nOptions:\n  --directory <DIRECTORY>  Project directory\n  --file <FILE>            Input file\n  --message <MESSAGE>      Literal message\n  --help                   Show help\n' ;;
   *) exit 9 ;;
 esac
@@ -565,6 +565,7 @@ esac
         let native = vec![executable.to_string_lossy().into_owned()];
         for (input, expected) in [
             ("fresh-cli se", "fresh-cli serve"),
+            ("fresh-cli --config so", "fresh-cli --config 'source folder/'"),
             ("fresh-cli serve --d", "fresh-cli serve --directory"),
             (
                 "fresh-cli serve --directory so",
@@ -587,6 +588,8 @@ esac
         }
         let secret = "fresh-cli serve --message PRIVATE_VALUE";
         assert!(candidates(secret, secret.len(), &project, &native).is_empty());
+        let input = "fresh-cli serve --conf";
+        assert!(!candidates(input, input.len(), &project, &native).iter().any(|r| r.label == "--config"), "root Global Options must not leak into child help that does not list them");
         assert_eq!(
             std::fs::read_to_string(calls).unwrap(),
             "--help\nserve --help\n",

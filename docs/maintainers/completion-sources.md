@@ -133,6 +133,12 @@ its [child YAML](https://github.com/docker/compose/blob/e18ab3d8797716b565e47b32
 lists dry-run as inherited. Inherited options are stored at their owner; an
 alias outside that owner's branch receives a local copy when needed.
 
+Installed help discovery also treats the generic `Global Options` heading as
+local to its command unless known metadata establishes inheritance. Explicit
+`Global Flags` and inherited-option headings still propagate. Nested help adds
+the options it exposes at that command. A custom help template can omit valid
+global options; native shell completion remains available for those cases.
+
 ### Reviewed snapshot checks
 
 | Measure | Count |

@@ -759,9 +759,10 @@ fn clean_help(text: &str) -> Option<String> {
 fn section_heading(line: &str) -> Option<Section> {
     let heading = line.strip_suffix(':')?.trim().to_ascii_lowercase();
     Some(match heading.as_str() {
-        "options" | "flags" | "optional arguments" | "named arguments" => Section::Options(false),
+        // "Global Options" can still belong before the subcommand (Docker).
+        // Child help is authoritative for options available at that child.
+        "options" | "flags" | "optional arguments" | "named arguments" | "global options" => Section::Options(false),
         "global flags"
-        | "global options"
         | "inherited flags"
         | "options inherited from parent commands" => Section::Options(true),
         "commands"
@@ -1781,6 +1782,9 @@ fn main() {
                 let input = "docker compose --project-directory ";
                 let rows = super::super::candidates(input, input.len(), dir.path(), &[cli.to_string_lossy().into_owned()]);
                 assert!(rows.iter().any(|r| r.buffer == "docker compose --project-directory 'source folder/'"), "installed Compose path completion: {rows:?}");
+                let input = "docker compose --con";
+                let rows = super::super::candidates(input, input.len(), dir.path(), &[cli.to_string_lossy().into_owned()]);
+                assert!(!rows.iter().any(|r| matches!(r.label.as_str(), "--config" | "--context")), "root-only Docker flags must precede compose: {rows:?}");
             }
         }
     }
