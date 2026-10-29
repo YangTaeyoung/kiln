@@ -159,7 +159,7 @@ pub struct TermView {
     accessible_input: String,
     pub palette: Arc<Palette>,
     pending_size: Option<((u16, u16), std::time::Instant)>,
-    theme_name: &'static str,
+    theme: kiln_common::Theme,
     /// false 면 바탕을 칠하지 않는다(카드가 둥근 바탕을 그린다).
     pub fill_background: bool,
 }
@@ -232,7 +232,7 @@ impl TermView {
             accessible_input: String::new(),
             palette: Arc::new(Palette::default()),
             pending_size: None,
-            theme_name: kiln_common::Theme::current().name,
+            theme: kiln_common::Theme::current(),
             fill_background: true,
         }
     }
@@ -401,8 +401,8 @@ impl TermView {
         self.request_size(ui.ctx(), conn, cols, rows);
 
         let theme = kiln_common::Theme::current();
-        if theme.name != self.theme_name {
-            self.theme_name = theme.name;
+        if theme != self.theme {
+            self.theme = theme;
             self.palette = Arc::new(Palette::from_theme(&theme));
             self.rows.clear();
         }

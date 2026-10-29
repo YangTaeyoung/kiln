@@ -2,12 +2,12 @@
 
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use egui::Color32;
 use kiln_common::Theme;
 use syntect::highlighting::{
-    Color, FontStyle, Highlighter, ScopeSelectors, StyleModifier, Theme as SynTheme, ThemeItem,
+    Color, FontStyle, ScopeSelectors, StyleModifier, Theme as SynTheme, ThemeItem,
     ThemeSettings,
 };
 use syntect::parsing::{SyntaxDefinition, SyntaxReference, SyntaxSet};
@@ -18,8 +18,8 @@ pub struct SyntaxAssets {
 }
 
 static ASSETS: OnceLock<SyntaxAssets> = OnceLock::new();
-/// 테마 이름별 syntect 하이라이터. 테마마다 한 번 만들어 프로세스가 끝날 때까지 둔다.
-static HIGHLIGHTERS: Mutex<Vec<(&'static str, &'static Highlighter<'static>)>> = Mutex::new(Vec::new());
+// Bound the cache: editing and reloading a user palette can create unlimited revisions.
+static THEMES: Mutex<Vec<(Theme, Arc<SynTheme>)>> = Mutex::new(Vec::new());
 
 /// 문법 세트를 (필요하면 로드해서) 돌려준다.
 pub fn assets() -> &'static SyntaxAssets {
@@ -47,21 +47,21 @@ pub fn assets() -> &'static SyntaxAssets {
     })
 }
 
-/// 현재 앱 테마(`Theme::current()`)에 맞춘 syntect 하이라이터.
-pub fn highlighter() -> &'static Highlighter<'static> {
-    highlighter_for(&Theme::current())
+/// Shared syntax colors for the current application palette.
+pub fn current_theme() -> Arc<SynTheme> {
+    theme_for(&Theme::current())
 }
 
-/// 주어진 앱 테마에 맞춘 syntect 하이라이터. 밝은 테마면 밝은 배경용 색 규칙을 쓴다.
-pub fn highlighter_for(t: &Theme) -> &'static Highlighter<'static> {
-    let mut list = HIGHLIGHTERS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, h)) = list.iter().find(|(n, _)| *n == t.name) {
-        return h;
+/// Shared syntect theme keyed by the full application palette.
+pub fn theme_for(t: &Theme) -> Arc<SynTheme> {
+    let mut list = THEMES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, theme)) = list.iter().find(|(palette, _)| palette == t) {
+        return Arc::clone(theme);
     }
-    let theme: &'static SynTheme = Box::leak(Box::new(build_theme(t)));
-    let h: &'static Highlighter<'static> = Box::leak(Box::new(Highlighter::new(theme)));
-    list.push((t.name, h));
-    h
+    let theme = Arc::new(build_theme(t));
+    if list.len() == 8 { list.remove(0); }
+    list.push((*t, Arc::clone(&theme)));
+    theme
 }
 
 /// 백그라운드 스레드에서 문법 세트를 미리 로드한다.
@@ -69,7 +69,7 @@ pub fn prewarm() {
     if ASSETS.get().is_none() {
         std::thread::spawn(|| {
             let _ = assets();
-            let _ = highlighter();
+            let _ = current_theme();
         });
     }
 }
@@ -81,16 +81,16 @@ fn syntax_palette(t: &Theme) -> Theme {
     }
     let hex = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
     let mut p = *t;
-    p.text = hex(0x1f2328);
-    p.text_dim = hex(0x4b535d);
-    p.text_faint = hex(0x6e7781);
-    p.green = hex(0x0a3069);
-    p.orange = hex(0x0550ae);
-    p.purple = hex(0xcf222e);
-    p.blue = hex(0x8250df);
-    p.yellow = hex(0x953800);
-    p.red = hex(0x116329);
-    p.ansi[6] = hex(0x0550ae);
+    // Keep inherited light syntax colors while respecting changed user colors.
+    macro_rules! inherited {
+        ($($field:ident => $value:expr),+ $(,)?) => { $(
+            if p.$field == Theme::KILN_LIGHT.$field { p.$field = hex($value); }
+        )+ };
+    }
+    inherited!(text => 0x1f2328, text_dim => 0x4b535d, text_faint => 0x6e7781,
+        green => 0x0a3069, orange => 0x0550ae, purple => 0xcf222e,
+        blue => 0x8250df, yellow => 0x953800, red => 0x116329);
+    if p.ansi[6] == Theme::KILN_LIGHT.ansi[6] { p.ansi[6] = hex(0x0550ae); }
     p
 }
 

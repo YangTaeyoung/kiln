@@ -1,10 +1,14 @@
 //! 디자인 토큰(색·모서리·간격)과 테마. 모든 크레이트가 `Theme::current()` 로 읽는다.
 
 use egui::{Color32, CornerRadius, FontFamily, FontId, Margin, Shadow, Stroke, TextStyle, Vec2};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::RwLock;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+mod custom;
+pub use custom::{ThemeChoice, import_theme, load_custom_themes, load_errors, themes_dir};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Theme {
+    /// Built-in palette identity. Custom selections use `ThemeChoice::name`.
     pub name: &'static str,
     pub label: &'static str,
     pub dark: bool,
@@ -166,17 +170,23 @@ impl Theme {
     pub const DARK: Theme = Theme::KILN_DARK;
 
     pub fn current() -> Theme {
-        Theme::ALL[CURRENT.load(Ordering::Relaxed).min(Theme::ALL.len() - 1)]
+        *CURRENT.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// 이름으로 테마를 고른다. 모르는 이름이면 기본 테마.
     pub fn set_current(name: &str) {
-        let i = Theme::ALL.iter().position(|t| t.name == name).unwrap_or(0);
-        CURRENT.store(i, Ordering::Relaxed);
+        *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = Self::by_name(name);
     }
 
     pub fn by_name(name: &str) -> Theme {
-        Theme::ALL.iter().copied().find(|t| t.name == name).unwrap_or(Theme::KILN_DARK)
+        Theme::ALL.iter().copied().find(|t| t.name == name)
+            .or_else(|| custom::find(name))
+            .unwrap_or(Theme::KILN_DARK)
+    }
+
+    /// Built-in and successfully loaded custom palettes, with owned selection IDs.
+    pub fn choices() -> Vec<ThemeChoice> {
+        custom::choices()
     }
 
     /// 강조색을 투명도와 함께.
@@ -275,7 +285,7 @@ impl Theme {
     }
 }
 
-static CURRENT: AtomicUsize = AtomicUsize::new(0);
+static CURRENT: RwLock<Theme> = RwLock::new(Theme::KILN_DARK);
 
 #[cfg(test)]
 mod selection_tests {

@@ -1678,8 +1678,8 @@ impl KilnApp {
         for (i, w) in self.workspaces.iter().enumerate() {
             add(Group::Spaces, Icon::Folder, w.name.clone(), &format!("⌘{}", i + 1), Action::SelectWorkspace(i));
         }
-        for th in Theme::ALL {
-            add(Group::Settings, Icon::Sparkle, kiln_common::trf!("테마: {}", th.label), "", Action::SetTheme(th.name.into()));
+        for choice in Theme::choices() {
+            add(Group::Settings, Icon::Sparkle, kiln_common::trf!("테마: {}", choice.display_label()), "", Action::SetTheme(choice.name));
         }
         add(Group::Settings, Icon::Gear, kiln_common::i18n::tr("설정 열기").into(), "⌘,", Action::OpenSettings);
         add(Group::Settings, Icon::Command, kiln_common::i18n::tr("글꼴 크게").into(), "⌘=", Action::FontDelta(1.0));

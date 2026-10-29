@@ -11938,5 +11938,35 @@
     "en": "Could not finish replacing the daemon. Retry in Settings.",
     "ja": "デーモンの更新を完了できませんでした。設定から再試行してください。",
     "zh-CN": "无法完成守护进程更新，请在设置中重试。"
+  },
+  "저장된 테마를 찾을 수 없어 기본 테마를 사용합니다": {
+    "en": "The saved theme is unavailable; using the default theme",
+    "ja": "保存されたテーマが見つからないため、既定のテーマを使用しています",
+    "zh-CN": "找不到已保存的主题，正在使用默认主题"
+  },
+  "테마 가져오기": {
+    "en": "Import theme",
+    "ja": "テーマをインポート",
+    "zh-CN": "导入主题"
+  },
+  "테마 파일 오류": {
+    "en": "Theme file errors",
+    "ja": "テーマファイルのエラー",
+    "zh-CN": "主题文件错误"
+  },
+  "테마 폴더 열기": {
+    "en": "Open themes folder",
+    "ja": "テーマフォルダーを開く",
+    "zh-CN": "打开主题文件夹"
+  },
+  "테마를 가져오지 못했습니다: {error}": {
+    "en": "Could not import theme: {error}",
+    "ja": "テーマをインポートできませんでした: {error}",
+    "zh-CN": "无法导入主题：{error}"
+  },
+  "테마를 읽지 못했습니다: {error}": {
+    "en": "Could not load theme: {error}",
+    "ja": "テーマを読み込めませんでした: {error}",
+    "zh-CN": "无法加载主题：{error}"
   }
 }
