@@ -164,12 +164,16 @@ fn appearance(ui: &mut egui::Ui, s: &mut Settings, acts: &mut Vec<Action>) {
     ui.add_space(20.0);
     ui.label(RichText::new(kiln_common::i18n::tr("테마")).font(fonts::semibold(12.0)).color(t.text_faint));
     ui.add_space(8.0);
+    let choices = Theme::choices();
+    let saved_available = choices.iter().any(|choice| choice.name == s.theme);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
-        for th in Theme::ALL {
+        for choice in choices {
+            let th = choice.theme;
+            let label = choice.display_label();
             let (r, resp) = ui.allocate_exact_size(vec2(120.0, 74.0), Sense::click());
-            let sel = s.theme == th.name;
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), sel, kiln_common::i18n::tr(th.label)));
+            let sel = s.theme == choice.name;
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), sel, label));
             widgets::focus_ring(ui, &resp, 10);
             // 미니 미리보기: 레일 + 카드 두 장.
             let preview = egui::Rect::from_min_size(r.min, vec2(r.width(), 46.0));
@@ -189,15 +193,42 @@ fn appearance(ui: &mut egui::Ui, s: &mut Settings, acts: &mut Vec<Action>) {
             }
             let stroke = if sel { Stroke::new(2.0, t.accent) } else if resp.hovered() { Stroke::new(1.0, t.border_strong) } else { Stroke::new(1.0, t.border) };
             ui.painter().rect_stroke(preview, CornerRadius::same(10), stroke, StrokeKind::Outside);
-            ui.painter().text(pos2(r.left() + 2.0, preview.bottom() + 15.0), Align2::LEFT_CENTER, kiln_common::i18n::tr(th.label), fonts::medium(13.0), if sel { t.text } else { t.text_dim });
+            let label_rect = egui::Rect::from_min_max(pos2(r.left(), preview.bottom()), r.max);
+            ui.painter().with_clip_rect(ui.clip_rect().intersect(label_rect)).text(pos2(r.left() + 2.0, preview.bottom() + 15.0), Align2::LEFT_CENTER, label, fonts::medium(13.0), if sel { t.text } else { t.text_dim });
+            let resp = resp.on_hover_text(label);
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             if resp.clicked() && !sel {
-                acts.push(Action::SetTheme(th.name.into()));
+                acts.push(Action::SetTheme(choice.name));
             }
         }
     });
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
+        if widgets::button(ui, kiln_common::i18n::tr("테마 가져오기"), ButtonKind::Secondary).clicked() {
+            acts.push(Action::ImportTheme);
+        }
+        if widgets::button(ui, kiln_common::i18n::tr("다시 읽기"), ButtonKind::Secondary).clicked() {
+            acts.push(Action::ReloadThemes);
+        }
+        if widgets::button(ui, kiln_common::i18n::tr("테마 폴더 열기"), ButtonKind::Secondary).clicked() {
+            let dir = kiln_common::theme::themes_dir();
+            if let Err(error) = std::fs::create_dir_all(&dir).map_err(anyhow::Error::from)
+                .and_then(|_| open::that_detached(dir).map_err(anyhow::Error::from)) {
+                acts.push(Action::Toast(error.to_string()));
+            }
+        }
+    });
+    if !saved_available {
+        ui.colored_label(t.yellow, kiln_common::i18n::tr("저장된 테마를 찾을 수 없어 기본 테마를 사용합니다"));
+    }
+    let errors = kiln_common::theme::load_errors();
+    if !errors.is_empty() {
+        ui.collapsing(kiln_common::i18n::tr("테마 파일 오류"), |ui| {
+            for error in errors { ui.colored_label(t.red, error); }
+        });
+    }
     ui.add_space(18.0);
     widgets::group(ui, kiln_common::i18n::tr("화면"), |ui| {
         widgets::setting_row(ui, kiln_common::i18n::tr("UI 크기"), kiln_common::i18n::tr("창 전체의 글자와 여백 비율"), |ui| {
@@ -344,6 +375,48 @@ fn about_page(ui: &mut egui::Ui, about: &AboutInfo, acts: &mut Vec<Action>) {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod custom_theme_tests {
+    use super::*;
+    use egui_kittest::{Harness, kittest::Queryable};
+
+    #[test]
+    fn custom_palette_tiles_and_import_reload_controls_emit_expected_actions() {
+        kiln_common::i18n::with_language(kiln_common::i18n::Language::English, || {
+            let root = tempfile::tempdir().unwrap();
+            struct Restore(std::path::PathBuf);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    kiln_common::theme::load_custom_themes(&self.0);
+                    Theme::set_current("kiln-dark");
+                }
+            }
+            let _restore = Restore(root.path().join("missing"));
+            let file = root.path().join("ocean.json");
+            std::fs::write(&file, r##"{"name":"ocean","label":"테마","base":"midnight","colors":{"bg":"#102030"}}"##).unwrap();
+            assert!(kiln_common::theme::load_custom_themes(root.path()).is_empty());
+            let mut initialized = false;
+            let mut h = Harness::builder().with_size([600.0, 800.0]).build_ui_state(|ui, state: &mut (Settings, Vec<Action>)| {
+                if !initialized { fonts::install(ui.ctx()); Theme::current().apply(ui.ctx()); initialized = true; return; }
+                appearance(ui, &mut state.0, &mut state.1);
+            }, (Settings::default(), Vec::new()));
+            h.run_steps(3);
+            h.get_by_label("테마").click(); h.run_steps(2);
+            assert!(h.state().1.iter().any(|action| matches!(action, Action::SetTheme(name) if name == "custom:ocean")));
+            h.get_by_label("Import theme").click(); h.run_steps(2);
+            assert!(h.state().1.iter().any(|action| matches!(action, Action::ImportTheme)));
+            h.get_by_label("Reload").click(); h.run_steps(2);
+            assert!(h.state().1.iter().any(|action| matches!(action, Action::ReloadThemes)));
+            h.state_mut().0.theme = "custom:ocean".into();
+            std::fs::write(&file, "{").unwrap();
+            assert_eq!(kiln_common::theme::load_custom_themes(root.path()).len(), 1);
+            h.run_steps(3);
+            assert!(h.query_by_label("Theme file errors").is_some());
+            assert!(h.query_by_label("The saved theme is unavailable; using the default theme").is_some());
+        });
+    }
 }
 
 #[cfg(test)]

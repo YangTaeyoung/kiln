@@ -121,6 +121,102 @@ fn shutdown(base: &std::path::Path) {
     }
 }
 
+#[test]
+fn custom_theme_selection_reload_and_relaunch_preserve_terminal_sessions() {
+    use kiln::app::Action;
+    use kiln_common::{Theme, theme};
+    use serde_json::json;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, proj) = setup("custom-themes");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            shutdown(&self.0);
+            theme::load_custom_themes(&self.0.join("missing"));
+            Theme::set_current("kiln-dark");
+        }
+    }
+    let _cleanup = Cleanup(base.clone());
+    use_posix_shell(&base);
+    let dir = base.join("cfg/themes");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut ansi = vec!["#112233"; 16];
+    ansi[2] = "#43AB6E";
+    let mut ocean = json!({"name":"ocean", "label":"Ocean custom", "base":"midnight",
+        "colors":{"bg":"#101820", "accent":"#80CBC4"}, "ansi":ansi});
+    std::fs::write(dir.join("ocean.json"), ocean.to_string()).unwrap();
+    std::fs::write(dir.join("other.json"), json!({"name":"other", "label":"Other custom", "base":"midnight", "colors":{"bg":"#211122"}}).to_string()).unwrap();
+    // Startup must load the catalog before resolving the saved selection.
+    std::fs::write(base.join("cfg/state.json"), json!({"settings":{"theme":"custom:other", "shell":posix_shell("sh")}}).to_string()).unwrap();
+    let render = std::env::var_os("KILN_TEST_RENDER").is_some();
+    let builder = Harness::builder().with_size([1100.0, 760.0]);
+    let builder = if render { builder.wgpu() } else { builder };
+    let mut h = builder.build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    assert_eq!(Theme::current().bg, egui::Color32::from_rgb(0x21,0x11,0x22));
+    let session = h.state().debug_focused_session();
+    h.state_mut().debug_open_settings(0); h.run_steps(3);
+    h.get_by_label("Ocean custom").click(); h.run_steps(3);
+    assert_eq!(Theme::current().bg, egui::Color32::from_rgb(0x10,0x18,0x20));
+    assert_eq!(h.ctx.style_of(egui::Theme::Dark).visuals.hyperlink_color, egui::Color32::from_rgb(0x80,0xcb,0xc4));
+    let captures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/reviews");
+    if render {
+        std::fs::create_dir_all(&captures).unwrap();
+        let original = kiln_common::i18n::language();
+        for language in kiln_common::i18n::Language::ALL {
+            h.state_mut().debug_queue_action(Action::SetLanguage(language)); h.run_steps(3);
+            h.render().unwrap().save(captures.join(format!("custom-themes-settings-{}.png", language.code()))).unwrap();
+        }
+        h.state_mut().debug_queue_action(Action::SetLanguage(original)); h.run_steps(3);
+    }
+    h.key_press(egui::Key::Escape); h.run_steps(2);
+    h.event(egui::Event::Text("printf '\\033[32mCUSTOM_THEME_MARKER\\033[0m\\n'".into()));
+    h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("CUSTOM_THEME_MARKER"))));
+    let painted_color = |h: &mut Harness<'_, KilnApp>, color: egui::Color32| {
+        h.output().shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
+            if text.galley.job.text.contains("CUSTOM_THEME_MARKER")
+                && text.galley.job.sections.iter().any(|section| section.format.color == color)))
+    };
+    assert!(pump_until(&mut h, 5, |h| painted_color(h, egui::Color32::from_rgb(0x43,0xab,0x6e))));
+    if render { assert!(h.render().unwrap().pixels().filter(|p| p.0[..3] == [0x43,0xab,0x6e]).count() > 10); }
+    // Same ID and same base, new palette: existing terminal row caches must change.
+    ocean["ansi"][2] = json!("#9D74DD");
+    ocean["colors"]["bg"] = json!("#152535");
+    std::fs::write(dir.join("ocean.json"), ocean.to_string()).unwrap();
+    h.state_mut().debug_open_settings(0); h.run_steps(3);
+    h.get_by_label(kiln_common::i18n::tr("다시 읽기")).click(); h.run_steps(3);
+    h.key_press(egui::Key::Escape); h.run_steps(3);
+    assert_eq!(Theme::current().bg, egui::Color32::from_rgb(0x15,0x25,0x35));
+    assert_eq!(h.state().debug_focused_session(), session);
+    assert!(painted_color(&mut h, egui::Color32::from_rgb(0x9d,0x74,0xdd)));
+    if render {
+        let image = h.render().unwrap();
+        assert!(image.pixels().filter(|p| p.0[..3] == [0x9d,0x74,0xdd]).count() > 10);
+        image.save(captures.join("custom-themes-terminal.png")).unwrap();
+    }
+    assert!(pump_until(&mut h, 5, |_| {
+        std::fs::read(base.join("cfg/state.json")).ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|state| state["settings"]["theme"] == "custom:ocean")
+    }));
+    drop(h);
+    let mut h = Harness::builder().with_size([1100.0, 760.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, None));
+    assert_eq!(Theme::current().bg, egui::Color32::from_rgb(0x15,0x25,0x35));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session() == session));
+    // Broken selected files are visible in Settings; repairing and reloading restores selection.
+    std::fs::write(dir.join("ocean.json"), "{").unwrap();
+    h.state_mut().debug_queue_action(Action::ReloadThemes); h.run_steps(3);
+    assert_eq!(Theme::current(), Theme::KILN_DARK);
+    assert_eq!(theme::load_errors().len(), 1);
+    assert!(Theme::choices().iter().any(|choice| choice.name == "custom:other"));
+    std::fs::write(dir.join("ocean.json"), ocean.to_string()).unwrap();
+    h.state_mut().debug_queue_action(Action::ReloadThemes); h.run_steps(3);
+    assert_eq!(Theme::current().bg, egui::Color32::from_rgb(0x15,0x25,0x35));
+    assert!(theme::load_errors().is_empty());
+    assert_eq!(h.state().debug_focused_session(), session);
+}
+
 #[cfg(unix)]
 #[test]
 fn linked_resume_stops_the_old_agent_flushes_history_and_reopens_only_the_winner() {

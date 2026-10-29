@@ -16,7 +16,7 @@ fn ms(d: Duration) -> f64 {
 #[test]
 fn a_syntax_set_load_and_first_open() {
     let t = Instant::now();
-    let _ = syntax::highlighter();
+    let _ = syntax::current_theme();
     let load = t.elapsed();
     let src = common::rust_source(20_000);
     let t = Instant::now();
@@ -33,7 +33,7 @@ fn highlight_20k_line_rust_file_full_and_incremental() {
     let mut b = Buffer::from_text(&src);
     let n = b.line_count();
     assert!(n >= 20_000);
-    let _ = syntax::highlighter();
+    let _ = syntax::current_theme();
     let rust = syntax::detect(Path::new("big.rs"), "");
 
     let t = Instant::now();

@@ -19,8 +19,36 @@ fn hash_of(text: &str, wrap: f32, driver: Driver, font: f32) -> u64 {
     wrap.to_bits().hash(&mut h);
     driver.hash(&mut h);
     font.to_bits().hash(&mut h);
-    Theme::current().name.hash(&mut h);
+    Theme::current().hash(&mut h);
     h.finish()
+}
+
+#[cfg(test)]
+mod custom_theme_tests {
+    use super::*;
+
+    #[test]
+    fn reloading_palette_colors_invalidates_cached_sql_without_changing_text() {
+        let root = tempfile::tempdir().unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                kiln_common::theme::load_custom_themes(&self.0);
+                Theme::set_current("kiln-dark");
+            }
+        }
+        let _restore = Restore(root.path().join("missing"));
+        let mut highlighter = SqlHighlighter::default();
+        for (hex, expected) in [("#12AB34", Color32::from_rgb(0x12,0xab,0x34)), ("#AB34CD", Color32::from_rgb(0xab,0x34,0xcd))] {
+            let value = serde_json::json!({"name":"sql", "label":"SQL", "base":"midnight", "colors":{"purple":hex}});
+            std::fs::write(root.path().join("sql.json"), value.to_string()).unwrap();
+            assert!(kiln_common::theme::load_custom_themes(root.path()).is_empty());
+            Theme::set_current("custom:sql");
+            let job = highlighter.job("SELECT 1", 400.0, Driver::Sqlite, 13.0);
+            assert_eq!(job.text, "SELECT 1");
+            assert_eq!(job.sections[0].format.color, expected);
+        }
+    }
 }
 
 impl SqlHighlighter {

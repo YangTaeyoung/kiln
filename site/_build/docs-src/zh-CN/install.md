@@ -109,6 +109,31 @@ Kiln 每天检查一次更新。要手动检查，打开**设置 → 关于 → 
 
 这只会改变 Kiln 自身的界面。终端输出、文件名、代码、提交信息和代理请求都保持原样。从早期版本升级上来的安装会继续使用韩语界面，直到你选择语言为止。
 
+## 自定义主题 {#custom-themes}
+
+打开**设置 → 外观 → 导入主题**，选择 JSON 文件。有效文件会复制到配置文件夹的 **themes** 子文件夹并立即应用。选择会保留到下次启动，也可以在命令面板中选择。导入不会覆盖已有主题文件。
+
+将以下示例保存为 `ocean.json` 即可使用：
+
+```json
+{
+  "name": "ocean",
+  "label": "Ocean",
+  "base": "midnight",
+  "colors": {
+    "bg": "#101820",
+    "accent": "#80CBC4",
+    "purple": "#C792EA"
+  }
+}
+```
+
+`name` 是由小写 ASCII 字母、数字或连字符组成的唯一标识符，长度为 1–64 个字符。`label` 是显示名称，长度为 1–64 个字符。`base` 必须为 `kiln-dark`、`midnight`、`ember` 或 `kiln-light`，用于确定明暗模式和未指定的颜色。自定义显示名称会按原文显示。
+
+`colors` 可以省略。颜色必须为不透明的 `#RRGGBB` 格式。支持的键为 `bg`, `bg_panel`, `bg_elevated`, `bg_hover`, `bg_selected`, `bg_input`, `border`, `border_strong`, `text`, `text_dim`, `text_faint`, `accent`, `accent_fg`, `green`, `red`, `yellow`, `blue`, `purple`, `orange`。要替换终端 ANSI 调色板，请在顶层添加 `ansi` 数组，包含恰好 16 个 `#RRGGBB` 字符串，按黑色到白色的基本 8 色，再到对应亮色的顺序排列。
+
+通过**打开主题文件夹**编辑或添加 JSON 文件，然后点击**重新加载**应用更改。每个文件最大为 64 KiB。无效文件、未知字段和重复标识符会显示在**主题文件错误**中，有效主题仍可使用。如果已保存的主题缺失或无效，Kiln 会使用 Kiln 深色主题，并保留原选择，以便修复文件并重新加载后恢复。终端及其正在运行的进程会保持运行。
+
 ## 后续步骤 {#next-steps}
 
 - [工作区与任务](workspaces.html)：整理文件夹和任务。

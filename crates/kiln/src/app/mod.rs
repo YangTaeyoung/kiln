@@ -247,6 +247,8 @@ pub enum Action {
     LaunchAgent { cwd: PathBuf, program: String, context: String, request: String },
     Toast(String),
     SetTheme(String),
+    ImportTheme,
+    ReloadThemes,
     RevealSession(SessionId),
     /// 계정 로그인 명령을 새 터미널 카드에서 실행한다.
     RunLogin(kiln_accounts::Tool),
@@ -403,6 +405,8 @@ impl KilnApp {
         let first_run = persisted.workspaces.is_empty() && open_paths.is_empty();
         #[cfg(target_os = "macos")]
         let first_run = first_run && !macos::has_open_requests();
+        let theme_errors = kiln_common::theme::load_custom_themes(&kiln_common::theme::themes_dir());
+        for error in &theme_errors { log::warn!("{error}"); }
         Theme::set_current(&persisted.settings.theme);
         let theme = Theme::current();
         theme.apply(ctx);
@@ -1708,6 +1712,25 @@ impl KilnApp {
                 self.theme.apply(ctx);
                 self.settings.theme = name;
                 self.conn.sync_palette();
+            }
+            Action::ImportTheme => {
+                let Some(source) = rfd::FileDialog::new()
+                    .set_title(kiln_common::i18n::tr("테마 가져오기"))
+                    .add_filter("JSON", &["json"]).pick_file() else { return; };
+                match kiln_common::theme::import_theme(&source, &kiln_common::theme::themes_dir()) {
+                    Ok(name) => {
+                        self.apply(Action::ReloadThemes, ctx);
+                        self.apply(Action::SetTheme(name), ctx);
+                    }
+                    Err(error) => self.apply(Action::Toast(kiln_common::trf!("테마를 가져오지 못했습니다: {error}")), ctx),
+                }
+            }
+            Action::ReloadThemes => {
+                let errors = kiln_common::theme::load_custom_themes(&kiln_common::theme::themes_dir());
+                self.apply(Action::SetTheme(self.settings.theme.clone()), ctx);
+                for error in errors {
+                    self.apply(Action::Toast(kiln_common::trf!("테마를 읽지 못했습니다: {error}")), ctx);
+                }
             }
         }
     }

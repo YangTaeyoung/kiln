@@ -43,8 +43,8 @@ pub struct Highlighter {
     /// `[dirty_end, data_end)` 줄은 이전 계산 결과가 남아 있어 수렴 비교에 쓰인다.
     data_end: usize,
     scratch: String,
-    /// 캐시를 계산할 때 쓴 앱 테마 이름. 테마가 바뀌면 전체를 다시 계산한다.
-    theme: &'static str,
+    /// Full palette, so reloading colors also invalidates cached spans.
+    theme: kiln_common::Theme,
     /// 마지막 `ensure` 호출에서 실제로 계산한 줄 수.
     pub last_work: usize,
 }
@@ -59,7 +59,7 @@ impl Highlighter {
             dirty_end: 0,
             data_end: 0,
             scratch: String::new(),
-            theme: kiln_common::Theme::current().name,
+            theme: kiln_common::Theme::current(),
             last_work: 0,
         };
         h.reset(line_count);
@@ -82,11 +82,13 @@ impl Highlighter {
 
     /// 모든 캐시를 비운다.
     pub fn reset(&mut self, line_count: usize) {
-        self.theme = kiln_common::Theme::current().name;
+        self.theme = kiln_common::Theme::current();
         self.starts = vec![None; line_count.max(1)];
         self.spans = vec![Vec::new(); line_count.max(1)];
         if let Some(s) = self.syntax {
-            let hl = HighlightState::new(syntax::highlighter(), ScopeStack::new());
+            let theme = syntax::current_theme();
+            let highlighter = syntect::highlighting::Highlighter::new(&theme);
+            let hl = HighlightState::new(&highlighter, ScopeStack::new());
             self.starts[0] = Some(Box::new(LineState { parse: ParseState::new(s), hl }));
         }
         self.valid = 0;
@@ -125,7 +127,7 @@ impl Highlighter {
     /// `upto` 줄(미포함)까지 강조를 계산한다. 시간 예산을 넘기면 멈추고 `false` 를 돌려준다.
     pub fn ensure<S: AsRef<str>>(&mut self, lines: &[S], upto: usize, deadline: Option<Instant>) -> bool {
         self.last_work = 0;
-        if self.syntax.is_some() && self.theme != kiln_common::Theme::current().name {
+        if self.syntax.is_some() && self.theme != kiln_common::Theme::current() {
             self.reset(lines.len());
         }
         let upto = upto.min(lines.len());
@@ -134,7 +136,9 @@ impl Highlighter {
             return true;
         };
         debug_assert_eq!(lines.len(), self.spans.len());
-        let hl = syntax::highlighter();
+        if self.valid >= upto { return true; }
+        let theme = syntax::current_theme();
+        let hl = syntect::highlighting::Highlighter::new(&theme);
         let set = &syntax::assets().set;
         while self.valid < upto {
             let i = self.valid;
@@ -147,7 +151,7 @@ impl Highlighter {
                 self.scratch.push('\n');
                 if let Ok(ops) = st.parse.parse_line(&self.scratch, set) {
                     let mut pos = 0u32;
-                    for (style, piece) in HighlightIterator::new(&mut st.hl, &ops, &self.scratch, hl) {
+                    for (style, piece) in HighlightIterator::new(&mut st.hl, &ops, &self.scratch, &hl) {
                         let len = piece.len() as u32;
                         let end = (pos + len).min(line.len() as u32);
                         if end > pos {
