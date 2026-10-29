@@ -109,6 +109,31 @@ Open **Settings → Appearance → Language** and choose English, Korean, Japane
 
 Only Kiln's own interface changes. Terminal output, filenames, code, commit messages and agent requests keep their original contents. Installations from earlier versions stay in Korean until you choose a language.
 
+## Custom themes {#custom-themes}
+
+Open **Settings → Appearance → Import theme** and choose a JSON file. Kiln copies a valid file into the **themes** subfolder of its configuration folder and selects it immediately. Your choice is saved for the next launch and is also available in the command palette. Importing never overwrites an existing theme.
+
+Start with this example, saved as `ocean.json`:
+
+```json
+{
+  "name": "ocean",
+  "label": "Ocean",
+  "base": "midnight",
+  "colors": {
+    "bg": "#101820",
+    "accent": "#80CBC4",
+    "purple": "#C792EA"
+  }
+}
+```
+
+`name` is a unique identifier of 1–64 lowercase ASCII letters, digits or hyphens. `label` is the displayed name (1–64 characters). `base` must be `kiln-dark`, `midnight`, `ember` or `kiln-light`; it supplies the light/dark appearance and every omitted color. Custom labels are displayed as written.
+
+`colors` is optional. Each value must be an opaque `#RRGGBB` color. Supported keys are `bg`, `bg_panel`, `bg_elevated`, `bg_hover`, `bg_selected`, `bg_input`, `border`, `border_strong`, `text`, `text_dim`, `text_faint`, `accent`, `accent_fg`, `green`, `red`, `yellow`, `blue`, `purple`, `orange`. To replace the terminal ANSI palette, add an optional top-level `ansi` array with exactly 16 `#RRGGBB` strings, in standard ANSI order (black through white, followed by their bright variants).
+
+Use **Open themes folder** to edit installed files or add JSON files yourself, then **Reload** to apply changes. Each file is limited to 64 KiB. Malformed files, unknown fields and duplicate identifiers appear under **Theme file errors** while valid themes remain available. If the saved theme is missing or invalid, Kiln uses Kiln Dark and keeps the saved choice so it can be restored after you fix the file and reload. Terminals and their running processes stay open.
+
 ## Next steps {#next-steps}
 
 - [Workspaces and tasks](workspaces.html) to organize your folders and tasks.
