@@ -1,4 +1,22 @@
 # Standard OSC 133 boundaries; command text is hex to keep control bytes out of OSC.
+# Plain local Codex sessions use an embedded server. Explicit commands and user wrappers stay intact.
+if (( ! $+functions[codex] && ! $+aliases[codex] )); then
+  function codex {
+    case "${1:-}" in
+      ''|resume|fork)
+        local arg
+        for arg in "$@"; do
+          case "$arg" in
+            --remote|--remote=*|--no-daemon) command codex "$@"; return $? ;;
+            --) break ;;
+          esac
+        done
+        command codex --no-daemon "$@"
+        ;;
+      *) command codex "$@" ;;
+    esac
+  }
+fi
 # Only Kiln's shells receive this wrapper; the ordinary CLI login stays intact.
 function agy {
   local launcher=${KILN_AGENT_LAUNCHER:-}

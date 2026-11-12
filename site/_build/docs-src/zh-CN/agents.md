@@ -100,6 +100,8 @@ Kiln 新开的 Codex 面板以 `--no-daemon` 运行，与 Codex 自己的共享�
 | **Run without daemon this time** | 不重启共享的 Codex 服务器，直接启动本次会话。对应的 CLI 命令是 `codex --no-daemon`。 |
 | **Restart with these settings** | 更改共享设置。这可能会中断其他客户端正在进行或排队的工作，请先确认。 |
 
+在新打开的 Kiln Zsh 终端中，直接输入的 `codex`、`codex resume …` 和 `codex fork …` 也使用 `--no-daemon`。即使共享服务器返回 **Server is draining; retry after reconnecting**，这些命令仍可独立启动。显式 `--remote` 连接、已有别名或函数、其他命令形式和其他 shell 保持原有行为。使用 `command codex …` 可绕过包装函数，也可以自行添加 `--no-daemon` 来启动本地会话。已有 shell 需要重新打开才能加载此集成。Kiln 不会重启共享服务器或更改其更新设置。
+
 ## 后续步骤 {#next-steps}
 
 - [账户](accounts.html)：登录、切换账户和查看用量。
