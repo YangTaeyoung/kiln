@@ -149,6 +149,15 @@ CLI’s `--help`). **Restart with these settings** changes shared settings and c
 interrupt other clients’ active or queued work. Review those clients before
 choosing a restart; Kiln does not perform it automatically.
 
+In a newly opened integrated Zsh terminal, plain `codex`, `codex resume …` and
+`codex fork …` also use `--no-daemon`. They can start independently when a shared
+server reports **Server is draining; retry after reconnecting**. Explicit
+`--remote` connections, existing `codex` aliases/functions, other command forms
+and other shells retain their normal behavior. Use `command codex …` to bypass
+the Zsh wrapper, or add `--no-daemon` yourself for a local session. Existing
+shells need to be reopened to load the wrapper. Kiln does not restart the shared
+server or change its update settings.
+
 See [Codex startup regression tests](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/cli/tests/daemon_startup.rs)
 and [feature-setting commands](https://learn.chatgpt.com/docs/developer-commands).
 

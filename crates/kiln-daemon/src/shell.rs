@@ -172,6 +172,59 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
+    fn bare_codex_uses_embedded_server_and_preserves_explicit_commands() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let integration = root.path().join("wrapper.zsh");
+        std::fs::write(&integration, include_str!("shell-integration.zsh").split("autoload -Uz").next().unwrap()).unwrap();
+        let binary = root.path().join("codex");
+        std::fs::write(&binary, concat!(
+            "#!/usr/bin/python3\nimport json,os,sys\n",
+            "print(json.dumps({'args':sys.argv[1:],'home':os.environ['CODEX_HOME'],'cwd':os.getcwd()}))\n",
+            "if not sys.argv[1:] or sys.argv[1] in ('resume','fork'):\n",
+            "    if '--no-daemon' not in sys.argv and '--remote' not in sys.argv and not any(a.startswith('--remote=') for a in sys.argv):\n",
+            "        print('Server is draining; retry after reconnecting',file=sys.stderr)\n",
+            "        sys.exit(1)\n",
+            "sys.exit(23)\n",
+        )).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let home = root.path().join("codex-home");
+        std::fs::create_dir(&home).unwrap();
+        let run = |script: &str| std::process::Command::new("/bin/zsh")
+            .args(["-f", "-c", script]).current_dir(root.path())
+            .env("INTEGRATION", &integration).env("CODEX_HOME", &home)
+            .env("PATH", format!("{}:/usr/bin:/bin", root.path().display())).output().unwrap();
+        for (command, expected) in [
+            ("codex", vec!["--no-daemon"]),
+            ("codex resume --last", vec!["--no-daemon", "resume", "--last"]),
+            ("codex fork 'exact id' 'literal;$(no)'", vec!["--no-daemon", "fork", "exact id", "literal;$(no)"]),
+            ("codex resume --remote unix:///fixture", vec!["resume", "--remote", "unix:///fixture"]),
+            ("codex resume --remote=unix:///fixture", vec!["resume", "--remote=unix:///fixture"]),
+            ("codex app-server daemon restart", vec!["app-server", "daemon", "restart"]),
+            ("codex update", vec!["update"]),
+            ("codex --version", vec!["--version"]),
+            ("codex --no-daemon resume --last", vec!["--no-daemon", "resume", "--last"]),
+            ("codex resume --last --no-daemon", vec!["resume", "--last", "--no-daemon"]),
+        ] {
+            let result = run(&format!("source \"$INTEGRATION\"; {command}"));
+            assert_eq!(result.status.code(), Some(23), "{command}: {}", String::from_utf8_lossy(&result.stderr));
+            let actual: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(actual["args"], serde_json::json!(expected), "{command}");
+            assert_eq!(actual["home"], home.to_str().unwrap());
+            assert_eq!(actual["cwd"], root.path().canonicalize().unwrap().to_str().unwrap());
+        }
+        let bypass = run("source \"$INTEGRATION\"; command codex resume --last");
+        assert_eq!(bypass.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&bypass.stderr).contains("Server is draining"));
+        let custom = run("codex() { print -r -- custom; }; source \"$INTEGRATION\"; codex");
+        assert_eq!(String::from_utf8_lossy(&custom.stdout).trim(), "custom");
+        let alias = run("alias codex='print -r -- alias'; source \"$INTEGRATION\"; eval codex");
+        assert!(alias.status.success(), "{}", String::from_utf8_lossy(&alias.stderr));
+        assert_eq!(String::from_utf8_lossy(&alias.stdout).trim(), "alias");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
     fn bare_agy_forwards_exact_arguments_to_kiln_and_keeps_version_commands_direct() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();

@@ -100,6 +100,8 @@ New Codex panels opened by Kiln run with `--no-daemon`, independent of Codex's o
 | **Run without daemon this time** | Starts this session without restarting the shared Codex server. The CLI equivalent is `codex --no-daemon`. |
 | **Restart with these settings** | Changes the shared settings. This can interrupt other clients' active or queued work, so check them first. |
 
+In newly opened Kiln Zsh terminals, plain `codex`, `codex resume …` and `codex fork …` also use `--no-daemon`, so a shared server reporting **Server is draining; retry after reconnecting** does not block those launches. Explicit `--remote` connections, existing aliases/functions, other command forms and other shells keep their normal behavior. Use `command codex …` to bypass the wrapper or add `--no-daemon` yourself for a local session. Reopen existing shells to load this integration. Kiln does not restart the shared server or change its update settings.
+
 ## Next steps {#next-steps}
 
 - [Accounts](accounts.html): sign in, switch accounts and watch usage.

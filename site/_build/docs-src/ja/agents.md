@@ -100,6 +100,8 @@ Kiln が新しく開く Codex のパネルは `--no-daemon` で実行される�
 | **Run without daemon this time**（今回はデーモンなしで実行） | 共有の Codex サーバーを再起動せずに、このセッションを開始します。CLI では `codex --no-daemon` に相当します。 |
 | **Restart with these settings**（この設定で再起動） | 共有の設定を変更します。ほかのクライアントの実行中または待機中の処理が中断される場合があるため、先に確認してください。 |
 
+新しく開いた Kiln の Zsh ターミナルでは、直接入力する `codex`、`codex resume …`、`codex fork …` にも `--no-daemon` が適用されます。共有サーバーが **Server is draining; retry after reconnecting** を返しても、これらのコマンドは独立して起動します。明示的な `--remote` 接続、既存のエイリアスや関数、その他のコマンド形式とシェルは従来どおりに動作します。ラッパーを使わない場合は `command codex …` を、ローカルセッションを直接実行する場合は `--no-daemon` を使用してください。既存のシェルには開き直した後で適用されます。Kiln は共有サーバーを再起動したり、更新設定を変更したりしません。
+
 ## 次のステップ {#next-steps}
 
 - [アカウント](accounts.html)では、ログイン、アカウントの切り替え、使用量の確認について説明しています。
