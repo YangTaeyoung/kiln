@@ -172,6 +172,14 @@ pub fn parse_keychain_account(meta: &str) -> String {
 
 impl CredentialStore for SecurityCli {
     fn get(&self, service: &str, account: &str) -> Result<Option<String>> {
+        #[cfg(target_os = "macos")]
+        if service.starts_with("kiln-connections-") {
+            return match security_framework::passwords::get_generic_password(service, account) {
+                Ok(bytes) => Ok(Some(String::from_utf8(bytes).map_err(|_| anyhow::anyhow!("Invalid connection credential"))?)),
+                Err(error) if error.code() == -25300 => Ok(None),
+                Err(error) => Err(error.into()),
+            };
+        }
         Ok(security(&["find-generic-password", "-s", service, "-a", account, "-w"])?.map(credential_output))
     }
 
@@ -186,10 +194,22 @@ impl CredentialStore for SecurityCli {
     }
 
     fn set(&self, service: &str, account: &str, value: &str) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        if service.starts_with("kiln-connections-") {
+            return Ok(security_framework::passwords::set_generic_password(service, account, value.as_bytes())?);
+        }
         security(&["add-generic-password", "-U", "-s", service, "-a", account, "-w", value]).map(|_| ())
     }
 
     fn delete(&self, service: &str, account: &str) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        if service.starts_with("kiln-connections-") {
+            return match security_framework::passwords::delete_generic_password(service, account) {
+                Ok(()) => Ok(true),
+                Err(error) if error.code() == -25300 => Ok(false),
+                Err(error) => Err(error.into()),
+            };
+        }
         Ok(security(&["delete-generic-password", "-s", service, "-a", account])?.is_some())
     }
 }

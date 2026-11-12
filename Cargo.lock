@@ -3105,11 +3105,13 @@ dependencies = [
  "libc",
  "log",
  "parking_lot",
+ "security-framework",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "toml",
+ "url",
  "windows-sys 0.61.2",
 ]
 
