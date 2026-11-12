@@ -306,9 +306,9 @@ impl CredentialStore for KeyringStore {
     }
 }
 
-/// Windows storage: Kiln's account snapshots (services starting with `kiln-accounts-`) in
-/// user-protected files, since they exceed the Credential Manager's 2560-byte limit; every
-/// other entry, such as `Codex Auth`, in the Credential Manager.
+/// Windows storage: Kiln's account snapshots and connection profiles use
+/// user-protected files so they can exceed the Credential Manager's 2560-byte
+/// limit. CLI-owned entries, such as `Codex Auth`, use the Credential Manager.
 #[cfg(windows)]
 pub struct WindowsStore {
     pub files: FileStore,
@@ -317,7 +317,11 @@ pub struct WindowsStore {
 #[cfg(windows)]
 impl WindowsStore {
     fn route(&self, service: &str) -> &dyn CredentialStore {
-        if service.starts_with("kiln-accounts-") { &self.files } else { &KeyringStore }
+        if service.starts_with("kiln-accounts-") || service.starts_with("kiln-connections-") {
+            &self.files
+        } else {
+            &KeyringStore
+        }
     }
 }
 
@@ -484,6 +488,11 @@ mod tests {
         store.set("kiln-accounts-claude", "work", &snapshot).unwrap();
         assert!(dir.path().join("credentials").join("kiln-accounts-claude").join("work").is_file());
         assert_eq!(store.get("kiln-accounts-claude", "work").unwrap(), Some(snapshot));
+        let connection = "z".repeat(6000);
+        store.set("kiln-connections-codex", "gateway", &connection).unwrap();
+        let path = dir.path().join("credentials").join("kiln-connections-codex").join("gateway");
+        assert_ne!(std::fs::read(path).unwrap(), connection.as_bytes());
+        assert_eq!(store.get("kiln-connections-codex", "gateway").unwrap(), Some(connection));
         let service = format!("Kiln Credential Test {}", std::process::id());
         store.set(&service, "cli|fixture", "entry").unwrap();
         assert!(!dir.path().join("credentials").join(&service).exists());
