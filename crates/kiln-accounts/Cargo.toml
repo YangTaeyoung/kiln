@@ -18,6 +18,7 @@ tempfile.workspace = true
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 toml = "1.1"
+url = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -28,3 +29,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"

@@ -11968,5 +11968,80 @@
     "en": "Could not load theme: {error}",
     "ja": "テーマを読み込めませんでした: {error}",
     "zh-CN": "无法加载主题：{error}"
+  },
+  "API 연결 추가": {
+    "en": "Add API connection",
+    "ja": "API 接続を追加",
+    "zh-CN": "添加 API 连接"
+  },
+  "API 연결 편집": {
+    "en": "Edit API connection",
+    "ja": "API 接続を編集",
+    "zh-CN": "编辑 API 连接"
+  },
+  "API 연결을 저장했습니다": {
+    "en": "API connection saved",
+    "ja": "API 接続を保存しました",
+    "zh-CN": "已保存 API 连接"
+  },
+  "API 키": {
+    "en": "API key",
+    "ja": "API キー",
+    "zh-CN": "API 密钥"
+  },
+  "게이트웨이": {
+    "en": "Gateway",
+    "ja": "ゲートウェイ",
+    "zh-CN": "网关"
+  },
+  "X-Api-Key 헤더 사용": {
+    "en": "Use X-Api-Key header",
+    "ja": "X-Api-Key ヘッダーを使用",
+    "zh-CN": "使用 X-Api-Key 标头"
+  },
+  "AWS 리전": {
+    "en": "AWS region",
+    "ja": "AWS リージョン",
+    "zh-CN": "AWS 区域"
+  },
+  "AWS 프로필": {
+    "en": "AWS profile",
+    "ja": "AWS プロファイル",
+    "zh-CN": "AWS 配置文件"
+  },
+  "Bedrock API 키": {
+    "en": "Bedrock API key",
+    "ja": "Bedrock API キー",
+    "zh-CN": "Bedrock API 密钥"
+  },
+  "AWS 액세스 키": {
+    "en": "AWS access key",
+    "ja": "AWS アクセスキー",
+    "zh-CN": "AWS 访问密钥"
+  },
+  "추가 헤더": {
+    "en": "Extra headers",
+    "ja": "追加ヘッダー",
+    "zh-CN": "额外标头"
+  },
+  "추가 환경 변수": {
+    "en": "Extra environment variables",
+    "ja": "追加の環境変数",
+    "zh-CN": "额外环境变量"
+  },
+  "선택 사항": {
+    "en": "Optional",
+    "ja": "任意",
+    "zh-CN": "可选"
+  },
+  "모델": {
+    "en": "Model",
+    "ja": "モデル",
+    "zh-CN": "模型"
+  },
+  "Codex 모델 설정": {
+    "en": "Codex model settings",
+    "ja": "Codex モデル設定",
+    "zh-CN": "Codex 模型设置"
   }
 }

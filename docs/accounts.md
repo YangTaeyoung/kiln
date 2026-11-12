@@ -1,9 +1,47 @@
 # Agent accounts
 
-Open **Settings → Accounts** to manage Claude Code and Codex subscription
-accounts, and Antigravity Google accounts on macOS. Install the official CLI for each
+Open **Settings → Accounts** to manage Claude Code and Codex accounts and API
+connections, and Antigravity Google accounts on macOS. Install the official CLI for each
 agent you use. See [Antigravity accounts](antigravity.md#accounts-on-macos) for its
 account isolation and platform boundaries.
+
+## API keys and gateways
+
+In **Settings → Accounts**, choose **Add API connection** on the Claude Code
+or Codex card. Name the connection, select its authentication method, then
+save it and choose **Switch**. New Kiln agent panels use the selected
+connection. Open panels keep the connection they started with.
+
+| Method | Claude Code | Codex |
+| --- | --- | --- |
+| API key | Anthropic API key | OpenAI API key |
+| Gateway | Anthropic Messages API base URL and Bearer token or X-Api-Key | Responses API base URL and Bearer token |
+| Amazon Bedrock | AWS region and a named profile, Bedrock API key, or AWS access key | Same AWS credentials, using the Codex Bedrock Mantle provider |
+| Custom | Environment variables for Claude Code | Environment variables for Codex |
+
+For **Sub2API**, use the base URL shown in the gateway’s client setup and its
+API key. A Claude Code URL normally ends at the gateway host (the CLI adds
+`/v1/messages`); the Codex URL normally ends in `/v1` (the CLI adds
+`/responses`). Leave X-Api-Key unchecked for Sub2API’s Bearer token.
+
+For **OpenRouter**, use `https://openrouter.ai/api` for Claude Code or
+`https://openrouter.ai/api/v1` for a Responses-compatible Codex model. Enter the
+model ID your gateway supports. Gateway URLs use HTTPS, with HTTP available
+for local loopback endpoints. See [Claude Code gateway setup](https://code.claude.com/docs/en/llm-gateway-connect)
+and the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+For a named AWS SSO profile, sign in with the AWS CLI first. See the
+[Claude Code Bedrock guide](https://code.claude.com/docs/en/amazon-bedrock) or
+the [Codex Bedrock guide](https://learn.chatgpt.com/docs/amazon-bedrock)
+for region, model and IAM requirements.
+
+Under **Codex model settings**, you can set `model_reasoning_effort`,
+`model_verbosity`, `model_context_window` or `model_auto_compact_token_limit`
+using TOML. Enter API keys and environment values in their dedicated fields.
+
+Connection values go in the local credential store. The account list keeps the
+connection name, type, and gateway host or AWS region. Connection profiles do not
+show subscription usage or participate in subscription account rotation.
 
 ## Add an account
 

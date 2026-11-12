@@ -7,6 +7,10 @@ Kiln 为你使用的每个代理账户各保存一份配置，在个人订阅和
 
 请先为每个代理安装官方 CLI。Kiln 通过该 CLI 登录，从不自行实现 OAuth 提供方，也不会绕过提供方的账户政策。
 
+## API 密钥和网关 {#api-connections}
+
+在 Claude Code 或 Codex 卡片上选择 **添加 API 连接**。可设置 API 密钥、网关、Amazon Bedrock 或自定义环境变量。保存后选择 **切换**，即可在新面板中使用。配置 Sub2API 时，输入对应代理的 Base URL，并将网关密钥作为 Bearer 令牌。Codex 网关必须支持 Responses API。API 连接不显示订阅用量。
+
 ## 添加账户 {#add-an-account}
 
 1. 在代理卡片上选择**添加账户**。

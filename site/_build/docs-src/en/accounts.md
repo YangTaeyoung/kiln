@@ -7,6 +7,10 @@ Kiln keeps a profile for each agent account you use, so you can move between per
 
 Install the official CLI for each agent first. Kiln uses that CLI to sign in and never implements its own OAuth provider or bypasses a provider's account policies.
 
+## API keys and gateways {#api-connections}
+
+On the Claude Code or Codex card, choose **Add API connection**. Select an API key, gateway, Amazon Bedrock, or custom environment variables. Save and choose **Switch** to use it in new panels. For Sub2API, enter the agent-specific Base URL and use the gateway key as a Bearer token. Codex gateways must support the Responses API. API connections do not show subscription usage.
+
 ## Add an account {#add-an-account}
 
 1. Choose **Add Account** on the agent's card.

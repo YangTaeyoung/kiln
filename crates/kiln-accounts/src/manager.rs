@@ -1,5 +1,6 @@
 //! 계정 저장·전환·사용량 조회. 상태는 `Arc` 안에 두고, 느린 작업은 백그라운드 스레드에서 돈다.
 
+use crate::connection::{self, Connection, Launch, Preset};
 use crate::store::{CredentialStore, FileStore, SecurityCli, read_secret, write_secret_atomic};
 use crate::ui::{AccountsEvent, UiState};
 use crate::{Profile, Tool, Usage, antigravity, claude, claude_refresh, codex, now_unix};
@@ -150,6 +151,8 @@ struct StoredProfile {
     /// Claude: `~/.claude.json` 의 `oauthAccount` 원문(계정 식별 메타데이터).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     oauth_account: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    connection: Option<(Preset, Option<String>)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_usage: Option<Usage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -436,6 +439,7 @@ impl AccountManager {
         let _op = self.inner.op.lock();
         for tool in Tool::ALL {
             for p in self.profiles(tool) {
+                if self.connection_summary(tool, &p.id).is_some() { continue; }
                 // An unapplied successful login is ready for Apply, not logged out.
                 let secret = if self.pending_login(tool, &p.id) {
                     self.inner.env.store.get(&profile_service(tool), &p.id)
@@ -524,6 +528,7 @@ impl AccountManager {
     }
 
     pub fn start_relogin(&self, tool: Tool, id: &str) {
+        if self.connection_summary(tool, id).is_some() { return; }
         if self.login_status(tool).is_some() || self.with_state(|s| s.busy[idx(tool)].is_some()) { return; }
         let Some(profile) = self.profiles(tool).into_iter().find(|p| p.id == id) else { return; };
         self.ui_state().feedback_profile[idx(tool)] = Some(id.to_string());
@@ -753,7 +758,7 @@ impl AccountManager {
                     kiln_common::trf!("계정 {n}")
                 };
                 let p = Profile { id: id.clone(), tool, label, email: email.clone(), added_unix: now as u64 };
-                ts.profiles.push(StoredProfile { profile: p.clone(), oauth_account: oauth.clone(), last_usage: None, last_usage_at: None, pending_login: !activate });
+                ts.profiles.push(StoredProfile { profile: p.clone(), oauth_account: oauth.clone(), connection: None, last_usage: None, last_usage_at: None, pending_login: !activate });
                 p
             };
             if activate { s.live_email[idx(tool)] = Some(email.clone()); }
@@ -781,6 +786,67 @@ impl AccountManager {
         Ok(profile)
     }
 
+    pub fn connection_summary(&self, tool: Tool, id: &str) -> Option<(Preset, Option<String>)> {
+        self.with_state(|s| s.settings.tool(tool).profiles.iter()
+            .find(|p| p.profile.id == id).and_then(|p| p.connection.clone()))
+    }
+
+    fn connection_service(tool: Tool) -> String { format!("kiln-connections-{}", tool.key()) }
+
+    fn read_connection(&self, tool: Tool, id: &str) -> Result<Connection> {
+        let secret = self.inner.env.store.get(&Self::connection_service(tool), id)?
+            .context("Connection credentials are missing")?;
+        serde_json::from_str(&secret).map_err(|_| anyhow!("Invalid connection credentials"))
+    }
+
+    pub(crate) fn edit_connection(&self, tool: Tool, id: &str) -> Result<Connection> {
+        let _op = self.inner.op.lock();
+        ensure!(self.connection_summary(tool, id).is_some(), "Connection was removed");
+        self.read_connection(tool, id)
+    }
+
+    pub fn save_connection(&self, tool: Tool, id: Option<&str>, label: &str, config: Connection) -> Result<Profile> {
+        let _op = self.inner.op.lock();
+        config.launch(tool)?;
+        let label = label.trim();
+        ensure!(!label.is_empty(), "Enter a connection name");
+        if let Some(id) = id { ensure!(self.connection_summary(tool, id).is_some(), "Connection was removed"); }
+        let id = id.map(str::to_owned).unwrap_or_else(|| new_id(tool));
+        let service = Self::connection_service(tool);
+        let previous_secret = self.inner.env.store.get(&service, &id)?;
+        self.inner.env.store.set(&service, &id, &serde_json::to_string(&config)?)?;
+        let previous = self.with_state(|s| s.settings.clone());
+        let summary = Some((config.preset, config.destination()));
+        let profile = self.with_state(|s| {
+            let rows = &mut s.settings.tool_mut(tool).profiles;
+            if let Some(row) = rows.iter_mut().find(|p| p.profile.id == id) {
+                row.profile.label = label.into();
+                row.connection = summary;
+                return row.profile.clone();
+            }
+            let profile = Profile { id: id.clone(), tool, label: label.into(), email: None, added_unix: now_unix() as u64 };
+            rows.push(StoredProfile { profile: profile.clone(), oauth_account: None, last_usage: None,
+                last_usage_at: None, pending_login: false, connection: summary });
+            profile
+        });
+        if let Err(error) = self.persist() {
+            self.with_state(|s| s.settings = previous);
+            if let Some(secret) = previous_secret { self.inner.env.store.set(&service, &id, &secret)?; }
+            else { self.inner.env.store.delete(&service, &id)?; }
+            return Err(error);
+        }
+        Ok(profile)
+    }
+
+    /// Resolve launch configuration and credentials in the final launch helper.
+    pub fn connection_launch(&self, tool: Tool, vars: &[(String, String)]) -> Result<Option<Launch>> {
+        let Some((_, id)) = vars.iter().find(|(k, _)| k == connection::MARKER) else { return Ok(None); };
+        let _op = self.inner.op.lock();
+        self.validate_launch_environment(tool, vars)?;
+        ensure!(self.connection_summary(tool, id).is_some(), "Connection was removed");
+        Ok(Some(self.read_connection(tool, id)?.launch(tool)?))
+    }
+
     /// Persistent CLI-owned credentials: bootstrap once, then let the CLI refresh them.
     pub fn launch_environment(&self, tool: Tool) -> Result<Vec<(String, String)>> {
         if !tool.has_accounts() { return Ok(Vec::new()); }
@@ -788,6 +854,22 @@ impl AccountManager {
         let Some(id) = self.active(tool) else { return Ok(Vec::new()); };
         let dir = self.runtime_dir(tool, &id);
         let env = &self.inner.env;
+        if self.connection_summary(tool, &id).is_some() {
+            // Never inherit subscription auth or provider settings into a connection.
+            std::fs::create_dir_all(&dir)?;
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+            }
+            if !dir.join("initialized").is_file() {
+                write_secret_atomic(&dir.join("initialized"), b"1")?;
+            }
+            return Ok(vec![
+                ((if tool == Tool::Claude { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" }).into(), dir.to_string_lossy().into_owned()),
+                ("KILN_AGENT_PROFILE".into(), id.clone()),
+                (connection::MARKER.into(), id),
+            ]);
+        }
         if tool == Tool::Antigravity {
             if self.runtime_secret(tool, &id)?.is_none() {
                 ensure!(!self.pending_login(tool, &id), "{}", kiln_common::i18n::tr("로그인 갱신을 적용한 후 새 세션을 여세요"));
@@ -846,6 +928,8 @@ impl AccountManager {
         if !tool.has_accounts() { ensure!(id.is_none(), "unexpected account for {}", tool.display_name()); return Ok(()); }
         let id=id.context("original account not recorded")?;
         if !self.profiles(tool).iter().any(|p|p.id==*id) {bail!("original account was removed");}
+        let marker = variables.iter().find(|(key, _)| key == connection::MARKER).map(|(_, value)| value);
+        ensure!(if self.connection_summary(tool, id).is_some() { marker == Some(id) } else { marker.is_none() }, "Connection identity changed");
         let key=match tool {Tool::Claude=>"CLAUDE_CONFIG_DIR",Tool::Codex=>"CODEX_HOME",Tool::Antigravity=>"HOME"};
         let config=variables.iter().find(|(k,_)|k==key).map(|(_,v)|PathBuf::from(v)).context("original account configuration missing")?;
         if config!=self.runtime_dir(tool,id) {bail!("account configuration changed");}
@@ -933,7 +1017,7 @@ impl AccountManager {
             let ts = s.settings.tool(tool);
             let a = ts.active.clone()?;
             let p = ts.profiles.iter().find(|p| p.profile.id == a)?;
-            if p.pending_login { return None; }
+            if p.pending_login || p.connection.is_some() { return None; }
             Some((a, p.profile.email.clone()))
         }) else {
             return Ok(());
@@ -984,6 +1068,22 @@ impl AccountManager {
             bail!(kiln_common::trf!("프로필을 찾을 수 없습니다: {id}"));
         };
         self.sync_back_locked(tool)?;
+        if self.connection_summary(tool, id).is_some() {
+            self.read_connection(tool, id)?.launch(tool)?;
+            let previous = self.with_state(|s| {
+                let old = s.settings.clone();
+                let ts = s.settings.tool_mut(tool);
+                ts.active = Some(id.into());
+                ts.active_since = now_unix();
+                old
+            });
+            if let Err(error) = self.persist() {
+                self.with_state(|s| s.settings = previous);
+                return Err(error);
+            }
+            self.with_state(|s| s.events.push(AccountsEvent::Switched { tool, id: id.into() }));
+            return Ok(());
+        }
         if self.active(tool).as_deref() == Some(id) && !self.pending_login(tool, id) {
             return Ok(());
         }
@@ -1038,7 +1138,8 @@ impl AccountManager {
         if !self.profiles(tool).iter().any(|p| p.id == id) {
             bail!(kiln_common::trf!("프로필을 찾을 수 없습니다: {id}"));
         }
-        self.inner.env.store.delete(&profile_service(tool), id)?;
+        let service = if self.connection_summary(tool, id).is_some() { Self::connection_service(tool) } else { profile_service(tool) };
+        self.inner.env.store.delete(&service, id)?;
         self.with_state(|s| {
             s.settings.tool_mut(tool).profiles.retain(|p| p.profile.id != id);
             s.usage.remove(&(tool, id.to_string()));
@@ -1084,11 +1185,12 @@ impl AccountManager {
             let ts = s.settings.tool(tool);
             let n = ts.profiles.len();
             let start = ts.active.as_ref().and_then(|a| ts.profiles.iter().position(|p| p.profile.id == *a));
+            if start.is_some_and(|i| ts.profiles[i].connection.is_some()) { return None; }
             let first = start.map_or(0, |i| i + 1);
             (0..n)
                 .map(|k| (first + k) % n)
                 .filter(|i| Some(*i) != start)
-                .filter(|i| !ts.profiles[*i].pending_login)
+                .filter(|i| !ts.profiles[*i].pending_login && ts.profiles[*i].connection.is_none())
                 .map(|i| &ts.profiles[i].profile)
                 .find(|p| !Self::is_exhausted(s, tool, &p.id, now))
                 .cloned()
@@ -1098,6 +1200,7 @@ impl AccountManager {
     /// 활성 계정을 한도 도달로 표시하고 여유 있는 다음 계정으로 전환한다. 전환한 계정을 돌려준다.
     pub fn rotate(&self, tool: Tool) -> Result<Option<Profile>> {
         if let Some(a) = self.active(tool) {
+            if self.connection_summary(tool, &a).is_some() { return Ok(None); }
             self.mark_limited(tool, &a);
         }
         let Some(next) = self.next_with_headroom(tool) else {
@@ -1220,6 +1323,7 @@ impl AccountManager {
     fn refresh_antigravity_usage(&self, manual: bool) {
         let tool = Tool::Antigravity;
         for profile in self.profiles(tool) {
+            if self.connection_summary(tool, &profile.id).is_some() { continue; }
             if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
             if self.pending_login(tool, &profile.id) { continue; }
             let due = self.with_state(|state| {
@@ -1254,6 +1358,7 @@ impl AccountManager {
 
     fn refresh_native_codex(&self, manual: bool) {
         for profile in self.profiles(Tool::Codex) {
+            if self.connection_summary(Tool::Codex, &profile.id).is_some() { continue; }
             if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
             if self.pending_login(Tool::Codex, &profile.id) { continue; }
             let now = now_unix();
@@ -1457,6 +1562,7 @@ impl AccountManager {
     fn refresh_profiles_with_clock(&self, tool: Tool, manual: bool, clock: &dyn Fn() -> i64) {
         use sha2::{Digest, Sha256};
         for profile in self.profiles(tool) {
+            if self.connection_summary(tool, &profile.id).is_some() { continue; }
             if self.inner.shutting_down.load(std::sync::atomic::Ordering::Relaxed) { break; }
             let credentials = {
                 let _op = self.inner.op.lock();
@@ -1602,6 +1708,32 @@ fn new_id(tool: Tool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_connection_pins_credentials_without_persisting_them_in_launch_environment() {
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(root.path(), false);
+        let manager = AccountManager::with_env(env.clone());
+        let connection = |key: &str| Connection {
+            preset: Preset::Gateway, base_url: "https://gateway.example/v1".into(),
+            key: key.into(), ..Default::default()
+        };
+        let first = manager.save_connection(Tool::Codex, None, "Work", connection("fixture-key-one")).unwrap();
+        let second = manager.save_connection(Tool::Codex, None, "Test", connection("fixture-key-two")).unwrap();
+        manager.switch_to(Tool::Codex, &first.id).unwrap();
+        let pinned = manager.launch_environment(Tool::Codex).unwrap();
+        assert!(!serde_json::to_string(&pinned).unwrap().contains("fixture-key"));
+        assert!(!std::fs::read_to_string(&env.settings_path).unwrap().contains("fixture-key"));
+        assert!(!env.codex_home.join("auth.json").exists());
+        assert!(manager.next_with_headroom(Tool::Codex).is_none());
+        manager.switch_to(Tool::Codex, &second.id).unwrap();
+        let reopened = AccountManager::with_env(env);
+        assert_eq!(reopened.connection_launch(Tool::Codex, &pinned).unwrap().unwrap().env["KILN_CODEX_API_KEY"], "fixture-key-one");
+        reopened.save_connection(Tool::Codex, Some(&first.id), "Work", connection("fixture-key-renewed")).unwrap();
+        assert_eq!(reopened.connection_launch(Tool::Codex, &pinned).unwrap().unwrap().env["KILN_CODEX_API_KEY"], "fixture-key-renewed");
+        reopened.remove(Tool::Codex, &first.id).unwrap();
+        assert!(reopened.connection_launch(Tool::Codex, &pinned).is_err());
+    }
 
     #[test]
     #[ignore = "requires explicit owner authorization and real Keychain opt-in"]

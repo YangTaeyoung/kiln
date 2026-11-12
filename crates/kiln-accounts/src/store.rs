@@ -172,6 +172,14 @@ pub fn parse_keychain_account(meta: &str) -> String {
 
 impl CredentialStore for SecurityCli {
     fn get(&self, service: &str, account: &str) -> Result<Option<String>> {
+        #[cfg(target_os = "macos")]
+        if service.starts_with("kiln-connections-") {
+            return match security_framework::passwords::get_generic_password(service, account) {
+                Ok(bytes) => Ok(Some(String::from_utf8(bytes).map_err(|_| anyhow::anyhow!("Invalid connection credential"))?)),
+                Err(error) if error.code() == -25300 => Ok(None),
+                Err(error) => Err(error.into()),
+            };
+        }
         Ok(security(&["find-generic-password", "-s", service, "-a", account, "-w"])?.map(credential_output))
     }
 
@@ -186,10 +194,22 @@ impl CredentialStore for SecurityCli {
     }
 
     fn set(&self, service: &str, account: &str, value: &str) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        if service.starts_with("kiln-connections-") {
+            return Ok(security_framework::passwords::set_generic_password(service, account, value.as_bytes())?);
+        }
         security(&["add-generic-password", "-U", "-s", service, "-a", account, "-w", value]).map(|_| ())
     }
 
     fn delete(&self, service: &str, account: &str) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        if service.starts_with("kiln-connections-") {
+            return match security_framework::passwords::delete_generic_password(service, account) {
+                Ok(()) => Ok(true),
+                Err(error) if error.code() == -25300 => Ok(false),
+                Err(error) => Err(error.into()),
+            };
+        }
         Ok(security(&["delete-generic-password", "-s", service, "-a", account])?.is_some())
     }
 }
@@ -286,9 +306,9 @@ impl CredentialStore for KeyringStore {
     }
 }
 
-/// Windows storage: Kiln's account snapshots (services starting with `kiln-accounts-`) in
-/// user-protected files, since they exceed the Credential Manager's 2560-byte limit; every
-/// other entry, such as `Codex Auth`, in the Credential Manager.
+/// Windows storage: Kiln's account snapshots and connection profiles use
+/// user-protected files so they can exceed the Credential Manager's 2560-byte
+/// limit. CLI-owned entries, such as `Codex Auth`, use the Credential Manager.
 #[cfg(windows)]
 pub struct WindowsStore {
     pub files: FileStore,
@@ -297,7 +317,11 @@ pub struct WindowsStore {
 #[cfg(windows)]
 impl WindowsStore {
     fn route(&self, service: &str) -> &dyn CredentialStore {
-        if service.starts_with("kiln-accounts-") { &self.files } else { &KeyringStore }
+        if service.starts_with("kiln-accounts-") || service.starts_with("kiln-connections-") {
+            &self.files
+        } else {
+            &KeyringStore
+        }
     }
 }
 
@@ -464,6 +488,11 @@ mod tests {
         store.set("kiln-accounts-claude", "work", &snapshot).unwrap();
         assert!(dir.path().join("credentials").join("kiln-accounts-claude").join("work").is_file());
         assert_eq!(store.get("kiln-accounts-claude", "work").unwrap(), Some(snapshot));
+        let connection = "z".repeat(6000);
+        store.set("kiln-connections-codex", "gateway", &connection).unwrap();
+        let path = dir.path().join("credentials").join("kiln-connections-codex").join("gateway");
+        assert_ne!(std::fs::read(path).unwrap(), connection.as_bytes());
+        assert_eq!(store.get("kiln-connections-codex", "gateway").unwrap(), Some(connection));
         let service = format!("Kiln Credential Test {}", std::process::id());
         store.set(&service, "cli|fixture", "entry").unwrap();
         assert!(!dir.path().join("credentials").join(&service).exists());

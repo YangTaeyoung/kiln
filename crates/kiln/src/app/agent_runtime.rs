@@ -435,6 +435,13 @@ pub fn run_request(
     cmd.args(lead).args(&spec.args).envs(spec.env)
         .env("KILN_CONFIG_DIR", kiln_common::paths::config_dir())
         .env_remove("KILN_CAPACITY_RETRY_TURN");
+    if record.spec.env.iter().any(|(key, _)| key == kiln_accounts::connection::MARKER) {
+        let accounts = AccountManager::with_env(kiln_accounts::Env::real());
+        if let Some(launch) = accounts.connection_launch(record.tool, &record.spec.env)? {
+            for key in launch.remove_env { cmd.env_remove(key); }
+            cmd.args(launch.args).envs(launch.env);
+        }
+    }
     if !resumed && let Some(payload) = payload {
         // agy takes the initial prompt as --prompt-interactive.
         if record.tool == Tool::Antigravity {

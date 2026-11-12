@@ -8,6 +8,7 @@ pub mod antigravity;
 pub mod claude;
 mod claude_refresh;
 pub mod codex;
+pub mod connection;
 mod limit;
 mod manager;
 mod login;

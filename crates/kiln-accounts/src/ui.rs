@@ -1,5 +1,7 @@
 //! 설정 화면의 계정 섹션: 도구별 카드, 계정 목록, 사용량 막대, 저장·추가·자동 전환.
 
+mod connections;
+
 use crate::{AccountManager, Profile, Tool, Usage, now_unix};
 use egui::{Align, Align2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 use kiln_common::Theme;
@@ -20,6 +22,7 @@ pub enum AccountsEvent {
 
 #[derive(Default)]
 pub(crate) struct UiState {
+    connection: Option<connections::Draft>,
     renaming: Option<(Tool, String, String)>,
     confirm_delete: Option<(Tool, String)>,
     adding: Option<(Tool, String)>,
@@ -180,9 +183,15 @@ fn tool_card(ui: &mut Ui, mgr: &AccountManager, tool: Tool) {
                     mgr.ui_state().adding = Some((tool, String::new()));
                     mgr.ui_state().adding_focus = true;
                 }
+                if tool != Tool::Antigravity && widgets::button_with(ui, Some(Icon::Plus), kiln_common::i18n::tr("API 연결 추가"), ButtonKind::Secondary, true).clicked() {
+                    let mut state = mgr.ui_state();
+                    state.feedback_profile[index] = None;
+                    state.connection = Some(connections::Draft::new(tool));
+                }
             });
         }); }
         if login_target.is_none() { login_form(ui, mgr, tool); }
+        connections::form(ui, mgr, tool, busy.is_some());
         if feedback_target.is_none() { login_feedback(ui, busy.as_deref(), error.as_deref(), notice.as_deref()); }
         ui.add_space(6.0);
         widgets::divider(ui);
@@ -642,9 +651,14 @@ fn antigravity_usage_block(ui: &mut Ui, usage: Option<&Usage>, now: i64, fetched
 fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, usage: Option<Usage>, now: i64, busy: bool) {
     let t = Theme::current();
     let tool = p.tool;
+    let connection = mgr.connection_summary(tool, &p.id);
+    let connection_caption = connection.as_ref().map(|(preset, destination)| {
+        let label = connections::preset_label(*preset);
+        destination.as_ref().map_or_else(|| label.into(), |dest| format!("{label} · {dest}"))
+    });
     let login_required = mgr.login_required(tool, &p.id);
     let compact = ui.available_width() < 600.0;
-    let identity_width = (ui.available_width() - 166.0 - if compact || login_required || tool == Tool::Antigravity { 0.0 } else { 252.0 }).max(64.0);
+    let identity_width = (ui.available_width() - 166.0 - if compact || login_required || connection.is_some() || tool == Tool::Antigravity { 0.0 } else { 252.0 }).max(64.0);
     let exhausted = !mgr.is_refreshing(tool) && mgr.usage_fetched_at(tool, &p.id).is_some_and(|at| now.saturating_sub(at) < 300) && usage.as_ref().is_some_and(|u| !u.is_unavailable() && u.exhausted_at(now));
     let renaming = mgr.ui_state().renaming.as_ref().filter(|(rt, id, _)| *rt == tool && *id == p.id).map(|r| r.2.clone());
     let confirming = mgr.ui_state().confirm_delete.as_ref().is_some_and(|(ct, id)| *ct == tool && *id == p.id);
@@ -698,7 +712,7 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     }
                 });
             }
-            let email = p.email.as_deref().unwrap_or(kiln_common::i18n::tr("이메일 알 수 없음"));
+            let email = connection_caption.as_deref().or(p.email.as_deref()).unwrap_or(kiln_common::i18n::tr("이메일 알 수 없음"));
             ui.add(egui::Label::new(RichText::new(email).font(fonts::regular(12.0)).color(t.text_faint)).truncate()).on_hover_text(email);
             if let Some(caption) = caption.as_ref().filter(|_| !compact) {
                 ui.add(egui::Label::new(RichText::new(caption).font(fonts::regular(11.0)).color(t.text_dim)).truncate()).on_hover_text(caption);
@@ -748,14 +762,26 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                     mgr.ui_state().renaming = Some((tool, p.id.clone(), p.label.clone()));
                     ui.close();
                 }
-                if ui.add_enabled_ui(!busy, |ui| menu_item(ui, Icon::Refresh, kiln_common::i18n::tr("다시 로그인"), t.text)).inner {
+                if connection.is_some() && ui.add_enabled_ui(!busy, |ui| {
+                    menu_item(ui, Icon::Pencil, kiln_common::i18n::tr("API 연결 편집"), t.text)
+                }).inner {
+                    mgr.ui_state().feedback_profile[tool_idx(tool)] = None;
+                    let profile = p.clone();
+                    mgr.run_async(tool, kiln_common::i18n::tr("불러오는 중…"), move |mgr| {
+                        let draft = connections::Draft::edit(mgr, &profile)?;
+                        mgr.ui_state().connection = Some(draft);
+                        Ok(String::new())
+                    });
+                    ui.close();
+                }
+                if connection.is_none() && ui.add_enabled_ui(!busy, |ui| menu_item(ui, Icon::Refresh, kiln_common::i18n::tr("다시 로그인"), t.text)).inner {
                     mgr.ui_state().feedback_profile[tool_idx(tool)] = Some(p.id.clone());
                     mgr.with_state(|s| { s.error[tool_idx(tool)] = None; s.notice[tool_idx(tool)] = None; });
                     mgr.ui_state().adding = None;
                     mgr.ui_state().relogin = Some((tool, p.id.clone()));
                     ui.close();
                 }
-                if tool == Tool::Codex {
+                if connection.is_none() && tool == Tool::Codex {
                     if ui.add_enabled_ui(resets_available > 0 && !busy, |ui| menu_item(ui, Icon::Undo, kiln_common::i18n::tr("초기화권 사용"), t.text)).inner {
                         mgr.ui_state().confirm_reset = Some(p.id.clone());
                         ui.close();
@@ -792,10 +818,10 @@ fn account_row(ui: &mut Ui, mgr: &AccountManager, p: &Profile, is_active: bool, 
                 }
             });
             ui.add_space(8.0);
-            if !login_required && !compact && tool != Tool::Antigravity { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
+            if connection.is_none() && !login_required && !compact && tool != Tool::Antigravity { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
         });
     });
-    if compact && !login_required && tool != Tool::Antigravity { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
+    if connection.is_none() && compact && !login_required && tool != Tool::Antigravity { usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(p.tool, &p.id), mgr.is_refreshing(p.tool)); }
     if tool == Tool::Antigravity && !login_required {
         antigravity_usage_block(ui, usage.as_ref(), now, mgr.usage_fetched_at(tool, &p.id), mgr.is_refreshing(tool));
     }
@@ -864,7 +890,7 @@ mod tests {
     }
     use crate::CredentialStore;
 
-    fn test_fonts(ui: &mut Ui) -> bool {
+    pub(super) fn test_fonts(ui: &mut Ui) -> bool {
         let id = egui::Id::new("accounts-login-test-fonts");
         if ui.ctx().data(|data| data.get_temp::<bool>(id)).unwrap_or(false) { return true; }
         ui.ctx().data_mut(|data| data.insert_temp(id, true));
