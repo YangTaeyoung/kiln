@@ -195,6 +195,16 @@ pub(super) fn form(ui: &mut Ui, mgr: &AccountManager, tool: Tool, busy: bool) {
             if tool == Tool::Claude || matches!(c.preset, Preset::ApiKey | Preset::Gateway) {
                 pairs(ui, tr("추가 헤더"), &mut draft.headers, "X-Team");
             }
+            if tool == Tool::Codex {
+                ui.collapsing(tr("Codex 모델 설정"), |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut c.codex_model_settings)
+                            .desired_width(ui.available_width())
+                            .desired_rows(3)
+                            .hint_text("model_reasoning_effort = \"medium\""),
+                    );
+                });
+            }
             pairs(ui, tr("추가 환경 변수"), &mut draft.env, "NAME");
             ui.horizontal_wrapped(|ui| {
                 save = widgets::button_with(

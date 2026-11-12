@@ -40,6 +40,7 @@ pub struct Connection {
     pub aws_session_token: String,
     pub headers: BTreeMap<String, String>,
     pub extra_env: BTreeMap<String, String>,
+    pub codex_model_settings: String,
 }
 
 #[derive(Default)]
@@ -199,6 +200,33 @@ impl Connection {
             }
         }
 
+        if !claude && !self.codex_model_settings.trim().is_empty() {
+            // Only non-secret, typed model settings can become CLI arguments.
+            let settings = self
+                .codex_model_settings
+                .parse::<toml::Table>()
+                .map_err(|_| anyhow::anyhow!("Enter Codex model settings as TOML"))?;
+            for (name, value) in settings {
+                let allowed = match name.as_str() {
+                    "model_reasoning_effort" => value.as_str().is_some_and(|v| {
+                        ["none", "minimal", "low", "medium", "high", "xhigh"].contains(&v)
+                    }),
+                    "model_verbosity" => value
+                        .as_str()
+                        .is_some_and(|v| ["low", "medium", "high"].contains(&v)),
+                    "model_context_window" | "model_auto_compact_token_limit" => {
+                        value.as_integer().is_some_and(|v| v > 0)
+                    }
+                    _ => false,
+                };
+                ensure!(
+                    allowed,
+                    "Invalid Codex model setting. Use reasoning effort, verbosity, context window, or auto-compact limit"
+                );
+                out.args.extend(["-c".into(), format!("{name}={value}")]);
+            }
+        }
+
         let mut headers = Vec::new();
         let mut codex_headers = toml::Table::new();
         for (name, value) in &self.headers {
@@ -325,6 +353,47 @@ mod tests {
         let claude = connection.launch(Tool::Claude).unwrap();
         assert_eq!(claude.env["ANTHROPIC_AUTH_TOKEN"], "fake-key");
         assert!(claude.remove_env.contains(&"ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn bedrock_auth_selects_one_credential_source() {
+        let mut connection = Connection {
+            preset: Preset::Bedrock,
+            region: "us-east-2".into(),
+            aws_profile: "kiln-aws-fixture".into(),
+            ..Default::default()
+        };
+        let codex = connection.launch(Tool::Codex).unwrap();
+        assert!(
+            codex
+                .args
+                .iter()
+                .any(|a| a == "model_provider=\"amazon-bedrock\"")
+        );
+        assert_eq!(codex.env["AWS_PROFILE"], "kiln-aws-fixture");
+        assert!(codex.remove_env.contains(&"AWS_BEARER_TOKEN_BEDROCK"));
+        connection.aws_auth = AwsAuth::Bearer;
+        connection.key = "bedrock-fixture".into();
+        let claude = connection.launch(Tool::Claude).unwrap();
+        assert_eq!(claude.env["CLAUDE_CODE_USE_BEDROCK"], "1");
+        assert_eq!(claude.env["AWS_BEARER_TOKEN_BEDROCK"], "bedrock-fixture");
+        assert!(!claude.env.contains_key("AWS_PROFILE"));
+        assert!(claude.remove_env.contains(&"AWS_PROFILE"));
+    }
+
+    #[test]
+    fn custom_environment_stays_out_of_codex_arguments() {
+        let mut connection = Connection {
+            preset: Preset::Custom,
+            codex_model_settings: "model_context_window = 64000".into(),
+            extra_env: BTreeMap::from([("CUSTOM_TOKEN".into(), "fixture-token".into())]),
+            ..Default::default()
+        };
+        let launch = connection.launch(Tool::Codex).unwrap();
+        assert_eq!(launch.args, ["-c", "model_context_window=64000"]);
+        assert_eq!(launch.env["CUSTOM_TOKEN"], "fixture-token");
+        connection.codex_model_settings = "experimental_bearer_token = 'fixture-token'".into();
+        assert!(connection.launch(Tool::Codex).is_err());
     }
 
     #[test]

@@ -35,6 +35,10 @@ For a named AWS SSO profile, sign in with the AWS CLI first. See the
 the [Codex Bedrock guide](https://learn.chatgpt.com/docs/amazon-bedrock)
 for region, model and IAM requirements.
 
+Under **Codex model settings**, you can set `model_reasoning_effort`,
+`model_verbosity`, `model_context_window` or `model_auto_compact_token_limit`
+using TOML. Enter API keys and environment values in their dedicated fields.
+
 Connection values go in the local credential store. The account list keeps the
 connection name, type, and gateway host or AWS region. Connection profiles do not
 show subscription usage or participate in subscription account rotation.

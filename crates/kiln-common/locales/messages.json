@@ -12038,5 +12038,10 @@
     "en": "Model",
     "ja": "モデル",
     "zh-CN": "模型"
+  },
+  "Codex 모델 설정": {
+    "en": "Codex model settings",
+    "ja": "Codex モデル設定",
+    "zh-CN": "Codex 模型设置"
   }
 }
