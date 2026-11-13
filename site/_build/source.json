@@ -1,5 +1,5 @@
 {
-  "kiln_version": "0.2.23",
-  "source_commit": "9c09215f13e96c6e3ed480dc48556ab4c351b9f8",
+  "kiln_version": "0.2.24",
+  "source_commit": "a4e446b160a7e1fa8ff16cd8134debe7ed591a95",
   "note": "The product site describes the app as of this commit. Update both fields after reflecting newer changes."
 }
