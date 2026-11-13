@@ -119,7 +119,7 @@ fn replace_all_after_confirmation() {
     type_query(&mut h, "Config");
     h.get_by_label("대/소문자 구분").click();
     h.get_by_label("단어 단위로").click();
-    h.run();
+    h.step();
     wait_done(&mut h);
     h.get_by_label("바꾸기 전환").click();
     h.run();

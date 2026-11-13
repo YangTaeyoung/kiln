@@ -200,9 +200,9 @@ fn daemon_completion_roundtrip_never_executes_and_rejects_stale_or_non_shell_met
             !matches!(
                 message,
                 ServerMsg::ShellCompletion {
-                    request: Some(_),
+                    request: Some(ref request),
                     ..
-                }
+                } if request.revision == 77 && request.explicit && request.buffer.is_empty()
             ),
             "non-Zsh foreground must not publish completion metadata"
         );
