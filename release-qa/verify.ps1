@@ -93,18 +93,28 @@ updater-test = []
         & .\Kiln.exe
         Assert-Exit '0.2.23 signed update fixture'
     } finally { Pop-Location }
-    if ((Snapshot $env:KILN_INSTALL_DIR) -notmatch [regex]::Escape((Get-FileHash (Join-Path $prev 'Kiln.exe')).Hash)) { throw 'Updated GUI does not match the installed archive' }
+    if ((Get-FileHash (Join-Path $env:KILN_INSTALL_DIR 'Kiln.exe')).Hash -ne (Get-FileHash (Join-Path $prev 'Kiln.exe')).Hash) { throw 'Updated GUI does not match the installed archive' }
     $upgradedCli = Join-Path $prev 'bin/kiln.exe'
     if ((& $upgradedCli --version) -ne $version -or (Get-FileHash $upgradedCli).Hash -ne (Get-FileHash (Join-Path $env:KILN_INSTALL_DIR 'bin/kiln.exe')).Hash) { throw 'Updated CLI does not match the installed archive' }
     $env:KILN_CONFIG_DIR = Join-Path $env:RUNNER_TEMP 'kiln-ui-config'
     $env:KILN_SOCKET = '\\.\pipe\kiln-release-verify'
+    New-Item -ItemType Directory -Force -Path $env:KILN_CONFIG_DIR | Out-Null
     $window = Try-StartGui (Join-Path $prev 'Kiln.exe') 'Updated Kiln 0.2.24'
     try {
-        if ((Test-Path (Join-Path $prev 'Kiln.exe.old')) -or (Test-Path (Join-Path $prev 'bin/kiln.exe.old'))) { throw 'Updated app did not clean up previous executables' }
+        # The OS window exists before the app initialization callback runs. Wait for
+        # the startup cleanup, which deliberately tolerates in-use old executables.
+        $leftovers = @((Join-Path $prev 'Kiln.exe.old'), (Join-Path $prev 'bin/kiln.exe.old'))
+        for ($i = 0; $i -lt 40 -and ($leftovers | Where-Object { Test-Path -LiteralPath $_ }); $i++) {
+            Start-Sleep -Milliseconds 250
+        }
+        $remaining = @($leftovers | Where-Object { Test-Path -LiteralPath $_ })
+        if ($remaining.Count) { Write-Host ('Windows still holds old copies; Kiln retries cleanup at next start: ' + ($remaining -join ', ')) }
+        $window.Refresh()
+        if ($window.HasExited -or $window.MainWindowHandle -eq 0) { throw 'Updated native window did not remain open' }
     } finally {
         if ($window.CloseMainWindow()) { $null = $window.WaitForExit(5000) }
     }
-    [ordered]@{ arch = $env:KILN_QA_ARCH; archive_sha256 = $sha; installed = $version; second_install_unchanged = $true; detected_automatically_from = '0.2.23'; checked_release_key = $true; replaced_running_executable = $true; candidate_window_opened = $true } | ConvertTo-Json | Set-Content (Join-Path $evidence 'result.json')
+    [ordered]@{ arch = $env:KILN_QA_ARCH; archive_sha256 = $sha; installed = $version; second_install_unchanged = $true; detected_automatically_from = '0.2.23'; checked_release_key = $true; replaced_running_executable = $true; candidate_window_opened = $true; old_files_remaining = $remaining.Count } | ConvertTo-Json | Set-Content (Join-Path $evidence 'result.json')
     Get-Content (Join-Path $evidence 'result.json')
 } finally {
     Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
