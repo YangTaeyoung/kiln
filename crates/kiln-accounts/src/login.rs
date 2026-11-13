@@ -27,6 +27,9 @@ pub(crate) struct LoginControl {
     input: Mutex<Option<Box<dyn Write + Send>>>,
     terminal_input: AtomicBool,
     code_submitted: AtomicBool,
+    code_sent_at: Mutex<Option<Instant>>,
+    #[cfg(test)]
+    code_timeout: Option<Duration>,
     stop_readers: AtomicBool,
     child: Mutex<Option<Arc<Mutex<Child>>>>,
     finished: Mutex<bool>,
@@ -88,6 +91,7 @@ impl LoginControl {
             .map_err(|_| anyhow::anyhow!(kiln_common::i18n::tr("로그인 코드를 전달하지 못했습니다. 다시 시도하세요")))?;
         input.flush()?;
         if self.terminal_input.load(Ordering::Relaxed) {
+            *self.code_sent_at.lock() = Some(Instant::now());
             self.code_submitted.store(true, Ordering::Relaxed);
             self.status.lock().accepts_code = false;
         }
@@ -363,9 +367,15 @@ fn run_antigravity_login(source: &Env, binary: &Path, control: &Arc<LoginControl
     let mut screen = Vec::new();
     let mut scanner = OutputScanner::default();
     let mut selected = false;
+    let code_timeout = Duration::from_secs(45);
+    #[cfg(test)]
+    let code_timeout = control.code_timeout.unwrap_or(code_timeout);
     loop {
         if control.cancel.load(Ordering::Relaxed) { bail!("{}", kiln_common::i18n::tr("로그인을 취소했습니다")); }
         if start.elapsed() >= timeout { bail!("{}", kiln_common::i18n::tr("로그인 시간이 만료되었습니다. 다시 시도하세요")); }
+        if control.code_sent_at.lock().is_some_and(|sent| sent.elapsed() >= code_timeout) {
+            bail!("{}", kiln_common::i18n::tr("로그인 코드 확인 시간이 초과되었습니다. 로그인을 다시 시작해 새 코드를 입력하세요"));
+        }
         let mut bytes = [0; 8192];
         match reader.read(&mut bytes) {
             Ok(n) if n > 0 => {
@@ -516,6 +526,31 @@ sleep 30
         scanner.feed(b"Paste the authorization code below:\nSigning in...", Tool::Antigravity, &control);
         assert!(!control.status.lock().accepts_code);
         assert!(control.send_code("fixture-code").is_err());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn antigravity_silent_callback_hits_its_own_deadline() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(root.path(), false);
+        let binary = root.path().join("silent-agy");
+        std::fs::write(&binary, "#!/bin/sh\nprintf 'Paste the authorization code below:\\n'\nread code\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let control = Arc::new(LoginControl { code_timeout: Some(Duration::from_millis(120)), ..Default::default() });
+        let sender = control.clone();
+        let send = std::thread::spawn(move || {
+            let end = Instant::now() + Duration::from_secs(3);
+            while !sender.status.lock().accepts_code {
+                assert!(Instant::now() < end);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            sender.send_code("fixture-code").unwrap();
+        });
+        let error = run_login(&env, Tool::Antigravity, &binary, &control, Duration::from_secs(5), Arc::new(|| {}))
+            .err().expect("silent callback must fail");
+        send.join().unwrap();
+        assert!(error.to_string().contains("코드 확인 시간"));
     }
 
     /// Submits only a deliberately invalid fixture code, never a real credential.

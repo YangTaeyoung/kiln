@@ -428,7 +428,12 @@ mod imp {
             let program = spec.program.clone().filter(|p| !p.is_empty()).unwrap_or_else(default_shell);
             let mut cmd = CommandBuilder::new(&program);
             match crate::shell::powershell_args(&program, spec) {
-                Some(args) => cmd.args(&args),
+                Some(args) => {
+                    cmd.args(&args);
+                    if let Ok(exe) = std::env::current_exe() {
+                        cmd.env("KILN_AGENT_LAUNCHER", crate::client::cli_executable(&exe));
+                    }
+                }
                 None => cmd.args(&spec.args),
             }
             let cwd = spec.cwd.clone().filter(|c| std::path::Path::new(c).is_dir())

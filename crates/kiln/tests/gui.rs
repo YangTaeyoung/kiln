@@ -1808,6 +1808,9 @@ fn direct_panel_actions_target_the_clicked_split_and_stay_inside_narrow_headers(
     let mut h=Harness::builder().with_size([1100.0,700.0]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
     h.get_by_label("오른쪽으로 나누기").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Claude Code").is_some());
+    h.get_by_label("터미널").click();
     assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2&&h.state().debug_focused_session().is_some()));
     let rects=h.state().debug_pane_rects();
     let left=rects.iter().min_by(|a,b|a.1.left().total_cmp(&b.1.left())).unwrap().0;
@@ -1815,6 +1818,8 @@ fn direct_panel_actions_target_the_clicked_split_and_stay_inside_narrow_headers(
     assert_eq!(h.state().debug_focused_pane_id(),Some(right));
     let button=h.get_all_by_label("아래로 나누기").min_by(|a,b|a.rect().left().total_cmp(&b.rect().left())).unwrap();
     button.click();
+    h.run_steps(3);
+    h.get_by_label("터미널").click();
     assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==3&&h.state().debug_focused_session().is_some()));
     let rects=h.state().debug_pane_rects();
     let left_rect=rects.iter().find(|(id,_)|*id==left).unwrap().1;

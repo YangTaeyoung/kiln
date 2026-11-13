@@ -11,6 +11,8 @@ Kiln은 사용하는 에이전트 계정마다 프로필을 따로 저장하므�
 
 Claude Code 또는 Codex 카드에서 **API 연결 추가**를 선택하세요. API 키, 게이트웨이, Amazon Bedrock 또는 사용자 지정 환경 변수를 설정할 수 있습니다. 저장 후 **전환**을 누르면 새 패널에 적용됩니다. Sub2API는 에이전트별 Base URL과 게이트웨이 키를 Bearer 토큰으로 입력하세요. Codex용 게이트웨이는 Responses API를 지원해야 합니다. API 연결은 구독 사용량을 표시하지 않습니다.
 
+Kiln의 Zsh 또는 PowerShell 터미널을 새로 열고 `claude` 또는 로컬 대화형 `codex`를 실행하면 선택한 계정을 사용합니다.
+
 ## 계정 추가하기 {#add-an-account}
 
 1. 에이전트 카드에서 **새 계정 추가**를 선택합니다.

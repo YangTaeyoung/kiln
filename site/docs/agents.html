@@ -68,6 +68,7 @@
 </table></div>
 <p>When you choose Antigravity below a request, Kiln passes the request and the repository summary to <code>agy</code> as its initial prompt. The <code>antigravity</code> command opens the Antigravity editor, so Kiln does not treat it as an agent.</p>
 <p>Unsent requests are saved with the workspace and restored when Kiln reopens. Closing a workspace asks before discarding them.</p>
+<p>The right and down split buttons let you choose a terminal or an agent for the new panel. Keyboard split shortcuts still open a terminal directly.</p>
 <h2 id="work-across-several-repositories">Work across several repositories</h2>
 <p>Open a parent folder, such as <code>~/dev/projects</code>, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.</p>
 <p>Inspecting a repository in the Git or GitHub tools does not change the task's working directory. Use the repository selector in those tools to target one repository for Git operations. See <a href="workspaces.html">Workspaces and tasks</a> and <a href="git.html">Git and GitHub</a>.</p>
@@ -214,6 +215,7 @@
 </table></div>
 <p>요청 아래에서 Antigravity를 고르면 Kiln은 요청과 저장소 요약을 <code>agy</code>의 첫 프롬프트로 넘깁니다. <code>antigravity</code> 명령은 Antigravity 편집기를 여는 명령이므로 Kiln은 이를 에이전트로 다루지 않습니다.</p>
 <p>보내지 않은 요청은 워크스페이스와 함께 저장되고, Kiln을 다시 열면 복원됩니다. 워크스페이스를 닫을 때는 요청을 버리기 전에 확인을 받습니다.</p>
+<p>패널 상단의 오른쪽·아래쪽 분할 버튼에서 새 패널에 열 터미널이나 에이전트를 고를 수 있습니다. 분할 단축키는 터미널을 바로 엽니다.</p>
 <h2 id="work-across-several-repositories">여러 저장소 함께 다루기</h2>
 <p>프론트엔드, 백엔드, 공유 라이브러리가 각각 다른 Git 저장소에 있다면 <code>~/dev/projects</code> 같은 상위 폴더를 여세요. Kiln은 이 폴더를 에이전트의 작업 루트로 유지하고 찾아낸 저장소 구성을 요청에 함께 넣을 수 있으므로, 요청 하나로 모든 저장소를 다룰 수 있습니다.</p>
 <p>Git이나 GitHub 도구에서 저장소를 살펴봐도 작업이 실행되는 디렉터리는 바뀌지 않습니다. Git 작업을 적용할 저장소는 해당 도구의 저장소 선택기에서 고릅니다. <a href="workspaces.html">워크스페이스와 작업</a>과 <a href="git.html">Git과 GitHub</a>를 참고하세요.</p>
@@ -360,6 +362,7 @@
 </table></div>
 <p>リクエストの下で Antigravity を選ぶと、Kiln はリクエストとリポジトリの概要を最初のプロンプトとして <code>agy</code> に渡します。<code>antigravity</code> コマンドは Antigravity のエディターを開くものなので、Kiln はエージェントとして扱いません。</p>
 <p>未送信のリクエストはワークスペースと一緒に保存され、Kiln を再び開くと復元されます。ワークスペースを閉じるときは、破棄する前に確認が表示されます。</p>
+<p>パネル上部の右分割・下分割ボタンから、新しいパネルで開くターミナルやエージェントを選べます。分割のショートカットはターミナルを直接開きます。</p>
 <h2 id="work-across-several-repositories">複数のリポジトリにまたがって作業する</h2>
 <p>フロントエンド、バックエンド、共有ライブラリが別々の Git リポジトリにある場合は、<code>~/dev/projects</code> のような親フォルダーを開きます。Kiln はそのフォルダーをエージェントの作業ルートとして保ち、検出したリポジトリ構成をリクエストに含めることができるため、1 つのリクエストですべてのリポジトリを扱えます。</p>
 <p>Git や GitHub のツールでリポジトリを確認しても、作業ディレクトリは変わりません。Git 操作の対象を 1 つのリポジトリにするには、それらのツールにあるリポジトリセレクターを使います。詳しくは<a href="workspaces.html">ワークスペースと作業</a>と <a href="git.html">Git と GitHub</a> を参照してください。</p>
@@ -506,6 +509,7 @@
 </table></div>
 <p>在请求下方选择 Antigravity 时，Kiln 会把请求和仓库摘要作为初始提示词传给 <code>agy</code>。<code>antigravity</code> 命令打开的是 Antigravity 编辑器，因此 Kiln 不把它当作代理。</p>
 <p>未发送的请求随工作区一起保存，Kiln 重新打开时会恢复。关闭工作区时，丢弃这些请求前会先询问。</p>
+<p>点击面板顶部的向右或向下拆分按钮，可以选择在新面板中打开终端或代理。拆分快捷键仍直接打开终端。</p>
 <h2 id="work-across-several-repositories">跨多个仓库工作</h2>
 <p>如果前端、后端和共享库分属不同的 Git 仓库，就打开它们的父文件夹，例如 <code>~/dev/projects</code>。Kiln 把这个文件夹作为代理的工作根目录，还可以把扫描到的仓库结构随请求一起附上，一个请求就能覆盖所有仓库。</p>
 <p>在 Git 或 GitHub 工具中查看某个仓库，不会改变任务的工作目录。要让 Git 操作针对某个仓库，请使用这些工具中的仓库选择器。详见<a href="workspaces.html">工作区与任务</a>和 <a href="git.html">Git 与 GitHub</a>。</p>

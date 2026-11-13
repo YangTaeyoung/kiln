@@ -192,7 +192,7 @@ mod tests {
         std::fs::create_dir(&home).unwrap();
         let run = |script: &str| std::process::Command::new("/bin/zsh")
             .args(["-f", "-c", script]).current_dir(root.path())
-            .env("INTEGRATION", &integration).env("CODEX_HOME", &home)
+            .env("INTEGRATION", &integration).env("CODEX_HOME", &home).env_remove("KILN_AGENT_LAUNCHER")
             .env("PATH", format!("{}:/usr/bin:/bin", root.path().display())).output().unwrap();
         for (command, expected) in [
             ("codex", vec!["--no-daemon"]),
@@ -247,6 +247,16 @@ mod tests {
         let argv: Vec<String> = serde_json::from_slice(&before).unwrap();
         assert_eq!(&argv[..2], &["agent-shell", "--cwd"]);
         assert_eq!(&argv[3..], &["--", "--model", "safe model", "literal;$(no)"]);
+        for (command, tool, tail) in [
+            ("claude --model 'safe model'", "claude", vec!["--model", "safe model"]),
+            ("codex resume --last", "codex", vec!["--no-daemon", "resume", "--last"]),
+        ] {
+            assert!(run(&format!("source \"$INTEGRATION\"; {command}")).status.success());
+            let argv: Vec<String> = serde_json::from_slice(&std::fs::read(&capture).unwrap()).unwrap();
+            assert_eq!(&argv[..4], &["agent-shell", "--tool", tool, "--cwd"]);
+            assert_eq!(&argv[6..], tail);
+        }
+        std::fs::write(&capture, &before).unwrap();
         let version = run("source \"$INTEGRATION\"; agy --version");
         assert_eq!(String::from_utf8_lossy(&version.stdout).trim(), "1.4.7");
         assert_eq!(before, std::fs::read(capture).unwrap());

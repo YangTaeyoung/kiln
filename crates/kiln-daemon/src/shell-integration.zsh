@@ -11,10 +11,30 @@ if (( ! $+functions[codex] && ! $+aliases[codex] )); then
             --) break ;;
           esac
         done
-        command codex --no-daemon "$@"
+        local launcher=${KILN_AGENT_LAUNCHER:-}
+        if [[ -n $launcher && -x $launcher ]]; then
+          "$launcher" agent-shell --tool codex --cwd "$PWD" -- --no-daemon "$@"
+        else
+          command codex --no-daemon "$@"
+        fi
         ;;
       *) command codex "$@" ;;
     esac
+  }
+fi
+# Preserve user aliases and functions. Authentication commands use the native CLI.
+if (( ! $+functions[claude] && ! $+aliases[claude] )); then
+  function claude {
+    local launcher=${KILN_AGENT_LAUNCHER:-}
+    case "${1:-}" in
+      --version|-v|--help|-h|auth|login|logout|update|upgrade|install|doctor|mcp)
+        command claude "$@"; return $? ;;
+    esac
+    if [[ -n $launcher && -x $launcher ]]; then
+      "$launcher" agent-shell --tool claude --cwd "$PWD" -- "$@"
+    else
+      command claude "$@"
+    fi
   }
 fi
 # Only Kiln's shells receive this wrapper; the ordinary CLI login stays intact.
@@ -66,6 +86,17 @@ _kiln_complete_hex() {
   done
   REPLY=$result
 }
+# A simple final $NAME or ${NAME prefix; never send parameter values.
+_kiln_variable_prefix() {
+  local tail=${1##*[[:space:]]}
+  local lead=${1%"$tail"}
+  [[ $lead != *[\$\`\;\|\&\(\)\<\>\"\'\\]* ]] || return 1
+  case "$tail" in
+    '$'*) REPLY=${tail#\$}; REPLY=${REPLY#\{} ;;
+    *) return 1 ;;
+  esac
+  [[ -z $REPLY || $REPLY == [a-zA-Z_][a-zA-Z0-9_]# ]]
+}
 _kiln_complete_preview() {
   emulate -L zsh
   setopt localoptions extendedglob
@@ -76,7 +107,9 @@ _kiln_complete_preview() {
   # Forward plain edit contexts, never evaluate them. Native shell completion
   # retains expansions, pipelines, redirections and editing before the caret.
   local command=${BUFFER%%[[:space:]]*}
-  if [[ -n $command && $command == [a-zA-Z0-9_+.-]## && $CURSOR == ${#BUFFER} && ${#BUFFER} -le 1024 &&
+  if [[ $CURSOR == ${#BUFFER} && ${#BUFFER} -le 1024 ]] && _kiln_variable_prefix "$BUFFER"; then
+    _kiln_complete_request preview
+  elif [[ -n $command && $command == [a-zA-Z0-9_+./-]## && $CURSOR == ${#BUFFER} && ${#BUFFER} -le 1024 &&
         $BUFFER != *[\;\|\&\$\`\(\)\<\>]* && $BUFFER != *$'\n'* && $BUFFER != *$'\r'* &&
         ( $BUFFER == *[[:space:]]* || ${#command} -ge 2 ) ]]; then
     _kiln_complete_request preview
@@ -101,11 +134,30 @@ _kiln_complete_request() {
   _kiln_complete_hex "$PWD"; cwd=$REPLY
   local prefix=${BUFFER[1,CURSOR]}
   local -a matches
-  if [[ $prefix != *[[:space:]]* && $prefix != *[\;\|\&\$\`\(\)]* ]]; then
+  local -a metadata
+  local name pattern
+  if _kiln_variable_prefix "$prefix"; then
+    pattern="${REPLY}*"
+    matches=(${(ok)parameters})
+    for name in "${matches[@]}"; do
+      [[ $name == ${~pattern} && $name == [a-zA-Z_][a-zA-Z0-9_]# && ${parameters[$name]} == *export* ]] || continue
+      metadata+=("variable:$name")
+      (( ${#metadata} >= 80 )) && break
+    done
+    _kiln_complete_hex "${(F)metadata}"; names=$REPLY
+  elif [[ $prefix == [a-zA-Z0-9_+.-]# ]]; then
+    pattern="${prefix}*"
+    for name in ${(ok)aliases}; do
+      [[ $name == ${~pattern} && $name == [a-zA-Z0-9_+.-]## ]] && metadata+=("alias:$name")
+      (( ${#metadata} >= 40 )) && break
+    done
+    for name in ${(ok)functions}; do
+      [[ $name != _* && $name == ${~pattern} && $name == [a-zA-Z0-9_+.-]## ]] && metadata+=("function:$name")
+      (( ${#metadata} >= 60 )) && break
+    done
     matches=(${(f)$(builtin whence -pm -- "${prefix}*" 2>/dev/null)})
-    matches=(${matches:t})
-    local names_text="${(F)matches[1,80]}"
-    _kiln_complete_hex "$names_text"; names=${REPLY[1,2048]}
+    metadata+=(${matches:t})
+    _kiln_complete_hex "${(F)metadata[1,80]}"; names=$REPLY
   else
     # The shell supplies its actual PATH resolution. The GUI never guesses an
     # executable from its own PATH and receives no command argument values here.
@@ -116,6 +168,10 @@ _kiln_complete_request() {
     fi
   fi
   _kiln_complete_hex "$file"; pathhex=$REPLY
+  while (( ${#buffer}+${#cwd}+${#pathhex}+${#names} >= 7900 && ${#metadata} > 1 )); do
+    metadata[-1]=()
+    _kiln_complete_hex "${(F)metadata[1,80]}"; names=$REPLY
+  done
   (( ${#buffer}+${#cwd}+${#pathhex}+${#names} < 7900 )) || return
   printf '\e]777;kiln-complete;%s;%s;%s;%s;%s;%s;%s\a' "$_KILN_COMPLETION_REV" "$CURSOR" "$buffer" "$cwd" "$pathhex" "$names" "$explicit"
 }

@@ -30,6 +30,8 @@ When you choose Antigravity below a request, Kiln passes the request and the rep
 
 Unsent requests are saved with the workspace and restored when Kiln reopens. Closing a workspace asks before discarding them.
 
+The right and down split buttons let you choose a terminal or an agent for the new panel. Keyboard split shortcuts still open a terminal directly.
+
 ## Work across several repositories {#work-across-several-repositories}
 
 Open a parent folder, such as `~/dev/projects`, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.

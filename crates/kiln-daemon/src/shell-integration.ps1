@@ -8,6 +8,34 @@ $global:__KilnIntegration = $true
 $global:__KilnCommandRan = $false
 $global:__KilnPrompt = $function:prompt
 
+# Keep user-defined aliases/functions and native CLI management commands.
+if (-not (Get-Command claude -CommandType Alias,Function -ErrorAction SilentlyContinue)) {
+    function global:claude {
+        $launcher = $env:KILN_AGENT_LAUNCHER
+        if ($launcher -and (Test-Path -LiteralPath $launcher) -and $PWD.Provider.Name -eq 'FileSystem' -and
+            $args[0] -notin @('--version','-v','--help','-h','auth','login','logout','update','upgrade','install','doctor','mcp')) {
+            & $launcher agent-shell --tool claude --cwd $PWD.Path -- @args
+        } else {
+            $native = Get-Command claude -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
+            & $native.Source @args
+        }
+    }
+}
+
+if (-not (Get-Command codex -CommandType Alias,Function -ErrorAction SilentlyContinue)) {
+    function global:codex {
+        $launcher = $env:KILN_AGENT_LAUNCHER
+        if ($launcher -and (Test-Path -LiteralPath $launcher) -and $PWD.Provider.Name -eq 'FileSystem' -and
+            ($args.Count -eq 0 -or $args[0] -in @('resume','fork')) -and
+            -not ($args -like '--remote*')) {
+            & $launcher agent-shell --tool codex --cwd $PWD.Path -- @args
+        } else {
+            $native = Get-Command codex -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
+            & $native.Source @args
+        }
+    }
+}
+
 function global:kiln-agent-status {
     param([Parameter(Mandatory)][ValidateSet('running', 'waiting', 'done', 'failed', 'unknown')][string]$State)
     [Console]::Write("$([char]27)]777;kiln-agent;$State$([char]7)")
