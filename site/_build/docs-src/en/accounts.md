@@ -11,6 +11,8 @@ Install the official CLI for each agent first. Kiln uses that CLI to sign in and
 
 On the Claude Code or Codex card, choose **Add API connection**. Select an API key, gateway, Amazon Bedrock, or custom environment variables. Save and choose **Switch** to use it in new panels. For Sub2API, enter the agent-specific Base URL and use the gateway key as a Bearer token. Codex gateways must support the Responses API. API connections do not show subscription usage.
 
+In a newly opened Kiln Zsh or PowerShell terminal, run `claude` or a local interactive `codex` command to use the selected account.
+
 ## Add an account {#add-an-account}
 
 1. Choose **Add Account** on the agent's card.

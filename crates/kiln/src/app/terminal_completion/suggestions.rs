@@ -42,6 +42,58 @@ fn catalog() -> &'static [Spec] {
     })
 }
 
+fn variable_choices(buffer: &str, names: &[String]) -> Option<Vec<Choice>> {
+    let start = buffer
+        .rfind(char::is_whitespace)
+        .map_or(0, |i| i + buffer[i..].chars().next().unwrap().len_utf8());
+    let (lead, tail) = buffer.split_at(start);
+    let raw = tail.strip_prefix('$')?;
+    let (braced, prefix) = raw.strip_prefix('{').map_or((false, raw), |p| (true, p));
+    if lead.contains('=')
+        || lead.contains(['\'', '"', '\\', '$', '`', ';', '|', '&', '(', ')', '<', '>'])
+        || (!prefix.is_empty() && !variable_name(prefix))
+    {
+        return Some(Vec::new());
+    }
+    let mut seen = HashSet::new();
+    Some(
+        names
+            .iter()
+            .filter_map(|entry| entry.strip_prefix("variable:"))
+            .filter(|name| {
+                variable_name(name) && name.starts_with(prefix) && (braced || *name != prefix)
+            })
+            .filter(|name| seen.insert(*name))
+            .take(80)
+            .map(|name| {
+                let label = if braced {
+                    format!("${{{name}}}")
+                } else {
+                    format!("${name}")
+                };
+                let buffer = format!("{lead}{label}");
+                let cursor = buffer.chars().count();
+                Choice {
+                    label,
+                    buffer,
+                    cursor,
+                    kind: ChoiceKind::Value,
+                    description: "환경 변수".into(),
+                    hint: String::new(),
+                }
+            })
+            .collect(),
+    )
+}
+
+fn variable_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .enumerate()
+            .all(|(i, b)| b == b'_' || b.is_ascii_alphabetic() || i > 0 && b.is_ascii_digit())
+}
+
 pub(super) fn candidates(
     buffer: &str,
     cursor: usize,
@@ -54,6 +106,9 @@ pub(super) fn candidates(
     {
         return vec![];
     }
+    if let Some(choices) = variable_choices(buffer, native_commands) {
+        return choices;
+    }
     let Some(tokens) = words(buffer) else {
         return vec![];
     };
@@ -62,16 +117,27 @@ pub(super) fn candidates(
     };
     let mut rows = Vec::<Item>::new();
     if tokens.len() == 1 {
+        if prefix.contains('/') {
+            return finish(paths(cwd, prefix, false), buffer, *start, prefix);
+        }
+        rows.extend(native_commands.iter().filter_map(|entry| {
+            let (label, description) = if let Some(name) = entry.strip_prefix("alias:") {
+                (name, "별칭")
+            } else if let Some(name) = entry.strip_prefix("function:") {
+                (name, "셸 함수")
+            } else {
+                (entry.as_str(), "설치된 명령")
+            };
+            (!label.contains('/') && valid(label) && !label.contains(':'))
+                .then(|| Item::new(label, description, "", ChoiceKind::Command))
+        }));
         rows.extend(catalog().iter().map(|s| Item::spec(s, ChoiceKind::Command)));
-        rows.extend(
-            native_commands
-                .iter()
-                .filter(|n| !n.contains('/') && valid(n))
-                .map(|n| Item::new(n, "설치된 명령", "", ChoiceKind::Command)),
-        );
         return finish(rows, buffer, *start, prefix);
     }
     let name = &tokens[0].1;
+    if name.contains('=') {
+        return vec![];
+    }
     let executable = native_commands
         .iter()
         .map(Path::new)
@@ -85,7 +151,7 @@ pub(super) fn candidates(
         expand_help(&mut root, executable, name, &tokens);
     }
     if root.subcommands.is_empty() && root.options.is_empty() && root.provider.is_empty() {
-        if prefix.contains('/') {
+        if !prefix.starts_with('-') {
             rows = paths(cwd, prefix, false);
         }
         return finish(rows, buffer, *start, prefix);
@@ -290,6 +356,9 @@ fn from_spec(root: &Spec, buffer: &str, tokens: &[(usize, String)], cwd: &Path) 
         }
         if matches!(current.provider.as_str(), "files" | "directories") || positionals == 0 {
             rows.extend(arguments(&current.provider, cwd, prefix));
+            if current.provider.is_empty() && prefix.contains('/') {
+                rows.extend(paths(cwd, prefix, false));
+            }
         }
         if rows.is_empty() && prefix.is_empty() && current.subcommands.is_empty() && !end_options {
             for option in options(&chain) {
@@ -565,7 +634,10 @@ esac
         let native = vec![executable.to_string_lossy().into_owned()];
         for (input, expected) in [
             ("fresh-cli se", "fresh-cli serve"),
-            ("fresh-cli --config so", "fresh-cli --config 'source folder/'"),
+            (
+                "fresh-cli --config so",
+                "fresh-cli --config 'source folder/'",
+            ),
             ("fresh-cli serve --d", "fresh-cli serve --directory"),
             (
                 "fresh-cli serve --directory so",
@@ -589,7 +661,12 @@ esac
         let secret = "fresh-cli serve --message PRIVATE_VALUE";
         assert!(candidates(secret, secret.len(), &project, &native).is_empty());
         let input = "fresh-cli serve --conf";
-        assert!(!candidates(input, input.len(), &project, &native).iter().any(|r| r.label == "--config"), "root Global Options must not leak into child help that does not list them");
+        assert!(
+            !candidates(input, input.len(), &project, &native)
+                .iter()
+                .any(|r| r.label == "--config"),
+            "root Global Options must not leak into child help that does not list them"
+        );
         assert_eq!(
             std::fs::read_to_string(calls).unwrap(),
             "--help\nserve --help\n",

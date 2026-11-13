@@ -9,6 +9,21 @@ use kiln_common::fonts;
 pub const TOPBAR_H: f32 = 42.0;
 const HEADER_H: f32 = 30.0;
 
+fn split_choices(ui: &mut egui::Ui, pane: PaneId, dir: layout::Dir, actions: &mut Vec<Action>) {
+    ui.set_min_width(152.0);
+    if widgets::button_with(ui, Some(Icon::Terminal), kiln_common::i18n::tr("터미널"), ButtonKind::Ghost, true).clicked() {
+        actions.push(Action::SplitPane(pane, dir));
+        ui.close();
+    }
+    widgets::divider(ui);
+    for tool in kiln_accounts::Tool::ALL {
+        if widgets::button_with(ui, Some(agent_icon(Some(tool))), tool.display_name(), ButtonKind::Ghost, true).clicked() {
+            actions.push(Action::SplitAgent(pane, dir, tool));
+            ui.close();
+        }
+    }
+}
+
 /// One complete tool list, shared by the titlebar and workspace context menu.
 fn tool_menu(ui: &mut egui::Ui, selected: Option<tools::ToolKind>) -> Option<tools::ToolKind> {
     let t = kiln_common::Theme::current();
@@ -1229,16 +1244,21 @@ impl KilnApp {
         bui.add_space(4.0);
         }
         if show_splits {
-        if widgets::icon_button(&mut bui,Icon::SplitDown,26.0,false,kiln_common::i18n::tr("아래로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Vertical));}
-        if widgets::icon_button(&mut bui,Icon::SplitRight,26.0,false,kiln_common::i18n::tr("오른쪽으로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Horizontal));}
+            for (dir, icon, label) in [
+                (layout::Dir::Vertical, Icon::SplitDown, "아래로 나누기"),
+                (layout::Dir::Horizontal, Icon::SplitRight, "오른쪽으로 나누기"),
+            ] {
+                let button = widgets::icon_button(&mut bui, icon, 26.0, false, kiln_common::i18n::tr(label));
+                egui::Popup::menu(&button).show(|ui| split_choices(ui, pid, dir, &mut self.actions));
+            }
         }
         if show_more {
             let menu=widgets::icon_button(&mut bui,Icon::More,26.0,false,kiln_common::i18n::tr("패널 작업"));
             egui::Popup::menu(&menu).show(|ui| {
                 self.terminal_header_menu(ui,pid);
                 if !show_splits {
-                    if ui.button(kiln_common::i18n::tr("오른쪽으로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Horizontal));ui.close();}
-                    if ui.button(kiln_common::i18n::tr("아래로 나누기")).clicked(){self.actions.push(Action::SplitPane(pid,layout::Dir::Vertical));ui.close();}
+                    ui.menu_button(kiln_common::i18n::tr("오른쪽으로 나누기"), |ui| split_choices(ui, pid, layout::Dir::Horizontal, &mut self.actions));
+                    ui.menu_button(kiln_common::i18n::tr("아래로 나누기"), |ui| split_choices(ui, pid, layout::Dir::Vertical, &mut self.actions));
                 }
                 if ui.button(kiln_common::i18n::tr("크게 보기 / 복원")).clicked(){self.actions.push(Action::ToggleZoom(Some(pid)));ui.close();}
                 if !show_close && ui.button(kiln_common::i18n::tr("패널 닫기")).clicked(){self.actions.push(Action::ClosePane(pid,false));ui.close();}

@@ -134,15 +134,42 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
     launch_spec(&path, &record, false, None)
 }
 
-/// Bare `agy` in a Kiln shell uses the account selected at invocation time.
-pub fn run_antigravity_shell(cwd: PathBuf, args: Vec<String>) -> Result<()> {
+/// Resolve the selected account at invocation time without recording shell arguments.
+pub fn run_shell(program: &str, cwd: PathBuf, args: Vec<String>) -> Result<()> {
+    let tool = Tool::ALL.into_iter().find(|tool| tool.program() == program)
+        .context("Unknown shell agent")?;
     let accounts = AccountManager::with_env(kiln_accounts::Env::real());
-    let spec = managed(Tool::Antigravity, cwd, &accounts)?;
-    let path = record_path(&spec).context("missing launch record")?;
-    let mut record = read(&path)?;
-    record.spec.args.extend(args);
-    private_write(&path, &serde_json::to_vec(&record)?)?;
-    run_request(&path, &record.generation, None, false)
+    if tool == Tool::Antigravity {
+        let spec = managed(tool, cwd, &accounts)?;
+        let path = record_path(&spec).context("missing launch record")?;
+        let mut record = read(&path)?;
+        record.spec.args.extend(args);
+        private_write(&path, &serde_json::to_vec(&record)?)?;
+        return run_request(&path, &record.generation, None, false);
+    }
+    let spec = remote_terminal::agent(tool, cwd).map_err(anyhow::Error::msg)?;
+    let env = accounts.launch_environment(tool)?;
+    let (program, lead) = agent_launch::launcher(Path::new(spec.program.as_ref().context("missing CLI executable")?));
+    let mut cmd = Command::new(program);
+    cmd.args(lead);
+    if let Some(cwd) = spec.cwd { cmd.current_dir(cwd); }
+    if tool == Tool::Codex && env.iter().any(|(name, _)| name == "KILN_AGENT_PROFILE") {
+        let store = codex_store_override(&SpawnSpec { env: env.clone(), ..Default::default() });
+        cmd.args(["-c", &store]);
+    }
+    cmd.envs(env.iter().cloned());
+    if let Some(launch) = accounts.connection_launch(tool, &env)? {
+        for key in launch.remove_env { cmd.env_remove(key); }
+        cmd.args(launch.args).envs(launch.env);
+    }
+    cmd.args(args);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(cmd.exec().into())
+    }
+    #[cfg(windows)]
+    std::process::exit(run_contained(cmd)?);
 }
 /// The launch record and generation in a `kiln agent-run --record <path> --generation <id>`
 /// command line.

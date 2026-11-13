@@ -36,7 +36,7 @@ enum Cmd {
     #[command(hide = true)]
     AgentRun { #[arg(long)] record: std::path::PathBuf, #[arg(long)] generation: String, #[arg(long)] request: Option<std::path::PathBuf>, #[arg(long)] resume: bool },
     #[command(hide = true)]
-    AgentShell { #[arg(long)] cwd: std::path::PathBuf, #[arg(last = true)] args: Vec<String> },
+    AgentShell { #[arg(long, default_value = "agy")] tool: String, #[arg(long)] cwd: std::path::PathBuf, #[arg(last = true)] args: Vec<String> },
     #[cfg(feature = "updater-test")]
     #[command(hide = true)]
     UpdaterTestRoot,
@@ -155,7 +155,7 @@ pub fn main() -> anyhow::Result<()> {
             app::agent_runtime::hook(std::path::Path::new(&record), &generation, std::io::stdin().lock())
         },
         Some(Cmd::AgentRun { record, generation, request, resume }) => app::agent_runtime::run_request(&record,&generation,request.as_deref(),resume),
-        Some(Cmd::AgentShell { cwd, args }) => app::agent_runtime::run_antigravity_shell(cwd, args),
+        Some(Cmd::AgentShell { tool, cwd, args }) => app::agent_runtime::run_shell(&tool, cwd, args),
         Some(Cmd::SyncWorker) => app::conversation_sync::serve_worker(),
         #[cfg(feature = "updater-test")]
         Some(Cmd::UpdaterTestRoot) => {

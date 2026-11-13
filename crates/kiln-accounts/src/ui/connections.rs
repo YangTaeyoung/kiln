@@ -50,9 +50,16 @@ pub(super) fn preset_label(preset: Preset) -> &'static str {
 }
 
 fn field(ui: &mut Ui, label: &str, value: &mut String, secret: bool, hint: &str) {
-    let label = ui.label(label);
+    let theme = Theme::current();
+    let label = ui.label(
+        RichText::new(label)
+            .font(fonts::medium(12.0))
+            .color(theme.text_dim),
+    );
     ui.add(
         egui::TextEdit::singleline(value)
+            .font(fonts::regular(13.0))
+            .margin(egui::Margin::symmetric(10, 8))
             .desired_width(ui.available_width())
             .password(secret)
             .hint_text(hint),
@@ -61,22 +68,41 @@ fn field(ui: &mut Ui, label: &str, value: &mut String, secret: bool, hint: &str)
 }
 
 fn pairs(ui: &mut Ui, title: &str, rows: &mut Vec<(String, String)>, hint: &str) {
-    ui.collapsing(title, |ui| {
+    ui.push_id(hint, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(title).font(fonts::semibold(12.0)));
+            if widgets::button_with(ui, Some(Icon::Plus), tr("추가"), ButtonKind::Ghost, true)
+                .clicked()
+            {
+                rows.push(Default::default());
+            }
+        });
         let mut remove = None;
         for (i, (name, value)) in rows.iter_mut().enumerate() {
             ui.push_id(i, |ui| {
-                field(ui, tr("이름"), name, false, hint);
-                field(ui, tr("값"), value, true, "");
-                if ui.small_button(tr("삭제")).clicked() {
-                    remove = Some(i);
-                }
+                let gap = ui.spacing().item_spacing.x;
+                let width = (ui.available_width() - 28.0 - gap * 2.0).max(0.0);
+                ui.horizontal(|ui| {
+                    let column = |ui: &mut Ui, width, label, value: &mut String, secret, hint| {
+                        ui.allocate_ui_with_layout(
+                            vec2(width, 58.0),
+                            Layout::top_down(Align::Min),
+                            |ui| {
+                                ui.set_width(width);
+                                field(ui, label, value, secret, hint);
+                            },
+                        );
+                    };
+                    column(ui, width * 0.42, tr("이름"), name, false, hint);
+                    column(ui, width * 0.58, tr("값"), value, true, "");
+                    if widgets::icon_button(ui, Icon::Trash, 28.0, false, tr("삭제")).clicked() {
+                        remove = Some(i);
+                    }
+                });
             });
         }
         if let Some(i) = remove {
             rows.remove(i);
-        }
-        if ui.small_button(tr("추가")).clicked() {
-            rows.push(Default::default());
         }
     });
 }
@@ -101,15 +127,26 @@ pub(super) fn form(ui: &mut Ui, mgr: &AccountManager, tool: Tool, busy: bool) {
     let theme = Theme::current();
     egui::Frame::new()
         .fill(theme.bg_hover)
-        .corner_radius(8)
-        .inner_margin(12)
+        .stroke(Stroke::new(1.0, theme.border))
+        .corner_radius(12)
+        .inner_margin(16)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.strong(tr(if draft.id.is_some() {
-                "API 연결 편집"
-            } else {
-                "API 연결 추가"
-            }));
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(tr(if draft.id.is_some() {
+                        "API 연결 편집"
+                    } else {
+                        "API 연결 추가"
+                    }))
+                    .font(fonts::semibold(16.0))
+                    .color(theme.text),
+                );
+                widgets::pill(ui, tool.display_name(), theme.text_dim);
+            });
+            ui.add_space(6.0);
+            widgets::divider(ui);
+            ui.add_space(6.0);
             field(ui, tr("이름"), &mut draft.label, false, "");
             let c = &mut draft.config;
             let previous_preset = c.preset;
@@ -192,29 +229,59 @@ pub(super) fn form(ui: &mut Ui, mgr: &AccountManager, tool: Tool, busy: bool) {
                 field(ui, label, &mut c.key, true, "");
             }
             field(ui, tr("모델"), &mut c.model, false, tr("선택 사항"));
-            if tool == Tool::Claude || matches!(c.preset, Preset::ApiKey | Preset::Gateway) {
-                pairs(ui, tr("추가 헤더"), &mut draft.headers, "X-Team");
-            }
-            if tool == Tool::Codex {
-                ui.collapsing(tr("Codex 모델 설정"), |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut c.codex_model_settings)
-                            .desired_width(ui.available_width())
-                            .desired_rows(3)
-                            .hint_text("model_reasoning_effort = \"medium\""),
-                    );
-                });
-            }
-            pairs(ui, tr("추가 환경 변수"), &mut draft.env, "NAME");
-            ui.horizontal_wrapped(|ui| {
-                save = widgets::button_with(
-                    ui,
-                    Some(Icon::Save),
-                    tr("저장"),
-                    ButtonKind::Primary,
-                    !busy && !draft.label.trim().is_empty(),
-                )
-                .clicked();
+            ui.add_space(6.0);
+            ui.collapsing(tr("고급 설정"), |ui| {
+                if tool == Tool::Claude || matches!(c.preset, Preset::ApiKey | Preset::Gateway) {
+                    pairs(ui, tr("추가 헤더"), &mut draft.headers, "X-Team");
+                }
+                pairs(ui, tr("추가 환경 변수"), &mut draft.env, "NAME");
+                if tool == Tool::Codex {
+                    ui.collapsing(tr("Codex 모델 설정"), |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut c.codex_model_settings)
+                                .desired_width(ui.available_width())
+                                .desired_rows(3)
+                                .hint_text("model_reasoning_effort = \"medium\""),
+                        );
+                    });
+                }
+            });
+            ui.add_space(6.0);
+            widgets::divider(ui);
+            ui.add_space(4.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let can_save = !busy
+                    && !draft.label.trim().is_empty()
+                    && match c.preset {
+                        Preset::Gateway => {
+                            !c.base_url.trim().is_empty() && !c.key.trim().is_empty()
+                        }
+                        Preset::ApiKey => !c.key.trim().is_empty(),
+                        Preset::Custom => true,
+                        Preset::Bedrock => {
+                            !c.region.trim().is_empty()
+                                && match c.aws_auth {
+                                    AwsAuth::Profile => !c.aws_profile.trim().is_empty(),
+                                    AwsAuth::Bearer => !c.key.trim().is_empty(),
+                                    AwsAuth::AccessKey => {
+                                        !c.aws_access_id.trim().is_empty()
+                                            && !c.key.trim().is_empty()
+                                    }
+                                }
+                        }
+                    };
+                save = ui
+                    .add_enabled_ui(can_save, |ui| {
+                        widgets::button_with(
+                            ui,
+                            Some(Icon::Save),
+                            tr("저장"),
+                            ButtonKind::Primary,
+                            false,
+                        )
+                    })
+                    .inner
+                    .clicked();
                 cancel =
                     widgets::button_with(ui, None, tr("취소"), ButtonKind::Ghost, true).clicked();
             });
@@ -286,6 +353,7 @@ mod tests {
                     mgr.ui_state().connection = Some(Draft::new(tool));
                     let mut h = egui_kittest::Harness::builder()
                         .with_size(vec2(420.0, 760.0))
+                        .wgpu()
                         .build_ui_state(
                             move |ui, mgr: &mut AccountManager| {
                                 if super::super::tests::test_fonts(ui) {
@@ -305,6 +373,20 @@ mod tests {
                             h.ctx.content_rect().contains_rect(node.rect()),
                             "{language:?}: {label} overflow"
                         );
+                    }
+                    if language == kiln_common::i18n::Language::Korean && tool == Tool::Claude {
+                        h.render()
+                            .unwrap()
+                            .save(std::env::temp_dir().join("kiln-connection-form-ko.png"))
+                            .unwrap();
+                        h.get_by_label(tr("고급 설정")).click();
+                        h.run_steps(6);
+                        h.get_all_by_label(tr("추가")).next().unwrap().click();
+                        h.run_steps(6);
+                        h.render()
+                            .unwrap()
+                            .save(std::env::temp_dir().join("kiln-connection-advanced-ko.png"))
+                            .unwrap();
                     }
                 }
             });

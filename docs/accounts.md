@@ -43,6 +43,22 @@ Connection values go in the local credential store. The account list keeps the
 connection name, type, and gateway host or AWS region. Connection profiles do not
 show subscription usage or participate in subscription account rotation.
 
+## Use the selected account from a terminal
+
+Open a new Kiln Zsh or PowerShell terminal after updating. Running `claude`
+or a local interactive `codex` command uses the account or API connection
+selected when you run it. An existing agent process keeps its current
+connection. User aliases and functions, native login commands and explicit
+remote Codex sessions keep their normal behavior. In Zsh, use
+`command claude` or `command codex` to run the original CLI directly.
+
+Kiln also checks native CLI sign-ins. A newly observed account with a known
+identity reuses its saved profile or creates one and selects it. Supported Claude
+Code gateway settings and Codex API-key or Responses-provider settings are
+imported from their user configuration; the Codex provider's key variable must
+be available to Kiln. Unchanged native settings do not override a manual
+selection. Antigravity account detection is available on macOS.
+
 ## Add an account
 
 1. Choose **Add account** on the agent's card.

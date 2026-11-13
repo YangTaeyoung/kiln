@@ -20,7 +20,9 @@ Clicking an item also inserts it and keeps terminal focus.
 ## Commands, options and arguments
 
 The shell supplies installed command names and resolves the executable with its
-own PATH. Kiln reads structured `--help` output for recognized commands and nested
+own PATH, plus the names of aliases and shell functions. A final `$NAME` or
+`${NAME` prefix completes exported variable names without reading their values.
+Kiln reads structured `--help` output for recognized commands and nested
 subcommands. This discovers command and option names from the installed version
 without adding a specification for each CLI. Supported layouts include Clap,
 Cobra, Click and argparse help. Help that cannot be recognized falls back to the
@@ -37,7 +39,7 @@ Argument kinds change the choices:
 - `cd ` offers directories under the current shell directory. Inserting a
   directory exposes its children. Spaces, quotes and Unicode names are escaped
   for the shell.
-- File arguments such as `cat `, `open ` and `git add ` offer local files and
+- File arguments such as `cat `, `open ` and `git add `, and plain arguments to uncatalogued commands such as `vi `, offer local files and
   folders. Hidden entries appear when the current path component starts with a dot.
 - Directory options such as `docker --config` and
   `docker compose --project-directory` offer directories. Compose `--file` and
@@ -80,7 +82,7 @@ applications and unsupported shells retain their normal input behavior.
 
 Turn off **Command suggestions** in Terminal settings to hide automatic menus.
 Set `KILN_COMPLETION_PREVIEW=0` in the shell to stop preview metadata as well.
-Control+Space remains available. Expansion expressions, pipelines, redirections
+Control+Space remains available. Complex expansion expressions, pipelines, redirections
 and editing before the end of the buffer use native shell completion.
 
 Completion requires no agent account or model connection. It reads no history

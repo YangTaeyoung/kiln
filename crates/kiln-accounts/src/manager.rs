@@ -171,6 +171,10 @@ struct ToolSettings {
     /// 현재 계정으로 전환한 시각(unix 초).
     #[serde(default)]
     active_since: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    live_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    external_connection_fingerprint: Option<String>,
     /// Claude Code 키체인 항목의 account 속성.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     keychain_account: Option<String>,
@@ -297,7 +301,6 @@ impl AccountManager {
     /// 실제 환경에서 설정을 읽고, 현재 로그인 계정 확인을 백그라운드로 시작한다.
     pub fn load() -> Self {
         let m = Self::with_env(Env::real());
-        m.check_live_identity_async();
         m.start_usage_updates();
         m
     }
@@ -432,7 +435,11 @@ impl AccountManager {
         if !started { return; }
         self.repaint();
         let m = self.clone();
-        std::thread::spawn(move || { m.check_profile_credentials(); m.repaint(); });
+        std::thread::spawn(move || {
+            for tool in Tool::ACCOUNTS { m.check_live_identity(tool); }
+            m.check_profile_credentials();
+            m.repaint();
+        });
     }
 
     fn check_profile_credentials(&self) {
@@ -690,9 +697,160 @@ impl AccountManager {
     }
 
     fn check_live_identity(&self, tool: Tool) {
-        let live = self.read_live(tool).ok().flatten();
-        let email = if live.is_some() { self.live_identity(tool, live.as_ref().map(|l| l.0.as_str())).0 } else { None };
-        self.with_state(|s| s.live_email[idx(tool)] = Some(email));
+        let _ = self.reconcile_live_login(tool);
+        let _ = self.reconcile_native_connection(tool);
+    }
+
+    fn live_fingerprint(secret: &str) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(secret.as_bytes()))
+    }
+
+    /// Adopt verified external OAuth changes without rewriting the external CLI's login.
+    fn reconcile_live_login(&self, tool: Tool) -> Result<()> {
+        let _op = self.inner.op.lock();
+        if self.with_state(|s| s.busy[idx(tool)].is_some()) { return Ok(()); }
+        let Some((secret, acct)) = self.read_live(tool)? else {
+            let changed = self.with_state(|s| {
+                s.live_email[idx(tool)] = Some(None);
+                let ts = s.settings.tool_mut(tool);
+                if ts.live_fingerprint.as_deref() == Some("absent") { return false; }
+                ts.live_fingerprint = Some("absent".into());
+                true
+            });
+            return if changed { self.persist() } else { Ok(()) };
+        };
+        let digest = Self::live_fingerprint(&secret);
+        let (baseline, active) = self.with_state(|s| {
+            let ts = s.settings.tool(tool);
+            (ts.live_fingerprint.clone(), ts.active.clone())
+        });
+        if baseline.as_deref() == Some(digest.as_str()) { return Ok(()); }
+        // Existing installs did not track the native CLI baseline. Do not
+        // replace their selected profile merely because Kiln was upgraded.
+        if baseline.is_none() && active.is_some() {
+            self.with_state(|s| s.settings.tool_mut(tool).live_fingerprint = Some(digest));
+            return self.persist();
+        }
+        if tool == Tool::Codex && !codex::has_chatgpt_tokens(&secret) { return Ok(()); }
+        if tool == Tool::Claude { claude::access_token(&secret)?; }
+        let (email, oauth) = if tool == Tool::Antigravity {
+            (Some((self.inner.env.antigravity_identity)(&secret)?), None)
+        } else {
+            self.live_identity(tool, Some(&secret))
+        };
+        let Some(email) = email else { return Ok(()); };
+        // A rotated native token does not supersede an isolated active login
+        // of the same identity, which owns its own refresh token.
+        if let Some(id) = active.as_deref()
+            && self.profiles(tool).iter().any(|p| p.id == id && p.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(&email)))
+        {
+            self.with_state(|s| {
+                s.live_email[idx(tool)] = Some(Some(email));
+                s.settings.tool_mut(tool).live_fingerprint = Some(digest);
+            });
+            return self.persist();
+        }
+        let existing = self.profiles(tool).into_iter().find(|p| p.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(&email)));
+        if let Some(profile) = existing.as_ref()
+            && self.runtime_dir(tool, &profile.id).join("initialized").is_file()
+            && self.runtime_secret(tool, &profile.id)?.is_none()
+        {
+            self.write_runtime(tool, &profile.id, &secret, oauth.as_ref())?;
+        }
+        let profile = self.save_credentials_locked(tool, "", secret, acct, Some(email), oauth, true)?;
+        self.with_state(|s| s.events.push(AccountsEvent::Switched { tool, id: profile.id }));
+        Ok(())
+    }
+
+    // Read only explicitly supported native configurations; never run helpers,
+    // load project settings, or copy arbitrary configuration into a profile.
+    fn native_connection(&self, tool: Tool) -> Option<Connection> {
+        let env = &self.inner.env;
+        let mut config = Connection::default();
+        match tool {
+            Tool::Claude => {
+                let root = env.claude_config_dir.clone().unwrap_or_else(|| env.home.join(".claude"));
+                let raw = std::fs::read_to_string(root.join("settings.json")).ok()?;
+                let doc: Value = serde_json::from_str(&raw).ok()?;
+                let value = |key: &str| doc["env"][key].as_str().unwrap_or_default().to_owned();
+                config.base_url = value("ANTHROPIC_BASE_URL");
+                config.model = value("ANTHROPIC_MODEL");
+                config.key = value("ANTHROPIC_AUTH_TOKEN");
+                if config.key.is_empty() {
+                    config.key = value("ANTHROPIC_API_KEY");
+                    config.x_api_key = true;
+                } else if config.base_url.is_empty() {
+                    return None;
+                }
+            }
+            Tool::Codex => {
+                let native_key = self.read_live(tool).ok().flatten().and_then(|(secret, _)| {
+                    let doc: Value = serde_json::from_str(&secret).ok()?;
+                    doc["OPENAI_API_KEY"].as_str().map(str::to_owned)
+                });
+                let doc = std::fs::read_to_string(env.codex_home.join("config.toml")).ok()
+                    .and_then(|raw| raw.parse::<toml::Table>().ok()).unwrap_or_default();
+                config.model = doc.get("model").and_then(toml::Value::as_str).unwrap_or_default().into();
+                if let Some(provider) = doc.get("model_provider").and_then(toml::Value::as_str).filter(|p| *p != "openai") {
+                    let provider = doc.get("model_providers")?.get(provider)?;
+                    if provider.get("wire_api").and_then(toml::Value::as_str).is_some_and(|wire| wire != "responses") { return None; }
+                    config.base_url = provider.get("base_url")?.as_str()?.into();
+                    let key = provider.get("env_key")?.as_str()?;
+                    config.key = std::env::var(key).ok()?;
+                } else {
+                    config.key = native_key?;
+                }
+            }
+            Tool::Antigravity => return None,
+        }
+        if !config.base_url.is_empty() { config.preset = Preset::Gateway; }
+        config.launch(tool).ok()?;
+        Some(config)
+    }
+
+    fn native_connection_digest(config: Option<&Connection>) -> String {
+        config.and_then(|c| serde_json::to_string(c).ok()).map_or_else(|| "absent".into(), |s| Self::live_fingerprint(&s))
+    }
+
+    fn reconcile_native_connection(&self, tool: Tool) -> Result<()> {
+        if tool == Tool::Antigravity { return Ok(()); }
+        let _op = self.inner.op.lock();
+        if self.with_state(|s| s.busy[idx(tool)].is_some()) { return Ok(()); }
+        let config = self.native_connection(tool);
+        let digest = Self::native_connection_digest(config.as_ref());
+        let (baseline, active) = self.with_state(|s| {
+            let ts = s.settings.tool(tool);
+            (ts.external_connection_fingerprint.clone(), ts.active.clone())
+        });
+        if baseline.as_deref() == Some(digest.as_str()) { return Ok(()); }
+        let previous = self.with_state(|s| s.settings.clone());
+        if let Some(config) = config.filter(|_| baseline.is_some() || active.is_none()) {
+            let existing = self.profiles(tool).iter().filter(|p| self.connection_summary(tool, &p.id).is_some())
+                .find(|p| self.read_connection(tool, &p.id).ok().is_some_and(|saved| {
+                    saved.preset == config.preset
+                        && saved.x_api_key == config.x_api_key
+                        && saved.key.trim() == config.key.trim()
+                        && saved.base_url.trim_end_matches('/') == config.base_url.trim_end_matches('/')
+                        && saved.model.trim() == config.model.trim()
+                })).cloned();
+            let profile = if let Some(profile) = existing { profile } else {
+                let label = config.destination().unwrap_or_else(|| format!("{} API", tool.display_name()));
+                self.save_connection_locked(tool, None, &label, config)?
+            };
+            self.with_state(|s| {
+                let ts = s.settings.tool_mut(tool);
+                ts.active = Some(profile.id.clone());
+                ts.active_since = now_unix();
+                s.events.push(AccountsEvent::Switched { tool, id: profile.id });
+            });
+        }
+        self.with_state(|s| s.settings.tool_mut(tool).external_connection_fingerprint = Some(digest));
+        if let Err(error) = self.persist() {
+            self.with_state(|s| s.settings = previous);
+            return Err(error);
+        }
+        Ok(())
     }
 
     // ---- 저장·전환 ----
@@ -740,6 +898,7 @@ impl AccountManager {
             if activate {
                 ts.active = Some(id.clone());
                 ts.active_since = now;
+                ts.live_fingerprint = Some(Self::live_fingerprint(&secret));
             }
             let profile = if let Some(p) = ts.profiles.iter_mut().find(|p| p.profile.id == id) {
                 p.pending_login = !activate;
@@ -807,6 +966,10 @@ impl AccountManager {
 
     pub fn save_connection(&self, tool: Tool, id: Option<&str>, label: &str, config: Connection) -> Result<Profile> {
         let _op = self.inner.op.lock();
+        self.save_connection_locked(tool, id, label, config)
+    }
+
+    fn save_connection_locked(&self, tool: Tool, id: Option<&str>, label: &str, config: Connection) -> Result<Profile> {
         config.launch(tool)?;
         let label = label.trim();
         ensure!(!label.is_empty(), "Enter a connection name");
@@ -848,6 +1011,10 @@ impl AccountManager {
     }
 
     /// Persistent CLI-owned credentials: bootstrap once, then let the CLI refresh them.
+    pub fn adopt_external_login(&self, tool: Tool) {
+        if tool.has_accounts() { self.check_live_identity(tool); }
+    }
+
     pub fn launch_environment(&self, tool: Tool) -> Result<Vec<(String, String)>> {
         if !tool.has_accounts() { return Ok(Vec::new()); }
         let _op = self.inner.op.lock();
@@ -1068,6 +1235,9 @@ impl AccountManager {
             bail!(kiln_common::trf!("프로필을 찾을 수 없습니다: {id}"));
         };
         self.sync_back_locked(tool)?;
+        let native_fingerprint = self.read_live(tool).ok()
+            .map(|current| current.map_or_else(|| "absent".into(), |(secret, _)| Self::live_fingerprint(&secret)));
+        let external_digest = Self::native_connection_digest(self.native_connection(tool).as_ref());
         if self.connection_summary(tool, id).is_some() {
             self.read_connection(tool, id)?.launch(tool)?;
             let previous = self.with_state(|s| {
@@ -1075,6 +1245,8 @@ impl AccountManager {
                 let ts = s.settings.tool_mut(tool);
                 ts.active = Some(id.into());
                 ts.active_since = now_unix();
+                ts.live_fingerprint = native_fingerprint;
+                ts.external_connection_fingerprint = Some(external_digest);
                 old
             });
             if let Err(error) = self.persist() {
@@ -1114,6 +1286,8 @@ impl AccountManager {
             let ts = s.settings.tool_mut(tool);
             ts.active = Some(id.to_string());
             ts.active_since = now_unix();
+            ts.external_connection_fingerprint = Some(external_digest);
+            ts.live_fingerprint = if tool == Tool::Antigravity { native_fingerprint } else { Some(Self::live_fingerprint(&secret)) };
             if let Some(profile) = ts.profiles.iter_mut().find(|profile| profile.profile.id == id) { profile.pending_login = false; }
             s.live_email[idx(tool)] = Some(email);
             s.login_required.remove(&(tool, id.to_string()));
@@ -1254,6 +1428,9 @@ impl AccountManager {
                     }
                 }
                 if periodic {
+                    if manager.inner.env.settings_path == kiln_common::paths::config_file("accounts.json") {
+                        manager.check_live_identity_async();
+                    }
                     next = std::time::Instant::now() + interval;
                 }
                 drop(manager);
@@ -1708,6 +1885,67 @@ fn new_id(tool: Tool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_gateway_settings_select_matching_connection_without_duplicate() {
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(root.path(), false);
+        let manager = AccountManager::with_env(env.clone());
+        let source = env.home.join(".claude/settings.json");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        let native = |host: &str, key: &str| {
+            std::fs::write(&source, serde_json::to_vec(&serde_json::json!({
+                "env": {"ANTHROPIC_BASE_URL": host, "ANTHROPIC_AUTH_TOKEN": key}
+            })).unwrap()).unwrap();
+        };
+        native("https://first.example", "fixture-key-a");
+        manager.reconcile_native_connection(Tool::Claude).unwrap();
+        let first = manager.active(Tool::Claude).unwrap();
+        native("https://second.example", "fixture-key-b");
+        manager.reconcile_native_connection(Tool::Claude).unwrap();
+        let second = manager.active(Tool::Claude).unwrap();
+        assert_ne!(first, second);
+        manager.switch_to(Tool::Claude, &first).unwrap();
+        manager.reconcile_native_connection(Tool::Claude).unwrap();
+        assert_eq!(manager.active(Tool::Claude).as_deref(), Some(first.as_str()));
+        native("https://first.example/", "fixture-key-a");
+        manager.reconcile_native_connection(Tool::Claude).unwrap();
+        assert_eq!(manager.profiles(Tool::Claude).len(), 2);
+        assert!(!std::fs::read_to_string(env.settings_path).unwrap().contains("fixture-key"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn external_antigravity_login_imports_verified_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, store) = Env::sandbox(root.path(), false);
+        env.antigravity_identity = Arc::new(|secret| Ok(format!("{}@example.test", antigravity::access_token(secret)?)));
+        let manager = AccountManager::with_env(env);
+        for name in ["first", "second", "first"] {
+            store.set(antigravity::SERVICE, antigravity::ACCOUNT, &serde_json::json!({"token":{"access_token":name,"refresh_token":"fixture"}}).to_string()).unwrap();
+            manager.reconcile_live_login(Tool::Antigravity).unwrap();
+            let profile = manager.profiles(Tool::Antigravity).into_iter().find(|p| Some(&p.id) == manager.active(Tool::Antigravity).as_ref()).unwrap();
+            assert_eq!(profile.email.unwrap(), format!("{name}@example.test"));
+        }
+        assert_eq!(manager.profiles(Tool::Antigravity).len(), 2);
+    }
+
+    #[test]
+    fn external_claude_login_reuses_existing_profile_and_imports_new_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(root.path(), true);
+        let mgr = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "first@example.test", "first");
+        mgr.reconcile_live_login(Tool::Claude).unwrap();
+        let first = mgr.active(Tool::Claude).unwrap();
+        login_claude(&env, &store, "second@example.test", "second");
+        mgr.reconcile_live_login(Tool::Claude).unwrap();
+        assert_ne!(mgr.active(Tool::Claude).as_deref(), Some(first.as_str()));
+        login_claude(&env, &store, "first@example.test", "first-relogin");
+        mgr.reconcile_live_login(Tool::Claude).unwrap();
+        assert_eq!(mgr.active(Tool::Claude).as_deref(), Some(first.as_str()));
+        assert_eq!(mgr.profiles(Tool::Claude).len(), 2);
+    }
 
     #[test]
     fn gateway_connection_pins_credentials_without_persisting_them_in_launch_environment() {

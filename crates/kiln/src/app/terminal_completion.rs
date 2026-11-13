@@ -119,6 +119,23 @@ pub fn candidates(
 mod tests {
     use super::*;
     #[test]
+    fn names_and_generic_file_paths_complete_without_expanding_values() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("sample file.txt"), "").unwrap();
+        let names = ["variable:PROJECT_ROOT", "variable:SECRET=never", "alias:proj", "function:project_open"].map(String::from);
+        let complete = |text: &str| candidates(text, text.chars().count(), dir.path(), &names);
+        assert_eq!(complete("echo $PRO")[0].buffer, "echo $PROJECT_ROOT");
+        assert_eq!(complete("echo ${PROJECT_ROOT")[0].buffer, "echo ${PROJECT_ROOT}");
+        assert!(complete("echo '$PRO").is_empty());
+        assert!(complete("echo $(echo $PRO").is_empty());
+        assert!(complete("echo $SECRET").is_empty());
+        assert!(complete("pro").iter().any(|c| c.label == "proj" && c.description == "별칭"));
+        assert!(complete("pro").iter().any(|c| c.label == "project_open"));
+        assert_eq!(complete("vi sam")[0].buffer, "vi 'sample file.txt'");
+        assert_eq!(complete("unknown-tool ./sam")[0].buffer, "unknown-tool './sample file.txt'");
+    }
+
+    #[test]
     fn paths_quotes_unicode_and_no_shell_execution() {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir(d.path().join("한 글")).unwrap();

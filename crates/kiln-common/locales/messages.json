@@ -12043,5 +12043,30 @@
     "en": "Codex model settings",
     "ja": "Codex モデル設定",
     "zh-CN": "Codex 模型设置"
+  },
+  "고급 설정": {
+    "en": "Advanced settings",
+    "ja": "詳細設定",
+    "zh-CN": "高级设置"
+  },
+  "환경 변수": {
+    "en": "Environment variable",
+    "ja": "環境変数",
+    "zh-CN": "环境变量"
+  },
+  "별칭": {
+    "en": "Alias",
+    "ja": "エイリアス",
+    "zh-CN": "别名"
+  },
+  "셸 함수": {
+    "en": "Shell function",
+    "ja": "シェル関数",
+    "zh-CN": "Shell 函数"
+  },
+  "로그인 코드 확인 시간이 초과되었습니다. 로그인을 다시 시작해 새 코드를 입력하세요": {
+    "en": "Code verification timed out. Start sign-in again and enter a new code.",
+    "ja": "コードの確認がタイムアウトしました。ログインをやり直して新しいコードを入力してください。",
+    "zh-CN": "验证码确认超时。请重新登录并输入新验证码。"
   }
 }

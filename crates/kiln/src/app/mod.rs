@@ -197,6 +197,7 @@ pub enum Action {
     NextPage(i32),
     Split(Dir),
     SplitPane(PaneId, Dir),
+    SplitAgent(PaneId, Dir, kiln_accounts::Tool),
     ClosePane(PaneId, bool),
     CloseActive,
     FocusPane(PaneId),
@@ -388,6 +389,7 @@ mod inspector_state_tests {
 struct PreparingAgent {
     /// Id of the workspace the launch was requested from.
     workspace: u64,
+    split: Option<(u64, PaneId, Dir)>,
     task: kiln_common::task::Task<Result<SpawnSpec, String>>,
     request: Option<(agent_launch::Prepared, String)>,
 }
@@ -879,6 +881,7 @@ impl KilnApp {
         let accounts = self.rotator.mgr.clone();
         let request_path = request.as_ref().map(|(prepared, _)| prepared.request_path.clone());
         let task = kiln_common::task::Task::spawn(ctx, move || {
+            accounts.adopt_external_login(tool);
             let spec = agent_runtime::managed(tool, cwd, &accounts).map_err(|e| e.to_string())?;
             match request_path {
                 Some(path) => agent_runtime::request_spec(&spec, &path).map_err(|e| e.to_string()),
@@ -886,7 +889,7 @@ impl KilnApp {
             }
         });
         let workspace = self.ws().id;
-        self.preparing_agents.push(PreparingAgent { workspace, task, request });
+        self.preparing_agents.push(PreparingAgent { workspace, split: None, task, request });
     }
 
     fn start_prepared_agents(&mut self, ctx: &egui::Context) {
@@ -896,13 +899,19 @@ impl KilnApp {
                 index += 1;
                 continue;
             }
-            let PreparingAgent { workspace, mut task, request } = self.preparing_agents.remove(index);
+            let PreparingAgent { workspace, split, mut task, request } = self.preparing_agents.remove(index);
             let result = task
                 .take()
                 .unwrap_or_else(|| Err(kiln_common::i18n::tr("작업을 시작할 수 없습니다").into()));
             let target = self.workspaces.iter().position(|w| w.id == workspace);
             match (result, target) {
-                (Ok(spec), Some(target)) => self.open_agent_page(target, spec, request, ctx),
+                (Ok(spec), Some(target)) => {
+                    if let Some((page, anchor, dir)) = split {
+                        self.open_agent_split(target, page, anchor, dir, spec);
+                    } else {
+                        self.open_agent_page(target, spec, request, ctx);
+                    }
+                }
                 (result, _) => {
                     if let Some((prepared, _)) = &request {
                         let _ = std::fs::remove_file(&prepared.request_path);
@@ -913,6 +922,30 @@ impl KilnApp {
                 }
             }
         }
+    }
+
+    fn open_agent_split(&mut self, workspace: usize, page_id: u64, anchor: PaneId, dir: Dir, spec: SpawnSpec) {
+        let Some(page_index) = self.workspaces[workspace].pages.iter().position(|p| p.id == page_id) else { return; };
+        let pane = self.new_term_pane(spec.cwd.clone());
+        let page = &mut self.workspaces[workspace].pages[page_index];
+        if !page.root.split(anchor, dir, pane) {
+            self.panes.remove(&pane);
+            return;
+        }
+        page.focused = pane;
+        page.zoomed = None;
+        self.launch_specs.insert(pane, spec);
+        self.spawn_for_pane(pane);
+        if workspace == self.active && page_index == self.ws().active_page {
+            self.focus_terminal = true;
+        }
+    }
+
+    fn split_cwd(&self, target: PaneId) -> Option<String> {
+        self.panes.get(&target).and_then(|p| p.session())
+            .and_then(|s| self.conn.infos.get(&s)).and_then(|i| i.cwd.clone())
+            .or_else(|| self.panes.get(&target).and_then(|p| p.cwd.clone()))
+            .or_else(|| self.workspaces.get(self.active).map(|w| w.root.to_string_lossy().into_owned()))
     }
 
     fn open_agent_page(&mut self, target: usize, spec: SpawnSpec, request: Option<(agent_launch::Prepared, String)>, ctx: &egui::Context) {
@@ -1323,14 +1356,19 @@ impl KilnApp {
                 let f = self.ws().page().focused;
                 self.apply(Action::SplitPane(f, dir), ctx);
             }
+            Action::SplitAgent(target, dir, tool) => {
+                let Some(cwd) = self.split_cwd(target) else { return; };
+                let workspace = self.ws().id;
+                let page = self.ws().page().id;
+                let accounts = self.rotator.mgr.clone();
+                let task = kiln_common::task::Task::spawn(ctx, move || {
+                    accounts.adopt_external_login(tool);
+                    agent_runtime::managed(tool, PathBuf::from(cwd), &accounts).map_err(|e| e.to_string())
+                });
+                self.preparing_agents.push(PreparingAgent { workspace, split: Some((page, target, dir)), task, request: None });
+            }
             Action::SplitPane(target, dir) => {
-                let cwd = self
-                    .panes
-                    .get(&target)
-                    .and_then(|p| p.session())
-                    .and_then(|s| self.conn.infos.get(&s))
-                    .and_then(|i| i.cwd.clone())
-                    .or_else(|| self.workspaces.get(self.active).map(|w| w.root.to_string_lossy().into_owned()));
+                let cwd = self.split_cwd(target);
                 let pane = self.new_term_pane(cwd);
                 let page = self.ws().page_mut();
                 if page.root.split(target, dir, pane) {

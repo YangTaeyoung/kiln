@@ -1,5 +1,9 @@
 # Arrange your panes
 
+The right and down split buttons in a panel header open a menu. Choose
+Terminal, Claude Code, Codex, or Antigravity to open it in that split.
+Keyboard split shortcuts still create a terminal directly.
+
 Drag a pane's title to the left, right, top, or bottom of another pane. The
 highlight shows its destination in the resulting layout. Moving a pane preserves
 its terminal session and running process; it does not open a replacement shell.
