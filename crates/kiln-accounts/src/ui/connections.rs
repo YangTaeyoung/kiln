@@ -237,11 +237,12 @@ pub(super) fn form(ui: &mut Ui, mgr: &AccountManager, tool: Tool, busy: bool) {
                 pairs(ui, tr("추가 환경 변수"), &mut draft.env, "NAME");
                 if tool == Tool::Codex {
                     ui.collapsing(tr("Codex 모델 설정"), |ui| {
+                        let example = "model_reasoning_effort = \"medium\"";
                         ui.add(
                             egui::TextEdit::multiline(&mut c.codex_model_settings)
                                 .desired_width(ui.available_width())
                                 .desired_rows(3)
-                                .hint_text("model_reasoning_effort = \"medium\""),
+                                .hint_text(example),
                         );
                     });
                 }
