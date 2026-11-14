@@ -5,6 +5,8 @@ description: Shell integration, activity reporting, command history, completion,
 
 Every Kiln task runs in a real terminal session owned by a local daemon. Shell integration adds command tracking, activity reporting and completion on top, and sessions keep running when you close the window.
 
+Korean input stays composed in agent terminals even when the agent hides its cursor.
+
 ## Shell integration {#shell-integration}
 
 New default zsh sessions get shell integration automatically. It tracks command boundaries and the working directory, and it does not modify your `.zshrc`.
