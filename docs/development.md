@@ -92,3 +92,13 @@ Escape, Korean/Latin input-source changes, another tab/panel, app blur/return,
 search, and the quick-terminal window. Confirm there are no leftover glyphs or
 unexpected committed characters. Event replay tests do not establish native IME
 latency or candidate-popup behavior.
+
+Cursor visibility must not control IME activation. Claude Code and other TUIs
+can hide the terminal cursor while waiting for input or redrawing. The focused
+terminal keeps IME enabled and renders preedit at the last visible cursor position,
+clamped to the current grid. Before any visible cursor arrives, it uses the
+bottom-left cell. The TUI's hidden cursor remains hidden. The `ime_` library
+regressions cover hidden/visible transitions; `direct_terminal_launch` opens the
+Claude Code menu entry with a cursor-hiding fixture and verifies composed Korean
+delivery through an isolated real PTY. Physical input-source and candidate-popup
+behavior still require installed-app verification.

@@ -68,8 +68,11 @@ read hold
             format!(r#"#!/bin/sh
 if [ "$1" = --version ]; then printf '1.2.3\n'; exit 0; fi
 /bin/pwd -P > {}
+printf '\033[?25l'
 printf 'CLAUDE_READY\n'
 read line
+printf 'CLAUDE_RECEIVED=%s\n' "$line"
+read hold
 "#, quote(&claude_cwd)),
         ),
         (
@@ -143,14 +146,31 @@ read line
     h.run_steps(3);
     assert_eq!(h.state().debug_focused_launch_spec(), Some(agent));
     pump(&mut h, "CODEX_READY");
-    h.state_mut().debug_apply_action(
-        &ctx,
-        Action::DirectAgent {
-            tool: kiln_accounts::Tool::Claude,
-            cwd: None,
-        },
-    );
+    h.get_by_label("새 작업").click();
+    h.run_steps(2);
+    h.get_by_label("Claude Code").click();
     pump(&mut h, "CLAUDE_READY");
+    // The daemon can publish its first frame before the menu has closed and
+    // terminal focus has transferred. Wait for the actual input-ready frame.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.output().platform_output.ime.is_none() {
+        h.step();
+        assert!(Instant::now() < deadline, "menu-launched Claude must allow IME with its cursor hidden");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    for text in ["ㅎ", "하", "한"] {
+        h.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: text.into(), active_range_chars: Some(1..1) }));
+        h.run_steps(2);
+        assert!(h.output().platform_output.ime.is_some());
+        assert!(!h.state().debug_focused_text().unwrap().contains(text), "preedit must not reach the PTY");
+    }
+    h.event(egui::Event::Ime(egui::ImeEvent::Commit("한".into())));
+    h.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: "글".into(), active_range_chars: Some(1..1) }));
+    h.run_steps(2);
+    h.event(egui::Event::Ime(egui::ImeEvent::Commit("글".into())));
+    h.event(egui::Event::Text("?".into()));
+    h.key_press(egui::Key::Enter);
+    pump(&mut h, "CLAUDE_RECEIVED=한글?");
     assert_eq!(
         std::fs::read_to_string(&claude_cwd).unwrap().trim_end(),
         workspace.canonical().unwrap().to_str().unwrap(),
