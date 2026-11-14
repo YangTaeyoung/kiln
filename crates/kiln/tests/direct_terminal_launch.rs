@@ -68,6 +68,7 @@ read hold
             format!(r#"#!/bin/sh
 if [ "$1" = --version ]; then printf '1.2.3\n'; exit 0; fi
 /bin/pwd -P > {}
+if ! /usr/bin/grep -q 'fixture-mcp' "$CLAUDE_CONFIG_DIR/.claude.json"; then exit 12; fi
 printf '\033[?25l'
 printf 'CLAUDE_READY\n'
 read line
@@ -146,7 +147,17 @@ read hold
     h.run_steps(3);
     assert_eq!(h.state().debug_focused_launch_spec(), Some(agent));
     pump(&mut h, "CODEX_READY");
-    h.get_by_label("새 작업").click();
+    // Existing native registrations must reach the CLI selected in the split menu.
+    let account_home = base.join("accounts/home");
+    std::fs::create_dir_all(account_home.join(".claude")).unwrap();
+    std::fs::write(account_home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"fixture","refreshToken":"fixture"}}"#).unwrap();
+    std::fs::write(account_home.join(".claude.json"), serde_json::json!({
+        "oauthAccount": {"emailAddress":"fixture@example.test"},
+        "mcpServers": {"fixture-mcp": {"type":"stdio", "command":"fixture-server"}}
+    }).to_string()).unwrap();
+    h.state().debug_accounts().save_current(kiln_accounts::Tool::Claude, "Fixture").unwrap();
+    h.get_by_label("오른쪽으로 나누기").click();
     h.run_steps(2);
     h.get_by_label("Claude Code").click();
     pump(&mut h, "CLAUDE_READY");

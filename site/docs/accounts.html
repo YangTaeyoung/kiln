@@ -58,6 +58,7 @@
 </ul>
 <p>Every saved account keeps its own configuration for the panels Kiln opens, so all of them stay signed in at once. Running agent sessions keep the account they started with. After switching, open a new agent panel to use the new account. A CLI you typed into an ordinary shell keeps using that shell's configuration, and Kiln never restarts it or replaces its credentials.</p>
 <p>Kiln does not rotate a running panel to another account when it reaches a usage limit. Choose another account here and open a new panel instead.</p>
+<p>Claude Code panels opened from <strong>New Task</strong>, a split menu or a selected-account shell inherit your existing user and project-local MCP registrations, including when you use an API connection. Project <code>.mcp.json</code> files keep their normal scope. New launches refresh inherited entries; MCP entries you edit or remove inside an account stay private to that account. Kiln reads your original configuration without changing it and keeps the selected login and workspace trust decisions separate. A remote MCP server may ask you to sign in again.</p>
 <h2 id="sign-in-again">Sign in again</h2>
 <p>Use this when a profile's login needs repairing. You keep the profile instead of deleting and recreating it.</p>
 <ol>
@@ -151,6 +152,7 @@
 </ul>
 <p>저장된 계정마다 Kiln이 여는 패널용 설정을 따로 두므로, 모든 계정이 동시에 로그인 상태를 유지합니다. 실행 중인 에이전트 세션은 시작할 때의 계정을 계속 씁니다. 전환한 계정을 쓰려면 새 에이전트 패널을 여세요. 일반 셸에서 직접 실행한 CLI는 그 셸의 설정을 계속 쓰며, Kiln은 이 CLI를 재시작하거나 자격 증명을 바꾸지 않습니다.</p>
 <p>실행 중인 패널이 사용량 한도에 도달해도 Kiln이 다른 계정으로 바꿔 주지는 않습니다. 이 화면에서 다른 계정을 고르고 새 패널을 여세요.</p>
+<p><strong>새 작업</strong>, 분할 메뉴 또는 선택한 계정을 사용하는 셸에서 연 Claude Code 패널은 기존 사용자 범위 및 프로젝트 로컬 MCP 등록을 이어받습니다. API 연결에도 적용되며, 프로젝트 <code>.mcp.json</code> 파일은 원래 범위를 유지합니다. 새로 실행할 때 가져온 항목을 갱신하고, 계정 안에서 직접 수정하거나 삭제한 MCP 항목은 해당 계정의 설정을 유지합니다. Kiln은 원본 설정을 변경하지 않으며 선택한 로그인과 작업 폴더 신뢰 승인은 별도로 유지합니다. 원격 MCP 서버는 다시 로그인을 요청할 수 있습니다.</p>
 <h2 id="sign-in-again">다시 로그인하기</h2>
 <p>프로필의 로그인을 복구해야 할 때 씁니다. 프로필을 지우고 다시 만들 필요 없이 그대로 유지됩니다.</p>
 <ol>
@@ -244,6 +246,7 @@
 </ul>
 <p>保存したアカウントは、Kiln が開くパネル用の構成をそれぞれ個別に持つので、すべてのアカウントで同時にログイン状態を保てます。実行中のエージェントセッションは、開始時のアカウントを使い続けます。切り替えた後に新しいアカウントを使うには、エージェントのパネルを新しく開いてください。通常のシェルでコマンドを入力して起動した CLI はそのシェルの構成を使い続けます。Kiln がその CLI を再起動したり、認証情報を置き換えたりすることはありません。</p>
 <p>実行中のパネルが使用量の上限に達しても、Kiln が別のアカウントに自動で切り替えることはありません。ここで別のアカウントを選び、新しいパネルを開いてください。</p>
+<p><strong>新しいタスク</strong>、分割メニュー、または選択中のアカウントを使うシェルから開いた Claude Code パネルは、既存のユーザー範囲とプロジェクトローカルの MCP 登録を引き継ぎます。API 接続にも適用され、プロジェクトの <code>.mcp.json</code> は元の範囲を維持します。新しく起動すると取り込んだ項目を更新し、アカウント内で直接変更・削除した MCP 項目はそのアカウントの設定を維持します。元の設定は変更せず、選択したログインと作業フォルダーの信頼承認は別々に保持します。リモート MCP サーバーでは再ログインが必要な場合があります。</p>
 <h2 id="sign-in-again">再ログインする</h2>
 <p>プロファイルのログインを直したいときに使います。プロファイルを削除して作り直す必要はありません。</p>
 <ol>
@@ -337,6 +340,7 @@
 </ul>
 <p>对于 Kiln 打开的面板，每个已保存的账户都有各自独立的配置，因此所有账户可以同时保持登录。正在运行的代理会话继续使用启动时的账户；切换后，新开一个代理面板才会用上新账户。在普通 Shell 中手动运行的 CLI 继续使用该 Shell 的配置，Kiln 绝不会重启它，也不会替换它的凭据。</p>
 <p>运行中的面板达到用量限制时，Kiln 不会把它轮换到其他账户。请在这里改选其他账户，再新开一个面板。</p>
+<p>通过<strong>新建任务</strong>、分屏菜单或使用所选账户的终端打开的 Claude Code 面板会继承已有的用户级和项目本地 MCP 注册，API 连接同样适用。项目 <code>.mcp.json</code> 文件保留原有作用域。新启动时会更新继承的条目；在账户内直接修改或删除的 MCP 条目保留该账户的设置。Kiln 只读取原始配置，不会修改它，并分别保留所选登录和工作目录信任决定。远程 MCP 服务器可能要求重新登录。</p>
 <h2 id="sign-in-again">重新登录</h2>
 <p>某份配置的登录需要修复时，用这个功能即可保留配置，不必删掉重建。</p>
 <ol>

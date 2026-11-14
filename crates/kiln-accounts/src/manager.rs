@@ -1031,6 +1031,7 @@ impl AccountManager {
             if !dir.join("initialized").is_file() {
                 write_secret_atomic(&dir.join("initialized"), b"1")?;
             }
+            if tool == Tool::Claude { crate::claude_mcp::inherit(&env.claude_json_path(), &dir)?; }
             return Ok(vec![
                 ((if tool == Tool::Claude { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" }).into(), dir.to_string_lossy().into_owned()),
                 ("KILN_AGENT_PROFILE".into(), id.clone()),
@@ -1078,6 +1079,7 @@ impl AccountManager {
             } else { write_secret_atomic(&dir.join("auth.json"), secret.as_bytes())?; }
             write_secret_atomic(&dir.join("initialized"), b"1")?;
         }
+        if tool == Tool::Claude { crate::claude_mcp::inherit(&env.claude_json_path(), &dir)?; }
         let mut variables = vec![(if tool == Tool::Claude { "CLAUDE_CONFIG_DIR" } else { "CODEX_HOME" }.into(), dir.to_string_lossy().into_owned()), ("KILN_AGENT_PROFILE".into(), id.clone())];
         if tool == Tool::Codex && !dir.join("auth.json").exists() {
             // A legacy/manual CLI may have migrated this namespace to Keyring.
@@ -1100,6 +1102,7 @@ impl AccountManager {
         let key=match tool {Tool::Claude=>"CLAUDE_CONFIG_DIR",Tool::Codex=>"CODEX_HOME",Tool::Antigravity=>"HOME"};
         let config=variables.iter().find(|(k,_)|k==key).map(|(_,v)|PathBuf::from(v)).context("original account configuration missing")?;
         if config!=self.runtime_dir(tool,id) {bail!("account configuration changed");}
+        if tool == Tool::Claude { crate::claude_mcp::inherit(&self.inner.env.claude_json_path(), &config)?; }
         if tool == Tool::Antigravity {
             for pair in antigravity::environment(&config) { ensure!(variables.contains(&pair), "Antigravity account configuration changed"); }
             ensure!(self.runtime_secret(tool, id)?.is_some(), "Antigravity sign-in required");
@@ -2752,6 +2755,100 @@ mod tests {
     fn login_claude(env: &Env, store: &crate::MemoryStore, email: &str, marker: &str) {
         store.set(claude::CLAUDE_SERVICE, "claude-code-user", &claude_cred(marker)).unwrap();
         set_claude_identity(env, email);
+    }
+
+    #[test]
+    fn claude_launch_inherits_mcp_into_an_existing_account_without_replacing_login() {
+        let root = tempfile::tempdir().unwrap();
+        let (env, store) = Env::sandbox(root.path(), true);
+        let manager = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "work@example.test", "work");
+        let profile = manager.save_current(Tool::Claude, "Work").unwrap();
+        let pinned = manager.launch_environment(Tool::Claude).unwrap();
+        let runtime = manager.runtime_dir(Tool::Claude, &profile.id);
+        let before = manager.runtime_secret(Tool::Claude, &profile.id).unwrap();
+        let source = serde_json::json!({
+            "oauthAccount": {"emailAddress": "other@example.test"},
+            "mcpServers": {"user-fixture": {"command": "fixture-user"}},
+            "projects": {"/fixture/project": {
+                "mcpServers": {"local-fixture": {"command": "fixture-local"}},
+                "disabledMcpServers": ["disabled-fixture"],
+                "hasTrustDialogAccepted": true
+            }}
+        });
+        write_secret_atomic(&env.claude_json_path(), &serde_json::to_vec(&source).unwrap()).unwrap();
+        manager.launch_environment(Tool::Claude).unwrap();
+        let read = || -> Value { serde_json::from_slice(&std::fs::read(claude::config_path(&runtime)).unwrap()).unwrap() };
+        let actual = read();
+        assert_eq!(actual["mcpServers"], source["mcpServers"]);
+        assert_eq!(actual["projects"]["/fixture/project"]["mcpServers"], source["projects"]["/fixture/project"]["mcpServers"]);
+        assert_eq!(actual["projects"]["/fixture/project"]["disabledMcpServers"], source["projects"]["/fixture/project"]["disabledMcpServers"]);
+        assert!(actual["projects"]["/fixture/project"].get("hasTrustDialogAccepted").is_none());
+        assert_eq!(actual["oauthAccount"]["emailAddress"], "work@example.test");
+        assert_eq!(manager.runtime_secret(Tool::Claude, &profile.id).unwrap(), before);
+        let mut source = source;
+        source["mcpServers"]["user-fixture"]["command"] = "fixture-updated".into();
+        write_secret_atomic(&env.claude_json_path(), &serde_json::to_vec(&source).unwrap()).unwrap();
+        manager.validate_launch_environment(Tool::Claude, &pinned).unwrap();
+        assert_eq!(read()["mcpServers"], source["mcpServers"], "restarts refresh their pinned account too");
+    }
+
+    #[test]
+    fn claude_gateway_inherits_mcp_from_the_custom_legacy_config_only() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(root.path(), false);
+        let custom = root.path().join("native-custom-config");
+        env.claude_config_dir = Some(custom.clone());
+        let native = serde_json::json!({"mcpServers": {"fixture": {"command": "fixture-custom"}},
+            "oauthAccount": {"emailAddress": "native@example.test"}, "apiKey": "must-not-import"});
+        write_secret_atomic(&custom.join(".config.json"), &serde_json::to_vec(&native).unwrap()).unwrap();
+        write_secret_atomic(&env.home.join(".claude.json"), br#"{"mcpServers":{"wrong-source":{"command":"wrong"}}}"#).unwrap();
+        let manager = AccountManager::with_env(env);
+        let profile = manager.save_connection(Tool::Claude, None, "Fixture", Connection {
+            preset: Preset::Gateway, base_url: "https://gateway.example".into(), key: "fixture-key".into(), ..Default::default()
+        }).unwrap();
+        manager.switch_to(Tool::Claude, &profile.id).unwrap();
+        manager.launch_environment(Tool::Claude).unwrap();
+        let actual: Value = serde_json::from_slice(&std::fs::read(claude::config_path(&manager.runtime_dir(Tool::Claude, &profile.id))).unwrap()).unwrap();
+        assert_eq!(actual["mcpServers"], native["mcpServers"]);
+        assert!(actual.get("oauthAccount").is_none());
+        assert!(actual.get("apiKey").is_none());
+    }
+
+    #[test]
+    #[ignore = "requires KILN_TEST_CLAUDE pointing to the installed official CLI; isolated files only"]
+    fn official_claude_reads_inherited_user_local_and_project_mcp_in_their_original_scopes() {
+        let binary = std::env::var_os("KILN_TEST_CLAUDE").expect("explicit official CLI path");
+        let root = tempfile::tempdir().unwrap();
+        let (env, _) = Env::sandbox(root.path(), false);
+        let project = root.path().join("project");
+        let other = root.path().join("other-project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let project = kiln_common::paths::canonicalize(project).unwrap();
+        let other = kiln_common::paths::canonicalize(other).unwrap();
+        let source = serde_json::json!({"mcpServers": {"kiln-user-fixture": {"type":"stdio", "command":"fixture-user"}},
+            "projects": {(project.to_str().unwrap()): {"mcpServers": {"kiln-local-fixture": {"type":"stdio", "command":"fixture-local"}}}}});
+        write_secret_atomic(&env.home.join(".claude.json"), &serde_json::to_vec(&source).unwrap()).unwrap();
+        write_secret_atomic(&project.join(".mcp.json"), br#"{"mcpServers":{"kiln-project-fixture":{"type":"stdio","command":"fixture-project"}}}"#).unwrap();
+        let manager = AccountManager::with_env(env.clone());
+        let profile = manager.save_connection(Tool::Claude, None, "Fixture", Connection {
+            preset: Preset::Gateway, base_url: "http://127.0.0.1:1".into(), key: "fixture-key".into(), ..Default::default()
+        }).unwrap();
+        manager.switch_to(Tool::Claude, &profile.id).unwrap();
+        let vars = manager.launch_environment(Tool::Claude).unwrap();
+        for (cwd, name, expected) in [
+            (&project, "kiln-user-fixture", true), (&project, "kiln-local-fixture", true),
+            (&project, "kiln-project-fixture", true), (&other, "kiln-local-fixture", false),
+            (&other, "kiln-user-fixture", true), (&other, "kiln-project-fixture", false),
+        ] {
+            let output = std::process::Command::new(&binary).args(["mcp", "get", name])
+                .env_clear().env("HOME", &env.home).env("USERPROFILE", &env.home)
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default()).envs(vars.iter().cloned())
+                .current_dir(cwd).output().unwrap();
+            assert_eq!(output.status.success(), expected, "unexpected {name} scope");
+            if expected { assert!(String::from_utf8_lossy(&output.stdout).contains("fixture-")); }
+        }
     }
 
     fn login_codex(env: &Env, email: &str, marker: &str) {

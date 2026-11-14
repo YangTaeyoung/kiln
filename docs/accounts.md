@@ -171,6 +171,15 @@ each saved account. Claude Code receives `CLAUDE_CONFIG_DIR`; Codex receives
 continues to work. The CLI owns token refresh in that directory. Kiln bootstraps
 it once and does not reinstall an old snapshot on every launch or account switch.
 
+Claude Code panels also inherit the MCP servers registered in your ordinary CLI's
+user configuration, including local registrations scoped to a project. This applies
+to **New Task**, split-menu launches and selected-account shell commands, including
+API connections. Project `.mcp.json` files retain their normal scope. New launches
+refresh unchanged inherited entries; MCP entries you edit or remove inside an
+account stay private to that account. Your original configuration is read only.
+Account identity, provider credentials and workspace trust decisions are not copied.
+Remote MCP servers may still request authentication in the selected account.
+
 Signing in again replaces that account's runtime credentials only when **Apply**
 is chosen. If credentials have been removed from an initialized runtime, Kiln
 asks for sign-in instead of restoring an old refresh token. Provider revocation,

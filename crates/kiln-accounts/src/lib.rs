@@ -6,6 +6,7 @@
 
 pub mod antigravity;
 pub mod claude;
+mod claude_mcp;
 mod claude_refresh;
 pub mod codex;
 pub mod connection;

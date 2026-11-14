@@ -39,6 +39,8 @@ Every saved account keeps its own configuration for the panels Kiln opens, so al
 
 Kiln does not rotate a running panel to another account when it reaches a usage limit. Choose another account here and open a new panel instead.
 
+Claude Code panels opened from **New Task**, a split menu or a selected-account shell inherit your existing user and project-local MCP registrations, including when you use an API connection. Project `.mcp.json` files keep their normal scope. New launches refresh inherited entries; MCP entries you edit or remove inside an account stay private to that account. Kiln reads your original configuration without changing it and keeps the selected login and workspace trust decisions separate. A remote MCP server may ask you to sign in again.
+
 ## Sign in again {#sign-in-again}
 
 Use this when a profile's login needs repairing. You keep the profile instead of deleting and recreating it.
