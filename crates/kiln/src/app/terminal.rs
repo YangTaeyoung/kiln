@@ -146,6 +146,8 @@ pub struct TermView {
     preedit: String,
     completion: super::terminal_completion::Popup,
     preedit_range: Option<std::ops::Range<usize>>,
+    /// TUI redraws may hide the cursor without ending native composition.
+    ime_cursor: Option<kiln_proto::Cursor>,
     last_input_pass: Option<(egui::ViewportId, u64)>,
     scroll_accum: f32,
     last_mouse_cell: Option<(u16, u16)>,
@@ -219,6 +221,7 @@ impl TermView {
             preedit: String::new(),
             completion: Default::default(),
             preedit_range: None,
+            ime_cursor: None,
             last_input_pass: None,
             scroll_accum: 0.0,
             last_mouse_cell: None,
@@ -450,7 +453,7 @@ impl TermView {
         }
         let exited = conn.infos.get(&self.session).and_then(|i| i.exited);
         let transport_ready=conn.terminal_health.get(&self.session).is_none_or(|h|h.state==kiln_proto::TerminalState::Healthy);
-        let accepts_input=transport_ready && resp.has_focus() && ui.memory(|m|m.allows_interaction(ui.layer_id()))
+        let accepts_input=transport_ready && resp.has_focus() && ui.input(|i|i.focused) && ui.memory(|m|m.allows_interaction(ui.layer_id()))
             && !resp.context_menu_opened() && !self.inspector && self.search.as_ref().is_none_or(|s|!s.focus);
         let completion_allowed=conn.is_connected() && conn.is_alive(self.session) && accepts_input && self.preedit.is_empty() && term_mode & mode::ALT_SCREEN==0 && conn.infos.get(&self.session).and_then(|i|i.fg_process.as_deref()).is_some_and(|n|matches!(n,"zsh"|"-zsh"));
         let completion_anchor=conn.screens.get(&self.session).and_then(|s|s.cursor).map(|c|egui::pos2(inner.left()+c.col as f32*cell.x,inner.top()+(c.row as f32+1.0)*cell.y)).unwrap_or(rect.left_bottom());
@@ -538,8 +541,16 @@ impl TermView {
             let until_toggle = 0.5 - ui.input(|i| i.time).rem_euclid(0.5);
             ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(until_toggle.max(0.01)));
         }
-        // 커서와 IME 조합 문자열.
-        if let Some(c) = screen.cursor {
+        // Cursor visibility is a TUI rendering choice, not IME focus. Keep
+        // composition enabled during hidden-cursor redraws, using the last known
+        // position (or the bottom-left cell until a cursor has been reported).
+        if let Some(c) = screen.cursor { self.ime_cursor = Some(c); }
+        {
+            let mut c = self.ime_cursor.unwrap_or(kiln_proto::Cursor {
+                col: 0, row: screen.rows.saturating_sub(1), shape: CursorShape::Beam,
+            });
+            c.col = c.col.min(screen.cols.saturating_sub(1));
+            c.row = c.row.min(screen.rows.saturating_sub(1));
             let pos = pos2(inner.min.x + c.col as f32 * cell.x, inner.min.y + c.row as f32 * cell.y);
             let wide = screen.lines.get(c.row as usize).and_then(|l| l.cells.get(c.col as usize)).is_some_and(|x| x.flags & flags::WIDE != 0);
             let w = if wide { cell.x * 2.0 } else { cell.x };
@@ -569,7 +580,7 @@ impl TermView {
                     if range.is_empty() {painter.line_segment([ime_cursor_rect.left_top(),ime_cursor_rect.left_bottom()],Stroke::new(1.0,fg));}
                     else {painter.rect_stroke(ime_cursor_rect,0.0,Stroke::new(1.0,fg),egui::StrokeKind::Inside);}
                 }
-            } else if screen.display_offset == 0 && (!settings.cursor_blink || !focused || ui.input(|i| (i.time * 2.0) as u64 % 2 == 0)) {
+            } else if screen.cursor.is_some() && screen.display_offset == 0 && (!settings.cursor_blink || !focused || ui.input(|i| (i.time * 2.0) as u64 % 2 == 0)) {
                 let color = self.palette.cursor;
                 match (c.shape, focused) {
                     (CursorShape::Block, true) => {
@@ -1429,6 +1440,51 @@ mod tests {
         assert!(h.state().0.preedit.is_empty(),"returning to a hidden tab must not resurrect old composition");
         assert!(!h.output().shapes.iter().any(|shape|matches!(&shape.shape,Shape::Text(t) if t.galley.job.text.contains('한') || t.galley.job.text.contains('ㅇ'))));
         h.render().unwrap().save(std::env::temp_dir().join("kiln-ime-clean-placeholder.png")).unwrap();
+    }
+
+    #[test]
+    fn ime_stays_enabled_while_a_tui_hides_the_terminal_cursor() {
+        use egui_kittest::Harness;
+        let mut conn = Conn::offline(egui::Context::default());
+        conn.screens.insert(1, Screen {
+            cols: 40, rows: 3, lines: vec![Line::default(); 3],
+            row_versions: vec![1; 3], cursor: None, ..Default::default()
+        });
+        let mut installed = false;
+        let mut h = Harness::builder().with_size([760.0, 200.0]).build_ui_state(move |ui, s: &mut (TermView, Conn)| {
+            if !installed { kiln_common::fonts::install(ui.ctx()); installed = true; return; }
+            s.0.ui(ui, &mut s.1, &TermSettings::default(), true, None);
+        }, (TermView::new(1), conn));
+        h.run_steps(3);
+        assert!(h.output().platform_output.ime.is_some(), "a hidden cursor must not disable native composition, even on the first frame");
+        let cursor = kiln_proto::Cursor { col: 5, row: 1, shape: CursorShape::Beam };
+        h.state_mut().1.screens.get_mut(&1).unwrap().cursor = Some(cursor);
+        h.run_steps(2);
+        let anchor = h.output().platform_output.ime.unwrap().cursor_rect;
+        for text in ["ㅎ", "하", "한", "한ㄱ", "한글"] {
+            h.state_mut().1.screens.get_mut(&1).unwrap().cursor = None;
+            h.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: text.into(), active_range_chars: Some(0..0) }));
+            h.run_steps(2);
+            let ime = h.output().platform_output.ime.expect("TUI redraw must preserve IME");
+            assert!(!ime.should_interrupt_composition);
+            assert_eq!(ime.cursor_rect.min, anchor.min, "composition retains the last visible input position");
+            assert_eq!(h.state().0.preedit, text);
+            let rendered: String = h.output().shapes.iter().filter_map(|shape| match &shape.shape {
+                Shape::Text(t) => Some(t.galley.job.text.as_str()), _ => None,
+            }).collect();
+            assert!(rendered.contains(text), "hidden-cursor composition must be rendered: {rendered:?}");
+            h.state_mut().1.screens.get_mut(&1).unwrap().cursor = Some(cursor);
+            h.run_steps(2);
+            assert!(h.output().platform_output.ime.is_some());
+        }
+        h.state_mut().1.screens.get_mut(&1).unwrap().cursor = None;
+        h.event(egui::Event::Ime(egui::ImeEvent::Commit("한글".into())));
+        h.run_steps(2);
+        assert!(h.state().0.preedit.is_empty());
+        assert!(h.output().platform_output.ime.is_some());
+        h.input_mut().focused = false;
+        h.step();
+        assert!(h.output().platform_output.ime.is_none(), "blur still disables IME");
     }
 
     #[test]
