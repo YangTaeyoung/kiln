@@ -12,6 +12,300 @@ fn pane() -> AgentPane {
     })
 }
 #[test]
+fn failed_enqueue_before_publication_recovers_live_submit_and_approval_controls() {
+    use super::super::journal;
+    for submit in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = journal::Journal::open(root.path(), "fixture".into()).unwrap();
+        journal.push(Event::Generation).unwrap();
+        journal
+            .push(Event::Lifecycle(if submit {
+                Lifecycle::Ready
+            } else {
+                Lifecycle::Waiting
+            }))
+            .unwrap();
+        if !submit {
+            journal
+                .push(Event::Request(Request {
+                    id: "approval".into(),
+                    title: "Write fixture.txt".into(),
+                    details: serde_json::json!({"file_path":"fixture.txt"}),
+                    questions: vec![],
+                    options: vec![],
+                }))
+                .unwrap();
+        }
+        std::fs::write(root.path().join("commands"), "blocked mailbox").unwrap();
+        let (client, start) = Client::paused(root.path().into(), "fixture");
+        let mut p = pane();
+        p.transcript = Transcript::default();
+        p.client = Some(client);
+        start.send(()).unwrap();
+        let ctx = egui::Context::default();
+        let replay_until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while p.transcript.sequence < journal.transcript.sequence {
+            p.tick(&ctx);
+            assert!(std::time::Instant::now() < replay_until);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        p.composer.text = "preserved 한글 task".into();
+        let id = if submit {
+            p.submit();
+            p.pending.as_ref().unwrap().id.clone()
+        } else {
+            let id = p
+                .send(Command::Respond {
+                    request_id: "approval".into(),
+                    decision: Decision::Allow,
+                    answers: Default::default(),
+                })
+                .unwrap();
+            p.responding.insert("approval".into(), id.clone());
+            id
+        };
+        let ctx = egui::Context::default();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            p.tick(&ctx);
+            if p.transcript.commands.get(&id) == Some(&CommandPhase::Rejected) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < until,
+                "failed enqueue has no command outcome"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(p.error.is_some());
+        if submit {
+            assert!(p.pending_recoverable());
+            assert_eq!(
+                p.pending.as_ref().unwrap().draft.text,
+                "preserved 한글 task"
+            );
+        } else {
+            assert!(!p.responding.contains_key("approval"));
+            assert!(p.transcript.requests.contains_key("approval"));
+        }
+        std::fs::remove_file(root.path().join("commands")).unwrap();
+        let mut initialized = false;
+        let mut h = Harness::builder().with_size([700., 600.]).build_ui_state(
+            |ui, p: &mut AgentPane| {
+                if !initialized {
+                    kiln_common::fonts::install(ui.ctx());
+                    initialized = true;
+                    return;
+                }
+                p.tick(ui.ctx());
+                p.ui(ui);
+            },
+            p,
+        );
+        let label = if submit {
+            "초안으로 복구"
+        } else {
+            "한 번 허용"
+        };
+        while h.query_by_label(label).is_none() {
+            h.step();
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.get_by_label(label).click();
+        h.run_steps(3);
+        if submit {
+            assert_eq!(h.state().composer.text, "preserved 한글 task");
+            assert!(h.state().pending.is_none());
+            assert!(!root.path().join("commands").exists());
+        } else {
+            while !root.path().join("commands").is_dir() {
+                h.step();
+                assert!(std::time::Instant::now() < until);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(h.state().responding.contains_key("approval"));
+        }
+    }
+}
+#[test]
+fn ambiguous_enqueue_waits_for_publication_or_authoritative_outcome_before_ui_retry() {
+    use super::super::journal;
+    for submit in [true, false] {
+        for accepted in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let mut journal = journal::Journal::open(root.path(), "fixture".into()).unwrap();
+            journal.push(Event::Generation).unwrap();
+            journal
+                .push(Event::Lifecycle(if submit {
+                    Lifecycle::Ready
+                } else {
+                    Lifecycle::Waiting
+                }))
+                .unwrap();
+            if !submit {
+                journal
+                    .push(Event::Request(Request {
+                        id: "approval".into(),
+                        title: "Write fixture.txt".into(),
+                        details: serde_json::json!({"file_path":"fixture.txt"}),
+                        questions: vec![],
+                        options: vec![],
+                    }))
+                    .unwrap();
+            }
+            let (client, start) = Client::faulted_enqueue(
+                root.path().into(),
+                "fixture",
+                journal::PublishPoint::AfterRename,
+            );
+            let mut p = pane();
+            p.transcript = Transcript::default();
+            p.client = Some(client);
+            start.send(()).unwrap();
+            let ctx = egui::Context::default();
+            let replay_until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while p.transcript.sequence < journal.transcript.sequence {
+                p.tick(&ctx);
+                assert!(std::time::Instant::now() < replay_until);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            p.composer.text = "uncertain 한글 task".into();
+            let id = if submit {
+                p.submit();
+                p.pending.as_ref().unwrap().id.clone()
+            } else {
+                let id = p
+                    .send(Command::Respond {
+                        request_id: "approval".into(),
+                        decision: Decision::Allow,
+                        answers: Default::default(),
+                    })
+                    .unwrap();
+                p.responding.insert("approval".into(), id.clone());
+                id
+            };
+            let ctx = egui::Context::default();
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while p.transcript.commands.get(&id) != Some(&CommandPhase::Unconfirmed) {
+                p.tick(&ctx);
+                assert!(
+                    std::time::Instant::now() < until,
+                    "ambiguous enqueue has no explicit outcome"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let file = root.path().join("commands").join(format!("{id}.json"));
+            assert!(file.is_file());
+            for _ in 0..20 {
+                p.tick(&ctx);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            if submit {
+                assert!(!p.pending_recoverable());
+            } else {
+                assert!(p.responding.contains_key("approval"));
+            }
+            if accepted {
+                journal
+                    .push(Event::CommandState {
+                        id: id.clone(),
+                        state: CommandPhase::Accepted,
+                    })
+                    .unwrap();
+                if !submit {
+                    journal
+                        .push(Event::RequestResolved("approval".into()))
+                        .unwrap();
+                }
+            }
+            std::fs::remove_file(file).unwrap();
+            loop {
+                p.tick(&ctx);
+                let done = if submit {
+                    if accepted {
+                        p.pending.is_none()
+                    } else {
+                        p.pending_recoverable()
+                    }
+                } else {
+                    !p.responding.contains_key("approval")
+                };
+                if done {
+                    break;
+                }
+                assert!(std::time::Instant::now() < until);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert_eq!(
+                std::fs::read_dir(root.path().join("commands"))
+                    .unwrap()
+                    .count(),
+                0,
+                "no automatic resend"
+            );
+            if accepted {
+                assert_eq!(
+                    p.transcript.commands.get(&id),
+                    Some(&CommandPhase::Accepted)
+                );
+                assert!(p.recovered.is_none());
+            } else {
+                let mut initialized = false;
+                let mut h = Harness::builder().with_size([700., 600.]).build_ui_state(
+                    |ui, p: &mut AgentPane| {
+                        if !initialized {
+                            kiln_common::fonts::install(ui.ctx());
+                            initialized = true;
+                            return;
+                        }
+                        p.tick(ui.ctx());
+                        p.ui(ui);
+                    },
+                    p,
+                );
+                let label = if submit {
+                    "초안으로 복구"
+                } else {
+                    "한 번 허용"
+                };
+                while h.query_by_label(label).is_none() {
+                    h.step();
+                    assert!(std::time::Instant::now() < until);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                h.get_by_label(label).click();
+                h.run_steps(3);
+                if submit {
+                    assert_eq!(h.state().composer.text, "uncertain 한글 task");
+                    assert_eq!(
+                        std::fs::read_dir(root.path().join("commands"))
+                            .unwrap()
+                            .count(),
+                        0
+                    );
+                } else {
+                    while std::fs::read_dir(root.path().join("commands"))
+                        .unwrap()
+                        .count()
+                        == 0
+                    {
+                        h.step();
+                        assert!(std::time::Instant::now() < until);
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    assert_eq!(
+                        std::fs::read_dir(root.path().join("commands"))
+                            .unwrap()
+                            .count(),
+                        1
+                    );
+                }
+            }
+        }
+    }
+}
+#[test]
 fn gui_conversation_stream_approval_stop_and_attachment_at_520px() {
     assert_eq!(Presentation::default(), Presentation::Gui);
     let mut p = pane();

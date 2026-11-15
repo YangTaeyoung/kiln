@@ -117,20 +117,47 @@ pub(super) fn sync_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 pub(super) fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    ensure!(bytes.len() <= MAX_RECORD, "oversized agent record");
+    atomic_observed(path, bytes, |_| Ok(())).map_err(|failure| failure.error)
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PublishPoint {
+    BeforeRename,
+    AfterRename,
+}
+#[derive(Debug)]
+pub(super) struct PublicationError {
+    pub uncertain: bool,
+    error: anyhow::Error,
+}
+impl std::fmt::Display for PublicationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.error, f)
+    }
+}
+impl std::error::Error for PublicationError {}
+fn atomic_observed(
+    path: &Path,
+    bytes: &[u8],
+    mut observe: impl FnMut(PublishPoint) -> Result<()>,
+) -> std::result::Result<(), PublicationError> {
     let tmp = path.with_extension(format!("{}.tmp", unique()));
+    let mut uncertain = false;
     let result = (|| {
+        ensure!(bytes.len() <= MAX_RECORD, "oversized agent record");
         let mut f = open(&tmp, false)?;
         f.write_all(bytes)?;
         f.sync_all()?;
+        observe(PublishPoint::BeforeRename)?;
+        uncertain = true;
         fs::rename(&tmp, path)?;
+        observe(PublishPoint::AfterRename)?;
         sync_directory(path.parent().context("missing private parent")?)?;
         Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
-    result
+    result.map_err(|error| PublicationError { uncertain, error })
 }
 pub(super) fn read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     ensure!(
@@ -279,7 +306,18 @@ pub(super) fn tail(path: &Path, offset: &mut u64) -> Result<Vec<Envelope>> {
     }
     Ok(out)
 }
-pub(super) fn enqueue(dir: &Path, command: &QueuedCommand) -> Result<()> {
+pub(super) fn enqueue(
+    dir: &Path,
+    command: &QueuedCommand,
+) -> std::result::Result<(), PublicationError> {
+    enqueue_observed(dir, command, |_| Ok(()))
+}
+pub(super) fn enqueue_observed(
+    dir: &Path,
+    command: &QueuedCommand,
+    observe: impl FnMut(PublishPoint) -> Result<()>,
+) -> std::result::Result<(), PublicationError> {
+    let bytes=(||->Result<Vec<u8>> {
     ensure!(valid_id(&command.id), "invalid command ID");
     ensure!(
         failure_reason(dir).is_none(),
@@ -291,15 +329,53 @@ pub(super) fn enqueue(dir: &Path, command: &QueuedCommand) -> Result<()> {
         fs::read_dir(&queue)?.take(257).count() < 256,
         "agent command queue is full"
     );
-    atomic(
-        &queue.join(format!("{}.json", command.id)),
-        &serde_json::to_vec(command)?,
+        Ok(serde_json::to_vec(command)?)
+    })().map_err(|error|PublicationError {uncertain:false,error})?;
+    atomic_observed(
+        &dir.join("commands").join(format!("{}.json", command.id)),
+        &bytes,
+        observe,
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn enqueue_faults_preserve_publication_boundary_and_cleanup_temporary_files() {
+        for point in [PublishPoint::BeforeRename, PublishPoint::AfterRename] {
+            let root = tempfile::tempdir().unwrap();
+            let command = QueuedCommand {
+                id: "fault-command".into(),
+                generation: "generation".into(),
+                command: super::super::Command::Interrupt,
+            };
+            let failure = enqueue_observed(root.path(), &command, |at| {
+                if at == point {
+                    anyhow::bail!("fixture I/O failure");
+                }
+                Ok(())
+            })
+            .unwrap_err();
+            assert_eq!(failure.uncertain, point == PublishPoint::AfterRename);
+            let files = std::fs::read_dir(root.path().join("commands"))
+                .unwrap()
+                .map(|file| file.unwrap().path())
+                .collect::<Vec<_>>();
+            if point == PublishPoint::AfterRename {
+                assert_eq!(files.len(), 1);
+                let published: QueuedCommand = read(&files[0]).unwrap();
+                assert_eq!(published.id, command.id);
+            } else {
+                assert!(files.is_empty());
+            }
+            assert!(
+                files
+                    .iter()
+                    .all(|file| file.extension().is_some_and(|ext| ext == "json"))
+            );
+        }
+    }
     #[test]
     fn replay_recovers_native_tool_identity_and_incomplete_tail() {
         let d = tempfile::tempdir().unwrap();

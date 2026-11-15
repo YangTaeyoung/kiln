@@ -60,6 +60,8 @@ struct ReplayCheckpoint {
 #[derive(Default)]
 struct WorkerHooks {
     #[cfg(test)]
+    enqueue_fault: Option<journal::PublishPoint>,
+    #[cfg(test)]
     before_failure: Option<(
         crossbeam_channel::Sender<()>,
         crossbeam_channel::Receiver<()>,
@@ -76,6 +78,15 @@ struct WorkerHooks {
     )>,
 }
 impl WorkerHooks {
+    #[cfg(test)]
+    fn publication(&mut self, point: journal::PublishPoint) -> Result<()> {
+        if self.enqueue_fault == Some(point) {
+            self.enqueue_fault = None;
+            bail!("fixture publication failure");
+        }
+        let _ = point;
+        Ok(())
+    }
     fn before_failure(&mut self) {
         #[cfg(test)]
         if let Some((reached, proceed)) = self.before_failure.take() {
@@ -102,10 +113,17 @@ fn enqueue_command(
     dir: &std::path::Path,
     command: &QueuedCommand,
     hooks: &mut WorkerHooks,
-) -> Result<()> {
+) -> std::result::Result<(), journal::PublicationError> {
     let _publication = EnqueuePublication::begin();
     hooks.inside_enqueue();
-    journal::enqueue(dir, command)
+    #[cfg(test)]
+    {
+        journal::enqueue_observed(dir, command, |point| hooks.publication(point))
+    }
+    #[cfg(not(test))]
+    {
+        journal::enqueue(dir, command)
+    }
 }
 // Match host::mailbox: only atomically published .json commands can execute.
 // An unreadable or oversized mailbox cannot prove that a command is absent.
@@ -154,6 +172,24 @@ impl Client {
         *client.generation.lock().unwrap() = generation.into();
         (client, tx)
     }
+    #[cfg(test)]
+    pub(super) fn faulted_enqueue(
+        directory: std::path::PathBuf,
+        generation: &str,
+        point: journal::PublishPoint,
+    ) -> (Self, crossbeam_channel::Sender<()>) {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let client = Self::at_directory_gated(
+            Ok(directory),
+            Some(rx),
+            WorkerHooks {
+                enqueue_fault: Some(point),
+                ..Default::default()
+            },
+        );
+        *client.generation.lock().unwrap() = generation.into();
+        (client, tx)
+    }
     fn at_directory_gated(
         directory: Result<std::path::PathBuf>,
         start: Option<crossbeam_channel::Receiver<()>>,
@@ -188,12 +224,15 @@ impl Client {
             };
             let mut offset = 0;
             let mut pending = None;
+            let mut pending_outcomes = false;
             let mut observed = Transcript::default();
             let mut reported = None;
             while !s.load(Ordering::Relaxed) {
                 if let Some(batch) = pending.take() {
                     match etx.try_send(batch) {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            pending_outcomes = false;
+                        }
                         Err(crossbeam_channel::TrySendError::Full(batch)) => pending = Some(batch),
                         Err(_) => break,
                     }
@@ -250,16 +289,31 @@ impl Client {
                         reported = Some(reason);
                     }
                 }
-                for queued in rx.try_iter().take(32) {
-                    *checkpoint.lock().unwrap() = None;
-                    if s.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    if u.lock().unwrap().is_some() {
-                        continue;
-                    }
-                    if let Err(err) = enqueue_command(&dir, &queued, &mut hooks) {
-                        *e.lock().unwrap() = Some(err.to_string());
+                // An undelivered outcome batch pauses further command consumption.
+                if !pending_outcomes {
+                    for queued in rx.try_iter().take(32) {
+                        *checkpoint.lock().unwrap() = None;
+                        if s.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        if u.lock().unwrap().is_some() {
+                            continue;
+                        }
+                        if let Err(err) = enqueue_command(&dir, &queued, &mut hooks) {
+                            *e.lock().unwrap() = Some(err.to_string());
+                            local.lock().unwrap().remove(&queued.id);
+                            let outcome = Envelope {
+                                sequence: 0,
+                                generation: queued.generation,
+                                event: Event::EnqueueFailed {
+                                    id: queued.id,
+                                    uncertain: err.uncertain,
+                                },
+                            };
+                            observed.apply(&outcome);
+                            pending.get_or_insert_with(Vec::new).push(outcome);
+                            pending_outcomes = true;
+                        }
                     }
                 }
                 if at_end

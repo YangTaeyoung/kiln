@@ -1,7 +1,10 @@
 //! Durable, provider-neutral conversation state. Only envelopes mutate the transcript.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Attachment {
@@ -159,6 +162,10 @@ pub enum Event {
         reason: String,
         rejected: Vec<String>,
     },
+    EnqueueFailed {
+        id: String,
+        uncertain: bool,
+    },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Envelope {
@@ -180,6 +187,7 @@ pub struct Transcript {
     pub provider_session_id: Option<String>,
     pub errors: Vec<String>,
     pub commands: BTreeMap<String, CommandPhase>,
+    pub uncertain_deliveries: BTreeSet<String>,
 }
 impl Transcript {
     fn invalidate_pending(&mut self) {
@@ -200,6 +208,24 @@ impl Transcript {
     }
     pub fn apply(&mut self, envelope: &Envelope) {
         if envelope.sequence == 0
+            && let Event::EnqueueFailed { id, uncertain } = &envelope.event
+        {
+            if !self.commands.contains_key(id) {
+                self.commands.insert(
+                    id.clone(),
+                    if *uncertain {
+                        CommandPhase::Unconfirmed
+                    } else {
+                        CommandPhase::Rejected
+                    },
+                );
+                if *uncertain {
+                    self.uncertain_deliveries.insert(id.clone());
+                }
+            }
+            return;
+        }
+        if envelope.sequence == 0
             && let Event::RuntimeUnavailable { reason, rejected } = &envelope.event
         {
             self.invalidate_pending();
@@ -217,6 +243,7 @@ impl Transcript {
             return;
         }
         if matches!(envelope.event, Event::Generation) {
+            self.uncertain_deliveries.clear();
             self.generation = envelope.generation.clone();
             self.requests.clear();
             for state in self.commands.values_mut() {
@@ -292,10 +319,11 @@ impl Transcript {
                 self.requests.remove(id);
             }
             Event::CommandState { id, state } => {
+                self.uncertain_deliveries.remove(id);
                 self.commands.insert(id.clone(), state.clone());
             }
             Event::Error(error) => self.errors.push(error.clone()),
-            Event::RuntimeUnavailable { .. } => {}
+            Event::RuntimeUnavailable { .. } | Event::EnqueueFailed { .. } => {}
         }
     }
 }
@@ -303,6 +331,59 @@ impl Transcript {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn enqueue_failure_overlay_never_replaces_authoritative_command_outcome() {
+        let mut newer = Transcript::default();
+        newer.apply(&e(1, "new", Event::Generation));
+        newer.apply(&e(
+            0,
+            "old",
+            Event::EnqueueFailed {
+                id: "finished-old-writer".into(),
+                uncertain: false,
+            },
+        ));
+        assert_eq!(
+            newer.commands.get("finished-old-writer"),
+            Some(&CommandPhase::Rejected)
+        );
+        assert_eq!(newer.sequence, 1);
+        for before in [true, false] {
+            for uncertain in [true, false] {
+                let mut transcript = Transcript::default();
+                transcript.apply(&e(1, "g", Event::Generation));
+                let accepted = e(
+                    2,
+                    "g",
+                    Event::CommandState {
+                        id: "command".into(),
+                        state: CommandPhase::Accepted,
+                    },
+                );
+                let local = e(
+                    0,
+                    "g",
+                    Event::EnqueueFailed {
+                        id: "command".into(),
+                        uncertain,
+                    },
+                );
+                if before {
+                    transcript.apply(&accepted);
+                    transcript.apply(&local);
+                } else {
+                    transcript.apply(&local);
+                    transcript.apply(&accepted);
+                }
+                assert_eq!(
+                    transcript.commands.get("command"),
+                    Some(&CommandPhase::Accepted)
+                );
+                assert!(transcript.uncertain_deliveries.is_empty());
+                assert_eq!(transcript.sequence, 2);
+            }
+        }
+    }
     fn e(sequence: u64, generation: &str, event: Event) -> Envelope {
         Envelope {
             sequence,

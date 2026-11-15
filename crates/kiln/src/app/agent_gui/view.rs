@@ -330,18 +330,38 @@ impl AgentPane {
             .retain(|id, _| self.transcript.requests.contains_key(id));
         self.responding.retain(|id, command| {
             self.transcript.requests.contains_key(id)
-                && !matches!(
-                    self.transcript.commands.get(command),
-                    Some(CommandPhase::Rejected | CommandPhase::Unconfirmed)
-                )
+                && match self.transcript.commands.get(command) {
+                    Some(CommandPhase::Rejected) => false,
+                    Some(CommandPhase::Unconfirmed) => {
+                        self.transcript.uncertain_deliveries.contains(command)
+                            && !self.client.as_ref().is_some_and(|client| {
+                                client.submission_is_unknown(
+                                    command,
+                                    &self.transcript.generation,
+                                    self.transcript.sequence,
+                                )
+                            })
+                    }
+                    _ => true,
+                }
         });
     }
     fn pending_recoverable(&self) -> bool {
         self.pending.as_ref().is_some_and(|p| {
-            matches!(
-                self.transcript.commands.get(&p.id),
-                Some(CommandPhase::Rejected | CommandPhase::Unconfirmed)
-            ) || (self.restored_pending
+            (match self.transcript.commands.get(&p.id) {
+                Some(CommandPhase::Rejected) => true,
+                Some(CommandPhase::Unconfirmed) => {
+                    !self.transcript.uncertain_deliveries.contains(&p.id)
+                        || self.client.as_ref().is_some_and(|client| {
+                            client.submission_is_unknown(
+                                &p.id,
+                                &self.transcript.generation,
+                                self.transcript.sequence,
+                            )
+                        })
+                }
+                _ => false,
+            }) || (self.restored_pending
                 && self.backlog.is_empty()
                 && !self.transcript.commands.contains_key(&p.id)
                 && self.client.as_ref().is_some_and(|client| {
