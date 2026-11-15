@@ -16,12 +16,60 @@ pub enum Presentation {
 }
 impl Presentation {
     pub fn ui(&mut self, ui: &mut Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(self, Self::Gui, kiln_common::i18n::tr("대화 GUI"));
-            ui.selectable_value(self, Self::Terminal, kiln_common::i18n::tr("터미널"));
-        });
+        let t = Theme::current();
+        let (track, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width().max(180.), 32.),
+            egui::Sense::hover(),
+        );
+        ui.painter().rect_filled(track, 8, t.bg_input);
+        for (index, (value, label)) in [
+            (Self::Gui, kiln_common::i18n::tr("대화 GUI")),
+            (Self::Terminal, kiln_common::i18n::tr("터미널")),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let width = (track.width() - 4.) / 2.;
+            let rect = egui::Rect::from_min_size(
+                track.min + egui::vec2(2. + index as f32 * width, 2.),
+                egui::vec2(width, 28.),
+            );
+            let response = ui.interact(
+                rect,
+                ui.id().with(("presentation", index)),
+                egui::Sense::click(),
+            );
+            let selected = *self == value;
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::RadioButton,
+                    ui.is_enabled(),
+                    selected,
+                    label,
+                )
+            });
+            if selected || response.hovered() {
+                ui.painter().rect_filled(
+                    rect,
+                    6,
+                    if selected { t.bg_elevated } else { t.bg_hover },
+                );
+            }
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                kiln_common::fonts::medium(12.5),
+                if selected { t.text } else { t.text_dim },
+            );
+            widgets::focus_ring(ui, &response, 6);
+            if response.clicked() {
+                *self = value;
+            }
+        }
     }
 }
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedDraft {
@@ -525,53 +573,36 @@ impl AgentPane {
         }
         ui.spacing_mut().item_spacing.y = 10.;
         Frame::new()
-            .inner_margin(Margin::symmetric(20, 12))
+            .inner_margin(Margin::symmetric(16, 6))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let icon = super::super::ui::agent_icon(Some(self.descriptor.tool));
                     let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(22., 22.), egui::Sense::hover());
-                    kiln_common::icons::paint(ui.painter(), rect, icon, t.orange);
+                        ui.allocate_exact_size(egui::vec2(18., 18.), egui::Sense::hover());
+                    kiln_common::icons::paint(ui.painter(), rect, icon, super::super::ui::agent_ink(icon, &t));
                     ui.label(RichText::new(self.descriptor.tool.display_name()).strong());
                     ui.label(RichText::new(&self.descriptor.account_label).color(t.text_dim));
-                    ui.label(RichText::new(self.status()).color(if self.busy() {
-                        t.orange
+                    ui.small(RichText::new(self.status()).color(if self.busy() { t.orange } else { t.text_dim }));
+                    let model = self.transcript.selected_model.as_deref().unwrap_or(kiln_common::i18n::tr("확인 대기"));
+                    let metadata = if self.transcript.modes.is_empty() {
+                        model.to_owned()
                     } else {
-                        t.text_dim
-                    }));
-                });
-                ui.horizontal_wrapped(|ui| {
-                    ui.small(kiln_common::i18n::tr("적용된 모델"));
-                    ui.small(
-                        self.transcript
-                            .selected_model
-                            .as_deref()
-                            .unwrap_or(kiln_common::i18n::tr("확인 대기")),
-                    );
-                    if !self.transcript.modes.is_empty() {
-                        ui.small(kiln_common::i18n::tr("적용된 모드"));
-                        ui.small(
-                            self.transcript
-                                .selected_mode
-                                .as_deref()
-                                .unwrap_or(kiln_common::i18n::tr("확인 대기")),
-                        );
-                    }
+                        format!("{model} · {}", self.transcript.selected_mode.as_deref().unwrap_or(kiln_common::i18n::tr("확인 대기")))
+                    };
+                    ui.small(RichText::new(metadata).color(t.text_dim)).on_hover_text(kiln_common::i18n::tr("적용된 모델"));
                 });
             });
         ui.separator();
         let available = ui.available_rect_before_wrap();
         let composer_h =
-            182. + if self.pending.is_some() || self.recovered.is_some() {
+            154. + if available.width() < 440. {
+                36. + if !self.transcript.models.is_empty() && !self.transcript.modes.is_empty() { 28. } else { 0. }
+            } else { 0. } + if self.pending.is_some() || self.recovered.is_some() {
                 62.
             } else {
                 0.
             } + if !self.composer.attachments.is_empty() || !self.imports.is_empty() {
                 62.
-            } else {
-                0.
-            } + if !self.transcript.models.is_empty() && !self.transcript.modes.is_empty() {
-                28.
             } else {
                 0.
             };
@@ -589,13 +620,19 @@ impl AgentPane {
         );
         body.set_clip_rect(transcript_rect);
         egui::ScrollArea::vertical().id_salt("messages").stick_to_bottom(true).auto_shrink([false,false]).show(&mut body,|ui|{
-            Frame::new().inner_margin(Margin::symmetric(20,10)).show(ui,|ui|{
-                ui.set_max_width(1100.);
+            let width = (ui.available_width() - 40.).clamp(0., 900.);
+            let inset = (ui.available_width() - width) / 2.;
+            ui.horizontal_top(|ui| {
+                ui.add_space(inset);
+                ui.vertical(|ui| {
+                ui.set_width(width);
                 let end=self.history_end.unwrap_or(self.transcript.entries.len()).min(self.transcript.entries.len());let start=end.saturating_sub(WINDOW);
+                if start > 0 || self.history_end.is_some() {
                 ui.horizontal_wrapped(|ui|{
                     if start>0 && ui.button(kiln_common::i18n::tr("이전 메시지")).clicked(){self.history_end=Some(start);}
                     if self.history_end.is_some() && ui.button(kiln_common::i18n::tr("최근 메시지")).clicked(){self.history_end=None;}
                 });
+                }
                 if self.transcript.entries.is_empty(){ui.add_space(26.);ui.label(RichText::new(kiln_common::i18n::tr("새 대화를 시작하세요")).size(20.).strong());ui.label(kiln_common::i18n::tr("작업을 입력하면 선택한 계정의 에이전트가 이 폴더에서 실행합니다."));}
                 for entry in &self.transcript.entries[start..end] {match entry {
                     Entry::Message(m)=>{
@@ -609,21 +646,7 @@ impl AgentPane {
                             if m.text.len()>DISPLAY_BYTES {ui.small(kiln_common::i18n::tr("긴 메시지는 표시가 제한됩니다. 전체 기록은 보존됩니다."));}
                         });ui.add_space(10.);
                     },
-                    Entry::Tool(tool)=>{
-                        Frame::new().stroke(Stroke::new(1.,t.border)).corner_radius(6).inner_margin(Margin::same(10)).show(ui,|ui|{
-                            let status=kiln_common::i18n::tr(match tool.status{ToolStatus::Pending=>"대기 중",ToolStatus::Running=>"실행 중",ToolStatus::Completed=>"완료",ToolStatus::Failed=>"실패",ToolStatus::Cancelled=>"중지됨"});
-                            egui::CollapsingHeader::new(format!("{} · {status}",super::approval::tool_title(tool,self.descriptor.tool))).id_salt(&tool.id).show(ui,|ui|{
-                                egui::ScrollArea::both().id_salt((&tool.id,"output")).max_height(260.).show(ui,|ui|{
-                                    if let Some(input)=self.cache.inputs.get(&tool.id){ui.add(egui::Label::new(RichText::new(input).monospace()).wrap());}
-                                    ui.add(egui::Label::new(RichText::new(bounded(&tool.output)).monospace()).wrap());
-                                    for line in bounded(&tool.diff).lines().take(500){
-                                        let color=if line.starts_with('+'){t.green}else if line.starts_with('-'){t.red}else{t.text_dim};
-                                        ui.add(egui::Label::new(RichText::new(line).monospace().color(color).background_color(color.gamma_multiply(0.08))).wrap());
-                                    }
-                                });
-                            });
-                        });
-                    }
+                    Entry::Tool(tool)=>self.tool_ui(ui, tool),
                 }}
                 let requests=self.transcript.requests.values().take(8).cloned().collect::<Vec<_>>();
                 for request in requests {self.request_ui(ui,&request);}
@@ -632,11 +655,14 @@ impl AgentPane {
                 if matches!(self.lifecycle(),Lifecycle::Failed|Lifecycle::Disconnected|Lifecycle::Stopped) {
                     if ui.button(kiln_common::i18n::tr("같은 대화로 재시작")).clicked(){restart=self.restart();}
                 }
+                });
             });
         });
+        let column_width = (available.width() - 40.).clamp(0., 900.);
+        let column_left = available.center().x - column_width / 2.;
         let composer_rect = egui::Rect::from_min_max(
-            egui::pos2(available.left() + 16., transcript_rect.bottom() + 8.),
-            egui::pos2(available.right() - 16., available.bottom() - 4.),
+            egui::pos2(column_left, transcript_rect.bottom() + 8.),
+            egui::pos2(column_left + column_width, available.bottom() - 4.),
         );
         let mut composer = ui.new_child(
             egui::UiBuilder::new()
@@ -651,13 +677,104 @@ impl AgentPane {
         ui.advance_cursor_after_rect(available);
         restart
     }
+    fn tool_ui(&self, ui: &mut Ui, tool: &ToolCall) {
+        let t = Theme::current();
+        let status = kiln_common::i18n::tr(match tool.status {
+            ToolStatus::Pending => "대기 중",
+            ToolStatus::Running => "실행 중",
+            ToolStatus::Completed => "완료",
+            ToolStatus::Failed => "실패",
+            ToolStatus::Cancelled => "중지됨",
+        });
+        let color = match tool.status {
+            ToolStatus::Completed => t.green,
+            ToolStatus::Failed => t.red,
+            ToolStatus::Running | ToolStatus::Pending => t.orange,
+            ToolStatus::Cancelled => t.text_dim,
+        };
+        let title = super::approval::tool_title(tool, self.descriptor.tool);
+        Frame::new()
+            .stroke(Stroke::new(1., t.border))
+            .corner_radius(6)
+            .inner_margin(Margin::same(8))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                // Native collapsing behavior, with space reserved for actual status.
+                ui.visuals_mut().collapsing_header_frame = true;
+                let status_galley = egui::WidgetText::from(RichText::new(status).color(color))
+                    .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button);
+                let title_width = (ui.available_width() - status_galley.size().x - 48.).max(0.);
+                let text = egui::WidgetText::from(title.clone()).into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Truncate),
+                    title_width,
+                    egui::TextStyle::Button,
+                );
+                let header = egui::CollapsingHeader::new(text)
+                    .id_salt(&tool.id)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::both()
+                            .id_salt((&tool.id, "output"))
+                            .max_height(260.)
+                            .show(ui, |ui| {
+                                if let Some(input) = self.cache.inputs.get(&tool.id) {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(input).monospace()).wrap(),
+                                    );
+                                }
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(bounded(&tool.output)).monospace(),
+                                    )
+                                    .wrap(),
+                                );
+                                for line in bounded(&tool.diff).lines().take(500) {
+                                    let color = if line.starts_with('+') {
+                                        t.green
+                                    } else if line.starts_with('-') {
+                                        t.red
+                                    } else {
+                                        t.text_dim
+                                    };
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(line)
+                                                .monospace()
+                                                .color(color)
+                                                .background_color(color.gamma_multiply(0.08)),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                            });
+                    });
+                let rect = header.header_response.rect;
+                ui.painter().galley(
+                    egui::pos2(
+                        rect.right() - status_galley.size().x - 6.,
+                        rect.center().y - status_galley.size().y / 2.,
+                    ),
+                    status_galley,
+                    color,
+                );
+                header.header_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::CollapsingHeader,
+                        true,
+                        format!("{title} · {status}"),
+                    )
+                });
+            });
+    }
     fn request_ui(&mut self, ui: &mut Ui, request: &Request) {
         let t = Theme::current();
         Frame::new()
-            .stroke(Stroke::new(1., t.orange))
+            .fill(t.bg_panel)
+            .stroke(Stroke::new(1., t.border_strong))
             .corner_radius(6)
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 let summary = self
                     .cache
                     .details
@@ -667,7 +784,11 @@ impl AgentPane {
                 let kind = summary
                     .map(|s| s.kind)
                     .unwrap_or_else(|| super::approval::kind(request, self.descriptor.tool));
-                ui.label(RichText::new(kind.title()).color(t.orange).strong());
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(16., 18.), egui::Sense::hover());
+                    kiln_common::icons::paint(ui.painter(), rect, kiln_common::icons::Icon::Warning, t.orange);
+                    ui.label(RichText::new(kind.title()).color(t.orange).strong());
+                });
                 if let Some(summary) = summary {
                     egui::ScrollArea::vertical()
                         .id_salt((&request.id, "summary"))
@@ -823,10 +944,12 @@ impl AgentPane {
                 }
             });
         }
-        Frame::new()
+        let mut editor_focused = false;
+        let frame = Frame::new()
+            .fill(t.bg_input)
             .stroke(Stroke::new(1., t.border_strong))
-            .corner_radius(8)
-            .inner_margin(Margin::same(10))
+            .corner_radius(12)
+            .inner_margin(Margin::same(12))
             .show(ui, |ui| {
                 let id = ui.id().with("message");
                 let focused = ui.memory(|m| m.has_focus(id));
@@ -883,6 +1006,7 @@ impl AgentPane {
                 let output = egui::TextEdit::multiline(&mut self.composer.text)
                     .id(id)
                     .hint_text(kiln_common::i18n::tr("작업을 입력하세요…"))
+                    .frame(Frame::NONE)
                     .desired_width(f32::INFINITY)
                     .desired_rows(3)
                     .char_limit(120_000)
@@ -916,6 +1040,7 @@ impl AgentPane {
                     edit.request_focus();
                     self.focus = false;
                 }
+                editor_focused = edit.has_focus();
                 // Losing focus cancels stale composition state, but blocks the click frame.
                 if edit.lost_focus() && self.composing {
                     if let Some(text) = self.committed_during_preedit.take() {
@@ -962,131 +1087,216 @@ impl AgentPane {
                 if let Some(error) = &self.attachment_error {
                     ui.add(egui::Label::new(RichText::new(error).color(t.red)).wrap());
                 }
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add_enabled(
-                            self.composer.attachments.len() + self.imports.len() < MAX_ATTACHMENTS,
-                            egui::Button::new(kiln_common::i18n::tr("이미지 첨부")),
-                        )
-                        .clicked()
-                    {
-                        let descriptor = self.descriptor.clone();
-                        self.imports.push(Task::spawn(ui.ctx(), move || {
-                            let path = rfd::FileDialog::new()
-                                .add_filter("Image", &["png", "jpg", "jpeg", "gif", "webp"])
-                                .pick_file()
-                                .ok_or_else(|| kiln_common::i18n::tr("첨부 취소됨").to_owned())?;
-                            import_attachment(&descriptor, &path).map_err(|e| e.to_string())
-                        }));
-                    }
-                    let dropped = ui.input(|i| {
-                        i.raw
-                            .dropped_files
-                            .iter()
-                            .map(|f| f.path().to_path_buf())
-                            .take(MAX_ATTACHMENTS)
-                            .collect::<Vec<_>>()
+                if ui.available_width() < 400. {
+                    ui.horizontal_wrapped(|ui| self.composer_controls_ui(ui));
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.composer_action_ui(ui, enter);
+                        });
                     });
-                    if ui.input(|i| {
-                        i.pointer
-                            .hover_pos()
-                            .is_some_and(|pos| ui.clip_rect().contains(pos))
-                    }) {
-                        for path in dropped {
-                            self.import(ui.ctx(), path);
-                        }
-                    }
-                    if !self.transcript.models.is_empty() || self.composer.model.is_some() {
-                        egui::ComboBox::from_label(kiln_common::i18n::tr("모델"))
-                            .selected_text(
-                                self.composer
-                                    .model
-                                    .as_deref()
-                                    .unwrap_or(kiln_common::i18n::tr("기본 모델")),
-                            )
-                            .width(125.)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.composer.model,
-                                    None,
-                                    kiln_common::i18n::tr("기본 모델"),
-                                );
-                                for model in &self.transcript.models {
-                                    ui.selectable_value(
-                                        &mut self.composer.model,
-                                        Some(model.id.clone()),
-                                        &model.label,
-                                    );
-                                }
-                            });
-                    }
-                    if !self.transcript.modes.is_empty() {
-                        let mut selected = None;
-                        egui::ComboBox::from_label(kiln_common::i18n::tr("모드"))
-                            .selected_text(
-                                self.transcript
-                                    .selected_mode
-                                    .as_deref()
-                                    .unwrap_or(kiln_common::i18n::tr("기본 모드")),
-                            )
-                            .width(105.)
-                            .show_ui(ui, |ui| {
-                                for mode in &self.transcript.modes {
-                                    if ui
-                                        .selectable_label(
-                                            self.transcript.selected_mode.as_deref()
-                                                == Some(&mode.id),
-                                            &mode.label,
-                                        )
-                                        .clicked()
-                                    {
-                                        selected = Some(mode.id.clone());
-                                    }
-                                }
-                            });
-                        if let Some(mode) = selected
-                            && let Err(error) = self.send(Command::SetMode { mode })
-                        {
-                            self.error = Some(error);
-                        }
-                    }
-                    if self.busy() {
-                        if widgets::button(ui, kiln_common::i18n::tr("중지"), ButtonKind::Secondary)
-                            .clicked()
-                        {
-                            if let Err(error) = self.send(Command::Interrupt) {
-                                self.error = Some(error);
-                            }
-                        }
-                    } else {
-                        let enabled = self.transport_alive
-                            && self.transcript.lifecycle == Lifecycle::Ready
-                            && self.pending.is_none()
-                            && self.backlog.is_empty()
-                            && self.imports.is_empty()
-                            && self.validation.is_none()
-                            && self.attachment_error.is_none()
-                            && !self.composing
-                            && !self.ime_frame
-                            && self.composer.model.as_ref().is_none_or(|id| {
-                                self.transcript.models.iter().any(|m| &m.id == id)
-                            });
-                        let clicked = ui
-                            .add_enabled(
-                                enabled,
-                                egui::Button::new(kiln_common::i18n::tr("보내기")),
-                            )
-                            .clicked();
-                        if clicked || enter {
-                            self.submit();
-                        }
-                    }
-                });
+                } else {
+                    ui.horizontal(|ui| {
+                        let controls_width = (ui.available_width() - 100.).max(0.);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(controls_width, ui.spacing().interact_size.y),
+                            egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+                            |ui| self.composer_controls_ui(ui),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.composer_action_ui(ui, enter);
+                        });
+                    });
+                }
                 ui.small(kiln_common::i18n::tr(
                     "Enter로 보내기 · Shift+Enter로 줄바꿈",
                 ));
             });
+        if editor_focused {
+            ui.painter().rect_stroke(
+                frame.response.rect,
+                12,
+                Stroke::new(1.5, widgets::tint(t.accent, 0.7)),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
+    fn composer_controls_ui(&mut self, ui: &mut Ui) {
+        if ui
+            .add_enabled_ui(
+                self.composer.attachments.len() + self.imports.len() < MAX_ATTACHMENTS,
+                |ui| {
+                    widgets::icon_button(
+                        ui,
+                        kiln_common::icons::Icon::Plus,
+                        28.,
+                        false,
+                        kiln_common::i18n::tr("이미지 첨부"),
+                    )
+                },
+            )
+            .inner
+            .clicked()
+        {
+            let descriptor = self.descriptor.clone();
+            self.imports.push(Task::spawn(ui.ctx(), move || {
+                let path = rfd::FileDialog::new()
+                    .add_filter("Image", &["png", "jpg", "jpeg", "gif", "webp"])
+                    .pick_file()
+                    .ok_or_else(|| kiln_common::i18n::tr("첨부 취소됨").to_owned())?;
+                import_attachment(&descriptor, &path).map_err(|e| e.to_string())
+            }));
+        }
+        let dropped = ui.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .take(MAX_ATTACHMENTS)
+                .collect::<Vec<_>>()
+        });
+        if ui.input(|i| {
+            i.pointer
+                .hover_pos()
+                .is_some_and(|pos| ui.clip_rect().contains(pos))
+        }) {
+            for path in dropped {
+                self.import(ui.ctx(), path);
+            }
+        }
+        let t = Theme::current();
+        let widgets = &mut ui.visuals_mut().widgets;
+        for visuals in [
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+        ] {
+            visuals.corner_radius = egui::CornerRadius::same(12);
+        }
+        widgets.inactive.bg_fill = t.bg_elevated;
+        widgets.inactive.weak_bg_fill = if t.dark { t.bg_elevated } else { t.bg_hover };
+        widgets.inactive.bg_stroke = Stroke::NONE;
+        if !self.transcript.models.is_empty() || self.composer.model.is_some() {
+            ui.allocate_ui(egui::vec2(125., 28.), |ui| {
+                let combo = egui::ComboBox::from_id_salt("composer-model")
+                    .selected_text(
+                        self.composer
+                            .model
+                            .as_deref()
+                            .unwrap_or(kiln_common::i18n::tr("기본 모델")),
+                    )
+                    .width(125.)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.composer.model,
+                            None,
+                            kiln_common::i18n::tr("기본 모델"),
+                        );
+                        for model in &self.transcript.models {
+                            ui.selectable_value(
+                                &mut self.composer.model,
+                                Some(model.id.clone()),
+                                &model.label,
+                            );
+                        }
+                    });
+                combo.response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::ComboBox,
+                        ui.is_enabled(),
+                        kiln_common::i18n::tr("모델"),
+                    )
+                });
+            });
+        }
+        if !self.transcript.modes.is_empty() {
+            let mut selected = None;
+            ui.allocate_ui(egui::vec2(105., 28.), |ui| {
+                let combo = egui::ComboBox::from_id_salt("composer-mode")
+                    .selected_text(
+                        self.transcript
+                            .selected_mode
+                            .as_deref()
+                            .unwrap_or(kiln_common::i18n::tr("기본 모드")),
+                    )
+                    .width(105.)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for mode in &self.transcript.modes {
+                            if ui
+                                .selectable_label(
+                                    self.transcript.selected_mode.as_deref() == Some(&mode.id),
+                                    &mode.label,
+                                )
+                                .clicked()
+                            {
+                                selected = Some(mode.id.clone());
+                            }
+                        }
+                    });
+                combo.response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::ComboBox,
+                        ui.is_enabled(),
+                        kiln_common::i18n::tr("모드"),
+                    )
+                });
+            });
+            if let Some(mode) = selected
+                && let Err(error) = self.send(Command::SetMode { mode })
+            {
+                self.error = Some(error);
+            }
+        }
+    }
+    fn composer_action_ui(&mut self, ui: &mut Ui, enter: bool) {
+        if self.busy() {
+            if widgets::button_with(
+                ui,
+                Some(kiln_common::icons::Icon::Stop),
+                kiln_common::i18n::tr("중지"),
+                ButtonKind::Secondary,
+                false,
+            )
+            .clicked()
+            {
+                if let Err(error) = self.send(Command::Interrupt) {
+                    self.error = Some(error);
+                }
+            }
+        } else {
+            let enabled = self.transport_alive
+                && self.transcript.lifecycle == Lifecycle::Ready
+                && self.pending.is_none()
+                && self.backlog.is_empty()
+                && self.imports.is_empty()
+                && self.validation.is_none()
+                && self.attachment_error.is_none()
+                && !self.composing
+                && !self.ime_frame
+                && self
+                    .composer
+                    .model
+                    .as_ref()
+                    .is_none_or(|id| self.transcript.models.iter().any(|m| &m.id == id));
+            let clicked = ui
+                .add_enabled_ui(enabled, |ui| {
+                    widgets::button_with(
+                        ui,
+                        Some(kiln_common::icons::Icon::ArrowUp),
+                        kiln_common::i18n::tr("보내기"),
+                        ButtonKind::Primary,
+                        false,
+                    )
+                })
+                .inner
+                .clicked();
+            if clicked || enter {
+                self.submit();
+            }
+        }
+    }
+
 }
 
 #[cfg(test)]

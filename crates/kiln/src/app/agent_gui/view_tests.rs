@@ -1054,3 +1054,121 @@ fn review_round2_i4_claude_mcp_arguments_are_visible_without_an_adjacent_tool_ca
         ));
     }
 }
+
+
+#[test]
+fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
+    for dark in [true, false] {
+        for width in [320., 520., 1400.] {
+            let mut p = pane();
+            p.transcript.lifecycle = Lifecycle::Ready;
+            p.transcript.selected_model = Some("fixture-model".into());
+            p.transcript.models = vec![Model {
+                id: "fixture-model".into(),
+                label: "Fixture model".into(),
+            }];
+            p.transcript.modes = vec![Choice {
+                id: "fixture-mode".into(),
+                label: "Fixture mode".into(),
+                description: String::new(),
+            }];
+            p.transcript.selected_mode = Some("fixture-mode".into());
+            p.transcript.entries.push(Entry::Message(Message {
+                id: "alignment-user".into(),
+                role: Role::User,
+                text: "Native layout probe".into(),
+                attachments: vec![],
+            }));
+            p.transcript.entries.push(Entry::Tool(ToolCall {
+                id: "alignment-tool".into(),
+                name: "Bash".into(),
+                status: ToolStatus::Running,
+                output: "fixture command output".into(),
+                diff: "--- a/fixture.txt\n+++ b/fixture.txt\n-old\n+new".into(),
+                ..Default::default()
+            }));
+            let mut initialized = false;
+            let mut h = Harness::builder().with_size([width, 760.]).build_ui_state(
+                |ui, p: &mut AgentPane| {
+                    if !initialized {
+                        kiln_common::fonts::install(ui.ctx());
+                        initialized = true;
+                        return;
+                    }
+                    kiln_common::Theme::set_current(if dark { "kiln-dark" } else { "kiln-light" });
+                    kiln_common::Theme::current().apply(ui.ctx());
+                    p.ui(ui);
+                },
+                p,
+            );
+            h.run();
+            assert_eq!(h.get_by_label("모델").accesskit_node().value().as_deref(), Some("기본 모델"));
+            assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("fixture-mode"));
+            let message = h.get_by_label("메시지").rect();
+            let tool = h.get_by_label("Bash · 실행 중").rect();
+            let send = h.get_by_label("보내기").rect();
+            let attach = h.get_by_label("이미지 첨부").rect();
+            assert!(
+                tool.width() >= message.width() - 12.,
+                "tool card must fill the conversation column: {tool:?} vs {message:?}"
+            );
+            assert!(
+                tool.width() <= 900.,
+                "wide prose/tool column stays readable"
+            );
+            assert!(
+                (send.right() - message.right()).abs() <= 4.,
+                "send belongs at the composer's right edge: {send:?} vs {message:?}"
+            );
+            assert!(
+                attach.left() < message.center().x,
+                "attachment controls remain on the left"
+            );
+            assert!(
+                h.get_by_label("나").rect().top() < if width > 1000. { 80. } else { 110. },
+                "metadata header must stay compact: {:?}",
+                h.get_by_label("나").rect()
+            );
+            for rect in [
+                message,
+                tool,
+                send,
+                attach,
+                h.get_by_label("Enter로 보내기 · Shift+Enter로 줄바꿈")
+                    .rect(),
+            ] {
+                assert!(h.ctx.content_rect().contains_rect(rect));
+            }
+            h.get_by_label("Bash · 실행 중").click();
+            h.run();
+            assert!(
+                h.query_all_by_label_contains("fixture command output")
+                    .count()
+                    > 0
+            );
+            assert!(h.query_all_by_label_contains("+new").count() > 0);
+            let image = h.render().expect("native egui render");
+            if let Some(dir) = std::env::var_os("KILN_VISUAL_CAPTURE_DIR") {
+                let dir = std::path::PathBuf::from(dir);
+                std::fs::create_dir_all(&dir).unwrap();
+                image
+                    .save(dir.join(format!(
+                        "alignment-{}-{width:.0}.png",
+                        if dark { "dark" } else { "light" }
+                    )))
+                    .unwrap();
+            }
+            let p = h.state_mut();
+            p.transcript.lifecycle = Lifecycle::Running;
+            h.run();
+            let stop = h.get_by_label("중지").rect();
+            assert!(
+                (stop.right() - message.right()).abs() <= 4.,
+                "Stop uses the same right anchor"
+            );
+            h.get_by_label("중지").click();
+            h.run();
+            assert!(matches!(h.state().sent.last(), Some(Command::Interrupt)));
+        }
+    }
+}

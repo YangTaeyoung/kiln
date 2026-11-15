@@ -25,6 +25,263 @@ fn split_choices(ui: &mut egui::Ui, pane: PaneId, dir: layout::Dir, actions: &mu
     }
 }
 
+fn new_task_popup(
+    ui: &mut egui::Ui,
+    presentation: &mut agent_gui::Presentation,
+    shortcut: &str,
+) -> (egui::Response, Option<Action>) {
+    let t = Theme::current();
+    let background = ui.painter().add(egui::Shape::Noop);
+    let trigger = widgets::button_with(
+        ui,
+        Some(Icon::Plus),
+        kiln_common::i18n::tr("새 작업"),
+        ButtonKind::Ghost,
+        true,
+    );
+    let popup =
+        egui::Popup::menu(&trigger).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    if popup.is_open() {
+        ui.painter().set(
+            background,
+            egui::epaint::RectShape::filled(trigger.rect, 7, t.bg_selected),
+        );
+    }
+    let mut chosen = None;
+    popup
+        .frame(
+            Frame::menu(ui.style())
+                .inner_margin(Margin::same(8))
+                .corner_radius(12)
+                .stroke(Stroke::new(1., t.border))
+                .shadow(t.shadow()),
+        )
+        .show(|ui| {
+            chosen = new_task_menu(ui, presentation, shortcut);
+        });
+    (trigger, chosen)
+}
+/// Native New Task menu: shared launch choices, without changing launch semantics.
+fn new_task_row(ui: &mut egui::Ui, icon: Icon, label: &str, trailing: &str) -> egui::Response {
+    let t = Theme::current();
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    widgets::paint_row(ui.painter(), rect, false, response.hovered());
+    icons::paint(
+        ui.painter(),
+        egui::Rect::from_center_size(pos2(rect.left() + 20., rect.center().y), vec2(18., 18.)),
+        icon,
+        agent_ink(icon, &t),
+    );
+    ui.painter().text(
+        pos2(rect.left() + 40., rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        fonts::medium(13.),
+        t.text,
+    );
+    if !trailing.is_empty() {
+        ui.painter().text(
+            pos2(rect.right() - 12., rect.center().y),
+            Align2::RIGHT_CENTER,
+            trailing,
+            fonts::medium(11.),
+            t.text_faint,
+        );
+    }
+    widgets::focus_ring(ui, &response, 6);
+    response
+}
+fn new_task_menu(
+    ui: &mut egui::Ui,
+    presentation: &mut agent_gui::Presentation,
+    shortcut: &str,
+) -> Option<Action> {
+    ui.set_width(268.0f32.min(ui.ctx().content_rect().width() - 40.));
+    ui.spacing_mut().item_spacing.y = 2.;
+    presentation.ui(ui);
+    ui.add_space(6.);
+    let mut chosen = None;
+    for tool in kiln_accounts::Tool::ALL {
+        if new_task_row(ui, agent_icon(Some(tool)), tool.display_name(), "").clicked() {
+            chosen = Some(if *presentation == agent_gui::Presentation::Gui {
+                Action::GuiAgent { tool, cwd: None }
+            } else {
+                Action::DirectAgent { tool, cwd: None }
+            });
+            ui.close();
+        }
+    }
+    ui.add_space(4.);
+    widgets::divider(ui);
+    ui.add_space(4.);
+    if new_task_row(
+        ui,
+        Icon::Sparkle,
+        kiln_common::i18n::tr("에이전트 요청"),
+        "",
+    )
+    .clicked()
+    {
+        chosen = Some(Action::NewAgentTask);
+        ui.close();
+    }
+    if new_task_row(
+        ui,
+        Icon::Terminal,
+        kiln_common::i18n::tr("새 터미널"),
+        shortcut,
+    )
+    .clicked()
+    {
+        chosen = Some(Action::NewPage);
+        ui.close();
+    }
+    ui.add_space(4.);
+    widgets::divider(ui);
+    ui.add_space(4.);
+    let folder = new_task_row(ui, Icon::Folder, kiln_common::i18n::tr("폴더에서 열기"), "");
+    icons::paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            pos2(folder.rect.right() - 18., folder.rect.center().y),
+            vec2(14., 14.),
+        ),
+        Icon::ChevronRight,
+        Theme::current().text_dim,
+    );
+    egui::containers::menu::SubMenu::new().show(ui, &folder, |ui| {
+        ui.set_width(248.);
+        for tool in kiln_accounts::Tool::ALL {
+            if new_task_row(ui, agent_icon(Some(tool)), tool.display_name(), "").clicked() {
+                chosen = Some(Action::OpenAgentFolder(tool));
+                ui.close();
+            }
+        }
+        if new_task_row(ui, Icon::Terminal, kiln_common::i18n::tr("터미널"), "").clicked() {
+            chosen = Some(Action::OpenFolder);
+            ui.close();
+        }
+    });
+    chosen
+}
+
+#[derive(Default)]
+struct ToastInteraction {
+    open: bool,
+    dismiss: bool,
+    action: bool,
+}
+fn toast_stack(ctx: &egui::Context, content: impl FnOnce(&mut egui::Ui)) {
+    egui::Area::new(egui::Id::new("toasts"))
+        .anchor(Align2::RIGHT_TOP, vec2(-16., TOPBAR_H + 12.))
+        .order(egui::Order::Tooltip)
+        .show(ctx, content);
+}
+fn toast_card(ui: &mut egui::Ui, toast: &Toast, t: &Theme) -> ToastInteraction {
+    let mut result = ToastInteraction::default();
+    let (accent, icon) = match toast.kind {
+        ToastKind::Info => (t.accent, Icon::Sparkle),
+        ToastKind::Notify => (t.orange, Icon::Bell),
+        ToastKind::Error => (t.red, Icon::Warning),
+    };
+    let viewport = ui.ctx().content_rect();
+    let compact = viewport.height() < 600. || viewport.width() < 900.;
+    Frame::new()
+        .fill(t.bg_elevated)
+        .stroke(Stroke::new(1., t.border))
+        .corner_radius(10)
+        .shadow(t.shadow())
+        .inner_margin(Margin {
+            left: 12,
+            right: 12,
+            top: 8,
+            bottom: 8,
+        })
+        .show(ui, |ui| {
+            ui.set_width(316.0f32.min(viewport.width() - 56.));
+            ui.spacing_mut().item_spacing = vec2(6., 4.);
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(16., 24.), Sense::hover());
+                icons::paint(ui.painter(), rect.shrink2(vec2(0., 4.)), icon, accent);
+                let title_width = (ui.available_width() - 28.).max(64.);
+                let title = if viewport.height() < 600. && !toast.body.is_empty() {
+                    format!("{} · {}", toast.title, toast.body)
+                } else {
+                    toast.title.clone()
+                };
+                ui.allocate_ui_with_layout(
+                    vec2(title_width, 24.),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_min_width(title_width);
+                        if compact && toast.button.is_none() {
+                            result.open = ui
+                                .add_sized(
+                                    [title_width, 24.],
+                                    egui::Button::new(
+                                        RichText::new(title).font(fonts::medium(13.)),
+                                    )
+                                    .frame(false)
+                                    .truncate(),
+                                )
+                                .on_hover_text(kiln_common::trf!(
+                                    "{}\n{}\n클릭하여 열기",
+                                    toast.title,
+                                    toast.body
+                                ))
+                                .clicked();
+                        } else {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(title)
+                                        .font(fonts::semibold(13.))
+                                        .color(t.text),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(&toast.body);
+                        }
+                    },
+                );
+                result.dismiss = widgets::icon_button(
+                    ui,
+                    Icon::Close,
+                    22.,
+                    false,
+                    kiln_common::i18n::tr("알림 닫기"),
+                )
+                .clicked();
+            });
+            if !toast.body.is_empty() && viewport.height() >= 600. {
+                ui.add(
+                    egui::Label::new(RichText::new(&toast.body).size(11.5).color(t.text_dim))
+                        .truncate(),
+                )
+                .on_hover_text(&toast.body);
+            }
+            // Preserve the former compact title activation and all explicit actions.
+            if !(compact && toast.button.is_none()) {
+                if let Some((label, _)) = &toast.button {
+                    result.action =
+                        widgets::button_with(ui, None, label, ButtonKind::Ghost, true).clicked();
+                } else if toast.session.is_some() {
+                    result.action = widgets::button_with(
+                        ui,
+                        None,
+                        kiln_common::i18n::tr("세션으로 이동"),
+                        ButtonKind::Ghost,
+                        true,
+                    )
+                    .clicked();
+                }
+            }
+        });
+    result
+}
+
 /// One complete tool list, shared by the titlebar and workspace context menu.
 fn tool_menu(ui: &mut egui::Ui, selected: Option<tools::ToolKind>) -> Option<tools::ToolKind> {
     let t = kiln_common::Theme::current();
@@ -645,23 +902,8 @@ impl KilnApp {
             let mut pui = ui.new_child(UiBuilder::new().max_rect(lane).layout(egui::Layout::left_to_right(egui::Align::Center)));
             pui.set_clip_rect(lane.intersect(ui.clip_rect()));
             pui.spacing_mut().item_spacing.x = 6.0;
-            let create=widgets::button_with(&mut pui,Some(Icon::Plus),kiln_common::i18n::tr("새 작업"),ButtonKind::Secondary,true);
-            egui::Popup::menu(&create).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                self.settings.agent_presentation.ui(ui);
-                if widgets::button_with(ui,Some(Icon::Codex),"Codex",ButtonKind::Ghost,true).clicked(){self.actions.push(if self.settings.agent_presentation==agent_gui::Presentation::Gui {Action::GuiAgent { tool: kiln_accounts::Tool::Codex, cwd: None }} else {Action::DirectAgent { tool: kiln_accounts::Tool::Codex, cwd: None }});ui.close();}
-                if widgets::button_with(ui,Some(Icon::Claude),"Claude Code",ButtonKind::Ghost,true).clicked(){self.actions.push(if self.settings.agent_presentation==agent_gui::Presentation::Gui {Action::GuiAgent { tool: kiln_accounts::Tool::Claude, cwd: None }} else {Action::DirectAgent { tool: kiln_accounts::Tool::Claude, cwd: None }});ui.close();}
-                if widgets::button_with(ui,Some(Icon::Antigravity),"Antigravity",ButtonKind::Ghost,true).clicked(){self.actions.push(if self.settings.agent_presentation==agent_gui::Presentation::Gui {Action::GuiAgent { tool: kiln_accounts::Tool::Antigravity, cwd: None }} else {Action::DirectAgent { tool: kiln_accounts::Tool::Antigravity, cwd: None }});ui.close();}
-                ui.separator();
-                if widgets::button_with(ui,Some(Icon::Sparkle),kiln_common::i18n::tr("에이전트 요청"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::NewAgentTask);ui.close();}
-                if widgets::button_with(ui,Some(Icon::Terminal),kiln_common::i18n::tr("새 터미널"),ButtonKind::Ghost,true).on_hover_text(self.keymap.label("new_task","⌘T")).clicked(){self.actions.push(Action::NewPage);ui.close();}
-                ui.separator();
-                ui.menu_button(kiln_common::i18n::tr("폴더에서 열기"), |ui| {
-                    if widgets::button_with(ui,Some(Icon::Codex),"Codex",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Codex));ui.close();}
-                    if widgets::button_with(ui,Some(Icon::Claude),"Claude Code",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Claude));ui.close();}
-                    if widgets::button_with(ui,Some(Icon::Antigravity),"Antigravity",ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenAgentFolder(kiln_accounts::Tool::Antigravity));ui.close();}
-                    if widgets::button_with(ui,Some(Icon::Terminal),kiln_common::i18n::tr("터미널"),ButtonKind::Ghost,true).clicked(){self.actions.push(Action::OpenFolder);ui.close();}
-                });
-            });
+            let (create, action) = new_task_popup(&mut pui, &mut self.settings.agent_presentation, &self.keymap.label("new_task", "⌘T"));
+            if let Some(action) = action { self.actions.push(action); }
             let tab_max=(lane.width()-create.rect.width()-6.0).clamp(80.0,360.0);
             let active = self.workspaces[self.active].active_page;
             let labels: Vec<_> = self.workspaces[self.active].pages.iter().map(|p| (self.page_label(p), self.page_attention(p))).collect();
@@ -1579,61 +1821,21 @@ impl KilnApp {
         let mut reveal = None;
         let mut dismiss = None;
         let mut pressed = None;
-        egui::Area::new(egui::Id::new("toasts")).anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -20.0)).order(egui::Order::Tooltip).show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 8.0;
+        toast_stack(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.;
             let n = self.toasts.len();
-            for idx in (n.saturating_sub(if ctx.content_rect().height() < 700.0 { 1 } else { 2 })..n).rev() {
+            for idx in (n.saturating_sub(if ctx.content_rect().height() < 700. { 1 } else { 2 })..n).rev() {
                 let toast = &self.toasts[idx];
-
-                let (accent, icon) = match toast.kind {
-                    ToastKind::Info => (t.accent, Icon::Sparkle),
-                    ToastKind::Notify => (t.orange, Icon::Bell),
-                    ToastKind::Error => (t.red, Icon::Warning),
-                };
-                let resp = Frame::new()
-                    .fill(t.bg_elevated)
-                    .stroke(Stroke::new(1.0, t.border_strong))
-                    .corner_radius(CornerRadius::same(12))
-                    .shadow(t.shadow())
-                    .inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 8 })
-                    .show(ui, |ui| {
-                        let compact=ctx.content_rect().height()<600.0 || ctx.content_rect().width()<900.0;
-                        ui.set_width(if compact {250.0f32.min(ctx.content_rect().width()-60.0)}else{300.0});
-                        if compact && toast.button.is_none() {
-                            ui.horizontal(|ui|{
-                                let title=format!("{} · {}",toast.title,toast.body);
-                                let available=(ui.available_width()-30.0).max(80.0);
-                                let response=ui.add_sized([available,24.0],egui::Button::new(RichText::new(title).size(12.0)).frame(false).truncate()).on_hover_text(kiln_common::trf!("{}\n{}\n클릭하여 열기",toast.title,toast.body));
-                                if response.clicked(){if let Some(session)=toast.session {reveal=Some((idx,session));}else{self.actions.push(Action::ToggleNotifications);dismiss=Some(idx);}}
-                                if widgets::icon_button(ui,Icon::Close,22.0,false,kiln_common::i18n::tr("알림 닫기")).clicked(){dismiss=Some(idx);}
-                            });
-                            return;
-                        }
-                        ui.horizontal(|ui| {
-                            let (r, _) = ui.allocate_exact_size(vec2(18.0, 24.0), Sense::hover());
-                            icons::paint(ui.painter(), r.shrink(2.0), icon, accent);
-                            let title_width = (ui.available_width() - 30.0).max(80.0);
-                            let title = if ctx.content_rect().height() < 600.0 && !toast.body.is_empty() {
-                                format!("{} · {}", toast.title, toast.body)
-                            } else { toast.title.clone() };
-                            ui.allocate_ui_with_layout(vec2(title_width, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                ui.add(egui::Label::new(RichText::new(title).font(fonts::semibold(13.0)).color(t.text)).truncate()).on_hover_text(&toast.body);
-                            });
-                            if widgets::icon_button(ui, Icon::Close, 22.0, false, kiln_common::i18n::tr("알림 닫기")).clicked() { dismiss = Some(idx); }
-                        });
-                        if !toast.body.is_empty() && ctx.content_rect().height() >= 600.0 {
-                            ui.add(egui::Label::new(RichText::new(&toast.body).size(12.0).color(t.text_dim)).truncate()).on_hover_text(&toast.body);
-                        }
-                        ui.horizontal(|ui| {
-                            if let Some((label, _)) = &toast.button {
-                                if widgets::button(ui, label, ButtonKind::Ghost).clicked() { pressed = Some(idx); }
-                            } else if toast.session.is_some() && widgets::button(ui, kiln_common::i18n::tr("세션으로 이동"), ButtonKind::Ghost).clicked() {
-                                reveal = toast.session.map(|session| (idx, session));
-                            }
-                        });
-                    });
-                let _ = resp;
-
+                let response = toast_card(ui, toast, &t);
+                if response.open {
+                    if let Some(session) = toast.session { reveal = Some((idx, session)); }
+                    else { self.actions.push(Action::ToggleNotifications); dismiss = Some(idx); }
+                }
+                if response.action {
+                    if toast.button.is_some() { pressed = Some(idx); }
+                    else { reveal = toast.session.map(|session| (idx, session)); }
+                }
+                if response.dismiss { dismiss = Some(idx); }
             }
         });
         if let Some(idx) = pressed {
@@ -1802,4 +2004,200 @@ mod workspace_order_tests {
         assert_eq!([0, 1, 2, 3, 4].map(|i| index_after_move(i, 0, 3)), [3, 0, 1, 2, 4]);
         assert_eq!([0, 1, 2].map(|i| index_after_move(i, 1, 1)), [0, 1, 2]);
     }
+}
+
+
+#[cfg(test)]
+mod agent_surface_visual_tests {
+    use super::*;
+    use egui_kittest::{
+        Harness,
+        kittest::{NodeT, Queryable},
+    };
+    fn capture(h: &mut Harness<'_, impl Sized>, name: &str) {
+        let image = h.render().expect("native surface render");
+        if let Some(dir) = std::env::var_os("KILN_VISUAL_CAPTURE_DIR") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(dir.join(format!("{name}.png"))).unwrap();
+        }
+    }
+    #[test]
+    fn new_task_popover_preserves_direct_gui_terminal_and_folder_actions_at_narrow_widths() {
+        for dark in [true, false] {
+            for width in [320., 520.] {
+                let mut initialized = false;
+                let mut h = Harness::builder().with_size([width, 620.]).build_ui_state(
+                    |ui, state: &mut (agent_gui::Presentation, Option<Action>)| {
+                        if !initialized {
+                            kiln_common::fonts::install(ui.ctx());
+                            initialized = true;
+                            return;
+                        }
+                        Theme::set_current(if dark { "kiln-dark" } else { "kiln-light" });
+                        Theme::current().apply(ui.ctx());
+                        if let (_, Some(action)) = new_task_popup(ui, &mut state.0, "⌘T") {
+                            state.1 = Some(action);
+                        }
+                    },
+                    (agent_gui::Presentation::Gui, None),
+                );
+                h.run();
+                h.get_by_label("새 작업").click();
+                h.run();
+                let gui = h.get_by_label("대화 GUI").rect();
+                let terminal = h.get_by_label("터미널").rect();
+                assert!((gui.width() - terminal.width()).abs() < 1.);
+                let row = h.get_by_label("Claude Code").rect();
+                assert!(row.width() > 240. && row.height() >= 32.);
+                for label in [
+                    "대화 GUI",
+                    "터미널",
+                    "Codex",
+                    "Claude Code",
+                    "Antigravity",
+                    "에이전트 요청",
+                    "새 터미널",
+                    "폴더에서 열기",
+                ] {
+                    assert!(
+                        h.ctx
+                            .content_rect()
+                            .contains_rect(h.get_by_label(label).rect()),
+                        "{label} stays on screen"
+                    );
+                }
+                capture(
+                    &mut h,
+                    &format!("menu-{}-{width:.0}", if dark { "dark" } else { "light" }),
+                );
+                h.get_by_label("터미널").click();
+                h.run();
+                h.get_by_label("Claude Code").click();
+                h.run();
+                assert!(matches!(
+                    h.state().1,
+                    Some(Action::DirectAgent {
+                        tool: kiln_accounts::Tool::Claude,
+                        ..
+                    })
+                ));
+                h.get_by_label("새 작업").click();
+                h.run();
+                h.get_by_label("대화 GUI").click();
+                h.run();
+                h.get_by_label("Codex").click();
+                h.run();
+                assert!(matches!(
+                    h.state().1,
+                    Some(Action::GuiAgent {
+                        tool: kiln_accounts::Tool::Codex,
+                        ..
+                    })
+                ));
+                h.get_by_label("새 작업").click();
+                h.run();
+                h.get_by_label("새 터미널").click();
+                h.run();
+                assert!(matches!(h.state().1, Some(Action::NewPage)));
+                h.get_by_label("새 작업").click();
+                h.run();
+                h.get_by_label("폴더에서 열기").click();
+                h.run();
+                h.query_all_by_label("Antigravity").last().unwrap().click();
+                h.run();
+                assert!(matches!(
+                    h.state().1,
+                    Some(Action::OpenAgentFolder(kiln_accounts::Tool::Antigravity))
+                ));
+                h.get_by_label("새 작업").click();
+                h.run();
+                for _ in 0..12 {
+                    h.key_press(egui::Key::Tab);
+                    h.run();
+                    if h.get_by_label("Claude Code").accesskit_node().is_focused() { break; }
+                }
+                assert!(h.get_by_label("Claude Code").accesskit_node().is_focused());
+                h.key_press(egui::Key::Enter);
+                h.run();
+                assert!(matches!(h.state().1, Some(Action::GuiAgent { tool: kiln_accounts::Tool::Claude, .. })));
+            }
+        }
+    }
+    #[test]
+    fn toast_stays_above_composer_and_keeps_keyboard_action_and_dismiss() {
+        for dark in [true, false] {
+            for width in [320., 520.] {
+                let toast = Toast {
+                    title: "검토가 필요합니다".into(),
+                    body: "작업을 확인하고 다음 단계를 선택하세요.".into(),
+                    at: Instant::now(),
+                    kind: ToastKind::Notify,
+                    session: None,
+                    button: Some(("확인".into(), Action::ToggleNotifications)),
+                };
+                let mut initialized = false;
+                let mut h = Harness::builder().with_size([width, 620.]).build_ui_state(
+                    |ui, state: &mut ToastInteraction| {
+                        if !initialized {
+                            kiln_common::fonts::install(ui.ctx());
+                            initialized = true;
+                            return;
+                        }
+                        Theme::set_current(if dark { "kiln-dark" } else { "kiln-light" });
+                        Theme::current().apply(ui.ctx());
+                        toast_stack(ui.ctx(), |ui| {
+                            let clicked = toast_card(ui, &toast, &Theme::current());
+                            state.action |= clicked.action;
+                            state.dismiss |= clicked.dismiss;
+                        });
+                    },
+                    ToastInteraction::default(),
+                );
+                h.run();
+                for label in ["검토가 필요합니다", "알림 닫기", "확인"] {
+                    let rect = h.get_by_label(label).rect();
+                    assert!(h.ctx.content_rect().contains_rect(rect));
+                    assert!(
+                        rect.top() > TOPBAR_H && rect.bottom() < 240.,
+                        "toast must stay below toolbar and above the work/composer: {rect:?}"
+                    );
+                }
+                capture(
+                    &mut h,
+                    &format!("toast-{}-{width:.0}", if dark { "dark" } else { "light" }),
+                );
+                for _ in 0..4 {
+                    h.key_press(egui::Key::Tab);
+                    h.run();
+                    if h.get_by_label("확인").accesskit_node().is_focused() {
+                        break;
+                    }
+                }
+                assert!(h.get_by_label("확인").accesskit_node().is_focused());
+                h.key_press(egui::Key::Enter);
+                h.run();
+                assert!(h.state().action);
+                h.get_by_label("알림 닫기").click();
+                h.run();
+                assert!(h.state().dismiss);
+            }
+        }
+    }
+    #[test]
+    fn compact_notification_title_keeps_existing_open_behavior() {
+        for width in [320., 520.] {
+            let toast = Toast { title: "確認する通知".into(), body: "Retained notification body".into(), at: Instant::now(), kind: ToastKind::Notify, session: None, button: None };
+            let mut initialized = false;
+            let mut h = Harness::builder().with_size([width, 620.]).build_ui_state(
+                |ui, opened: &mut bool| {
+                    if !initialized { kiln_common::fonts::install(ui.ctx()); initialized = true; return; }
+                    toast_stack(ui.ctx(), |ui| { *opened |= toast_card(ui, &toast, &Theme::current()).open; });
+                }, false,
+            );
+            h.run(); h.get_by_label("確認する通知").click(); h.run();
+            assert!(*h.state(), "narrow notification title must retain its existing open action");
+        }
+    }
+
 }
