@@ -19,8 +19,11 @@ validation run in the background; missing or modified attachments remain visible
 and must be removed or replaced before sending.
 
 Assistant text renders as Markdown. Expand tool cards to inspect inputs, outputs
-and file diffs. Permission cards support allow and deny; question cards support
-text, single choice and multiple choices as advertised. **Stop** interrupts the
+and file diffs. Permission cards show localized action summaries (command, folder,
+paths, reason and requested access), keeping transport IDs and schemas out of the decision.
+Responses use the generation actually displayed, even while newer events wait in
+the bounded view backlog. Stop remains usable during that backlog. Question cards
+support text, single choice and multiple choices as advertised. **Stop** interrupts the
 current turn without closing its reusable worker. Failed/disconnected sessions
 retain history and offer an explicit **Restart same conversation** action.
 
@@ -31,8 +34,10 @@ close confirmation; an idle GUI host is not treated as a busy task.
 
 A locally queued message is not provider acceptance. Kiln saves its command ID and
 payload until the journal confirms acceptance or a matching user message. Reopening
-never sends a draft automatically. Unknown/rejected delivery remains recoverable
-through **Recover as draft**; check history before intentionally sending again.
+never sends a draft automatically. After complete replay, a restored local send
+missing from both journal and mailbox becomes explicitly unknown and recoverable even when its worker remains Ready.
+Recovery waits for still-active local enqueue workers and does not classify missing
+work as rejected. Unknown/rejected delivery remains recoverable through **Recover as draft**; check history before intentionally sending again.
 A dispatched message is never silently shown as a fresh unsent message.
 
 The latest 100 entries form a bounded display window. **Earlier messages** and

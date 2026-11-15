@@ -42,6 +42,8 @@ Press **Enter** or **Send** to submit; **Shift+Enter** adds a line. Korean IME p
 
 Closing Kiln saves drafts while the daemon keeps the worker alive. Closing a pane ends its session and asks before discarding drafts. Locally queued sends wait for journal confirmation: reopening never resends them. An unconfirmed send offers **Recover as draft**; check history before intentionally sending again. Failed or disconnected sessions retain history and offer **Restart same conversation**. Earlier/latest message controls navigate a bounded display window without deleting history.
 
+Approval cards show the command, folder, affected paths, reason and requested access with localized titles. Transport IDs and schemas stay out of the decision. After full history replay, a restored send absent from the journal and mailbox offers explicit recovery even if the worker is Ready; it is never resent automatically.
+
 ## Work across several repositories {#work-across-several-repositories}
 
 Open a parent folder, such as `~/dev/projects`, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.

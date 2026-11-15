@@ -12253,5 +12253,165 @@
     "en": "Wait for image import to finish before quitting.",
     "ja": "画像の読み込みが完了してから終了してください。",
     "zh-CN": "请等待图片导入完成后再退出。"
+  },
+  "명령 실행 승인": {
+    "en": "Approve command execution",
+    "ja": "コマンド実行の承認",
+    "zh-CN": "批准命令执行"
+  },
+  "파일 변경 승인": {
+    "en": "Approve file changes",
+    "ja": "ファイル変更の承認",
+    "zh-CN": "批准文件更改"
+  },
+  "권한 요청": {
+    "en": "Permission request",
+    "ja": "権限リクエスト",
+    "zh-CN": "权限请求"
+  },
+  "네트워크 접근 승인": {
+    "en": "Approve network access",
+    "ja": "ネットワークアクセスの承認",
+    "zh-CN": "批准网络访问"
+  },
+  "추가 정보 요청": {
+    "en": "Additional information requested",
+    "ja": "追加情報のリクエスト",
+    "zh-CN": "请求补充信息"
+  },
+  "도구 실행 승인": {
+    "en": "Approve tool execution",
+    "ja": "ツール実行の承認",
+    "zh-CN": "批准工具执行"
+  },
+  "대상 경로": {
+    "en": "Target paths",
+    "ja": "対象パス",
+    "zh-CN": "目标路径"
+  },
+  "허용 범위": {
+    "en": "Access boundary",
+    "ja": "許可範囲",
+    "zh-CN": "访问范围"
+  },
+  "요청 범위": {
+    "en": "Requested scope",
+    "ja": "リクエスト範囲",
+    "zh-CN": "请求范围"
+  },
+  "요청 이유": {
+    "en": "Reason",
+    "ja": "理由",
+    "zh-CN": "请求原因"
+  },
+  "읽기 경로": {
+    "en": "Read paths",
+    "ja": "読み取りパス",
+    "zh-CN": "读取路径"
+  },
+  "쓰기 경로": {
+    "en": "Write paths",
+    "ja": "書き込みパス",
+    "zh-CN": "写入路径"
+  },
+  "접근 허용": {
+    "en": "Access allowed",
+    "ja": "アクセスを許可",
+    "zh-CN": "允许访问"
+  },
+  "접근 차단": {
+    "en": "Access denied",
+    "ja": "アクセスを拒否",
+    "zh-CN": "拒绝访问"
+  },
+  "프로토콜": {
+    "en": "Protocol",
+    "ja": "プロトコル",
+    "zh-CN": "协议"
+  },
+  "변경 전": {
+    "en": "Before",
+    "ja": "変更前",
+    "zh-CN": "更改前"
+  },
+  "변경 후": {
+    "en": "After",
+    "ja": "変更後",
+    "zh-CN": "更改后"
+  },
+  "작성 내용": {
+    "en": "Proposed content",
+    "ja": "書き込み内容",
+    "zh-CN": "拟写内容"
+  },
+  "질문": {
+    "en": "Question",
+    "ja": "質問",
+    "zh-CN": "问题"
+  },
+  "서버": {
+    "en": "Server",
+    "ja": "サーバー",
+    "zh-CN": "服务器"
+  },
+  "주소": {
+    "en": "Address",
+    "ja": "アドレス",
+    "zh-CN": "地址"
+  },
+  "네트워크": {
+    "en": "Network",
+    "ja": "ネットワーク",
+    "zh-CN": "网络"
+  },
+  "변경 내용": {
+    "en": "Changes",
+    "ja": "変更内容",
+    "zh-CN": "更改内容"
+  },
+  "현재 작업": {
+    "en": "Current turn",
+    "ja": "現在のターン",
+    "zh-CN": "当前轮次"
+  },
+  "현재 세션": {
+    "en": "Current session",
+    "ja": "現在のセッション",
+    "zh-CN": "当前会话"
+  },
+  "검색어": {
+    "en": "Search query",
+    "ja": "検索語句",
+    "zh-CN": "搜索词"
+  },
+  "요청": {
+    "en": "Request",
+    "ja": "リクエスト",
+    "zh-CN": "请求"
+  },
+  "파일 변경": {
+    "en": "File changes",
+    "ja": "ファイル変更",
+    "zh-CN": "文件更改"
+  },
+  "웹 검색": {
+    "en": "Web search",
+    "ja": "ウェブ検索",
+    "zh-CN": "网页搜索"
+  },
+  "이미지 보기": {
+    "en": "View image",
+    "ja": "画像を表示",
+    "zh-CN": "查看图片"
+  },
+  "이미지 생성": {
+    "en": "Generate image",
+    "ja": "画像を生成",
+    "zh-CN": "生成图片"
+  },
+  "도구 실행": {
+    "en": "Tool execution",
+    "ja": "ツール実行",
+    "zh-CN": "工具执行"
   }
 }

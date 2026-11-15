@@ -277,5 +277,6 @@ fn verify_image(bytes: &[u8], mime: &str, digest: &str) -> bool {
     image_mime(bytes) == Some(mime) && !digest.is_empty() && image_digest(bytes) == digest
 }
 
+mod approval;
 mod view;
 pub use view::{AgentPane, Presentation, SavedDraft};

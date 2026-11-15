@@ -42,7 +42,7 @@ struct Cached {
 struct PreparedDisplay {
     messages: HashMap<String, Cached>,
     inputs: HashMap<String, String>,
-    details: HashMap<String, String>,
+    details: HashMap<String, (Request, super::approval::Summary)>,
 }
 const WINDOW: usize = 100;
 const MAX_ATTACHMENTS: usize = 8;
@@ -63,6 +63,7 @@ pub struct AgentPane {
     composer: Draft,
     pending: Option<PendingDraft>,
     recovered: Option<PendingDraft>,
+    restored_pending: bool,
     cache: PreparedDisplay,
     parsing: Option<Task<(u64, usize, PreparedDisplay)>>,
     cached_revision: Option<(u64, usize)>,
@@ -74,7 +75,7 @@ pub struct AgentPane {
     answers: BTreeMap<String, BTreeMap<String, Vec<String>>>,
     responding: BTreeMap<String, String>,
     composing: bool,
-    before_preedit: Option<String>,
+    committed_during_preedit: Option<String>,
     ime_frame: bool,
     ime_guard_frame: Option<u64>,
     transport_alive: bool,
@@ -103,6 +104,7 @@ impl AgentPane {
             composer: Draft::default(),
             pending: None,
             recovered: None,
+            restored_pending: false,
             cache: PreparedDisplay {
                 messages: HashMap::new(),
                 inputs: HashMap::new(),
@@ -118,7 +120,7 @@ impl AgentPane {
             answers: BTreeMap::new(),
             responding: BTreeMap::new(),
             composing: false,
-            before_preedit: None,
+            committed_during_preedit: None,
             ime_frame: false,
             ime_guard_frame: None,
             transport_alive: false,
@@ -140,7 +142,7 @@ impl AgentPane {
     }
     pub fn draft(&self) -> SavedDraft {
         let mut composer = self.composer.clone();
-        if let Some(text) = &self.before_preedit {
+        if let Some(text) = &self.committed_during_preedit {
             composer.text = text.clone();
         }
         SavedDraft {
@@ -158,6 +160,7 @@ impl AgentPane {
             recovered.draft.attachments.truncate(MAX_ATTACHMENTS);
         }
         self.composer = saved.composer;
+        self.restored_pending = saved.pending.is_some();
         self.pending = saved.pending;
         self.recovered = saved.recovered;
         // Validation is scheduled by tick; restore never sends or reads files.
@@ -213,7 +216,9 @@ impl AgentPane {
     }
     fn send(&mut self, command: Command) -> Result<String, String> {
         if let Some(client) = &self.client {
-            return client.send(command).map_err(|e| e.to_string());
+            return client
+                .send_for_generation(&self.transcript.generation, command)
+                .map_err(|e| e.to_string());
         }
         #[cfg(test)]
         {
@@ -244,6 +249,7 @@ impl AgentPane {
                     .any(|e| matches!(e,Entry::Message(m) if m.id==format!("user-{}",p.id)));
             if confirmed {
                 self.pending = None;
+                self.restored_pending = false;
             }
         }
         if let Some(recovered) = &self.recovered {
@@ -280,7 +286,17 @@ impl AgentPane {
             matches!(
                 self.transcript.commands.get(&p.id),
                 Some(CommandPhase::Rejected | CommandPhase::Unconfirmed)
-            ) || (self.transport_known && !self.transport_alive)
+            ) || (self.restored_pending
+                && self.backlog.is_empty()
+                && !self.transcript.commands.contains_key(&p.id)
+                && self.client.as_ref().is_some_and(|client| {
+                    client.submission_is_unknown(
+                        &p.id,
+                        &self.transcript.generation,
+                        self.transcript.sequence,
+                    )
+                }))
+                || (self.transport_known && !self.transport_alive)
                 || matches!(
                     self.transcript.lifecycle,
                     Lifecycle::Failed | Lifecycle::Disconnected | Lifecycle::Stopped
@@ -314,6 +330,7 @@ impl AgentPane {
         }) {
             Ok(id) => {
                 self.pending = Some(PendingDraft { id, draft });
+                self.restored_pending = false;
                 self.recovered = None;
                 self.composer.text.clear();
                 self.composer.attachments.clear();
@@ -416,6 +433,7 @@ impl AgentPane {
             let entries = self.transcript.entries[end.saturating_sub(WINDOW)..end].to_vec();
             let previous = self.cache.messages.clone();
             let revision = self.transcript.sequence;
+            let provider = self.descriptor.tool;
             let requests = self
                 .transcript
                 .requests
@@ -441,16 +459,16 @@ impl AgentPane {
                             display.messages.insert(m.id, Cached { source, markdown });
                         }
                         Entry::Tool(t) => {
-                            let source = serde_json::to_string_pretty(&t.input).unwrap_or_default();
+                            let source = super::approval::tool_input(&t, provider);
                             display.inputs.insert(t.id, bounded(&source).to_owned());
                         }
                     }
                 }
                 for request in requests {
-                    let source = serde_json::to_string_pretty(&request.details).unwrap_or_default();
+                    let summary = super::approval::project(&request);
                     display
                         .details
-                        .insert(request.id, bounded(&source).to_owned());
+                        .insert(request.id.clone(), (request, summary));
                 }
                 (revision, end, display)
             }));
@@ -594,7 +612,7 @@ impl AgentPane {
                     Entry::Tool(tool)=>{
                         Frame::new().stroke(Stroke::new(1.,t.border)).corner_radius(6).inner_margin(Margin::same(10)).show(ui,|ui|{
                             let status=kiln_common::i18n::tr(match tool.status{ToolStatus::Pending=>"대기 중",ToolStatus::Running=>"실행 중",ToolStatus::Completed=>"완료",ToolStatus::Failed=>"실패",ToolStatus::Cancelled=>"중지됨"});
-                            egui::CollapsingHeader::new(format!("{} · {status}",tool.name)).id_salt(&tool.id).show(ui,|ui|{
+                            egui::CollapsingHeader::new(format!("{} · {status}",super::approval::tool_title(tool,self.descriptor.tool))).id_salt(&tool.id).show(ui,|ui|{
                                 egui::ScrollArea::both().id_salt((&tool.id,"output")).max_height(260.).show(ui,|ui|{
                                     if let Some(input)=self.cache.inputs.get(&tool.id){ui.add(egui::Label::new(RichText::new(input).monospace()).wrap());}
                                     ui.add(egui::Label::new(RichText::new(bounded(&tool.output)).monospace()).wrap());
@@ -640,15 +658,27 @@ impl AgentPane {
             .corner_radius(6)
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
-                ui.label(RichText::new(&request.title).color(t.orange).strong());
-                if let Some(details) = self.cache.details.get(&request.id)
-                    && details != "null"
-                {
+                let summary = self
+                    .cache
+                    .details
+                    .get(&request.id)
+                    .filter(|(cached, _)| cached == request)
+                    .map(|(_, summary)| summary);
+                let kind = summary
+                    .map(|s| s.kind)
+                    .unwrap_or_else(|| super::approval::kind(request));
+                ui.label(RichText::new(kind.title()).color(t.orange).strong());
+                if let Some(summary) = summary {
                     egui::ScrollArea::vertical()
-                        .id_salt((&request.id, "details"))
-                        .max_height(120.)
+                        .id_salt((&request.id, "summary"))
+                        .max_height(180.)
                         .show(ui, |ui| {
-                            ui.add(egui::Label::new(RichText::new(details).monospace()).wrap());
+                            for (label, value) in &summary.fields {
+                                ui.label(
+                                    RichText::new(kiln_common::i18n::tr(label)).color(t.text_dim),
+                                );
+                                ui.add(egui::Label::new(value).wrap());
+                            }
                         });
                 }
                 let answers = self.answers.entry(request.id.clone()).or_default();
@@ -696,7 +726,9 @@ impl AgentPane {
                 let answers = answers.clone();
                 let mut decision = None;
                 ui.add_enabled_ui(
-                    self.transport_alive && !self.responding.contains_key(&request.id),
+                    self.transport_alive
+                        && summary.is_some()
+                        && !self.responding.contains_key(&request.id),
                     |ui| {
                         ui.horizontal_wrapped(|ui| {
                             if request.options.is_empty() {
@@ -794,7 +826,7 @@ impl AgentPane {
                 let focused = ui.memory(|m| m.has_focus(id));
                 self.ime_frame = self.ime_guard_frame == Some(ui.ctx().cumulative_frame_nr());
                 if !focused && self.composing {
-                    if let Some(text) = self.before_preedit.take() {
+                    if let Some(text) = self.committed_during_preedit.take() {
                         self.composer.text = text;
                     }
                     self.composing = false;
@@ -806,9 +838,6 @@ impl AgentPane {
                             if let egui::Event::Ime(event) = event {
                                 match event {
                                     egui::ImeEvent::Preedit { text, .. } => {
-                                        if !self.composing && !text.is_empty() {
-                                            self.before_preedit = Some(self.composer.text.clone());
-                                        }
                                         self.composing = !text.is_empty();
                                         self.ime_frame = true;
                                     }
@@ -845,14 +874,31 @@ impl AgentPane {
                         i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
                     });
                 }
-                let edit = ui.add(
-                    egui::TextEdit::multiline(&mut self.composer.text)
-                        .id(id)
-                        .hint_text(kiln_common::i18n::tr("작업을 입력하세요…"))
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(3)
-                        .char_limit(120_000),
-                );
+                let output = egui::TextEdit::multiline(&mut self.composer.text)
+                    .id(id)
+                    .hint_text(kiln_common::i18n::tr("작업을 입력하세요…"))
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(3)
+                    .char_limit(120_000)
+                    .show(ui);
+                if self.composing
+                    && let Some(range) = output.cursor_range
+                {
+                    // TextEdit has processed the complete ordered event batch;
+                    // exclude its actual composing range, preserving earlier commits.
+                    let range = range.as_sorted_char_range();
+                    self.committed_during_preedit = Some(
+                        self.composer
+                            .text
+                            .chars()
+                            .enumerate()
+                            .filter_map(|(index, ch)| {
+                                (!(range.start.0..range.end.0).contains(&index)).then_some(ch)
+                            })
+                            .collect(),
+                    );
+                }
+                let edit = output.response;
                 edit.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::TextEdit,
@@ -866,14 +912,14 @@ impl AgentPane {
                 }
                 // Losing focus cancels stale composition state, but blocks the click frame.
                 if edit.lost_focus() && self.composing {
-                    if let Some(text) = self.before_preedit.take() {
+                    if let Some(text) = self.committed_during_preedit.take() {
                         self.composer.text = text;
                     }
                     self.composing = false;
                     self.ime_frame = true;
                 }
                 if !self.composing {
-                    self.before_preedit = None;
+                    self.committed_during_preedit = None;
                 }
                 if !self.composer.attachments.is_empty() || !self.imports.is_empty() {
                     egui::ScrollArea::vertical()

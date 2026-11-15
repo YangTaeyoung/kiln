@@ -143,3 +143,13 @@ and command identity until actual journal acceptance. Restore never replays work
 Dead PTYs override stale Ready journal state and disable sending. Explicit pane
 close ends the session; GUI quit saves drafts and only disconnects the clients.
 See [Native agent conversations](agent-gui.md).
+
+Agent presentation commands use `Client::send_for_generation` with the generation
+actually reduced by the view. Draining into a bounded view backlog does not retarget
+an approval or Stop to an unseen worker. The compatible `Client::send` interface
+remains for existing consumers. Restored pending sends use a background replay and
+mailbox checkpoint before exposing unknown-delivery recovery; process-local weak
+mailbox references prevent an old client still enqueuing from being declared missing.
+No missing command is automatically replayed or classified as rejected. Approval
+and confirmed Codex native-item envelopes are projected into actionable summaries;
+actual tool arguments remain intact, including domain IDs.
