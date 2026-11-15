@@ -21,7 +21,7 @@ impl Presentation {
             egui::vec2(ui.available_width().max(180.), 32.),
             egui::Sense::hover(),
         );
-        ui.painter().rect_filled(track, 8, t.bg_input);
+        ui.painter().rect_filled(track, 8, if t.dark { t.bg_input } else { t.bg_hover });
         for (index, (value, label)) in [
             (Self::Gui, kiln_common::i18n::tr("대화 GUI")),
             (Self::Terminal, kiln_common::i18n::tr("터미널")),
@@ -54,6 +54,9 @@ impl Presentation {
                     6,
                     if selected { t.bg_elevated } else { t.bg_hover },
                 );
+            }
+            if selected {
+                ui.painter().rect_stroke(rect, 6, Stroke::new(1., t.border_strong), egui::StrokeKind::Inside);
             }
             ui.painter().text(
                 rect.center(),
@@ -134,6 +137,8 @@ pub struct AgentPane {
     focus: bool,
     #[cfg(test)]
     pub(super) sent: Vec<Command>,
+    #[cfg(test)]
+    composer_geometry: Option<(egui::Rect, egui::Rect)>,
 }
 impl AgentPane {
     pub fn from_spec(spec: &SpawnSpec) -> Option<Self> {
@@ -179,6 +184,8 @@ impl AgentPane {
             focus: true,
             #[cfg(test)]
             sent: vec![],
+            #[cfg(test)]
+            composer_geometry: None,
         }
     }
     #[cfg(test)]
@@ -596,7 +603,7 @@ impl AgentPane {
         let available = ui.available_rect_before_wrap();
         let composer_h =
             154. + if available.width() < 440. {
-                36. + if !self.transcript.models.is_empty() && !self.transcript.modes.is_empty() { 28. } else { 0. }
+                56. + if !self.transcript.models.is_empty() && !self.transcript.modes.is_empty() { 28. } else { 0. }
             } else { 0. } + if self.pending.is_some() || self.recovered.is_some() {
                 62.
             } else {
@@ -673,7 +680,13 @@ impl AgentPane {
         egui::ScrollArea::vertical()
             .id_salt("composer-scroll")
             .auto_shrink([false, false])
-            .show(&mut composer, |ui| self.composer_ui(ui));
+            .show(&mut composer, |ui| {
+                let frame = self.composer_ui(ui);
+                #[cfg(test)]
+                { self.composer_geometry = Some((frame, ui.clip_rect())); }
+                #[cfg(not(test))]
+                let _ = frame;
+            });
         ui.advance_cursor_after_rect(available);
         restart
     }
@@ -696,11 +709,36 @@ impl AgentPane {
         Frame::new()
             .stroke(Stroke::new(1., t.border))
             .corner_radius(6)
-            .inner_margin(Margin::same(8))
+            .inner_margin(Margin::ZERO)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                // Native collapsing behavior, with space reserved for actual status.
+                // Keep native full-width collapse behavior, but share the card's
+                // boundary instead of painting a second outlined control inside it.
                 ui.visuals_mut().collapsing_header_frame = true;
+                let open = egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    ui.make_persistent_id(&tool.id),
+                    false,
+                )
+                .is_open();
+                let radius = egui::CornerRadius {
+                    nw: 6,
+                    ne: 6,
+                    sw: if open { 0 } else { 6 },
+                    se: if open { 0 } else { 6 },
+                };
+                let widgets = &mut ui.visuals_mut().widgets;
+                for (visuals, fill) in [
+                    (&mut widgets.inactive, t.bg_elevated),
+                    (&mut widgets.hovered, t.bg_hover),
+                    (&mut widgets.active, t.bg_selected),
+                    (&mut widgets.noninteractive, t.bg_elevated),
+                ] {
+                    visuals.bg_stroke = Stroke::NONE;
+                    visuals.corner_radius = radius;
+                    visuals.weak_bg_fill = fill;
+                    visuals.expansion = 0.;
+                }
                 let status_galley = egui::WidgetText::from(RichText::new(status).color(color))
                     .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button);
                 let title_width = (ui.available_width() - status_galley.size().x - 48.).max(0.);
@@ -713,41 +751,45 @@ impl AgentPane {
                 let header = egui::CollapsingHeader::new(text)
                     .id_salt(&tool.id)
                     .show(ui, |ui| {
-                        egui::ScrollArea::both()
-                            .id_salt((&tool.id, "output"))
-                            .max_height(260.)
-                            .show(ui, |ui| {
-                                if let Some(input) = self.cache.inputs.get(&tool.id) {
-                                    ui.add(
-                                        egui::Label::new(RichText::new(input).monospace()).wrap(),
-                                    );
-                                }
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(bounded(&tool.output)).monospace(),
-                                    )
-                                    .wrap(),
-                                );
-                                for line in bounded(&tool.diff).lines().take(500) {
-                                    let color = if line.starts_with('+') {
-                                        t.green
-                                    } else if line.starts_with('-') {
-                                        t.red
-                                    } else {
-                                        t.text_dim
-                                    };
+                        Frame::NONE.inner_margin(Margin::same(8)).show(ui, |ui| {
+                            egui::ScrollArea::both()
+                                .id_salt((&tool.id, "output"))
+                                .max_height(260.)
+                                .show(ui, |ui| {
+                                    if let Some(input) = self.cache.inputs.get(&tool.id) {
+                                        ui.add(
+                                            egui::Label::new(RichText::new(input).monospace())
+                                                .wrap(),
+                                        );
+                                    }
                                     ui.add(
                                         egui::Label::new(
-                                            RichText::new(line)
-                                                .monospace()
-                                                .color(color)
-                                                .background_color(color.gamma_multiply(0.08)),
+                                            RichText::new(bounded(&tool.output)).monospace(),
                                         )
                                         .wrap(),
                                     );
-                                }
-                            });
+                                    for line in bounded(&tool.diff).lines().take(500) {
+                                        let color = if line.starts_with('+') {
+                                            t.green
+                                        } else if line.starts_with('-') {
+                                            t.red
+                                        } else {
+                                            t.text_dim
+                                        };
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(line)
+                                                    .monospace()
+                                                    .color(color)
+                                                    .background_color(color.gamma_multiply(0.08)),
+                                            )
+                                            .wrap(),
+                                        );
+                                    }
+                                });
+                        });
                     });
+                widgets::focus_ring(ui, &header.header_response, 6);
                 let rect = header.header_response.rect;
                 ui.painter().galley(
                     egui::pos2(
@@ -908,7 +950,7 @@ impl AgentPane {
                 }
             });
     }
-    fn composer_ui(&mut self, ui: &mut Ui) {
+    fn composer_ui(&mut self, ui: &mut Ui) -> egui::Rect {
         let t = Theme::current();
         if self.recovered.is_some() {
             ui.add(
@@ -1119,6 +1161,7 @@ impl AgentPane {
                 egui::StrokeKind::Inside,
             );
         }
+        frame.response.rect
     }
     fn composer_controls_ui(&mut self, ui: &mut Ui) {
         if ui

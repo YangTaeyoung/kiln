@@ -1104,6 +1104,8 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
             h.run();
             assert_eq!(h.get_by_label("모델").accesskit_node().value().as_deref(), Some("기본 모델"));
             assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("fixture-mode"));
+            let (outer, clip) = h.state().composer_geometry.expect("actual composer geometry");
+            assert!(clip.contains_rect(outer), "the complete composer frame must fit its actual painting clip: {outer:?} vs {clip:?}");
             let message = h.get_by_label("메시지").rect();
             let tool = h.get_by_label("Bash · 실행 중").rect();
             let send = h.get_by_label("보내기").rect();
@@ -1170,5 +1172,143 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
             h.run();
             assert!(matches!(h.state().sent.last(), Some(Command::Interrupt)));
         }
+    }
+}
+
+
+fn visual_fix1_capture(h: &mut Harness<'_, impl Sized>, name: &str) -> image::RgbaImage {
+    let image = h.render().expect("native egui render");
+    if let Some(dir) = std::env::var_os("KILN_VISUAL_CAPTURE_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        image.save(dir.join(format!("{name}.png"))).unwrap();
+    }
+    image
+}
+#[test]
+fn visual_fix1_persistent_segment_selection_is_visible_in_both_native_themes() {
+    for dark in [true, false] {
+        let mut initialized = false;
+        let mut h = Harness::builder().with_size([320., 160.]).build_ui_state(
+            |ui, value: &mut Presentation| {
+                if !initialized {
+                    kiln_common::fonts::install(ui.ctx());
+                    initialized = true;
+                    return;
+                }
+                Theme::set_current(if dark { "kiln-dark" } else { "kiln-light" });
+                Theme::current().apply(ui.ctx());
+                value.ui(ui);
+            },
+            Presentation::Gui,
+        );
+        h.run();
+        for (index, selected) in ["대화 GUI", "터미널"].into_iter().enumerate() {
+            if index == 1 {
+                h.get_by_label(selected).click();
+                h.run();
+            }
+            let image = visual_fix1_capture(
+                &mut h,
+                &format!("segment-{}-{index}", if dark { "dark" } else { "light" }),
+            );
+            let sample = |label| {
+                let rect = h.get_by_label(label).rect();
+                let scale = image.width() as f32 / h.ctx.content_rect().width();
+                *image.get_pixel(
+                    ((rect.left() + 8.) * scale) as u32,
+                    ((rect.top() + 8.) * scale) as u32,
+                )
+            };
+            let gui = sample("대화 GUI");
+            let terminal = sample("터미널");
+            let difference: i32 = (0..3)
+                .map(|c| (gui[c] as i32 - terminal[c] as i32).abs())
+                .sum();
+            assert!(
+                difference > 24,
+                "persistent selected material must differ away from text/focus/hover: {gui:?} vs {terminal:?}"
+            );
+            assert_eq!(
+                h.state(),
+                &if index == 0 {
+                    Presentation::Gui
+                } else {
+                    Presentation::Terminal
+                }
+            );
+        }
+    }
+}
+#[test]
+fn visual_fix1_tool_uses_one_flush_card_boundary_and_native_keyboard_collapse() {
+    fn stroked_rects(shape: &egui::Shape, result: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(rect) if rect.stroke.width > 0. => result.push(rect.rect),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    stroked_rects(shape, result);
+                }
+            }
+            _ => {}
+        }
+    }
+    for dark in [true, false] {
+        let mut p = pane();
+        let tool = ToolCall {
+            id: "single-card".into(),
+            name: "Bash".into(),
+            status: ToolStatus::Completed,
+            output: "keyboard expanded output".into(),
+            ..Default::default()
+        };
+        p.transcript.entries.push(Entry::Tool(tool.clone()));
+        let mut initialized = false;
+        let mut h = Harness::builder().with_size([520., 420.]).build_ui_state(
+            |ui, p: &mut AgentPane| {
+                if !initialized {
+                    kiln_common::fonts::install(ui.ctx());
+                    initialized = true;
+                    return;
+                }
+                Theme::set_current(if dark { "kiln-dark" } else { "kiln-light" });
+                Theme::current().apply(ui.ctx());
+                p.tool_ui(ui, &tool);
+            },
+            p,
+        );
+        h.run();
+        let header = h.get_by_label("Bash · 완료").rect();
+        let mut boundaries = vec![];
+        for shape in &h.output().shapes {
+            stroked_rects(&shape.shape, &mut boundaries);
+        }
+        assert_eq!(
+            boundaries.len(),
+            1,
+            "one card boundary, no nested outlined header: {boundaries:?}"
+        );
+        assert!(
+            (header.left() - boundaries[0].left()).abs() <= 2.
+                && (header.right() - boundaries[0].right()).abs() <= 2.,
+            "header must be flush with the single boundary"
+        );
+        visual_fix1_capture(
+            &mut h,
+            &format!("tool-{}-collapsed", if dark { "dark" } else { "light" }),
+        );
+        h.key_press(egui::Key::Tab);
+        h.run();
+        assert!(h.get_by_label("Bash · 완료").accesskit_node().is_focused());
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert!(h.query_by_label("keyboard expanded output").is_some());
+        visual_fix1_capture(
+            &mut h,
+            &format!("tool-{}-expanded", if dark { "dark" } else { "light" }),
+        );
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert!(h.query_by_label("keyboard expanded output").is_none());
     }
 }
