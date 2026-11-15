@@ -181,7 +181,9 @@ pub(super) struct Journal {
 }
 impl Journal {
     pub fn open(dir: &Path, generation: String) -> Result<Self> {
-        let file = open(&dir.join("events.jsonl"), true)?;
+        // Windows append handles cannot set the file length. Recover with a
+        // normal write handle, then reopen for append-only journal writes.
+        let file = open(&dir.join("events.jsonl"), false)?;
         ensure!(
             file.metadata()?.len() <= MAX_JOURNAL,
             "agent journal is full"
@@ -199,6 +201,8 @@ impl Journal {
         }
         // Drop an incomplete final append after a crash, before writing a new generation.
         file.set_len(offset)?;
+        drop(file);
+        let file = open(&dir.join("events.jsonl"), true)?;
         let failure = failure_reason(dir);
         if let Some(reason) = &failure {
             transcript.apply(&Envelope {
@@ -380,6 +384,8 @@ mod tests {
     fn replay_recovers_native_tool_identity_and_incomplete_tail() {
         let d = tempfile::tempdir().unwrap();
         let mut j = Journal::open(d.path(), "a".into()).unwrap();
+        let path = d.path().join("events.jsonl");
+        assert_eq!(fs::metadata(&path).unwrap().len(), 0);
         j.push(Event::Generation).unwrap();
         j.push(Event::Session("native".into())).unwrap();
         j.push(Event::Tool(crate::app::agent_gui::ToolCall {
@@ -389,17 +395,44 @@ mod tests {
         }))
         .unwrap();
         drop(j);
-        open(&d.path().join("events.jsonl"), true)
+        let retained = fs::read(&path).unwrap();
+        open(&path, true)
             .unwrap()
             .write_all(b"{\"partial\"")
             .unwrap();
         let mut j = Journal::open(d.path(), "b".into()).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), retained);
+        // Recovery must retain an append handle, even if its cursor is moved.
+        j.file.seek(SeekFrom::Start(0)).unwrap();
         j.push(Event::Generation).unwrap();
         assert_eq!(j.transcript.provider_session_id.as_deref(), Some("native"));
         assert_eq!(j.transcript.entries.len(), 1);
         let mut offset = 0;
-        let replay = tail(&d.path().join("events.jsonl"), &mut offset).unwrap();
+        let replay = tail(&path, &mut offset).unwrap();
         assert_eq!(replay.len(), 4);
+        assert_eq!(replay[3].generation, "b");
+        assert!(fs::read(&path).unwrap().starts_with(&retained));
+        drop(j);
+        let retained = fs::read(&path).unwrap();
+        // A complete existing journal also remains intact on the next restart.
+        let mut j = Journal::open(d.path(), "c".into()).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), retained);
+        j.file.seek(SeekFrom::Start(0)).unwrap();
+        j.push(Event::Generation).unwrap();
+        j.push(Event::Session("native-next".into())).unwrap();
+        drop(j);
+        let mut offset = 0;
+        let replay = tail(&path, &mut offset).unwrap();
+        assert_eq!(replay.len(), 6);
+        assert_eq!(
+            replay.iter().map(|e| e.sequence).collect::<Vec<_>>(),
+            (1..=6).collect::<Vec<_>>()
+        );
+        assert_eq!(replay[4].generation, "c");
+        assert!(matches!(&replay[5].event, Event::Session(id) if id == "native-next"));
+        let bytes = fs::read(&path).unwrap();
+        assert!(bytes.starts_with(&retained));
+        assert_eq!(offset, bytes.len() as u64);
     }
     #[test]
     fn ids_never_escape_private_directory() {
