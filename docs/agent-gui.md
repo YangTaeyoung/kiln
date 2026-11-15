@@ -74,3 +74,5 @@ The view uses egui 0.36.2 [ScrollArea](https://docs.rs/egui/0.36.2/egui/containe
 and its standard TextEdit IME path. The shipped empty navy canvas is the unchanged
 selected design asset `clean-0-71f28052a152.png`; interactive text and cards remain
 native widgets. It is used in dark mode; light mode follows the current theme.
+
+See [native component notes](agent-gui-design.md) for the implemented conversation, composer, decision, menu and notification geometry.
