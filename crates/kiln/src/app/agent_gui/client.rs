@@ -60,6 +60,11 @@ struct ReplayCheckpoint {
 #[derive(Default)]
 struct WorkerHooks {
     #[cfg(test)]
+    before_failure: Option<(
+        crossbeam_channel::Sender<()>,
+        crossbeam_channel::Receiver<()>,
+    )>,
+    #[cfg(test)]
     inside_enqueue: Option<(
         crossbeam_channel::Sender<()>,
         crossbeam_channel::Receiver<()>,
@@ -71,6 +76,13 @@ struct WorkerHooks {
     )>,
 }
 impl WorkerHooks {
+    fn before_failure(&mut self) {
+        #[cfg(test)]
+        if let Some((reached, proceed)) = self.before_failure.take() {
+            let _ = reached.send(());
+            let _ = proceed.recv();
+        }
+    }
     fn inside_enqueue(&mut self) {
         #[cfg(test)]
         if let Some((reached, proceed)) = self.inside_enqueue.take() {
@@ -220,6 +232,7 @@ impl Client {
                 }
                 if let Some(reason) = reason {
                     *e.lock().unwrap() = Some(reason.clone());
+                    hooks.before_failure();
                     *u.lock().unwrap() = Some(reason.clone());
                     if at_end && pending.is_none() && reported.as_ref() != Some(&reason) {
                         let mut rejected = journal::pending_ids(&dir)
@@ -340,9 +353,19 @@ impl Client {
     /// Bind every view control to the generation actually reduced by that view.
     /// A drained but unapplied Generation must never retarget an old approval.
     pub fn send_for_generation(&self, generation: &str, command: Command) -> Result<String> {
-        if let Some(reason) = self.unavailable.lock().unwrap().clone() {
-            bail!(reason);
+        self.send_with_registration(generation, command, || {})
+    }
+    fn send_with_registration(
+        &self,
+        generation: &str,
+        command: Command,
+        before_registration: impl FnOnce(),
+    ) -> Result<String> {
+        let unavailable = self.unavailable.lock().unwrap();
+        if let Some(reason) = unavailable.as_ref() {
+            bail!(reason.clone());
         }
+        before_registration();
         if generation.is_empty() {
             bail!("agent is still connecting");
         }
@@ -357,6 +380,7 @@ impl Client {
             self.local_pending.lock().unwrap().remove(&id);
             bail!("agent command queue is unavailable");
         }
+        drop(unavailable);
         Ok(id)
     }
     /// Missing is unknown (never rejected) only after background replay and queue
@@ -386,6 +410,73 @@ impl Drop for Client {
 mod tests {
     use super::*;
     use crate::app::agent_gui::{Decision, Event};
+    #[test]
+    fn failure_transition_and_command_registration_share_accounting_boundary() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = journal::Journal::open(root.path(), "generation".into()).unwrap();
+        journal.push(Event::Generation).unwrap();
+        let (start, starting) = crossbeam_channel::bounded(1);
+        let (failing, failure) = crossbeam_channel::bounded(1);
+        let (fail, failed) = crossbeam_channel::bounded(1);
+        let client = Client::at_directory_gated(
+            Ok(root.path().into()),
+            Some(starting),
+            WorkerHooks {
+                before_failure: Some((failing, failed)),
+                ..Default::default()
+            },
+        );
+        *client.generation.lock().unwrap() = "generation".into();
+        let client = Arc::new(client);
+        let (checked, check) = crossbeam_channel::bounded(1);
+        let (resume, resumed) = crossbeam_channel::bounded(1);
+        let sender = client.clone();
+        let sending = std::thread::spawn(move || {
+            sender
+                .send_with_registration("generation", Command::Interrupt, || {
+                    checked.send(()).unwrap();
+                    resumed
+                        .recv_timeout(std::time::Duration::from_secs(3))
+                        .unwrap();
+                })
+                .unwrap()
+        });
+        check
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+        journal::atomic(
+            &root.path().join("failure.json"),
+            br#"{"reason":"fixture failure"}"#,
+        )
+        .unwrap();
+        start.send(()).unwrap();
+        failure
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+        let excluded = client.unavailable.try_lock().is_err();
+        fail.send(()).unwrap();
+        resume.send(()).unwrap();
+        let id = sending.join().unwrap();
+        let mut client = Arc::try_unwrap(client).ok().unwrap();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut transcript = Transcript::default();
+        loop {
+            for event in client.drain() {
+                transcript.apply(&event);
+            }
+            if transcript.commands.get(&id) == Some(&super::super::CommandPhase::Rejected) {
+                break;
+            }
+            assert!(std::time::Instant::now() < until);
+            std::thread::yield_now();
+        }
+        assert!(
+            excluded,
+            "failure must wait for registered command identity"
+        );
+        assert!(client.send(Command::Interrupt).is_err());
+        assert!(!root.path().join("commands").exists());
+    }
     #[test]
     fn approval_generation_comes_from_delivered_view_state_not_unseen_tail() {
         let dir = tempfile::tempdir().unwrap();

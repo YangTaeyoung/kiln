@@ -10,6 +10,7 @@ pub(in crate::app::agent_gui) struct Codex {
     interrupt_pending: bool,
     pending: BTreeMap<String, (Value, String, Value)>,
     tools: BTreeMap<String, ToolCall>,
+    diffs: BTreeMap<String, ToolCall>,
     selected: Option<String>,
     pending_model: Option<String>,
 }
@@ -25,6 +26,7 @@ impl Codex {
             interrupt_pending: false,
             pending: BTreeMap::new(),
             tools: BTreeMap::new(),
+            diffs: BTreeMap::new(),
             selected: None,
             pending_model: None,
         }
@@ -298,13 +300,16 @@ impl Codex {
                 e.event(Event::Tool(tool.clone()));
             }
             "turn/diff/updated" => {
-                e.event(Event::Tool(ToolCall {
+                let turn = s(p, "turnId");
+                let diff = ToolCall {
                     id: format!("diff-{}", s(p, "turnId")),
                     name: "Changes".into(),
                     diff: s(p, "diff"),
                     status: ToolStatus::Running,
                     ..Default::default()
-                }));
+                };
+                self.diffs.insert(turn, diff.clone());
+                e.event(Event::Tool(diff));
             }
             "serverRequest/resolved" => {
                 let key = request_key(&p["requestId"]);
@@ -312,6 +317,15 @@ impl Codex {
                 e.event(Event::RequestResolved(key));
             }
             "turn/completed" => {
+                if let Some(mut diff) = self.diffs.remove(&s(&p["turn"], "id")) {
+                    diff.status = match s(&p["turn"], "status").as_str() {
+                        "interrupted" => ToolStatus::Cancelled,
+                        "failed" => ToolStatus::Failed,
+                        "completed" => ToolStatus::Completed,
+                        _ => ToolStatus::Failed,
+                    };
+                    e.event(Event::Tool(diff));
+                }
                 self.busy = false;
                 self.interrupt_pending = false;
                 self.turn.clear();
@@ -410,4 +424,44 @@ fn form_content(schema: &Value, answers: &BTreeMap<String, Vec<String>>) -> Resu
         }
     }
     Ok(Value::Object(content))
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+    #[test]
+    fn completed_turn_finalizes_only_its_synthetic_diff() {
+        for (native, expected) in [
+            ("completed", ToolStatus::Completed),
+            ("interrupted", ToolStatus::Cancelled),
+            ("failed", ToolStatus::Failed),
+        ] {
+            let mut adapter = Codex::new("/tmp".into(), None);
+            adapter.ingest(json!({"method":"item/started","params":{"item":{"id":"async","type":"mcpToolCall","server":"fixture","tool":"background"}}})).unwrap();
+            adapter.ingest(json!({"method":"turn/diff/updated","params":{"turnId":"other","diff":"other diff"}})).unwrap();
+            let diff = "--- a/fixture\n+++ b/fixture\n@@ -1 +1 @@\n-old\n+new";
+            adapter
+                .ingest(
+                    json!({"method":"turn/diff/updated","params":{"turnId":"turn","diff":diff}}),
+                )
+                .unwrap();
+            let effects = adapter.ingest(json!({"method":"turn/completed","params":{"turn":{"id":"turn","status":native,"error":null}}})).unwrap();
+            let finalized = effects
+                .events
+                .iter()
+                .filter_map(|event| {
+                    if let Event::Tool(tool) = event {
+                        Some(tool)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(finalized.len(), 1);
+            assert_eq!(finalized[0].id, "diff-turn");
+            assert_eq!(finalized[0].diff, diff);
+            assert_eq!(finalized[0].status, expected);
+            assert_eq!(adapter.tools["async"].status, ToolStatus::Running);
+        }
+    }
 }

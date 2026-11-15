@@ -174,6 +174,7 @@ enum Input {
     Json(Value),
     Eof,
     Error(&'static str),
+    WriteError,
 }
 struct Backend {
     child: Child,
@@ -239,7 +240,7 @@ impl Backend {
                     || stdin.write_all(b"\n").is_err()
                     || stdin.flush().is_err()
                 {
-                    let _ = tx.send(Input::Error("agent input pipe failed"));
+                    let _ = tx.send(Input::WriteError);
                     break;
                 }
             }
@@ -499,6 +500,7 @@ pub fn serve(id: &str) -> Result<()> {
             backend.effects(&mut journal, adapter.start(), &mut active)?;
             let started = Instant::now();
             let mut initialized = false;
+            let mut draining: Option<(Instant, String)> = None;
             let outcome = (|| -> Result<()> {
                 loop {
                     if TERMINATE.load(Ordering::Relaxed) {
@@ -525,11 +527,26 @@ pub fn serve(id: &str) -> Result<()> {
                                 backend.effects(&mut journal, batch, &mut active)?;
                                 anyhow::bail!(message);
                             }
+                            Input::WriteError => {
+                                draining.get_or_insert_with(|| {
+                                    (Instant::now(), "agent input pipe failed".into())
+                                });
+                            }
                         }
                     }
                     backend.effects(&mut journal, batch, &mut active)?;
                     if let Some(status) = backend.child.try_wait()? {
-                        anyhow::bail!("agent CLI exited ({status})");
+                        draining.get_or_insert_with(|| {
+                            (Instant::now(), format!("agent CLI exited ({status})"))
+                        });
+                    }
+                    if let Some((since, reason)) = &draining {
+                        ensure!(
+                            since.elapsed() < Duration::from_secs(2),
+                            "{reason}; agent output drain timed out"
+                        );
+                        std::thread::sleep(Duration::from_millis(15));
+                        continue;
                     }
                     if matches!(journal.transcript.lifecycle, Lifecycle::Ready) {
                         initialized = true;

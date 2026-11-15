@@ -17,6 +17,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        id: fixture-python
+        with:
+          python-version: '3.13'
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@v2
@@ -40,9 +44,12 @@ jobs:
           cargo test --locked --workspace --test native_ime
           cargo test --locked --workspace --test native_open_files
       - name: Integration tests
+        env:
+          KILN_TEST_PYTHON: ${{ steps.fixture-python.outputs.python-path }}
         run: |
           tests=$(for f in crates/kiln-editor/tests/*.rs crates/kiln-git/tests/*.rs; do printf -- '--test %s ' "$(basename "$f" .rs)"; done)
           cargo nextest run --locked --profile ci --workspace $tests --test macos_responsibility --test transfers --test s3_pagination --test aws_profile_ui --test ssh_profile_ui --test object_profile_ui --test direct_terminal_launch --test shell_completion --test terminal_recovery --test hosted --test hosted_failures --test sqlite_backend --test config_store --test splitter --test schema_changes --test result_edit --test sql_completion --test query_execution --test schema_ui_flow --test gui --test remote_inspector --test workflow_distill --test pane_layout --test portable_icons
+          cargo nextest run --locked --profile ci -p kiln --test agent_gui --test agent_gui_launch
           KILN_PTY_HOST=0 cargo nextest run --locked --profile ci --workspace --test daemon
           cargo test --locked --workspace --test mixed_upgrade
       - name: Keep snapshot differences
@@ -80,6 +87,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        id: fixture-python
+        if: matrix.part == 'terminal'
+        with:
+          python-version: '3.13'
       - name: Install stable Rust
         run: |
           if ! command -v rustup >/dev/null; then
@@ -122,7 +134,9 @@ jobs:
           exit $status
       - name: Terminal and daemon integration
         if: matrix.part == 'terminal'
-        run: cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation -- --test-threads=1
+        env:
+          KILN_TEST_PYTHON: ${{ steps.fixture-python.outputs.python-path }}
+        run: cargo test --locked --no-fail-fast --workspace --test hosted --test daemon --test lifecycle_reliability --test notification_visibility --test recovery_navigation --test agent_gui -- --test-threads=1
       - name: GUI integration
         if: matrix.part == 'terminal' && !cancelled()
         run: cargo test --locked --no-fail-fast --workspace --test gui --test remote_inspector --test workflow_distill --test portable_icons --test widgets_visual --test fullscreen --test glyphs -- --test-threads=1
