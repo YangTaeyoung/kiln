@@ -32,6 +32,7 @@ mod agent_launch;
 mod agent_handover;
 mod capacity_recovery;
 pub mod agent_runtime;
+pub mod agent_gui;
 pub mod conversation_sync;
 mod remote_terminal;
 mod pane_layout;
