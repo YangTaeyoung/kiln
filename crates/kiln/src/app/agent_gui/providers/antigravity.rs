@@ -16,7 +16,9 @@ pub(in crate::app::agent_gui) struct Antigravity {
     mode_config: Option<String>,
     modes: Vec<Choice>,
     models: Vec<Model>,
-    deferred: Option<(String, Option<String>, Option<Value>)>,
+    deferred: Option<ConfigOperation>,
+    retired_configs: BTreeSet<String>,
+    model_settled: bool,
 }
 impl Antigravity {
     pub fn new(cwd: PathBuf, resume: Option<String>) -> Self {
@@ -37,6 +39,8 @@ impl Antigravity {
             modes: vec![],
             models: vec![],
             deferred: None,
+            retired_configs: BTreeSet::new(),
+            model_settled: true,
         }
     }
     pub fn start(&mut self) -> Effects {
@@ -77,6 +81,11 @@ impl Antigravity {
                     attachments.is_empty() || self.image,
                     "this Antigravity session does not support images"
                 );
+                let target = if !self.model_settled {
+                    Some(model.clone().or_else(||self.selected.clone()).context("The model configuration is unsettled; choose an explicit model before submitting")?)
+                } else {
+                    model.clone()
+                };
                 let mut prompt = vec![json!({"type":"text","text":text})];
                 prompt.extend(image_blocks(id, attachments, Tool::Antigravity)?);
                 let user = rpc(
@@ -84,25 +93,41 @@ impl Antigravity {
                     "session/prompt",
                     json!({"sessionId":self.session,"prompt":prompt}),
                 );
-                if model.is_some() && model != &self.selected {
+                if !self.model_settled || (target.is_some() && target != self.selected) {
                     ensure!(
-                        self.models.iter().any(|m| Some(&m.id) == model.as_ref()),
+                        self.models.iter().any(|m| Some(&m.id) == target.as_ref()),
                         "model is not available in this Antigravity session"
                     );
                     let (method, params) = if let Some(config) = &self.model_config {
                         (
                             "session/set_config_option",
-                            json!({"sessionId":self.session,"configId":config,"value":model}),
+                            json!({"sessionId":self.session,"configId":config,"value":target}),
                         )
                     } else {
                         (
                             "session/set_model",
-                            json!({"sessionId":self.session,"modelId":model}),
+                            json!({"sessionId":self.session,"modelId":target}),
                         )
                     };
-                    let operation = format!("config-{}", journal::unique());
-                    self.deferred = Some((operation.clone(), model.clone(), Some(user)));
-                    e.write(rpc(json!(operation), method, params));
+                    let id = format!("config-{}", journal::unique());
+                    let wire = rpc(json!(id), method, params);
+                    let operation = ConfigOperation {
+                        id,
+                        model: target,
+                        mode: None,
+                        prompt: Some(user),
+                        wire,
+                        sent: self.retired_configs.is_empty(),
+                    };
+                    if operation.sent {
+                        e.write(operation.wire.clone());
+                    }
+                    self.deferred = Some(operation);
+                    self.model_settled = false;
+                    e.event(Event::Models {
+                        choices: vec![],
+                        selected: None,
+                    });
                 } else {
                     e.write(user);
                 }
@@ -142,14 +167,34 @@ impl Antigravity {
                         json!({"sessionId":self.session,"modeId":mode}),
                     )
                 };
-                let operation = format!("config-{}", journal::unique());
-                self.deferred = Some((operation.clone(), None, None));
+                let id = format!("config-{}", journal::unique());
+                let wire = rpc(json!(id), method, params);
+                let operation = ConfigOperation {
+                    id,
+                    model: None,
+                    mode: Some(mode.clone()),
+                    prompt: None,
+                    wire,
+                    sent: self.retired_configs.is_empty(),
+                };
+                if operation.sent {
+                    e.write(operation.wire.clone());
+                }
+                self.deferred = Some(operation);
+                self.model_settled = false;
                 self.busy = true;
-                e.write(rpc(json!(operation), method, params));
+                e.event(Event::Modes {
+                    choices: vec![],
+                    selected: None,
+                });
+                e.event(Event::Models {
+                    choices: vec![],
+                    selected: None,
+                });
                 e.state(Lifecycle::Running);
             }
             Command::Interrupt => {
-                if self.deferred.take().is_some() {
+                if cancel_config(&mut self.deferred, &mut self.retired_configs) {
                     self.busy = false;
                     e.cancelled = true;
                     e.state(Lifecycle::Ready);
@@ -165,15 +210,22 @@ impl Antigravity {
         Ok(e)
     }
     fn options(&mut self, r: &Value, e: &mut Effects) {
+        let authoritative = self.deferred.is_none() && self.retired_configs.is_empty();
         if let Some(models) = r.get("models") {
             self.models = model_choices(&models["availableModels"], "modelId", "name");
-            self.selected = models
-                .get("currentModelId")
-                .and_then(Value::as_str)
-                .map(String::from);
+            if authoritative
+                && let Some(model) = models.get("currentModelId").and_then(Value::as_str)
+            {
+                self.selected = Some(model.into());
+                self.model_settled = true;
+            }
             e.event(Event::Models {
                 choices: self.models.clone(),
-                selected: self.selected.clone(),
+                selected: if authoritative && self.model_settled {
+                    self.selected.clone()
+                } else {
+                    None
+                },
             });
         }
         if let Some(modes) = r.get("modes") {
@@ -189,10 +241,14 @@ impl Antigravity {
                 .collect();
             e.event(Event::Modes {
                 choices: self.modes.clone(),
-                selected: modes
-                    .get("currentModeId")
-                    .and_then(Value::as_str)
-                    .map(String::from),
+                selected: if authoritative {
+                    modes
+                        .get("currentModeId")
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                } else {
+                    None
+                },
             });
         }
         for option in r["configOptions"].as_array().into_iter().flatten() {
@@ -214,10 +270,19 @@ impl Antigravity {
                             label: s(v, "name"),
                         })
                         .collect();
-                    self.selected = Some(s(option, "currentValue"));
+                    if authoritative
+                        && let Some(model) = option.get("currentValue").and_then(Value::as_str)
+                    {
+                        self.selected = Some(model.into());
+                        self.model_settled = true;
+                    }
                     e.event(Event::Models {
                         choices: self.models.clone(),
-                        selected: self.selected.clone(),
+                        selected: if authoritative && self.model_settled {
+                            self.selected.clone()
+                        } else {
+                            None
+                        },
                     });
                 }
                 "mode" => {
@@ -232,7 +297,11 @@ impl Antigravity {
                         .collect();
                     e.event(Event::Modes {
                         choices: self.modes.clone(),
-                        selected: Some(s(option, "currentValue")),
+                        selected: if authoritative {
+                            Some(s(option, "currentValue"))
+                        } else {
+                            None
+                        },
                     });
                 }
                 _ => {}
@@ -331,11 +400,16 @@ impl Antigravity {
         }
         if method.is_empty() && v.get("id").is_some() {
             let id = s(&v, "id");
+            if (v.get("result").is_some() || v.get("error").is_some())
+                && settle_retired_config(&id, &mut self.deferred, &mut self.retired_configs, &mut e)
+            {
+                return Ok(e);
+            }
             if id.starts_with("config-")
                 && self
                     .deferred
                     .as_ref()
-                    .is_none_or(|(pending, _, _)| pending != &id)
+                    .is_none_or(|operation| !operation.matches(&id))
             {
                 return Ok(e);
             }
@@ -346,18 +420,33 @@ impl Antigravity {
             if self
                 .deferred
                 .as_ref()
-                .is_some_and(|(pending, _, _)| pending == &id)
+                .is_some_and(|operation| operation.matches(&id))
             {
-                let (_, model, user) = self.deferred.take().unwrap();
-                if let Some(model) = model {
+                ensure!(
+                    v.get("result").is_some(),
+                    "invalid ACP configuration confirmation"
+                );
+                let operation = self.deferred.take().unwrap();
+                if let Some(model) = operation.model {
                     self.selected = Some(model);
+                    self.model_settled = true;
+                }
+                if let Some(mode) = operation.mode {
+                    e.event(Event::Modes {
+                        choices: vec![],
+                        selected: Some(mode),
+                    });
                 }
                 self.options(r, &mut e);
                 e.event(Event::Models {
                     choices: vec![],
-                    selected: self.selected.clone(),
+                    selected: if self.model_settled {
+                        self.selected.clone()
+                    } else {
+                        None
+                    },
                 });
-                if let Some(user) = user {
+                if let Some(user) = operation.prompt {
                     e.write(user);
                 } else {
                     self.busy = false;
@@ -443,7 +532,11 @@ impl Antigravity {
                 }
                 "current_mode_update" => e.event(Event::Modes {
                     choices: vec![],
-                    selected: Some(s(u, "currentModeId")),
+                    selected: if self.deferred.is_none() && self.retired_configs.is_empty() {
+                        Some(s(u, "currentModeId"))
+                    } else {
+                        None
+                    },
                 }),
                 "config_option_update" => self.options(u, &mut e),
                 _ => {}

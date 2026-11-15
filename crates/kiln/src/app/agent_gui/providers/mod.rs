@@ -4,7 +4,7 @@ mod claude;
 mod codex;
 use super::*;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 #[derive(Default)]
 pub(super) struct Effects {
     pub writes: Vec<Value>,
@@ -44,6 +44,49 @@ impl Effects {
     fn state(&mut self, s: Lifecycle) {
         self.event(Event::Lifecycle(s));
     }
+}
+// A sent configuration operation may still take effect after Stop. Its reply is a
+// settlement barrier, never proof of rollback. New controls wait behind that barrier.
+struct ConfigOperation {
+    id: String,
+    model: Option<String>,
+    mode: Option<String>,
+    prompt: Option<Value>,
+    wire: Value,
+    sent: bool,
+}
+impl ConfigOperation {
+    fn matches(&self, id: &str) -> bool {
+        self.sent && self.id == id
+    }
+}
+fn cancel_config(pending: &mut Option<ConfigOperation>, retired: &mut BTreeSet<String>) -> bool {
+    if let Some(operation) = pending.take() {
+        if operation.sent {
+            retired.insert(operation.id);
+        }
+        true
+    } else {
+        false
+    }
+}
+fn settle_retired_config(
+    id: &str,
+    pending: &mut Option<ConfigOperation>,
+    retired: &mut BTreeSet<String>,
+    effects: &mut Effects,
+) -> bool {
+    if !retired.remove(id) {
+        return false;
+    }
+    if retired.is_empty()
+        && let Some(operation) = pending
+        && !operation.sent
+    {
+        operation.sent = true;
+        effects.write(operation.wire.clone());
+    }
+    true
 }
 pub(super) enum Adapter {
     Claude(claude::Claude),
@@ -415,7 +458,7 @@ mod review_regressions {
                 json!({"id":"initialize","result":{"protocolVersion":1,"agentCapabilities":{}}}),
             )
             .unwrap();
-            a.ingest(json!({"id":"session","result":{"sessionId":"native","models":{"currentModelId":"old","availableModels":[{"modelId":"A","name":"A"},{"modelId":"B","name":"B"}]}}})).unwrap();
+            a.ingest(json!({"id":"session","result":{"sessionId":"native","models":{"currentModelId":"old","availableModels":[{"modelId":"old","name":"Old"},{"modelId":"A","name":"A"},{"modelId":"B","name":"B"}]}}})).unwrap();
         }
         a
     }
@@ -441,7 +484,7 @@ mod review_regressions {
         if tool == Tool::Claude {
             json!({"type":"control_response","response":{"request_id":id,"subtype":"success","response":{}}})
         } else {
-            json!({"id":id,"result":{"configOptions":[{"id":"model","category":"model","type":"select","currentValue":model,"options":[{"value":"A","name":"A"},{"value":"B","name":"B"}]}]}})
+            json!({"id":id,"result":{"configOptions":[{"id":"model","category":"model","type":"select","currentValue":model,"options":[{"value":"old","name":"Old"},{"value":"A","name":"A"},{"value":"B","name":"B"}]}]}})
         }
     }
     fn prompt(tool: Tool, v: &Value) -> bool {
@@ -460,10 +503,14 @@ mod review_regressions {
                 a.command(&Command::Interrupt, "fixture").unwrap();
                 let b = submit(&mut a, b_model);
                 assert!(!b.writes.iter().any(|v| prompt(tool, v)));
-                let b_id = control_id(tool, &b);
-                assert_ne!(a_id, b_id);
+                assert!(
+                    b.writes.is_empty(),
+                    "replacement control must wait for the outstanding operation"
+                );
                 let old = a.ingest(ack(tool, a_id.clone(), "A")).unwrap();
-                assert!(old.writes.is_empty());
+                assert!(!old.writes.iter().any(|v| prompt(tool, v)));
+                let b_id = control_id(tool, &old);
+                assert_ne!(a_id, b_id);
                 assert!(!old.events.iter().any(|e| matches!(e, Event::Models { .. })));
                 let success = a.ingest(ack(tool, b_id, b_model)).unwrap();
                 assert_eq!(success.writes.iter().filter(|v| prompt(tool, v)).count(), 1);
@@ -483,7 +530,8 @@ mod review_regressions {
             let mut a = initialized(tool);
             let old = control_id(tool, &submit(&mut a, "A"));
             a.command(&Command::Interrupt, "fixture").unwrap();
-            let current = control_id(tool, &submit(&mut a, "B"));
+            let queued = submit(&mut a, "B");
+            assert!(queued.writes.is_empty());
             let error = |id: Value| {
                 if tool == Tool::Claude {
                     json!({"type":"control_response","response":{"request_id":id,"subtype":"error","error":"failed"}})
@@ -491,7 +539,9 @@ mod review_regressions {
                     json!({"id":id,"error":{"code":-1,"message":"failed"}})
                 }
             };
-            assert!(a.ingest(error(old)).unwrap().writes.is_empty());
+            let settled = a.ingest(error(old)).unwrap();
+            assert!(!settled.writes.iter().any(|v| prompt(tool, v)));
+            let current = control_id(tool, &settled);
             assert!(a.ingest(error(current)).is_err());
         }
     }
@@ -550,5 +600,240 @@ mod review_regressions {
             let accepted = a.command(&answer(valid), "fixture").unwrap();
             assert!(accepted.writes[0]["result"]["content"]["value"].is_number());
         }
+    }
+    fn failed_config(tool: Tool, id: Value, cancelled: bool) -> Value {
+        if tool == Tool::Claude {
+            json!({"type":"control_response","response":{"request_id":id,"subtype":"error","error":if cancelled{"cancelled"}else{"failed"}}})
+        } else {
+            json!({"id":id,"error":{"code":if cancelled{-32800}else{-1},"message":"configuration did not complete"}})
+        }
+    }
+    #[test]
+    fn original_model_and_default_reconfirm_after_cancelled_native_change_in_both_response_orders()
+    {
+        for tool in [Tool::Claude, Tool::Antigravity] {
+            for before_b in [false, true] {
+                for use_default in [false, true] {
+                    for outcome in [0, 1, 2] {
+                        let mut a = initialized(tool);
+                        let old_id = control_id(tool, &submit(&mut a, "A"));
+                        a.command(&Command::Interrupt, "fixture").unwrap();
+                        let old_response = if outcome == 0 {
+                            ack(tool, old_id.clone(), "A")
+                        } else {
+                            failed_config(tool, old_id.clone(), outcome == 2)
+                        };
+                        if before_b {
+                            let old = a.ingest(old_response.clone()).unwrap();
+                            assert!(!old.writes.iter().any(|v| prompt(tool, v)));
+                        }
+                        let mut b = a
+                            .command(
+                                &Command::Submit {
+                                    text: "must use original O".into(),
+                                    attachments: vec![],
+                                    model: if use_default {
+                                        None
+                                    } else {
+                                        Some("old".into())
+                                    },
+                                },
+                                "fixture",
+                            )
+                            .unwrap();
+                        assert!(
+                            !b.writes.iter().any(|v| prompt(tool, v)),
+                            "{tool:?}: formerly confirmed O cannot justify dispatch"
+                        );
+                        if !before_b {
+                            assert!(
+                                b.writes.is_empty(),
+                                "configuration must wait for the outstanding native change"
+                            );
+                            b = a.ingest(old_response).unwrap();
+                        }
+                        assert!(!b.writes.iter().any(|v| prompt(tool, v)));
+                        let b_id = control_id(tool, &b);
+                        assert_ne!(old_id, b_id);
+                        let target = if tool == Tool::Claude {
+                            &b.writes[0]["request"]["model"]
+                        } else {
+                            b.writes[0]["params"]
+                                .get("modelId")
+                                .unwrap_or(&b.writes[0]["params"]["value"])
+                        };
+                        assert_eq!(target, "old");
+                        let stale = a.ingest(ack(tool, old_id, "A")).unwrap();
+                        assert!(stale.writes.is_empty());
+                        let confirmed = a.ingest(ack(tool, b_id, "old")).unwrap();
+                        assert_eq!(
+                            confirmed.writes.iter().filter(|v| prompt(tool, v)).count(),
+                            1
+                        );
+                        assert!(confirmed.events.iter().any(
+                            |e| matches!(e,Event::Models{selected:Some(model),..}if model=="old")
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn unsettled_none_without_known_model_is_rejected_until_explicit_model_is_confirmed() {
+        for tool in [Tool::Claude, Tool::Antigravity] {
+            let mut a = Adapter::new(tool, "/tmp".into(), None);
+            if tool == Tool::Claude {
+                a.ingest(json!({"type":"control_response","response":{"request_id":"initialize","subtype":"success","response":{}}})).unwrap();
+            } else {
+                a.ingest(json!({"id":"initialize","result":{"protocolVersion":1,"agentCapabilities":{}}})).unwrap();
+                a.ingest(json!({"id":"session","result":{"sessionId":"native","models":{"availableModels":[{"modelId":"A","name":"A"},{"modelId":"B","name":"B"}]}}})).unwrap();
+            }
+            let old = control_id(tool, &submit(&mut a, "A"));
+            a.command(&Command::Interrupt, "fixture").unwrap();
+            assert!(
+                a.command(
+                    &Command::Submit {
+                        text: "unknown default must not run".into(),
+                        attachments: vec![],
+                        model: None
+                    },
+                    "fixture"
+                )
+                .is_err()
+            );
+            a.ingest(failed_config(tool, old, true)).unwrap();
+            let next = submit(&mut a, "B");
+            assert!(!next.writes.iter().any(|v| prompt(tool, v)));
+            let confirmed = a.ingest(ack(tool, control_id(tool, &next), "B")).unwrap();
+            assert!(confirmed.writes.iter().any(|v| prompt(tool, v)));
+        }
+    }
+    #[test]
+    fn cancelled_acp_mode_stays_unknown_until_fresh_mode_evidence_and_cannot_bypass_model_barrier()
+    {
+        let mut a = initialized(Tool::Antigravity);
+        a.ingest(json!({"id":"session","result":{"sessionId":"native","modes":{"currentModeId":"ask","availableModes":[{"id":"ask","name":"Ask"},{"id":"code","name":"Code"}]}}})).unwrap();
+        let change = a
+            .command(
+                &Command::SetMode {
+                    mode: "code".into(),
+                },
+                "fixture",
+            )
+            .unwrap();
+        let mode_id = control_id(Tool::Antigravity, &change);
+        assert!(
+            change
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Modes { selected: None, .. }))
+        );
+        a.command(&Command::Interrupt, "fixture").unwrap();
+        let b = submit(&mut a, "old");
+        assert!(b.writes.is_empty());
+        let settled=a.ingest(json!({"id":mode_id,"result":{"configOptions":[{"id":"mode","category":"mode","currentValue":"code","options":[{"value":"ask","name":"Ask"},{"value":"code","name":"Code"}]}]}})).unwrap();
+        assert!(!settled.events.iter().any(|e| matches!(
+            e,
+            Event::Modes {
+                selected: Some(_),
+                ..
+            }
+        )));
+        let model_id = control_id(Tool::Antigravity, &settled);
+        let confirmed = a.ingest(ack(Tool::Antigravity, model_id, "old")).unwrap();
+        assert!(
+            confirmed
+                .writes
+                .iter()
+                .any(|v| prompt(Tool::Antigravity, v))
+        );
+        assert!(
+            !confirmed.events.iter().any(|e| matches!(
+                e,
+                Event::Modes {
+                    selected: Some(_),
+                    ..
+                }
+            )),
+            "model confirmation alone cannot confirm a permission mode"
+        );
+    }
+    #[test]
+    fn cancelling_a_queued_replacement_does_not_create_an_unsent_settlement_barrier() {
+        for tool in [Tool::Claude, Tool::Antigravity] {
+            let mut a = initialized(tool);
+            let sent = submit(&mut a, "A");
+            let old_id = control_id(tool, &sent);
+            a.command(&Command::Interrupt, "fixture").unwrap();
+            assert!(submit(&mut a, "old").writes.is_empty());
+            a.command(&Command::Interrupt, "fixture").unwrap();
+            assert!(submit(&mut a, "B").writes.is_empty());
+            let released = a.ingest(ack(tool, old_id, "A")).unwrap();
+            assert_eq!(released.writes.len(), 1);
+            assert!(!released.writes.iter().any(|v| prompt(tool, v)));
+            let confirmed = a
+                .ingest(ack(tool, control_id(tool, &released), "B"))
+                .unwrap();
+            assert_eq!(
+                confirmed.writes.iter().filter(|v| prompt(tool, v)).count(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn uncorrelated_model_metadata_cannot_replace_the_last_confirmed_default_during_settlement() {
+        for tool in [Tool::Claude, Tool::Antigravity] {
+            let mut a = initialized(tool);
+            let old_id = control_id(tool, &submit(&mut a, "A"));
+            a.command(&Command::Interrupt, "fixture").unwrap();
+            let metadata = if tool == Tool::Claude {
+                json!({"type":"system","model":"A"})
+            } else {
+                json!({"method":"session/update","params":{"sessionId":"native","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"model","category":"model","currentValue":"A","options":[{"value":"old","name":"Old"},{"value":"A","name":"A"}]}]}}})
+            };
+            let update = a.ingest(metadata).unwrap();
+            assert!(!update.events.iter().any(|e| matches!(
+                e,
+                Event::Models {
+                    selected: Some(_),
+                    ..
+                }
+            )));
+            a.command(
+                &Command::Submit {
+                    text: "default must reconfirm last known O".into(),
+                    attachments: vec![],
+                    model: None,
+                },
+                "fixture",
+            )
+            .unwrap();
+            let released = a.ingest(ack(tool, old_id, "A")).unwrap();
+            let wire = &released.writes[0];
+            let model = if tool == Tool::Claude {
+                &wire["request"]["model"]
+            } else {
+                wire["params"]
+                    .get("modelId")
+                    .unwrap_or(&wire["params"]["value"])
+            };
+            assert_eq!(model, "old");
+        }
+    }
+    #[test]
+    fn claude_startup_model_metadata_cannot_undo_a_later_matching_confirmation() {
+        let mut a = initialized(Tool::Claude);
+        let selected = submit(&mut a, "A");
+        a.ingest(ack(Tool::Claude, control_id(Tool::Claude, &selected), "A"))
+            .unwrap();
+        a.ingest(json!({"type":"result","is_error":false})).unwrap();
+        a.ingest(json!({"type":"system","subtype":"init","model":"old"}))
+            .unwrap();
+        let restore = submit(&mut a, "old");
+        assert!(
+            !restore.writes.iter().any(|v| prompt(Tool::Claude, v)),
+            "stale startup metadata cannot justify the old model"
+        );
+        assert_eq!(restore.writes[0]["request"]["model"], "old");
     }
 }

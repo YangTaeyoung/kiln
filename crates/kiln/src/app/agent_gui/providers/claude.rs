@@ -10,7 +10,9 @@ pub(in crate::app::agent_gui) struct Claude {
     blocks: BTreeMap<usize, String>,
     message: String,
     partial_input: BTreeMap<String, String>,
-    deferred: Option<(String, String, Value)>,
+    deferred: Option<ConfigOperation>,
+    retired_configs: BTreeSet<String>,
+    model_settled: bool,
     selected: Option<String>,
 }
 impl Claude {
@@ -26,6 +28,8 @@ impl Claude {
             message: String::new(),
             partial_input: BTreeMap::new(),
             deferred: None,
+            retired_configs: BTreeSet::new(),
+            model_settled: true,
             selected: None,
         }
     }
@@ -75,16 +79,34 @@ impl Claude {
                     self.ready && !self.busy,
                     "Claude is not ready for a new turn"
                 );
+                let target = if !self.model_settled {
+                    Some(model.clone().or_else(||self.selected.clone()).context("The model configuration is unsettled; choose an explicit model before submitting")?)
+                } else {
+                    model.clone()
+                };
                 let mut content = vec![json!({"type":"text","text":text})];
                 content.extend(image_blocks(id, attachments, Tool::Claude)?);
                 let user = json!({"type":"user","message":{"role":"user","content":content},"session_id":self.session,"parent_tool_use_id":null});
-                if model.is_some() && model != &self.selected {
-                    let operation = format!("model-{}", journal::unique());
-                    self.deferred = Some((operation.clone(), model.clone().unwrap(), user));
-                    e.write(Self::control(
-                        &operation,
-                        json!({"subtype":"set_model","model":model}),
-                    ));
+                if !self.model_settled || (target.is_some() && target != self.selected) {
+                    let id = format!("model-{}", journal::unique());
+                    let wire = Self::control(&id, json!({"subtype":"set_model","model":target}));
+                    let operation = ConfigOperation {
+                        id,
+                        model: target,
+                        mode: None,
+                        prompt: Some(user),
+                        wire,
+                        sent: self.retired_configs.is_empty(),
+                    };
+                    if operation.sent {
+                        e.write(operation.wire.clone());
+                    }
+                    self.deferred = Some(operation);
+                    self.model_settled = false;
+                    e.event(Event::Models {
+                        choices: vec![],
+                        selected: None,
+                    });
                 } else {
                     e.write(user);
                 }
@@ -121,7 +143,7 @@ impl Claude {
                 e.state(Lifecycle::Running);
             }
             Command::Interrupt => {
-                if self.deferred.take().is_some() {
+                if cancel_config(&mut self.deferred, &mut self.retired_configs) {
                     self.busy = false;
                     e.cancelled = true;
                     e.state(Lifecycle::Ready);
@@ -168,11 +190,21 @@ impl Claude {
             "control_response" => {
                 let r = &v["response"];
                 let id = s(r, "request_id");
+                if matches!(s(r, "subtype").as_str(), "success" | "error")
+                    && settle_retired_config(
+                        &id,
+                        &mut self.deferred,
+                        &mut self.retired_configs,
+                        &mut e,
+                    )
+                {
+                    return Ok(e);
+                }
                 if id.starts_with("model-")
                     && self
                         .deferred
                         .as_ref()
-                        .is_none_or(|(pending, _, _)| pending != &id)
+                        .is_none_or(|operation| !operation.matches(&id))
                 {
                     return Ok(e);
                 }
@@ -190,15 +222,20 @@ impl Claude {
                 if self
                     .deferred
                     .as_ref()
-                    .is_some_and(|(pending, _, _)| pending == &id)
+                    .is_some_and(|operation| operation.matches(&id))
                 {
-                    let (_, model, user) = self.deferred.take().unwrap();
-                    self.selected = Some(model);
+                    ensure!(
+                        s(r, "subtype") == "success",
+                        "invalid Claude model confirmation"
+                    );
+                    let operation = self.deferred.take().unwrap();
+                    self.selected = operation.model;
+                    self.model_settled = true;
                     e.event(Event::Models {
                         choices: vec![],
                         selected: self.selected.clone(),
                     });
-                    e.write(user);
+                    e.write(operation.prompt.unwrap());
                 }
             }
             "control_request" => {
@@ -238,10 +275,18 @@ impl Claude {
                     e.event(Event::Session(id.into()));
                 }
                 if let Some(model) = v.get("model").and_then(Value::as_str) {
-                    self.selected = Some(model.into());
+                    // System init metadata can be delayed beyond a control acknowledgement.
+                    // It seeds startup only; matching controls own subsequent confirmation.
+                    if self.model_settled && self.selected.is_none() {
+                        self.selected = Some(model.into());
+                    }
                     e.event(Event::Models {
                         choices: vec![],
-                        selected: self.selected.clone(),
+                        selected: if self.model_settled {
+                            self.selected.clone()
+                        } else {
+                            None
+                        },
                     });
                 }
             }
