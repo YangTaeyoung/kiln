@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 provider = os.environ["FIXTURE_PROVIDER"]
 mode = os.environ.get("FIXTURE_MODE", "conversation")
@@ -11,6 +12,7 @@ session = "fixture-" + provider
 turn = 0
 pending = None
 prompt_id = None
+processes = {}
 
 
 def emit(value):
@@ -68,6 +70,21 @@ def permission(identity):
         emit({"id": identity, "method": "session/request_permission", "params": {"sessionId": session, "toolCall": {"toolCallId": identity, "title": "Write " + identity}, "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}, {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]}})
 
 
+if mode == "closed-input":
+    audit(json.loads(sys.stdin.readline()))
+    os.close(0)
+    emit({"type": "control_request", "request_id": "one", "request": {"subtype": "fixture_unsupported"}})
+    time.sleep(0.2)
+    frames = [{"type": "control_request", "request_id": "two", "request": {"subtype": "fixture_unsupported"}}]
+    frames += [{"type": "fixture_padding"}] * 512
+    frames += [{"type": "system", "subtype": "init", "session_id": session, "model": "fixture"}]
+    sys.stdout.write("".join(json.dumps(value) + "\n" for value in frames))
+    sys.stdout.flush()
+    Path("emitted-final").touch()
+    time.sleep(0.1)
+    os._exit(0)
+
+
 for line in sys.stdin:
     value = json.loads(line)
     audit(value)
@@ -92,11 +109,30 @@ for line in sys.stdin:
         if method == "turn/interrupt":
             result(value["id"], {})
         finish("interrupted")
+    elif method == "thread/backgroundTerminals/terminate":
+        assert mode == "codex-process-stop"
+        assert value["params"] == {"threadId": session, "processId": "102"}
+        child = processes["102"]
+        child.terminate()
+        child.wait(timeout=3)
+        result(value["id"], {"terminated": True})
     elif kind == "user" or method in ("turn/start", "session/prompt"):
         turn += 1
         prompt_id = value.get("id")
         if provider == "codex":
             result(value["id"], {"turn": {"id": str(turn)}})
+        if mode == "codex-process-stop":
+            for child in processes.values():
+                child.poll()
+            if turn <= 2:
+                process = str(100 + turn)
+                target = "background.txt" if turn == 1 else "late.txt"
+                child = subprocess.Popen([sys.executable, "-c", "import time; from pathlib import Path; time.sleep(1.5); Path(" + repr(target) + ").write_bytes(b'completed\\n')"])
+                processes[process] = child
+                notice("item/started", {"threadId": session, "turnId": str(turn), "item": {"id": "process-" + process, "type": "commandExecution", "command": "delayed fixture write " + target, "processId": process, "source": "unifiedExecStartup", "status": "inProgress"}})
+            if turn != 2:
+                finish()
+            continue
         pending = "operation-" + str(turn)
         permission(pending)
     elif kind == "control_response" or "result" in value:
@@ -111,7 +147,7 @@ for line in sys.stdin:
         else:
             allow = value["result"]["outcome"].get("optionId") == "allow"
         if allow:
-            Path(pending + ".txt").write_text("fixture result\n", encoding="utf-8")
+            Path(pending + ".txt").write_bytes(b"fixture result\n")
         output = "written" if allow else "denied"
         if provider == "claude":
             emit({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": pending, "content": output, "is_error": not allow}]}})

@@ -1,5 +1,28 @@
 //! Codex app-server v2, verified against the installed generated JSON schemas.
 use super::*;
+use std::time::{Duration, Instant};
+struct StopTarget {
+    item: String,
+    process: String,
+}
+struct StopOperation {
+    turn: String,
+    interrupt: String,
+    pending: BTreeMap<String, StopTarget>,
+    requested: BTreeSet<String>,
+    unconfirmed: BTreeSet<String>,
+    turn_done: bool,
+    failed: bool,
+    deadline: Instant,
+}
+fn native_error_message(error: &Value) -> String {
+    error
+        .as_str()
+        .or_else(|| error.get("message").and_then(Value::as_str))
+        .filter(|message| !message.trim().is_empty())
+        .unwrap_or("Codex reported an error.")
+        .into()
+}
 pub(in crate::app::agent_gui) struct Codex {
     cwd: PathBuf,
     resume: Option<String>,
@@ -11,6 +34,8 @@ pub(in crate::app::agent_gui) struct Codex {
     pending: BTreeMap<String, (Value, String, Value)>,
     tools: BTreeMap<String, ToolCall>,
     diffs: BTreeMap<String, ToolCall>,
+    tool_turns: BTreeMap<String, String>,
+    stopping: Option<StopOperation>,
     selected: Option<String>,
     pending_model: Option<String>,
 }
@@ -27,6 +52,8 @@ impl Codex {
             pending: BTreeMap::new(),
             tools: BTreeMap::new(),
             diffs: BTreeMap::new(),
+            tool_turns: BTreeMap::new(),
+            stopping: None,
             selected: None,
             pending_model: None,
         }
@@ -35,6 +62,166 @@ impl Codex {
         let mut e = Effects::default();
         e.write(rpc(json!("initialize"),"initialize",json!({"clientInfo":{"name":"kiln","title":"Kiln","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}})));
         e
+    }
+    pub fn tick(&mut self) -> Effects {
+        self.tick_at(Instant::now())
+    }
+    fn tick_at(&mut self, now: Instant) -> Effects {
+        let mut effects = Effects::default();
+        if let Some(stop) = &mut self.stopping
+            && !stop.failed
+            && now >= stop.deadline
+        {
+            stop.failed = true;
+            effects.event(Event::Error("Codex stopping is unconfirmed; a command may still be running. Waiting for native completion; no new task was sent.".into()));
+            effects.state(Lifecycle::Failed);
+        }
+        effects
+    }
+    fn stop_state(&mut self, effects: &mut Effects) {
+        let Some(stop) = &self.stopping else {
+            return;
+        };
+        if stop.turn_done && stop.pending.is_empty() && stop.unconfirmed.is_empty() {
+            self.stopping = None;
+            self.busy = false;
+            effects.state(Lifecycle::Ready);
+        } else {
+            effects.state(if stop.failed {
+                Lifecycle::Failed
+            } else {
+                Lifecycle::Running
+            });
+        }
+    }
+    fn queue_terminations(&mut self, effects: &mut Effects) {
+        let Some(stop) = &mut self.stopping else {
+            return;
+        };
+        for (id, tool) in &self.tools {
+            if self.tool_turns.get(id) != Some(&stop.turn)
+                || tool.status != ToolStatus::Running
+                || tool.input["type"] != "commandExecution"
+                || stop.requested.contains(id)
+            {
+                continue;
+            }
+            let Some(process) = tool.input["processId"]
+                .as_str()
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let request = format!("stop-terminal-{}", journal::unique());
+            effects.write(rpc(
+                json!(request),
+                "thread/backgroundTerminals/terminate",
+                json!({"threadId":self.thread,"processId":process}),
+            ));
+            stop.requested.insert(id.clone());
+            stop.pending.insert(
+                request,
+                StopTarget {
+                    item: id.clone(),
+                    process: process.into(),
+                },
+            );
+        }
+    }
+    fn interrupt(&mut self, effects: &mut Effects) {
+        if self.stopping.is_some() {
+            return;
+        }
+        let interrupt = format!("stop-interrupt-{}", journal::unique());
+        self.stopping = Some(StopOperation {
+            turn: self.turn.clone(),
+            interrupt: interrupt.clone(),
+            pending: Default::default(),
+            requested: Default::default(),
+            unconfirmed: Default::default(),
+            turn_done: false,
+            failed: false,
+            deadline: Instant::now() + Duration::from_secs(10),
+        });
+        effects.write(rpc(
+            json!(interrupt),
+            "turn/interrupt",
+            json!({"threadId":self.thread,"turnId":self.turn}),
+        ));
+        self.queue_terminations(effects);
+    }
+    fn stop_response(&mut self, id: &str, value: &Value, effects: &mut Effects) -> bool {
+        if !id.starts_with("stop-terminal-") && !id.starts_with("stop-interrupt-") {
+            return false;
+        }
+        let Some(stop) = &mut self.stopping else {
+            return true;
+        };
+        if id == stop.interrupt {
+            if let Some(error) = value.get("error") {
+                stop.failed = true;
+                effects.event(Event::Error(format!(
+                    "Codex interruption is unconfirmed: {}",
+                    native_error_message(error)
+                )));
+                self.stop_state(effects);
+            }
+            return true;
+        }
+        let Some(target) = stop.pending.remove(id) else {
+            return true;
+        };
+        let completed = self.tools.get(&target.item).is_some_and(|tool| {
+            matches!(
+                tool.status,
+                ToolStatus::Completed | ToolStatus::Failed | ToolStatus::Cancelled
+            )
+        });
+        if !completed {
+            if let Some(tool) = self.tools.get_mut(&target.item)
+                && tool.status == ToolStatus::Running
+                && self.tool_turns.get(&target.item) == Some(&stop.turn)
+                && tool.input["processId"] == target.process
+                && value["result"]["terminated"] == true
+            {
+                tool.status = ToolStatus::Cancelled;
+                stop.unconfirmed.remove(&target.item);
+                effects.event(Event::Tool(tool.clone()));
+            } else {
+                stop.failed = true;
+                stop.unconfirmed.insert(target.item);
+                effects.event(Event::Error(format!(
+                    "Codex could not confirm stopping a command; it may still be running: {}",
+                    value
+                        .get("error")
+                        .map(native_error_message)
+                        .unwrap_or_else(|| "termination was not confirmed".into())
+                )));
+            }
+        }
+        self.stop_state(effects);
+        true
+    }
+    fn native_item(&mut self, params: &Value, complete: bool, effects: &mut Effects) {
+        let id = s(&params["item"], "id");
+        let same_thread = params["threadId"] == self.thread;
+        let turn = s(params, "turnId");
+        if !complete && same_thread && !turn.is_empty() {
+            self.tool_turns.entry(id.clone()).or_insert(turn.clone());
+        }
+        self.item(&params["item"], complete, effects);
+        if complete
+            && same_thread
+            && let Some(stop) = &mut self.stopping
+            && turn == stop.turn
+            && stop.requested.contains(&id)
+        {
+            stop.pending.retain(|_, target| target.item != id);
+            stop.unconfirmed.remove(&id);
+            self.stop_state(effects);
+        } else if !complete && same_thread {
+            self.queue_terminations(effects);
+        }
     }
     pub fn command(&mut self, c: &Command, id: &str) -> Result<Effects> {
         let mut e = Effects::default();
@@ -108,15 +295,11 @@ impl Codex {
                 for (key, _) in std::mem::take(&mut self.pending) {
                     e.event(Event::RequestResolved(key));
                 }
-                if self.busy {
+                if self.busy && self.stopping.is_none() {
                     if self.turn.is_empty() {
                         self.interrupt_pending = true;
                     } else {
-                        e.write(rpc(
-                            json!("interrupt"),
-                            "turn/interrupt",
-                            json!({"threadId":self.thread,"turnId":self.turn}),
-                        ));
+                        self.interrupt(&mut e);
                     }
                 }
             }
@@ -162,7 +345,7 @@ impl Codex {
             tool.output = text(output);
         }
         if let Some(error) = item.get("error").filter(|v| !v.is_null()) {
-            tool.output = text(error);
+            tool.output = native_error_message(error);
             tool.status = ToolStatus::Failed;
         }
         if let Some(changes) = item.get("changes").and_then(Value::as_array) {
@@ -216,8 +399,11 @@ impl Codex {
         }
         if method.is_empty() && v.get("id").is_some() {
             let id = s(&v, "id");
+            if self.stop_response(&id, &v, &mut e) {
+                return Ok(e);
+            }
             if let Some(error) = v.get("error") {
-                anyhow::bail!("Codex {id} failed: {}", text(error));
+                anyhow::bail!("Codex request failed: {}", native_error_message(error));
             }
             let r = &v["result"];
             match id.as_str() {
@@ -265,11 +451,7 @@ impl Codex {
                     self.turn = s(&r["turn"], "id");
                     e.accepted = true;
                     if std::mem::take(&mut self.interrupt_pending) {
-                        e.write(rpc(
-                            json!("interrupt"),
-                            "turn/interrupt",
-                            json!({"threadId":self.thread,"turnId":self.turn}),
-                        ));
+                        self.interrupt(&mut e);
                     }
                 }
                 _ => {}
@@ -283,13 +465,20 @@ impl Codex {
                 }
             }
             "turn/started" => {
+                if p.get("threadId").is_some() && p["threadId"] != self.thread {
+                    return Ok(e);
+                }
                 self.turn = s(&p["turn"], "id");
                 e.accepted = true;
-                e.state(Lifecycle::Running);
+                if self.stopping.is_some() {
+                    self.stop_state(&mut e);
+                } else {
+                    e.state(Lifecycle::Running);
+                }
             }
             "item/agentMessage/delta" => e.event(message(s(p, "itemId"), s(p, "delta"), true)),
-            "item/started" => self.item(&p["item"], false, &mut e),
-            "item/completed" => self.item(&p["item"], true, &mut e),
+            "item/started" => self.native_item(p, false, &mut e),
+            "item/completed" => self.native_item(p, true, &mut e),
             "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
                 let id = s(p, "itemId");
                 let tool = self.tools.entry(id.clone()).or_insert_with(|| ToolCall {
@@ -317,6 +506,13 @@ impl Codex {
                 e.event(Event::RequestResolved(key));
             }
             "turn/completed" => {
+                if p.get("threadId").is_some() && p["threadId"] != self.thread {
+                    return Ok(e);
+                }
+                let turn = s(&p["turn"], "id");
+                if !self.turn.is_empty() && turn != self.turn {
+                    return Ok(e);
+                }
                 if let Some(mut diff) = self.diffs.remove(&s(&p["turn"], "id")) {
                     diff.status = match s(&p["turn"], "status").as_str() {
                         "interrupted" => ToolStatus::Cancelled,
@@ -326,20 +522,32 @@ impl Codex {
                     };
                     e.event(Event::Tool(diff));
                 }
-                self.busy = false;
                 self.interrupt_pending = false;
                 self.turn.clear();
                 self.pending.clear();
                 if let Some(error) = p["turn"].get("error").filter(|v| !v.is_null()) {
-                    e.event(Event::Error(text(error)));
+                    e.event(Event::Error(native_error_message(error)));
                 }
-                e.state(Lifecycle::Ready);
-            }
-            "error" => {
-                e.event(Event::Error(text(&p["error"])));
-                if p["willRetry"].as_bool() != Some(true) {
+                if let Some(stop) = &mut self.stopping
+                    && stop.turn == turn
+                {
+                    stop.turn_done = true;
+                    self.stop_state(&mut e);
+                } else {
                     self.busy = false;
                     e.state(Lifecycle::Ready);
+                }
+            }
+            "error" => {
+                e.event(Event::Error(native_error_message(&p["error"])));
+                if p["willRetry"].as_bool() != Some(true) {
+                    if let Some(stop) = &mut self.stopping {
+                        stop.failed = true;
+                        self.stop_state(&mut e);
+                    } else {
+                        self.busy = false;
+                        e.state(Lifecycle::Ready);
+                    }
                 }
             }
             "thread/closed" => {
@@ -463,5 +671,286 @@ mod diff_tests {
             assert_eq!(finalized[0].status, expected);
             assert_eq!(adapter.tools["async"].status, ToolStatus::Running);
         }
+    }
+}
+
+#[cfg(test)]
+mod stop_tests {
+    use super::*;
+    fn running() -> Codex {
+        let mut adapter = Codex::new("/tmp".into(), None);
+        adapter
+            .ingest(json!({"id":"thread","result":{"thread":{"id":"thread"}}}))
+            .unwrap();
+        adapter
+            .command(
+                &Command::Submit {
+                    text: "task".into(),
+                    attachments: vec![],
+                    model: None,
+                },
+                "fixture",
+            )
+            .unwrap();
+        adapter
+            .ingest(json!({"id":"turn","result":{"turn":{"id":"current"}}}))
+            .unwrap();
+        adapter
+    }
+    fn item(adapter: &mut Codex, id: &str, thread: &str, turn: &str, kind: &str, process: &str) {
+        adapter.ingest(json!({"method":"item/started","params":{"threadId":thread,"turnId":turn,"item":{"id":id,"type":kind,"command":"fixture command","processId":process,"status":"inProgress"}}})).unwrap();
+    }
+    fn termination(effects: &Effects) -> Value {
+        let requests = effects
+            .writes
+            .iter()
+            .filter(|v| v["method"] == "thread/backgroundTerminals/terminate")
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        requests[0].clone()
+    }
+    #[test]
+    fn stop_terminates_only_current_native_command_and_waits_for_matching_receipt() {
+        let mut adapter = running();
+        item(
+            &mut adapter,
+            "prior",
+            "thread",
+            "prior",
+            "commandExecution",
+            "10",
+        );
+        item(
+            &mut adapter,
+            "active",
+            "thread",
+            "current",
+            "commandExecution",
+            "20",
+        );
+        item(
+            &mut adapter,
+            "foreign",
+            "other-thread",
+            "current",
+            "commandExecution",
+            "30",
+        );
+        item(
+            &mut adapter,
+            "mcp",
+            "thread",
+            "current",
+            "mcpToolCall",
+            "40",
+        );
+        let stop = adapter.command(&Command::Interrupt, "fixture").unwrap();
+        let request = termination(&stop);
+        assert_eq!(
+            request["params"],
+            json!({"threadId":"thread","processId":"20"})
+        );
+        assert!(
+            !stop
+                .events
+                .iter()
+                .any(|e| matches!(e,Event::Tool(t) if t.status==ToolStatus::Cancelled))
+        );
+        let turn = adapter.ingest(json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"current","status":"interrupted"}}})).unwrap();
+        assert!(!turn.events.contains(&Event::Lifecycle(Lifecycle::Ready)));
+        adapter.command(&Command::Interrupt, "fixture").unwrap();
+        assert!(
+            adapter
+                .command(
+                    &Command::Submit {
+                        text: "too soon".into(),
+                        attachments: vec![],
+                        model: None
+                    },
+                    "fixture"
+                )
+                .is_err()
+        );
+        let settled = adapter
+            .ingest(json!({"id":request["id"],"result":{"terminated":true}}))
+            .unwrap();
+        assert!(settled.events.iter().any(
+            |e| matches!(e,Event::Tool(t) if t.id=="active"&&t.status==ToolStatus::Cancelled)
+        ));
+        assert!(settled.events.contains(&Event::Lifecycle(Lifecycle::Ready)));
+        for id in ["prior", "foreign", "mcp"] {
+            assert_eq!(adapter.tools[id].status, ToolStatus::Running);
+        }
+        adapter
+            .command(
+                &Command::Submit {
+                    text: "next turn".into(),
+                    attachments: vec![],
+                    model: None,
+                },
+                "fixture",
+            )
+            .unwrap();
+        let next = adapter
+            .ingest(json!({"id":"turn","result":{"turn":{"id":"next"}}}))
+            .unwrap();
+        assert!(!next.writes.iter().any(|v| v["method"] == "turn/interrupt"));
+        let late = adapter
+            .ingest(json!({"id":request["id"],"error":{"code":-32601,"message":"late"}}))
+            .unwrap();
+        assert!(late.events.is_empty());
+        assert!(adapter.busy);
+        assert_eq!(adapter.turn, "next");
+    }
+    #[test]
+    fn unsupported_or_unconfirmed_termination_keeps_native_status_and_blocks_new_turns() {
+        for response in [
+            json!({"result":{"terminated":false}}),
+            json!({"error":{"code":-32601,"message":"unsupported"}}),
+        ] {
+            let mut adapter = running();
+            item(
+                &mut adapter,
+                "active",
+                "thread",
+                "current",
+                "commandExecution",
+                "20",
+            );
+            let stop = adapter.command(&Command::Interrupt, "fixture").unwrap();
+            let request = termination(&stop);
+            adapter.ingest(json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"current","status":"interrupted"}}})).unwrap();
+            let mut response = response;
+            response["id"] = request["id"].clone();
+            let failed = adapter.ingest(response).unwrap();
+            assert!(failed.events.iter().any(|e| matches!(e, Event::Error(_))));
+            assert!(failed.events.contains(&Event::Lifecycle(Lifecycle::Failed)));
+            let error = adapter.ingest(json!({"method":"error","params":{"error":{"message":"turn failed"},"willRetry":false}})).unwrap();
+            assert!(!error.events.contains(&Event::Lifecycle(Lifecycle::Ready)));
+            assert_eq!(adapter.tools["active"].status, ToolStatus::Running);
+            assert!(
+                adapter
+                    .command(
+                        &Command::Submit {
+                            text: "blocked".into(),
+                            attachments: vec![],
+                            model: None
+                        },
+                        "fixture"
+                    )
+                    .is_err()
+            );
+            let done = adapter.ingest(json!({"method":"item/completed","params":{"threadId":"thread","turnId":"current","item":{"id":"active","type":"commandExecution","processId":"20","status":"completed"}}})).unwrap();
+            assert!(done.events.contains(&Event::Lifecycle(Lifecycle::Ready)));
+        }
+    }
+    #[test]
+    fn missing_termination_receipt_times_out_without_completing_or_replaying_a_command() {
+        let mut adapter = running();
+        item(
+            &mut adapter,
+            "active",
+            "thread",
+            "current",
+            "commandExecution",
+            "20",
+        );
+        let stop = adapter.command(&Command::Interrupt, "fixture").unwrap();
+        let request = termination(&stop);
+        adapter.ingest(json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"current","status":"interrupted"}}})).unwrap();
+        assert!(
+            adapter
+                .tick_at(Instant::now() + Duration::from_secs(1))
+                .events
+                .is_empty()
+        );
+        let timed_out = adapter.tick_at(Instant::now() + Duration::from_secs(11));
+        assert!(
+            timed_out
+                .events
+                .contains(&Event::Lifecycle(Lifecycle::Failed))
+        );
+        assert!(
+            timed_out
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Error(_)))
+        );
+        assert!(timed_out.writes.is_empty());
+        assert_eq!(adapter.tools["active"].status, ToolStatus::Running);
+        assert!(
+            adapter
+                .tick_at(Instant::now() + Duration::from_secs(12))
+                .events
+                .is_empty()
+        );
+        let late = adapter
+            .ingest(json!({"id":request["id"],"result":{"terminated":true}}))
+            .unwrap();
+        assert!(late.events.contains(&Event::Lifecycle(Lifecycle::Ready)));
+        assert!(late.writes.is_empty());
+    }
+    #[test]
+    fn native_command_started_during_stop_is_terminated_before_turn_readiness() {
+        let mut adapter = running();
+        let stop = adapter.command(&Command::Interrupt, "fixture").unwrap();
+        assert_eq!(stop.writes.len(), 1);
+        let started = adapter.ingest(json!({"method":"item/started","params":{"threadId":"thread","turnId":"current","item":{"id":"late-start","type":"commandExecution","processId":"50","status":"inProgress"}}})).unwrap();
+        let request = termination(&started);
+        assert_eq!(
+            request["params"],
+            json!({"threadId":"thread","processId":"50"})
+        );
+        let receipt = adapter
+            .ingest(json!({"id":request["id"],"result":{"terminated":true}}))
+            .unwrap();
+        assert!(!receipt.events.contains(&Event::Lifecycle(Lifecycle::Ready)));
+        let done = adapter.ingest(json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"current","status":"interrupted"}}})).unwrap();
+        assert!(done.events.contains(&Event::Lifecycle(Lifecycle::Ready)));
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    #[test]
+    fn native_errors_project_readable_messages_without_protocol_objects() {
+        let error = json!({"message":"Sign in again to continue.","codexErrorInfo":{"type":"authentication"},"additionalDetails":{"internal":"fixture"},"misalignment":null});
+        for message in [
+            json!({"method":"turn/completed","params":{"turn":{"id":"turn","status":"failed","error":error}}}),
+            json!({"method":"error","params":{"error":error,"willRetry":false}}),
+        ] {
+            let mut adapter = Codex::new("/tmp".into(), None);
+            let effects = adapter.ingest(message).unwrap();
+            let errors = effects
+                .events
+                .iter()
+                .filter_map(|event| {
+                    if let Event::Error(message) = event {
+                        Some(message.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(errors, vec!["Sign in again to continue."]);
+        }
+        let mut adapter = Codex::new("/tmp".into(), None);
+        let rpc = adapter
+            .ingest(json!({"id":"transport-only-id","error":error}))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(rpc.contains("Sign in again to continue."));
+        for hidden in [
+            "transport-only-id",
+            "codexErrorInfo",
+            "additionalDetails",
+            "misalignment",
+        ] {
+            assert!(!rpc.contains(hidden));
+        }
+        let unknown = adapter.ingest(json!({"method":"error","params":{"error":{"internal_only":"fixture"},"willRetry":true}})).unwrap();
+        assert!(unknown.events.iter().any(|event|matches!(event,Event::Error(message) if !message.contains("internal_only")&&!message.contains('{'))));
     }
 }

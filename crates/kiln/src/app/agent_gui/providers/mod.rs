@@ -94,6 +94,12 @@ pub(super) enum Adapter {
     Antigravity(antigravity::Antigravity),
 }
 impl Adapter {
+    pub fn tick(&mut self) -> Effects {
+        match self {
+            Self::Codex(adapter) => adapter.tick(),
+            _ => Effects::default(),
+        }
+    }
     pub fn new(tool: Tool, cwd: PathBuf, resume: Option<String>) -> Self {
         match tool {
             Tool::Claude => Self::Claude(claude::Claude::new(resume)),

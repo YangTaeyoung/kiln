@@ -1,7 +1,7 @@
 //! Structured agents run under the actual isolated daemon and PTY owner.
 use kiln::app::agent_gui::{
-    AgentPane, Client, Command, CommandPhase, Decision, Descriptor, Envelope, Lifecycle,
-    SavedDraft, Transcript,
+    AgentPane, Client, Command, CommandPhase, Decision, Descriptor, Entry, Envelope, Lifecycle,
+    SavedDraft, ToolStatus, Transcript,
 };
 use kiln_accounts::Tool;
 use kiln_daemon::client::Client as DaemonClient;
@@ -236,6 +236,85 @@ fn decision<'a>(wire: &'a [Value], identity: &str) -> &'a Value {
     matches[0]
 }
 
+fn native_command_stop(runtime: &Runtime) {
+    let (_, descriptor, _, directory) = runtime.spawn(Tool::Codex, "codex-process-stop");
+    let project = descriptor.cwd.clone();
+    let mut client = Client::connect(descriptor);
+    let mut transcript = Transcript::default();
+    wait(&mut client, &mut transcript, |t| {
+        t.lifecycle == Lifecycle::Ready
+    });
+    let submit = |client: &Client, text: &str| {
+        client
+            .send(Command::Submit {
+                text: text.into(),
+                attachments: vec![],
+                model: None,
+            })
+            .unwrap()
+    };
+    submit(&client, "previous background task");
+    wait(&mut client, &mut transcript, |t| {
+        t.lifecycle == Lifecycle::Ready
+            && t.entries
+                .iter()
+                .any(|entry| matches!(entry,Entry::Tool(tool) if tool.id=="process-101"))
+    });
+    submit(&client, "active delayed task");
+    wait(&mut client, &mut transcript, |t| {
+        t.entries.iter().any(|entry|matches!(entry,Entry::Tool(tool) if tool.id=="process-102"&&tool.status==ToolStatus::Running))
+    });
+    client.send(Command::Interrupt).unwrap();
+    wait(&mut client, &mut transcript, |t| {
+        t.lifecycle==Lifecycle::Ready&&t.entries.iter().any(|entry|matches!(entry,Entry::Tool(tool) if tool.id=="process-102"&&tool.status==ToolStatus::Cancelled))
+    });
+    let until = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < until || !project.join("background.txt").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "previous background task did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        fs::read(project.join("background.txt")).unwrap(),
+        b"completed\n"
+    );
+    assert!(!project.join("late.txt").exists());
+    assert!(transcript.entries.iter().any(|entry|matches!(entry,Entry::Tool(tool) if tool.id=="process-101"&&tool.status==ToolStatus::Running)));
+    let last_sequence = transcript.sequence;
+    submit(&client, "subsequent task");
+    wait(&mut client, &mut transcript, |t| {
+        t.sequence > last_sequence && t.lifecycle == Lifecycle::Ready
+    });
+    let wire = wires(&project);
+    let terminate = wire
+        .iter()
+        .filter(|v| v["method"] == "thread/backgroundTerminals/terminate")
+        .collect::<Vec<_>>();
+    assert_eq!(terminate.len(), 1);
+    assert_eq!(
+        terminate[0]["params"],
+        json!({"threadId":"fixture-codex","processId":"102"})
+    );
+    assert_eq!(prompts(&wire), 3);
+    let events = fs::read_to_string(directory.join("events.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Envelope>(line).unwrap())
+        .collect::<Vec<_>>();
+    let stopping = events.iter().position(|event|matches!(event.event,kiln::app::agent_gui::Event::Message {ref message,..} if message.text=="active delayed task")).unwrap();
+    let cancelled = events.iter().position(|event|matches!(event.event,kiln::app::agent_gui::Event::Tool(ref tool) if tool.id=="process-102"&&tool.status==ToolStatus::Cancelled)).unwrap();
+    assert!(
+        !events[stopping..cancelled]
+            .iter()
+            .any(|event| event.event == kiln::app::agent_gui::Event::Lifecycle(Lifecycle::Ready))
+    );
+    println!(
+        "codex process Stop: exact current native process terminated, prior background completed, delayed side effect absent after 2s, next turn accepted"
+    );
+}
 #[test]
 fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
     let runtime = Runtime::new();
@@ -367,13 +446,16 @@ fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
             original.pid
         );
     }
+    native_command_stop(&runtime);
     for tool in Tool::ALL {
-        for mode in ["exit", "exit-held"] {
+        for mode in ["closed-input", "exit", "exit-held"] {
+            if mode == "closed-input" && tool != Tool::Claude {
+                continue;
+            }
             if cfg!(windows) && mode == "exit-held" {
                 continue;
             }
             let (_, descriptor, _, directory) = runtime.spawn(tool, mode);
-            #[cfg(unix)]
             let project = descriptor.cwd.clone();
             let mut client = Client::connect(descriptor);
             let mut transcript = Transcript::default();
@@ -381,6 +463,9 @@ fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
             wait(&mut client, &mut transcript, |t| {
                 t.lifecycle == Lifecycle::Disconnected
             });
+            if mode == "closed-input" {
+                assert!(project.join("emitted-final").exists());
+            }
             assert_eq!(
                 transcript.provider_session_id.as_deref(),
                 Some(format!("fixture-{}", tool.key()).as_str())
@@ -427,8 +512,9 @@ fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
                 .unwrap();
             assert!(session < disconnected);
             println!(
-                "{} {mode}: final session after 1024 frames retained before Disconnected in {:?}",
+                "{} {mode}: final session after {} frames retained before Disconnected in {:?}",
                 tool.key(),
+                if mode == "closed-input" { 512 } else { 1024 },
                 started.elapsed()
             );
         }

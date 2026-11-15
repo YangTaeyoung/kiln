@@ -180,6 +180,7 @@ struct Backend {
     child: Child,
     out: crossbeam_channel::Sender<Value>,
     input: crossbeam_channel::Receiver<Input>,
+    draining: Option<(Instant, String)>,
 }
 impl Backend {
     fn spawn(mut command: Process) -> Result<Self> {
@@ -259,7 +260,18 @@ impl Backend {
             child,
             out,
             input: rx,
+            draining: None,
         })
+    }
+    fn begin_drain(&mut self, reason: String) {
+        self.draining
+            .get_or_insert_with(|| (Instant::now(), reason));
+    }
+    fn poll_exit(&mut self) -> Result<()> {
+        if let Some(status) = self.child.try_wait()? {
+            self.begin_drain(format!("agent CLI exited ({status})"));
+        }
+        Ok(())
     }
     fn effects(
         &mut self,
@@ -299,9 +311,13 @@ impl Backend {
             })?;
         }
         for value in effects.writes {
-            self.out
-                .try_send(value)
-                .map_err(|_| anyhow::anyhow!("agent input queue is full or disconnected"))?;
+            if self.draining.is_some() {
+                break;
+            }
+            if self.out.try_send(value).is_err() {
+                self.begin_drain("agent input queue is full or disconnected".into());
+                break;
+            }
         }
         Ok(())
     }
@@ -448,7 +464,11 @@ fn dispatch(
             if !matches!(q.command, Command::Submit { .. }) {
                 j.push(Event::CommandState {
                     id: q.id,
-                    state: CommandPhase::Accepted,
+                    state: if backend.draining.is_some() {
+                        CommandPhase::Unconfirmed
+                    } else {
+                        CommandPhase::Accepted
+                    },
                 })?;
             }
         }
@@ -500,47 +520,44 @@ pub fn serve(id: &str) -> Result<()> {
             backend.effects(&mut journal, adapter.start(), &mut active)?;
             let started = Instant::now();
             let mut initialized = false;
-            let mut draining: Option<(Instant, String)> = None;
             let outcome = (|| -> Result<()> {
                 loop {
                     if TERMINATE.load(Ordering::Relaxed) {
                         group.terminate(&mut journal)?;
                         return Ok(());
                     }
-                    let mut batch = Effects::default();
+                    backend.poll_exit()?;
+                    let mut batch = adapter.tick();
                     for input in backend.input.try_iter().take(128).collect::<Vec<_>>() {
                         match input {
                             Input::Json(value) => match adapter.ingest(value) {
                                 Ok(effects) => batch.merge(effects),
                                 Err(error) => {
+                                    backend.begin_drain(error.to_string());
                                     backend.effects(&mut journal, batch, &mut active)?;
                                     return Err(error);
                                 }
                             },
                             Input::Eof => {
+                                backend.begin_drain("agent output closed".into());
                                 backend.effects(&mut journal, batch, &mut active)?;
                                 anyhow::bail!(
                                     "agent output closed; the conversation is disconnected"
                                 );
                             }
                             Input::Error(message) => {
+                                backend.begin_drain(message.into());
                                 backend.effects(&mut journal, batch, &mut active)?;
                                 anyhow::bail!(message);
                             }
                             Input::WriteError => {
-                                draining.get_or_insert_with(|| {
-                                    (Instant::now(), "agent input pipe failed".into())
-                                });
+                                backend.begin_drain("agent input pipe failed".into());
                             }
                         }
                     }
                     backend.effects(&mut journal, batch, &mut active)?;
-                    if let Some(status) = backend.child.try_wait()? {
-                        draining.get_or_insert_with(|| {
-                            (Instant::now(), format!("agent CLI exited ({status})"))
-                        });
-                    }
-                    if let Some((since, reason)) = &draining {
+                    backend.poll_exit()?;
+                    if let Some((since, reason)) = &backend.draining {
                         ensure!(
                             since.elapsed() < Duration::from_secs(2),
                             "{reason}; agent output drain timed out"
@@ -574,6 +591,9 @@ pub fn serve(id: &str) -> Result<()> {
                         dispatch(&mut backend, &mut adapter, &mut journal, q, id, &mut active)?;
                     }
                     for (path, q) in mailbox(&dir)? {
+                        if backend.draining.is_some() {
+                            break;
+                        }
                         if matches!(q.command, Command::Restart) {
                             journal.push(Event::CommandState {
                                 id: q.id,
@@ -680,6 +700,85 @@ mod subprocess_tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::os::unix::process::CommandExt;
+    #[test]
+    fn outbound_queue_failure_retires_deferred_prompts_but_publishes_final_events() {
+        use serde_json::json;
+        for tool in [Tool::Claude, Tool::Antigravity] {
+            let root = tempfile::tempdir().unwrap();
+            let mut journal = Journal::open(root.path(), "generation".into()).unwrap();
+            journal.push(Event::Generation).unwrap();
+            let mut adapter = Adapter::new(tool, root.path().into(), None);
+            if tool == Tool::Claude {
+                adapter.ingest(json!({"type":"control_response","response":{"request_id":"initialize","subtype":"success","response":{}}})).unwrap();
+                adapter
+                    .ingest(json!({"type":"system","model":"old"}))
+                    .unwrap();
+            } else {
+                adapter.ingest(json!({"id":"initialize","result":{"protocolVersion":1,"agentCapabilities":{}}})).unwrap();
+                adapter.ingest(json!({"id":"session","result":{"sessionId":"native","models":{"currentModelId":"old","availableModels":[{"modelId":"old","name":"Old"},{"modelId":"new","name":"New"}]}}})).unwrap();
+            }
+            let mut backend = Backend::spawn(Process::new("/bin/cat")).unwrap();
+            let (out, received) = crossbeam_channel::bounded(1);
+            backend.out = out;
+            let mut active = Some("submission".into());
+            let control = adapter
+                .command(
+                    &Command::Submit {
+                        text: "must remain unsent".into(),
+                        attachments: vec![],
+                        model: Some("new".into()),
+                    },
+                    "fixture",
+                )
+                .unwrap();
+            let identity = if tool == Tool::Claude {
+                control.writes[0]["request_id"].clone()
+            } else {
+                control.writes[0]["id"].clone()
+            };
+            backend.effects(&mut journal, control, &mut active).unwrap();
+            received.recv().unwrap();
+            backend
+                .effects(
+                    &mut journal,
+                    Effects {
+                        writes: vec![json!({"before_failure":true}), json!({"fails":true})],
+                        ..Default::default()
+                    },
+                    &mut active,
+                )
+                .unwrap();
+            assert_eq!(received.recv().unwrap(), json!({"before_failure":true}));
+            let acknowledgement = if tool == Tool::Claude {
+                json!({"type":"control_response","response":{"request_id":identity,"subtype":"success","response":{}}})
+            } else {
+                json!({"id":identity,"result":{}})
+            };
+            let effects = adapter.ingest(acknowledgement).unwrap();
+            assert_eq!(effects.writes.len(), 1);
+            backend.effects(&mut journal, effects, &mut active).unwrap();
+            assert!(
+                received.try_recv().is_err(),
+                "no deferred prompt reaches the outbound queue"
+            );
+            backend
+                .effects(
+                    &mut journal,
+                    Effects {
+                        events: vec![Event::Session("final-session".into())],
+                        ..Default::default()
+                    },
+                    &mut active,
+                )
+                .unwrap();
+            assert_eq!(
+                journal.transcript.provider_session_id.as_deref(),
+                Some("final-session")
+            );
+            assert_eq!(journal.transcript.selected_model.as_deref(), Some("new"));
+            assert_eq!(active.as_deref(), Some("submission"));
+        }
+    }
     #[test]
     fn worker_entry() {
         let Ok(id) = std::env::var("KILN_GUI_FIXTURE_ID") else {

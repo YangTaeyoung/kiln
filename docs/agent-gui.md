@@ -31,6 +31,16 @@ support text, single choice and multiple choices as advertised. **Stop** interru
 current turn without closing its reusable worker. Failed/disconnected sessions
 retain history and offer an explicit **Restart same conversation** action.
 
+For Codex, Stop also requests native termination of running command processes
+identified in the current thread and turn. It preserves commands from earlier
+turns and unrelated background/MCP work. This uses the installed app-server's
+experimental `thread/backgroundTerminals/terminate` API. Kiln waits for native
+termination or item completion before marking a command stopped and enabling a
+new turn. An unsupported, rejected or unanswered termination stays unconfirmed
+with an explicit failure after a ten-second confirmation timeout; it never becomes
+an automatic retry. Native completion can settle that failure, or a new conversation can be
+opened explicitly. Turn interruption alone does not establish process exit.
+
 Closing the GUI saves drafts and disconnects its client. The daemon still owns the
 worker. Explicitly closing a pane ends that session and asks before discarding an
 unsent or unconfirmed draft. Running/waiting work participates in the existing
