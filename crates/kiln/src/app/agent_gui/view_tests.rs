@@ -1312,3 +1312,131 @@ fn visual_fix1_tool_uses_one_flush_card_boundary_and_native_keyboard_collapse() 
         assert!(h.query_by_label("keyboard expanded output").is_none());
     }
 }
+
+
+#[test]
+fn visual_fix2_full_pane_approval_arguments_are_painted_before_decisions_after_long_history() {
+    fn text_paint(h: &Harness<'_, AgentPane>, needle: &str) -> Vec<(egui::Rect, egui::Rect)> {
+        fn collect(
+            shape: &egui::Shape,
+            clip: egui::Rect,
+            needle: &str,
+            out: &mut Vec<(egui::Rect, egui::Rect)>,
+        ) {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text().contains(needle) => {
+                    out.push((text.visual_bounding_rect(), clip))
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, clip, needle, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = vec![];
+        for shape in &h.output().shapes {
+            collect(&shape.shape, shape.clip_rect, needle, &mut out);
+        }
+        out
+    }
+    for dark in [true, false] {
+        for width in [1400., 520.] {
+            for long in [false, true] {
+                let mut p = pane();
+                p.descriptor.tool = kiln_accounts::Tool::Claude;
+                p.transcript.lifecycle = Lifecycle::Waiting;
+                for index in 0..30 {
+                    p.transcript.entries.push(Entry::Message(Message {
+                        id: format!("earlier-{index}"), role: if index % 2 == 0 {Role::User} else {Role::Assistant},
+                        text: "Earlier conversation context.\nAnother retained line.\nA third history line.".into(), attachments: vec![],
+                    }));
+                }
+                p.transcript.entries.push(Entry::Tool(ToolCall {
+                    id: "approval-tool".into(),
+                    name: "mcp__fixture__echo".into(),
+                    status: ToolStatus::Running,
+                    ..Default::default()
+                }));
+                let needle = if long {
+                    "bounded approval body"
+                } else {
+                    "native GUI MCP check"
+                };
+                let request = Request {
+                    id: "permission".into(),
+                    title: "mcp__fixture__echo".into(),
+                    questions: vec![],
+                    options: vec![],
+                    details: serde_json::json!({"text": if long { "bounded approval body ".repeat(600) } else { "native GUI MCP check".into() }}),
+                };
+                p.cache.details.insert(
+                    request.id.clone(),
+                    (
+                        request.clone(),
+                        super::super::approval::project(&request, p.descriptor.tool),
+                    ),
+                );
+                p.transcript.requests.insert(request.id.clone(), request);
+                let mut initialized = false;
+                let mut h = Harness::builder().with_size([width, 880.]).build_ui_state(
+                    |ui, p: &mut AgentPane| {
+                        if !initialized {
+                            kiln_common::fonts::install(ui.ctx());
+                            initialized = true;
+                            return;
+                        }
+                        Theme::set_current(if dark { "kiln-dark" } else { "kiln-light" });
+                        Theme::current().apply(ui.ctx());
+                        ui.add_space(72.); // Native app toolbar and pane chrome above the complete AgentPane.
+                        p.ui(ui);
+                    },
+                    p,
+                );
+                h.run();
+                visual_fix1_capture(
+                    &mut h,
+                    &format!(
+                        "approval-{}-{width:.0}-{}",
+                        if dark { "dark" } else { "light" },
+                        if long { "long" } else { "short" }
+                    ),
+                );
+                let paints = text_paint(&h, needle);
+                assert!(
+                    !paints.is_empty(),
+                    "actual argument must emit a paint shape, AX presence is insufficient"
+                );
+                if long {
+                    assert!(
+                        paints.iter().all(|(_, clip)| clip.height() <= 180. + 1.),
+                        "long approval input retains a bounded scrolling paint viewport: {paints:?}"
+                    );
+                } else {
+                    assert!(
+                        paints
+                            .iter()
+                            .all(|(bounds, clip)| clip.contains_rect(*bounds)),
+                        "short argument must be painted fully before decision controls: {paints:?}"
+                    );
+                }
+                for label in ["한 번 허용", "거부"] {
+                    let painted = text_paint(&h, label);
+                    assert!(
+                        !painted.is_empty()
+                            && painted
+                                .iter()
+                                .all(|(bounds, clip)| clip.contains_rect(*bounds)),
+                        "decision stays painted and reachable: {label} {painted:?}"
+                    );
+                }
+                h.get_by_label("한 번 허용").click();
+                h.run();
+                assert!(
+                    matches!(h.state().sent.last(), Some(Command::Respond { request_id, decision: Decision::Allow, .. }) if request_id == "permission")
+                );
+            }
+        }
+    }
+}

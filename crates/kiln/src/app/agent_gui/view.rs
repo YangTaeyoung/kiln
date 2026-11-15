@@ -834,6 +834,10 @@ impl AgentPane {
                 if let Some(summary) = summary {
                     egui::ScrollArea::vertical()
                         .id_salt((&request.id, "summary"))
+                        // The enclosing history can offer almost no remaining
+                        // height. Reserve the bounded summary viewport anyway;
+                        // auto-shrink still fits shorter actual content.
+                        .min_scrolled_height(180.)
                         .max_height(180.)
                         .show(ui, |ui| {
                             for (label, value) in &summary.fields {
