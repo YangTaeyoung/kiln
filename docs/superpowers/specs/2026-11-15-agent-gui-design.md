@@ -125,6 +125,10 @@ separate focused files. Provider-specific files live under `agent_gui/providers/
 - `descriptor(spec: &SpawnSpec) -> Option<Descriptor>` validates those markers.
   Descriptor contains ID, Tool, cwd and account label for the view.
 - `serve(id: &str) -> anyhow::Result<()>` is the hidden host entry point.
+- `import_attachment(descriptor: &Descriptor, source: &Path) -> anyhow::Result<Attachment>`
+  makes a private immutable image copy off the UI thread. Limit files to 20 MiB,
+  verify image signatures/MIME, reject symlinks/non-regular files and ensure the
+  final worker only reads attachments inside this runtime.
 - `Client::connect(descriptor: Descriptor) -> Client` owns a background journal and
   command worker. `Client::drain() -> Vec<Envelope>` and
   `Client::send(command: Command) -> anyhow::Result<()>` never block on child I/O.
