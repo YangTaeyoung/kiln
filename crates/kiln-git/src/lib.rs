@@ -84,3 +84,11 @@ pub fn repo_summary(root: &Path) -> Option<RepoSummary> {
         pr,
     })
 }
+
+/// Cached native Markdown shared with conversation views. Parse on a background worker.
+#[derive(Clone, Debug, Default)]
+pub struct Markdown(ui::markdown::Markdown);
+impl Markdown {
+    pub fn parse(source: &str) -> Self { Self(ui::markdown::Markdown::parse(source)) }
+    pub fn show(&self, ui: &mut egui::Ui) { self.0.show(ui); }
+}

@@ -126,3 +126,20 @@ reduces output-driven redraws without adding a buffered input queue or changing
 low-latency GPU presentation. Daemon replacement attempts are scoped to the server
 identity with a 30-second retry backoff; helpers are version-checked before
 terminal handover so older installations cannot downgrade the daemon.
+
+## Native agent conversation presentation
+
+New agent panes default to native GUI presentation. `agent_gui::AgentPane` is an
+`agent_views` overlay on existing Term panes, preserving daemon/PTy ownership and
+saved session IDs. `KILN_GUI_AGENT`/`KILN_GUI_TOOL` launch markers restore the overlay;
+old saved terminal panes remain terminal panes. `Presentation` is persisted in
+Settings; `PaneP.agent_draft` defaults absent for older state.
+
+Launch preparation, request-file creation, account environment capture, Markdown
+parsing, journal I/O and attachment import/validation run on background workers.
+Every GUI pane ticks even while hidden. Rendering uses a bounded history window,
+bounded tool output and eight image attachments. A queued draft retains its payload
+and command identity until actual journal acceptance. Restore never replays work.
+Dead PTYs override stale Ready journal state and disable sending. Explicit pane
+close ends the session; GUI quit saves drafts and only disconnects the clients.
+See [Native agent conversations](agent-gui.md).

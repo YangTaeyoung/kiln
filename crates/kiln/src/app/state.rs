@@ -27,6 +27,7 @@ pub struct TerminalLaunchDraft {
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default)]
 pub struct Settings {
+    pub agent_presentation: super::agent_gui::Presentation,
     pub font_size: f32,
     pub ui_scale: f32,
     pub option_as_meta: bool,
@@ -52,6 +53,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            agent_presentation: Default::default(),
             font_size: 13.5,
             ui_scale: 1.0,
             option_as_meta: true,
@@ -120,6 +122,8 @@ pub struct PaneP {
     pub tool: Option<ToolP>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<kiln_proto::SpawnSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_draft: Option<super::agent_gui::SavedDraft>,
 }
 
 /// 카드에 담긴 도구(터미널이 아닌 카드).
@@ -185,7 +189,7 @@ impl WorkspaceP {
                         TabP::DbConsole { conn } => ToolP::DbConsole { conn },
                         TabP::Terminal { .. } => unreachable!(),
                     };
-                    PageP { manual_split:false, zoomed:None, root: Node::Leaf(id), focused: id, panes: vec![PaneP { id, session: None, cwd: None, tool: Some(tool), launch: None }], title: None,agent_request:None,agent_request_offset:0 }
+                    PageP { manual_split:false, zoomed:None, root: Node::Leaf(id), focused: id, panes: vec![PaneP { id, session: None, cwd: None, tool: Some(tool), launch: None, agent_draft: None }], title: None,agent_request:None,agent_request_offset:0 }
                 }
             };
             self.pages.push(page);

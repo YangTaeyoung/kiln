@@ -116,6 +116,7 @@ read hold
     h.run_steps(3);
     h.get_by_label("새 작업").click();
     h.run_steps(2);
+    h.get_by_label("터미널").click();h.run_steps(2);
     h.get_by_label("Codex").click();
     pump(&mut h, "CODEX_READY");
     // Probe the child's physical directory directly. The shell's inherited PWD

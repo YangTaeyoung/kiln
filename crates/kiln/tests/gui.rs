@@ -2189,6 +2189,7 @@ while True:
         }
         if tool.has_accounts() {manager.save_current(tool,"").unwrap();}
     };
+    h.state_mut().debug_set_agent_presentation(kiln::app::agent_gui::Presentation::Terminal);
     sign_in("fixture-a@example.invalid");h.state_mut().debug_queue_action(Action::LaunchAgent{program:tool.program().into(),cwd:proj.clone(),context:"fixture context".into(),request:"fixture task request".into()});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
     let sid_a=h.state().debug_focused_session().unwrap();let pane_a=h.state().debug_focused_pane_id().unwrap();let spec_a=h.state().debug_focused_launch_spec().unwrap();let path_a=agent_runtime::record_path(&spec_a).unwrap();

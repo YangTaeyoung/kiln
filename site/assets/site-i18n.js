@@ -1,7 +1,7 @@
 window.KILN_I18N = {
   "en": {
     "f_agents_t": "Agents, side by side",
-    "f_agents_d": "Each agent works in its own terminal. The sidebar shows which one needs you.",
+    "f_agents_d": "Choose native conversations or terminals. Stream tools, answer approvals and keep drafts.",
     "f_daemon_t": "Sessions that never stop",
     "f_daemon_d": "Close or update Kiln. Your shells and agents keep running.",
     "f_review_t": "Review in the same window",
@@ -102,7 +102,7 @@ window.KILN_I18N = {
   },
   "ko": {
     "f_agents_t": "에이전트를 나란히",
-    "f_agents_d": "에이전트마다 각자의 터미널에서 일하고, 입력이 필요하면 사이드바가 알려 줍니다.",
+    "f_agents_d": "대화 GUI 또는 터미널을 선택하고, 도구 실행·권한 요청·초안을 한곳에서 관리하세요.",
     "f_daemon_t": "꺼지지 않는 세션",
     "f_daemon_d": "Kiln을 닫거나 업데이트해도 셸과 에이전트는 계속 돌아갑니다.",
     "f_review_t": "리뷰도 같은 창에서",
@@ -203,7 +203,7 @@ window.KILN_I18N = {
   },
   "ja": {
     "f_agents_t": "エージェントを並べて",
-    "f_agents_d": "エージェントはそれぞれのターミナルで作業し、入力が必要になるとサイドバーが知らせます。",
+    "f_agents_d": "会話 GUI またはターミナルを選び、ツール実行・権限確認・下書きを管理。",
     "f_daemon_t": "止まらないセッション",
     "f_daemon_d": "Kiln を閉じても更新しても、シェルとエージェントは動き続けます。",
     "f_review_t": "レビューも同じウィンドウで",
@@ -304,7 +304,7 @@ window.KILN_I18N = {
   },
   "zh-CN": {
     "f_agents_t": "代理并排运行",
-    "f_agents_d": "每个代理在自己的终端里工作，需要你时侧栏会提示。",
+    "f_agents_d": "选择对话 GUI 或终端，查看工具运行、回答权限请求并保留草稿。",
     "f_daemon_t": "不会中断的会话",
     "f_daemon_d": "关闭或更新 Kiln，Shell 和代理照常运行。",
     "f_review_t": "在同一窗口审查",

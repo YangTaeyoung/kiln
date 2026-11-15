@@ -66,6 +66,19 @@ impl KilnApp {
         for page in &self.workspaces[index].pages {
             let panes=page.root.panes();
             for &pane in &panes {
+                if let Some(view)=self.agent_views.get(&pane) {
+                    let phase=match view.lifecycle(){
+                        agent_gui::Lifecycle::Starting=>TaskPhase::Recovering,agent_gui::Lifecycle::Disconnected=>TaskPhase::Stalled,
+                        agent_gui::Lifecycle::Failed=>TaskPhase::Failed,agent_gui::Lifecycle::Running=>TaskPhase::Running,
+                        agent_gui::Lifecycle::Waiting=>TaskPhase::Waiting,
+                        agent_gui::Lifecycle::Ready if view.transcript.entries.iter().any(|e|matches!(e,agent_gui::Entry::Message(m) if m.role==agent_gui::Role::Assistant))=>TaskPhase::Done,
+                        _=>TaskPhase::Unknown,
+                    };
+                    let title=if panes.len()==1{page.title.clone()}else{None}.unwrap_or_else(||view.descriptor.tool.display_name().into());
+                    let created=self.panes.get(&pane).and_then(Pane::session).and_then(|s|self.conn.infos.get(&s)).map(|i|i.created_unix).unwrap_or_default();
+                    tasks.push(WorkspaceTask{pane,title,qualifier:String::new(),phase,agent:Some(view.descriptor.tool),updated:created,recorded:None});
+                    locations.push(view.descriptor.cwd.file_name().unwrap_or_default().to_string_lossy().into_owned());continue;
+                }
                 let Some(session)=self.panes.get(&pane).and_then(Pane::session) else {continue};
                 let Some(info)=self.conn.infos.get(&session) else {continue};
                 let telemetry=self.conn.telemetry.get(&session);

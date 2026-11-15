@@ -12068,5 +12068,190 @@
     "en": "Code verification timed out. Start sign-in again and enter a new code.",
     "ja": "コードの確認がタイムアウトしました。ログインをやり直して新しいコードを入力してください。",
     "zh-CN": "验证码确认超时。请重新登录并输入新验证码。"
+  },
+  "대화 GUI": {
+    "en": "Conversation GUI",
+    "ja": "会話 GUI",
+    "zh-CN": "对话 GUI"
+  },
+  "새 에이전트 표시 방식": {
+    "en": "New agent presentation",
+    "ja": "新規エージェントの表示",
+    "zh-CN": "新代理显示方式"
+  },
+  "준비됨": {
+    "en": "Ready",
+    "ja": "準備完了",
+    "zh-CN": "就绪"
+  },
+  "연결 끊김": {
+    "en": "Disconnected",
+    "ja": "切断済み",
+    "zh-CN": "已断开"
+  },
+  "중지됨": {
+    "en": "Stopped",
+    "ja": "停止済み",
+    "zh-CN": "已停止"
+  },
+  "적용된 모델": {
+    "en": "Effective model",
+    "ja": "適用中のモデル",
+    "zh-CN": "当前模型"
+  },
+  "적용된 모드": {
+    "en": "Effective mode",
+    "ja": "適用中のモード",
+    "zh-CN": "当前模式"
+  },
+  "확인 대기": {
+    "en": "Awaiting confirmation",
+    "ja": "確認待ち",
+    "zh-CN": "等待确认"
+  },
+  "이전 메시지": {
+    "en": "Earlier messages",
+    "ja": "以前のメッセージ",
+    "zh-CN": "较早消息"
+  },
+  "최근 메시지": {
+    "en": "Latest messages",
+    "ja": "最新メッセージ",
+    "zh-CN": "最新消息"
+  },
+  "새 대화를 시작하세요": {
+    "en": "Start a conversation",
+    "ja": "会話を始めましょう",
+    "zh-CN": "开始对话"
+  },
+  "작업을 입력하면 선택한 계정의 에이전트가 이 폴더에서 실행합니다.": {
+    "en": "Enter a task to run the selected account’s agent in this folder.",
+    "ja": "タスクを入力すると、選択したアカウントのエージェントがこのフォルダーで実行します。",
+    "zh-CN": "输入任务后，所选账户的代理将在此文件夹中运行。"
+  },
+  "나": {
+    "en": "You",
+    "ja": "自分",
+    "zh-CN": "我"
+  },
+  "긴 메시지는 표시가 제한됩니다. 전체 기록은 보존됩니다.": {
+    "en": "Long message display is limited. Full history is retained.",
+    "ja": "長いメッセージの表示は制限されます。履歴全体は保持されます。",
+    "zh-CN": "长消息的显示有限制，完整记录会保留。"
+  },
+  "한 번 허용": {
+    "en": "Allow once",
+    "ja": "一度許可",
+    "zh-CN": "允许一次"
+  },
+  "거부": {
+    "en": "Deny",
+    "ja": "拒否",
+    "zh-CN": "拒绝"
+  },
+  "전송 결과 미확인 · 자동으로 다시 보내지 않습니다.": {
+    "en": "Delivery is unconfirmed. Nothing will be resent automatically.",
+    "ja": "送信結果は未確認です。自動再送はしません。",
+    "zh-CN": "发送结果未确认，不会自动重发。"
+  },
+  "전송 확인 대기": {
+    "en": "Awaiting delivery confirmation",
+    "ja": "送信確認待ち",
+    "zh-CN": "等待发送确认"
+  },
+  "초안으로 복구": {
+    "en": "Recover as draft",
+    "ja": "下書きに戻す",
+    "zh-CN": "恢复为草稿"
+  },
+  "작업을 입력하세요…": {
+    "en": "Describe your task…",
+    "ja": "タスクを入力…",
+    "zh-CN": "输入任务…"
+  },
+  "메시지": {
+    "en": "Message",
+    "ja": "メッセージ",
+    "zh-CN": "消息"
+  },
+  "첨부 제거": {
+    "en": "Remove attachment",
+    "ja": "添付を削除",
+    "zh-CN": "移除附件"
+  },
+  "이미지 가져오는 중…": {
+    "en": "Importing image…",
+    "ja": "画像を読み込み中…",
+    "zh-CN": "正在导入图片…"
+  },
+  "이미지 첨부": {
+    "en": "Attach image",
+    "ja": "画像を添付",
+    "zh-CN": "附加图片"
+  },
+  "첨부 취소됨": {
+    "en": "Attachment cancelled",
+    "ja": "添付をキャンセルしました",
+    "zh-CN": "已取消附件"
+  },
+  "기본 모델": {
+    "en": "Default model",
+    "ja": "既定のモデル",
+    "zh-CN": "默认模型"
+  },
+  "기본 모드": {
+    "en": "Default mode",
+    "ja": "既定のモード",
+    "zh-CN": "默认模式"
+  },
+  "보내기": {
+    "en": "Send",
+    "ja": "送信",
+    "zh-CN": "发送"
+  },
+  "Enter로 보내기 · Shift+Enter로 줄바꿈": {
+    "en": "Enter to send · Shift+Enter for a new line",
+    "ja": "Enter で送信 · Shift+Enter で改行",
+    "zh-CN": "Enter 发送 · Shift+Enter 换行"
+  },
+  "이미지는 최대 8개까지 첨부할 수 있습니다.": {
+    "en": "Attach up to 8 images.",
+    "ja": "画像は最大 8 枚まで添付できます。",
+    "zh-CN": "最多可附加 8 张图片。"
+  },
+  "대화 초안을 버릴까요?": {
+    "en": "Discard the conversation draft?",
+    "ja": "会話の下書きを破棄しますか？",
+    "zh-CN": "丢弃对话草稿？"
+  },
+  "이 패널의 보내지 않은 초안과 전송 확인 대기 요청이 삭제됩니다.": {
+    "en": "Unsent drafts and unconfirmed submissions in this pane will be deleted.",
+    "ja": "このパネルの未送信の下書きと送信未確認のリクエストを削除します。",
+    "zh-CN": "将删除此面板中未发送的草稿和待确认的请求。"
+  },
+  "대화 초안": {
+    "en": "Conversation draft",
+    "ja": "会話の下書き",
+    "zh-CN": "对话草稿"
+  },
+  "• {} — 대화 초안": {
+    "en": "• {} — Conversation draft",
+    "ja": "• {} — 会話の下書き",
+    "zh-CN": "• {} — 对话草稿"
+  },
+  "원래 요청의 전송이 확인되었습니다. 대화 기록을 확인하세요.": {
+    "en": "The original request was delivered. Check the conversation history.",
+    "ja": "元のリクエストの送信を確認しました。会話履歴を確認してください。",
+    "zh-CN": "已确认原请求已发送，请检查对话记录。"
+  },
+  "이 요청은 이미 전송되었을 수 있습니다. 기록을 확인한 뒤 다시 보내세요.": {
+    "en": "This request may already have been delivered. Check history before sending again.",
+    "ja": "このリクエストは送信済みの可能性があります。履歴を確認してから再送してください。",
+    "zh-CN": "此请求可能已经发送，请检查记录后再发送。"
+  },
+  "이미지 가져오기가 끝난 후 종료하세요.": {
+    "en": "Wait for image import to finish before quitting.",
+    "ja": "画像の読み込みが完了してから終了してください。",
+    "zh-CN": "请等待图片导入完成后再退出。"
   }
 }

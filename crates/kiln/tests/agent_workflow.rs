@@ -17,7 +17,7 @@ fn long_parent_request_launches_a_separate_task_and_preserves_both_repositories(
  std::fs::write(shell.join(".zshrc"),"PROMPT='probe > '\n").unwrap();
  let _cleanup=Cleanup(base.to_path_buf());
  unsafe {for (key,path) in [("KILN_SOCKET",base.join("d.sock")),("KILN_CONFIG_DIR",base.join("cfg")),("KILN_ACCOUNTS_SANDBOX",base.join("accounts")),("ZDOTDIR",shell)]{std::env::set_var(key,path);}std::env::set_var("PATH",format!("{}:{}",bin.display(),std::env::var("PATH").unwrap_or_default()));std::env::set_var("KILN_EXE",env!("CARGO_BIN_EXE_kiln"));std::env::set_var("KILN_NO_AUTO_UPGRADE","1");std::env::set_var("KILN_DB_NO_KEYCHAIN","1");}
- let mut h=Harness::builder().with_size([1200.,800.]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(root.clone())));let ctx=h.ctx.clone();
+ let mut h=Harness::builder().with_size([1200.,800.]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(root.clone())));let ctx=h.ctx.clone();h.state_mut().debug_set_agent_presentation(kiln::app::agent_gui::Presentation::Terminal);
  pump(&mut h,|h|h.state().debug_focused_text().is_some());
  let original=h.state().debug_focused_session();let count=h.state().debug_task_count();
  h.state_mut().debug_apply_action(&ctx,Action::NewAgentTask);h.run_steps(3);

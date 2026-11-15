@@ -1,0 +1,1042 @@
+//! Native conversation presentation. The daemon owns the worker; this owns only a client.
+use super::*;
+use egui::{Frame, Margin, RichText, Stroke, Ui};
+use kiln_common::{
+    Theme,
+    task::Task,
+    widgets::{self, ButtonKind},
+};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Presentation {
+    #[default]
+    Gui,
+    Terminal,
+}
+impl Presentation {
+    pub fn ui(&mut self, ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(self, Self::Gui, kiln_common::i18n::tr("대화 GUI"));
+            ui.selectable_value(self, Self::Terminal, kiln_common::i18n::tr("터미널"));
+        });
+    }
+}
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedDraft {
+    pub composer: Draft,
+    pub pending: Option<PendingDraft>,
+    pub recovered: Option<PendingDraft>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PendingDraft {
+    pub id: String,
+    pub draft: Draft,
+}
+#[derive(Clone)]
+struct Cached {
+    source: String,
+    markdown: kiln_git::Markdown,
+}
+struct PreparedDisplay {
+    messages: HashMap<String, Cached>,
+    inputs: HashMap<String, String>,
+    details: HashMap<String, String>,
+}
+const WINDOW: usize = 100;
+const MAX_ATTACHMENTS: usize = 8;
+const DISPLAY_BYTES: usize = 64 * 1024;
+fn bounded(s: &str) -> &str {
+    let mut n = s.len().min(DISPLAY_BYTES);
+    while !s.is_char_boundary(n) {
+        n -= 1;
+    }
+    &s[..n]
+}
+
+pub struct AgentPane {
+    pub descriptor: Descriptor,
+    client: Option<Client>,
+    pub transcript: Transcript,
+    backlog: VecDeque<Envelope>,
+    composer: Draft,
+    pending: Option<PendingDraft>,
+    recovered: Option<PendingDraft>,
+    cache: PreparedDisplay,
+    parsing: Option<Task<(u64, usize, PreparedDisplay)>>,
+    cached_revision: Option<(u64, usize)>,
+    imports: Vec<Task<Result<Attachment, String>>>,
+    validation: Option<Task<Result<(), String>>>,
+    attachment_error: Option<String>,
+    validate_on_tick: bool,
+    error: Option<String>,
+    answers: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    responding: BTreeMap<String, String>,
+    composing: bool,
+    before_preedit: Option<String>,
+    ime_frame: bool,
+    ime_guard_frame: Option<u64>,
+    transport_alive: bool,
+    transport_known: bool,
+    history_end: Option<usize>,
+    canvas_task: Option<Task<Option<egui::ColorImage>>>,
+    canvas: Option<egui::TextureHandle>,
+    focus: bool,
+    #[cfg(test)]
+    pub(super) sent: Vec<Command>,
+}
+impl AgentPane {
+    pub fn from_spec(spec: &SpawnSpec) -> Option<Self> {
+        let descriptor = descriptor(spec)?;
+        let client = Client::connect(descriptor.clone());
+        let mut pane = Self::new(descriptor);
+        pane.client = Some(client);
+        Some(pane)
+    }
+    fn new(descriptor: Descriptor) -> Self {
+        Self {
+            descriptor,
+            client: None,
+            transcript: Transcript::default(),
+            backlog: VecDeque::new(),
+            composer: Draft::default(),
+            pending: None,
+            recovered: None,
+            cache: PreparedDisplay {
+                messages: HashMap::new(),
+                inputs: HashMap::new(),
+                details: HashMap::new(),
+            },
+            parsing: None,
+            cached_revision: None,
+            imports: vec![],
+            validation: None,
+            attachment_error: None,
+            validate_on_tick: false,
+            error: None,
+            answers: BTreeMap::new(),
+            responding: BTreeMap::new(),
+            composing: false,
+            before_preedit: None,
+            ime_frame: false,
+            ime_guard_frame: None,
+            transport_alive: false,
+            transport_known: false,
+            history_end: None,
+            canvas_task: None,
+            canvas: None,
+            focus: true,
+            #[cfg(test)]
+            sent: vec![],
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn fixture(descriptor: Descriptor) -> Self {
+        let mut p = Self::new(descriptor);
+        p.transport_alive = true;
+        p.transport_known = true;
+        p
+    }
+    pub fn draft(&self) -> SavedDraft {
+        let mut composer = self.composer.clone();
+        if let Some(text) = &self.before_preedit {
+            composer.text = text.clone();
+        }
+        SavedDraft {
+            composer,
+            pending: self.pending.clone(),
+            recovered: self.recovered.clone(),
+        }
+    }
+    pub fn restore_draft(&mut self, mut saved: SavedDraft) {
+        saved.composer.attachments.truncate(MAX_ATTACHMENTS);
+        if let Some(pending) = &mut saved.pending {
+            pending.draft.attachments.truncate(MAX_ATTACHMENTS);
+        }
+        if let Some(recovered) = &mut saved.recovered {
+            recovered.draft.attachments.truncate(MAX_ATTACHMENTS);
+        }
+        self.composer = saved.composer;
+        self.pending = saved.pending;
+        self.recovered = saved.recovered;
+        // Validation is scheduled by tick; restore never sends or reads files.
+        self.attachment_error = None;
+        self.validate_on_tick = true;
+    }
+    pub fn importing(&self) -> bool {
+        !self.imports.is_empty()
+    }
+    pub fn has_draft(&self) -> bool {
+        !self.composer.text.is_empty()
+            || !self.composer.attachments.is_empty()
+            || self.pending.is_some()
+            || self.recovered.is_some()
+            || !self.imports.is_empty()
+    }
+    pub fn set_transport_alive(&mut self, alive: bool) {
+        self.transport_alive = alive;
+        self.transport_known = true;
+    }
+    pub fn transport_unverified(&mut self) {
+        self.transport_alive = false;
+    }
+    pub fn lifecycle(&self) -> Lifecycle {
+        if !self.transport_known {
+            Lifecycle::Starting
+        } else if self.transport_alive {
+            self.transcript.lifecycle.clone()
+        } else {
+            Lifecycle::Disconnected
+        }
+    }
+    pub fn busy(&self) -> bool {
+        self.transport_alive
+            && matches!(
+                self.transcript.lifecycle,
+                Lifecycle::Running | Lifecycle::Waiting
+            )
+    }
+    pub fn status(&self) -> &'static str {
+        kiln_common::i18n::tr(match self.lifecycle() {
+            Lifecycle::Starting => "시작하는 중…",
+            Lifecycle::Ready => "준비됨",
+            Lifecycle::Running => "실행 중",
+            Lifecycle::Waiting => "입력 필요",
+            Lifecycle::Disconnected => "연결 끊김",
+            Lifecycle::Failed => "실패",
+            Lifecycle::Stopped => "중지됨",
+        })
+    }
+    pub fn request_focus(&mut self) {
+        self.focus = true;
+    }
+    fn send(&mut self, command: Command) -> Result<String, String> {
+        if let Some(client) = &self.client {
+            return client.send(command).map_err(|e| e.to_string());
+        }
+        #[cfg(test)]
+        {
+            self.sent.push(command);
+            return Ok(format!("test-{}", self.sent.len()));
+        }
+        #[cfg(not(test))]
+        {
+            let _ = command;
+            Err(kiln_common::i18n::tr("연결 끊김").into())
+        }
+    }
+    fn apply(&mut self, envelope: &Envelope) {
+        if matches!(envelope.event, Event::Generation) {
+            self.answers.clear();
+            self.responding.clear();
+        }
+        self.transcript.apply(envelope);
+        self.reconcile();
+    }
+    fn reconcile(&mut self) {
+        if let Some(p) = &self.pending {
+            let confirmed = self.transcript.commands.get(&p.id) == Some(&CommandPhase::Accepted)
+                || self
+                    .transcript
+                    .entries
+                    .iter()
+                    .any(|e| matches!(e,Entry::Message(m) if m.id==format!("user-{}",p.id)));
+            if confirmed {
+                self.pending = None;
+            }
+        }
+        if let Some(recovered) = &self.recovered {
+            let accepted = self.transcript.commands.get(&recovered.id)
+                == Some(&CommandPhase::Accepted)
+                || self.transcript.entries.iter().any(
+                    |e| matches!(e,Entry::Message(m) if m.id==format!("user-{}",recovered.id)),
+                );
+            if accepted {
+                if self.composer == recovered.draft {
+                    self.composer = Draft::default();
+                }
+                self.error = Some(
+                    kiln_common::i18n::tr(
+                        "원래 요청의 전송이 확인되었습니다. 대화 기록을 확인하세요.",
+                    )
+                    .into(),
+                );
+                self.recovered = None;
+            }
+        }
+        self.answers
+            .retain(|id, _| self.transcript.requests.contains_key(id));
+        self.responding.retain(|id, command| {
+            self.transcript.requests.contains_key(id)
+                && !matches!(
+                    self.transcript.commands.get(command),
+                    Some(CommandPhase::Rejected | CommandPhase::Unconfirmed)
+                )
+        });
+    }
+    fn pending_recoverable(&self) -> bool {
+        self.pending.as_ref().is_some_and(|p| {
+            matches!(
+                self.transcript.commands.get(&p.id),
+                Some(CommandPhase::Rejected | CommandPhase::Unconfirmed)
+            ) || (self.transport_known && !self.transport_alive)
+                || matches!(
+                    self.transcript.lifecycle,
+                    Lifecycle::Failed | Lifecycle::Disconnected | Lifecycle::Stopped
+                )
+        })
+    }
+    fn submit(&mut self) {
+        if self.composing
+            || self.ime_frame
+            || !self.transport_alive
+            || self.transcript.lifecycle != Lifecycle::Ready
+            || self.pending.is_some()
+            || !self.backlog.is_empty()
+            || self.validation.is_some()
+            || self.attachment_error.is_some()
+            || !self.imports.is_empty()
+            || self
+                .composer
+                .model
+                .as_ref()
+                .is_some_and(|id| !self.transcript.models.iter().any(|m| &m.id == id))
+            || (self.composer.text.trim().is_empty() && self.composer.attachments.is_empty())
+        {
+            return;
+        }
+        let draft = self.composer.clone();
+        match self.send(Command::Submit {
+            text: draft.text.clone(),
+            attachments: draft.attachments.clone(),
+            model: draft.model.clone(),
+        }) {
+            Ok(id) => {
+                self.pending = Some(PendingDraft { id, draft });
+                self.recovered = None;
+                self.composer.text.clear();
+                self.composer.attachments.clear();
+                self.cached_revision = None;
+            }
+            Err(error) => self.error = Some(error),
+        }
+    }
+    pub fn restart(&mut self) -> bool {
+        if !self.transport_alive {
+            return true;
+        }
+        match self.send(Command::Restart) {
+            Ok(_) => {}
+            Err(error) => self.error = Some(error),
+        }
+        false
+    }
+    /// Poll all panes, including hidden panes. Background jobs bound disk/parse work.
+    pub fn tick(&mut self, ctx: &egui::Context) {
+        if self.canvas.is_none() && self.canvas_task.is_none() {
+            self.canvas_task = Some(Task::spawn(ctx, || {
+                let decoded = image::load_from_memory(include_bytes!("clean-0-71f28052a152.png"))
+                    .ok()?
+                    .to_rgba8();
+                Some(egui::ColorImage::from_rgba_unmultiplied(
+                    [decoded.width() as usize, decoded.height() as usize],
+                    decoded.as_raw(),
+                ))
+            }));
+        }
+        if let Some(task) = &mut self.canvas_task
+            && let Some(Some(image)) = task.take()
+        {
+            self.canvas =
+                Some(ctx.load_texture("agent-canvas", image, egui::TextureOptions::LINEAR));
+            self.canvas_task = None;
+        }
+
+        if self.validate_on_tick {
+            self.validate_on_tick = false;
+            self.validate_attachments(ctx);
+        }
+        let mut error = None;
+        if let Some(client) = &mut self.client {
+            if self.backlog.is_empty() {
+                self.backlog.extend(client.drain());
+            }
+            error = client.take_error();
+        }
+        let since = std::time::Instant::now();
+        for _ in 0..32 {
+            let Some(event) = self.backlog.pop_front() else {
+                break;
+            };
+            self.apply(&event);
+            if since.elapsed() > std::time::Duration::from_millis(2) {
+                break;
+            }
+        }
+        if let Some(error) = error {
+            self.error = Some(error);
+        }
+        self.reconcile();
+        let mut i = 0;
+        while i < self.imports.len() {
+            if self.imports[i].is_pending() {
+                i += 1;
+                continue;
+            }
+            if let Some(result) = self.imports.remove(i).take() {
+                match result {
+                    Ok(a) => {
+                        self.composer.attachments.push(a);
+                        self.validation = None;
+                        self.attachment_error = None;
+                    }
+                    Err(e) => self.error = Some(e),
+                }
+            }
+        }
+        if let Some(task) = &mut self.validation
+            && !task.is_pending()
+        {
+            self.attachment_error = task.take().and_then(Result::err);
+            self.validation = None;
+        }
+        let end = self
+            .history_end
+            .unwrap_or(self.transcript.entries.len())
+            .min(self.transcript.entries.len());
+        if let Some(task) = &mut self.parsing
+            && let Some((revision, end, cache)) = task.take()
+        {
+            self.cache = cache;
+            self.cached_revision = Some((revision, end));
+            self.parsing = None;
+        }
+        if self.parsing.is_none() && self.cached_revision != Some((self.transcript.sequence, end)) {
+            let entries = self.transcript.entries[end.saturating_sub(WINDOW)..end].to_vec();
+            let previous = self.cache.messages.clone();
+            let revision = self.transcript.sequence;
+            let requests = self
+                .transcript
+                .requests
+                .values()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>();
+            self.parsing = Some(Task::spawn(ctx, move || {
+                let mut display = PreparedDisplay {
+                    messages: HashMap::new(),
+                    inputs: HashMap::new(),
+                    details: HashMap::new(),
+                };
+                for entry in entries {
+                    match entry {
+                        Entry::Message(m) => {
+                            let source = bounded(&m.text).to_owned();
+                            let markdown = previous
+                                .get(&m.id)
+                                .filter(|cached| cached.source == source)
+                                .map(|c| c.markdown.clone())
+                                .unwrap_or_else(|| kiln_git::Markdown::parse(&source));
+                            display.messages.insert(m.id, Cached { source, markdown });
+                        }
+                        Entry::Tool(t) => {
+                            let source = serde_json::to_string_pretty(&t.input).unwrap_or_default();
+                            display.inputs.insert(t.id, bounded(&source).to_owned());
+                        }
+                    }
+                }
+                for request in requests {
+                    let source = serde_json::to_string_pretty(&request.details).unwrap_or_default();
+                    display
+                        .details
+                        .insert(request.id, bounded(&source).to_owned());
+                }
+                (revision, end, display)
+            }));
+        }
+        if self.busy()
+            || self.pending.is_some()
+            || self.parsing.is_some()
+            || !self.backlog.is_empty()
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
+    fn validate_attachments(&mut self, ctx: &egui::Context) {
+        let mut attachments = self.composer.attachments.clone();
+        if let Some(p) = &self.pending {
+            attachments.extend(p.draft.attachments.clone());
+        }
+        if attachments.is_empty() {
+            return;
+        }
+        let id = self.descriptor.id.clone();
+        self.validation = Some(Task::spawn(ctx, move || {
+            for attachment in attachments {
+                super::attachment_bytes(&id, &attachment)
+                    .map_err(|e| format!("{}: {e}", attachment.name))?;
+            }
+            Ok(())
+        }));
+    }
+    fn import(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
+        if self.composer.attachments.len() + self.imports.len() >= MAX_ATTACHMENTS {
+            self.error =
+                Some(kiln_common::i18n::tr("이미지는 최대 8개까지 첨부할 수 있습니다.").into());
+            return;
+        }
+        let descriptor = self.descriptor.clone();
+        self.imports.push(Task::spawn(ctx, move || {
+            import_attachment(&descriptor, &path).map_err(|e| e.to_string())
+        }));
+    }
+    /// Returns true only when a dead PTY needs an explicit daemon respawn.
+    pub fn ui(&mut self, ui: &mut Ui) -> bool {
+        let t = Theme::current();
+        let mut restart = false;
+        if t.dark
+            && let Some(canvas) = &self.canvas
+        {
+            ui.painter().image(
+                canvas.id(),
+                ui.available_rect_before_wrap(),
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
+                egui::Color32::WHITE,
+            );
+        }
+        ui.spacing_mut().item_spacing.y = 10.;
+        Frame::new()
+            .inner_margin(Margin::symmetric(20, 12))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let icon = super::super::ui::agent_icon(Some(self.descriptor.tool));
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(22., 22.), egui::Sense::hover());
+                    kiln_common::icons::paint(ui.painter(), rect, icon, t.orange);
+                    ui.label(RichText::new(self.descriptor.tool.display_name()).strong());
+                    ui.label(RichText::new(&self.descriptor.account_label).color(t.text_dim));
+                    ui.label(RichText::new(self.status()).color(if self.busy() {
+                        t.orange
+                    } else {
+                        t.text_dim
+                    }));
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.small(kiln_common::i18n::tr("적용된 모델"));
+                    ui.small(
+                        self.transcript
+                            .selected_model
+                            .as_deref()
+                            .unwrap_or(kiln_common::i18n::tr("확인 대기")),
+                    );
+                    if !self.transcript.modes.is_empty() {
+                        ui.small(kiln_common::i18n::tr("적용된 모드"));
+                        ui.small(
+                            self.transcript
+                                .selected_mode
+                                .as_deref()
+                                .unwrap_or(kiln_common::i18n::tr("확인 대기")),
+                        );
+                    }
+                });
+            });
+        ui.separator();
+        let available = ui.available_rect_before_wrap();
+        let composer_h =
+            182. + if self.pending.is_some() || self.recovered.is_some() {
+                62.
+            } else {
+                0.
+            } + if !self.composer.attachments.is_empty() || !self.imports.is_empty() {
+                62.
+            } else {
+                0.
+            } + if !self.transcript.models.is_empty() && !self.transcript.modes.is_empty() {
+                28.
+            } else {
+                0.
+            };
+        let transcript_rect = egui::Rect::from_min_max(
+            available.min,
+            egui::pos2(
+                available.right(),
+                (available.bottom() - composer_h).max(available.top() + 60.),
+            ),
+        );
+        let mut body = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(transcript_rect)
+                .id_salt("transcript"),
+        );
+        body.set_clip_rect(transcript_rect);
+        egui::ScrollArea::vertical().id_salt("messages").stick_to_bottom(true).auto_shrink([false,false]).show(&mut body,|ui|{
+            Frame::new().inner_margin(Margin::symmetric(20,10)).show(ui,|ui|{
+                ui.set_max_width(1100.);
+                let end=self.history_end.unwrap_or(self.transcript.entries.len()).min(self.transcript.entries.len());let start=end.saturating_sub(WINDOW);
+                ui.horizontal_wrapped(|ui|{
+                    if start>0 && ui.button(kiln_common::i18n::tr("이전 메시지")).clicked(){self.history_end=Some(start);}
+                    if self.history_end.is_some() && ui.button(kiln_common::i18n::tr("최근 메시지")).clicked(){self.history_end=None;}
+                });
+                if self.transcript.entries.is_empty(){ui.add_space(26.);ui.label(RichText::new(kiln_common::i18n::tr("새 대화를 시작하세요")).size(20.).strong());ui.label(kiln_common::i18n::tr("작업을 입력하면 선택한 계정의 에이전트가 이 폴더에서 실행합니다."));}
+                for entry in &self.transcript.entries[start..end] {match entry {
+                    Entry::Message(m)=>{
+                        let user=m.role==Role::User;
+                        ui.label(RichText::new(if user{kiln_common::i18n::tr("나")}else{self.descriptor.tool.display_name()}).color(t.text_dim).strong());
+                        let frame=Frame::new().inner_margin(Margin::same(if user{12}else{2})).corner_radius(6).fill(if user{t.bg_elevated}else{egui::Color32::TRANSPARENT});
+                        frame.show(ui,|ui|{
+                            ui.set_width(ui.available_width());
+                            if let Some(c)=self.cache.messages.get(&m.id) && c.source==bounded(&m.text){c.markdown.show(ui);} else {ui.add(egui::Label::new(bounded(&m.text)).wrap());}
+                            for a in m.attachments.iter().take(MAX_ATTACHMENTS){ui.label(format!("▧ {}",a.name));}
+                            if m.text.len()>DISPLAY_BYTES {ui.small(kiln_common::i18n::tr("긴 메시지는 표시가 제한됩니다. 전체 기록은 보존됩니다."));}
+                        });ui.add_space(10.);
+                    },
+                    Entry::Tool(tool)=>{
+                        Frame::new().stroke(Stroke::new(1.,t.border)).corner_radius(6).inner_margin(Margin::same(10)).show(ui,|ui|{
+                            let status=kiln_common::i18n::tr(match tool.status{ToolStatus::Pending=>"대기 중",ToolStatus::Running=>"실행 중",ToolStatus::Completed=>"완료",ToolStatus::Failed=>"실패",ToolStatus::Cancelled=>"중지됨"});
+                            egui::CollapsingHeader::new(format!("{} · {status}",tool.name)).id_salt(&tool.id).show(ui,|ui|{
+                                egui::ScrollArea::both().id_salt((&tool.id,"output")).max_height(260.).show(ui,|ui|{
+                                    if let Some(input)=self.cache.inputs.get(&tool.id){ui.add(egui::Label::new(RichText::new(input).monospace()).wrap());}
+                                    ui.add(egui::Label::new(RichText::new(bounded(&tool.output)).monospace()).wrap());
+                                    for line in bounded(&tool.diff).lines().take(500){
+                                        let color=if line.starts_with('+'){t.green}else if line.starts_with('-'){t.red}else{t.text_dim};
+                                        ui.add(egui::Label::new(RichText::new(line).monospace().color(color).background_color(color.gamma_multiply(0.08))).wrap());
+                                    }
+                                });
+                            });
+                        });
+                    }
+                }}
+                let requests=self.transcript.requests.values().take(8).cloned().collect::<Vec<_>>();
+                for request in requests {self.request_ui(ui,&request);}
+                if let Some(error)=self.transcript.errors.last(){ui.add(egui::Label::new(RichText::new(bounded(error)).color(t.red)).wrap());}
+                if let Some(error)=&self.error{ui.add(egui::Label::new(RichText::new(bounded(error)).color(t.orange)).wrap());}
+                if matches!(self.lifecycle(),Lifecycle::Failed|Lifecycle::Disconnected|Lifecycle::Stopped) {
+                    if ui.button(kiln_common::i18n::tr("같은 대화로 재시작")).clicked(){restart=self.restart();}
+                }
+            });
+        });
+        let composer_rect = egui::Rect::from_min_max(
+            egui::pos2(available.left() + 16., transcript_rect.bottom() + 8.),
+            egui::pos2(available.right() - 16., available.bottom() - 4.),
+        );
+        let mut composer = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(composer_rect)
+                .id_salt("composer"),
+        );
+        composer.set_clip_rect(composer_rect);
+        egui::ScrollArea::vertical()
+            .id_salt("composer-scroll")
+            .auto_shrink([false, false])
+            .show(&mut composer, |ui| self.composer_ui(ui));
+        ui.advance_cursor_after_rect(available);
+        restart
+    }
+    fn request_ui(&mut self, ui: &mut Ui, request: &Request) {
+        let t = Theme::current();
+        Frame::new()
+            .stroke(Stroke::new(1., t.orange))
+            .corner_radius(6)
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.label(RichText::new(&request.title).color(t.orange).strong());
+                if let Some(details) = self.cache.details.get(&request.id)
+                    && details != "null"
+                {
+                    egui::ScrollArea::vertical()
+                        .id_salt((&request.id, "details"))
+                        .max_height(120.)
+                        .show(ui, |ui| {
+                            ui.add(egui::Label::new(RichText::new(details).monospace()).wrap());
+                        });
+                }
+                let answers = self.answers.entry(request.id.clone()).or_default();
+                for question in request.questions.iter().take(16) {
+                    ui.add(egui::Label::new(&question.text).wrap());
+                    let values = answers.entry(question.id.clone()).or_default();
+                    if question.options.is_empty() {
+                        if values.is_empty() {
+                            values.push(String::new());
+                        }
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut values[0])
+                                .hint_text(&question.text)
+                                .char_limit(8000),
+                        );
+                        edit.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::TextEdit,
+                                true,
+                                &question.text,
+                            )
+                        });
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            for option in question.options.iter().take(32) {
+                                let selected = values.contains(&option.id);
+                                if ui
+                                    .selectable_label(selected, &option.label)
+                                    .on_hover_text(&option.description)
+                                    .clicked()
+                                {
+                                    if selected {
+                                        values.retain(|v| v != &option.id);
+                                    } else {
+                                        if !question.multi_select {
+                                            values.clear();
+                                        }
+                                        values.push(option.id.clone());
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+                let answers = answers.clone();
+                let mut decision = None;
+                ui.add_enabled_ui(
+                    self.transport_alive && !self.responding.contains_key(&request.id),
+                    |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            if request.options.is_empty() {
+                                if widgets::button(
+                                    ui,
+                                    kiln_common::i18n::tr("한 번 허용"),
+                                    ButtonKind::Primary,
+                                )
+                                .clicked()
+                                {
+                                    decision = Some(Decision::Allow);
+                                }
+                                if widgets::button(
+                                    ui,
+                                    kiln_common::i18n::tr("거부"),
+                                    ButtonKind::Secondary,
+                                )
+                                .clicked()
+                                {
+                                    decision = Some(Decision::Deny);
+                                }
+                            } else {
+                                for option in request.options.iter().take(32) {
+                                    if ui
+                                        .button(&option.label)
+                                        .on_hover_text(&option.description)
+                                        .clicked()
+                                    {
+                                        decision = Some(Decision::Option(option.id.clone()));
+                                    }
+                                }
+                                if ui.button(kiln_common::i18n::tr("취소")).clicked() {
+                                    decision = Some(Decision::Cancel);
+                                }
+                            }
+                        })
+                    },
+                );
+                if let Some(decision) = decision {
+                    match self.send(Command::Respond {
+                        request_id: request.id.clone(),
+                        decision,
+                        answers,
+                    }) {
+                        Ok(id) => {
+                            self.responding.insert(request.id.clone(), id);
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
+                }
+            });
+    }
+    fn composer_ui(&mut self, ui: &mut Ui) {
+        let t = Theme::current();
+        if self.recovered.is_some() {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(kiln_common::i18n::tr(
+                        "이 요청은 이미 전송되었을 수 있습니다. 기록을 확인한 뒤 다시 보내세요.",
+                    ))
+                    .color(t.orange),
+                )
+                .wrap(),
+            );
+        }
+        if let Some(p) = self.pending.clone() {
+            let recoverable = self.pending_recoverable();
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(kiln_common::i18n::tr(if recoverable {
+                        "전송 결과 미확인 · 자동으로 다시 보내지 않습니다."
+                    } else {
+                        "전송 확인 대기"
+                    }))
+                    .color(t.orange),
+                );
+                if recoverable
+                    && self.composer.text.is_empty()
+                    && self.composer.attachments.is_empty()
+                    && ui.button(kiln_common::i18n::tr("초안으로 복구")).clicked()
+                {
+                    self.composer = p.draft.clone();
+                    self.recovered = Some(p.clone());
+                    self.pending = None;
+                    self.validate_attachments(ui.ctx());
+                }
+            });
+        }
+        Frame::new()
+            .stroke(Stroke::new(1., t.border_strong))
+            .corner_radius(8)
+            .inner_margin(Margin::same(10))
+            .show(ui, |ui| {
+                let id = ui.id().with("message");
+                let focused = ui.memory(|m| m.has_focus(id));
+                self.ime_frame = self.ime_guard_frame == Some(ui.ctx().cumulative_frame_nr());
+                if !focused && self.composing {
+                    if let Some(text) = self.before_preedit.take() {
+                        self.composer.text = text;
+                    }
+                    self.composing = false;
+                    self.ime_frame = true;
+                }
+                if focused {
+                    ui.input(|input| {
+                        for event in &input.events {
+                            if let egui::Event::Ime(event) = event {
+                                match event {
+                                    egui::ImeEvent::Preedit { text, .. } => {
+                                        if !self.composing && !text.is_empty() {
+                                            self.before_preedit = Some(self.composer.text.clone());
+                                        }
+                                        self.composing = !text.is_empty();
+                                        self.ime_frame = true;
+                                    }
+                                    egui::ImeEvent::Commit(_) => {
+                                        self.composing = false;
+                                        self.ime_frame = true;
+                                    }
+                                    #[allow(deprecated)]
+                                    egui::ImeEvent::Disabled => {
+                                        self.composing = false;
+                                        self.ime_frame = true;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    });
+                }
+                if self.ime_frame {
+                    self.ime_guard_frame = Some(ui.ctx().cumulative_frame_nr());
+                }
+                let enter = focused
+                    && !self.composing
+                    && !self.ime_frame
+                    && ui.input(|i| {
+                        i.key_pressed(egui::Key::Enter)
+                            && !i.modifiers.shift
+                            && !i.modifiers.command
+                            && !i.modifiers.ctrl
+                            && !i.modifiers.alt
+                    });
+                if enter {
+                    ui.input_mut(|i| {
+                        i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                    });
+                }
+                let edit = ui.add(
+                    egui::TextEdit::multiline(&mut self.composer.text)
+                        .id(id)
+                        .hint_text(kiln_common::i18n::tr("작업을 입력하세요…"))
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(3)
+                        .char_limit(120_000),
+                );
+                edit.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::TextEdit,
+                        true,
+                        kiln_common::i18n::tr("메시지"),
+                    )
+                });
+                if self.focus {
+                    edit.request_focus();
+                    self.focus = false;
+                }
+                // Losing focus cancels stale composition state, but blocks the click frame.
+                if edit.lost_focus() && self.composing {
+                    if let Some(text) = self.before_preedit.take() {
+                        self.composer.text = text;
+                    }
+                    self.composing = false;
+                    self.ime_frame = true;
+                }
+                if !self.composing {
+                    self.before_preedit = None;
+                }
+                if !self.composer.attachments.is_empty() || !self.imports.is_empty() {
+                    egui::ScrollArea::vertical()
+                        .id_salt("attachment-chips")
+                        .max_height(60.)
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                let mut remove = None;
+                                for (index, a) in self.composer.attachments.iter().enumerate() {
+                                    let label = a.name.chars().take(28).collect::<String>();
+                                    if ui
+                                        .button(format!("▧ {label} ×"))
+                                        .on_hover_text(format!(
+                                            "{} · {}",
+                                            kiln_common::i18n::tr("첨부 제거"),
+                                            a.name
+                                        ))
+                                        .clicked()
+                                    {
+                                        remove = Some(index);
+                                    }
+                                }
+                                if let Some(index) = remove {
+                                    self.composer.attachments.remove(index);
+                                    self.attachment_error = None;
+                                    self.validate_attachments(ui.ctx());
+                                }
+                                if !self.imports.is_empty() {
+                                    ui.small(kiln_common::i18n::tr("이미지 가져오는 중…"));
+                                }
+                            })
+                        });
+                }
+                if let Some(error) = &self.attachment_error {
+                    ui.add(egui::Label::new(RichText::new(error).color(t.red)).wrap());
+                }
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            self.composer.attachments.len() + self.imports.len() < MAX_ATTACHMENTS,
+                            egui::Button::new(kiln_common::i18n::tr("이미지 첨부")),
+                        )
+                        .clicked()
+                    {
+                        let descriptor = self.descriptor.clone();
+                        self.imports.push(Task::spawn(ui.ctx(), move || {
+                            let path = rfd::FileDialog::new()
+                                .add_filter("Image", &["png", "jpg", "jpeg", "gif", "webp"])
+                                .pick_file()
+                                .ok_or_else(|| kiln_common::i18n::tr("첨부 취소됨").to_owned())?;
+                            import_attachment(&descriptor, &path).map_err(|e| e.to_string())
+                        }));
+                    }
+                    let dropped = ui.input(|i| {
+                        i.raw
+                            .dropped_files
+                            .iter()
+                            .map(|f| f.path().to_path_buf())
+                            .take(MAX_ATTACHMENTS)
+                            .collect::<Vec<_>>()
+                    });
+                    if ui.input(|i| {
+                        i.pointer
+                            .hover_pos()
+                            .is_some_and(|pos| ui.clip_rect().contains(pos))
+                    }) {
+                        for path in dropped {
+                            self.import(ui.ctx(), path);
+                        }
+                    }
+                    if !self.transcript.models.is_empty() || self.composer.model.is_some() {
+                        egui::ComboBox::from_label(kiln_common::i18n::tr("모델"))
+                            .selected_text(
+                                self.composer
+                                    .model
+                                    .as_deref()
+                                    .unwrap_or(kiln_common::i18n::tr("기본 모델")),
+                            )
+                            .width(125.)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.composer.model,
+                                    None,
+                                    kiln_common::i18n::tr("기본 모델"),
+                                );
+                                for model in &self.transcript.models {
+                                    ui.selectable_value(
+                                        &mut self.composer.model,
+                                        Some(model.id.clone()),
+                                        &model.label,
+                                    );
+                                }
+                            });
+                    }
+                    if !self.transcript.modes.is_empty() {
+                        let mut selected = None;
+                        egui::ComboBox::from_label(kiln_common::i18n::tr("모드"))
+                            .selected_text(
+                                self.transcript
+                                    .selected_mode
+                                    .as_deref()
+                                    .unwrap_or(kiln_common::i18n::tr("기본 모드")),
+                            )
+                            .width(105.)
+                            .show_ui(ui, |ui| {
+                                for mode in &self.transcript.modes {
+                                    if ui
+                                        .selectable_label(
+                                            self.transcript.selected_mode.as_deref()
+                                                == Some(&mode.id),
+                                            &mode.label,
+                                        )
+                                        .clicked()
+                                    {
+                                        selected = Some(mode.id.clone());
+                                    }
+                                }
+                            });
+                        if let Some(mode) = selected
+                            && let Err(error) = self.send(Command::SetMode { mode })
+                        {
+                            self.error = Some(error);
+                        }
+                    }
+                    if self.busy() {
+                        if widgets::button(ui, kiln_common::i18n::tr("중지"), ButtonKind::Secondary)
+                            .clicked()
+                        {
+                            if let Err(error) = self.send(Command::Interrupt) {
+                                self.error = Some(error);
+                            }
+                        }
+                    } else {
+                        let enabled = self.transport_alive
+                            && self.transcript.lifecycle == Lifecycle::Ready
+                            && self.pending.is_none()
+                            && self.backlog.is_empty()
+                            && self.imports.is_empty()
+                            && self.validation.is_none()
+                            && self.attachment_error.is_none()
+                            && !self.composing
+                            && !self.ime_frame
+                            && self.composer.model.as_ref().is_none_or(|id| {
+                                self.transcript.models.iter().any(|m| &m.id == id)
+                            });
+                        let clicked = ui
+                            .add_enabled(
+                                enabled,
+                                egui::Button::new(kiln_common::i18n::tr("보내기")),
+                            )
+                            .clicked();
+                        if clicked || enter {
+                            self.submit();
+                        }
+                    }
+                });
+                ui.small(kiln_common::i18n::tr(
+                    "Enter로 보내기 · Shift+Enter로 줄바꿈",
+                ));
+            });
+    }
+}
+
+#[cfg(test)]
+#[path = "view_tests.rs"]
+mod tests;

@@ -44,6 +44,7 @@ clap = { version = "4", features = ["derive"] }
 base64 = "0.22"
 ring = "0.17"
 roxmltree = "0.21"
+image = { version = "0.25", default-features = false, features = ["png"] }
 postcard.workspace = true
 arboard = "3"
 regex = "1"
@@ -70,7 +71,6 @@ embed-resource = "3"
 
 [dev-dependencies]
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot", "eframe"] }
 

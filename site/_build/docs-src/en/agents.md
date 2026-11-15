@@ -32,6 +32,16 @@ Unsent requests are saved with the workspace and restored when Kiln reopens. Clo
 
 The right and down split buttons let you choose a terminal or an agent for the new panel. Keyboard split shortcuts still open a terminal directly.
 
+## Native conversation or terminal {#conversation-gui}
+
+In **New Task** and the right/down split menu, choose **Conversation GUI** or **Terminal** before choosing an agent. New agent launches default to Conversation GUI. Save your preference in **Settings → Behavior → New agent presentation**. Ordinary terminals, SSH and existing terminal tasks keep their current presentation.
+
+The conversation shows streamed Markdown, expandable tool input/output and file diffs. Answer inline permission or question cards; both allow and deny work. The header pins the starting account and shows the confirmed effective model/mode. Composer choices contain only models and modes advertised by the provider. Existing native MCP and permission settings are preserved.
+
+Press **Enter** or **Send** to submit; **Shift+Enter** adds a line. Korean IME preedit and commit do not submit. Use **Attach image** or drop up to eight images (PNG, JPEG, GIF, WebP; 20 MiB each). Remove missing or invalid restored attachments before sending. **Stop** interrupts the current turn.
+
+Closing Kiln saves drafts while the daemon keeps the worker alive. Closing a pane ends its session and asks before discarding drafts. Locally queued sends wait for journal confirmation: reopening never resends them. An unconfirmed send offers **Recover as draft**; check history before intentionally sending again. Failed or disconnected sessions retain history and offer **Restart same conversation**. Earlier/latest message controls navigate a bounded display window without deleting history.
+
 ## Work across several repositories {#work-across-several-repositories}
 
 Open a parent folder, such as `~/dev/projects`, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.
