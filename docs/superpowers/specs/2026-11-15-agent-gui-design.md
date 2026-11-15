@@ -56,9 +56,13 @@ anchor and activity channel, not the conversation renderer. This reuses existing
 macOS/Windows persistent session ownership and close/kill semantics without a
 second daemon or new public network listener.
 
-The worker and provider remain alive when a window or GUI client closes. Killing
-the session explicitly terminates its process tree using existing PTY ownership.
-Do not detach provider children into process groups that escape the session.
+The worker and provider remain alive when a window or GUI client closes. Existing PTY kill sends SIGHUP on Unix; that alone is not a process-tree
+termination guarantee. The GUI host must explicitly clean its own session process
+group on termination, including HUP-resistant children. In production the host
+must be the PTY session/group leader before using group signals; never signal a
+foreign parent group. Flush terminal state and escalate only that owned group
+when needed. Provider children must not escape into another group. Windows uses
+the existing Job Object lifecycle. Verify this with child/grandchild fixtures.
 Windows launchers must reuse `agent_launch::launcher` and hide stray consoles.
 
 Each session has an owner-only directory below `config/agent-gui/ID`, containing a
