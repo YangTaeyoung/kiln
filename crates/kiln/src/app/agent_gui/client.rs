@@ -10,31 +10,109 @@ use std::{
 type LocalMailbox = Mutex<BTreeSet<String>>;
 // A reconnect in the same GUI process must not infer unknown delivery while a
 // dropped client's background worker can still enqueue its local command.
-static LOCAL_MAILBOXES: OnceLock<Mutex<Vec<Weak<LocalMailbox>>>> = OnceLock::new();
-fn register_mailbox(local: &Arc<LocalMailbox>) {
-    let mut mailboxes = LOCAL_MAILBOXES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap();
-    mailboxes.retain(|weak| weak.strong_count() > 0);
-    mailboxes.push(Arc::downgrade(local));
+#[derive(Default)]
+struct WriterRegistry {
+    revision: u64,
+    mailboxes: Vec<Weak<LocalMailbox>>,
 }
-fn queued_locally(id: &str) -> bool {
-    let mut mailboxes = LOCAL_MAILBOXES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap();
-    mailboxes.retain(|weak| weak.strong_count() > 0);
-    mailboxes
+static LOCAL_MAILBOXES: OnceLock<Mutex<WriterRegistry>> = OnceLock::new();
+fn writers() -> &'static Mutex<WriterRegistry> {
+    LOCAL_MAILBOXES.get_or_init(Default::default)
+}
+fn register_mailbox(local: &Arc<LocalMailbox>) {
+    let mut registry = writers().lock().unwrap();
+    registry.mailboxes.retain(|weak| weak.strong_count() > 0);
+    registry.mailboxes.push(Arc::downgrade(local));
+}
+fn queued_locally_in(registry: &mut WriterRegistry, id: &str) -> bool {
+    registry.mailboxes.retain(|weak| weak.strong_count() > 0);
+    registry
+        .mailboxes
         .iter()
         .filter_map(Weak::upgrade)
         .any(|local| local.lock().unwrap().contains(id))
+}
+#[cfg(test)]
+fn queued_locally(id: &str) -> bool {
+    queued_locally_in(&mut writers().lock().unwrap(), id)
+}
+// The revision is advanced both before I/O and when the write finishes, before
+// the worker can release its local mailbox. No writer mutex is held during I/O.
+struct EnqueuePublication;
+impl EnqueuePublication {
+    fn begin() -> Self {
+        writers().lock().unwrap().revision += 1;
+        Self
+    }
+}
+impl Drop for EnqueuePublication {
+    fn drop(&mut self) {
+        writers().lock().unwrap().revision += 1;
+    }
 }
 #[derive(Clone)]
 struct ReplayCheckpoint {
     generation: String,
     sequence: u64,
     queued: BTreeSet<String>,
+    writer_revision: u64,
+}
+#[derive(Default)]
+struct WorkerHooks {
+    #[cfg(test)]
+    inside_enqueue: Option<(
+        crossbeam_channel::Sender<()>,
+        crossbeam_channel::Receiver<()>,
+    )>,
+    #[cfg(test)]
+    after_checkpoint: Option<(
+        crossbeam_channel::Sender<()>,
+        crossbeam_channel::Receiver<()>,
+    )>,
+}
+impl WorkerHooks {
+    fn inside_enqueue(&mut self) {
+        #[cfg(test)]
+        if let Some((reached, proceed)) = self.inside_enqueue.take() {
+            let _ = reached.send(());
+            let _ = proceed.recv();
+        }
+    }
+    fn after_checkpoint(&mut self) {
+        #[cfg(test)]
+        if let Some((reached, proceed)) = self.after_checkpoint.take() {
+            let _ = reached.send(());
+            let _ = proceed.recv();
+        }
+    }
+}
+fn enqueue_command(
+    dir: &std::path::Path,
+    command: &QueuedCommand,
+    hooks: &mut WorkerHooks,
+) -> Result<()> {
+    let _publication = EnqueuePublication::begin();
+    hooks.inside_enqueue();
+    journal::enqueue(dir, command)
+}
+// Match host::mailbox: only atomically published .json commands can execute.
+// An unreadable or oversized mailbox cannot prove that a command is absent.
+fn published_command_ids(dir: &std::path::Path) -> Result<BTreeSet<String>> {
+    let entries = match std::fs::read_dir(dir.join("commands")) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let paths = entries
+        .take(257)
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    anyhow::ensure!(paths.len() <= 256, "agent command queue is full");
+    paths
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .map(|path| journal::read::<QueuedCommand>(&path).map(|command| command.id))
+        .collect()
 }
 /// A bounded local mailbox and journal reader. Dropping this never terminates the host.
 pub struct Client {
@@ -52,7 +130,7 @@ impl Client {
         Self::at_directory(journal::directory(&descriptor.id))
     }
     pub(super) fn at_directory(directory: Result<std::path::PathBuf>) -> Self {
-        Self::at_directory_gated(directory, None)
+        Self::at_directory_gated(directory, None, WorkerHooks::default())
     }
     #[cfg(test)]
     pub(super) fn paused(
@@ -60,13 +138,14 @@ impl Client {
         generation: &str,
     ) -> (Self, crossbeam_channel::Sender<()>) {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let client = Self::at_directory_gated(Ok(directory), Some(rx));
+        let client = Self::at_directory_gated(Ok(directory), Some(rx), WorkerHooks::default());
         *client.generation.lock().unwrap() = generation.into();
         (client, tx)
     }
     fn at_directory_gated(
         directory: Result<std::path::PathBuf>,
         start: Option<crossbeam_channel::Receiver<()>>,
+        mut hooks: WorkerHooks,
     ) -> Self {
         let (tx, rx) = crossbeam_channel::bounded::<QueuedCommand>(32);
         let (etx, erx) = crossbeam_channel::bounded(8);
@@ -166,7 +245,7 @@ impl Client {
                     if u.lock().unwrap().is_some() {
                         continue;
                     }
-                    if let Err(err) = journal::enqueue(&dir, &queued) {
+                    if let Err(err) = enqueue_command(&dir, &queued, &mut hooks) {
                         *e.lock().unwrap() = Some(err.to_string());
                     }
                 }
@@ -175,19 +254,35 @@ impl Client {
                     && u.lock().unwrap().is_none()
                     && !observed.generation.is_empty()
                 {
-                    let queued = journal::pending_ids(&dir).into_iter().collect();
-                    // Queue removal follows a durable host command outcome. Recheck
-                    // the journal length after queue inspection to close that race.
-                    if std::fs::metadata(dir.join("events.jsonl"))
-                        .is_ok_and(|meta| meta.len() == offset)
-                    {
-                        *checkpoint.lock().unwrap() = Some(ReplayCheckpoint {
-                            generation: observed.generation.clone(),
-                            sequence: observed.sequence,
-                            queued,
-                        });
-                    } else {
-                        *checkpoint.lock().unwrap() = None;
+                    let revision = writers().lock().unwrap().revision;
+                    let queued = published_command_ids(&dir);
+                    // Cover host outcome/removal ordering as well as concurrent
+                    // local publications. Publishing and querying use writer ->
+                    // checkpoint lock order; an expired mailbox cannot validate
+                    // a checkpoint from before its final possible publication.
+                    let journal_stable = std::fs::metadata(dir.join("events.jsonl"))
+                        .is_ok_and(|meta| meta.len() == offset);
+                    let checkpointed = {
+                        let registry = writers().lock().unwrap();
+                        let mut checkpoint = checkpoint.lock().unwrap();
+                        if let Ok(queued) = queued
+                            && journal_stable
+                            && registry.revision == revision
+                        {
+                            *checkpoint = Some(ReplayCheckpoint {
+                                generation: observed.generation.clone(),
+                                sequence: observed.sequence,
+                                queued,
+                                writer_revision: revision,
+                            });
+                            true
+                        } else {
+                            *checkpoint = None;
+                            false
+                        }
+                    };
+                    if checkpointed {
+                        hooks.after_checkpoint();
                     }
                 }
                 std::thread::sleep(std::time::Duration::from_millis(30));
@@ -268,10 +363,14 @@ impl Client {
     /// inspection are consistent with this applied transcript watermark. Local
     /// mailboxes, including a dropped worker still finishing enqueue, take priority.
     pub fn submission_is_unknown(&self, id: &str, generation: &str, applied_sequence: u64) -> bool {
+        let mut registry = writers().lock().unwrap();
         let replay = self.replay.lock().unwrap();
         replay.as_ref().is_some_and(|r| {
-            r.generation == generation && r.sequence <= applied_sequence && !r.queued.contains(id)
-        }) && !queued_locally(id)
+            r.writer_revision == registry.revision
+                && r.generation == generation
+                && r.sequence <= applied_sequence
+                && !r.queued.contains(id)
+        }) && !queued_locally_in(&mut registry, id)
     }
     pub fn take_error(&self) -> Option<String> {
         self.error.lock().unwrap().take()
@@ -387,5 +486,131 @@ mod review_tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(!client.submission_is_unknown("missing", "other-generation", applied));
+    }
+}
+
+#[cfg(test)]
+mod round2_tests {
+    use super::*;
+    #[test]
+    fn review_round2_i2_completed_old_publication_invalidates_paused_new_reader_checkpoint() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = journal::Journal::open(root.path(), "G1".into()).unwrap();
+        journal.push(Event::Generation).unwrap();
+        journal
+            .push(Event::Lifecycle(super::super::Lifecycle::Ready))
+            .unwrap();
+        let (a_reached_tx, a_reached_rx) = crossbeam_channel::bounded(1);
+        let (a_release_tx, a_release_rx) = crossbeam_channel::bounded(1);
+        let old = Client::at_directory_gated(
+            Ok(root.path().into()),
+            None,
+            WorkerHooks {
+                inside_enqueue: Some((a_reached_tx, a_release_rx)),
+                ..Default::default()
+            },
+        );
+        let id = old
+            .send_for_generation(
+                "G1",
+                Command::Submit {
+                    text: "original request".into(),
+                    attachments: vec![],
+                    model: None,
+                },
+            )
+            .unwrap();
+        a_reached_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let (b_reached_tx, b_reached_rx) = crossbeam_channel::bounded(1);
+        let (b_release_tx, b_release_rx) = crossbeam_channel::bounded(1);
+        let mut restored = Client::at_directory_gated(
+            Ok(root.path().into()),
+            None,
+            WorkerHooks {
+                after_checkpoint: Some((b_reached_tx, b_release_rx)),
+                ..Default::default()
+            },
+        );
+        b_reached_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let applied = restored.drain().iter().map(|e| e.sequence).max().unwrap();
+        assert_eq!(applied, 2);
+        assert!(
+            restored
+                .replay
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .queued
+                .is_empty()
+        );
+        assert!(!restored.submission_is_unknown(&id, "G1", applied));
+        drop(old);
+        a_release_tx.send(()).unwrap();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while queued_locally(&id) {
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(journal::pending_ids(root.path()).contains(&id));
+        assert!(
+            !restored.submission_is_unknown(&id, "G1", applied),
+            "a stale empty checkpoint must not outlive the old writer's successful publication while the new reader is paused"
+        );
+        b_release_tx.send(()).unwrap();
+        while !restored
+            .replay
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|r| r.queued.contains(&id))
+        {
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!restored.submission_is_unknown(&id, "G1", applied));
+        while !restored.submission_is_unknown("genuinely-missing", "G1", applied) {
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+}
+
+#[cfg(test)]
+mod round2_publication_tests {
+    use super::*;
+    #[test]
+    fn review_round2_unpublished_atomic_temp_file_is_not_an_executable_mailbox() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = journal::Journal::open(root.path(), "G1".into()).unwrap();
+        journal.push(Event::Generation).unwrap();
+        journal
+            .push(Event::Lifecycle(super::super::Lifecycle::Ready))
+            .unwrap();
+        let queue = root.path().join("commands");
+        journal::private_dir(&queue).unwrap();
+        let q = QueuedCommand {
+            id: "unpublished".into(),
+            generation: "G1".into(),
+            command: Command::Interrupt,
+        };
+        journal::atomic(&queue.join("orphan.tmp"), &serde_json::to_vec(&q).unwrap()).unwrap();
+        let mut client = Client::at_directory(Ok(root.path().into()));
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut applied = 0;
+        while !client.submission_is_unknown("unpublished", "G1", applied) {
+            for e in client.drain() {
+                applied = applied.max(e.sequence);
+            }
+            assert!(
+                std::time::Instant::now() < until,
+                "host only consumes .json; an orphan atomic temp must not strand a restored draft"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 }

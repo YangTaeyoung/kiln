@@ -465,7 +465,7 @@ impl AgentPane {
                     }
                 }
                 for request in requests {
-                    let summary = super::approval::project(&request);
+                    let summary = super::approval::project(&request, provider);
                     display
                         .details
                         .insert(request.id.clone(), (request, summary));
@@ -666,7 +666,7 @@ impl AgentPane {
                     .map(|(_, summary)| summary);
                 let kind = summary
                     .map(|s| s.kind)
-                    .unwrap_or_else(|| super::approval::kind(request));
+                    .unwrap_or_else(|| super::approval::kind(request, self.descriptor.tool));
                 ui.label(RichText::new(kind.title()).color(t.orange).strong());
                 if let Some(summary) = summary {
                     egui::ScrollArea::vertical()
@@ -677,6 +677,12 @@ impl AgentPane {
                                 ui.label(
                                     RichText::new(kiln_common::i18n::tr(label)).color(t.text_dim),
                                 );
+                                let value = RichText::new(value);
+                                let value = if *label == "도구 입력" {
+                                    value.monospace()
+                                } else {
+                                    value
+                                };
                                 ui.add(egui::Label::new(value).wrap());
                             }
                         });

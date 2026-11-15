@@ -85,7 +85,10 @@ fn gui_conversation_stream_approval_stop_and_attachment_at_520px() {
     let request = p.transcript.requests["ask"].clone();
     p.cache.details.insert(
         request.id.clone(),
-        (request.clone(), super::super::approval::project(&request)),
+        (
+            request.clone(),
+            super::super::approval::project(&request, p.descriptor.tool),
+        ),
     );
     h.run();
     h.get_by_label("한 번 허용").click();
@@ -436,7 +439,10 @@ fn review_i1_backlog_keeps_reused_approval_and_controls_on_applied_generation() 
     let request = p.transcript.requests["7"].clone();
     p.cache.details.insert(
         "7".into(),
-        (request.clone(), super::super::approval::project(&request)),
+        (
+            request.clone(),
+            super::super::approval::project(&request, p.descriptor.tool),
+        ),
     );
     let mut initialized = false;
     let mut h = Harness::builder().with_size([700., 700.]).build_ui_state(
@@ -540,7 +546,10 @@ fn review_i4_codex_permission_card_projects_actionable_details_without_transport
     };
     p.cache.details.insert(
         request.id.clone(),
-        (request.clone(), super::super::approval::project(&request)),
+        (
+            request.clone(),
+            super::super::approval::project(&request, p.descriptor.tool),
+        ),
     );
     let mut initialized = false;
     let mut h = Harness::builder().with_size([700., 600.]).build_ui_state(
@@ -664,7 +673,10 @@ fn review_i4_codex_elicitation_shows_questions_and_server_without_schema_or_ids(
     };
     p.cache.details.insert(
         request.id.clone(),
-        (request.clone(), super::super::approval::project(&request)),
+        (
+            request.clone(),
+            super::super::approval::project(&request, p.descriptor.tool),
+        ),
     );
     let mut initialized = false;
     let mut h = Harness::builder().with_size([700., 600.]).build_ui_state(
@@ -703,13 +715,13 @@ fn review_i4_file_and_permission_summaries_retain_paths_and_scope() {
         options: vec![],
         details: serde_json::json!({"threadId":"hidden","grantRoot":"/workspace","changes":[{"path":"src/main.rs"}],"reason":"Apply requested change"}),
     };
-    let summary = super::super::approval::project(&request);
+    let summary = super::super::approval::project(&request, kiln_accounts::Tool::Codex);
     assert_eq!(summary.kind, super::super::approval::Kind::Files);
     assert!(summary.fields.iter().any(|(_, v)| v == "/workspace"));
     assert!(summary.fields.iter().any(|(_, v)| v == "src/main.rs"));
     request.title = "item/permissions/requestApproval".into();
     request.details = serde_json::json!({"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/read"],"write":["/write"]}},"scope":"turn","cwd":"/workspace","threadId":"hidden"});
-    let summary = super::super::approval::project(&request);
+    let summary = super::super::approval::project(&request, kiln_accounts::Tool::Codex);
     assert_eq!(summary.kind, super::super::approval::Kind::Permission);
     for required in [
         "/read",
@@ -797,7 +809,10 @@ fn review_i4_changed_request_never_uses_stale_approval_summary() {
     };
     p.cache.details.insert(
         old.id.clone(),
-        (old.clone(), super::super::approval::project(&old)),
+        (
+            old.clone(),
+            super::super::approval::project(&old, p.descriptor.tool),
+        ),
     );
     let mut new = old;
     new.details = serde_json::json!({"file_path":"new.txt"});
@@ -959,4 +974,83 @@ for line in sys.stdin:
     assert!(p.transcript.commands.is_empty());
     assert!(super::super::journal::pending_ids(&directory).is_empty());
     assert!(worker.0.try_wait().unwrap().is_none());
+}
+
+#[test]
+fn review_round2_i4_claude_mcp_arguments_are_visible_without_an_adjacent_tool_card() {
+    for tool_use_id in [Some("native-tool-id"), None] {
+        let input = serde_json::json!({"text":"native GUI MCP check","recipient":"qa@example.invalid","body":"approval body","id":"domain-record-42","type":"invoice","status":"draft"});
+        let mut native = serde_json::json!({"type":"control_request","request_id":"native-control-id","request":{"subtype":"can_use_tool","tool_name":"mcp__kiln_qa__echo","input":input}});
+        if let Some(id) = tool_use_id {
+            native["request"]["tool_use_id"] = id.into();
+        }
+        let mut adapter = super::super::providers::Adapter::new(
+            kiln_accounts::Tool::Claude,
+            "/fixture".into(),
+            None,
+        );
+        let effects = adapter.ingest(native).unwrap();
+        assert_eq!(
+            effects.events.iter().any(|e| matches!(e, Event::Tool(_))),
+            tool_use_id.is_some()
+        );
+        let request = effects
+            .events
+            .into_iter()
+            .find_map(|event| {
+                if let Event::Request(request) = event {
+                    Some(request)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let mut p = pane();
+        p.descriptor.tool = kiln_accounts::Tool::Claude;
+        p.cache.details.insert(
+            request.id.clone(),
+            (
+                request.clone(),
+                super::super::approval::project(&request, p.descriptor.tool),
+            ),
+        );
+        let mut initialized = false;
+        let mut h = Harness::builder().with_size([700., 700.]).build_ui_state(
+            |ui, p: &mut AgentPane| {
+                if !initialized {
+                    kiln_common::fonts::install(ui.ctx());
+                    initialized = true;
+                    return;
+                }
+                p.request_ui(ui, &request);
+            },
+            p,
+        );
+        h.run();
+        for argument in [
+            "native GUI MCP check",
+            "qa@example.invalid",
+            "approval body",
+            "domain-record-42",
+            "invoice",
+            "draft",
+        ] {
+            assert!(
+                h.query_all_by_label_contains(argument).count() > 0,
+                "approval itself must show {argument}, even without tool_use_id"
+            );
+        }
+        for transport in ["native-control-id", "native-tool-id", "can_use_tool"] {
+            assert_eq!(h.query_all_by_label_contains(transport).count(), 0);
+        }
+        h.get_by_label("한 번 허용").click();
+        h.run();
+        assert!(matches!(
+            h.state().sent.last(),
+            Some(Command::Respond {
+                decision: Decision::Allow,
+                ..
+            })
+        ));
+    }
 }

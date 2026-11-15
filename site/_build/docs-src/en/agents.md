@@ -44,6 +44,8 @@ Closing Kiln saves drafts while the daemon keeps the worker alive. Closing a pan
 
 Approval cards show the command, folder, affected paths, reason and requested access with localized titles. Transport IDs and schemas stay out of the decision. After full history replay, a restored send absent from the journal and mailbox offers explicit recovery even if the worker is Ready; it is never resent automatically.
 
+Claude approvals include the actual MCP/tool arguments, including domain identifiers; long previews are bounded and labeled partial. Codex transport parameters and schemas stay filtered. Recovery also waits for a queue observation that follows any final publication by the old client.
+
 ## Work across several repositories {#work-across-several-repositories}
 
 Open a parent folder, such as `~/dev/projects`, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.

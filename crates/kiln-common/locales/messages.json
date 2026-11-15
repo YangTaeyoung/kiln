@@ -12413,5 +12413,15 @@
     "en": "Tool execution",
     "ja": "ツール実行",
     "zh-CN": "工具执行"
+  },
+  "도구 입력": {
+    "en": "Tool input",
+    "ja": "ツール入力",
+    "zh-CN": "工具输入"
+  },
+  "도구 입력이 길어 일부만 표시합니다.": {
+    "en": "Tool input is long; only part is shown.",
+    "ja": "ツール入力が長いため一部のみ表示しています。",
+    "zh-CN": "工具输入较长，仅显示部分内容。"
   }
 }

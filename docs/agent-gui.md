@@ -21,6 +21,10 @@ and must be removed or replaced before sending.
 Assistant text renders as Markdown. Expand tool cards to inspect inputs, outputs
 and file diffs. Permission cards show localized action summaries (command, folder,
 paths, reason and requested access), keeping transport IDs and schemas out of the decision.
+Claude approval cards include the actual tool input, including arbitrary MCP
+arguments and domain identifiers. Antigravity’s explicitly provided tool input
+follows the same rule. Long input previews are bounded and marked as
+partial. Codex request envelopes keep transport fields and schemas out of the UI.
 Responses use the generation actually displayed, even while newer events wait in
 the bounded view backlog. Stop remains usable during that backlog. Question cards
 support text, single choice and multiple choices as advertised. **Stop** interrupts the
@@ -36,7 +40,10 @@ A locally queued message is not provider acceptance. Kiln saves its command ID a
 payload until the journal confirms acceptance or a matching user message. Reopening
 never sends a draft automatically. After complete replay, a restored local send
 missing from both journal and mailbox becomes explicitly unknown and recoverable even when its worker remains Ready.
-Recovery waits for still-active local enqueue workers and does not classify missing
+A shared writer revision invalidates an older queue observation after any final
+local publication, even when the old client has closed. Only published command
+files count as executable mailbox entries. Recovery waits for still-active local
+enqueue workers and does not classify missing
 work as rejected. Unknown/rejected delivery remains recoverable through **Recover as draft**; check history before intentionally sending again.
 A dispatched message is never silently shown as a fresh unsent message.
 

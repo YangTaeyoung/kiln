@@ -153,3 +153,13 @@ mailbox references prevent an old client still enqueuing from being declared mis
 No missing command is automatically replayed or classified as rejected. Approval
 and confirmed Codex native-item envelopes are projected into actionable summaries;
 actual tool arguments remain intact, including domain IDs.
+
+Replay checkpoints also carry the synchronized local writer revision. Enqueue
+increments that revision before and after its publication; the completion change
+precedes local mailbox destruction. Publication and query both lock writer state
+before checkpoint state, with disk I/O outside those locks. Thus an expired old
+mailbox cannot make an older empty-queue checkpoint valid. The recovery probe
+matches the host's published `.json` mailbox classification and treats an unreadable
+or oversized mailbox conservatively. Claude can_use_tool details are known actual
+arguments, so their bounded preview preserves domain keys; Codex request details
+are known protocol params and keep their allowlisted projection.
