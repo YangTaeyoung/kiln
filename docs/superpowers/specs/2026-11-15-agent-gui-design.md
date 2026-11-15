@@ -38,6 +38,15 @@ interruption, not just unit tests or a mock conversation.
 - Existing terminal conversation continuation remains available. Converting a
   currently running TUI process in place is not part of this first GUI release.
 
+## Visual direction
+
+Use the selected 12ui direction: existing slate shell, one readable conversation
+column, compact bordered expandable tool cards, inline file diffs and approval
+card, and a fixed multiline composer. Orange indicates provider/action emphasis;
+status also has text/icons so it does not rely on color. Keep the original shell
+and real supported model names; synthetic names in the design are placeholders.
+At narrow widths, controls wrap rather than creating a second fixed column.
+
 ## Runtime ownership
 
 The GUI must not own the agent child. A private `kiln agent-gui-host --id ID`
@@ -56,14 +65,23 @@ Each session has an owner-only directory below `config/agent-gui/ID`, containing
 credential-free launch configuration, append-only event journal, host lock and
 atomic command queue. IDs must be validated before use as paths. Limit reads and
 event sizes. The host lock prevents two workers from controlling one conversation.
-Account secrets are resolved only by the launch worker, just as connection launch
-credentials are today. Do not log or persist resolved API key environment values.
+Background preparation may call the existing account launch environment builder,
+including its credential bootstrap. Capture that pinned profile environment once.
+The host validates the original profile rather than selecting whichever account is
+active later. Resolve connection API-key environment values only in the final launch
+worker. Never log or persist those resolved connection values.
 
 Journal commands include unique IDs and a host generation. Reject stale approvals,
 duplicates and commands from an older generation. Interrupted or ambiguous sends
 must be reported; never silently retry a model prompt. Pending UI approvals are
 resolved only by their live matching provider request. EOF or backend exit is an
 explicit failure/disconnected state, never an indefinitely animated response.
+
+Restoring an absent/exited daemon session may start the same host ID; validate the
+existing native conversation ID and resume it without an extra user turn. A durable
+initial-intent marker is written before its first attempted send, so a crash during
+initial submission never causes automatic prompt replay. Ambiguous pending commands
+from an old worker generation require explicit user retry.
 
 Disk I/O, child I/O, JSON parsing, image reads and journal tailing run off the UI
 thread. Deliver bounded batches to the UI; coalesce streaming text and cache
