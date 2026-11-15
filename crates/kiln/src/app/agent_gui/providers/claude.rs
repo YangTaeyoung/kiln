@@ -10,7 +10,7 @@ pub(in crate::app::agent_gui) struct Claude {
     blocks: BTreeMap<usize, String>,
     message: String,
     partial_input: BTreeMap<String, String>,
-    deferred: Option<Value>,
+    deferred: Option<(String, String, Value)>,
     selected: Option<String>,
 }
 impl Claude {
@@ -79,10 +79,10 @@ impl Claude {
                 content.extend(image_blocks(id, attachments, Tool::Claude)?);
                 let user = json!({"type":"user","message":{"role":"user","content":content},"session_id":self.session,"parent_tool_use_id":null});
                 if model.is_some() && model != &self.selected {
-                    self.deferred = Some(user);
-                    self.selected = model.clone();
+                    let operation = format!("model-{}", journal::unique());
+                    self.deferred = Some((operation.clone(), model.clone().unwrap(), user));
                     e.write(Self::control(
-                        "set-model",
+                        &operation,
                         json!({"subtype":"set_model","model":model}),
                     ));
                 } else {
@@ -168,6 +168,14 @@ impl Claude {
             "control_response" => {
                 let r = &v["response"];
                 let id = s(r, "request_id");
+                if id.starts_with("model-")
+                    && self
+                        .deferred
+                        .as_ref()
+                        .is_none_or(|(pending, _, _)| pending != &id)
+                {
+                    return Ok(e);
+                }
                 if s(r, "subtype") == "error" {
                     anyhow::bail!("Claude control request {id} failed: {}", s(r, "error"));
                 }
@@ -179,10 +187,18 @@ impl Claude {
                     });
                     e.state(Lifecycle::Ready);
                 }
-                if id == "set-model" {
-                    if let Some(user) = self.deferred.take() {
-                        e.write(user);
-                    }
+                if self
+                    .deferred
+                    .as_ref()
+                    .is_some_and(|(pending, _, _)| pending == &id)
+                {
+                    let (_, model, user) = self.deferred.take().unwrap();
+                    self.selected = Some(model);
+                    e.event(Event::Models {
+                        choices: vec![],
+                        selected: self.selected.clone(),
+                    });
+                    e.write(user);
                 }
             }
             "control_request" => {

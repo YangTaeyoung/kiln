@@ -154,6 +154,11 @@ pub enum Event {
         state: CommandPhase,
     },
     Error(String),
+    /// Client health overlay; sequence zero never advances or replaces journal history.
+    RuntimeUnavailable {
+        reason: String,
+        rejected: Vec<String>,
+    },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Envelope {
@@ -177,7 +182,37 @@ pub struct Transcript {
     pub commands: BTreeMap<String, CommandPhase>,
 }
 impl Transcript {
+    fn invalidate_pending(&mut self) {
+        self.lifecycle = Lifecycle::Failed;
+        self.requests.clear();
+        for state in self.commands.values_mut() {
+            if matches!(state, CommandPhase::Queued | CommandPhase::Dispatched) {
+                *state = CommandPhase::Unconfirmed;
+            }
+        }
+        for entry in &mut self.entries {
+            if let Entry::Tool(tool) = entry
+                && matches!(tool.status, ToolStatus::Pending | ToolStatus::Running)
+            {
+                tool.status = ToolStatus::Failed;
+            }
+        }
+    }
     pub fn apply(&mut self, envelope: &Envelope) {
+        if envelope.sequence == 0
+            && let Event::RuntimeUnavailable { reason, rejected } = &envelope.event
+        {
+            self.invalidate_pending();
+            for id in rejected {
+                self.commands
+                    .entry(id.clone())
+                    .or_insert(CommandPhase::Rejected);
+            }
+            if !self.errors.contains(reason) {
+                self.errors.push(reason.clone());
+            }
+            return;
+        }
         if envelope.sequence <= self.sequence {
             return;
         }
@@ -200,9 +235,15 @@ impl Transcript {
                 self.lifecycle = state.clone();
                 if matches!(
                     state,
-                    Lifecycle::Disconnected | Lifecycle::Stopped | Lifecycle::Ready
+                    Lifecycle::Disconnected
+                        | Lifecycle::Failed
+                        | Lifecycle::Stopped
+                        | Lifecycle::Ready
                 ) {
                     self.requests.clear();
+                }
+                if matches!(state, Lifecycle::Failed) {
+                    self.invalidate_pending();
                 }
             }
             Event::Session(id) => self.provider_session_id = Some(id.clone()),
@@ -254,6 +295,7 @@ impl Transcript {
                 self.commands.insert(id.clone(), state.clone());
             }
             Event::Error(error) => self.errors.push(error.clone()),
+            Event::RuntimeUnavailable { .. } => {}
         }
     }
 }

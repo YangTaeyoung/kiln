@@ -11,6 +11,7 @@ pub(in crate::app::agent_gui) struct Codex {
     pending: BTreeMap<String, (Value, String, Value)>,
     tools: BTreeMap<String, ToolCall>,
     selected: Option<String>,
+    pending_model: Option<String>,
 }
 impl Codex {
     pub fn new(cwd: PathBuf, resume: Option<String>) -> Self {
@@ -25,6 +26,7 @@ impl Codex {
             pending: BTreeMap::new(),
             tools: BTreeMap::new(),
             selected: None,
+            pending_model: None,
         }
     }
     pub fn start(&mut self) -> Effects {
@@ -52,7 +54,7 @@ impl Codex {
                     json!({"threadId":self.thread,"input":input,"model":model}),
                 ));
                 self.busy = true;
-                self.selected = model.clone();
+                self.pending_model = model.clone();
                 e.state(Lifecycle::Running);
             }
             Command::Respond {
@@ -251,6 +253,13 @@ impl Codex {
                     selected: self.selected.clone(),
                 }),
                 "turn" => {
+                    if let Some(model) = self.pending_model.take() {
+                        self.selected = Some(model);
+                    }
+                    e.event(Event::Models {
+                        choices: vec![],
+                        selected: self.selected.clone(),
+                    });
                     self.turn = s(&r["turn"], "id");
                     e.accepted = true;
                     if std::mem::take(&mut self.interrupt_pending) {
@@ -378,7 +387,14 @@ fn form_content(schema: &Value, answers: &BTreeMap<String, Vec<String>>) -> Resu
                         .context("answer must be true or false")?
                 ),
                 "number" | "integer" => {
-                    serde_json::from_str::<Value>(first).context("answer must be a number")?
+                    let value =
+                        serde_json::from_str::<Value>(first).context("answer must be a number")?;
+                    ensure!(value.is_number(), "answer must be a number");
+                    ensure!(
+                        s(field, "type") != "integer" || value.is_i64() || value.is_u64(),
+                        "answer must be an integer"
+                    );
+                    value
                 }
                 "array" => json!(answer),
                 _ => json!(first),

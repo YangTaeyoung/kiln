@@ -16,7 +16,7 @@ pub(in crate::app::agent_gui) struct Antigravity {
     mode_config: Option<String>,
     modes: Vec<Choice>,
     models: Vec<Model>,
-    deferred: Option<Value>,
+    deferred: Option<(String, Option<String>, Option<Value>)>,
 }
 impl Antigravity {
     pub fn new(cwd: PathBuf, resume: Option<String>) -> Self {
@@ -100,9 +100,9 @@ impl Antigravity {
                             json!({"sessionId":self.session,"modelId":model}),
                         )
                     };
-                    self.deferred = Some(user);
-                    e.write(rpc(json!("model"), method, params));
-                    self.selected = model.clone();
+                    let operation = format!("config-{}", journal::unique());
+                    self.deferred = Some((operation.clone(), model.clone(), Some(user)));
+                    e.write(rpc(json!(operation), method, params));
                 } else {
                     e.write(user);
                 }
@@ -128,7 +128,7 @@ impl Antigravity {
             }
             Command::SetMode { mode } => {
                 ensure!(
-                    self.ready && self.modes.iter().any(|m| m.id == *mode),
+                    self.ready && !self.busy && self.modes.iter().any(|m| m.id == *mode),
                     "mode is not available in this session"
                 );
                 let (method, params) = if let Some(config) = &self.mode_config {
@@ -142,7 +142,11 @@ impl Antigravity {
                         json!({"sessionId":self.session,"modeId":mode}),
                     )
                 };
-                e.write(rpc(json!("mode"), method, params));
+                let operation = format!("config-{}", journal::unique());
+                self.deferred = Some((operation.clone(), None, None));
+                self.busy = true;
+                e.write(rpc(json!(operation), method, params));
+                e.state(Lifecycle::Running);
             }
             Command::Interrupt => {
                 if self.deferred.take().is_some() {
@@ -327,10 +331,40 @@ impl Antigravity {
         }
         if method.is_empty() && v.get("id").is_some() {
             let id = s(&v, "id");
+            if id.starts_with("config-")
+                && self
+                    .deferred
+                    .as_ref()
+                    .is_none_or(|(pending, _, _)| pending != &id)
+            {
+                return Ok(e);
+            }
             if let Some(error) = v.get("error") {
                 anyhow::bail!("Antigravity {id} failed: {}", text(error));
             }
             let r = &v["result"];
+            if self
+                .deferred
+                .as_ref()
+                .is_some_and(|(pending, _, _)| pending == &id)
+            {
+                let (_, model, user) = self.deferred.take().unwrap();
+                if let Some(model) = model {
+                    self.selected = Some(model);
+                }
+                self.options(r, &mut e);
+                e.event(Event::Models {
+                    choices: vec![],
+                    selected: self.selected.clone(),
+                });
+                if let Some(user) = user {
+                    e.write(user);
+                } else {
+                    self.busy = false;
+                    e.state(Lifecycle::Ready);
+                }
+                return Ok(e);
+            }
             match id.as_str() {
                 "initialize" => {
                     ensure!(
@@ -373,13 +407,7 @@ impl Antigravity {
                     self.options(r, &mut e);
                     e.state(Lifecycle::Ready);
                 }
-                "model" => {
-                    self.options(r, &mut e);
-                    if let Some(user) = self.deferred.take() {
-                        e.write(user);
-                    }
-                }
-                "mode" => self.options(r, &mut e),
+
                 "prompt" => {
                     self.busy = false;
                     self.pending.clear();

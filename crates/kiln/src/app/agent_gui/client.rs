@@ -1,8 +1,11 @@
-use super::{Command, Descriptor, Envelope, QueuedCommand, journal};
+use super::{Command, Descriptor, Envelope, Event, QueuedCommand, Transcript, journal};
 use anyhow::{Result, bail};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    collections::BTreeSet,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 /// A bounded local mailbox and journal reader. Dropping this never terminates the host.
 pub struct Client {
@@ -10,19 +13,28 @@ pub struct Client {
     events: crossbeam_channel::Receiver<Vec<Envelope>>,
     generation: Arc<Mutex<String>>,
     error: Arc<Mutex<Option<String>>>,
+    unavailable: Arc<Mutex<Option<String>>>,
+    local_pending: Arc<Mutex<BTreeSet<String>>>,
     stop: Arc<AtomicBool>,
 }
 impl Client {
     pub fn connect(descriptor: Descriptor) -> Self {
         Self::at_directory(journal::directory(&descriptor.id))
     }
-    fn at_directory(directory: Result<std::path::PathBuf>) -> Self {
+    pub(super) fn at_directory(directory: Result<std::path::PathBuf>) -> Self {
         let (tx, rx) = crossbeam_channel::bounded::<QueuedCommand>(32);
         let (etx, erx) = crossbeam_channel::bounded(8);
         let generation = Arc::new(Mutex::new(String::new()));
         let error = Arc::new(Mutex::new(None));
+        let unavailable = Arc::new(Mutex::new(None));
+        let local_pending = Arc::new(Mutex::new(BTreeSet::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let (e, s) = (error.clone(), stop.clone());
+        let (e, u, local, s) = (
+            error.clone(),
+            unavailable.clone(),
+            local_pending.clone(),
+            stop.clone(),
+        );
         std::thread::spawn(move || {
             let dir = match directory {
                 Ok(d) => d,
@@ -33,6 +45,8 @@ impl Client {
             };
             let mut offset = 0;
             let mut pending = None;
+            let mut observed = Transcript::default();
+            let mut reported = None;
             while !s.load(Ordering::Relaxed) {
                 if let Some(batch) = pending.take() {
                     match etx.try_send(batch) {
@@ -41,20 +55,60 @@ impl Client {
                         Err(_) => break,
                     }
                 }
+                let mut reason = journal::failure_reason(&dir);
+                if reason.is_none() && journal::worker_absent(&dir) {
+                    reason=Some("Agent worker is unavailable. Pending submissions are unconfirmed and will not be replayed.".into());
+                }
+                let mut at_end = false;
                 if pending.is_none() {
                     match journal::tail(&dir.join("events.jsonl"), &mut offset) {
                         Ok(batch) if !batch.is_empty() => {
+                            for event in &batch {
+                                if matches!(event.event, Event::Generation) && reason.is_none() {
+                                    *u.lock().unwrap() = None;
+                                    reported = None;
+                                }
+                                if let Event::CommandState { id, .. } = &event.event {
+                                    local.lock().unwrap().remove(id);
+                                }
+                                observed.apply(event);
+                            }
                             pending = Some(batch);
                         }
-                        Ok(_) => {}
+                        Ok(_) => at_end = true,
                         Err(err) => {
                             if dir.join("events.jsonl").exists() {
-                                *e.lock().unwrap() = Some(err.to_string());
+                                reason = Some(format!(
+                                    "Conversation history storage is unavailable: {err}"
+                                ));
+                                at_end = true;
                             }
                         }
                     }
                 }
+                if let Some(reason) = reason {
+                    *e.lock().unwrap() = Some(reason.clone());
+                    *u.lock().unwrap() = Some(reason.clone());
+                    if at_end && pending.is_none() && reported.as_ref() != Some(&reason) {
+                        let mut rejected = journal::pending_ids(&dir)
+                            .into_iter()
+                            .collect::<BTreeSet<_>>();
+                        rejected.extend(local.lock().unwrap().iter().cloned());
+                        pending = Some(vec![Envelope {
+                            sequence: 0,
+                            generation: observed.generation.clone(),
+                            event: Event::RuntimeUnavailable {
+                                reason: reason.clone(),
+                                rejected: rejected.into_iter().collect(),
+                            },
+                        }]);
+                        reported = Some(reason);
+                    }
+                }
                 for queued in rx.try_iter().take(32) {
+                    if u.lock().unwrap().is_some() {
+                        continue;
+                    }
                     if let Err(err) = journal::enqueue(&dir, &queued) {
                         *e.lock().unwrap() = Some(err.to_string());
                     }
@@ -67,31 +121,40 @@ impl Client {
             events: erx,
             generation,
             error,
+            unavailable,
+            local_pending,
             stop,
         }
     }
     pub fn drain(&mut self) -> Vec<Envelope> {
         let events: Vec<Envelope> = self.events.try_iter().take(8).flatten().collect();
         for envelope in &events {
-            if matches!(envelope.event, super::Event::Generation) {
+            if matches!(envelope.event, Event::Generation) {
                 *self.generation.lock().unwrap() = envelope.generation.clone();
             }
         }
         events
     }
-    /// Success means locally queued; transcript CommandPhase tracks dispatch/acceptance.
-    pub fn send(&self, command: Command) -> Result<()> {
+    /// Returns the locally queued ID for pending-draft reconciliation, not provider acceptance.
+    pub fn send(&self, command: Command) -> Result<String> {
+        if let Some(reason) = self.unavailable.lock().unwrap().clone() {
+            bail!(reason);
+        }
         if self.generation.lock().unwrap().is_empty() {
             bail!("agent is still connecting");
         }
+        let id = journal::unique();
         let queued = QueuedCommand {
-            id: journal::unique(),
+            id: id.clone(),
             generation: self.generation.lock().unwrap().clone(),
             command,
         };
-        self.commands
-            .try_send(queued)
-            .map_err(|_| anyhow::anyhow!("agent command queue is unavailable"))
+        self.local_pending.lock().unwrap().insert(id.clone());
+        if self.commands.try_send(queued).is_err() {
+            self.local_pending.lock().unwrap().remove(&id);
+            bail!("agent command queue is unavailable");
+        }
+        Ok(id)
     }
     pub fn take_error(&self) -> Option<String> {
         self.error.lock().unwrap().take()

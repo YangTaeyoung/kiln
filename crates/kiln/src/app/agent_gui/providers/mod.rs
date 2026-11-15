@@ -401,3 +401,154 @@ mod input_bounds_tests {
         assert!(a.ingest(frame).is_err());
     }
 }
+
+#[cfg(test)]
+mod review_regressions {
+    use super::*;
+    fn initialized(tool: Tool) -> Adapter {
+        let mut a = Adapter::new(tool, "/tmp".into(), None);
+        if tool == Tool::Claude {
+            a.ingest(json!({"type":"control_response","response":{"request_id":"initialize","subtype":"success","response":{}}})).unwrap();
+            a.ingest(json!({"type":"system","model":"old"})).unwrap();
+        } else {
+            a.ingest(
+                json!({"id":"initialize","result":{"protocolVersion":1,"agentCapabilities":{}}}),
+            )
+            .unwrap();
+            a.ingest(json!({"id":"session","result":{"sessionId":"native","models":{"currentModelId":"old","availableModels":[{"modelId":"A","name":"A"},{"modelId":"B","name":"B"}]}}})).unwrap();
+        }
+        a
+    }
+    fn submit(a: &mut Adapter, model: &str) -> Effects {
+        a.command(
+            &Command::Submit {
+                text: format!("prompt {model}"),
+                attachments: vec![],
+                model: Some(model.into()),
+            },
+            "fixture",
+        )
+        .unwrap()
+    }
+    fn control_id(tool: Tool, e: &Effects) -> Value {
+        if tool == Tool::Claude {
+            e.writes[0]["request_id"].clone()
+        } else {
+            e.writes[0]["id"].clone()
+        }
+    }
+    fn ack(tool: Tool, id: Value, model: &str) -> Value {
+        if tool == Tool::Claude {
+            json!({"type":"control_response","response":{"request_id":id,"subtype":"success","response":{}}})
+        } else {
+            json!({"id":id,"result":{"configOptions":[{"id":"model","category":"model","type":"select","currentValue":model,"options":[{"value":"A","name":"A"},{"value":"B","name":"B"}]}]}})
+        }
+    }
+    fn prompt(tool: Tool, v: &Value) -> bool {
+        if tool == Tool::Claude {
+            v["type"] == "user"
+        } else {
+            v["method"] == "session/prompt"
+        }
+    }
+    #[test]
+    fn cancelled_model_ack_cannot_dispatch_replacement_and_only_matching_success_confirms_model() {
+        for tool in [Tool::Claude, Tool::Antigravity] {
+            for b_model in ["A", "B"] {
+                let mut a = initialized(tool);
+                let a_id = control_id(tool, &submit(&mut a, "A"));
+                a.command(&Command::Interrupt, "fixture").unwrap();
+                let b = submit(&mut a, b_model);
+                assert!(!b.writes.iter().any(|v| prompt(tool, v)));
+                let b_id = control_id(tool, &b);
+                assert_ne!(a_id, b_id);
+                let old = a.ingest(ack(tool, a_id.clone(), "A")).unwrap();
+                assert!(old.writes.is_empty());
+                assert!(!old.events.iter().any(|e| matches!(e, Event::Models { .. })));
+                let success = a.ingest(ack(tool, b_id, b_model)).unwrap();
+                assert_eq!(success.writes.iter().filter(|v| prompt(tool, v)).count(), 1);
+                assert!(
+                    success.events.iter().any(
+                        |e| matches!(e,Event::Models{selected:Some(model),..}if model==b_model)
+                    )
+                );
+                let duplicate = a.ingest(ack(tool, a_id, "A")).unwrap();
+                assert!(duplicate.writes.is_empty());
+            }
+        }
+    }
+    #[test]
+    fn retired_model_errors_are_ignored_and_live_model_errors_never_dispatch() {
+        for tool in [Tool::Claude, Tool::Antigravity] {
+            let mut a = initialized(tool);
+            let old = control_id(tool, &submit(&mut a, "A"));
+            a.command(&Command::Interrupt, "fixture").unwrap();
+            let current = control_id(tool, &submit(&mut a, "B"));
+            let error = |id: Value| {
+                if tool == Tool::Claude {
+                    json!({"type":"control_response","response":{"request_id":id,"subtype":"error","error":"failed"}})
+                } else {
+                    json!({"id":id,"error":{"code":-1,"message":"failed"}})
+                }
+            };
+            assert!(a.ingest(error(old)).unwrap().writes.is_empty());
+            assert!(a.ingest(error(current)).is_err());
+        }
+    }
+    #[test]
+    fn codex_publishes_selected_model_only_after_turn_ack() {
+        let mut a = Adapter::new(Tool::Codex, "/tmp".into(), None);
+        a.ingest(json!({"id":"thread","result":{"thread":{"id":"native"},"model":"old"}}))
+            .unwrap();
+        let queued = submit(&mut a, "new");
+        assert!(
+            !queued
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Models { .. }))
+        );
+        let accepted = a
+            .ingest(json!({"id":"turn","result":{"turn":{"id":"turn1"}}}))
+            .unwrap();
+        assert!(
+            accepted
+                .events
+                .iter()
+                .any(|e| matches!(e,Event::Models{selected:Some(model),..}if model=="new"))
+        );
+    }
+    #[test]
+    fn numeric_elicitation_rejects_wrong_json_types_without_consuming_the_request() {
+        for (kind, invalid, valid) in [
+            ("number", vec!["true", "{}", "[]", "\"4\""], "1.5"),
+            ("integer", vec!["true", "{}", "1.5", "\"4\""], "4"),
+        ] {
+            let mut a = Adapter::new(Tool::Codex, "/tmp".into(), None);
+            let e=a.ingest(json!({"id":7,"method":"mcpServer/elicitation/request","params":{"mode":"form","requestedSchema":{"type":"object","properties":{"value":{"type":kind}},"required":["value"]}}})).unwrap();
+            let request_id = e
+                .events
+                .iter()
+                .find_map(|e| {
+                    if let Event::Request(r) = e {
+                        Some(r.id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let answer = |text: &str| Command::Respond {
+                request_id: request_id.clone(),
+                decision: Decision::Allow,
+                answers: BTreeMap::from([("value".into(), vec![text.into()])]),
+            };
+            for invalid in invalid {
+                assert!(
+                    a.command(&answer(invalid), "fixture").is_err(),
+                    "{kind} accepted {invalid}"
+                );
+            }
+            let accepted = a.command(&answer(valid), "fixture").unwrap();
+            assert!(accepted.writes[0]["result"]["content"]["value"].is_number());
+        }
+    }
+}

@@ -466,8 +466,19 @@ pub fn serve(id: &str) -> Result<()> {
     let dir = journal::directory(id)?;
     journal::private_dir(&dir)?;
     let lock = journal::open(&dir.join("host.lock"), false)?;
-    lock.try_lock()
-        .context("another GUI agent worker already owns this conversation")?;
+    // A client health probe briefly tests this same OS lock. Allow that probe to
+    // finish without mistaking it for a second long-lived worker on restart.
+    let lock_deadline = Instant::now() + Duration::from_millis(250);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => break,
+            Err(error) if Instant::now() >= lock_deadline => {
+                return Err(error)
+                    .context("another GUI agent worker already owns this conversation");
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(5)),
+        }
+    }
     let config: Config = journal::read(&dir.join("config.json"))?;
     ensure!(config.descriptor.id == id, "agent config identity mismatch");
     let mut journal = Journal::open(&dir, journal::unique())?;
@@ -984,6 +995,65 @@ mod subprocess_tests {
             assert_eq!(restarted.entries.len(), 0);
             stop(&mut child);
         }
+    }
+    #[test]
+    fn sealed_journal_rejects_same_id_worker_restart_before_launching_or_replaying_pending_submission()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let boot = root.path().join("provider-booted");
+        let program = script(
+            root.path(),
+            "must-not-launch",
+            &format!(
+                "from pathlib import Path\nPath({:?}).write_text('launched')\n",
+                boot.to_string_lossy()
+            ),
+        );
+        let mut config = config(root.path(), program, Tool::Claude);
+        config.initial_prompt = Some("never replay initial".into());
+        let dir = root.path().join("agent-gui").join(&config.descriptor.id);
+        journal::private_dir(&dir).unwrap();
+        let mut j = Journal::open(&dir, "old".into()).unwrap();
+        j.push(Event::Generation).unwrap();
+        j.push(Event::Session("native".into())).unwrap();
+        j.push(Event::Lifecycle(Lifecycle::Running)).unwrap();
+        journal::enqueue(
+            &dir,
+            &QueuedCommand {
+                id: "pending".into(),
+                generation: "old".into(),
+                command: Command::Submit {
+                    text: "never replay queued".into(),
+                    attachments: vec![],
+                    model: None,
+                },
+            },
+        )
+        .unwrap();
+        journal::atomic(
+            &dir.join("failure.json"),
+            br#"{"reason":"fixture exhausted journal; retained history is read-only"}"#,
+        )
+        .unwrap();
+        let mut replacement = worker(&config, root.path());
+        let start = Instant::now();
+        loop {
+            if let Some(status) = replacement.try_wait().unwrap() {
+                assert!(!status.success());
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(3));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!boot.exists());
+        assert!(dir.join("commands/pending.json").is_file());
+        assert!(!dir.join("initial-intent").exists());
+        let mut reopened = Journal::open(&dir, "retry".into()).unwrap();
+        assert_eq!(
+            reopened.transcript.provider_session_id.as_deref(),
+            Some("native")
+        );
+        assert!(reopened.push(Event::Generation).is_err());
     }
     fn alive(pid: i32) -> bool {
         #[cfg(target_os = "macos")]
