@@ -102,6 +102,25 @@ jobs:
             export PATH="$USERPROFILE/.cargo/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Windows directory guard diagnostic
+        if: matrix.part == 'libraries'
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP 'kiln-directory-guard-probe.exe'
+          rustc --edition=2024 scripts/windows-directory-guard-probe.rs -o $probe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $probe | Set-Content -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'kiln-directory-guard-probe.jsonl')
+          $probeExit = $LASTEXITCODE
+          Remove-Item -LiteralPath $probe
+          exit $probeExit
+      - name: Keep early guard diagnostic
+        if: matrix.part == 'libraries' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: directory-guard-${{ matrix.target.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/kiln-directory-guard-probe.jsonl
+          if-no-files-found: error
+          retention-days: 3
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target.name }}
