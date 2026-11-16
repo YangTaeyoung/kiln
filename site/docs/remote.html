@@ -183,7 +183,38 @@
 <h2 id="mobile-companion">Kiln Remote for phones</h2>
 <p>Kiln Remote 0.1.0 is an optional Android/iPhone companion built separately from desktop Kiln 0.3.0. Start the host manually on your computer, allow specific workspaces and pair using its per-launch URL and token. Closing the desktop window does not start the host. Mobile packages are built from source; there is no App Store or Play Store download in this stage.</p>
 <p>Open or create native conversations, explicitly send tasks, inspect tool output and answer complete approvals. Commands insert an editable draft. Supported controls show their native scope and pending or confirmed state; unsupported controls remain read-only. Creating a task keeps its prompt as a draft until you press Send. Connection loss never automatically repeats a prompt. Credentials and drafts stay in memory; explicit Disconnect clears the connection, and closing the app loses unsaved memory-only data.</p>
-<p>For phones, the owner must provision signing and a trusted HTTPS connection to the loopback host. Emulator/Simulator checks do not establish physical-device or remote-network acceptance. See the <a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">build, connection and verification guide</a> for exact steps, current evidence and limits. Desktop screenshots on this site retain their original provenance and are not mobile screenshots.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="databases.html"><small>Previous</small>Databases</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">문서<b>도구</b></p></div><h1>원격 파일과 SSH</h1><p class="desc">Amazon S3, Google Cloud Storage, OCI Object Storage, Cloudflare R2, FTP/FTPS, SFTP의 파일을 살펴보고 편집하며, SSH 설정에 있는 호스트로 SSH 터미널을 엽니다.</p><p>Kiln의 워크스페이스 인스펙터에서는 터미널, 데이터베이스, 로컬 파일과 함께 오브젝트 스토리지, FTP 서버, SFTP 호스트도 살펴볼 수 있습니다. 원격 파일은 로컬 파일과 같은 편집기에서 열리고, OpenSSH 설정에 있는 SSH 호스트는 바로 골라 쓸 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
+<p>For phones, the owner must provision signing and a trusted HTTPS connection to the loopback host. Emulator/Simulator checks do not establish physical-device or remote-network acceptance. See the <a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">build, connection and verification guide</a> for exact steps, current evidence and limits. Desktop screenshots on this site retain their original provenance and are not mobile screenshots.</p>
+<h3 id="mobile-verification">Verification on 2026-11-16</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Observed evidence and remaining checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Source</td>
+<td>Current implementation <code>e94f490</code>; desktop source and capture provenance remain separate.</td>
+</tr>
+<tr>
+<td>Android and iOS native execution</td>
+<td>Create, explicit Submit, installed Claude 2.1.325, real stdio MCP, one-time Allow and exact completed echo each produced one effect at <code>b45beac</code>. Model inference used a synthetic loopback service, not a cloud model.</td>
+</tr>
+<tr>
+<td>Final iOS setting and layout</td>
+<td>At <code>e94f490</code>, Effort Level high was Applied and settled with effective high; the rendered main width matched the 402px frame. On final Android, selecting high and explicitly requesting the change rendered Native confirmation high; independent GET settlement verification remains pending.</td>
+</tr>
+<tr>
+<td>Redirects and terminals</td>
+<td>Both native apps refused the redirect; its destination received zero requests and zero authorized requests. Both platforms sent explicit terminal input to a real private shell and verified the expected output once. Android terminal proof is from <code>b45beac</code>, iOS from <code>e94f490</code>.</td>
+</tr>
+<tr>
+<td>Remaining acceptance</td>
+<td>Earlier mobile CI passed all three jobs and both native build modes. Current-source CI, native picker, reconnect/draft/no-replay and narrow/dark-theme matrix remain pending. Physical devices, signing, physical IME and public-network acceptance remain owner tasks.</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="databases.html"><small>Previous</small>Databases</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">문서<b>도구</b></p></div><h1>원격 파일과 SSH</h1><p class="desc">Amazon S3, Google Cloud Storage, OCI Object Storage, Cloudflare R2, FTP/FTPS, SFTP의 파일을 살펴보고 편집하며, SSH 설정에 있는 호스트로 SSH 터미널을 엽니다.</p><p>Kiln의 워크스페이스 인스펙터에서는 터미널, 데이터베이스, 로컬 파일과 함께 오브젝트 스토리지, FTP 서버, SFTP 호스트도 살펴볼 수 있습니다. 원격 파일은 로컬 파일과 같은 편집기에서 열리고, OpenSSH 설정에 있는 SSH 호스트는 바로 골라 쓸 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
 <h2 id="add-a-connection">연결 추가하기</h2>
 <p>제목 표시줄에서 <strong>도구 → 원격 연결</strong>을 선택한 뒤, 이름을 붙여 연결을 추가합니다. 이 도구는 터미널 작업을 가리지 않고 그 옆에 열립니다.</p>
 <div class="table"><table>
@@ -333,7 +364,38 @@
 <h2 id="mobile-companion">휴대폰용 Kiln Remote</h2>
 <p>Kiln Remote 0.1.0은 데스크톱 Kiln 0.3.0과 별도로 빌드하는 Android/iPhone 동반 앱입니다. 컴퓨터에서 호스트를 직접 시작하고 허용할 작업 폴더를 지정한 뒤, 실행할 때마다 발급되는 URL과 토큰으로 연결합니다. 데스크톱 창을 닫아도 호스트가 시작되지는 않습니다. 이 단계에서는 소스로 모바일 패키지를 빌드하며 App Store나 Play Store 다운로드는 제공하지 않습니다.</p>
 <p>네이티브 대화를 열거나 만들고, 작업을 직접 전송하고, 도구 출력을 확인하며, 세부 정보가 완전한 승인 요청에 답할 수 있습니다. 명령을 선택하면 편집할 초안에 삽입됩니다. 지원하는 설정은 네이티브 적용 범위와 대기·확인 상태를 표시하고, 미지원 설정은 읽기 전용으로 남습니다. 새 작업의 요청은 Send를 누를 때까지 초안으로 유지됩니다. 연결이 끊겨도 요청을 자동으로 재전송하지 않습니다. 자격 증명과 초안은 메모리에만 보관하며 Disconnect는 연결을 지웁니다. 앱을 종료하면 저장되지 않은 메모리 데이터가 사라집니다.</p>
-<p>실제 휴대폰에서는 소유자가 서명과 루프백 호스트로 연결되는 신뢰할 수 있는 HTTPS 경로를 준비해야 합니다. 에뮬레이터·시뮬레이터 검증은 실제 기기나 원격 네트워크 검증을 대신하지 않습니다. 자세한 절차와 현재 검증 범위는 <a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">빌드·연결·검증 안내</a>를 확인하세요. 사이트의 데스크톱 화면은 기존 촬영 출처를 유지하며 모바일 화면이 아닙니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="databases.html"><small>이전</small>데이터베이스</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>リモートファイルと SSH</h1><p class="desc">Amazon S3、Google Cloud Storage、OCI Object Storage、Cloudflare R2、FTP/FTPS、SFTP 上のファイルの閲覧・編集と、SSH config のホストで SSH ターミナルを開く方法を説明します。</p><p>Kiln では、オブジェクトストレージ、FTP サーバー、SFTP ホストを、ターミナルやデータベース、ローカルファイルと同じワークスペースインスペクターで閲覧できます。リモートファイルはローカルのファイルと同じエディターで開けます。OpenSSH の config にある SSH ホストは、一覧から選ぶだけで使えます。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
+<p>실제 휴대폰에서는 소유자가 서명과 루프백 호스트로 연결되는 신뢰할 수 있는 HTTPS 경로를 준비해야 합니다. 에뮬레이터·시뮬레이터 검증은 실제 기기나 원격 네트워크 검증을 대신하지 않습니다. 자세한 절차와 현재 검증 범위는 <a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">빌드·연결·검증 안내</a>를 확인하세요. 사이트의 데스크톱 화면은 기존 촬영 출처를 유지하며 모바일 화면이 아닙니다.</p>
+<h3 id="mobile-verification">2026-11-16 검증 기록</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>범위</th>
+<th>관찰한 근거와 남은 검증</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>소스</td>
+<td>현재 구현은 <code>e94f490</code>이며 데스크톱 소스와 화면 촬영 출처는 별도로 유지합니다.</td>
+</tr>
+<tr>
+<td>Android·iOS 네이티브 실행</td>
+<td><code>b45beac</code>에서 생성, 명시적 Submit, 설치된 Claude 2.1.325, 실제 stdio MCP, 일회성 Allow, 정확한 완료 응답을 확인했으며 플랫폼별 효과는 각각 한 번이었습니다. 모델 추론은 클라우드 모델이 아닌 합성 루프백 서비스를 사용했습니다.</td>
+</tr>
+<tr>
+<td>최종 iOS 설정과 화면 폭</td>
+<td><code>e94f490</code>에서 Effort Level high의 Applied·settled 및 실제 high 적용을 확인했고, 본문 폭은 402px 프레임과 일치했습니다. 최종 Android에서도 high를 선택하고 변경을 명시적으로 요청한 뒤 Native confirmation high 표시를 확인했습니다. 별도 GET 적용 상태 확인은 대기 중입니다.</td>
+</tr>
+<tr>
+<td>리디렉션과 터미널</td>
+<td>두 네이티브 앱 모두 리디렉션을 거부했고 대상 서버의 요청과 인증 요청은 모두 0건이었습니다. 두 플랫폼 모두 실제 격리 셸에 명시적으로 입력하여 예상 출력을 한 번 확인했습니다. Android 터미널 근거는 <code>b45beac</code>, iOS는 <code>e94f490</code>입니다.</td>
+</tr>
+<tr>
+<td>남은 검증</td>
+<td>이전 모바일 CI의 세 작업과 두 네이티브 빌드 모드는 통과했습니다. 현재 소스 CI, 네이티브 선택기, 재연결·초안·중복 전송 방지, 좁은 화면·다크 테마 검증은 대기 중입니다. 실제 기기, 서명, 물리적 IME와 공용 네트워크 검증은 소유자의 후속 작업입니다.</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="databases.html"><small>이전</small>데이터베이스</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>リモートファイルと SSH</h1><p class="desc">Amazon S3、Google Cloud Storage、OCI Object Storage、Cloudflare R2、FTP/FTPS、SFTP 上のファイルの閲覧・編集と、SSH config のホストで SSH ターミナルを開く方法を説明します。</p><p>Kiln では、オブジェクトストレージ、FTP サーバー、SFTP ホストを、ターミナルやデータベース、ローカルファイルと同じワークスペースインスペクターで閲覧できます。リモートファイルはローカルのファイルと同じエディターで開けます。OpenSSH の config にある SSH ホストは、一覧から選ぶだけで使えます。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
 <h2 id="add-a-connection">接続を追加する</h2>
 <p>タイトルバーで<strong>ツール → リモート接続</strong>を選び、名前付きの接続を追加します。このツールはターミナルの作業を置き換えず、その横に開きます。</p>
 <div class="table"><table>
@@ -483,7 +545,38 @@
 <h2 id="mobile-companion">スマートフォン向け Kiln Remote</h2>
 <p>Kiln Remote 0.1.0 は、デスクトップ版 Kiln 0.3.0 と別にビルドする Android/iPhone 用の補助アプリです。コンピューターでホストを手動起動し、許可する作業フォルダーを指定して、起動ごとの URL とトークンで接続します。デスクトップのウィンドウを閉じてもホストは起動しません。この段階ではソースからモバイルパッケージをビルドします。App Store や Play Store での配布はありません。</p>
 <p>ネイティブ会話を開く・作成する、タスクを明示的に送信する、ツール出力を確認する、詳細がそろった承認要求に応答する操作に対応します。コマンドは編集可能な下書きに挿入されます。対応する設定にはネイティブの適用範囲と保留・確認状態が表示され、非対応の設定は読み取り専用です。新しいタスクの依頼文は Send を押すまで下書きのままです。接続が切れても依頼を自動再送しません。認証情報と下書きはメモリ内だけに保持されます。Disconnect で接続情報を消去し、アプリ終了で未保存のメモリ内データは失われます。</p>
-<p>実機では、所有者が署名とループバックホストへの信頼できる HTTPS 接続を用意する必要があります。エミュレーターや Simulator の検証は、実機や遠隔ネットワークの検証を意味しません。詳しい手順と現在の検証範囲は<a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">ビルド・接続・検証ガイド</a>を参照してください。このサイトのデスクトップ画面は元の撮影出典を維持しており、モバイル画面ではありません。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="databases.html"><small>前へ</small>データベース</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">文档<b>工具</b></p></div><h1>远程文件与 SSH</h1><p class="desc">浏览和编辑 Amazon S3、Google Cloud Storage、OCI Object Storage、Cloudflare R2、FTP/FTPS 和 SFTP 上的文件，并直接从 SSH 配置打开 SSH 终端。</p><p>在 Kiln 的工作区检查器中，可以浏览对象存储、FTP 服务器和 SFTP 主机，它们与终端、数据库和本地文件并列。远程文件和本地文件在同一个编辑器中打开，OpenSSH 配置里的 SSH 主机可以直接选用。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
+<p>実機では、所有者が署名とループバックホストへの信頼できる HTTPS 接続を用意する必要があります。エミュレーターや Simulator の検証は、実機や遠隔ネットワークの検証を意味しません。詳しい手順と現在の検証範囲は<a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">ビルド・接続・検証ガイド</a>を参照してください。このサイトのデスクトップ画面は元の撮影出典を維持しており、モバイル画面ではありません。</p>
+<h3 id="mobile-verification">2026-11-16 の検証記録</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>範囲</th>
+<th>観察した証拠と残る確認</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ソース</td>
+<td>現在の実装は <code>e94f490</code> です。デスクトップのソースと画面の撮影出典は別に維持します。</td>
+</tr>
+<tr>
+<td>Android と iOS のネイティブ実行</td>
+<td><code>b45beac</code> で作成、明示的な Submit、インストール済み Claude 2.1.325、実際の stdio MCP、一度限りの Allow、正確な完了応答を確認し、各プラットフォームの効果は一回でした。モデル推論はクラウドモデルではなく合成ループバックサービスです。</td>
+</tr>
+<tr>
+<td>最終 iOS 設定と画面幅</td>
+<td><code>e94f490</code> で Effort Level high の Applied・settled と実効値 high を確認し、本文幅は 402px のフレームに一致しました。最終 Android でも high を選択し、変更を明示的に要求して Native confirmation high の表示を確認しました。別の GET による適用状態の確認は未完了です。</td>
+</tr>
+<tr>
+<td>リダイレクトとターミナル</td>
+<td>両ネイティブアプリがリダイレクトを拒否し、転送先への要求と認証付き要求はともに 0 件でした。両プラットフォームで実際の隔離シェルに明示的に入力し、期待する出力を一回確認しました。Android のターミナル証拠は <code>b45beac</code>、iOS は <code>e94f490</code> です。</td>
+</tr>
+<tr>
+<td>残る検証</td>
+<td>以前のモバイル CI は全三ジョブと両ネイティブビルドモードで成功しました。現在のソースの CI、ネイティブ選択画面、再接続・下書き・再送防止、狭い画面とダークテーマの検証は未完了です。実機、署名、物理 IME、公開ネットワークの確認は所有者の作業です。</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="databases.html"><small>前へ</small>データベース</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">文档<b>工具</b></p></div><h1>远程文件与 SSH</h1><p class="desc">浏览和编辑 Amazon S3、Google Cloud Storage、OCI Object Storage、Cloudflare R2、FTP/FTPS 和 SFTP 上的文件，并直接从 SSH 配置打开 SSH 终端。</p><p>在 Kiln 的工作区检查器中，可以浏览对象存储、FTP 服务器和 SFTP 主机，它们与终端、数据库和本地文件并列。远程文件和本地文件在同一个编辑器中打开，OpenSSH 配置里的 SSH 主机可以直接选用。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
 <h2 id="add-a-connection">添加连接</h2>
 <p>在标题栏中选择<strong>工具 → 远程连接</strong>，然后添加一个命名连接。该工具在终端任务旁边打开，不会替换终端任务。</p>
 <div class="table"><table>
@@ -633,7 +726,38 @@
 <h2 id="mobile-companion">手机上的 Kiln Remote</h2>
 <p>Kiln Remote 0.1.0 是与桌面版 Kiln 0.3.0 分开构建的可选 Android/iPhone 配套应用。在电脑上手动启动主机，指定允许访问的工作目录，再使用每次启动生成的 URL 和令牌配对。关闭桌面窗口不会启动主机。此阶段需从源码构建移动安装包，尚无 App Store 或 Play Store 下载。</p>
 <p>您可以打开或创建原生对话、明确发送任务、查看工具输出，并回应详细信息完整的审批请求。命令会插入可编辑的草稿。受支持的设置会显示原生作用范围及待确认或已确认状态，不受支持的设置保持只读。新建任务后，请求内容会保留为草稿，直到您按下 Send。连接中断不会自动重发请求。凭据和草稿仅保留在内存中；Disconnect 会清除连接，退出应用会丢失尚未保存的内存数据。</p>
-<p>使用实体手机时，所有者需要准备签名及通往回环主机的可信 HTTPS 连接。模拟器验证不代表实体设备或远程网络已通过验收。请查看<a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">构建、连接与验证指南</a>，了解具体步骤、当前证据与限制。本站的桌面截图保留原有拍摄来源，并非移动端截图。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="databases.html"><small>上一页</small>数据库</a></nav></article></main>
+<p>使用实体手机时，所有者需要准备签名及通往回环主机的可信 HTTPS 连接。模拟器验证不代表实体设备或远程网络已通过验收。请查看<a href="https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md">构建、连接与验证指南</a>，了解具体步骤、当前证据与限制。本站的桌面截图保留原有拍摄来源，并非移动端截图。</p>
+<h3 id="mobile-verification">2026-11-16 验证记录</h3>
+<div class="table"><table>
+<thead>
+<tr>
+<th>范围</th>
+<th>已观察的证据与待验证项目</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>源码</td>
+<td>当前实现为 <code>e94f490</code>，桌面源码和截图来源仍单独保留。</td>
+</tr>
+<tr>
+<td>Android 与 iOS 原生执行</td>
+<td>在 <code>b45beac</code> 上确认创建、明确 Submit、已安装的 Claude 2.1.325、真实 stdio MCP、一次性 Allow 及准确的完成响应，每个平台各产生一次效果。模型推理使用合成回环服务，并非云端模型。</td>
+</tr>
+<tr>
+<td>最终 iOS 设置与宽度</td>
+<td>在 <code>e94f490</code> 上确认 Effort Level high 为 Applied、settled 且实际值为 high；正文宽度与 402px 框架一致。最终 Android 上也已选择 high 并明确请求变更，界面显示 Native confirmation high；独立 GET 的应用状态验证仍待完成。</td>
+</tr>
+<tr>
+<td>重定向与终端</td>
+<td>两个原生应用均拒绝重定向，目标服务器收到的请求和授权请求均为 0。两个平台均向真实隔离 shell 明确输入，并确认预期输出只出现一次。Android 终端证据来自 <code>b45beac</code>，iOS 来自 <code>e94f490</code>。</td>
+</tr>
+<tr>
+<td>剩余验收</td>
+<td>之前的移动 CI 三个任务及两种原生构建模式均已通过。当前源码 CI、原生选择器、重连与草稿及防重发、窄屏与深色主题矩阵仍待验证。实体设备、签名、物理 IME 和公共网络验收由所有者后续完成。</td>
+</tr>
+</tbody>
+</table></div><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="databases.html"><small>上一页</small>数据库</a></nav></article></main>
   <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
 </div>
 <footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span data-ui="issue">Report an issue</span></a></nav></div></footer>

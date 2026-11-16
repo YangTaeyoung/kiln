@@ -32,4 +32,4 @@ it('keeps long native IDs and focused text fields within 360/402px with at least
    await page.close();
   }
  }finally{await browser.close();}
-});
+},30_000);

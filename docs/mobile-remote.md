@@ -123,7 +123,7 @@ IDs, tokens, raw captures and local paths in ignored private receipts. Verify:
 ### Dated verification: 2026-11-16
 
 The source-only host/app implementation is
-`b45beac78277c5435bc8a0b4a97065563e2fb7c5`.
+`e94f490a0432fe16d77ab9465ac9cea0a7216bb1`.
 This immutable input is distinct from subsequent delivery commits. Desktop source
 and capture provenance remain recorded independently in
 [site source metadata](../site/_build/source.json).
@@ -132,10 +132,18 @@ and capture provenance remain recorded independently in
 | --- | --- |
 | Host/API and synthetic native-provider regression suites | Prior reviewed producer evidence: 17 HTTP + 8 shared tests; final delivery run recorded separately |
 | App behavior | Prior reviewed producer evidence: 33 tests; actual device acceptance is separate |
-| Installed Android + iOS UI, real installed provider CLI and MCP | Controller-owned acceptance in progress; no final PASS claimed here |
+| Installed Android + iOS conversation and MCP | Actual UI Create → explicit Submit → installed Claude 2.1.325 → real stdio MCP → one-time Allow → exact completed echo, with one effect on each platform. Verified at public implementation `b45beac`; later app changes are scoped separately below |
 | Model inference in actual-CLI acceptance | Synthetic loopback inference, explicitly separate from installed CLI/native/MCP execution |
+| Final iOS native setting and phone width | At public implementation `e94f490`, actual Effort Level high returned Applied, settled=true and effective high after the UI test (37.3s, PASS). Rendered main width 402px matched the 402px frame after the input/select fix; the earlier overflow was 459.5px |
+| Final Android native setting | At `e94f490`, actual UI selected Effort Level high and explicitly requested the change; Native confirmation high was rendered. Independent GET settlement verification remains pending |
+| Native redirect refusal | Both platforms refused HTTP 302 at `e94f490`: two requests reached the exact owned redirect listener, zero reached its destination, and zero authorized requests reached that destination |
+| Scoped native terminal effects | Both platforms sent explicit UI input + Enter to a real private `/bin/sh` and observed `REMOTE_TERMINAL_VERIFIED` plus exactly one marker effect. Android verified at `b45beac`; iOS at `e94f490` |
+| Mobile CI packages | Public delivery `21ca116` passed web and both native jobs, including development/production compilation. At `e94f490`, one web phone-layout test exceeded its 5s test deadline while 35 other tests passed; final CI acceptance remains pending. This test deadline is not evidence of a runtime product failure |
+| Remaining actual UI matrix | Native picker, reconnect/draft/no-replay, narrow-width and dark-theme matrix still in progress; individual observed cases above do not complete this gate |
 | Physical phones, signing and trusted remote network | Owner acceptance pending |
 | Cleanup | Controller-owned final exact-allowlist audit pending; three earlier normal Antigravity history entries retain their native cleanup boundary |
 
 No public mobile tag, Store deployment or physical-device acceptance is implied by
-source integration. Update this table only from sanitized actual receipts.
+source integration. The MCP proof predates the final 16px phone inputs, settings
+priority and terminal fallback changes; it is not relabeled as a repeated final-head
+MCP run. Update this table only from sanitized actual receipts.

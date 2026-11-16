@@ -4,10 +4,10 @@
   "note": "0.3.0 published production build source; v0.3.0 resolves to merge 561284352e8e2a520a064f7084994df6ec20dc71 with the same c1b960100acc04ce4f6e87bf422e86cd1e3afff1 tree. Localized agent images remain actual synthetic-data captures of renderer 83ffa78, with presentation equivalence verified against 3e3a136; they are not fresh 6e5fa22 images. Dated verification separates final CI and public artifact checks from native execution, physical IME and incomplete cleanup.",
   "mobile": {
     "version": "0.1.0",
-    "host_source_commit": "b45beac78277c5435bc8a0b4a97065563e2fb7c5",
-    "app_source_commit": "b45beac78277c5435bc8a0b4a97065563e2fb7c5",
+    "host_source_commit": "e94f490a0432fe16d77ab9465ac9cea0a7216bb1",
+    "app_source_commit": "e94f490a0432fe16d77ab9465ac9cea0a7216bb1",
     "verification_date": "2026-11-16",
     "verification": "docs/mobile-remote.md",
-    "note": "Separate mobile implementation inputs. Actual native UI acceptance is controller-owned and pending final receipts; compile and synthetic fixtures do not imply physical-device acceptance. Desktop source/capture provenance above is unchanged."
+    "note": "Separate mobile implementation input. Actual Android/iOS installed Claude CLI and stdio MCP execution was verified at public b45beac with synthetic loopback inference. Final e94f490 iOS effort/402px layout, both native redirect refusal and iOS terminal effects were observed separately; Android high native confirmation was also rendered; its independent GET settlement, picker/reconnect/theme matrix and current-head CI acceptance remain pending. Desktop source/capture provenance above is unchanged; no physical-device acceptance is implied."
   }
 }

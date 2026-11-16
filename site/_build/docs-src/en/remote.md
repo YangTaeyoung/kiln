@@ -135,3 +135,13 @@ Kiln Remote 0.1.0 is an optional Android/iPhone companion built separately from 
 Open or create native conversations, explicitly send tasks, inspect tool output and answer complete approvals. Commands insert an editable draft. Supported controls show their native scope and pending or confirmed state; unsupported controls remain read-only. Creating a task keeps its prompt as a draft until you press Send. Connection loss never automatically repeats a prompt. Credentials and drafts stay in memory; explicit Disconnect clears the connection, and closing the app loses unsaved memory-only data.
 
 For phones, the owner must provision signing and a trusted HTTPS connection to the loopback host. Emulator/Simulator checks do not establish physical-device or remote-network acceptance. See the [build, connection and verification guide](https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md) for exact steps, current evidence and limits. Desktop screenshots on this site retain their original provenance and are not mobile screenshots.
+
+### Verification on 2026-11-16 {#mobile-verification}
+
+| Scope | Observed evidence and remaining checks |
+| --- | --- |
+| Source | Current implementation `e94f490`; desktop source and capture provenance remain separate. |
+| Android and iOS native execution | Create, explicit Submit, installed Claude 2.1.325, real stdio MCP, one-time Allow and exact completed echo each produced one effect at `b45beac`. Model inference used a synthetic loopback service, not a cloud model. |
+| Final iOS setting and layout | At `e94f490`, Effort Level high was Applied and settled with effective high; the rendered main width matched the 402px frame. On final Android, selecting high and explicitly requesting the change rendered Native confirmation high; independent GET settlement verification remains pending. |
+| Redirects and terminals | Both native apps refused the redirect; its destination received zero requests and zero authorized requests. Both platforms sent explicit terminal input to a real private shell and verified the expected output once. Android terminal proof is from `b45beac`, iOS from `e94f490`. |
+| Remaining acceptance | Earlier mobile CI passed all three jobs and both native build modes. Current-source CI, native picker, reconnect/draft/no-replay and narrow/dark-theme matrix remain pending. Physical devices, signing, physical IME and public-network acceptance remain owner tasks. |
