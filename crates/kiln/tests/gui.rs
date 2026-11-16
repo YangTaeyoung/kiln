@@ -84,6 +84,8 @@ fn setup(tag: &str) -> (PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("kg-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(base.join("cfg")).unwrap();
+    // Own the physical fixture root before passing it to nofollow runtime I/O.
+    let base = base.canonical().unwrap();
     std::fs::create_dir_all(base.join("proj/src")).unwrap();
     std::fs::write(base.join("proj/src/main.rs"), "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
     std::fs::write(base.join("proj/README.md"), "# proj\n").unwrap();

@@ -41,7 +41,8 @@ fn pump(h: &mut Harness<'_, KilnApp>, expected: &str) {
 #[test]
 fn direct_agents_and_ssh_open_without_shell_commands_and_survive_gui_restore() {
     let dir = tempfile::tempdir().unwrap();
-    let base = dir.path();
+    // TempDir keeps ownership; runtime I/O uses the physical path past macOS aliases.
+    let base = dir.path().canonical().unwrap();
     let workspace = base.join("parent workspace");
     let bin = base.join("bin");
     for path in [&workspace, &bin] {
