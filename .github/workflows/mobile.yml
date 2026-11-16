@@ -52,6 +52,8 @@ jobs:
           java-version: '21'
       - uses: android-actions/setup-android@v3
         if: matrix.platform == 'android'
+        with:
+          packages: platform-tools
       - name: Install Android compile SDK
         if: matrix.platform == 'android'
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
