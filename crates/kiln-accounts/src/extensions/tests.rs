@@ -1886,8 +1886,9 @@ fn windows_directory_guards_allow_journal_io_but_pin_namespace() {
     state
         .write_new("write-initial", b"old", false)
         .expect("create, write and sync nonempty initial journal stage");
-    std::fs::rename(state.path.join("write-initial"), state.path.join(MANIFEST))
-        .expect("rename initial journal stage with native OS error");
+    state
+        .rename_windows("write-initial", &state, MANIFEST)
+        .expect("rename initial journal stage with native operation and OS error");
     state
         .atomic(MANIFEST, b"new")
         .expect("replace atomic journal write");
@@ -1916,7 +1917,52 @@ fn windows_directory_guards_allow_journal_io_but_pin_namespace() {
         std::fs::read(destination.join("published/asset")).unwrap(),
         b"inert"
     );
+    // Exercise the backup/rollback direction under the same retained guards.
+    root.rename_windows("published", &state, "backup")
+        .expect("move publication to journal backup with native OS error");
+    state
+        .rename_windows("backup", &root, "published")
+        .expect("restore journal backup with native OS error");
+    assert_eq!(
+        std::fs::read(destination.join("published/asset")).unwrap(),
+        b"inert"
+    );
     root.remove("published")
         .expect("remove published tree after child guard closes");
     drop(lock);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_live_directory_guards_deny_write_delete_and_rename() {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        DELETE, FILE_APPEND_DATA, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_WRITE_DATA,
+    };
+    let (_tmp, _source, destination) = fixture();
+    let root = Dir::open(&destination).unwrap();
+    let held = root.dir("held", true).unwrap();
+    // Test an empty directory too: a nonempty-directory rule must not be the
+    // reason that the protected namespace cannot be replaced or retargeted.
+    for populated in [false, true] {
+        if populated {
+            held.write_new("asset", b"inert", false).unwrap();
+        }
+        for access in [FILE_WRITE_DATA, FILE_APPEND_DATA, DELETE] {
+            let result = OpenOptions::new()
+                .access_mode(access)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(&held.path);
+            assert!(
+                result.is_err(),
+                "live directory guard allowed access {access:#x}"
+            );
+        }
+        assert!(std::fs::rename(&held.path, destination.join("moved")).is_err());
+        assert!(root.rename_windows("held", &root, "moved").is_err());
+        assert!(held.path.is_dir());
+        assert!(!destination.join("moved").exists());
+    }
 }

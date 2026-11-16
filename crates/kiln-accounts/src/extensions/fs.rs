@@ -532,9 +532,73 @@ impl Dir {
             to.sync()?;
             Ok(())
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            io(std::fs::rename(self.path.join(from), to.path.join(name)))
+            self.rename_windows(from, to, name)
+                .map_err(|_| "FILESYSTEM_ACCESS")
+        }
+    }
+    #[cfg(windows)]
+    pub(super) fn rename_windows(
+        &self,
+        from: &str,
+        to: &Dir,
+        name: &str,
+    ) -> Result<(), (&'static str, std::io::Error)> {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_RENAME_INFO,
+            FILE_SHARE_READ, FileRenameInfo, SetFileInformationByHandle,
+        };
+        component(from)
+            .and_then(|()| component(name))
+            .map_err(|reason| {
+                (
+                    "validate rename leaf",
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, reason),
+                )
+            })?;
+        // Retain both parent chains and their read-only sharing throughout the
+        // rename. Opening the entry itself must not follow a final reparse point.
+        let source = OpenOptions::new()
+            .access_mode(DELETE)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(self.path.join(from))
+            .map_err(|error| ("open rename source", error))?;
+        let leaf: Vec<u16> = name.encode_utf16().collect();
+        let bytes =
+            std::mem::offset_of!(FILE_RENAME_INFO, FileName) + (leaf.len() + 1) * size_of::<u16>();
+        // usize storage supplies FILE_RENAME_INFO's handle alignment, including
+        // its trailing UTF-16 name. The extra zero unit terminates the name.
+        let mut storage = vec![0usize; bytes.div_ceil(size_of::<usize>())];
+        let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+        // SAFETY: aligned, zero-initialized storage covers the header and name;
+        // both File handles and the buffer remain live until this synchronous call
+        // returns. Only ReplaceIfExists is enabled, not POSIX sharing overrides.
+        let result = unsafe {
+            (*info).Anonymous.ReplaceIfExists = true;
+            (*info).RootDirectory = to.file.as_raw_handle();
+            (*info).FileNameLength = (leaf.len() * size_of::<u16>()) as u32;
+            std::ptr::copy_nonoverlapping(
+                leaf.as_ptr(),
+                std::ptr::addr_of_mut!((*info).FileName).cast::<u16>(),
+                leaf.len(),
+            );
+            SetFileInformationByHandle(
+                source.as_raw_handle(),
+                FileRenameInfo,
+                info.cast(),
+                bytes as u32,
+            )
+        };
+        if result == 0 {
+            Err((
+                "rename relative to guarded destination",
+                std::io::Error::last_os_error(),
+            ))
+        } else {
+            Ok(())
         }
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
