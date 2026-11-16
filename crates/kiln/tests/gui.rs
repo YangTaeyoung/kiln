@@ -154,7 +154,10 @@ fn custom_theme_selection_reload_and_relaunch_preserve_terminal_sessions() {
     let builder = Harness::builder().with_size([1100.0, 760.0]);
     let builder = if render { builder.wgpu() } else { builder };
     let mut h = builder.build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
-    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_session().is_some()
+            && h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())
+    }), "custom theme fixture requires a session with actual terminal output");
     assert_eq!(Theme::current().bg, egui::Color32::from_rgb(0x21,0x11,0x22));
     let session = h.state().debug_focused_session();
     h.state_mut().debug_open_settings(0); h.run_steps(3);
@@ -172,6 +175,12 @@ fn custom_theme_selection_reload_and_relaunch_preserve_terminal_sessions() {
         h.state_mut().debug_queue_action(Action::SetLanguage(original)); h.run_steps(3);
     }
     h.key_press(egui::Key::Escape); h.run_steps(2);
+    let session_unchanged = h.state().debug_focused_session() == session;
+    let screen = h.state().debug_focused_text();
+    let screen_present = screen.is_some();
+    let screen_nonempty = screen.as_ref().is_some_and(|text| !text.trim().is_empty());
+    assert!(session_unchanged && screen_present && screen_nonempty,
+        "custom theme pre-input: session_unchanged={session_unchanged}, screen_present={screen_present}, screen_nonempty={screen_nonempty}");
     h.event(egui::Event::Text("printf '\\033[32mCUSTOM_THEME_MARKER\\033[0m\\n'".into()));
     h.key_press(egui::Key::Enter);
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("CUSTOM_THEME_MARKER"))));
