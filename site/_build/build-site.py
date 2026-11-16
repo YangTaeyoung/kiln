@@ -64,8 +64,10 @@ def build(lang, slug=None):
         soup.main.append(section)
         for el in soup.select('.shot[data-crop]'):
             x,y,w,h = map(float, el['data-crop'].split())
-            el['style'] = f'aspect-ratio:{w*2000}/{h*1257}'
-            el.append(tag('img', src=f"/assets/shots/{el['data-shot']}-{lang}.webp", alt=I18N[lang].get({'agents':'f_agents_t','git':'f_review_t','db':'f_db_t'}.get(el['data-shot'], ''), c['section']), loading='lazy', decoding='async', width='2000', height='1257', style=f'width:{100/w}%;left:{-x/w*100}%;top:{-y/h*100}%'))
+            width,height = docs.SHOT_SIZES.get(el['data-shot'], (2000,1257))
+            alt = docs.AGENT_SHOT_CAPTIONS[lang] if el['data-shot'] == 'agents' else I18N[lang].get({'git':'f_review_t','db':'f_db_t'}.get(el['data-shot'], ''), c['section'])
+            el['style'] = f'aspect-ratio:{w*width}/{h*height}'
+            el.append(tag('img', src=f"/assets/shots/{el['data-shot']}-{lang}.webp", alt=alt, loading='lazy', decoding='async', width=str(width), height=str(height), style=f'width:{100/w}%;left:{-x/w*100}%;top:{-y/h*100}%'))
         video = soup.select_one('#hero-video')
         video['poster'] = f'/assets/hero-poster-{lang}.webp'
         video['preload'] = 'none'
@@ -86,7 +88,7 @@ def build(lang, slug=None):
             el[attr] = path + ('#' + parsed.fragment if parsed.fragment else '')
     for img in soup.select('.shot img'):
         if not img.get('alt'): img['alt'] = docs.UI[lang]['shot']
-        img['width'], img['height'] = '2000', '1257'
+        img['width'], img['height'] = img.get('width', '2000'), img.get('height', '1257')
     for option in soup.select('#lang option'):
         option.attrs.pop('selected', None)
         if option['value'] == lang: option['selected'] = ''

@@ -315,10 +315,11 @@ document.addEventListener("DOMContentLoaded", function () {
   var lang = "en";
   function t(k) { return (I[lang] && I[lang][k] != null) ? I[lang][k] : (I.en[k] != null ? I.en[k] : ""); }
 
-  var SW = 2000, SH = 1257;
   function layoutShot(el) {
     var c = el.dataset.crop.split(" ").map(Number), img = el.querySelector("img");
+    var SW = el.dataset.shot === "agents" ? 2560 : 2000, SH = el.dataset.shot === "agents" ? 1540 : 1257;
     if (!img) { img = document.createElement("img"); img.alt = ""; img.decoding = "async"; el.appendChild(img); }
+    if (el.dataset.shot === "agents") { img.alt = t("shot_agents"); img.width = SW; img.height = SH; }
     el.style.aspectRatio = (c[2] * SW).toFixed(1) + " / " + (c[3] * SH).toFixed(1);
     img.style.width = (100 / c[2]) + "%";
     img.style.left = (-c[0] / c[2] * 100) + "%";

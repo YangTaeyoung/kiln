@@ -18,6 +18,7 @@ GROUPS = [
 ORDER = [s for _, slugs in GROUPS for s in slugs]
 
 SHOTS = {"index": "agents", "workspaces": "agents", "agents": "agents", "terminal": "files", "git": "git", "databases": "db", "editor": "editor", "remote": "remote", "install": "settings"}
+SHOT_SIZES = {"agents": (2560, 1540)}
 GLAZE = ["tenmoku", "celadon", "shino", "kaki"]
 GROUP_OF = {s: g for g, slugs in GROUPS for s in slugs}
 
@@ -30,6 +31,13 @@ UI = {
            "features": "機能", "download": "ダウンロード", "menu": "ページ一覧", "shot": "デモ用ワークスペースで動かした Kiln", "home": "ホーム", "issue": "問題を報告", "releases": "リリース"},
     "zh-CN": {"g_start": "入门", "g_use": "使用 Kiln", "g_tools": "工具", "docs": "文档", "toc": "本页内容", "prev": "上一页", "next": "下一页",
               "features": "功能", "download": "下载", "menu": "页面目录", "shot": "运行演示工作区的 Kiln", "home": "首页", "issue": "报告问题", "releases": "发布"},
+}
+
+AGENT_SHOT_CAPTIONS = {
+    "en": "Claude Code session settings in a synthetic example workspace.",
+    "ko": "합성 예제 워크스페이스의 Claude Code 대화 설정.",
+    "ja": "合成サンプルワークスペースの Claude Code セッション設定。",
+    "zh-CN": "合成示例工作区中的 Claude Code 会话设置。",
 }
 
 
@@ -87,8 +95,13 @@ def page(slug):
         body = render(text)
         if slug in SHOTS:
             gz = GLAZE[(ORDER.index(slug) + 1) % 4]
-            img = (f'<figure class="shot"><div class="plate" data-glaze="{gz}" data-seed="{ORDER.index(slug) * 1.7:.1f}"><img src="../assets/shots/{SHOTS[slug]}-{lang}.webp" alt="" loading="lazy" decoding="async"></div>'
-                   f'<figcaption>{UI[lang]["shot"]}</figcaption></figure>')
+            agent_shot = SHOTS[slug] == "agents"
+            caption = AGENT_SHOT_CAPTIONS[lang] if agent_shot else UI[lang]["shot"]
+            alt = html.escape(caption, quote=True) if agent_shot else ""
+            size = SHOT_SIZES.get(SHOTS[slug])
+            dimensions = f' width="{size[0]}" height="{size[1]}"' if size else ""
+            img = (f'<figure class="shot"><div class="plate" data-glaze="{gz}" data-seed="{ORDER.index(slug) * 1.7:.1f}"><img src="../assets/shots/{SHOTS[slug]}-{lang}.webp" alt="{alt}"{dimensions} loading="lazy" decoding="async"></div>'
+                   f'<figcaption>{caption}</figcaption></figure>')
             body = re.sub(r"(</p>)", r"\1" + img.replace("\\", "\\\\"), body, count=1)
         pn = []
         if prev_slug:

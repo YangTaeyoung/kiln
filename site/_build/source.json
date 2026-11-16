@@ -1,5 +1,5 @@
 {
   "kiln_version": "0.3.0",
-  "source_commit": "af070274b70ffcbb8bc19a945e85b58c825cbdb1",
-  "note": "The product site describes the app as of this commit. Update both fields after reflecting newer changes."
+  "source_commit": "3e3a136cfe2d409fc42879b3f924d0bcd2081f8a",
+  "note": "Production source pin for unpublished 0.3.0. Localized agent screenshots show matching native session settings with synthetic data; they do not establish authenticated execution or publication."
 }
