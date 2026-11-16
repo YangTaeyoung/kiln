@@ -4,7 +4,7 @@ use super::super::{Budget, MAX_DEPTH, TOTAL_FILES};
 use super::{Kind, R, component, io, relative};
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     os::windows::{
         fs::OpenOptionsExt,
         io::{AsRawHandle, FromRawHandle},
@@ -242,6 +242,7 @@ impl Dir {
             };
             dir = dir.dir(name.to_str().ok_or("INVALID_ASSET_PATH")?, false)?;
         }
+        dir.path = path; // Preserve caller provenance; never used for child I/O.
         Ok(dir)
     }
     fn validate(&self) -> std::io::Result<()> {
@@ -479,7 +480,18 @@ impl Dir {
     // Ownership is checked against the same DELETE-capable object that moves.
     // A name replacement between the caller's fingerprint and acquisition must
     // not turn a foreign object into the journal backup.
+    #[cfg(test)]
     pub fn rename_checked(&self, from: &str, to: &Dir, name: &str, expected: &str) -> R<()> {
+        self.rename_checked_in(from, to, name, expected, self)
+    }
+    pub fn rename_checked_in(
+        &self,
+        from: &str,
+        to: &Dir,
+        name: &str,
+        expected: &str,
+        private: &Dir,
+    ) -> R<()> {
         component(from)?;
         component(name)?;
         #[cfg(test)]
@@ -505,12 +517,35 @@ impl Dir {
         to.revalidate()?;
         #[cfg(test)]
         super::windows_tests::before_rename();
+        #[cfg(test)]
+        super::windows_tests::checked_rename_boundary(&self.path, from);
         io(rename_handle(
             object.file(),
             Some(&to.anchor.file),
             name,
             false,
         ))?;
+        // Validate the acquired object AFTER the native move, not its old name
+        // or just its parents. A changed source is never accepted as prepared.
+        if object.verify(expected).is_err() {
+            if to.anchor.identity != private.anchor.identity {
+                // All production callers either move into private state, or
+                // publish/restore from it. Refuse any unrecorded retirement name.
+                if self.anchor.identity != private.anchor.identity {
+                    return Err("PUBLICATION_CONTAINMENT_FAILED");
+                }
+                io(rename_handle(
+                    object.file(),
+                    Some(&private.anchor.file),
+                    from,
+                    false,
+                ))
+                .map_err(|_| "PUBLICATION_CONTAINMENT_FAILED")?;
+                private.sync()?;
+                to.sync()?;
+            }
+            return Err("PUBLICATION_OBJECT_CHANGED");
+        }
         self.sync()?;
         to.sync()
     }
@@ -578,6 +613,7 @@ impl Dir {
     pub fn remove(&self, name: &str) -> R<()> {
         self.remove_impl(name, None)
     }
+    #[cfg(test)]
     pub fn remove_checked(&self, name: &str, expected: &str) -> R<()> {
         self.remove_impl(name, Some(expected))
     }
@@ -614,6 +650,22 @@ enum OwnedSource {
     Directory(Dir),
 }
 impl OwnedSource {
+    fn verify(&self, expected: &str) -> R<()> {
+        let actual = match self {
+            Self::File(file) => {
+                super::super::Snapshot::one(read_file(file, super::super::FILE_BYTES)?)
+                    .fingerprint()
+            }
+            Self::Directory(dir) => {
+                dir.revalidate()?;
+                super::super::scan::snapshot_open_directory(dir)?.fingerprint()
+            }
+        };
+        if actual != expected {
+            return Err("CONCURRENT_PROFILE_EDIT");
+        }
+        Ok(())
+    }
     fn file(&self) -> &File {
         match self {
             Self::File(f) => f,
@@ -621,7 +673,7 @@ impl OwnedSource {
         }
     }
 }
-fn read_file(file: &File, limit: usize) -> R<Vec<u8>> {
+fn read_file(mut file: &File, limit: usize) -> R<Vec<u8>> {
     if io(kind(file))? != Kind::File {
         return Err("SPECIAL_FILE");
     }
@@ -629,6 +681,7 @@ fn read_file(file: &File, limit: usize) -> R<Vec<u8>> {
     if before.len() > limit as u64 {
         return Err("FILE_SIZE_LIMIT");
     }
+    io(file.seek(SeekFrom::Start(0)))?;
     let mut bytes = Vec::new();
     io(file
         .take(limit.saturating_add(1) as u64)
@@ -654,7 +707,8 @@ fn rename_handle(
         }
     }
     let leaf: Vec<u16> = name.encode_utf16().collect();
-    let bytes = std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName) + leaf.len() * 2;
+    let bytes = (std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName) + leaf.len() * 2)
+        .max(size_of::<FILE_RENAME_INFORMATION>());
     let mut storage = vec![
         0usize;
         bytes
@@ -809,6 +863,151 @@ impl Mutation {
             }
         }
     }
+}
+
+pub(super) struct CleanupNode {
+    pub path: String,
+    object: OwnedSource,
+}
+impl CleanupNode {
+    pub fn directory(&self) -> R<bool> {
+        let directory = matches!(self.object, OwnedSource::Directory(_));
+        if io(kind(self.object.file()))? != if directory { Kind::Dir } else { Kind::File } {
+            return Err("CLEANUP_OWNERSHIP_CHANGED");
+        }
+        Ok(directory)
+    }
+    pub fn identity(&self) -> R<(u32, u64, u64)> {
+        let info = io(information(self.object.file()))?;
+        let (volume, index) = identity(&info);
+        Ok((
+            volume,
+            index,
+            (u64::from(info.ftCreationTime.dwHighDateTime) << 32)
+                | u64::from(info.ftCreationTime.dwLowDateTime),
+        ))
+    }
+    pub fn bytes(&self) -> R<Vec<u8>> {
+        read_file(self.object.file(), super::super::FILE_BYTES)
+    }
+    pub fn dispose(self) -> R<()> {
+        match self.object {
+            OwnedSource::File(file) => dispose(file),
+            OwnedSource::Directory(dir) => {
+                dir.revalidate()?;
+                let anchor =
+                    Arc::try_unwrap(dir.anchor).map_err(|_| "MUTATION_HANDLE_STILL_SHARED")?;
+                dispose(anchor.file)
+            }
+        }
+    }
+}
+impl Mutation {
+    fn flatten(self, path: String, out: &mut Vec<CleanupNode>) {
+        match self {
+            Self::File(file) => out.push(CleanupNode {
+                path,
+                object: OwnedSource::File(file),
+            }),
+            Self::Directory(dir, children) => {
+                for (name, child) in children {
+                    child.flatten(
+                        if path.is_empty() {
+                            name
+                        } else {
+                            format!("{path}/{name}")
+                        },
+                        out,
+                    );
+                }
+                out.push(CleanupNode {
+                    path,
+                    object: OwnedSource::Directory(dir),
+                });
+            }
+        }
+    }
+}
+impl Dir {
+    pub(super) fn cleanup_nodes(
+        &self,
+        name: &str,
+        budget: &Budget,
+        whole_fingerprint: bool,
+    ) -> R<Option<(Option<String>, Vec<CleanupNode>)>> {
+        component(name)?;
+        let file = match self.child(name, DELETE | FILE_READ_DATA, FILE_SHARE_READ, FILE_OPEN, 0) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err("CLEANUP_OWNERSHIP_CHANGED"),
+        };
+        let tree = Mutation::acquire(self, name, file, 0, &mut 0, budget)?;
+        let fingerprint = if whole_fingerprint {
+            Some(tree.snapshot(budget)?.fingerprint())
+        } else {
+            None
+        };
+        let mut nodes = Vec::new();
+        tree.flatten(String::new(), &mut nodes);
+        Ok(Some((fingerprint, nodes)))
+    }
+}
+
+pub(super) fn registry_relative(root: &Path, path: &Path) -> R<String> {
+    fn parts(path: &Path) -> R<(Prefix<'_>, Vec<String>)> {
+        if !path.is_absolute() {
+            return Err("EXTERNAL_PLUGIN_ROOT");
+        }
+        let mut parts = path.components();
+        let Some(Component::Prefix(prefix)) = parts.next() else {
+            return Err("EXTERNAL_PLUGIN_ROOT");
+        };
+        if !matches!(
+            prefix.kind(),
+            Prefix::Disk(_) | Prefix::VerbatimDisk(_) | Prefix::UNC(..) | Prefix::VerbatimUNC(..)
+        ) {
+            return Err("EXTERNAL_PLUGIN_ROOT");
+        }
+        if !matches!(parts.next(), Some(Component::RootDir)) {
+            return Err("EXTERNAL_PLUGIN_ROOT");
+        }
+        let mut names = Vec::new();
+        for part in parts {
+            let Component::Normal(name) = part else {
+                return Err("INVALID_ASSET_PATH");
+            };
+            let name = name.to_str().ok_or("INVALID_ASSET_PATH")?;
+            component(name)?;
+            names.push(name.to_owned());
+        }
+        Ok((prefix.kind(), names))
+    }
+    let (a, root_names) = parts(root)?;
+    let (b, path_names) = parts(path)?;
+    let same_root = match (a, b) {
+        (Prefix::Disk(a) | Prefix::VerbatimDisk(a), Prefix::Disk(b) | Prefix::VerbatimDisk(b)) => {
+            a.eq_ignore_ascii_case(&b)
+        }
+        (
+            Prefix::UNC(a, b) | Prefix::VerbatimUNC(a, b),
+            Prefix::UNC(c, d) | Prefix::VerbatimUNC(c, d),
+        ) => {
+            let strings = [a, b, c, d].map(|s| s.to_str().ok_or("INVALID_ASSET_PATH"));
+            let [a, b, c, d] = strings;
+            a?.eq_ignore_ascii_case(c?) && b?.eq_ignore_ascii_case(d?)
+        }
+        _ => false,
+    };
+    if !same_root
+        || path_names.len() <= root_names.len()
+        || !root_names
+            .iter()
+            .zip(&path_names)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    {
+        return Err("EXTERNAL_PLUGIN_ROOT");
+    }
+    Ok(path_names[root_names.len()..].join("/"))
 }
 
 pub(super) fn scan_page(status: NTSTATUS, bytes: usize, capacity: usize) -> R<bool> {

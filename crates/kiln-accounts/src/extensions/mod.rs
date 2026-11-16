@@ -235,7 +235,7 @@ struct Manifest {
     root: String,
     entries: BTreeMap<String, Entry>,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Intent {
     entry: Entry,
@@ -244,6 +244,8 @@ struct Intent {
     stage: String,
     #[serde(default)]
     backup: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    cleanup_complete: Vec<String>,
 }
 #[derive(Clone)]
 struct FileData {
@@ -876,7 +878,10 @@ fn reconcile_one(
         after,
         stage: stage.clone(),
         backup: format!("backup-{}", nonce()),
+        cleanup_complete: Vec::new(),
     };
+    #[cfg(windows)]
+    let mut intent = intent;
     state.atomic(
         "intent.json",
         &serde_json::to_vec(&intent).map_err(|_| "INVALID_MANIFEST")?,
@@ -891,23 +896,26 @@ fn reconcile_one(
             state.swap(&stage, &p, &n)?;
             #[cfg(not(any(target_os = "macos", target_os = "linux")))]
             {
-                p.rename_checked(
+                p.rename_checked_in(
                     &n,
                     state,
                     &intent.backup,
                     before.as_deref().ok_or("CORRUPT_INTENT")?,
+                    state,
                 )?;
-                if let Err(e) = state.rename_checked(
+                if let Err(e) = state.rename_checked_in(
                     &stage,
                     &p,
                     &n,
                     intent.after.as_deref().ok_or("CORRUPT_INTENT")?,
+                    state,
                 ) {
-                    let _ = state.rename_checked(
+                    let _ = state.rename_checked_in(
                         &intent.backup,
                         &p,
                         &n,
                         before.as_deref().ok_or("CORRUPT_INTENT")?,
+                        state,
                     );
                     return Err(e);
                 }
@@ -915,22 +923,24 @@ fn reconcile_one(
         }
         (false, true) => {
             #[cfg(windows)]
-            state.rename_checked(
+            state.rename_checked_in(
                 &stage,
                 &p,
                 &n,
                 intent.after.as_deref().ok_or("CORRUPT_INTENT")?,
+                state,
             )?;
             #[cfg(not(windows))]
             state.rename(&stage, &p, &n)?;
         }
         (true, false) => {
             #[cfg(windows)]
-            p.rename_checked(
+            p.rename_checked_in(
                 &n,
                 state,
                 &intent.backup,
                 before.as_deref().ok_or("CORRUPT_INTENT")?,
+                state,
             )?;
             #[cfg(not(windows))]
             p.rename(&n, state, &intent.backup)?;
@@ -940,7 +950,7 @@ fn reconcile_one(
     m.entries.insert(key, intent.entry.clone());
     persist(state, m)?;
     #[cfg(windows)]
-    cleanup_windows_intent(state, &intent)?;
+    cleanup_windows_intent(state, &mut intent)?;
     #[cfg(not(windows))]
     {
         state.remove("intent.json")?;
@@ -959,12 +969,16 @@ fn recover(root: &Dir, state: &Dir, m: &mut Manifest) -> R<()> {
     }
     let (bytes, _) = state.read("intent.json", METADATA_BYTES)?;
     let intent: Intent = serde_json::from_slice(&bytes).map_err(|_| "CORRUPT_INTENT")?;
+    #[cfg(windows)]
+    let mut intent = intent;
     intent.entry.target.valid()?;
     fs::component(&intent.stage)?;
     fs::component(&intent.backup)?;
     if !intent.stage.starts_with("asset-") || !intent.backup.starts_with("backup-") {
         return Err("CORRUPT_INTENT");
     }
+    #[cfg(windows)]
+    validate_cleanup_phase(state, &intent)?;
     let now = physical(root, &intent.entry.target)?;
     if now == intent.after {
         let (parent, _) = root.parent(&intent.entry.target.path, false)?;
@@ -976,11 +990,12 @@ fn recover(root: &Dir, state: &Dir, m: &mut Manifest) -> R<()> {
     } else if now.is_none() && intent.before.is_some() && state.kind(&intent.backup)?.is_some() {
         let (p, n) = root.parent(&intent.entry.target.path, true)?;
         #[cfg(windows)]
-        state.rename_checked(
+        state.rename_checked_in(
             &intent.backup,
             &p,
             &n,
             intent.before.as_deref().ok_or("CORRUPT_INTENT")?,
+            state,
         )?;
         #[cfg(not(windows))]
         state.rename(&intent.backup, &p, &n)?;
@@ -999,7 +1014,7 @@ fn recover(root: &Dir, state: &Dir, m: &mut Manifest) -> R<()> {
         persist(state, m)?;
     }
     #[cfg(windows)]
-    cleanup_windows_intent(state, &intent)?;
+    cleanup_windows_intent(state, &mut intent)?;
     #[cfg(not(windows))]
     {
         state.remove("intent.json")?;
@@ -1009,16 +1024,48 @@ fn recover(root: &Dir, state: &Dir, m: &mut Manifest) -> R<()> {
     Ok(())
 }
 #[cfg(windows)]
-fn cleanup_windows_intent(state: &Dir, intent: &Intent) -> R<()> {
-    for (name, expected) in [
-        (&intent.stage, &intent.after),
-        (&intent.backup, &intent.before),
-    ] {
+fn validate_cleanup_phase(state: &Dir, intent: &Intent) -> R<()> {
+    let names = [&intent.stage, &intent.backup];
+    if intent.cleanup_complete.len() > names.len()
+        || !intent
+            .cleanup_complete
+            .iter()
+            .zip(names)
+            .all(|(a, b)| a == b)
+    {
+        return Err("CORRUPT_INTENT");
+    }
+    for name in &intent.cleanup_complete {
         if state.kind(name)?.is_some() {
-            state.remove_checked(name, expected.as_deref().ok_or("CORRUPT_INTENT")?)?;
+            return Err("CLEANUP_COMPLETED_TARGET_REAPPEARED");
         }
     }
-    // A failed ownership check or supported flush preserves the recovery intent.
+    Ok(())
+}
+#[cfg(windows)]
+fn cleanup_windows_intent(state: &Dir, intent: &mut Intent) -> R<()> {
+    let mut authorization = intent.clone();
+    authorization.cleanup_complete.clear();
+    let bytes = serde_json::to_vec(&authorization).map_err(|_| "CORRUPT_INTENT")?;
+    let targets = [
+        (intent.stage.clone(), intent.after.clone()),
+        (intent.backup.clone(), intent.before.clone()),
+    ];
+    validate_cleanup_phase(state, intent)?;
+    for (name, expected) in &targets {
+        if !intent.cleanup_complete.contains(name) {
+            fs::windows_cleanup::finish_one(state, &bytes, name, expected.as_deref())?;
+            intent.cleanup_complete.push(name.clone());
+            // Completion is durable before metadata retirement. Reappearing data
+            // is thereafter foreign even if its bytes equal the old fingerprint.
+            state.atomic(
+                "intent.json",
+                &serde_json::to_vec(intent).map_err(|_| "CORRUPT_INTENT")?,
+            )?;
+        }
+        fs::windows_cleanup::retire(state, &bytes, name, expected.as_deref())?;
+    }
+    fs::windows_cleanup::ensure_retired(state)?;
     state.remove("intent.json")
 }
 #[cfg(test)]

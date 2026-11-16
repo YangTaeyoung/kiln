@@ -686,6 +686,7 @@ fn crash_recovery_preserves_old_new_and_concurrent_local_states() {
             after,
             stage: stage.into(),
             backup: backup.into(),
+            cleanup_complete: Vec::new(),
         };
         state
             .atomic("intent.json", &serde_json::to_vec(&intent).unwrap())
@@ -1053,7 +1054,8 @@ fn explicit_marketplace_declarations_are_not_silently_reinterpreted() {
     assert!(!dest.join("plugins/cache/test-market").exists());
     assert!(
         dest.join("plugins/cache/other-market/other/1.0.0/.claude-plugin/plugin.json")
-            .exists()
+            .exists(),
+        "{report:?}"
     );
     assert!(dest.join("skills/unrelated/SKILL.md").exists());
     assert_eq!(
@@ -1319,7 +1321,11 @@ fn review_r2_claude_version_override_deletion_and_catalog_pointer_stay_effective
     for deleted in [false, true] {
         let (_tmp, source, dest) = fixture();
         plugin_fixture(&source);
-        reconcile(Tool::Claude, &source, &dest);
+        let initial_report = reconcile(Tool::Claude, &source, &dest);
+        assert!(
+            !initial_report.entries.iter().any(|e| e.state == "failed"),
+            "initial preparation: {initial_report:?}"
+        );
         let registry = fs::read(dest.join("plugins/installed_plugins.json")).unwrap();
         let catalog =
             fs::read(dest.join("plugins/marketplaces/test-market/.claude-plugin/marketplace.json"))
@@ -1392,7 +1398,11 @@ fn review_r2_immutable_versions_are_retained_and_source_removal_disables_next_la
     );
     let (_tmp, source, dest) = fixture();
     plugin_fixture(&source);
-    reconcile(Tool::Claude, &source, &dest);
+    let initial_report = reconcile(Tool::Claude, &source, &dest);
+    assert!(
+        !initial_report.entries.iter().any(|e| e.state == "failed"),
+        "initial preparation: {initial_report:?}"
+    );
     claude_version(&source, "2.0.0");
     reconcile(Tool::Claude, &source, &dest);
     assert!(
@@ -1597,7 +1607,11 @@ fn review_r2_source_disappearance_preserves_private_plugin_intent() {
                 "config.toml",
             )
         };
-        reconcile(tool, &source, &dest);
+        let initial_report = reconcile(tool, &source, &dest);
+        assert!(
+            !initial_report.entries.iter().any(|e| e.state == "failed"),
+            "initial preparation: {initial_report:?}"
+        );
         put(&dest, payload, "private edit");
         let before = fs::read(dest.join(metadata)).unwrap();
         fs::remove_dir_all(source.join("plugins")).unwrap();
@@ -1623,7 +1637,11 @@ fn review_r2_source_disappearance_preserves_private_plugin_intent() {
 fn fix2_r2_directory_override_keeps_shared_bindings_after_source_disappears() {
     let (_tmp, source, dest) = fixture();
     plugin_fixture(&source);
-    reconcile(Tool::Claude, &source, &dest);
+    let initial_report = reconcile(Tool::Claude, &source, &dest);
+    assert!(
+        !initial_report.entries.iter().any(|e| e.state == "failed"),
+        "initial preparation: {initial_report:?}"
+    );
     let payload = "plugins/marketplaces/test-market/inert/skills/plugin-proof/SKILL.md";
     put(&dest, payload, "private directory override");
     let paths = [
@@ -1684,7 +1702,11 @@ fn fix2_r2_removed_protected_catalog_entry_merges_with_unrelated_source_update()
         "settings.json",
         r#"{"enabledPlugins":{"inert@test-market":true,"other@test-market":true}}"#,
     );
-    reconcile(Tool::Claude, &source, &dest);
+    let initial_report = reconcile(Tool::Claude, &source, &dest);
+    assert!(
+        !initial_report.entries.iter().any(|e| e.state == "failed"),
+        "initial preparation: {initial_report:?}"
+    );
     put(
         &dest,
         "plugins/marketplaces/test-market/inert/skills/plugin-proof/SKILL.md",
@@ -2047,6 +2069,7 @@ fn windows_recovery_collision_keeps_intent_backup_and_foreign_destination() {
             after: Some(snap.fingerprint()),
             stage: "asset-collision".into(),
             backup: "backup-collision".into(),
+            cleanup_complete: Vec::new(),
         };
         state
             .atomic("intent.json", &serde_json::to_vec(&intent).unwrap())

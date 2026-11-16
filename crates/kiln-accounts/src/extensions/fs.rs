@@ -56,6 +56,32 @@ pub(super) fn relative(s: &str) -> R<()> {
     }
     Ok(())
 }
+// Registry paths are native absolute paths; the importer uses portable '/'
+// components. This conversion is lexical and never follows a filesystem link.
+pub(super) fn registry_relative(root: &Path, path: &Path) -> R<String> {
+    #[cfg(windows)]
+    {
+        windows::registry_relative(root, path)
+    }
+    #[cfg(not(windows))]
+    {
+        let rel = path
+            .strip_prefix(root)
+            .map_err(|_| "EXTERNAL_PLUGIN_ROOT")?;
+        let mut names = Vec::new();
+        for part in rel.components() {
+            let Component::Normal(name) = part else {
+                return Err("INVALID_ASSET_PATH");
+            };
+            let name = name.to_str().ok_or("INVALID_ASSET_PATH")?;
+            component(name)?;
+            names.push(name);
+        }
+        let rel = names.join("/");
+        relative(&rel)?;
+        Ok(rel)
+    }
+}
 #[cfg(unix)]
 fn c(s: &std::ffi::OsStr) -> R<std::ffi::CString> {
     std::ffi::CString::new(s.as_bytes()).map_err(|_| "INVALID_ASSET_PATH")
@@ -514,3 +540,6 @@ pub(super) use windows::Dir;
 
 #[cfg(all(test, windows))]
 mod windows_tests;
+
+#[cfg(windows)]
+pub(super) mod windows_cleanup;

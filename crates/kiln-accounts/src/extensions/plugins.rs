@@ -253,16 +253,11 @@ pub(super) fn claude(
                 )?;
                 boolean(record, "auto")?;
                 let path = Path::new(text(record, "installPath")?);
-                let rel = path
-                    .strip_prefix(&root.path)
-                    .map_err(|_| "EXTERNAL_PLUGIN_ROOT")?
-                    .to_str()
-                    .ok_or("INVALID_ASSET_PATH")?;
-                fs::relative(rel)?;
+                let rel = fs::registry_relative(&root.path, path)?;
                 if !rel.starts_with("cache/") {
                     return Err("EXTERNAL_PLUGIN_ROOT");
                 }
-                let (p, n) = root.parent(rel, false)?;
+                let (p, n) = root.parent(&rel, false)?;
                 let snapshot = snapshot(&p, &n, true, b, true)?;
                 validate_portable(&snapshot, &source.path)?;
                 let mut manifest = validate_bundle(&snapshot)?;
@@ -278,12 +273,7 @@ pub(super) fn claude(
                     .ok_or("UNSAFE_MARKETPLACE_METADATA")?;
                 validate_market_source(source_descriptor)?;
                 let location = Path::new(text(market_record, "installLocation")?);
-                let market_rel = location
-                    .strip_prefix(&root.path)
-                    .map_err(|_| "EXTERNAL_PLUGIN_ROOT")?
-                    .to_str()
-                    .ok_or("INVALID_ASSET_PATH")?;
-                fs::relative(market_rel)?;
+                let market_rel = fs::registry_relative(&root.path, location)?;
                 if !market_rel.starts_with("marketplaces/") {
                     return Err("EXTERNAL_PLUGIN_ROOT");
                 }
@@ -382,7 +372,11 @@ pub(super) fn claude(
                     .ok_or("UNSAFE_MARKETPLACE_METADATA")?;
                 fs::relative(plugin_source)?;
                 let market_payload = if source_descriptor["source"] == "directory" {
-                    if text(source_descriptor, "path")? != text(market_record, "installLocation")? {
+                    if fs::registry_relative(
+                        &root.path,
+                        Path::new(text(source_descriptor, "path")?),
+                    )? != market_rel
+                    {
                         return Err("EXTERNAL_PLUGIN_ROOT");
                     }
                     let relative = format!("{market_rel}/{plugin_source}");
