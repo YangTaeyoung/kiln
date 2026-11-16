@@ -545,10 +545,28 @@ impl Dir {
         to: &Dir,
         name: &str,
     ) -> Result<(), (&'static str, std::io::Error)> {
+        self.rename_windows_native(from, Some(to), name)
+    }
+    #[cfg(windows)]
+    pub(super) fn rename_windows_native(
+        &self,
+        from: &str,
+        to: Option<&Dir>,
+        name: &str,
+    ) -> Result<(), (&'static str, std::io::Error)> {
         use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
-        use windows_sys::Win32::Storage::FileSystem::{
-            DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_RENAME_INFO,
-            FILE_SHARE_READ, FileRenameInfo, SetFileInformationByHandle,
+        use windows_sys::{
+            Wdk::Storage::FileSystem::{
+                FILE_RENAME_INFORMATION, FileRenameInformation, NtSetInformationFile,
+            },
+            Win32::{
+                Foundation::RtlNtStatusToDosError,
+                Storage::FileSystem::{
+                    DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+                    FILE_SHARE_READ,
+                },
+                System::IO::IO_STATUS_BLOCK,
+            },
         };
         component(from)
             .and_then(|()| component(name))
@@ -567,35 +585,40 @@ impl Dir {
             .open(self.path.join(from))
             .map_err(|error| ("open rename source", error))?;
         let leaf: Vec<u16> = name.encode_utf16().collect();
-        let bytes =
-            std::mem::offset_of!(FILE_RENAME_INFO, FileName) + (leaf.len() + 1) * size_of::<u16>();
-        // usize storage supplies FILE_RENAME_INFO's handle alignment, including
+        let bytes = size_of::<FILE_RENAME_INFORMATION>() + (leaf.len() + 1) * size_of::<u16>();
+        // usize storage supplies FILE_RENAME_INFORMATION's handle alignment, including
         // its trailing UTF-16 name. The extra zero unit terminates the name.
         let mut storage = vec![0usize; bytes.div_ceil(size_of::<usize>())];
-        let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
-        // SAFETY: aligned, zero-initialized storage covers the header and name;
-        // both File handles and the buffer remain live until this synchronous call
-        // returns. Only ReplaceIfExists is enabled, not POSIX sharing overrides.
-        let result = unsafe {
+        let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+        let mut io_status = IO_STATUS_BLOCK::default();
+        // SAFETY: aligned, zero-initialized storage covers the header and name.
+        // The source has no FILE_FLAG_OVERLAPPED: its I/O calls block until complete,
+        // so both handles, the buffer and IO_STATUS_BLOCK outlive the operation.
+        // Only ReplaceIfExists is enabled, not POSIX sharing overrides. A NULL root
+        // with a validated leaf renames within the source's existing parent.
+        let status = unsafe {
             (*info).Anonymous.ReplaceIfExists = true;
-            (*info).RootDirectory = to.file.as_raw_handle();
+            (*info).RootDirectory = to.map_or(std::ptr::null_mut(), |dir| dir.file.as_raw_handle());
             (*info).FileNameLength = (leaf.len() * size_of::<u16>()) as u32;
             std::ptr::copy_nonoverlapping(
                 leaf.as_ptr(),
                 std::ptr::addr_of_mut!((*info).FileName).cast::<u16>(),
                 leaf.len(),
             );
-            SetFileInformationByHandle(
+            NtSetInformationFile(
                 source.as_raw_handle(),
-                FileRenameInfo,
+                &mut io_status,
                 info.cast(),
                 bytes as u32,
+                FileRenameInformation,
             )
         };
-        if result == 0 {
+        if status < 0 {
+            // Native calls return NTSTATUS; GetLastError does not describe them.
+            let error = unsafe { RtlNtStatusToDosError(status) };
             Err((
-                "rename relative to guarded destination",
-                std::io::Error::last_os_error(),
+                "NtSetInformationFile rename",
+                std::io::Error::from_raw_os_error(error as i32),
             ))
         } else {
             Ok(())

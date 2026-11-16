@@ -1962,7 +1962,66 @@ fn windows_live_directory_guards_deny_write_delete_and_rename() {
         }
         assert!(std::fs::rename(&held.path, destination.join("moved")).is_err());
         assert!(root.rename_windows("held", &root, "moved").is_err());
+        assert!(root.rename_windows_native("held", None, "moved").is_err());
         assert!(held.path.is_dir());
         assert!(!destination.join("moved").exists());
     }
+}
+
+#[cfg(windows)]
+fn assert_windows_native_same_directory_rename(retained_root: bool) {
+    let (_tmp, _source, destination) = fixture();
+    let root = Dir::open(&destination).unwrap();
+    let state = root.dir(STATE, true).unwrap();
+    let to = retained_root.then_some(&state);
+    state.write_new("initial", b"old", false).unwrap();
+    state
+        .rename_windows_native("initial", to, "manifest-가.json")
+        .expect("native same-directory initial rename: operation and OS error");
+    assert!(!state.path.join("initial").exists());
+    assert_eq!(state.read("manifest-가.json", 10).unwrap().0, b"old");
+    state.write_new("replacement", b"new", false).unwrap();
+    state
+        .rename_windows_native("replacement", to, "manifest-가.json")
+        .expect("native same-directory replacement: operation and OS error");
+    assert_eq!(state.read("manifest-가.json", 10).unwrap().0, b"new");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_native_same_directory_rename_with_null_root() {
+    assert_windows_native_same_directory_rename(false);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_native_same_directory_rename_with_retained_root() {
+    assert_windows_native_same_directory_rename(true);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_native_cross_directory_rename_with_retained_root() {
+    let (_tmp, _source, destination) = fixture();
+    let root = Dir::open(&destination).unwrap();
+    let state = root.dir(STATE, true).unwrap();
+    let stage = state.dir("stage", true).unwrap();
+    stage.write_new("asset", b"inert", false).unwrap();
+    drop(stage);
+    state
+        .rename_windows("stage", &root, "published")
+        .expect("native cross-directory publication: operation and OS error");
+    assert_eq!(
+        std::fs::read(destination.join("published/asset")).unwrap(),
+        b"inert"
+    );
+    root.rename_windows("published", &state, "backup")
+        .expect("native cross-directory backup: operation and OS error");
+    state
+        .rename_windows("backup", &root, "published")
+        .expect("native cross-directory rollback: operation and OS error");
+    assert_eq!(
+        std::fs::read(destination.join("published/asset")).unwrap(),
+        b"inert"
+    );
 }
