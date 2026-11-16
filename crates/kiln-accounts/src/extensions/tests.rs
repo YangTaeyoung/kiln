@@ -1881,9 +1881,13 @@ fn windows_directory_guards_allow_journal_io_but_pin_namespace() {
         .write_new("lock", b"", false)
         .expect("create lock file");
     let lock = state.lock("lock").expect("lock journal");
+    // Split the first atomic write so native CI identifies the exact failing
+    // boundary instead of losing the OS error through the public reason code.
     state
-        .atomic(MANIFEST, b"old")
-        .expect("initial atomic journal write");
+        .write_new("write-initial", b"old", false)
+        .expect("create, write and sync nonempty initial journal stage");
+    std::fs::rename(state.path.join("write-initial"), state.path.join(MANIFEST))
+        .expect("rename initial journal stage with native OS error");
     state
         .atomic(MANIFEST, b"new")
         .expect("replace atomic journal write");
