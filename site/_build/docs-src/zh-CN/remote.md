@@ -127,3 +127,11 @@ Kiln 只读取 SSH 配置，不会运行 SSH 命令、`Match exec`、身份验�
 
 - SFTP 和 SSH 使用 Windows OpenSSH，SSH 配置中的 `C:\…` 路径可以照原样使用。
 - 以 `.cmd` 包装脚本形式安装的云 CLI 会通过 `PATHEXT` 找到，gcloud 和 Wrangler 的文件夹遵循 `%APPDATA%`。
+
+## 手机上的 Kiln Remote {#mobile-companion}
+
+Kiln Remote 0.1.0 是与桌面版 Kiln 0.3.0 分开构建的可选 Android/iPhone 配套应用。在电脑上手动启动主机，指定允许访问的工作目录，再使用每次启动生成的 URL 和令牌配对。关闭桌面窗口不会启动主机。此阶段需从源码构建移动安装包，尚无 App Store 或 Play Store 下载。
+
+您可以打开或创建原生对话、明确发送任务、查看工具输出，并回应详细信息完整的审批请求。命令会插入可编辑的草稿。受支持的设置会显示原生作用范围及待确认或已确认状态，不受支持的设置保持只读。新建任务后，请求内容会保留为草稿，直到您按下 Send。连接中断不会自动重发请求。凭据和草稿仅保留在内存中；Disconnect 会清除连接，退出应用会丢失尚未保存的内存数据。
+
+使用实体手机时，所有者需要准备签名及通往回环主机的可信 HTTPS 连接。模拟器验证不代表实体设备或远程网络已通过验收。请查看[构建、连接与验证指南](https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md)，了解具体步骤、当前证据与限制。本站的桌面截图保留原有拍摄来源，并非移动端截图。

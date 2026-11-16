@@ -4,6 +4,8 @@ Native iPhone and Android companion, app ID `dev.kiln.remote`. Requires the sepa
 
 ## Build
 
+For isolated portable artifact builds use [the delivery scripts](../../docs/mobile-remote.md#reproducible-packages).
+
 Node 22+, Xcode 26+, Android SDK 36 and JDK 21 are required by Capacitor 8.6.2. Install dependencies with `npm ci`. Run `npm test` and `npm run build` for client verification. `npm run native:sync` builds the HTTPS-only production bundle and copies it to both native projects. Open `ios/App/App.xcodeproj`, scheme `App`, or build `android` with `JAVA_HOME` pointing to a local JDK 21 and `ANDROID_HOME` to your SDK. No machine-local SDK path is committed.
 
 For emulator/simulator development only, `npm run native:dev` builds a bundle permitting HTTP for `localhost`, `127.0.0.1` and Android's `10.0.2.2`. Android's Debug resource limits cleartext to those names; Release denies cleartext. iOS Debug uses `Info.Debug.plist` for localhost/local networking; Release uses `Info.plist` without ATS exceptions. Certificate validation is never disabled. Before a release, run `npm run native:sync` to replace development assets, then compile Release. Never ship the development bundle.

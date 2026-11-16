@@ -127,3 +127,11 @@ Edit a saved connection to replace its credentials.
 
 - SFTP and SSH use Windows OpenSSH, and `C:\…` paths in your SSH config work as written.
 - Cloud CLIs installed as `.cmd` shims are found through `PATHEXT`, and the gcloud and Wrangler folders follow `%APPDATA%`.
+
+## Kiln Remote for phones {#mobile-companion}
+
+Kiln Remote 0.1.0 is an optional Android/iPhone companion built separately from desktop Kiln 0.3.0. Start the host manually on your computer, allow specific workspaces and pair using its per-launch URL and token. Closing the desktop window does not start the host. Mobile packages are built from source; there is no App Store or Play Store download in this stage.
+
+Open or create native conversations, explicitly send tasks, inspect tool output and answer complete approvals. Commands insert an editable draft. Supported controls show their native scope and pending or confirmed state; unsupported controls remain read-only. Creating a task keeps its prompt as a draft until you press Send. Connection loss never automatically repeats a prompt. Credentials and drafts stay in memory; explicit Disconnect clears the connection, and closing the app loses unsaved memory-only data.
+
+For phones, the owner must provision signing and a trusted HTTPS connection to the loopback host. Emulator/Simulator checks do not establish physical-device or remote-network acceptance. See the [build, connection and verification guide](https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md) for exact steps, current evidence and limits. Desktop screenshots on this site retain their original provenance and are not mobile screenshots.

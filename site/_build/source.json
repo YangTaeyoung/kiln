@@ -1,5 +1,13 @@
 {
   "kiln_version": "0.3.0",
   "source_commit": "6e5fa22943bf7325446b0fa94b0a32afb590cf33",
-  "note": "0.3.0 published production build source; v0.3.0 resolves to merge 561284352e8e2a520a064f7084994df6ec20dc71 with the same c1b960100acc04ce4f6e87bf422e86cd1e3afff1 tree. Localized agent images remain actual synthetic-data captures of renderer 83ffa78, with presentation equivalence verified against 3e3a136; they are not fresh 6e5fa22 images. Dated verification separates final CI and public artifact checks from native execution, physical IME and incomplete cleanup."
+  "note": "0.3.0 published production build source; v0.3.0 resolves to merge 561284352e8e2a520a064f7084994df6ec20dc71 with the same c1b960100acc04ce4f6e87bf422e86cd1e3afff1 tree. Localized agent images remain actual synthetic-data captures of renderer 83ffa78, with presentation equivalence verified against 3e3a136; they are not fresh 6e5fa22 images. Dated verification separates final CI and public artifact checks from native execution, physical IME and incomplete cleanup.",
+  "mobile": {
+    "version": "0.1.0",
+    "host_source_commit": "b45beac78277c5435bc8a0b4a97065563e2fb7c5",
+    "app_source_commit": "b45beac78277c5435bc8a0b4a97065563e2fb7c5",
+    "verification_date": "2026-11-16",
+    "verification": "docs/mobile-remote.md",
+    "note": "Separate mobile implementation inputs. Actual native UI acceptance is controller-owned and pending final receipts; compile and synthetic fixtures do not imply physical-device acceptance. Desktop source/capture provenance above is unchanged."
+  }
 }

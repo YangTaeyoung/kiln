@@ -5,6 +5,9 @@ mobile host is a separate **0.1.0** Cargo workspace; desktop Kiln stays **0.3.0*
 No listener starts with the desktop app. Native conversations, provider login and
 inference lifecycle remain owned by Kiln's existing CLI/daemon.
 
+See [delivery, repeatable builds and actual-UI evidence](../docs/mobile-remote.md)
+for Android/iOS artifacts, CI coverage, acceptance steps and owner boundaries.
+
 ## Build and run the host
 
 ```sh
