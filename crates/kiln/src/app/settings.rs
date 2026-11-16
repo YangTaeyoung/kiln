@@ -309,6 +309,8 @@ fn terminal(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 fn behavior(ui: &mut egui::Ui, s: &mut Settings) {
+    ui.label(kiln_common::i18n::tr("새 에이전트 표시 방식"));
+    s.agent_presentation.ui(ui);
     widgets::group(ui, kiln_common::i18n::tr("안전"), |ui| {
         widgets::setting_toggle(ui, kiln_common::i18n::tr("실행 중인 프로세스를 종료하기 전 확인"), kiln_common::i18n::tr("패널·탭·워크스페이스를 닫을 때 실행 중인 프로세스가 있으면 확인합니다"), &mut s.confirm_close_running);
     });

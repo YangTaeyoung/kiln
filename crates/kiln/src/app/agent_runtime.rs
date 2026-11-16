@@ -105,8 +105,15 @@ pub fn record_path(spec: &SpawnSpec) -> Option<PathBuf> {
         .map(|(_, v)| PathBuf::from(v))
 }
 pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<SpawnSpec> {
-    let mut spec = remote_terminal::agent(tool, cwd).map_err(anyhow::Error::msg)?;
-    spec.env = accounts.launch_environment(tool)?;
+    let spec = remote_terminal::agent(tool, cwd).map_err(anyhow::Error::msg)?;
+    let (path, record) = prepare_managed_record(tool, spec, accounts, &directory())?;
+    let mut spec = record.spec.clone();
+    attach(&mut spec, &path, &record)?;
+    launch_spec(&path, &record, false, None)
+}
+fn prepare_managed_record(tool: Tool, mut spec: SpawnSpec, accounts: &AccountManager, records: &Path) -> Result<(PathBuf, Record)> {
+    let (environment, extension_report) = accounts.prepare_launch_environment(tool)?;
+    spec.env = environment;
     if tool == Tool::Codex {
         spec.args.push("--no-daemon".into());
         if spec.env.iter().any(|(k, _)| k == "KILN_AGENT_PROFILE") {
@@ -118,7 +125,7 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos();
     let generation = format!("{}-{stamp}", std::process::id());
-    let path = directory().join(format!("{generation}.json"));
+    let path = records.join(format!("{generation}.json"));
     let version = String::new();
     let record = Record {
         tool,
@@ -130,10 +137,20 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
         request_started: false,
     };
     private_write(&path, &serde_json::to_vec(&record)?)?;
-    attach(&mut spec, &path, &record)?;
-    launch_spec(&path, &record, false, None)
+    extension_report.write_prepared(&path.with_extension("extensions.json"))?;
+    Ok((path, record))
 }
 
+/// Prepared diagnostics only: no asset I/O or reconciliation from UI/restarts.
+fn print_extension_report(report:&kiln_accounts::extensions::ExtensionReport) {
+    if !report.validated(){return;}
+    for entry in &report.entries {if ["failed","unsupported"].contains(&entry.state.as_str()) {
+        eprintln!("[Kiln extension preparation] {}: {} ({})",entry.name,entry.state,entry.reason);
+    }}
+}
+fn prepared_extension_report(path:&Path)->Result<kiln_accounts::extensions::ExtensionReport> {
+    kiln_accounts::extensions::ExtensionReport::read_prepared(&path.with_extension("extensions.json"))
+}
 /// Resolve the selected account at invocation time without recording shell arguments.
 pub fn run_shell(program: &str, cwd: PathBuf, args: Vec<String>) -> Result<()> {
     let tool = Tool::ALL.into_iter().find(|tool| tool.program() == program)
@@ -148,7 +165,8 @@ pub fn run_shell(program: &str, cwd: PathBuf, args: Vec<String>) -> Result<()> {
         return run_request(&path, &record.generation, None, false);
     }
     let spec = remote_terminal::agent(tool, cwd).map_err(anyhow::Error::msg)?;
-    let env = accounts.launch_environment(tool)?;
+    let (env, extension_report) = accounts.prepare_launch_environment(tool)?;
+    print_extension_report(&extension_report);
     let (program, lead) = agent_launch::launcher(Path::new(spec.program.as_ref().context("missing CLI executable")?));
     let mut cmd = Command::new(program);
     cmd.args(lead);
@@ -448,6 +466,10 @@ pub fn run_request(
     if !resumed {
         attach(&mut spec, path, &record)?;
     }
+    if !resumed {match prepared_extension_report(path) {
+        Ok(report)=>print_extension_report(&report),
+        Err(_)=>eprintln!("[Kiln extension preparation] Prepared status unavailable (INVALID_PREPARED_REPORT)"),
+    }}
     let retry = std::env::var("KILN_CAPACITY_RETRY_TURN").ok();
     if let Some(turn) = &retry {
         ensure!(resumed && record.tool == Tool::Codex, "invalid capacity retry");
@@ -1093,6 +1115,28 @@ fn latest_version(tool: Tool, offline: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn review_r5_managed_launch_prepares_once_and_hands_off_safe_status() {
+        let temp = tempfile::tempdir().unwrap();
+        let (env, _) = kiln_accounts::Env::sandbox(&temp.path().canonicalize().unwrap(), false);
+        let source = env.home.join(".claude/skills/inert/SKILL.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap(); fs::write(&source,b"old").unwrap();
+        let accounts = AccountManager::with_env(env);
+        let profile=accounts.save_connection(Tool::Claude,None,"Fixture",kiln_accounts::connection::Connection {
+            preset:kiln_accounts::connection::Preset::Gateway,base_url:"https://example.invalid".into(),key:"SYNTHETIC_CONNECTION_CANARY".into(),..Default::default()
+        }).unwrap();
+        accounts.switch_to(Tool::Claude,&profile.id).unwrap();
+        let (path,record)=prepare_managed_record(Tool::Claude,SpawnSpec::default(),&accounts,&temp.path().canonicalize().unwrap().join("records")).unwrap();
+        let report=prepared_extension_report(&path).unwrap();assert!(report.entries.iter().any(|e|e.state=="prepared"));
+        let root=PathBuf::from(&record.spec.env.iter().find(|(k,_)|k=="CLAUDE_CONFIG_DIR").unwrap().1);
+        assert_eq!(fs::read(root.join("skills/inert/SKILL.md")).unwrap(),b"old");
+        fs::write(source,b"new").unwrap();
+        accounts.validate_launch_environment(Tool::Claude,&record.spec.env).unwrap();
+        assert!(prepared_extension_report(&path).unwrap().validated());
+        assert_eq!(fs::read(root.join("skills/inert/SKILL.md")).unwrap(),b"old");
+        assert!(!fs::read_to_string(path.with_extension("extensions.json")).unwrap().contains("SYNTHETIC_CONNECTION_CANARY"));
+    }
+
     #[test]
     fn a_launch_is_found_in_the_agent_run_command_line() {
         let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();

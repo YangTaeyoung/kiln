@@ -10,10 +10,10 @@ fn pump(h:&mut Harness<'_,KilnApp>,mut f:impl FnMut(&Harness<'_,KilnApp>)->bool)
 fn task_switch_reveals_canvas_acknowledges_attention_and_retains_original_request(){
  let dir=tempfile::tempdir().unwrap();let base=dir.path();let root=base.join("parent");let bin=base.join("bin");
  for path in [&root,&bin]{std::fs::create_dir_all(path).unwrap();}
- let executable=bin.join("codex");std::fs::write(&executable,"#!/bin/sh\nprintf 'REQUEST_STARTED\\n'\n").unwrap();std::fs::set_permissions(&executable,std::fs::Permissions::from_mode(0o700)).unwrap();
+ let executable=bin.join("codex");std::fs::write(&executable,"#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'codex-cli 0.162.1\\n'; exit 0; fi\nprintf 'REQUEST_STARTED\\n'\n").unwrap();std::fs::set_permissions(&executable,std::fs::Permissions::from_mode(0o700)).unwrap();
  let _cleanup=Cleanup(base.to_path_buf());
  unsafe {for (key,path) in [("KILN_SOCKET",base.join("d.sock")),("KILN_CONFIG_DIR",base.join("cfg")),("KILN_ACCOUNTS_SANDBOX",base.join("accounts"))]{std::env::set_var(key,path);}std::env::set_var("PATH",format!("{}:{}",bin.display(),std::env::var("PATH").unwrap_or_default()));std::env::set_var("KILN_EXE",env!("CARGO_BIN_EXE_kiln"));std::env::set_var("KILN_NO_AUTO_UPGRADE","1");std::env::set_var("KILN_DB_NO_KEYCHAIN","1");}
- let mut h=Harness::builder().with_size([720.,440.]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(root.clone())));let ctx=h.ctx.clone();
+ let mut h=Harness::builder().with_size([720.,440.]).build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(root.clone())));let ctx=h.ctx.clone();h.state_mut().debug_set_agent_presentation(kiln::app::agent_gui::Presentation::Terminal);
  pump(&mut h,|h|h.state().debug_focused_text().is_some());h.run_steps(3);
  h.state_mut().debug_apply_action(&ctx,Action::ToggleInspector);h.run_steps(3);
  assert!(!h.state_mut().debug_deliver_attention(&ctx,Some(kiln_proto::AgentActivity::Waiting)));

@@ -5555,3 +5555,24 @@ fn bounded_sync_enabling_requests_first_scan_without_overriding_active_pause() {
     assert!(!manager.urgent, "initial linking still respects the active CLI pause");
     assert_eq!(manager.paused.len(), 1);
 }
+
+#[test]
+fn review_r5_pair_connect_resolves_endpoints_without_extension_refresh() {
+    let temp=tempfile::tempdir().unwrap();
+    let (env,_)=kiln_accounts::Env::sandbox(&temp.path().canonicalize().unwrap(),false);
+    for source in [env.home.join(".claude"),env.codex_home.clone()] {
+        fs::create_dir_all(source.join("skills/inert")).unwrap();fs::write(source.join("skills/inert/SKILL.md"),b"inert").unwrap();
+    }
+    let accounts=AccountManager::with_env(env);
+    for tool in [Tool::Claude,Tool::Codex] {
+        let profile=accounts.save_connection(tool,None,"Fixture",kiln_accounts::connection::Connection {
+            preset:kiln_accounts::connection::Preset::Gateway,base_url:"https://example.invalid/v1".into(),key:"SYNTHETIC_CONNECTION_CANARY".into(),..Default::default()
+        }).unwrap();
+        accounts.switch_to(tool,&profile.id).unwrap();
+    }
+    let pair=Pair::connect(&accounts).unwrap();
+    for root in [&pair.claude.root,&pair.codex.root] {
+        assert!(root.starts_with(temp.path().canonical().unwrap()));
+        assert!(!root.join("kiln-extension-state").exists());assert!(!root.join("skills/inert").exists());
+    }
+}

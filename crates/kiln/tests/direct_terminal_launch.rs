@@ -41,7 +41,8 @@ fn pump(h: &mut Harness<'_, KilnApp>, expected: &str) {
 #[test]
 fn direct_agents_and_ssh_open_without_shell_commands_and_survive_gui_restore() {
     let dir = tempfile::tempdir().unwrap();
-    let base = dir.path();
+    // TempDir keeps ownership; runtime I/O uses the physical path past macOS aliases.
+    let base = dir.path().canonical().unwrap();
     let workspace = base.join("parent workspace");
     let bin = base.join("bin");
     for path in [&workspace, &bin] {
@@ -116,6 +117,7 @@ read hold
     h.run_steps(3);
     h.get_by_label("새 작업").click();
     h.run_steps(2);
+    h.get_by_label("터미널").click();h.run_steps(2);
     h.get_by_label("Codex").click();
     pump(&mut h, "CODEX_READY");
     // Probe the child's physical directory directly. The shell's inherited PWD

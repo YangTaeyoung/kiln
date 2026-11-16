@@ -32,6 +32,8 @@ enum Cmd {
     #[command(hide = true)]
     AgentHook,
     #[command(hide = true)]
+    AgentGuiHost { #[arg(long)] id: String },
+    #[command(hide = true)]
     SyncWorker,
     #[command(hide = true)]
     AgentRun { #[arg(long)] record: std::path::PathBuf, #[arg(long)] generation: String, #[arg(long)] request: Option<std::path::PathBuf>, #[arg(long)] resume: bool },
@@ -135,6 +137,7 @@ pub fn main() -> anyhow::Result<()> {
         _ => {}
     }
     match cli.cmd {
+        Some(Cmd::AgentGuiHost { id }) => app::agent_gui::serve(&id),
         Some(Cmd::AgentHook) => {
             #[cfg(windows)]
             if std::env::var_os("KILN_AGENT_RECORD").is_none() {

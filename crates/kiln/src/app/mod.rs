@@ -32,6 +32,7 @@ mod agent_launch;
 mod agent_handover;
 mod capacity_recovery;
 pub mod agent_runtime;
+pub mod agent_gui;
 pub mod conversation_sync;
 mod remote_terminal;
 mod pane_layout;
@@ -189,6 +190,8 @@ pub enum Action {
     OpenFolder,
     NewAgentTask,
     DirectAgent { tool: kiln_accounts::Tool, cwd: Option<PathBuf> },
+    GuiAgent { tool: kiln_accounts::Tool, cwd: Option<PathBuf> },
+    GuiAgentWithOptions { tool: kiln_accounts::Tool, cwd: PathBuf, options: agent_gui::LaunchOptions },
     OpenAgentFolder(kiln_accounts::Tool),
     OpenSsh { alias: String, config_path: Option<PathBuf> },
     OpenSshConnection { alias: String, config_path: Option<PathBuf>, options: kiln_remote::ssh_config::SshOptions },
@@ -346,6 +349,7 @@ pub struct KilnApp {
     pending_agent_prompts: HashMap<PaneId, String>,
     /// Agent launches whose account environment is prepared off the UI thread.
     preparing_agents: Vec<PreparingAgent>,
+    agent_views: HashMap<PaneId, agent_gui::AgentPane>,
     agent_request_view: Option<agent_request::RequestView>,
     db: kiln_db::DbManager,
     rotator: rotation::Rotator,
@@ -390,8 +394,8 @@ struct PreparingAgent {
     /// Id of the workspace the launch was requested from.
     workspace: u64,
     split: Option<(u64, PaneId, Dir)>,
-    task: kiln_common::task::Task<Result<SpawnSpec, String>>,
-    request: Option<(agent_launch::Prepared, String)>,
+    task: kiln_common::task::Task<Result<(SpawnSpec, Option<(agent_launch::Prepared, String)>), String>>,
+    request: bool,
 }
 
 impl KilnApp {
@@ -463,6 +467,7 @@ impl KilnApp {
             pending_input: HashMap::new(),
             pending_agent_prompts: HashMap::new(),
             preparing_agents: Vec::new(),
+            agent_views: HashMap::new(),
             agent_request_view:None,
             db: kiln_db::DbManager::load(),
             rotator: rotation::Rotator::new({
@@ -558,7 +563,13 @@ impl KilnApp {
                         None => PaneKind::Term { session: pp.session, pending: None, view: pp.session.map(TermView::new) },
                     };
                     if pp.tool.is_none() {
-                        if let Some(spec) = &pp.launch { self.launch_specs.insert(pp.id, spec.clone()); }
+                        if let Some(spec) = &pp.launch {
+                            if let Some(mut view)=agent_gui::AgentPane::from_spec(spec) {
+                                if let Some(draft)=&pp.agent_draft {view.restore_draft(draft.clone());}
+                                self.agent_views.insert(pp.id,view);
+                            }
+                            self.launch_specs.insert(pp.id, spec.clone());
+                        }
                     }
                     self.panes.insert(pp.id, Pane { id: pp.id, kind, cwd: pp.cwd.clone() });
                 }
@@ -625,6 +636,7 @@ impl KilnApp {
                                 cwd: p.session().and_then(|s| self.conn.infos.get(&s)).and_then(|i| i.cwd.clone()).or_else(|| p.cwd.clone()),
                                 tool: p.tool().and_then(|t| t.persist()),
                                 launch: self.launch_specs.get(&p.id).cloned(),
+                                agent_draft: self.agent_views.get(&p.id).map(agent_gui::AgentPane::draft),
                             })
                             .collect(),
                     })
@@ -877,19 +889,35 @@ impl KilnApp {
 
     /// Prepares an agent's account environment and launch record on a worker; the page
     /// opens in the requesting workspace once they are ready.
-    fn prepare_agent(&mut self, tool: kiln_accounts::Tool, cwd: PathBuf, request: Option<(agent_launch::Prepared, String)>, ctx: &egui::Context) {
+    fn prepare_agent(&mut self, tool: kiln_accounts::Tool, cwd: PathBuf, request: Option<(String,String,String)>, gui: bool, ctx: &egui::Context) {
+        self.prepare_agent_with_options(tool,cwd,request,gui,agent_gui::LaunchOptions::Inherited,ctx);
+    }
+
+    fn prepare_agent_with_options(&mut self, tool: kiln_accounts::Tool, cwd: PathBuf, request: Option<(String,String,String)>, gui: bool, options: agent_gui::LaunchOptions, ctx: &egui::Context) {
         let accounts = self.rotator.mgr.clone();
-        let request_path = request.as_ref().map(|(prepared, _)| prepared.request_path.clone());
+        let is_request=request.is_some();
         let task = kiln_common::task::Task::spawn(ctx, move || {
+            if !cwd.is_dir(){return Err(kiln_common::i18n::tr("워크스페이스 폴더를 찾을 수 없습니다.").into());}
             accounts.adopt_external_login(tool);
-            let spec = agent_runtime::managed(tool, cwd, &accounts).map_err(|e| e.to_string())?;
-            match request_path {
-                Some(path) => agent_runtime::request_spec(&spec, &path).map_err(|e| e.to_string()),
-                None => Ok(spec),
+            let prepared=match &request {
+                Some((program,context,prompt))=>Some((agent_launch::prepare(program,context,prompt)?,prompt.clone())),
+                None=>None,
+            };
+            let result=if gui {
+                let initial_prompt=request.as_ref().map(|(_,context,prompt)|format!("{context}\n## 사용자 요청\n{prompt}"));
+                agent_gui::prepare_with_options(tool,cwd,&accounts,initial_prompt,options).map_err(|e|e.to_string())
+            }else{
+                agent_runtime::managed(tool,cwd,&accounts).and_then(|spec|match &prepared {
+                    Some((prepared,_))=>agent_runtime::request_spec(&spec,&prepared.request_path),None=>Ok(spec),
+                }).map_err(|e|e.to_string())
+            };
+            match result {
+                Ok(spec)=>Ok((spec,prepared)),
+                Err(error)=>{if let Some((prepared,_))=prepared{let _=std::fs::remove_file(prepared.request_path);}Err(error)}
             }
         });
-        let workspace = self.ws().id;
-        self.preparing_agents.push(PreparingAgent { workspace, split: None, task, request });
+        let workspace=self.ws().id;
+        self.preparing_agents.push(PreparingAgent {workspace,split:None,task,request:is_request});
     }
 
     fn start_prepared_agents(&mut self, ctx: &egui::Context) {
@@ -899,13 +927,13 @@ impl KilnApp {
                 index += 1;
                 continue;
             }
-            let PreparingAgent { workspace, split, mut task, request } = self.preparing_agents.remove(index);
+            let PreparingAgent { workspace, split, mut task, request: _ } = self.preparing_agents.remove(index);
             let result = task
                 .take()
                 .unwrap_or_else(|| Err(kiln_common::i18n::tr("작업을 시작할 수 없습니다").into()));
             let target = self.workspaces.iter().position(|w| w.id == workspace);
             match (result, target) {
-                (Ok(spec), Some(target)) => {
+                (Ok((spec,request)), Some(target)) => {
                     if let Some((page, anchor, dir)) = split {
                         self.open_agent_split(target, page, anchor, dir, spec);
                     } else {
@@ -913,8 +941,9 @@ impl KilnApp {
                     }
                 }
                 (result, _) => {
-                    if let Some((prepared, _)) = &request {
-                        let _ = std::fs::remove_file(&prepared.request_path);
+                    if let Ok((_,Some((prepared,_))))=&result {
+                        let path=prepared.request_path.clone();
+                        let _=kiln_common::task::Task::spawn(ctx,move ||std::fs::remove_file(path));
                     }
                     if let Err(error) = result {
                         self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), error, ToastKind::Error, None);
@@ -934,6 +963,7 @@ impl KilnApp {
         }
         page.focused = pane;
         page.zoomed = None;
+        if let Some(view)=agent_gui::AgentPane::from_spec(&spec){self.agent_views.insert(pane,view);}
         self.launch_specs.insert(pane, spec);
         self.spawn_for_pane(pane);
         if workspace == self.active && page_index == self.ws().active_page {
@@ -966,6 +996,7 @@ impl KilnApp {
             // Agent tasks keep following their live CLI title.
             None => page.title = spec.name.clone().filter(|name| !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == name)),
         }
+        if let Some(view)=agent_gui::AgentPane::from_spec(&spec){self.agent_views.insert(pane,view);}
         self.launch_specs.insert(pane, spec);
         let ws = &mut self.workspaces[target];
         ws.pages.push(page);
@@ -1056,6 +1087,7 @@ impl KilnApp {
     }
 
     fn pane_is_busy(&self, pane: PaneId) -> Option<String> {
+        if let Some(view)=self.agent_views.get(&pane){return view.busy().then(||view.descriptor.tool.display_name().into());}
         let s = self.panes.get(&pane)?.session()?;
         let info = self.conn.infos.get(&s)?;
         if info.exited.is_some() {
@@ -1066,6 +1098,7 @@ impl KilnApp {
     }
 
     fn drop_pane(&mut self, p: PaneId) {
+        self.agent_views.remove(&p);
         self.pending_input.remove(&p);
         self.launch_specs.remove(&p);
         self.cli_restarts.remove(&p);self.cli_confirmations.remove(&p);
@@ -1265,24 +1298,20 @@ impl KilnApp {
                 let root = self.ws().root.clone();
                 let Some(cwd) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() else { return; };
                 let cwd = normalize_path(cwd.canonical().unwrap_or(cwd));
-                let spec = match agent_runtime::managed(tool, cwd.clone(), &self.rotator.mgr).map_err(|e|e.to_string()) {
-                    Ok(spec) => spec,
-                    Err(error) => { self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), error, ToastKind::Error, None); return; }
-                };
-                let existing = self.workspaces.iter().any(|ws| normalize_path(ws.tools.canonical_root().to_owned()) == cwd);
-                self.add_workspace(cwd, ctx);
-                if existing { self.launch_terminal_page(spec, ctx); }
-                else if let Some(pane) = self.focused_pane() {
-                    self.ws().page_mut().title = None;
-                    self.launch_specs.insert(pane, spec);
-                    self.spawn_for_pane(pane);
-                    self.focus_terminal = true;
-                    self.reveal_work_surface(ctx);
-                }
+                let gui=self.settings.agent_presentation==agent_gui::Presentation::Gui;
+                self.add_workspace(cwd.clone(),ctx);
+                self.prepare_agent(tool,cwd,None,gui,ctx);
             }
             Action::DirectAgent { tool, cwd } => {
                 let cwd = cwd.unwrap_or_else(|| self.ws().root.clone());
-                self.prepare_agent(tool, cwd, None, ctx);
+                self.prepare_agent(tool, cwd, None, false, ctx);
+            }
+            Action::GuiAgentWithOptions {tool,cwd,options} => {
+                self.prepare_agent_with_options(tool,cwd,None,true,options,ctx);
+            }
+            Action::GuiAgent {tool,cwd} => {
+                let cwd=cwd.unwrap_or_else(||self.ws().root.clone());
+                self.prepare_agent(tool,cwd,None,true,ctx);
             }
             Action::OpenSsh { alias, config_path } => {
                 self.apply(Action::OpenSshConnection { alias, config_path, options: Default::default() }, ctx);
@@ -1328,6 +1357,7 @@ impl KilnApp {
                 if !force {
                     let busy: Vec<String> = if self.settings.confirm_close_running { panes.iter().filter_map(|p| self.pane_is_busy(*p)).collect() } else { vec![] };
                     let mut dirty: Vec<String> = panes.iter().filter_map(|p| self.panes.get(p).and_then(|x| x.tool())).filter(|t| t.is_dirty()).map(|t| t.title()).collect();
+                    if panes.iter().any(|p| self.agent_views.get(p).is_some_and(agent_gui::AgentPane::has_draft)) {dirty.push(kiln_common::i18n::tr("대화 초안").into());}
                     if panes.iter().any(|p| self.terminal_launch_drafts.get(p).is_some_and(|d|d.command.is_some())) { dirty.push(kiln_common::i18n::tr("보관한 터미널 실행 요청").into()); }
                     if !busy.is_empty() || !dirty.is_empty() {
                         let mut parts = Vec::new();
@@ -1361,11 +1391,13 @@ impl KilnApp {
                 let workspace = self.ws().id;
                 let page = self.ws().page().id;
                 let accounts = self.rotator.mgr.clone();
+                let gui=self.settings.agent_presentation==agent_gui::Presentation::Gui;
                 let task = kiln_common::task::Task::spawn(ctx, move || {
                     accounts.adopt_external_login(tool);
-                    agent_runtime::managed(tool, PathBuf::from(cwd), &accounts).map_err(|e| e.to_string())
+                    if gui{return agent_gui::prepare(tool,PathBuf::from(cwd),&accounts,None).map(|s|(s,None)).map_err(|e|e.to_string());}
+                    agent_runtime::managed(tool, PathBuf::from(cwd), &accounts).map(|s|(s,None)).map_err(|e| e.to_string())
                 });
-                self.preparing_agents.push(PreparingAgent { workspace, split: Some((page, target, dir)), task, request: None });
+                self.preparing_agents.push(PreparingAgent { workspace, split: Some((page, target, dir)), task, request: false });
             }
             Action::SplitPane(target, dir) => {
                 let cwd = self.split_cwd(target);
@@ -1385,6 +1417,9 @@ impl KilnApp {
                 if self.block_submitted_database_write(&[p]){return;}
                 if self.block_disconnected_close(&[p]) { return; }
                 if !force {
+                    if self.agent_views.get(&p).is_some_and(agent_gui::AgentPane::has_draft) {
+                        self.confirm=Some(Confirm{skip_running_confirmation:None,title:kiln_common::i18n::tr("대화 초안을 버릴까요?").into(),body:kiln_common::i18n::tr("이 패널의 보내지 않은 초안과 전송 확인 대기 요청이 삭제됩니다.").into(),ok:kiln_common::i18n::tr("버리고 닫기").into(),action:Action::ClosePane(p,true)});return;
+                    }
                     if self.terminal_launch_drafts.get(&p).is_some_and(|draft|draft.command.is_some()) {
                         self.confirm=Some(Confirm { skip_running_confirmation: None, title:kiln_common::i18n::tr("보관한 실행 요청을 버릴까요?").into(), body:kiln_common::i18n::tr("이 패널의 실행 요청이 삭제됩니다.").into(), ok:kiln_common::i18n::tr("요청 버리고 닫기").into(), action:Action::ClosePane(p,true) });
                         return;
@@ -1687,19 +1722,10 @@ impl KilnApp {
                 self.apply(Action::RunInTerminalAt{cwd,command:cmd},ctx);
             }
             Action::LaunchAgent {cwd, program, context, request} => {
-                if !cwd.is_dir() {
-                    self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), kiln_common::i18n::tr("워크스페이스 폴더를 찾을 수 없습니다."), ToastKind::Error, None);
-                    return;
-                }
                 let tool=match program.as_str() {"claude"=>kiln_accounts::Tool::Claude,"codex"=>kiln_accounts::Tool::Codex,"agy"=>kiln_accounts::Tool::Antigravity,_=>return};
-                // One request per workspace is prepared at a time; the composer stays open until it starts.
                 let workspace=self.ws().id;
-                if self.preparing_agents.iter().any(|p|p.request.is_some() && p.workspace==workspace) {return;}
-                let prepared=match agent_launch::prepare(&program,&context,&request) {
-                    Ok(prepared)=>prepared,
-                    Err(error)=>{self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"),error,ToastKind::Error,None);return;}
-                };
-                self.prepare_agent(tool,cwd,Some((prepared,request)),ctx);
+                if self.preparing_agents.iter().any(|p|p.request && p.workspace==workspace) {return;}
+                self.prepare_agent(tool,cwd,Some((program,context,request)),self.settings.agent_presentation==agent_gui::Presentation::Gui,ctx);
             }
             Action::RunInTerminalAt {cwd, command:cmd} => {
                 let pane = self.new_term_pane(Some(cwd.to_string_lossy().into_owned()));
@@ -1713,10 +1739,14 @@ impl KilnApp {
                 self.focus_terminal = true;
             }
             Action::Toast(t) => self.toast(t, String::new(), ToastKind::Info, None),
-            Action::RestartAgent(pane) => self.request_cli_restart(pane),
+            Action::RestartAgent(pane) => {
+                if let Some(view)=self.agent_views.get_mut(&pane) {
+                    if view.restart() {self.apply(Action::RestartPane(pane),ctx);}
+                } else {self.request_cli_restart(pane);}
+            },
             Action::RunLogin(tool) => self.apply(Action::RunInTerminal(kiln_accounts::login_command(tool).to_string()), ctx),
             Action::RotateAccount(session, tool) => {
-                if self.panes.iter().any(|(pane,p)|p.session()==Some(session) && self.launch_specs.get(pane).and_then(agent_runtime::record_path).is_some()) {
+                if self.panes.iter().any(|(pane,p)|p.session()==Some(session) && (self.agent_views.contains_key(pane) || self.launch_specs.get(pane).and_then(agent_runtime::record_path).is_some())) {
                     self.toast(kiln_common::i18n::tr("사용량 한도"),kiln_common::i18n::tr("이 패널은 원래 계정을 유지합니다. 계정 설정에서 다른 계정을 선택한 뒤 새 패널을 여세요."),ToastKind::Info,Some(session));
                 } else {self.rotator.start(session,tool);}
             },
@@ -1779,10 +1809,13 @@ impl KilnApp {
     }
 
     fn session_is_observed(&self, session:SessionId, ctx:&egui::Context)->bool {
-        let Some((observed,viewport))=self.conn.observed_terminal(ctx) else { return false; };
-        if observed!=session { return false; }
-        if viewport!=ctx.viewport_id() {
-            return self.quick.open && self.quick.pane.and_then(|p|self.panes.get(&p)).and_then(Pane::session)==Some(session);
+        let gui=self.panes.iter().any(|(id,p)|p.session()==Some(session) && self.agent_views.contains_key(id));
+        if !gui {
+            let Some((observed,viewport))=self.conn.observed_terminal(ctx) else { return false; };
+            if observed!=session { return false; }
+            if viewport!=ctx.viewport_id() {
+                return self.quick.open && self.quick.pane.and_then(|p|self.panes.get(&p)).and_then(Pane::session)==Some(session);
+            }
         }
         if !self.window_focused || self.focused_session()!=Some(session) { return false; }
         let Some(workspace)=self.workspaces.get(self.active) else { return false; };
@@ -1990,7 +2023,7 @@ impl KilnApp {
                 ConnEvent::Upgrading => self.transient_info(kiln_common::i18n::tr("데몬을 새 버전으로 교체하는 중"), kiln_common::i18n::tr("실행 중인 세션은 그대로 유지됩니다")),
                 ConnEvent::SessionText { session, text } => {
                     let mut out = Vec::new();
-                    self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
+                    self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).filter(|spec|agent_runtime::record_path(spec).is_some() || agent_gui::descriptor(spec).is_some()).and_then(|_|p.session())));
                     self.rotator.on_text(&self.conn, session, &text, &mut out);
                     self.handle_rotation(out);
                 }
@@ -2120,6 +2153,7 @@ impl KilnApp {
         }
         for ws in self.workspaces.iter().enumerate().filter(|(i,_)| workspace.is_none_or(|wanted| *i==wanted)).map(|(_,ws)|ws) {
             for pane in ws.all_panes() {
+                if workspace.is_some() && self.agent_views.get(&pane).is_some_and(agent_gui::AgentPane::has_draft) {items.push(kiln_common::trf!("• {} — 대화 초안",ws.name));}
                 if self.terminal_launch_drafts.get(&pane).is_some_and(|draft|draft.command.is_some()) || self.pending_input.contains_key(&pane) {
                     items.push(kiln_common::trf!("• {} — 실행 확인이 필요한 터미널 요청",ws.name));
                 }
@@ -2161,6 +2195,11 @@ impl KilnApp {
             #[cfg(target_os="macos")] macos::reply_to_termination(false);
             self.toast(kiln_common::i18n::tr("Worktree 생성 중"), kiln_common::i18n::tr("진행 중인 Git 작업이 끝난 후 종료하세요."), ToastKind::Info, None);
             return;
+        }
+        if self.agent_views.values().any(agent_gui::AgentPane::importing) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            #[cfg(target_os="macos")] macos::reply_to_termination(false);
+            self.toast(kiln_common::i18n::tr("이미지 가져오는 중…"),kiln_common::i18n::tr("이미지 가져오기가 끝난 후 종료하세요."),ToastKind::Info,None);return;
         }
         let dirty = self.unsaved_items(None);
         if dirty.is_empty() {
@@ -2217,6 +2256,10 @@ impl KilnApp {
     #[doc(hidden)]
     pub fn debug_apply_action(&mut self, ctx: &egui::Context, action: Action) { self.apply(action,ctx); }
     #[doc(hidden)]
+    pub fn debug_set_agent_presentation(&mut self, presentation: agent_gui::Presentation) {self.settings.agent_presentation=presentation;}
+    #[doc(hidden)]
+    pub fn debug_agent_draft(&self,pane:PaneId)->Option<agent_gui::SavedDraft>{self.agent_views.get(&pane).map(agent_gui::AgentPane::draft)}
+    pub fn debug_focused_agent_draft(&self)->Option<agent_gui::SavedDraft>{self.focused_pane().and_then(|p|self.agent_views.get(&p)).map(agent_gui::AgentPane::draft)}
     pub fn debug_set_shell(&mut self, shell: String) { self.settings.shell=shell; }
     #[doc(hidden)]
     pub fn debug_launch_drafts(&self) -> Vec<(PaneId,Option<String>)> { self.terminal_launch_drafts.values().map(|draft|(draft.pane,draft.command.clone())).collect() }
@@ -2250,7 +2293,7 @@ impl KilnApp {
         self.cancel_pane_layout();
         let snapshot=self.persist();
         let bytes=serde_json::to_vec(&snapshot).unwrap();
-        self.workspaces.clear();self.panes.clear();self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
+        self.workspaces.clear();self.panes.clear();self.agent_views.clear();self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
         self.restore(serde_json::from_slice(&bytes).unwrap(),ctx);
     }
 
@@ -2629,13 +2672,19 @@ impl eframe::App for KilnApp {
         self.window_focused = focused_now;
         self.handle_conn_events(ctx);
         self.start_prepared_agents(ctx);
+        for (id,view) in &mut self.agent_views {
+            let alive=if self.conn.is_connected() && self.conn.sessions_listed {
+                self.panes.get(id).and_then(Pane::session).and_then(|s|self.conn.infos.get(&s)).map(|i|i.exited.is_none())
+            }else{None};
+            match alive {Some(alive)=>view.set_transport_alive(alive),None=>view.transport_unverified()};view.tick(ctx);
+        }
         while let Ok(r) = self.clones.1.try_recv() {
             match r {
                 Ok(p) => self.add_workspace(p, ctx),
                 Err(e) => self.toast(kiln_common::i18n::tr("저장소 복제 실패"), e, ToastKind::Error, None),
             }
         }
-        self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).and_then(agent_runtime::record_path).and_then(|_|p.session())));
+        self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).filter(|spec|agent_runtime::record_path(spec).is_some() || agent_gui::descriptor(spec).is_some()).and_then(|_|p.session())));
         self.tick_agent_handover(ctx);
         self.tick_cli_updates(ctx);
         if self.agy_conversations.due() {
@@ -2654,7 +2703,7 @@ impl eframe::App for KilnApp {
                 let session = self.panes.get(&pane)?.session()?;
                 let info = self.conn.infos.get(&session)?;
                 if info.exited.is_some() { return None; }
-                let managed = self.launch_specs.get(&pane).and_then(agent_runtime::record_path).is_some();
+                let managed = self.agent_views.contains_key(&pane) || self.launch_specs.get(&pane).and_then(agent_runtime::record_path).is_some();
                 let active = managed || info.fg_process.as_deref().and_then(rotation::tool_for).is_some();
                 Some((session, (root.clone(), active)))
             }).collect::<Vec<_>>()

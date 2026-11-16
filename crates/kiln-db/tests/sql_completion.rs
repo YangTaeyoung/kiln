@@ -60,6 +60,10 @@ fn sql_completion_real_metadata_keyboard_undo_and_execution_are_independent() {
     h.run_steps(4);
     sql(&mut h, "SELECT * FROM cu|");
     until(&mut h, "customers · 테이블");
+    // Metadata arrival preserves an already-selected keyword. Reopen the popup
+    // against the loaded catalog before testing its default keyboard acceptance.
+    h.key_press(Key::Escape);
+    h.run_steps(2);
     h.key_press_modifiers(Modifiers::CTRL, Key::Space);
     h.run_steps(2);
     h.key_press(Key::Enter);

@@ -89,6 +89,20 @@ fn fuzzy_query_and_enter_opens_best_match() {
 
 #[test]
 fn arrow_keys_move_selection_and_escape_closes() {
+    use egui_kittest::kittest::NodeT;
+
+    fn effect_in_four_steps(
+        h: &mut Harness<'static, State>,
+        effect: impl Fn(&Harness<'static, State>) -> bool,
+    ) -> bool {
+        for _ in 0..4 {
+            h.step();
+            if effect(h) {
+                return true;
+            }
+        }
+        false
+    }
     let (_t, root) = fixture();
     let mut h = harness(&root);
     wait_indexed(&mut h);
@@ -96,13 +110,24 @@ fn arrow_keys_move_selection_and_escape_closes() {
     // 빈 검색어의 전체 목록(16개)이 아니라 걸러진 결과가 올 때까지 기다린다.
     assert!(common::wait_until(&mut h, 15.0, |h| (3..16).contains(&h.state().qo.result_paths().len())));
     let results = h.state().qo.result_paths();
+    let selected = |h: &Harness<'static, State>, path: &str| {
+        h.query_by_label(path)
+            .is_some_and(|node| node.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True))
+    };
     h.key_press(Key::ArrowDown);
-    h.run();
+    assert!(effect_in_four_steps(&mut h, |h| selected(h, &results[1])),
+        "ArrowDown must select the second result");
     h.key_press(Key::ArrowUp);
+    assert!(effect_in_four_steps(&mut h, |h| selected(h, &results[0])),
+        "ArrowUp must select the first result");
     h.key_press(Key::ArrowDown);
-    h.run();
+    assert!(effect_in_four_steps(&mut h, |h| selected(h, &results[1])),
+        "ArrowDown must select the second result again");
     h.key_press(Key::Enter);
-    h.run();
+    assert!(effect_in_four_steps(&mut h, |h| {
+        h.state().picked.as_deref() == Some(root.join(&results[1]).as_path())
+            && !h.state().qo.is_open()
+    }), "Enter must pick the selected result and close Quick Open");
     assert_eq!(h.state().picked.as_deref(), Some(root.join(&results[1]).as_path()));
     h.state_mut().qo.open(&root);
     assert!(common::wait_until(&mut h, 15.0, |h| {
@@ -110,7 +135,8 @@ fn arrow_keys_move_selection_and_escape_closes() {
             && h.state().qo.result_paths().len() == 16
     }));
     h.key_press(Key::Escape);
-    h.run();
+    assert!(effect_in_four_steps(&mut h, |h| !h.state().qo.is_open()),
+        "Escape must close Quick Open");
     assert!(!h.state().qo.is_open());
     assert!(h.state().picked.is_some());
 }

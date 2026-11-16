@@ -41,6 +41,8 @@ Kiln does not rotate a running panel to another account when it reaches a usage 
 
 Claude Code panels opened from **New Task**, a split menu or a selected-account shell inherit your existing user and project-local MCP registrations, including when you use an API connection. Project `.mcp.json` files keep their normal scope. New launches refresh inherited entries; MCP entries you edit or remove inside an account stay private to that account. Kiln reads your original configuration without changing it and keeps the selected login and workspace trust decisions separate. A remote MCP server may ask you to sign in again.
 
+Supported personal author assets are prepared when a new Claude/Codex session starts; existing panes keep their account and worker. Private profile edits/deletions remain authoritative. Preparation is separate from native loading or execution. See [personal extension scope](agents.html#personal-extensions).
+
 ## Sign in again {#sign-in-again}
 
 Use this when a profile's login needs repairing. You keep the profile instead of deleting and recreating it.

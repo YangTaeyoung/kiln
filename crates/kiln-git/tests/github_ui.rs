@@ -214,12 +214,14 @@ fn issue_view_comments_closes_reopens_and_edits_labels() {
     // 닫기 → 다시 열기
     h.get_by_label("이슈 닫기").click();
     h.run_steps(1);
-    settle(&mut h, |s| s.view.is_loading());
+    // Task readiness may receive a refresh result before a UI frame applies it.
+    // Keep stepping until the authoritative view reflects the requested state.
+    settle(&mut h, |s| s.view.is_loading() || s.view.state() != Some(IssueState::Completed));
     assert!(backend.has_call("close cli/cli 14420 Completed"));
     assert_eq!(h.state().view.state(), Some(IssueState::Completed));
     h.get_by_label("다시 열기").click();
     h.run_steps(1);
-    settle(&mut h, |s| s.view.is_loading());
+    settle(&mut h, |s| s.view.is_loading() || s.view.state() != Some(IssueState::Open));
     assert!(backend.has_call("reopen cli/cli 14420"));
     assert_eq!(h.state().view.state(), Some(IssueState::Open));
 

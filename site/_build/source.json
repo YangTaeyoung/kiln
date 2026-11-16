@@ -1,5 +1,5 @@
 {
-  "kiln_version": "0.2.26",
-  "source_commit": "5120471195cbd279b039db46b5df2334f0d9946a",
-  "note": "The product site describes the app as of this commit. Update both fields after reflecting newer changes."
+  "kiln_version": "0.3.0",
+  "source_commit": "886dee080a47566b4fbf890ec8a619b858b0f9db",
+  "note": "0.3.0 production source. Localized agent images are actual synthetic-data captures of renderer 83ffa78, with presentation equivalence verified against 3e3a136; they are not later-source runtime proof. This marker does not establish final CI, signed archives or publication."
 }

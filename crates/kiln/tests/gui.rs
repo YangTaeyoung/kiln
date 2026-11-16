@@ -84,6 +84,8 @@ fn setup(tag: &str) -> (PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("kg-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(base.join("cfg")).unwrap();
+    // Own the physical fixture root before passing it to nofollow runtime I/O.
+    let base = base.canonical().unwrap();
     std::fs::create_dir_all(base.join("proj/src")).unwrap();
     std::fs::write(base.join("proj/src/main.rs"), "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
     std::fs::write(base.join("proj/README.md"), "# proj\n").unwrap();
@@ -152,7 +154,10 @@ fn custom_theme_selection_reload_and_relaunch_preserve_terminal_sessions() {
     let builder = Harness::builder().with_size([1100.0, 760.0]);
     let builder = if render { builder.wgpu() } else { builder };
     let mut h = builder.build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj.clone())));
-    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_session().is_some()));
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_session().is_some()
+            && h.state().debug_focused_text().is_some_and(|text| !text.trim().is_empty())
+    }), "custom theme fixture requires a session with actual terminal output");
     assert_eq!(Theme::current().bg, egui::Color32::from_rgb(0x21,0x11,0x22));
     let session = h.state().debug_focused_session();
     h.state_mut().debug_open_settings(0); h.run_steps(3);
@@ -170,6 +175,12 @@ fn custom_theme_selection_reload_and_relaunch_preserve_terminal_sessions() {
         h.state_mut().debug_queue_action(Action::SetLanguage(original)); h.run_steps(3);
     }
     h.key_press(egui::Key::Escape); h.run_steps(2);
+    let session_unchanged = h.state().debug_focused_session() == session;
+    let screen = h.state().debug_focused_text();
+    let screen_present = screen.is_some();
+    let screen_nonempty = screen.as_ref().is_some_and(|text| !text.trim().is_empty());
+    assert!(session_unchanged && screen_present && screen_nonempty,
+        "custom theme pre-input: session_unchanged={session_unchanged}, screen_present={screen_present}, screen_nonempty={screen_nonempty}");
     h.event(egui::Event::Text("printf '\\033[32mCUSTOM_THEME_MARKER\\033[0m\\n'".into()));
     h.key_press(egui::Key::Enter);
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|t| t.contains("CUSTOM_THEME_MARKER"))));
@@ -1810,7 +1821,7 @@ fn direct_panel_actions_target_the_clicked_split_and_stay_inside_narrow_headers(
     h.get_by_label("오른쪽으로 나누기").click();
     h.run_steps(3);
     assert!(h.query_by_label("Claude Code").is_some());
-    h.get_by_label("터미널").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button,"터미널").click();
     assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==2&&h.state().debug_focused_session().is_some()));
     let rects=h.state().debug_pane_rects();
     let left=rects.iter().min_by(|a,b|a.1.left().total_cmp(&b.1.left())).unwrap().0;
@@ -1819,7 +1830,7 @@ fn direct_panel_actions_target_the_clicked_split_and_stay_inside_narrow_headers(
     let button=h.get_all_by_label("아래로 나누기").min_by(|a,b|a.rect().left().total_cmp(&b.rect().left())).unwrap();
     button.click();
     h.run_steps(3);
-    h.get_by_label("터미널").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button,"터미널").click();
     assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==3&&h.state().debug_focused_session().is_some()));
     let rects=h.state().debug_pane_rects();
     let left_rect=rects.iter().find(|(id,_)|*id==left).unwrap().1;
@@ -1994,7 +2005,7 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     let _cleanup=Cleanup(base.clone());
     use_posix_shell(&base);
     let mut h=Harness::builder().with_size([1100.,760.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
-    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some() && h.state().debug_focused_text().is_some_and(|text|!text.trim().is_empty())), "original terminal must have produced output before workspace navigation");
     let original=h.state().debug_focused_session().unwrap();
     h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
     type_into_prompt(&mut h,"Review API contract independently");
@@ -2046,6 +2057,9 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     assert_eq!(h.state().debug_workspace_count(),1);assert_eq!(h.state().debug_focused_session(),Some(original));
     assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently"]);
     let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    let same_session=h.state().debug_focused_session()==Some(original);
+    let screen=h.state().debug_focused_text();
+    assert!(same_session && screen.as_ref().is_some_and(|text|!text.trim().is_empty()), "before terminal input: original_session={same_session}, screen_present={}, screen_nonempty={}",screen.is_some(),screen.as_ref().is_some_and(|text|!text.trim().is_empty()));
     client.send(kiln_proto::ClientMsg::Input{session:original,data:b"printf 'original-workspace-%s\\n' alive\r".to_vec()});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|t|t.contains("original-workspace-alive"))),"focused terminal: {:?}",h.state().debug_focused_text());
     let sessions=match client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(2)).unwrap(){kiln_proto::ServerMsg::Sessions{sessions,..}=>sessions,r=>panic!("{r:?}")};
@@ -2189,6 +2203,7 @@ while True:
         }
         if tool.has_accounts() {manager.save_current(tool,"").unwrap();}
     };
+    h.state_mut().debug_set_agent_presentation(kiln::app::agent_gui::Presentation::Terminal);
     sign_in("fixture-a@example.invalid");h.state_mut().debug_queue_action(Action::LaunchAgent{program:tool.program().into(),cwd:proj.clone(),context:"fixture context".into(),request:"fixture task request".into()});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|text|text.contains("READY"))));
     let sid_a=h.state().debug_focused_session().unwrap();let pane_a=h.state().debug_focused_pane_id().unwrap();let spec_a=h.state().debug_focused_launch_spec().unwrap();let path_a=agent_runtime::record_path(&spec_a).unwrap();

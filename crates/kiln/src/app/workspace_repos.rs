@@ -813,6 +813,7 @@ impl RepositoryWorkspace {
                 .show(ui, |ui| {
                     let request = ui.add(
                         egui::TextEdit::multiline(&mut self.prompt)
+                            .id(egui::Id::new(("agent_request_prompt", self.workspace_id)))
                             .desired_rows(5)
                             .hint_text(kiln_common::i18n::tr("무엇을 만들거나 바꿀까요?"))
                             .desired_width(f32::INFINITY),
@@ -1674,6 +1675,54 @@ mod tests {
         w.context_cache = w.context();
         w
     }
+    #[test]
+    fn prompt_identity_and_input_survive_inventory_acceptance_per_workspace() {
+        use egui_kittest::kittest::NodeT;
+        let workspaces = [41, 42].map(|id| {
+            let mut workspace = fixture(0).with_id_salt(id);
+            workspace.inventory = None;
+            workspace.open_agent_task();
+            workspace
+        });
+        assert_eq!(workspaces[0].root, workspaces[1].root);
+        let mut h = Harness::builder().with_size([500., 700.]).build_ui_state(
+            |ui, (workspaces, active): &mut ([RepositoryWorkspace; 2], usize)| {
+                workspaces[*active].ui(ui, ToolKind::Git);
+            },
+            (workspaces, 0),
+        );
+        let mut ids = Vec::new();
+        let drafts = ["Review API contract independently", "Write separate documentation"];
+        for (active, draft) in drafts.iter().enumerate() {
+            h.state_mut().1 = active;
+            h.run_steps(2);
+            assert!(h.state().0[active].loading());
+            let input = h.get_by_role(egui::accesskit::Role::MultilineTextInput);
+            assert!(input.accesskit_node().is_focused());
+            let pending_id = input.accesskit_node().id();
+            assert!(!h.state().0[active].focus_prompt, "one-time focus was consumed");
+
+            // Accept the scan after focus was observed, then send exactly one real event.
+            // No refocus or input retry may hide an identity change at this boundary.
+            h.state_mut().0[active].accept_inventory(Default::default());
+            h.event(egui::Event::Text((*draft).into()));
+            h.run_steps(3);
+            assert!(!h.state().0[active].loading());
+            let input = h.get_by_role(egui::accesskit::Role::MultilineTextInput);
+            assert_eq!(
+                (input.accesskit_node().id(), input.accesskit_node().is_focused(), h.state().0[active].prompt.as_str()),
+                (pending_id, true, *draft),
+                "inventory acceptance must preserve the focused prompt and its input",
+            );
+            ids.push(pending_id);
+        }
+        assert_ne!(ids[0], ids[1], "same-root workspaces have distinct prompt identities");
+        h.state_mut().1 = 0;
+        h.run_steps(2);
+        assert_eq!(h.get_by_role(egui::accesskit::Role::MultilineTextInput).accesskit_node().id(), ids[0]);
+        assert_eq!(h.state().0.each_ref().map(|w| w.prompt.as_str()), drafts);
+    }
+
     #[test]
     fn generated_workspace_context_and_file_metadata_follow_all_locales() {
         use kiln_common::i18n::{Language, with_language};

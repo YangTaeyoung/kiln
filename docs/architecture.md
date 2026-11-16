@@ -126,3 +126,56 @@ reduces output-driven redraws without adding a buffered input queue or changing
 low-latency GPU presentation. Daemon replacement attempts are scoped to the server
 identity with a 30-second retry backoff; helpers are version-checked before
 terminal handover so older installations cannot downgrade the daemon.
+
+## Native agent conversation presentation
+
+New agent panes default to native GUI presentation. `agent_gui::AgentPane` is an
+`agent_views` overlay on existing Term panes, preserving daemon/PTy ownership and
+saved session IDs. `KILN_GUI_AGENT`/`KILN_GUI_TOOL` launch markers restore the overlay;
+old saved terminal panes remain terminal panes. `Presentation` is persisted in
+Settings; `PaneP.agent_draft` defaults absent for older state.
+
+Launch preparation, request-file creation, account environment capture, Markdown
+parsing, journal I/O and attachment import/validation run on background workers.
+Every GUI pane ticks even while hidden. Rendering uses a bounded history window,
+bounded tool output and eight image attachments. A queued draft retains its payload
+and command identity until actual journal acceptance. Restore never replays work.
+Dead PTYs override stale Ready journal state and disable sending. Explicit pane
+close ends the session; GUI quit saves drafts and only disconnects the clients.
+See [Native agent conversations](agent-gui.md).
+
+`agent_gui::controls` is the typed boundary for native controls, model metadata,
+catalogs, status and outcomes. Provider adapters publish full replacement snapshots
+and safe status projections rather than arbitrary configuration objects. An
+unsettled configuration outcome blocks conflicting operations and Submit even after
+transport acceptance, Stop or timeout; requested and effective values stay distinct.
+The native settings, commands, actions and launch views consume that boundary.
+Tool-header localization is a presentation projection; original protocol/history
+data remains unchanged. See the [provider coverage matrix](agent-feature-coverage.md).
+
+Explicit creation options use `prepare_with_options` on the existing background
+preparation worker. Resumed workers do not reapply them. New-launch account
+preparation also reconciles bounded author assets and hands a typed private report
+to the host. Validation/status reads and conversation-sync endpoint resolution do
+not reconcile extensions. Existing account bootstrap and credential handling remain
+separate; prepared/retained asset status does not establish native loading.
+
+Agent presentation commands use `Client::send_for_generation` with the generation
+actually reduced by the view. Draining into a bounded view backlog does not retarget
+an approval or Stop to an unseen worker. The compatible `Client::send` interface
+remains for existing consumers. Restored pending sends use a background replay and
+mailbox checkpoint before exposing unknown-delivery recovery; process-local weak
+mailbox references prevent an old client still enqueuing from being declared missing.
+No missing command is automatically replayed or classified as rejected. Approval
+and confirmed Codex native-item envelopes are projected into actionable summaries;
+actual tool arguments remain intact, including domain IDs.
+
+Replay checkpoints also carry the synchronized local writer revision. Enqueue
+increments that revision before and after its publication; the completion change
+precedes local mailbox destruction. Publication and query both lock writer state
+before checkpoint state, with disk I/O outside those locks. Thus an expired old
+mailbox cannot make an older empty-queue checkpoint valid. The recovery probe
+matches the host's published `.json` mailbox classification and treats an unreadable
+or oversized mailbox conservatively. Claude can_use_tool details are known actual
+arguments, so their bounded preview preserves domain keys; Codex request details
+are known protocol params and keep their allowlisted projection.
