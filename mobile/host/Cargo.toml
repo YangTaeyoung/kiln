@@ -1,0 +1,35 @@
+[package]
+name = "kiln-mobile-host"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+kiln = { path = "../../crates/kiln" }
+kiln-accounts = { path = "../../crates/kiln-accounts" }
+kiln-daemon = { path = "../../crates/kiln-daemon" }
+kiln-common = { path = "../../crates/kiln-common" }
+kiln-proto = { path = "../../crates/kiln-proto" }
+axum = "=0.8.9"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "time", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+ring = "0.17"
+base64 = "0.22"
+libc = "0.2"
+tempfile = "3"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking"] }
+
+[patch.crates-io]
+egui-winit = { path = "../../vendor/egui-winit" }
+winit = { path = "../../vendor/winit" }
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,5 @@
+/host/target/
+*.private.json
+*.private.log
+/node_modules/
+/dist/

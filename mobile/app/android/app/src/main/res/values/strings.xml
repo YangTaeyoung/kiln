@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Kiln Remote</string>
+    <string name="title_activity_main">Kiln Remote</string>
+    <string name="package_name">dev.kiln.remote</string>
+    <string name="custom_url_scheme">dev.kiln.remote</string>
+</resources>

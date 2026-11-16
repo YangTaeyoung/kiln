@@ -1,0 +1,40 @@
+{
+  "api_version": 1,
+  "host_version": "0.1.0",
+  "host_name": "Kiln computer",
+  "workspaces": [
+    {
+      "id": "workspace-1",
+      "name": "Example project"
+    }
+  ],
+  "providers": [
+    {
+      "provider": "claude",
+      "available": true
+    },
+    {
+      "provider": "codex",
+      "available": true
+    },
+    {
+      "provider": "antigravity",
+      "available": true
+    }
+  ],
+  "capabilities": {
+    "conversations": true,
+    "terminals": true,
+    "image_upload": true,
+    "native_actions": false,
+    "structured_grants": false
+  },
+  "limits": {
+    "text_bytes": 120000,
+    "snapshot_bytes": 2097152,
+    "recent_entries": 200,
+    "image_bytes": 20971520,
+    "mutation_retention_seconds": 600,
+    "mutation_results": 1024
+  }
+}

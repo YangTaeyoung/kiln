@@ -1,6 +1,10 @@
 //! Owner-private append journal and atomic command mailbox; no credential material.
 use super::{Envelope, Event, QueuedCommand, Transcript};
 use anyhow::{Context, Result, ensure};
+#[cfg(unix)]
+mod retained;
+#[cfg(unix)]
+pub(super) use retained::RetainedStorage;
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
@@ -286,6 +290,9 @@ impl Journal {
 }
 pub(super) fn tail(path: &Path, offset: &mut u64) -> Result<Vec<Envelope>> {
     let mut f = File::open(path)?;
+    tail_file(&mut f, offset)
+}
+fn tail_file(f: &mut File, offset: &mut u64) -> Result<Vec<Envelope>> {
     ensure!(
         f.metadata()?.len() <= MAX_JOURNAL,
         "oversized agent journal"

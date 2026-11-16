@@ -187,8 +187,68 @@ pub struct Client {
     writers: SharedWriters,
     stop: Arc<AtomicBool>,
     replay: Arc<Mutex<Option<ReplayCheckpoint>>>,
+    #[cfg(unix)]
+    retained: Option<Arc<journal::RetainedStorage>>,
+}
+#[derive(Clone, Debug)]
+pub struct HistorySummary {
+    pub title: Option<String>,
+    pub lifecycle: Option<super::Lifecycle>,
+    pub partial: bool,
 }
 impl Client {
+    /// Opt-in trust boundary: retained no-follow journal and mailbox I/O. Desktop connect is unchanged.
+    #[cfg(unix)]
+    pub fn connect_hardened(descriptor: Descriptor) -> Result<Self> {
+        let directory = journal::directory(&descriptor.id)?;
+        let storage = Arc::new(journal::RetainedStorage::open(&directory)?);
+        storage.matches_descriptor(&descriptor)?;
+        Ok(Self::at_storage(
+            Ok(directory),
+            None,
+            WorkerHooks::default(),
+            Some(storage),
+        ))
+    }
+    #[cfg(unix)]
+    pub fn summary_hardened(descriptor: &Descriptor) -> Result<HistorySummary> {
+        let storage = journal::RetainedStorage::open(&journal::directory(&descriptor.id)?)?;
+        storage.matches_descriptor(descriptor)?;
+        let (events, partial) = storage.summary()?;
+        let mut transcript = Transcript::default();
+        for e in events {
+            transcript.apply(&e);
+        }
+        let title = transcript.entries.iter().find_map(|e| match e {
+            super::Entry::Message(m)
+                if m.role == super::Role::User && !m.text.trim().is_empty() =>
+            {
+                Some(
+                    m.text
+                        .trim()
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .take(160)
+                        .collect(),
+                )
+            }
+            _ => None,
+        });
+        if storage.failure_reason().is_some() || storage.worker_absent() {
+            transcript.lifecycle = super::Lifecycle::Failed;
+        }
+        Ok(HistorySummary {
+            title,
+            lifecycle: if partial || transcript.generation.is_empty() {
+                None
+            } else {
+                Some(transcript.lifecycle)
+            },
+            partial,
+        })
+    }
     pub fn connect(descriptor: Descriptor) -> Self {
         Self::at_directory(journal::directory(&descriptor.id))
     }
@@ -226,7 +286,21 @@ impl Client {
     fn at_directory_gated(
         directory: Result<std::path::PathBuf>,
         start: Option<crossbeam_channel::Receiver<()>>,
+        hooks: WorkerHooks,
+    ) -> Self {
+        Self::at_storage(
+            directory,
+            start,
+            hooks,
+            #[cfg(unix)]
+            None,
+        )
+    }
+    fn at_storage(
+        directory: Result<PathBuf>,
+        start: Option<crossbeam_channel::Receiver<()>>,
         mut hooks: WorkerHooks,
+        #[cfg(unix)] retained: Option<Arc<journal::RetainedStorage>>,
     ) -> Self {
         let (tx, rx) = crossbeam_channel::bounded::<QueuedCommand>(32);
         let (etx, erx) = crossbeam_channel::bounded(8);
@@ -249,6 +323,8 @@ impl Client {
             local_pending.clone(),
             stop.clone(),
         );
+        #[cfg(unix)]
+        let worker_storage = retained.clone();
         std::thread::spawn(move || {
             if let Some(start) = start {
                 let _ = start.recv();
@@ -275,13 +351,37 @@ impl Client {
                         Err(_) => break,
                     }
                 }
+                #[cfg(unix)]
+                let mut reason = if let Some(storage) = &worker_storage {
+                    storage
+                        .validate()
+                        .err()
+                        .map(|_| "Native retained storage changed; history is read-only".into())
+                        .or_else(|| storage.failure_reason())
+                } else {
+                    journal::failure_reason(&dir)
+                };
+                #[cfg(not(unix))]
                 let mut reason = journal::failure_reason(&dir);
-                if reason.is_none() && journal::worker_absent(&dir) {
+                #[cfg(unix)]
+                let absent = worker_storage
+                    .as_ref()
+                    .map_or_else(|| journal::worker_absent(&dir), |s| s.worker_absent());
+                #[cfg(not(unix))]
+                let absent = journal::worker_absent(&dir);
+                if reason.is_none() && absent {
                     reason=Some("Agent worker is unavailable. Pending submissions are unconfirmed and will not be replayed.".into());
                 }
                 let mut at_end = false;
                 if pending.is_none() {
-                    match journal::tail(&dir.join("events.jsonl"), &mut offset) {
+                    #[cfg(unix)]
+                    let batch = match &worker_storage {
+                        Some(s) => s.tail(&mut offset),
+                        None => journal::tail(&dir.join("events.jsonl"), &mut offset),
+                    };
+                    #[cfg(not(unix))]
+                    let batch = journal::tail(&dir.join("events.jsonl"), &mut offset);
+                    match batch {
                         Ok(batch) if !batch.is_empty() => {
                             *checkpoint.lock().unwrap() = None;
                             for event in &batch {
@@ -312,6 +412,15 @@ impl Client {
                     hooks.before_failure();
                     *u.lock().unwrap() = Some(reason.clone());
                     if at_end && pending.is_none() && reported.as_ref() != Some(&reason) {
+                        #[cfg(unix)]
+                        let mut rejected = if let Some(storage) = &worker_storage {
+                            storage.published_ids().unwrap_or_default()
+                        } else {
+                            journal::pending_ids(&dir)
+                                .into_iter()
+                                .collect::<BTreeSet<_>>()
+                        };
+                        #[cfg(not(unix))]
                         let mut rejected = journal::pending_ids(&dir)
                             .into_iter()
                             .collect::<BTreeSet<_>>();
@@ -344,7 +453,17 @@ impl Client {
                             // even if a new Generation makes the runtime usable.
                             continue;
                         }
-                        if let Err(err) = enqueue_command(&dir, &queued, &mut hooks, &worker_writers) {
+                        #[cfg(unix)]
+                        let publication = if let Some(storage) = &worker_storage {
+                            let _publication = EnqueuePublication::begin(&worker_writers);
+                            storage.enqueue(&queued)
+                        } else {
+                            enqueue_command(&dir, &queued, &mut hooks, &worker_writers)
+                        };
+                        #[cfg(not(unix))]
+                        let publication =
+                            enqueue_command(&dir, &queued, &mut hooks, &worker_writers);
+                        if let Err(err) = publication {
                             *e.lock().unwrap() = Some(err.to_string());
                             local.lock().unwrap().remove(&queued.id);
                             let outcome = Envelope {
@@ -367,13 +486,27 @@ impl Client {
                     && !observed.generation.is_empty()
                 {
                     let revision = worker_writers.lock().unwrap().revision;
+                    #[cfg(unix)]
+                    let queued = worker_storage
+                        .as_ref()
+                        .map_or_else(|| published_command_ids(&dir), |s| s.published_ids());
+                    #[cfg(not(unix))]
                     let queued = published_command_ids(&dir);
                     // Cover host outcome/removal ordering as well as concurrent
                     // local publications. Publishing and querying use writer ->
                     // checkpoint lock order; an expired mailbox cannot validate
                     // a checkpoint from before its final possible publication.
+                    #[cfg(unix)]
+                    let journal_stable = worker_storage.as_ref().map_or_else(
+                        || {
+                            std::fs::metadata(dir.join("events.jsonl"))
+                                .is_ok_and(|m| m.len() == offset)
+                        },
+                        |s| s.journal_len().is_ok_and(|len| len == offset),
+                    );
+                    #[cfg(not(unix))]
                     let journal_stable = std::fs::metadata(dir.join("events.jsonl"))
-                        .is_ok_and(|meta| meta.len() == offset);
+                        .is_ok_and(|m| m.len() == offset);
                     let checkpointed = {
                         let registry = worker_writers.lock().unwrap();
                         let mut checkpoint = checkpoint.lock().unwrap();
@@ -410,6 +543,8 @@ impl Client {
             writers,
             stop,
             replay,
+            #[cfg(unix)]
+            retained,
         }
     }
     #[cfg(test)]
@@ -433,11 +568,29 @@ impl Client {
                 writers,
                 stop: Arc::new(AtomicBool::new(false)),
                 replay: Arc::new(Mutex::new(None)),
+                #[cfg(unix)]
+                retained: None,
             },
             rx,
         )
     }
     pub fn drain(&mut self) -> Vec<Envelope> {
+        #[cfg(unix)]
+        if self
+            .retained
+            .as_ref()
+            .is_some_and(|s| s.validate().is_err())
+        {
+            while self.events.try_recv().is_ok() {}
+            return vec![Envelope {
+                sequence: 0,
+                generation: self.generation.lock().unwrap().clone(),
+                event: Event::RuntimeUnavailable {
+                    reason: "Native retained storage changed; history is read-only".into(),
+                    rejected: vec![],
+                },
+            }];
+        }
         let events: Vec<Envelope> = self.events.try_iter().take(8).flatten().collect();
         for envelope in &events {
             if matches!(envelope.event, Event::Generation) {
@@ -454,6 +607,10 @@ impl Client {
     /// Bind every view control to the generation actually reduced by that view.
     /// A drained but unapplied Generation must never retarget an old approval.
     pub fn send_for_generation(&self, generation: &str, command: Command) -> Result<String> {
+        #[cfg(unix)]
+        if let Some(storage) = &self.retained {
+            storage.validate()?;
+        }
         self.send_with_registration(generation, command, || {})
     }
     fn send_with_registration(
@@ -497,16 +654,32 @@ impl Client {
                 && !r.queued.contains(id)
         }) && !queued_locally_in(&mut registry, id)
     }
-    pub fn invalidate_replay(&self) { *self.replay.lock().unwrap() = None; }
+    pub fn invalidate_replay(&self) {
+        *self.replay.lock().unwrap() = None;
+    }
     /// Current background replay AND mailbox inspection, not only an old Ready event.
     pub fn replay_current(&self, generation: &str, sequence: u64) -> bool {
+        #[cfg(unix)]
+        if self
+            .retained
+            .as_ref()
+            .is_some_and(|s| s.validate().is_err())
+        {
+            return false;
+        }
         let mut registry = self.writers.lock().unwrap();
         registry.mailboxes.retain(|weak| weak.strong_count() > 0);
-        let no_local = registry.mailboxes.iter().filter_map(Weak::upgrade)
+        let no_local = registry
+            .mailboxes
+            .iter()
+            .filter_map(Weak::upgrade)
             .all(|local| local.lock().unwrap().is_empty());
         self.replay.lock().unwrap().as_ref().is_some_and(|r| {
-            r.generation == generation && r.sequence <= sequence
-                && r.writer_revision == registry.revision && r.queued.is_empty() && no_local
+            r.generation == generation
+                && r.sequence <= sequence
+                && r.writer_revision == registry.revision
+                && r.queued.is_empty()
+                && no_local
         })
     }
     pub fn take_error(&self) -> Option<String> {
