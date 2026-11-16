@@ -9,6 +9,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Workspaces and agents](workspaces.md) | Named workspaces, shared folders, multiple repositories, split sessions |
 | [Pane layout](pane-layout.md) | Drag panes, resize local or linked boundaries, snap and cancel |
 | [Remote files and SSH](remote-files.md) | S3/OCI/GCS/R2, CLI profiles, FTP/SFTP, file transfers and SSH terminals |
+| [Kiln Remote mobile companion](mobile-remote.md) | Optional host, Android/iOS source builds, pairing and actual-UI evidence boundaries |
 | [Object storage](object-storage.md) | AWS, OCI, Google and Cloudflare profiles, authentication and transfer limits |
 | [Native agent conversations](agent-gui.md) | GUI/Terminal mode, streamed tools, approvals, images and durable drafts |
 | [Native feature coverage](agent-feature-coverage.md) | Provider controls/actions, startup options, native references and extension boundaries |

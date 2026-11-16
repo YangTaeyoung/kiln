@@ -1,0 +1,12 @@
+import { useState } from 'react';
+import { FileText } from 'lucide-react';
+import type { ApprovalRequest, Decision } from '../../../protocol/v1';
+import { responseCommand } from '../state/native';
+import type { Remote } from '../state/useRemote';
+import type { Translate } from '../locales';
+export function Approval({request:q,remote:r,t}:{request:ApprovalRequest;remote:Remote;t:Translate}){
+ const [answers,setAnswers]=useState<Record<string,string[]>>({});
+ const key=`respond-${r.selected}-${q.id}`;const disabled=r.connectivity!=='verified'||!r.snapshotFresh||!q.respondable||!r.snapshot?.replay_ready||r.ledger.busy(key)||r.ledger.records.some(record=>record.key===key&&['queued','succeeded'].includes(record.state));
+ const respond=(decision:Decision)=>{void r.command(responseCommand(q,decision,answers),key);};
+ return <article className="approval card"><div className="row"><span className="round-icon"><FileText/></span><div><h3>{t('approval')}</h3><p>{q.title}</p></div></div><details open><summary>{t('permissionScope')}</summary><pre>{JSON.stringify(q.details,null,2)}</pre></details>{q.questions.map(question=><fieldset key={question.id}><legend>{question.text}</legend>{question.options.length===0&&<textarea aria-label={question.text} disabled={disabled} value={(answers[question.id]??[]).join('\n')} maxLength={4096} onChange={e=>setAnswers(a=>({...a,[question.id]:question.multi_select?e.target.value.split('\n'):[e.target.value]}))}/ >}{question.options.map(o=><label className="choice-row" key={o.id}><input type={question.multi_select?'checkbox':'radio'} name={`${q.id}-${question.id}`} value={o.id} checked={(answers[question.id]??[]).includes(o.id)} disabled={disabled} onChange={e=>setAnswers(a=>({...a,[question.id]:question.multi_select?(e.target.checked?[...(a[question.id]??[]),o.id]:(a[question.id]??[]).filter(id=>id!==o.id)):[o.id]}))}/><span>{o.label}<small>{o.description}</small></span></label>)}</fieldset>)}{!q.respondable&&<p className="warning">{t('review')} {q.reason}</p>}<div className="actions"><button disabled={disabled} className="allow" onClick={()=>respond('Allow')}>✓ {t('allow')}</button><button disabled={disabled} onClick={()=>respond('Deny')}>× {t('deny')}</button><button disabled={disabled} onClick={()=>respond('Cancel')}>{t('cancel')}</button></div>{q.options.map(o=><section className="native-option" key={o.id}><strong>{o.label}</strong><p>{o.description}</p><button disabled={disabled} onClick={()=>respond({Option:o.id})}>{t('choose')} · {o.label}</button></section>)}</article>;
+}

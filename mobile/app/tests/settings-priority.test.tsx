@@ -1,0 +1,40 @@
+import {afterEach,expect,it,vi} from 'vitest';
+import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
+import approval from '../../protocol/fixtures/approval.json';
+import type {ControlOption,Snapshot} from '../../protocol/v1';
+import {Settings} from '../src/components/Settings';
+import {Terminal} from '../src/components/Terminal';
+import {translator} from '../src/locales';
+import {MutationLedger} from '../src/state/mutations';
+import type {Remote} from '../src/state/useRemote';
+afterEach(cleanup);
+const option=(id:string,live=false):ControlOption=>({id,label:id,description:`Original ${id}`,scope:live?'Live':'Inherited',kind:'Text',current:{Text:'original'},choices:[],category:null,available:true,mobile_supported:live,mobile_reason:live?null:'Inherited scope',reason:null,source:'native',documentation:null});
+it('puts editable model/effort/ultracode and modes first while retaining every native-only option under collapsed Advanced',()=>{
+ const s=structuredClone(approval) as Snapshot;
+ if('unavailable'in s.controls)throw Error();
+ s.controls.options=[option('$schema'),option('apiKeyHelper'),option('other-live',true),option('ultracode',true),option('proxyAuthHelper'),option('effort',true),option('model',true)];
+ s.modes=[{id:'plan',label:'Plan mode',description:'Original plan'}];
+ s.controls.capabilities=[{id:'native-cap',label:'Native capability',scope:'Managed',available:false,description:'Original capability',documentation:''}];
+ s.controls.outcomes={operation:{settled:false,operation:'operation',control:'effort',requested:{Text:'high'},effective:{Text:'low'},state:'Pending',message:'Original outcome'}};
+ const remote={snapshot:s,selected:s.descriptor.id,connectivity:'verified',snapshotFresh:true,ledger:new MutationLedger(),command:vi.fn()} as unknown as Remote;
+ const {container}=render(<Settings remote={remote} t={translator('en')} language="en" setLanguage={()=>{}} back={()=>{}} newTask={()=>{}}/>);
+ const advanced=screen.getByText('Advanced · original native settings').closest('details')!;
+ expect(advanced).toBeTruthy();expect(advanced.hasAttribute('open')).toBe(false);
+ const primary=Array.from(container.querySelectorAll('.execution > .control-row .control-heading strong')).map(e=>e.textContent);
+ expect(primary).toEqual(['model','effort','ultracode','other-live']);
+ const effort=screen.getByLabelText('effort');expect(effort.closest('details')).toBeNull();
+ expect(screen.getByText('Plan mode').compareDocumentPosition(advanced)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ fireEvent.click(within(advanced).getByText('Advanced · original native settings'));
+ expect(advanced.hasAttribute('open')).toBe(true);
+ for(const name of ['$schema','apiKeyHelper','proxyAuthHelper'])expect(within(advanced).getByText(name)).toBeTruthy();
+ expect(container.querySelectorAll('.control-heading strong')).toHaveLength(7);
+ expect(screen.getByText('Native capability')).toBeTruthy();expect(screen.getByText('Original outcome')).toBeTruthy();
+});
+
+it('identifies empty-titled terminal rows and selected detail by their stable native IDs',()=>{
+ const remote={terminals:{terminals:[{id:'native-1',title:'',exited:null},{id:'native-2',title:'',exited:null}],truncated:false},terminal:{id:'native-1',title:'',exited:null,text:'',truncated:false},ledger:new MutationLedger(),connectivity:'verified'} as unknown as Remote;
+ const {container}=render(<Terminal remote={remote} t={translator('en')}/>);
+ expect(screen.getByRole('button',{name:'Terminal native-1 · —'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Terminal native-2 · —'})).toBeTruthy();
+ expect(container.querySelector('.section-heading strong')?.textContent).toBe('Terminal native-1');
+});

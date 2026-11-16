@@ -1,0 +1,80 @@
+name: Mobile companion
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', '.github/workflows/mobile.yml']
+  pull_request:
+    paths: ['mobile/**', '.github/workflows/mobile.yml']
+permissions:
+  contents: read
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/app/package-lock.json
+      - name: Web behavior and production bundle
+        working-directory: mobile/app
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+          npm run build
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            runner: ubuntu-latest
+          - platform: ios
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/app/package-lock.json
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        if: matrix.platform == 'android'
+        with:
+          packages: platform-tools
+      - name: Install Android compile SDK
+        if: matrix.platform == 'android'
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: matrix.platform == 'ios'
+        with:
+          xcode-version: '26.2'
+      - name: Check Xcode toolchain
+        if: matrix.platform == 'ios'
+        run: |
+          xcodebuild -version
+          xcodebuild -version | head -1 | grep -E '^Xcode (2[6-9]|[3-9][0-9])\.'
+      - name: Compile development and production native packages
+        run: |
+          bash mobile/scripts/build-native.sh '${{ matrix.platform }}' development "$RUNNER_TEMP/mobile-development"
+          bash mobile/scripts/build-native.sh '${{ matrix.platform }}' production "$RUNNER_TEMP/mobile-production"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiln-remote-0.1.0-${{ matrix.platform }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mobile-development/
+            ${{ runner.temp }}/mobile-production/
+          if-no-files-found: error
+          retention-days: 7

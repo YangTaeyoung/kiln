@@ -11,7 +11,7 @@ mod host;
 mod journal;
 mod providers;
 use anyhow::{Context, Result, ensure};
-pub use client::Client;
+pub use client::{Client, HistorySummary};
 pub use host::serve;
 use kiln_accounts::{AccountManager, Tool};
 use kiln_proto::SpawnSpec;

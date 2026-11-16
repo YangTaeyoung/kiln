@@ -120,8 +120,11 @@ Source tests, generated-schema checks, inert native catalog discovery and local
 synthetic inference are distinct from authenticated provider execution. This
 matrix does not certify account entitlement, managed-policy behavior, native
 visual/physical-IME acceptance, Windows runtime, signed archives or publication.
-The [dated native verification record](maintainers/0.3.0-status.md) documents the
-observed Claude/Codex native controls and tool execution with loopback inference,
-and Antigravity's authenticated native read task. It also retains the unexecuted
-Codex permission-profile change, unresolved physical IME and incomplete cleanup.
-The [0.3.0 notes](releases/0.3.0.md) keep delivery status explicit.
+The [dated verification record](maintainers/0.3.0-status.md) records the published
+0.3.0 release, final source CI, verified public archives/feeds and isolated installer
+checks separately from native execution. Its fresh `6e5fa22` Claude High/independent
+Ultracode and MCP approval/result run uses loopback inference; older Question/Stop,
+Read/Edit/image, Codex and authenticated Antigravity runs retain their exact source
+scopes. The unexecuted Codex permission-profile change, unresolved physical IME,
+original installed-app update UI and incomplete file/three-history cleanup remain
+explicit. See also the [0.3.0 notes](releases/0.3.0.md).

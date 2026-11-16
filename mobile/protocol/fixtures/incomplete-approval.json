@@ -1,0 +1,62 @@
+{
+  "descriptor": {
+    "id": "fixture-conversation",
+    "provider": "claude",
+    "workspace_id": "workspace-1",
+    "account_label": "Default"
+  },
+  "generation": "fixture-generation",
+  "sequence": 7,
+  "lifecycle": "Waiting",
+  "entries": [
+    {
+      "Message": {
+        "id": "message-1",
+        "role": "User",
+        "text": "Inert contract fixture. No inference or tool execution.",
+        "attachments": []
+      }
+    }
+  ],
+  "requests": [
+    {
+      "id": "approval-1",
+      "title": "Write example.txt",
+      "questions": [],
+      "options": [],
+      "details": null,
+      "respondable": false,
+      "reason": "Review complete approval details on the computer."
+    }
+  ],
+  "models": [],
+  "selected_model": null,
+  "modes": [],
+  "selected_mode": null,
+  "controls": {
+    "coverage": {},
+    "options_reported": true,
+    "models_reported": false,
+    "capabilities": [],
+    "queue": null,
+    "options": [],
+    "models": [],
+    "commands": null,
+    "skills": null,
+    "agents": null,
+    "styles": null,
+    "outcomes": {},
+    "status": {}
+  },
+  "commands": {},
+  "uncertain_deliveries": [],
+  "errors": [],
+  "replay_ready": true,
+  "coverage": {
+    "truncated": false,
+    "entries_retained": 1,
+    "entry_limit": 200,
+    "byte_limit": 2097152,
+    "approval_details_complete": false
+  }
+}

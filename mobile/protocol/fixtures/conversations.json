@@ -1,0 +1,33 @@
+{
+  "conversations": [
+    {
+      "descriptor": {
+        "id": "fixture-conversation",
+        "provider": "claude",
+        "workspace_id": "workspace-1",
+        "account_label": "Default"
+      },
+      "title": "Review the example changes",
+      "lifecycle": "Waiting",
+      "summary": {
+        "partial": false,
+        "unavailable": null
+      }
+    },
+    {
+      "descriptor": {
+        "id": "fixture-unavailable",
+        "provider": "codex",
+        "workspace_id": "workspace-1",
+        "account_label": "Default"
+      },
+      "title": null,
+      "lifecycle": null,
+      "summary": {
+        "partial": true,
+        "unavailable": "Conversation history is unavailable for safe summary."
+      }
+    }
+  ],
+  "truncated": false
+}

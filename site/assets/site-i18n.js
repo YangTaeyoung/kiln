@@ -1,5 +1,6 @@
 window.KILN_I18N = {
   "en": {
+    "m_mobile": "Kiln Remote · source build",
     "f_agents_t": "Agents, side by side",
     "shot_agents": "Claude Code session settings in a synthetic example workspace.",
     "f_agents_d": "Choose native conversations or terminals, with settings, commands and approvals.",
@@ -102,6 +103,7 @@ window.KILN_I18N = {
     "dl_windows": "Download for Windows"
   },
   "ko": {
+    "m_mobile": "Kiln Remote · 소스 빌드",
     "f_agents_t": "에이전트를 나란히",
     "shot_agents": "합성 예제 워크스페이스의 Claude Code 대화 설정.",
     "f_agents_d": "대화 GUI 또는 터미널에서 제공자 설정·명령·권한 요청을 다루세요.",
@@ -204,6 +206,7 @@ window.KILN_I18N = {
     "dl_windows": "Windows용 다운로드"
   },
   "ja": {
+    "m_mobile": "Kiln Remote · ソースビルド",
     "f_agents_t": "エージェントを並べて",
     "shot_agents": "合成サンプルワークスペースの Claude Code セッション設定。",
     "f_agents_d": "会話 GUI またはターミナルで、設定・コマンド・権限確認を操作。",
@@ -306,6 +309,7 @@ window.KILN_I18N = {
     "dl_windows": "Windows 版をダウンロード"
   },
   "zh-CN": {
+    "m_mobile": "Kiln Remote · 源码构建",
     "f_agents_t": "代理并排运行",
     "shot_agents": "合成示例工作区中的 Claude Code 会话设置。",
     "f_agents_d": "选择对话 GUI 或终端，使用提供方设置、命令及权限审批。",

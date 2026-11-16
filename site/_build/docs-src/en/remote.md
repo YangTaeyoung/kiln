@@ -127,3 +127,24 @@ Edit a saved connection to replace its credentials.
 
 - SFTP and SSH use Windows OpenSSH, and `C:\…` paths in your SSH config work as written.
 - Cloud CLIs installed as `.cmd` shims are found through `PATHEXT`, and the gcloud and Wrangler folders follow `%APPDATA%`.
+
+## Kiln Remote for phones {#mobile-companion}
+
+Kiln Remote 0.1.0 is an optional Android/iPhone companion built separately from desktop Kiln 0.3.0. Start the host manually on your computer, allow specific workspaces and pair using its per-launch URL and token. Closing the desktop window does not start the host. Mobile packages are built from source; there is no App Store or Play Store download in this stage.
+
+Open or create native conversations, explicitly send tasks, inspect tool output and answer complete approvals. Commands insert an editable draft. Supported controls show their native scope and pending or confirmed state; unsupported controls remain read-only. Creating a task keeps its prompt as a draft until you press Send. Connection loss never automatically repeats a prompt. Credentials and drafts stay in memory; explicit Disconnect clears the connection, and closing the app loses unsaved memory-only data.
+
+For phones, the owner must provision signing and a trusted HTTPS connection to the loopback host. Emulator/Simulator checks do not establish physical-device or remote-network acceptance. See the [build, connection and verification guide](https://github.com/YangTaeyoung/kiln/blob/main/docs/mobile-remote.md) for exact steps, current evidence and limits. Desktop screenshots on this site retain their original provenance and are not mobile screenshots.
+
+### Verification on 2026-11-16 {#mobile-verification}
+
+| Scope | Observed evidence and remaining checks |
+| --- | --- |
+| Source | Historical baseline `e94f490`; dark fix `c078e58`; attachment draft fix `f0b380f3f8b6ca154c6764b47f3f179847216646`. Desktop source and capture provenance remain separate. |
+| Android and iOS native execution | Create, explicit Send, installed Claude 2.1.325, real stdio MCP, one-time Allow and exact completed echo each produced one effect at `b45beac`. Inference used a synthetic loopback service. Later app fixes do not constitute a repeated final-head MCP run. |
+| Settings and width | At `e94f490`, both actual UIs selected Effort Level high; independent GET confirmed Applied, effective high and settled=true. iOS input width was 402px in a 402px frame; Android viewport and scroll width were both 360 CSS px. |
+| Redirects and terminals | At `e94f490`, both native apps refused redirects: two source requests, zero destination requests and zero forwarded authorization. Android at `b45beac` and iOS at `e94f490` explicitly sent terminal input + Enter to a real private shell and produced the expected effect once per platform. |
+| Drafts and images | Both actual apps preserved text after Disconnect/re-pair at `e94f490`, without extra MCP effects. Android uploaded a 6,403-byte PNG through its native picker and displayed a chip. Bounded iOS automation did not observe the Photo Library handoff; actual iOS upload remains unverified. |
+| Attachment draft fix | Images now survive settings, commands/skills, task-list navigation and same-live-host re-pairing. Images from another address or host launch show Unavailable and block Send until removed and explicitly selected/uploaded again. No automatic retry. Ten real component regressions cover navigation, session boundaries and late receipts; the full app suite passed 47 tests. Native acceptance of this later fix remains pending. |
+| Dark appearance and CI | Both rebuilt native apps were inspected as readable at `c078e58`; rendered contrast regression passed ≥4.5 after reproducing 1.095 before the fix. All three mobile CI jobs passed at that source, including development/production builds. Final attachment-source CI/artifacts remain pending. These observations do not certify every route, width or keyboard state. |
+| Owner acceptance and cleanup | Physical phones, signing, Korean IME and trusted HTTPS remain owner tasks, including when using SSH forwarding. Desktop exact-owned cleanup is complete except the existing three normal Antigravity history cleanup boundaries; mobile processes/devices/data and the final audit remain pending. Original app, daemon, auth/preferences and protected desktop release remain preserved. |
