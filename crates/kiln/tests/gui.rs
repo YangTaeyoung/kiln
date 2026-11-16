@@ -2005,7 +2005,7 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     let _cleanup=Cleanup(base.clone());
     use_posix_shell(&base);
     let mut h=Harness::builder().with_size([1100.,760.]).wgpu().build_eframe(|cc|KilnApp::new(&cc.egui_ctx,Some(proj.clone())));
-    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some()));
+    assert!(pump_until(&mut h,10,|h|h.state().debug_focused_session().is_some() && h.state().debug_focused_text().is_some_and(|text|!text.trim().is_empty())), "original terminal must have produced output before workspace navigation");
     let original=h.state().debug_focused_session().unwrap();
     h.state_mut().debug_queue_action(Action::NewAgentTask);h.run_steps(4);
     type_into_prompt(&mut h,"Review API contract independently");
@@ -2057,6 +2057,9 @@ fn same_directory_named_workspaces_create_choose_restore_and_close_independently
     assert_eq!(h.state().debug_workspace_count(),1);assert_eq!(h.state().debug_focused_session(),Some(original));
     assert_eq!(h.state().debug_workspace_prompts(),vec!["Review API contract independently"]);
     let client=kiln_daemon::client::Client::connect(&base.join("d.sock").to_string_lossy(),None).unwrap();
+    let same_session=h.state().debug_focused_session()==Some(original);
+    let screen=h.state().debug_focused_text();
+    assert!(same_session && screen.as_ref().is_some_and(|text|!text.trim().is_empty()), "before terminal input: original_session={same_session}, screen_present={}, screen_nonempty={}",screen.is_some(),screen.as_ref().is_some_and(|text|!text.trim().is_empty()));
     client.send(kiln_proto::ClientMsg::Input{session:original,data:b"printf 'original-workspace-%s\\n' alive\r".to_vec()});
     assert!(pump_until(&mut h,10,|h|h.state().debug_focused_text().is_some_and(|t|t.contains("original-workspace-alive"))),"focused terminal: {:?}",h.state().debug_focused_text());
     let sessions=match client.request(|req|kiln_proto::ClientMsg::ListSessions{req},Duration::from_secs(2)).unwrap(){kiln_proto::ServerMsg::Sessions{sessions,..}=>sessions,r=>panic!("{r:?}")};
