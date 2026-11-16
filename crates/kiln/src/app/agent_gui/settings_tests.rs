@@ -797,6 +797,15 @@ fn task6_settings_and_commands_start_at_top_instead_of_history_bottom() {
     );
 }
 
+// These fields require absolute paths, including a drive prefix on Windows.
+fn fix1_absolute(name: &str) -> String {
+    if cfg!(windows) {
+        format!("C:/{name}")
+    } else {
+        format!("/{name}")
+    }
+}
+
 fn fix1_form(p: AgentPane, launch: bool, width: f32, dark: bool) -> Harness<'static, AgentPane> {
     let mut initialized = false;
     Harness::builder().with_size([width, 1400.]).build_ui_state(
@@ -847,10 +856,12 @@ fn fix1_two_lines(h: &mut Harness<'_, AgentPane>, index: usize, first: &str, sec
 }
 #[test]
 fn task6_fix1_launch_lists_accept_sequential_lines_before_explicit_launch() {
+    let one = fix1_absolute("one");
+    let two = fix1_absolute("two");
     for (tool, first, second) in [
         (Tool::Claude, "Read", "Grep"),
-        (Tool::Codex, "/one", "/two"),
-        (Tool::Antigravity, "/one", "/two"),
+        (Tool::Codex, one.as_str(), two.as_str()),
+        (Tool::Antigravity, one.as_str(), two.as_str()),
     ] {
         for (width, dark) in [(320., false), (900., true)] {
             let mut h = fix1_form(fixture(tool), true, width, dark);
@@ -882,6 +893,8 @@ fn task6_fix1_launch_lists_accept_sequential_lines_before_explicit_launch() {
 }
 #[test]
 fn task6_fix1_live_lists_accept_sequential_lines_before_explicit_apply() {
+    let one = fix1_absolute("one");
+    let two = fix1_absolute("two");
     for sandbox in [false, true] {
         for (width, dark) in [(320., false), (900., true)] {
             let mut p = fixture(if sandbox { Tool::Codex } else { Tool::Claude });
@@ -912,18 +925,18 @@ fn task6_fix1_live_lists_accept_sequential_lines_before_explicit_apply() {
             p.transcript.controls.options = vec![option];
             let mut h = fix1_form(p, false, width, dark);
             h.run();
-            fix1_two_lines(&mut h, 0, "/one", "/two");
+            fix1_two_lines(&mut h, 0, &one, &two);
             h.get_by_label("적용").click();
             h.run();
             let expected = if sandbox {
                 ControlValue::Sandbox(NativeSandbox::WorkspaceWrite {
                     network_access: false,
-                    writable_roots: vec!["/one".into(), "/two".into()],
+                    writable_roots: vec![one.clone().into(), two.clone().into()],
                     exclude_slash_tmp: false,
                     exclude_tmpdir_env_var: false,
                 })
             } else {
-                ControlValue::Strings(vec!["/one".into(), "/two".into()])
+                ControlValue::Strings(vec![one.clone().into(), two.clone().into()])
             };
             assert_eq!(
                 h.state().sent,
@@ -1138,6 +1151,8 @@ fn task6_fix1_default_reset_and_kind_changes_rebuild_independent_editors() {
 }
 #[test]
 fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
+    let one = fix1_absolute("one");
+    let two = fix1_absolute("two");
     for form in [0, 1, 2] {
         let launch = form == 0;
         let mut p = fixture(if form == 2 { Tool::Codex } else { Tool::Claude });
@@ -1174,7 +1189,7 @@ fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
             h.get_by_label("새 대화 옵션 지정").click();
             h.run();
         }
-        fix1_two_lines(&mut h, 0, "/one", "/two");
+        fix1_two_lines(&mut h, 0, &one, &two);
         h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Home);
         h.run();
         h.key_press(egui::Key::Backspace);
@@ -1183,7 +1198,7 @@ fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
         h.run();
         assert_eq!(
             fix1_input(&h, 0).accesskit_node().value(),
-            Some("/one".into())
+            Some(one.clone())
         );
         h.input_mut()
             .events
@@ -1194,7 +1209,7 @@ fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
         h.run();
         assert_eq!(
             fix1_input(&h, 0).accesskit_node().value(),
-            Some("/one한".into())
+            Some(format!("{one}한"))
         );
         assert!(h.state().sent.is_empty());
         assert!(h.state_mut().take_launch_request().is_none());
@@ -1208,7 +1223,7 @@ fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
         h.run_steps(2);
         assert_eq!(
             fix1_input(&h, 0).accesskit_node().value(),
-            Some("/one".into())
+            Some(one.clone())
         );
         // Clicking the action during preedit cancels focus composition, but cannot apply it.
         h.input_mut()
@@ -1229,7 +1244,7 @@ fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
         assert!(h.state_mut().take_launch_request().is_none());
         assert_eq!(
             fix1_input(&h, 0).accesskit_node().value(),
-            Some("/one".into())
+            Some(one.clone())
         );
         h.get_by_label(if launch {
             "새 대화 열기"
@@ -1240,19 +1255,19 @@ fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
         h.run();
         if launch {
             assert!(
-                matches!(h.state_mut().take_launch_request(),Some(LaunchOptions::Claude(v)) if v.allowed_tools==["/one"])
+                matches!(h.state_mut().take_launch_request(),Some(LaunchOptions::Claude(v)) if v.allowed_tools==[one.clone()])
             );
         } else {
             match h.state().sent.last().expect("explicit Apply") {
                 Command::Configure {
                     value: ControlValue::Strings(v),
                     ..
-                } => assert_eq!(v, &["/one"]),
+                } => assert_eq!(v, &[one.clone()]),
                 Command::Configure {
                     value:
                         ControlValue::Sandbox(NativeSandbox::WorkspaceWrite { writable_roots, .. }),
                     ..
-                } => assert_eq!(writable_roots, &[PathBuf::from("/one")]),
+                } => assert_eq!(writable_roots, &[PathBuf::from(&one)]),
                 other => panic!("unexpected {other:?}"),
             }
         }
@@ -1262,6 +1277,7 @@ fn task6_fix1_list_row_deletion_and_ime_cancellation_never_commit_preedit() {
 
 #[test]
 fn task6_fix1_launch_validates_committed_path_buffer_without_losing_edits() {
+    let valid = fix1_absolute("valid-path");
     let mut h = fix1_form(fixture(Tool::Codex), true, 320., false);
     h.run();
     h.get_by_label("새 대화 옵션 지정").click();
@@ -1281,12 +1297,12 @@ fn task6_fix1_launch_validates_committed_path_buffer_without_losing_edits() {
     h.run();
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
     h.run();
-    fix1_input(&h, 0).type_text("/valid-path");
+    fix1_input(&h, 0).type_text(&valid);
     h.run();
     h.get_by_label("새 대화 열기").click();
     h.run();
     assert!(
-        matches!(h.state_mut().take_launch_request(),Some(LaunchOptions::Codex(v)) if v.workspace_roots==[PathBuf::from("/valid-path")])
+        matches!(h.state_mut().take_launch_request(),Some(LaunchOptions::Codex(v)) if v.workspace_roots==[PathBuf::from(&valid)])
     );
     assert!(h.state().sent.is_empty());
     assert_eq!(h.state().composer.text, "keep 한글 draft");

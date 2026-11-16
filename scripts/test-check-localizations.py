@@ -35,6 +35,14 @@ impl App { fn ui() { ui.label("Untranslated after tests"); } }'''
 impl App { fn ui() { ui.button("Production after lexical noise"); } }'''
         self.assertEqual(self.literals(source), ["Production after lexical noise"])
 
+    def test_test_only_macro_with_static_body_preserves_following_production(self):
+        source = '''#[cfg(test)]
+thread_local! {
+    static FIXTURE: Cell<bool> = const { Cell::new(false) };
+}
+fn production() { ui.label("Production after macro"); }'''
+        self.assertEqual(self.literals(source), ["Production after macro"])
+
     def test_multiple_inline_test_items_preserve_production_between_them(self):
         source = '''#[cfg(test)] fn fixture() { ui.label("Test only"); }
 fn production() { ui.label("첫 번째 누락"); }

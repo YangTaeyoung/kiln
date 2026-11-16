@@ -5572,7 +5572,7 @@ fn review_r5_pair_connect_resolves_endpoints_without_extension_refresh() {
     }
     let pair=Pair::connect(&accounts).unwrap();
     for root in [&pair.claude.root,&pair.codex.root] {
-        assert!(root.starts_with(temp.path().canonicalize().unwrap()));
+        assert!(root.starts_with(temp.path().canonical().unwrap()));
         assert!(!root.join("kiln-extension-state").exists());assert!(!root.join("skills/inert").exists());
     }
 }

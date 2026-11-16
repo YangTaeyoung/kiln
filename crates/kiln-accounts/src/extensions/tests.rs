@@ -1850,3 +1850,69 @@ fn fix2_r3_explicit_private_activation_override_remains_authoritative() {
     );
     assert!(dest.join("skills/demo/.claude-plugin/plugin.json").exists());
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_directory_guards_allow_journal_io_but_pin_namespace() {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_tmp, _source, destination) = fixture();
+    // Report the native failure before Dir intentionally reduces filesystem errors
+    // to bounded public reason codes. Every path belongs to the disposable fixture.
+    let mut ancestors = destination.ancestors().collect::<Vec<_>>();
+    ancestors.reverse();
+    let mut guards = Vec::new();
+    for path in ancestors {
+        guards.push(
+            OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .custom_flags(0x02000000 | 0x00200000)
+                .open(path)
+                .unwrap_or_else(|error| panic!("pin fixture ancestor {path:?}: {error:?}")),
+        );
+    }
+    drop(guards);
+    let root = Dir::open(&destination).expect("open fixture root");
+    let state = root
+        .dir(STATE, true)
+        .expect("create guarded journal directory");
+    state
+        .write_new("lock", b"", false)
+        .expect("create lock file");
+    let lock = state.lock("lock").expect("lock journal");
+    state
+        .atomic(MANIFEST, b"old")
+        .expect("initial atomic journal write");
+    state
+        .atomic(MANIFEST, b"new")
+        .expect("replace atomic journal write");
+    assert_eq!(state.read(MANIFEST, 10).unwrap().0, b"new");
+    let staged = state.dir("staged", true).expect("create stage");
+    staged
+        .write_new("asset", b"inert", false)
+        .expect("write staged asset");
+    assert!(
+        std::fs::rename(&staged.path, destination.join("moved")).is_err(),
+        "live guard must prevent renaming its directory"
+    );
+    assert!(
+        OpenOptions::new()
+            .write(true)
+            .custom_flags(0x02000000)
+            .open(&staged.path)
+            .is_err(),
+        "live guard must deny writable directory handles"
+    );
+    drop(staged);
+    state
+        .rename("staged", &root, "published")
+        .expect("publish released stage");
+    assert_eq!(
+        std::fs::read(destination.join("published/asset")).unwrap(),
+        b"inert"
+    );
+    root.remove("published")
+        .expect("remove published tree after child guard closes");
+    drop(lock);
+}

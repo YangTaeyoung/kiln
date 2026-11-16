@@ -166,7 +166,10 @@ def production_source(source):
         # A test-only constant/use may terminate with a semicolon; block items
         # terminate at their matching top-level closing brace.
         after = code[match.end():]
-        kind = re.search(r"\b(mod|fn|impl|struct|enum|trait|const|static|use)\b", after)
+        # Inspect the item header only: a macro body may itself contain static
+        # or const declarations, but the macro ends at its own closing delimiter.
+        header = re.split(r"[!{;]", after, maxsplit=1)[0]
+        kind = re.search(r"\b(mod|fn|impl|struct|enum|trait|const|static|use)\b", header)
         semicolon_item = kind and kind[1] in {"const", "static", "use"}
         stack = []
         end = None
