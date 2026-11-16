@@ -891,22 +891,62 @@ fn reconcile_one(
             state.swap(&stage, &p, &n)?;
             #[cfg(not(any(target_os = "macos", target_os = "linux")))]
             {
-                p.rename(&n, state, &intent.backup)?;
-                if let Err(e) = state.rename(&stage, &p, &n) {
-                    let _ = state.rename(&intent.backup, &p, &n);
+                p.rename_checked(
+                    &n,
+                    state,
+                    &intent.backup,
+                    before.as_deref().ok_or("CORRUPT_INTENT")?,
+                )?;
+                if let Err(e) = state.rename_checked(
+                    &stage,
+                    &p,
+                    &n,
+                    intent.after.as_deref().ok_or("CORRUPT_INTENT")?,
+                ) {
+                    let _ = state.rename_checked(
+                        &intent.backup,
+                        &p,
+                        &n,
+                        before.as_deref().ok_or("CORRUPT_INTENT")?,
+                    );
                     return Err(e);
                 }
             }
         }
-        (false, true) => state.rename(&stage, &p, &n)?,
-        (true, false) => p.rename(&n, state, &intent.backup)?,
+        (false, true) => {
+            #[cfg(windows)]
+            state.rename_checked(
+                &stage,
+                &p,
+                &n,
+                intent.after.as_deref().ok_or("CORRUPT_INTENT")?,
+            )?;
+            #[cfg(not(windows))]
+            state.rename(&stage, &p, &n)?;
+        }
+        (true, false) => {
+            #[cfg(windows)]
+            p.rename_checked(
+                &n,
+                state,
+                &intent.backup,
+                before.as_deref().ok_or("CORRUPT_INTENT")?,
+            )?;
+            #[cfg(not(windows))]
+            p.rename(&n, state, &intent.backup)?;
+        }
         (false, false) => {}
     }
-    m.entries.insert(key, intent.entry);
+    m.entries.insert(key, intent.entry.clone());
     persist(state, m)?;
-    state.remove("intent.json")?;
-    state.remove(&stage)?;
-    state.remove(&intent.backup)?;
+    #[cfg(windows)]
+    cleanup_windows_intent(state, &intent)?;
+    #[cfg(not(windows))]
+    {
+        state.remove("intent.json")?;
+        state.remove(&stage)?;
+        state.remove(&intent.backup)?;
+    }
     Ok(if a.is_some() {
         "prepared"
     } else {
@@ -930,22 +970,56 @@ fn recover(root: &Dir, state: &Dir, m: &mut Manifest) -> R<()> {
         let (parent, _) = root.parent(&intent.entry.target.path, false)?;
         parent.sync()?;
         state.sync()?;
-        m.entries.insert(intent.entry.target.key(), intent.entry);
+        m.entries
+            .insert(intent.entry.target.key(), intent.entry.clone());
         persist(state, m)?;
     } else if now.is_none() && intent.before.is_some() && state.kind(&intent.backup)?.is_some() {
         let (p, n) = root.parent(&intent.entry.target.path, true)?;
+        #[cfg(windows)]
+        state.rename_checked(
+            &intent.backup,
+            &p,
+            &n,
+            intent.before.as_deref().ok_or("CORRUPT_INTENT")?,
+        )?;
+        #[cfg(not(windows))]
         state.rename(&intent.backup, &p, &n)?;
     } else if now != intent.before {
-        let mut e = intent.entry;
+        #[cfg(windows)]
+        if intent.before.is_some()
+            && state.kind(&intent.backup)?.is_some()
+            && (intent.after.is_none() || state.kind(&intent.stage)?.is_some())
+        {
+            return Err("RECOVERY_DESTINATION_COLLISION");
+        }
+        let mut e = intent.entry.clone();
         e.state = if now.is_none() { "deleted" } else { "override" }.into();
         e.written = current(root, &e.target)?;
         m.entries.insert(e.target.key(), e);
         persist(state, m)?;
     }
-    state.remove("intent.json")?;
-    state.remove(&intent.stage)?;
-    state.remove(&intent.backup)?;
+    #[cfg(windows)]
+    cleanup_windows_intent(state, &intent)?;
+    #[cfg(not(windows))]
+    {
+        state.remove("intent.json")?;
+        state.remove(&intent.stage)?;
+        state.remove(&intent.backup)?;
+    }
     Ok(())
+}
+#[cfg(windows)]
+fn cleanup_windows_intent(state: &Dir, intent: &Intent) -> R<()> {
+    for (name, expected) in [
+        (&intent.stage, &intent.after),
+        (&intent.backup, &intent.before),
+    ] {
+        if state.kind(name)?.is_some() {
+            state.remove_checked(name, expected.as_deref().ok_or("CORRUPT_INTENT")?)?;
+        }
+    }
+    // A failed ownership check or supported flush preserves the recovery intent.
+    state.remove("intent.json")
 }
 #[cfg(test)]
 mod tests;

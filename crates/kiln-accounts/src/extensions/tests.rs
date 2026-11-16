@@ -1901,14 +1901,6 @@ fn windows_directory_guards_allow_journal_io_but_pin_namespace() {
         std::fs::rename(&staged.path, destination.join("moved")).is_err(),
         "live guard must prevent renaming its directory"
     );
-    assert!(
-        OpenOptions::new()
-            .write(true)
-            .custom_flags(0x02000000)
-            .open(&staged.path)
-            .is_err(),
-        "live guard must deny writable directory handles"
-    );
     drop(staged);
     state
         .rename("staged", &root, "published")
@@ -1934,12 +1926,11 @@ fn windows_directory_guards_allow_journal_io_but_pin_namespace() {
 
 #[cfg(windows)]
 #[test]
-fn windows_live_directory_guards_deny_write_delete_and_rename() {
+fn windows_live_directory_guards_pin_delete_and_rename() {
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        DELETE, FILE_APPEND_DATA, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_WRITE_DATA,
+        DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     };
     let (_tmp, _source, destination) = fixture();
     let root = Dir::open(&destination).unwrap();
@@ -1950,7 +1941,7 @@ fn windows_live_directory_guards_deny_write_delete_and_rename() {
         if populated {
             held.write_new("asset", b"inert", false).unwrap();
         }
-        for access in [FILE_WRITE_DATA, FILE_APPEND_DATA, DELETE] {
+        for access in [DELETE] {
             let result = OpenOptions::new()
                 .access_mode(access)
                 .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
@@ -2024,4 +2015,67 @@ fn windows_native_cross_directory_rename_with_retained_root() {
         std::fs::read(destination.join("published/asset")).unwrap(),
         b"inert"
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_recovery_collision_keeps_intent_backup_and_foreign_destination() {
+    let (tmp, source, dest) = fixture();
+    put(&source, "skills/demo/SKILL.md", "old");
+    reconcile(Tool::Claude, &source, &dest);
+    {
+        let root = Dir::open(&dest).unwrap();
+        let state = root.dir(STATE, false).unwrap();
+        let mut m: Manifest =
+            serde_json::from_slice(&state.read(MANIFEST, METADATA_BYTES).unwrap().0).unwrap();
+        let target = Target::file("skills/demo");
+        let before = physical(&root, &target).unwrap();
+        put(&source, "skills/demo/SKILL.md", "new");
+        let src = Dir::open(&source).unwrap().dir("skills", false).unwrap();
+        let snap = scan::snapshot(&src, "demo", false, &mut Budget::new(), true).unwrap();
+        snap.stage(&state, "asset-collision").unwrap();
+        let intent = Intent {
+            entry: Entry {
+                unit: None,
+                target: target.clone(),
+                kind: "skills".into(),
+                source: snap.fingerprint(),
+                written: Some(snap.fingerprint()),
+                state: "owned".into(),
+            },
+            before,
+            after: Some(snap.fingerprint()),
+            stage: "asset-collision".into(),
+            backup: "backup-collision".into(),
+        };
+        state
+            .atomic("intent.json", &serde_json::to_vec(&intent).unwrap())
+            .unwrap();
+        let (p, n) = root.parent(&target.path, false).unwrap();
+        p.rename(&n, &state, &intent.backup).unwrap();
+        p.write_new(&n, b"FOREIGN", false).unwrap();
+        assert_eq!(
+            recover(&root, &state, &mut m),
+            Err("RECOVERY_DESTINATION_COLLISION")
+        );
+        assert_eq!(p.read(&n, 100).unwrap().0, b"FOREIGN");
+        assert_eq!(
+            state
+                .dir(&intent.backup, false)
+                .unwrap()
+                .read("SKILL.md", 100)
+                .unwrap()
+                .0,
+            b"old"
+        );
+        assert!(state.kind("intent.json").unwrap().is_some());
+        p.remove(&n).unwrap();
+        recover(&root, &state, &mut m).unwrap();
+        assert_eq!(
+            p.dir(&n, false).unwrap().read("SKILL.md", 100).unwrap().0,
+            b"old"
+        );
+        assert!(state.kind("intent.json").unwrap().is_none());
+    }
+    tmp.close().unwrap();
 }

@@ -89,6 +89,29 @@ pub(super) fn snapshot(
         dirs,
     })
 }
+// Fingerprint the already-acquired Windows mutation object, never its old name.
+#[cfg(windows)]
+pub(super) fn snapshot_open_directory(dir: &Dir) -> R<Snapshot> {
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    walk(
+        dir,
+        "",
+        &mut files,
+        &mut dirs,
+        &mut 0,
+        &mut BTreeSet::new(),
+        true,
+        &Budget::new(),
+        false,
+        0,
+    )?;
+    Ok(Snapshot {
+        directory: true,
+        files,
+        dirs,
+    })
+}
 fn walk(
     dir: &Dir,
     prefix: &str,

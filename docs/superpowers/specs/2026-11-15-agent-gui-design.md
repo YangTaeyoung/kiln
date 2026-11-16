@@ -335,3 +335,53 @@ header/details at normal/narrow widths. Existing code currently falls back to ra
 tool.name for Claude/ACP and MCP command calls in `approval.rs::tool_title`.
 
 Reference: [MCP tool names and display titles](https://modelcontextprotocol.io/specification/2026-07-28/server/tools#tool).
+
+
+## Windows extension filesystem correction (November 16)
+
+Native x64 and ARM64 acceptance disproved the original directory share-read
+assumption: retained-root publication fails and an already-open empty directory
+can acquire a junction. Extension reconciliation must therefore use opened-object
+relative filesystem operations throughout the Windows backend. This amendment
+replaces the method-level requirement to deny every directory write-open with the
+following observable preservation contract; it does not relax account isolation.
+
+- Bootstrap a supported drive/UNC namespace root once, then descend by validated
+  single components relative to retained handles. Reject unsupported namespace
+  forms explicitly. Reject reparse descent; `Dir.path` is diagnostic only after
+  anchoring. Use typed windows-sys NT bindings and noninheritable synchronous RAII
+  handles. Ordinary ancestors share read/write but never delete; retain the whole
+  chain, validate opened objects and preserve object identity.
+- Every Windows child operation (creation, metadata, read, lock, enumeration,
+  rename and recursive deletion) must operate on the accepted object or fail
+  closed after a live root/ancestor reparse mutation. It must never traverse or
+  alter the external junction target. Existing held regular-file reads retain
+  protection from data writes, append and deletion. Directories remain pinned
+  against external rename/delete/replacement.
+- Preserve readonly source namespaces, bounded scanning, exclusive creation,
+  local overrides, tombstones, ownership fingerprints, private staging outside
+  native scanners, journal/backup/publish/recovery ordering and account pinning.
+  An unowned destination appearing during publication must survive and prevent
+  takeover. No share-delete/guard-drop workaround, POSIX replacement/delete,
+  forced external-handle closure, auth/config/history copy or native-default
+  fallback is allowed.
+- Serialize entire directory scans across aliases; reject malformed/truncated
+  records, errors and incomplete inventories. Preserve current scan bounds
+  (16,384 files, depth 16, 256 MiB, five-second cooperative deadline). A duplicate
+  handle does not create an independent scan cursor. Recursive removal acquires
+  one DELETE-capable mutation-root handle, avoiding self-blocking duplicates.
+- Keep all existing checked file-data/journal flushes and ordering points. The
+  supported recovery guarantee is process interruption/restart, with a bounded
+  Windows backup-to-publish absence window. Unix directory fsync remains intact.
+  Windows directory-entry persistence across sudden power loss is unverified and
+  must not be advertised; do not add admin/volume flushes or swallow a failed
+  supported flush. This is a precise limit, not permission to erase recovery
+  intent on failure.
+- Acceptance requires actual x64 and ARM64 publication/recovery and controlled
+  post-validation root/ancestor retarget effects, with successful unguarded
+  junction controls and unchanged external canaries. Cross-compilation alone is
+  insufficient. Existing product test gates remain enabled; no blanket ignores.
+
+References: [NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile),
+[NtQueryDirectoryFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerydirectoryfile),
+[FileDispositionInformation](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-_file_disposition_information).

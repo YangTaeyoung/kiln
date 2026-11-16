@@ -102,32 +102,41 @@ jobs:
             export PATH="$USERPROFILE/.cargo/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal && rustup default stable
-      - name: Windows directory guard diagnostic
-        if: matrix.part == 'libraries'
-        shell: pwsh
-        run: |
-          $probe = Join-Path $env:RUNNER_TEMP 'kiln-directory-guard-probe.exe'
-          rustc --edition=2024 scripts/windows-directory-guard-probe.rs -o $probe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $probe | Set-Content -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'kiln-directory-guard-probe.jsonl')
-          $probeExit = $LASTEXITCODE
-          Remove-Item -LiteralPath $probe
-          exit $probeExit
-      - name: Keep early guard diagnostic
-        if: matrix.part == 'libraries' && !cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: directory-guard-${{ matrix.target.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/kiln-directory-guard-probe.jsonl
-          if-no-files-found: error
-          retention-days: 3
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target.name }}
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' && matrix.part == 'libraries' }}
-      - name: Library tests
+      - name: Windows rooted extension effect gate
+        id: rooted-effects
         if: matrix.part == 'libraries'
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'kiln-rooted-extensions.log'
+          cargo test --locked -p kiln-accounts --lib extensions:: -- --test-threads=1 2>&1 | Tee-Object -FilePath $log
+          $result = $LASTEXITCODE
+          $evidence = [ordered]@{
+            source = '${{ github.sha }}'
+            target = '${{ matrix.target.name }}'
+            exit_code = $result
+            log_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $log).Hash.ToLowerInvariant()
+            native_runner = $true
+            tests_started = [bool](Select-String -Path $log -Pattern '^running [0-9]+ tests$' -Quiet)
+          }
+          $evidence | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'kiln-rooted-extensions.json')
+          exit $result
+      - name: Keep early rooted effect evidence
+        if: matrix.part == 'libraries' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rooted-extensions-${{ matrix.target.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/kiln-rooted-extensions.log
+            ${{ runner.temp }}/kiln-rooted-extensions.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Library tests
+        if: matrix.part == 'libraries' && !cancelled()
         run: cargo test --locked --no-fail-fast --workspace --lib -- --test-threads=1
       - name: Credential Manager
         if: matrix.part == 'libraries' && !cancelled()
