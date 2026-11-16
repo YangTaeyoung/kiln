@@ -12,3 +12,9 @@ input[role=switch]:checked{background:var(--green);border-color:var(--green)}
 input[role=switch]:checked:after{left:17px;background:var(--paper)}
 
 .folder-icon img{width:30px;height:30px;object-fit:contain}.composer-controls select{min-height:44px}
+/* Keep editable text readable at focus without disabling user zoom. */
+input,textarea,select,.composer textarea,.composer-controls select{font-size:16px}
+.page-header h1,.conversation-meta>strong,.composer textarea{min-width:0}
+.page-header h1{overflow-wrap:anywhere}
+.composer textarea{flex:1 1 0}
+.composer-controls select{max-width:100%}
