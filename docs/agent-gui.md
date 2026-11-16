@@ -8,8 +8,8 @@ remain terminals. A running TUI conversation is not converted in place.
 
 The native view uses the installed official CLI and the account selected when the
 pane starts. Changing the active account affects future panes. Existing CLI MCP
-configuration and native permission defaults remain in effect. Models and modes
-are shown only when advertised by that provider. The header shows the confirmed
+configuration and native permission defaults remain in effect. Model, reasoning
+effort and mode choices follow the provider's advertised metadata. The header shows the confirmed
 effective model/mode; a composer choice remains requested until native confirmation.
 
 Enter a task and press **Send** or **Enter**. **Shift+Enter** inserts a line break.
@@ -138,3 +138,5 @@ selected design asset `clean-0-71f28052a152.png`; interactive text and cards rem
 native widgets. It is used in dark mode; light mode follows the current theme.
 
 See [native component notes](agent-gui-design.md) for the implemented conversation, composer, decision, menu and notification geometry.
+See [candidate native verification](maintainers/0.3.0-status.md) for observed native
+controls/tools, inference provenance and the unresolved physical Korean IME boundary.

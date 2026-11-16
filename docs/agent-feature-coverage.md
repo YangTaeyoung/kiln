@@ -120,4 +120,8 @@ Source tests, generated-schema checks, inert native catalog discovery and local
 synthetic inference are distinct from authenticated provider execution. This
 matrix does not certify account entitlement, managed-policy behavior, native
 visual/physical-IME acceptance, Windows runtime, signed archives or publication.
+The [dated native verification record](maintainers/0.3.0-status.md) documents the
+observed Claude/Codex native controls and tool execution with loopback inference,
+and Antigravity's authenticated native read task. It also retains the unexecuted
+Codex permission-profile change, unresolved physical IME and incomplete cleanup.
 The [0.3.0 notes](releases/0.3.0.md) keep delivery status explicit.

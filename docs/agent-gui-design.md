@@ -40,4 +40,10 @@ Sources: [menu](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f8
 
 ## Verification boundary
 
-The final visual review disposition was **ship** for the scoped source/harness correction at `9967013`. Its approval-summary fix was **Approved** in dark/light full-pane renders at 1400/520 widths with short/long arguments. Earlier actual native dark conversation/menu and light conversation/Stop captures informed the component record. They precede the final approval fix and do not establish corrected native approval visibility or a real decision result. That actual native gate remained **CannotVerify** when these notes were written. Harness geometry, native interaction, physical IME input and provider outcomes remain separate evidence.
+The visual review disposition was **ship** for the scoped source/harness correction at `9967013`. Its approval-summary fix was **Approved** in dark/light full-pane renders at 1400/520 widths with short/long arguments. Subsequent actual native light approval/result/menu captures closed the earlier **CannotVerify** approval-visibility gate: actual MCP arguments and both decisions were readable before the controller selected one-time Allow, and the native result showed the matching completed echo. The scoped actual-native review was **Approved**, with a ship disposition. This is installed Claude plus local loopback inference and a real stdio MCP fixture, not authenticated remote Claude inference or whole-feature/release approval. See [current native verification](maintainers/0.3.0-status.md) for the later expanded controls/tools, authenticated Antigravity result and unresolved physical IME boundary.
+
+The composer dimensions above record the original model/mode presentation at
+`9967013`. Expanded controls also include advertised reasoning effort and independent
+Claude Ultracode, plus searchable session settings and commands/skills; see
+[provider coverage](agent-feature-coverage.md). Harness geometry, native interaction,
+physical IME input and provider outcomes remain separate evidence.
