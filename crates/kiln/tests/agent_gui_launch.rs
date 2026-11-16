@@ -35,7 +35,7 @@ fn pump(h: &mut Harness<'_, KilnApp>, mut ready: impl FnMut(&Harness<'_, KilnApp
 #[test]
 fn gui_default_menu_workspace_request_exact_once_and_draft_restore() {
     let dir = tempfile::tempdir().unwrap();
-    let base = dir.path();
+    let base = dir.path().canonicalize().unwrap();
     let workspace = base.join("workspace");
     let bin = base.join("bin");
     std::fs::create_dir_all(&workspace).unwrap();
