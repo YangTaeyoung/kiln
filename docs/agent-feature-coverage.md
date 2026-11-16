@@ -1,6 +1,6 @@
 # Native agent feature coverage
 
-This matrix describes the unpublished 0.3.0 source implementation. Reference
+This matrix describes the 0.3.0 source implementation. Reference
 versions are Claude Code **2.1.325** / Agent SDK **0.3.325**, Codex CLI
 **0.167.2**, and Antigravity CLI **1.5.9**. They are the versions inspected during
 implementation, not minimum requirements or a compatibility promise for later
