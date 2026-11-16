@@ -1,4 +1,4 @@
-import type { ApprovalRequest, Command, ControlOption, Decision, Outcome, Snapshot } from '../../../protocol/v1';
+import type { ApprovalRequest, Attachment, Command, ControlOption, Decision, Outcome, Snapshot } from '../../../protocol/v1';
 import type { Language } from '../locales';
 export const editable=(o:ControlOption)=>o.available && o.mobile_supported && o.scope==='Live';
 export function canSubmit(s:Snapshot|null,generation=s?.generation):boolean {
@@ -16,7 +16,20 @@ export function responseCommand(r:ApprovalRequest,decision:Decision,answers:Reco
  if(Object.keys(answers).some(id=>!r.questions.some(q=>q.id===id)))throw new Error('invalid_question');
  return {Respond:{request_id:r.id,decision,answers:result}};
 }
+export type AttachmentDraft = Attachment & { hostScope:string; revision:number };
 export class Drafts {
+ private images=new Map<string,AttachmentDraft[]>();
+ imageSnapshot(id:string){return this.images.get(id)??[];}
+ addImage(id:string,hostScope:string,attachment:Attachment){
+  this.images.set(id,[...this.imageSnapshot(id),{...attachment,hostScope,revision:++this.revision}]);
+ }
+ removeImage(id:string,revision:number){
+  this.images.set(id,this.imageSnapshot(id).filter(image=>image.revision!==revision));
+ }
+ consumeImages(id:string,submitted:AttachmentDraft[]){
+  const revisions=new Set(submitted.map(image=>image.revision));
+  this.images.set(id,this.imageSnapshot(id).filter(image=>!revisions.has(image.revision)));
+ }
  private values=new Map<string,{text:string;revision:number}>();
  private revision=0;
  get(id:string){return this.values.get(id)?.text??'';}

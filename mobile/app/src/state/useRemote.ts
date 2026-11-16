@@ -5,6 +5,7 @@ import { Drafts, canSubmit } from './native';
 import { MutationLedger } from './mutations';
 export function useRemote(){
  const [client,setClient]=useState<RemoteClient|null>(null),[bootstrap,setBootstrap]=useState<Bootstrap|null>(null),[list,setList]=useState<ConversationList|null>(null),[selected,setSelected]=useState<string|null>(null),[snapshot,setSnapshot]=useState<Snapshot|null>(null),[terminals,setTerminals]=useState<TerminalList|null>(null),[terminal,setTerminal]=useState<Terminal|null>(null),[error,setError]=useState<string|null>(null),[loading,setLoading]=useState(false),[revision,changed]=useState(0),[createdId,setCreatedId]=useState<string|null>(null),[connectivity,setConnectivity]=useState<'disconnected'|'verified'|'unverified'>('disconnected'),[verifiedAt,setVerifiedAt]=useState<number|null>(null),[snapshotFresh,setSnapshotFresh]=useState(false);
+ const [hostScope,setHostScope]=useState<string|null>(null);
  const drafts=useRef(new Drafts()).current;
  const ledgerRef=useRef<MutationLedger|null>(null);if(!ledgerRef.current)ledgerRef.current=new MutationLedger(()=>changed(n=>n+1));const ledger=ledgerRef.current;
  const createIntents=useRef(new Map<string,{draft:ReturnType<Drafts['snapshot']>;epoch:number}>());
@@ -28,9 +29,13 @@ export function useRemote(){
  },[client,selected]);
  useEffect(()=>{void refresh();const id=setInterval(()=>void refresh(),4000);return()=>clearInterval(id);},[refresh]);
  useEffect(()=>{setSnapshot(null);void readSnapshot();const id=setInterval(()=>void readSnapshot(),1500);return()=>clearInterval(id);},[readSnapshot]);
- async function pair(address:string,token:string){if(pairing.current)return;pairing.current=true;setLoading(true);setError(null);setConnectivity('unverified');setSnapshotFresh(false);const e=++epoch.current;let next:RemoteClient|undefined;try{next=new RemoteClient(address,token);const b=await next.get<Bootstrap>('/v1/bootstrap');if(b.api_version!==1 || b.host_version!=='0.1.0')throw new Error('unsupported_host');const l=await next.get<ConversationList>('/v1/conversations');if(e===epoch.current){client?.clear();setClient(next);setBootstrap(b);setList(l);setConnectivity('verified');setVerifiedAt(Date.now());setSnapshot(null);setSelected(null);setTerminal(null);setTerminals(null);}}catch(err){next?.clear();if(e===epoch.current)setError(err instanceof ApiFailure?err.code:'connection_failed');}finally{pairing.current=false;setLoading(false);}}
- function disconnect(){++epoch.current;setConnectivity('disconnected');setVerifiedAt(null);setSnapshotFresh(false);client?.clear();setClient(null);setBootstrap(null);setList(null);setSelected(null);setSnapshot(null);setTerminal(null);setTerminals(null);setError(null);setCreatedId(null);}
- function select(id:string){setSnapshotFresh(false);setSnapshot(null);setSelected(id);}
+ async function pair(address:string,token:string){if(pairing.current)return;pairing.current=true;setLoading(true);setError(null);setConnectivity('unverified');setSnapshotFresh(false);const e=++epoch.current;let next:RemoteClient|undefined;try{next=new RemoteClient(address,token);const b=await next.get<Bootstrap>('/v1/bootstrap');if(b.api_version!==1 || b.host_version!=='0.1.0')throw new Error('unsupported_host');const l=await next.get<ConversationList>('/v1/conversations');
+  // The launch bearer changes when the host restarts. Retain only its digest, never a second credential.
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([next.base,token])));
+  const scope=Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+  if(e===epoch.current){setHostScope(scope);client?.clear();setClient(next);setBootstrap(b);setList(l);setConnectivity('verified');setVerifiedAt(Date.now());setSnapshot(null);setSelected(null);setTerminal(null);setTerminals(null);}}catch(err){next?.clear();if(e===epoch.current)setError(err instanceof ApiFailure?err.code:'connection_failed');}finally{pairing.current=false;setLoading(false);}}
+ function disconnect(){++epoch.current;setHostScope(null);setConnectivity('disconnected');setVerifiedAt(null);setSnapshotFresh(false);client?.clear();setClient(null);setBootstrap(null);setList(null);setSelected(null);setSnapshot(null);setTerminal(null);setTerminals(null);setError(null);setCreatedId(null);}
+ function select(id:string){if(selectedRef.current===id){void readSnapshot();return;}setSnapshotFresh(false);setSnapshot(null);setSelected(id);}
  async function command(command:Command,key:string){const s=currentSnapshot.current;if(!client||!s||connectivity!=='verified'||!snapshotFresh)return;const generation=s.generation;const e=epoch.current;
   const settlementRequired=typeof command==='object'&&('Submit'in command||'SubmitWithSkills'in command||'Configure'in command||'SetMode'in command);
   if(command!=='Interrupt' && (!s.replay_ready || (settlementRequired&&!canSubmit(s,generation)))){setError('native_not_ready');return;}
@@ -68,9 +73,18 @@ export function useRemote(){
   });
   if(receipt&&e===epoch.current)void recover(receipt.request_id);
  }
- async function upload(file:File){if(!client||!selected)return;if(file.size>20*1024*1024 || !['image/png','image/jpeg','image/gif','image/webp'].includes(file.type)){setError('invalid_image');return;}
-  const encoded=await new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});
-  return ledger.perform(`upload-${selected}`,id=>client.post<UploadReceipt>(`/v1/conversations/${encodeURIComponent(selected)}/attachments`,{request_id:id,filename:file.name,mime:file.type,bytes_base64:encoded}));
+ async function upload(file:File){
+  if(!client||!selected||!hostScope||connectivity!=='verified')return;
+  const conversation=selected,scope=hostScope,e=epoch.current;
+  if(file.size>20*1024*1024 || !['image/png','image/jpeg','image/gif','image/webp'].includes(file.type)){setError('invalid_image');return;}
+  try{
+   const encoded=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file);});
+   if(e!==epoch.current)return; // Disconnect during file reading must not initiate a late POST.
+   const result=await ledger.perform(`upload-${conversation}`,id=>client.post<UploadReceipt>(`/v1/conversations/${encodeURIComponent(conversation)}/attachments`,{request_id:id,filename:file.name,mime:file.type,bytes_base64:encoded}));
+   // Completion belongs to the captured host/conversation even if its route has unmounted.
+   if(result){drafts.addImage(conversation,scope,result.attachment);changed(n=>n+1);}
+   return result;
+  }catch{if(e===epoch.current)setError('image_read_failed');}
  }
  async function readTerminal(id:string){if(!client)return;const e=epoch.current;try{const value=await client.get<Terminal>(`/v1/terminals/${encodeURIComponent(id)}`);if(e===epoch.current)setTerminal(value);}catch{if(e===epoch.current)setError('terminal_unavailable');}}
  async function terminalInput(text:string,enter:boolean){
@@ -79,6 +93,6 @@ export function useRemote(){
   const receipt=await ledger.perform(`terminal-${terminal.id}`,id=>client.post(`/v1/terminals/${encodeURIComponent(terminal.id)}/input`,{request_id:id,text,enter}));
   return e===epoch.current&&terminalRef.current?.id===terminal.id?receipt:undefined;
  }
- return {sessionId:epoch.current,isCurrentSession:(id:number)=>id===epoch.current,connectivity,verifiedAt,snapshotFresh,createdId,bootstrap,list,selected,snapshot,terminals,terminal,error,loading,ledger,drafts,revision,pair,disconnect,select,refresh,readSnapshot,command,recover,create,upload,readTerminal,terminalInput};
+ return {hostScope,sessionId:epoch.current,isCurrentSession:(id:number)=>id===epoch.current,connectivity,verifiedAt,snapshotFresh,createdId,bootstrap,list,selected,snapshot,terminals,terminal,error,loading,ledger,drafts,revision,pair,disconnect,select,refresh,readSnapshot,command,recover,create,upload,readTerminal,terminalInput};
 }
 export type Remote=ReturnType<typeof useRemote>;
