@@ -305,24 +305,7 @@ pub(super) fn tool_input(tool: &ToolCall, provider: Tool) -> String {
         .join("\n")
 }
 pub(super) fn tool_title(tool: &ToolCall, provider: Tool) -> String {
-    let title = match native_item(tool, provider) {
-        Some("fileChange") => kiln_common::i18n::tr("파일 변경"),
-        Some("webSearch") => kiln_common::i18n::tr("웹 검색"),
-        Some("imageView") => kiln_common::i18n::tr("이미지 보기"),
-        Some("imageGeneration") => kiln_common::i18n::tr("이미지 생성"),
-        Some("mcpToolCall" | "commandExecution") | None => &tool.name,
-        Some("dynamicToolCall") => tool.input["tool"]
-            .as_str()
-            .unwrap_or(kiln_common::i18n::tr("도구 실행")),
-        Some(_) => tool.input["title"]
-            .as_str()
-            .unwrap_or(kiln_common::i18n::tr("도구 실행")),
-    };
-    bounded(if title.is_empty() {
-        kiln_common::i18n::tr("도구 실행")
-    } else {
-        title
-    })
+    super::tool_presentation::title(tool, provider, native_item(tool, provider))
 }
 
 #[cfg(test)]

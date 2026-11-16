@@ -1,6 +1,20 @@
 //! Codex app-server v2, verified against the installed generated JSON schemas.
 use super::*;
+#[path = "codex_actions.rs"]
+mod actions;
+#[path = "codex_controls.rs"]
+mod detailed;
 use std::time::{Duration, Instant};
+struct ActiveTurnSettings {
+    turn: String,
+    values: BTreeMap<String, ControlValue>,
+}
+struct ActiveTurnChange {
+    turn: String,
+    control: String,
+    value: ControlValue,
+    values: BTreeMap<String, ControlValue>,
+}
 struct StopTarget {
     item: String,
     process: String,
@@ -37,7 +51,34 @@ pub(in crate::app::agent_gui) struct Codex {
     tool_turns: BTreeMap<String, String>,
     stopping: Option<StopOperation>,
     selected: Option<String>,
-    pending_model: Option<String>,
+    pending_turn_settings: Option<BTreeMap<String, ControlValue>>,
+    active_turn_settings: Option<ActiveTurnSettings>,
+    pending_active_change: Option<ActiveTurnChange>,
+    pub(super) launch_options: LaunchOptions,
+    native: NativeFlight,
+    controls: Vec<ControlOption>,
+    metadata: Vec<ModelMetadata>,
+    model_choices: Vec<Model>,
+    model_pages: usize,
+    collaboration: BTreeMap<String, Option<String>>,
+    profiles: Vec<ControlChoice>,
+    profile_pages: usize,
+    allowed_sandboxes: Option<Vec<String>>,
+    allowed_granular: Option<Vec<GranularApproval>>,
+    policy_loaded: bool,
+    effective: BTreeMap<String, ControlValue>,
+    allowed_policies: Vec<String>,
+    allowed_reviewers: Vec<String>,
+    start_after_models: bool,
+    compacting: bool,
+    queue: Vec<QueuedTask>,
+    skills: Vec<NativeEntry>,
+    skill_enabled: BTreeMap<String, bool>,
+    explicit_effort: bool,
+    expected_settings: BTreeMap<String, ControlValue>,
+    settings_ack: bool,
+    settings_notification: bool,
+    settings_deadline: Option<Instant>,
 }
 impl Codex {
     pub fn new(cwd: PathBuf, resume: Option<String>) -> Self {
@@ -55,8 +96,38 @@ impl Codex {
             tool_turns: BTreeMap::new(),
             stopping: None,
             selected: None,
-            pending_model: None,
+            pending_turn_settings: None,
+            active_turn_settings: None,
+            pending_active_change: None,
+            launch_options: LaunchOptions::Inherited,
+            native: NativeFlight::default(),
+            controls: vec![],
+            metadata: vec![],
+            model_choices: vec![],
+            model_pages: 0,
+            collaboration: BTreeMap::new(),
+            profiles: vec![],
+            profile_pages: 0,
+            allowed_sandboxes: None,
+            allowed_granular: None,
+            policy_loaded: false,
+            effective: BTreeMap::new(),
+            allowed_policies: vec![],
+            allowed_reviewers: vec![],
+            start_after_models: false,
+            compacting: false,
+            queue: vec![],
+            skills: vec![],
+            skill_enabled: BTreeMap::new(),
+            explicit_effort: false,
+            expected_settings: BTreeMap::new(),
+            settings_ack: false,
+            settings_notification: false,
+            settings_deadline: None,
         }
+    }
+    pub(super) fn resuming(&self) -> bool {
+        self.resume.is_some()
     }
     pub fn start(&mut self) -> Effects {
         let mut e = Effects::default();
@@ -67,7 +138,7 @@ impl Codex {
         self.tick_at(Instant::now())
     }
     fn tick_at(&mut self, now: Instant) -> Effects {
-        let mut effects = Effects::default();
+        let mut effects = self.native.tick_at(now);
         if let Some(stop) = &mut self.stopping
             && !stop.failed
             && now >= stop.deadline
@@ -203,6 +274,15 @@ impl Codex {
         true
     }
     fn native_item(&mut self, params: &Value, complete: bool, effects: &mut Effects) {
+        if complete
+            && self.compacting
+            && params["threadId"] == self.thread
+            && params["item"]["type"] == "contextCompaction"
+        {
+            self.compacting = false;
+            self.busy = false;
+            effects.state(Lifecycle::Ready);
+        }
         let id = s(&params["item"], "id");
         let same_thread = params["threadId"] == self.thread;
         let turn = s(params, "turnId");
@@ -225,25 +305,114 @@ impl Codex {
     }
     pub fn command(&mut self, c: &Command, id: &str) -> Result<Effects> {
         let mut e = Effects::default();
+        if !matches!(
+            c,
+            Command::Interrupt
+                | Command::Respond { .. }
+                | Command::Discover(_)
+                | Command::NativeAction(NativeAction::Codex(
+                    CodexAction::AcceptEffectiveSettings { .. }
+                ))
+        ) {
+            self.native.idle()?;
+        }
         match c {
+            Command::Configure { control, value } => self.configure(control, value, &mut e)?,
+            Command::Discover(target) => {
+                ensure!(
+                    self.native.reads.len() < 32,
+                    "Too many native discovery requests"
+                );
+                ensure!(self.ready, "Codex is not ready");
+                self.discovery(target.clone(), &mut e);
+            }
+            Command::NativeAction(NativeAction::Codex(action)) => self.action(action, &mut e)?,
+            Command::NativeAction(action) => {
+                ensure!(self.ready && !self.busy, "Codex is busy");
+                match action {
+                    NativeAction::ReloadSkills => self.discovery(Discovery::Skills, &mut e),
+                    NativeAction::Compact => {
+                        self.compacting = true;
+                        self.busy = true;
+                        self.turn.clear();
+                        self.active_turn_settings = None;
+                        self.pending_turn_settings = None;
+                        e.state(Lifecycle::Running);
+                        let id =
+                            self.native
+                                .begin("action:compact", ControlValue::Default, &mut e)?;
+                        e.write(rpc(
+                            json!(id),
+                            "thread/compact/start",
+                            json!({"threadId":self.thread}),
+                        ));
+                    }
+                    _ => anyhow::bail!("This native action is not available for Codex"),
+                }
+            }
             Command::Submit {
                 text,
                 attachments,
                 model,
+            }
+            | Command::SubmitWithSkills {
+                text,
+                attachments,
+                model,
+                ..
             } => {
                 ensure!(
                     self.ready && !self.busy,
                     "Codex is not ready for a new turn"
                 );
+                if model.is_none() {
+                    if let Some(meta) = self.metadata.iter().find(|m| {
+                        Some(&m.id) == self.selected.as_ref()
+                            || self
+                                .selected
+                                .as_ref()
+                                .is_some_and(|selected| m.resolved_model.as_ref() == Some(selected))
+                    }) {
+                        if let Some(ControlValue::Text(effort)) = self.effective.get("effort") {
+                            ensure!(
+                                meta.efforts.iter().any(|e| e.value == *effort),
+                                "The native effort is not advertised for this model; explicitly choose a supported effort before Send"
+                            );
+                        }
+                    }
+                }
                 let mut input = vec![json!({"type":"text","text":text,"text_elements":[]})];
                 input.extend(image_blocks(id, attachments, Tool::Codex)?);
-                e.write(rpc(
-                    json!("turn"),
-                    "turn/start",
-                    json!({"threadId":self.thread,"input":input,"model":model}),
-                ));
+                if let Command::SubmitWithSkills { skills, .. } = c {
+                    ensure!(skills.len() <= 32, "Too many skills");
+                    for skill in skills {
+                        ensure!(
+                            self.skills
+                                .iter()
+                                .any(|s| s.name == skill.name
+                                    && s.path.as_deref() == Some(&skill.path))
+                                && self.skill_enabled.get(&skill.path) == Some(&true),
+                            "Skill is no longer available"
+                        );
+                        input.push(json!({"type":"skill","name":skill.name,"path":skill.path}));
+                    }
+                }
+                let mut params = json!({"threadId":self.thread,"input":input});
+                if let Some(model) = model {
+                    if !self.metadata.is_empty() {
+                        let patch = self.patch("model", &ControlValue::Text(model.clone()))?;
+                        for key in ["collaborationMode", "model", "effort", "serviceTier"] {
+                            if let Some(value) = patch.get(key) {
+                                params[key] = value.clone();
+                            }
+                        }
+                    } else {
+                        params["model"] = json!(model);
+                    }
+                }
+                self.pending_turn_settings = Some(self.turn_settings_snapshot(&params));
+                e.write(rpc(json!("turn"), "turn/start", params));
                 self.busy = true;
-                self.pending_model = model.clone();
                 e.state(Lifecycle::Running);
             }
             Command::Respond {
@@ -260,13 +429,36 @@ impl Codex {
                 let cancelled = matches!(decision, Decision::Cancel);
                 let response = match method.as_str() {
                     "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
-                        json!({"decision":if allow{"accept"}else if cancelled{"cancel"}else{"decline"}})
+                        let proposed = match decision {
+                            Decision::Option(key) => {
+                                let index = key
+                                    .strip_prefix("native-decision-")
+                                    .and_then(|v| v.parse::<usize>().ok())
+                                    .context("Unknown native approval choice")?;
+                                p["availableDecisions"]
+                                    .as_array()
+                                    .and_then(|v| v.get(index))
+                                    .cloned()
+                                    .context("Native approval choice is no longer available")?
+                            }
+                            Decision::Allow => json!("accept"),
+                            Decision::Cancel => json!("cancel"),
+                            Decision::Deny => json!("decline"),
+                            _ => anyhow::bail!("Invalid approval response"),
+                        };
+                        if let Some(available) = p["availableDecisions"].as_array() {
+                            ensure!(
+                                available.contains(&proposed),
+                                "The native server did not offer this decision"
+                            );
+                        }
+                        json!({"decision":proposed})
                     }
                     "execCommandApproval" | "applyPatchApproval" => {
                         json!({"decision":if allow{"approved"}else if cancelled{"abort"}else{"denied"}})
                     }
                     "item/permissions/requestApproval" => {
-                        json!({"permissions":if allow{p["permissions"].clone()}else{json!({})},"scope":"turn"})
+                        detailed::permission_grant(&p["permissions"], decision)?
                     }
                     "item/tool/requestUserInput" => {
                         let map: serde_json::Map<String, Value> = answers
@@ -291,6 +483,7 @@ impl Codex {
                 e.state(Lifecycle::Running);
             }
             Command::Interrupt => {
+                self.native.cancel(&mut e);
                 // Server clears live requests with serverRequest/resolved; reject late UI replies now.
                 for (key, _) in std::mem::take(&mut self.pending) {
                     e.event(Event::RequestResolved(key));
@@ -303,7 +496,11 @@ impl Codex {
                     }
                 }
             }
-            Command::SetMode { .. } => anyhow::bail!("this provider does not expose session modes"),
+            Command::SetMode { mode } => self.configure(
+                "collaborationMode",
+                &ControlValue::Text(mode.clone()),
+                &mut e,
+            )?,
             Command::Restart => anyhow::bail!("host restart is handled by the runtime"),
         }
         Ok(e)
@@ -362,6 +559,14 @@ impl Codex {
         let method = s(&v, "method");
         let p = &v["params"];
         if !method.is_empty() && v.get("id").is_some() {
+            if p.get("threadId")
+                .and_then(Value::as_str)
+                .is_some_and(|thread| !self.thread.is_empty() && thread != self.thread)
+            {
+                e.write(unknown(v["id"].clone()));
+                return Ok(e);
+            }
+
             match method.as_str() {
                 "item/commandExecution/requestApproval"
                 | "item/fileChange/requestApproval"
@@ -388,7 +593,30 @@ impl Codex {
                             .unwrap_or(&method)
                             .into(),
                         questions,
-                        options: vec![],
+                        options: p["availableDecisions"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .enumerate()
+                            .map(|(i, d)| Choice {
+                                id: format!("native-decision-{i}"),
+                                label: match d.as_str() {
+                                    Some("accept") => "Allow once",
+                                    Some("acceptForSession") => "Allow for session",
+                                    Some("decline") => "Decline",
+                                    Some("cancel") => "Cancel turn",
+                                    _ if d.get("acceptWithExecpolicyAmendment").is_some() => {
+                                        "Allow and save command policy"
+                                    }
+                                    _ if d.get("applyNetworkPolicyAmendment").is_some() => {
+                                        "Apply network policy"
+                                    }
+                                    _ => "Native decision",
+                                }
+                                .into(),
+                                description: String::new(),
+                            })
+                            .collect(),
                         details: p.clone(),
                     }));
                     e.state(Lifecycle::Waiting);
@@ -399,6 +627,14 @@ impl Codex {
         }
         if method.is_empty() && v.get("id").is_some() {
             let id = s(&v, "id");
+            if id == "models" && self.start_after_models && v.get("error").is_some() {
+                anyhow::bail!(
+                    "The native model catalog is required to validate explicit new-conversation options"
+                );
+            }
+            if self.detailed_response(&id, &v, &mut e) {
+                return Ok(e);
+            }
             if self.stop_response(&id, &v, &mut e) {
                 return Ok(e);
             }
@@ -409,16 +645,30 @@ impl Codex {
             match id.as_str() {
                 "initialize" => {
                     e.write(json!({"jsonrpc":"2.0","method":"initialized"}));
-                    e.write(rpc(json!("models"), "model/list", json!({})));
+                    e.write(rpc(
+                        json!("models"),
+                        "model/list",
+                        json!({"limit":100,"includeHidden":true}),
+                    ));
                     let (method, params) = if let Some(id) = &self.resume {
                         (
                             "thread/resume",
                             json!({"threadId":id,"cwd":self.cwd,"excludeTurns":true}),
                         )
                     } else {
-                        ("thread/start", json!({"cwd":self.cwd}))
+                        ("thread/start", {
+                            let mut p = self.launch_options.codex_params();
+                            p["cwd"] = json!(self.cwd);
+                            p
+                        })
                     };
-                    e.write(rpc(json!("thread"), method, params));
+                    if self.resume.is_none()
+                        && matches!(&self.launch_options,LaunchOptions::Codex(v) if v.model.is_some())
+                    {
+                        self.start_after_models = true;
+                    } else {
+                        e.write(rpc(json!("thread"), method, params));
+                    }
                 }
                 "thread" => {
                     let id = s(&r["thread"], "id");
@@ -434,21 +684,26 @@ impl Codex {
                         choices: vec![],
                         selected: self.selected.clone(),
                     });
+                    self.capabilities(&mut e);
+                    self.settings(r, &mut e);
+                    e.write(rpc(
+                        json!("collaboration"),
+                        "collaborationMode/list",
+                        json!({}),
+                    ));
+
+                    self.discovery(Discovery::Policy, &mut e);
+                    self.discovery(Discovery::Skills, &mut e);
                     e.state(Lifecycle::Ready);
                 }
-                "models" => e.event(Event::Models {
-                    choices: model_choices(&r["data"], "id", "displayName"),
-                    selected: self.selected.clone(),
-                }),
+                "models" => self.models(r, &mut e)?,
                 "turn" => {
-                    if let Some(model) = self.pending_model.take() {
-                        self.selected = Some(model);
-                    }
                     e.event(Event::Models {
                         choices: vec![],
                         selected: self.selected.clone(),
                     });
-                    self.turn = s(&r["turn"], "id");
+                    self.adopt_turn(s(&r["turn"], "id"));
+                    self.publish_active_turn(&mut e);
                     e.accepted = true;
                     if std::mem::take(&mut self.interrupt_pending) {
                         self.interrupt(&mut e);
@@ -456,6 +711,9 @@ impl Codex {
                 }
                 _ => {}
             }
+            return Ok(e);
+        }
+        if self.notification(&method, p, &mut e) {
             return Ok(e);
         }
         match method.as_str() {
@@ -468,7 +726,8 @@ impl Codex {
                 if p.get("threadId").is_some() && p["threadId"] != self.thread {
                     return Ok(e);
                 }
-                self.turn = s(&p["turn"], "id");
+                self.adopt_turn(s(&p["turn"], "id"));
+                self.publish_active_turn(&mut e);
                 e.accepted = true;
                 if self.stopping.is_some() {
                     self.stop_state(&mut e);
@@ -524,6 +783,9 @@ impl Codex {
                 }
                 self.interrupt_pending = false;
                 self.turn.clear();
+                self.active_turn_settings = None;
+                self.publish_active_turn(&mut e);
+                self.pending_turn_settings = None;
                 self.pending.clear();
                 if let Some(error) = p["turn"].get("error").filter(|v| !v.is_null()) {
                     e.event(Event::Error(native_error_message(error)));

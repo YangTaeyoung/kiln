@@ -10,7 +10,7 @@ The native view uses the installed official CLI and the account selected when th
 pane starts. Changing the active account affects future panes. Existing CLI MCP
 configuration and native permission defaults remain in effect. Models and modes
 are shown only when advertised by that provider. The header shows the confirmed
-effective model/mode; a composer model choice is a request for the next send.
+effective model/mode; a composer choice remains requested until native confirmation.
 
 Enter a task and press **Send** or **Enter**. **Shift+Enter** inserts a line break.
 IME composition and its commit frame do not send. Attach or drop up to eight PNG,
@@ -62,9 +62,71 @@ The latest 100 entries form a bounded display window. **Earlier messages** and
 messages and tool output are limited for display; the runtime journal remains the
 source of truth. Automatic bottom following stops when the user scrolls away.
 
+## Settings, commands and explicit actions
+
+Open **Session settings** to search controls by name and scope. The composer keeps
+model, reasoning effort, mode and Claude's independent Ultracode close to the
+draft. Available choices depend on native model/account metadata. Changing a model
+reconciles its dependent choices. **Advanced settings** contains the remaining
+typed live controls; the reference inventory also labels new-conversation,
+inherited, managed and terminal-only features. An inventory entry is not permission
+to invoke an arbitrary native method or edit native global configuration.
+
+Requested and native values remain separate. Send and conflicting settings wait
+for native settlement; transport acceptance alone is insufficient. A rejected or
+unconfirmed result stays visible and is not retried automatically. Stop withdraws
+deferred prompts but does not roll back a native setting. For a Codex mismatch,
+explicit acceptance of the visible native state releases that operation without
+claiming the earlier request succeeded. Missing or mismatched ACP snapshots keep
+the barrier until the native ACK and authoritative matching state arrive.
+
+Use **Commands and skills** to search native names, descriptions, hints and aliases.
+Selection inserts an editable draft and preserves existing text and images; only
+**Send** executes it. Codex skill selection also retains the exact native skill
+input with the draft. Absent, empty and partial catalogs remain distinguishable.
+Unsupported refreshes report locally; Antigravity supplies its catalog through
+native session updates rather than a separate manual-discovery endpoint.
+
+Claude exposes explicit skill, style and safely supported plugin reloads. Codex
+has explicit compaction, goals/budgets, queued tasks, inline review, current-turn
+settings, memory mode/status and MCP reload actions. Queue editing can continue
+during a turn; starting queued work, review and goal actions require idle state.
+Opening settings never creates a goal, budget or task. Native policy and endpoint
+availability still govern every action.
+
+**New conversation settings → Open new conversation** starts a separate pane using
+the currently selected account and explicit startup options. It preserves the
+current session/draft and supplies no replayed prompt. **New conversation in
+terminal** opens the ordinary terminal workflow for terminal-only features.
+The [provider coverage matrix](agent-feature-coverage.md) lists every implemented
+control/action family, startup option and inherited boundary with native references.
+
+## Extensions and tool labels
+
+New launches prepare supported personal author assets for the selected private
+Claude/Codex profile. Source files remain unchanged, and private edits/deletions
+take precedence over later imports. Existing credential/bootstrap behavior and
+native project precedence remain in effect. This is bounded asset reconciliation,
+not whole-profile synchronization. Unsupported formats, account-linked assets and
+nonportable or credential-bearing plugin configuration need native setup.
+
+**Extension prepared** means the asset was prepared; **Existing extension retained**
+means a prior cache payload was preserved. Neither establishes native enablement,
+loading or execution. Native catalog/status evidence remains separate. See
+[extension coverage and limits](agent-feature-coverage.md#personal-extensions-and-saved-accounts).
+
+Tool/question headers follow the app language, including known MCP operations.
+Expand a card or hover its header to inspect the original name. Unknown operations
+use an external-tool label. Locale changes relabel existing history without
+translating or rewriting arguments, outputs, questions, model text or diffs.
+
 ## Implementation references
 
 `app/agent_gui/view.rs` owns the native presentation and draft reconciliation.
+`settings_ui.rs`, `commands_ui.rs`, `actions_ui.rs` and `launch_ui.rs` render typed
+controls; `tool_presentation.rs` projects localized headers without changing wire
+data. `controls.rs` defines the safe shared contracts; provider adapters retain
+native IDs and validate each explicit request.
 `app/agent_gui/client.rs` handles bounded background journal/command transport.
 The `agent_views` map overlays existing Term panes; launch-spec GUI markers select
 that view on restore. GUI teardown drops only the client. Markdown parsing,

@@ -19,6 +19,9 @@ pub(in crate::app::agent_gui) struct Antigravity {
     deferred: Option<ConfigOperation>,
     retired_configs: BTreeSet<String>,
     model_settled: bool,
+    controls: Vec<ControlOption>,
+    native: NativeFlight,
+    config_ack: bool,
 }
 impl Antigravity {
     pub fn new(cwd: PathBuf, resume: Option<String>) -> Self {
@@ -41,7 +44,18 @@ impl Antigravity {
             deferred: None,
             retired_configs: BTreeSet::new(),
             model_settled: true,
+            controls: vec![],
+            native: NativeFlight::default(),
+            config_ack: false,
         }
+    }
+    pub fn tick(&mut self) -> Effects {
+        let mut e = self.native.tick();
+        tick_config(&mut self.deferred, &mut e);
+        e
+    }
+    pub(super) fn resuming(&self) -> bool {
+        self.resume.is_some()
     }
     pub fn start(&mut self) -> Effects {
         let mut e = Effects::default();
@@ -67,7 +81,41 @@ impl Antigravity {
     }
     pub fn command(&mut self, c: &Command, id: &str) -> Result<Effects> {
         let mut e = Effects::default();
+        if !matches!(
+            c,
+            Command::Interrupt | Command::Respond { .. } | Command::Discover(_)
+        ) {
+            self.native.idle()?;
+        }
         match c {
+            Command::SubmitWithSkills { .. } => {
+                anyhow::bail!("This provider uses native slash command drafts for skills")
+            }
+            Command::Configure { control, value } => {
+                ensure!(
+                    self.ready
+                        && !self.busy
+                        && self.deferred.is_none()
+                        && self.retired_configs.is_empty(),
+                    "Antigravity configuration is not ready"
+                );
+                self.controls
+                    .iter()
+                    .find(|o| o.id == *control)
+                    .context("Unknown ACP option")?
+                    .validate(value)?;
+                let id = self.native.begin(control, value.clone(), &mut e)?;
+                self.config_ack = false;
+                e.write(rpc(
+                    json!(id),
+                    "session/set_config_option",
+                    json!({"sessionId":self.session,"configId":control,"value":value.wire()}),
+                ));
+            }
+            Command::Discover(_) => e.event(unavailable("discovery")),
+            Command::NativeAction(_) => anyhow::bail!(
+                "Use an advertised native command in the composer and Send explicitly"
+            ),
             Command::Submit {
                 text,
                 attachments,
@@ -118,6 +166,8 @@ impl Antigravity {
                         prompt: Some(user),
                         wire,
                         sent: self.retired_configs.is_empty(),
+                        started: std::time::Instant::now(),
+                        timeout_reported: false,
                     };
                     if operation.sent {
                         e.write(operation.wire.clone());
@@ -176,6 +226,8 @@ impl Antigravity {
                     prompt: None,
                     wire,
                     sent: self.retired_configs.is_empty(),
+                    started: std::time::Instant::now(),
+                    timeout_reported: false,
                 };
                 if operation.sent {
                     e.write(operation.wire.clone());
@@ -194,7 +246,8 @@ impl Antigravity {
                 e.state(Lifecycle::Running);
             }
             Command::Interrupt => {
-                if cancel_config(&mut self.deferred, &mut self.retired_configs) {
+                self.native.cancel(&mut e);
+                if cancel_config(&mut self.deferred, &mut self.retired_configs, &mut e) {
                     self.busy = false;
                     e.cancelled = true;
                     e.state(Lifecycle::Ready);
@@ -209,9 +262,36 @@ impl Antigravity {
         }
         Ok(e)
     }
+    fn settle_configuration(&mut self, e: &mut Effects) {
+        if !self.config_ack {
+            return;
+        }
+        let Some(op) = &self.native.operation else {
+            return;
+        };
+        let actual = self
+            .controls
+            .iter()
+            .find(|o| o.id == op.control)
+            .and_then(|o| o.current.clone());
+        if actual.as_ref() == Some(&op.value) {
+            self.native
+                .finish(ApplicationState::Applied, actual, None, e);
+            self.config_ack = false;
+        } else {
+            e.event(op.outcome(ApplicationState::Unconfirmed, actual,
+                Some("Native snapshot differs from the requested setting; Send remains blocked until confirmation.".into())));
+        }
+    }
     fn options(&mut self, r: &Value, e: &mut Effects) {
+        if r.get("configOptions").is_some_and(|v| !v.is_array()) {
+            e.event(unavailable("malformed_config_snapshot"));
+            return;
+        }
         let authoritative = self.deferred.is_none() && self.retired_configs.is_empty();
-        if let Some(models) = r.get("models") {
+        if r.get("configOptions").is_none()
+            && let Some(models) = r.get("models")
+        {
             self.models = model_choices(&models["availableModels"], "modelId", "name");
             if authoritative
                 && let Some(model) = models.get("currentModelId").and_then(Value::as_str)
@@ -228,7 +308,9 @@ impl Antigravity {
                 },
             });
         }
-        if let Some(modes) = r.get("modes") {
+        if r.get("configOptions").is_none()
+            && let Some(modes) = r.get("modes")
+        {
             self.modes = modes["availableModes"]
                 .as_array()
                 .into_iter()
@@ -251,63 +333,102 @@ impl Antigravity {
                 },
             });
         }
-        for option in r["configOptions"].as_array().into_iter().flatten() {
-            let mut values = Vec::new();
-            for group in option["options"].as_array().into_iter().flatten() {
-                if let Some(nested) = group.get("options").and_then(Value::as_array) {
-                    values.extend(nested.iter());
-                } else {
-                    values.push(group);
-                }
+        if r.get("configOptions").is_some() {
+            self.controls = acp_options(&r["configOptions"]);
+            let choices_partial = r["configOptions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .zip(self.controls.iter())
+                .any(|(raw, option)| {
+                    let count: usize = raw["options"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|v| v["options"].as_array().map(Vec::len).unwrap_or(1))
+                        .sum();
+                    count > option.choices.len()
+                });
+            e.event(coverage(
+                "config_options",
+                &r["configOptions"],
+                self.controls.len(),
+                choices_partial,
+            ));
+            self.model_config = None;
+            self.mode_config = None;
+            self.models.clear();
+            self.modes.clear();
+            if authoritative {
+                self.selected = None;
             }
-            match s(option, "category").as_str() {
-                "model" => {
-                    self.model_config = Some(s(option, "id"));
-                    self.models = values
-                        .iter()
-                        .map(|v| Model {
-                            id: s(v, "value"),
-                            label: s(v, "name"),
-                        })
-                        .collect();
-                    if authoritative
-                        && let Some(model) = option.get("currentValue").and_then(Value::as_str)
-                    {
-                        self.selected = Some(model.into());
-                        self.model_settled = true;
+            let mut selected_mode = None;
+            for option in &self.controls {
+                if !matches!(option.kind, ControlKind::Select) {
+                    continue;
+                }
+                match option.category.as_deref() {
+                    Some("model") => {
+                        self.model_config = Some(option.id.clone());
+                        self.models = option
+                            .choices
+                            .iter()
+                            .map(|v| Model {
+                                id: v.value.clone(),
+                                label: v.label.clone(),
+                            })
+                            .collect();
+                        if authoritative {
+                            self.selected = option.current.as_ref().and_then(|v| {
+                                if let ControlValue::Text(v) = v {
+                                    Some(v.clone())
+                                } else {
+                                    None
+                                }
+                            });
+                            self.model_settled = self.selected.is_some();
+                        }
                     }
-                    e.event(Event::Models {
-                        choices: self.models.clone(),
-                        selected: if authoritative && self.model_settled {
-                            self.selected.clone()
-                        } else {
-                            None
-                        },
-                    });
+                    Some("mode") => {
+                        self.mode_config = Some(option.id.clone());
+                        self.modes = option
+                            .choices
+                            .iter()
+                            .map(|v| Choice {
+                                id: v.value.clone(),
+                                label: v.label.clone(),
+                                description: v.description.clone(),
+                            })
+                            .collect();
+                        if authoritative {
+                            selected_mode = option.current.as_ref().and_then(|v| {
+                                if let ControlValue::Text(v) = v {
+                                    Some(v.clone())
+                                } else {
+                                    None
+                                }
+                            });
+                        }
+                    }
+                    _ => {}
                 }
-                "mode" => {
-                    self.mode_config = Some(s(option, "id"));
-                    self.modes = values
-                        .iter()
-                        .map(|v| Choice {
-                            id: s(v, "value"),
-                            label: s(v, "name"),
-                            description: s(v, "description"),
-                        })
-                        .collect();
-                    e.event(Event::Modes {
-                        choices: self.modes.clone(),
-                        selected: if authoritative {
-                            Some(s(option, "currentValue"))
-                        } else {
-                            None
-                        },
-                    });
-                }
-                _ => {}
             }
+            e.event(Event::Controls(ControlEvent::Options(
+                self.controls.clone(),
+            )));
+            e.event(Event::Controls(ControlEvent::Quick {
+                models: self.models.clone(),
+                selected_model: if authoritative && self.model_settled {
+                    self.selected.clone()
+                } else {
+                    None
+                },
+                modes: self.modes.clone(),
+                selected_mode,
+            }));
         }
     }
+
     fn tool(&mut self, u: &Value, e: &mut Effects) {
         let id = s(u, "toolCallId");
         if id.is_empty() {
@@ -319,6 +440,14 @@ impl Antigravity {
         });
         if let Some(title) = u.get("title").and_then(Value::as_str) {
             tool.name = title.into();
+        }
+        if u.get("kind").is_some() || u.get("name").is_some() || u.get("title").is_some() {
+            let metadata = tool.presentation.get_or_insert_with(Default::default);
+            for (key, slot) in [("kind", &mut metadata.kind), ("name", &mut metadata.native_name), ("title", &mut metadata.title)] {
+                if let Some(value) = u.get(key).and_then(Value::as_str) {
+                    *slot = Some(value.chars().take(2048).collect());
+                }
+            }
         }
         if let Some(input) = u.get("rawInput") {
             tool.input = input.clone();
@@ -400,6 +529,32 @@ impl Antigravity {
         }
         if method.is_empty() && v.get("id").is_some() {
             let id = s(&v, "id");
+            if id.starts_with("native-") {
+                if self.native.operation.as_ref().is_none_or(|op| op.id != id) {
+                    return Ok(e);
+                }
+                if v.get("error").is_some() {
+                    self.config_ack = false;
+                    self.native.finish(
+                        ApplicationState::Rejected,
+                        None,
+                        Some("Native configuration was rejected.".into()),
+                        &mut e,
+                    );
+                    return Ok(e);
+                }
+                self.config_ack = true;
+                if !v["result"]["configOptions"].is_array() {
+                    let op = self.native.operation.as_ref().unwrap();
+                    e.event(op.outcome(ApplicationState::Unconfirmed, None,
+                        Some("Native ACK returned no full snapshot; Send remains blocked until effective settings are confirmed.".into())));
+                    return Ok(e);
+                }
+                self.options(&v["result"], &mut e);
+                self.settle_configuration(&mut e);
+                return Ok(e);
+            }
+
             if (v.get("result").is_some() || v.get("error").is_some())
                 && settle_retired_config(&id, &mut self.deferred, &mut self.retired_configs, &mut e)
             {
@@ -411,6 +566,18 @@ impl Antigravity {
                     .as_ref()
                     .is_none_or(|operation| !operation.matches(&id))
             {
+                return Ok(e);
+            }
+            if v.get("error").is_some() && self.deferred.as_ref().is_some_and(|op| op.matches(&id))
+            {
+                e.event(Event::Controls(ControlEvent::Settlement(id.clone())));
+                self.deferred = None;
+                self.busy = false;
+                e.cancelled = true;
+                e.event(Event::Error(
+                    "Antigravity rejected the setting; no deferred task was sent.".into(),
+                ));
+                e.state(Lifecycle::Ready);
                 return Ok(e);
             }
             if let Some(error) = v.get("error") {
@@ -427,6 +594,20 @@ impl Antigravity {
                     "invalid ACP configuration confirmation"
                 );
                 let operation = self.deferred.take().unwrap();
+                e.event(Event::Controls(ControlEvent::Settlement(
+                    operation.id.clone(),
+                )));
+                let config_ack = operation.wire["method"] == "session/set_config_option";
+                if config_ack && !r["configOptions"].is_array() {
+                    self.busy = false;
+                    self.model_settled = false;
+                    e.cancelled = true;
+                    e.event(Event::Error("Native configuration ACK omitted the full settings snapshot; the task was not sent.".into()));
+                    e.state(Lifecycle::Ready);
+                    return Ok(e);
+                }
+                let target_model = operation.model.clone();
+                let target_mode = operation.mode.clone();
                 if let Some(model) = operation.model {
                     self.selected = Some(model);
                     self.model_settled = true;
@@ -438,6 +619,23 @@ impl Antigravity {
                     });
                 }
                 self.options(r, &mut e);
+                if config_ack
+                    && (target_model
+                        .as_ref()
+                        .is_some_and(|model| self.selected.as_ref() != Some(model))
+                        || target_mode.as_ref().is_some_and(|mode| {
+                            !self.controls.iter().any(|o| {
+                                o.category.as_deref() == Some("mode")
+                                    && o.current == Some(ControlValue::Text(mode.clone()))
+                            })
+                        }))
+                {
+                    self.busy = false;
+                    e.cancelled = true;
+                    e.event(Event::Error("The returned native settings differ from the request; the task was not sent.".into()));
+                    e.state(Lifecycle::Ready);
+                    return Ok(e);
+                }
                 e.event(Event::Models {
                     choices: vec![],
                     selected: if self.model_settled {
@@ -513,10 +711,18 @@ impl Antigravity {
                 "update belongs to another session"
             );
             // Loading replays native history; the durable journal already holds it. Do not duplicate it.
-            if self.loading {
+            let u = &p["update"];
+            if self.loading
+                && !matches!(
+                    s(u, "sessionUpdate").as_str(),
+                    "available_commands_update"
+                        | "usage_update"
+                        | "config_option_update"
+                        | "current_mode_update"
+                )
+            {
                 return Ok(e);
             }
-            let u = &p["update"];
 
             match s(u, "sessionUpdate").as_str() {
                 "agent_message_chunk" => {
@@ -538,7 +744,26 @@ impl Antigravity {
                         None
                     },
                 }),
-                "config_option_update" => self.options(u, &mut e),
+                "config_option_update" => {
+                    self.options(u, &mut e);
+                    if u["configOptions"].is_array() {
+                        self.settle_configuration(&mut e);
+                    }
+                }
+                "available_commands_update" => {
+                    let entries = controls::native_entries(&u["availableCommands"]);
+                    e.event(coverage(
+                        "commands",
+                        &u["availableCommands"],
+                        entries.len(),
+                        false,
+                    ));
+                    e.event(Event::Controls(ControlEvent::Catalog {
+                        kind: CatalogKind::Commands,
+                        entries,
+                    }));
+                }
+                "usage_update" => e.event(status("context", u, &["used", "size"])),
                 _ => {}
             }
         }

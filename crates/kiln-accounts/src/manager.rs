@@ -24,6 +24,10 @@ pub struct Env {
     pub antigravity_usage: Arc<dyn Fn(&Path) -> Result<Usage> + Send + Sync>,
     pub claude_config_dir: Option<PathBuf>,
     pub codex_home: PathBuf,
+    /// Captured native extension overrides; projected only into the selected child.
+    pub claude_plugin_cache: Option<PathBuf>,
+    pub claude_plugin_dirs: bool,
+    pub claude_plugin_seed: bool,
     /// true 면 Claude Code 의 현재 자격증명을 `store` 의 `Claude Code-credentials` 항목으로 다룬다(macOS).
     pub claude_live_in_store: bool,
     pub store: Arc<dyn CredentialStore>,
@@ -73,6 +77,9 @@ impl Env {
             home,
             claude_config_dir,
             codex_home,
+            claude_plugin_cache: std::env::var_os("CLAUDE_CODE_PLUGIN_CACHE_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),
+            claude_plugin_dirs: std::env::var_os("CLAUDE_CODE_PLUGIN_DIRS").is_some_and(|v| !v.is_empty()),
+            claude_plugin_seed: std::env::var_os("CLAUDE_CODE_PLUGIN_SEED_DIR").is_some_and(|v| !v.is_empty()),
             claude_live_in_store: macos,
             store,
             settings_path: kiln_common::paths::config_file("accounts.json"),
@@ -97,6 +104,9 @@ impl Env {
             codex_home: home.join(".codex"),
             home,
             claude_config_dir: None,
+            claude_plugin_cache: None,
+            claude_plugin_dirs: false,
+            claude_plugin_seed: false,
             claude_live_in_store,
             store: store.clone(),
             settings_path: root.join("config/accounts.json"),
@@ -1016,6 +1026,32 @@ impl AccountManager {
     }
 
     pub fn launch_environment(&self, tool: Tool) -> Result<Vec<(String, String)>> {
+        self.launch_environment_base(tool)
+    }
+
+    /// Background new-launch preparation only. Optional asset failures are safe,
+    /// bounded status rows; account/environment validation retains existing errors.
+    pub fn prepare_launch_environment(&self, tool: Tool) -> Result<(Vec<(String, String)>, crate::extensions::ExtensionReport)> {
+        let mut variables = self.launch_environment_base(tool)?;
+        let mut report = crate::extensions::ExtensionReport::default();
+        let Some(id) = variables.iter().find(|(key, _)| key == "KILN_AGENT_PROFILE").map(|(_, value)| value.clone()) else { return Ok((variables, report)); };
+        if tool == Tool::Antigravity { return Ok((variables, report)); }
+        let _op = self.inner.op.lock();
+        self.validate_launch_environment(tool, &variables)?;
+        let env = &self.inner.env;
+        let source = if tool == Tool::Claude { env.claude_config_dir.clone().unwrap_or_else(|| env.home.join(".claude")) } else { env.codex_home.clone() };
+        let destination = self.runtime_dir(tool, &id);
+        report = crate::extensions::reconcile_with_overrides(tool, &source, &destination,
+            env.claude_plugin_cache.as_deref(), env.claude_plugin_dirs, env.claude_plugin_seed);
+        if tool == Tool::Claude {
+            variables.push(("CLAUDE_CODE_PLUGIN_CACHE_DIR".into(), destination.join("plugins").to_string_lossy().into_owned()));
+            if env.claude_plugin_dirs { variables.push(("CLAUDE_CODE_PLUGIN_DIRS".into(), String::new())); }
+            if env.claude_plugin_seed { variables.push(("CLAUDE_CODE_PLUGIN_SEED_DIR".into(), String::new())); }
+        }
+        Ok((variables, report))
+    }
+
+    fn launch_environment_base(&self, tool: Tool) -> Result<Vec<(String, String)>> {
         if !tool.has_accounts() { return Ok(Vec::new()); }
         let _op = self.inner.op.lock();
         let Some(id) = self.active(tool) else { return Ok(Vec::new()); };
@@ -2755,6 +2791,67 @@ mod tests {
     fn login_claude(env: &Env, store: &crate::MemoryStore, email: &str, marker: &str) {
         store.set(claude::CLAUDE_SERVICE, "claude-code-user", &claude_cred(marker)).unwrap();
         set_claude_identity(env, email);
+    }
+
+    #[test]
+    fn review_r5_environment_resolution_does_not_reconcile_extensions() {
+        let root=tempfile::tempdir().unwrap();let(env,store)=Env::sandbox(&root.path().canonicalize().unwrap(),true);
+        write_secret_atomic(&env.home.join(".claude/skills/fixture/SKILL.md"),b"inert").unwrap();
+        let manager=AccountManager::with_env(env.clone());login_claude(&env,&store,"fixture@example.test","fixture");let profile=manager.save_current(Tool::Claude,"").unwrap();
+        manager.launch_environment(Tool::Claude).unwrap();assert!(!manager.runtime_dir(Tool::Claude,&profile.id).join("kiln-extension-state").exists());
+        let(_,report)=manager.prepare_launch_environment(Tool::Claude).unwrap();assert!(report.entries.iter().any(|e|e.state=="prepared"));
+    }
+
+    #[test]
+    fn extension_preparation_pins_accounts_and_never_refreshes_from_validation() {
+        let root = tempfile::tempdir().unwrap();
+        let canonical = root.path().canonicalize().unwrap();
+        let (env, store) = Env::sandbox(&canonical, true);
+        let source = env.home.join(".claude/skills/fixture/SKILL.md");
+        write_secret_atomic(&source, b"original fixture").unwrap();
+        let manager = AccountManager::with_env(env.clone());
+        login_claude(&env, &store, "first@example.test", "credential-first");
+        let first = manager.save_current(Tool::Claude, "First").unwrap();
+        let (pinned, report) = manager.prepare_launch_environment(Tool::Claude).unwrap();
+        assert!(report.entries.iter().any(|e|e.state=="prepared"), "{report:?}");
+        let imported = manager.runtime_dir(Tool::Claude, &first.id).join("skills/fixture/SKILL.md");
+        assert_eq!(std::fs::read(&imported).unwrap(), b"original fixture");
+        let credential = manager.runtime_secret(Tool::Claude, &first.id).unwrap();
+        write_secret_atomic(&source, b"updated fixture").unwrap();
+        manager.validate_launch_environment(Tool::Claude, &pinned).unwrap();
+        assert_eq!(std::fs::read(&imported).unwrap(), b"original fixture", "validation must not update running workers' assets");
+        manager.prepare_launch_environment(Tool::Claude).unwrap();
+        assert_eq!(std::fs::read(&imported).unwrap(), b"updated fixture");
+        assert_eq!(manager.runtime_secret(Tool::Claude, &first.id).unwrap(), credential);
+        assert!(pinned.iter().all(|(k,_)|k!="HOME"));
+        login_claude(&env, &store, "second@example.test", "credential-second");
+        let second = manager.save_current(Tool::Claude, "Second").unwrap();
+        manager.prepare_launch_environment(Tool::Claude).unwrap();
+        assert!(manager.runtime_dir(Tool::Claude, &second.id).join("skills/fixture/SKILL.md").is_file());
+        assert_ne!(manager.runtime_dir(Tool::Claude, &first.id), manager.runtime_dir(Tool::Claude, &second.id));
+    }
+
+    #[test]
+    fn extension_gateway_isolation_and_cache_overrides_remain_explicit() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut env, _) = Env::sandbox(&root.path().canonicalize().unwrap(), false);
+        env.claude_plugin_cache = Some(env.home.join("external-plugin-cache"));
+        env.claude_plugin_dirs = true;
+        write_secret_atomic(&env.home.join(".claude/agents/fixture.md"), b"inert fixture").unwrap();
+        write_secret_atomic(&env.home.join(".claude/settings.json"), br#"{"env":{"TOKEN":"SOURCE_CANARY"}}"#).unwrap();
+        let manager = AccountManager::with_env(env);
+        let account = manager.save_connection(Tool::Claude, None, "Gateway", Connection {
+            preset: Preset::Gateway, base_url: "https://gateway.example".into(), key: "KEY_CANARY".into(), ..Default::default()
+        }).unwrap();
+        manager.switch_to(Tool::Claude, &account.id).unwrap();
+        let (variables,report)=manager.prepare_launch_environment(Tool::Claude).unwrap();
+        let runtime=manager.runtime_dir(Tool::Claude,&account.id);
+        assert!(runtime.join("agents/fixture.md").is_file());
+        assert!(!runtime.join("settings.json").exists());
+        assert!(variables.contains(&("CLAUDE_CODE_PLUGIN_CACHE_DIR".into(),runtime.join("plugins").to_string_lossy().into_owned())));
+        assert!(variables.contains(&("CLAUDE_CODE_PLUGIN_DIRS".into(),String::new())));
+        assert_eq!(report.entries.iter().filter(|e|e.reason=="EXTERNAL_PLUGIN_ROOT").count(),2);
+        let public=serde_json::to_string(&report).unwrap();assert!(!public.contains("KEY_CANARY")&&!public.contains("SOURCE_CANARY"));
     }
 
     #[test]

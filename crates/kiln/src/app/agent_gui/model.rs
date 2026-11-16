@@ -1,4 +1,5 @@
-//! Durable, provider-neutral conversation state. Only envelopes mutate the transcript.
+use super::controls::*;
+// Durable, provider-neutral conversation state. Only envelopes mutate the transcript.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -16,6 +17,8 @@ pub struct Attachment {
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Draft {
+    #[serde(default)]
+    pub skills: Vec<NativeSkillInput>,
     pub text: String,
     pub attachments: Vec<Attachment>,
     pub model: Option<String>,
@@ -26,6 +29,7 @@ pub enum Decision {
     Deny,
     Cancel,
     Option(String),
+    Grant(PermissionGrant),
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Command {
@@ -34,11 +38,23 @@ pub enum Command {
         attachments: Vec<Attachment>,
         model: Option<String>,
     },
+    SubmitWithSkills {
+        text: String,
+        attachments: Vec<Attachment>,
+        model: Option<String>,
+        skills: Vec<NativeSkillInput>,
+    },
     Respond {
         request_id: String,
         decision: Decision,
         answers: BTreeMap<String, Vec<String>>,
     },
+    Configure {
+        control: String,
+        value: ControlValue,
+    },
+    Discover(Discovery),
+    NativeAction(NativeAction),
     SetMode {
         mode: String,
     },
@@ -94,12 +110,21 @@ pub enum CommandPhase {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct ToolCall {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<ToolPresentation>,
     pub id: String,
     pub name: String,
     pub input: Value,
     pub output: String,
     pub diff: String,
     pub status: ToolStatus,
+}
+/// Optional native display metadata; never mixed into execution arguments.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ToolPresentation {
+    pub kind: Option<String>,
+    pub title: Option<String>,
+    pub native_name: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Entry {
@@ -135,6 +160,7 @@ pub struct Model {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Event {
     Generation,
+    Controls(ControlEvent),
     Lifecycle(Lifecycle),
     Session(String),
     Models {
@@ -176,6 +202,7 @@ pub struct Envelope {
 #[derive(Clone, Debug, Default)]
 pub struct Transcript {
     pub generation: String,
+    pub controls: NativeControls,
     pub sequence: u64,
     pub lifecycle: Lifecycle,
     pub entries: Vec<Entry>,
@@ -257,7 +284,32 @@ impl Transcript {
         }
         self.sequence = envelope.sequence;
         match &envelope.event {
-            Event::Generation => {}
+            Event::Generation => {
+                self.controls = NativeControls::default();
+            }
+            Event::Controls(event) => {
+                if let ControlEvent::Quick {
+                    models,
+                    selected_model,
+                    modes,
+                    selected_mode,
+                } = event
+                {
+                    self.models = models.clone();
+                    self.selected_model = selected_model.clone();
+                    self.modes = modes.clone();
+                    self.selected_mode = selected_mode.clone();
+                }
+                if let ControlEvent::ModelSnapshot { choices, selected } = event {
+                    self.models = choices.clone();
+                    self.selected_model = selected.clone();
+                }
+                if let ControlEvent::ModeSnapshot { choices, selected } = event {
+                    self.modes = choices.clone();
+                    self.selected_mode = selected.clone();
+                }
+                self.controls.apply(event);
+            }
             Event::Lifecycle(state) => {
                 self.lifecycle = state.clone();
                 if matches!(

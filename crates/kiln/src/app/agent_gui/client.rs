@@ -450,6 +450,18 @@ impl Client {
                 && !r.queued.contains(id)
         }) && !queued_locally_in(&mut registry, id)
     }
+    pub fn invalidate_replay(&self) { *self.replay.lock().unwrap() = None; }
+    /// Current background replay AND mailbox inspection, not only an old Ready event.
+    pub fn replay_current(&self, generation: &str, sequence: u64) -> bool {
+        let mut registry = writers().lock().unwrap();
+        registry.mailboxes.retain(|weak| weak.strong_count() > 0);
+        let no_local = registry.mailboxes.iter().filter_map(Weak::upgrade)
+            .all(|local| local.lock().unwrap().is_empty());
+        self.replay.lock().unwrap().as_ref().is_some_and(|r| {
+            r.generation == generation && r.sequence <= sequence
+                && r.writer_revision == registry.revision && r.queued.is_empty() && no_local
+        })
+    }
     pub fn take_error(&self) -> Option<String> {
         self.error.lock().unwrap().take()
     }

@@ -1,0 +1,1094 @@
+[
+  {
+    "key": "$schema",
+    "type": "string",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "apiKeyHelper",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "proxyAuthHelper",
+    "type": "string",
+    "scope": "See official key / provider policy",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "awsCredentialExport",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "awsAuthRefresh",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "gcpAuthRefresh",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "processWrapper",
+    "type": "string",
+    "scope": "`User or managed`",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "policyHelper",
+    "type": "{",
+    "scope": "`Managed`. Read from the macOS plist, the Windows HKLM registry, or the managed settings file. Claude Code reads the key from the highest-priority managed source that carries a policy key and runs the helper only when that source is one of those three; it ignores the key in server-managed settings, the HKCU registry, and host-supplied parent settings.",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "fileSuggestion",
+    "type": "{",
+    "scope": "`Any file`. Under the status line and file suggestion gates, Claude Code turns the command off or runs only a managed value, and skips yours without warning.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "respectGitignore",
+    "type": "boolean",
+    "scope": "`Any file`. When no settings file sets it, Claude Code falls back to `respectGitignore` in `~/.claude.json`, which the `/config` toggle writes.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "cleanupPeriodDays",
+    "type": "number",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "desktopSessionCleanupPeriodDays",
+    "type": "number",
+    "scope": "`User or managed`. Claude Code also reads the key from a file you pass with `--settings`, and ignores it in project and local settings.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "syncClaudeAiSkills",
+    "type": "boolean",
+    "scope": "`User, local, or managed`, and files passed with `--settings`. A repository can't turn it off for you.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "syncClaudeAiPlugins",
+    "type": "boolean",
+    "scope": "`User, local, or managed`, and files passed with `--settings`. A repository can't turn it off for you.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "skillListingMaxDescChars",
+    "type": "number",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "skillListingBudgetFraction",
+    "type": "number",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "wslInheritsWindowsSettings",
+    "type": "boolean",
+    "scope": "`Managed`. In an admin-controlled Windows source.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "env",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "attribution",
+    "type": "boolean  /  {",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "attributionProject",
+    "type": "string",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "attributionProjectPolicy",
+    "type": "{",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "includeCoAuthoredBy",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "includeGitInstructions",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "permissions",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Live permission setter/rules; structured rule editor needs scoped proof"
+  },
+  {
+    "key": "model",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Live: dedicated setter"
+  },
+  {
+    "key": "fallbackModel",
+    "type": "string[]",
+    "scope": "`Any file`",
+    "note": "Session flag accepted; fallback execution untested"
+  },
+  {
+    "key": "availableModels",
+    "type": "string[]",
+    "scope": "`Any file`. Deploy it in managed settings to enforce it for an organization.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "enforceAvailableModels",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "availableModelsMatch",
+    "type": "'prefix'  /  'exact'",
+    "scope": "`Managed`. Claude Code ignores the key in user, project, and local settings and in `--settings`, with a warning",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "deniedModels",
+    "type": "string[]",
+    "scope": "`Managed`. Claude Code ignores the key in user, project, and local settings and in `--settings`, with a warning",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "modelOverrides",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "modelPicker",
+    "type": "{",
+    "scope": "`User or managed`. Claude Code reads the key from managed settings, `--settings`, and user settings, and ignores it in project and local settings so a repository you clone can't relabel the picker. The highest of those three that sets the key supplies the whole lineup, and Claude Code never combines lineups from two sources.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "modelPricing",
+    "type": "{",
+    "scope": "`Managed`. Deploy the key through server-managed settings, an MDM policy, a `managed-settings.json` file, or a policy helper. Claude Code ignores it in user, project, and local settings, in `--settings`, and on Windows in the user-writable HKCU registry. With server-managed settings, each session reports costs at list price until that session's settings fetch has confirmed the setting. A host application that embeds Claude Code and sets `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` can supply a table of its own through the SDK `managedSettings` option, which Claude Code uses only when no managed source sets the key and only in Claude Code v2.1.246 or later.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "enableAllProjectMcpServers",
+    "type": "boolean",
+    "scope": "`Any file`. In a folder whose trust dialog you haven't accepted, Claude Code honors it from user settings, managed settings, and `--settings` and ignores it in the shared project file, both in the session and for `claude mcp list` and `claude mcp get`; Project server approvals and workspace trust says when an untracked `.claude/settings.local.json` counts too.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "enabledMcpjsonServers",
+    "type": "string[]",
+    "scope": "`Any file`. In a folder whose trust dialog you haven't accepted, Claude Code honors it from user settings, managed settings, and `--settings` and ignores it in the shared project file, both in the session and for `claude mcp list` and `claude mcp get`; Project server approvals and workspace trust says when an untracked `.claude/settings.local.json` counts too.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disabledMcpjsonServers",
+    "type": "string[]",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableClaudeAiConnectors",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "skillOverrides",
+    "type": "{",
+    "scope": "`Any file`. The `/skills` menu writes to `.claude/settings.local.json`.",
+    "note": "Live: command-list readback"
+  },
+  {
+    "key": "disableBundledSkills",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "managedMcpServers",
+    "type": "{",
+    "scope": "`Managed`. Claude Code drops the key with a warning in user, project, and local settings, and doesn't read it in the Claude Desktop app's Code tab on a third-party deployment or in the app's Cowork sessions, where Claude Desktop supplies and locks those sessions' MCP servers itself.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "allowedMcpServers",
+    "type": "{",
+    "scope": "`Any file`. Entries from every file merge into one allowlist unless `allowManagedMcpServersOnly` is set. Deploy it in managed settings to enforce it.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "deniedMcpServers",
+    "type": "{",
+    "scope": "`Any file`. Entries from every file merge into one denylist, and `allowManagedMcpServersOnly` doesn't change that. Deploy it in managed settings to enforce it.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "hooks",
+    "type": "{",
+    "scope": "`Any file`. Hooks merge across files rather than replacing each other, and hooks from managed settings can't be removed from other files.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "worktree",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableAllHooks",
+    "type": "boolean",
+    "scope": "`Any file`. Only managed settings can disable managed hooks.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableReplyCheck",
+    "type": "boolean",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableAgentView",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableRemoteControl",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableWorkflows",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited policy; live gate readback verified"
+  },
+  {
+    "key": "disableArtifact",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "enableArtifact",
+    "type": "boolean",
+    "scope": "`Any file`. Every file can turn the tool off, and none can turn it back on.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "enableWorkflows",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Live: availability readback"
+  },
+  {
+    "key": "workflowSizeGuideline",
+    "type": "'unrestricted'  /  'small'  /  'medium'  /  'large'",
+    "scope": "`Any file`. A value there takes precedence over the **Dynamic workflow size** choice in `/config`, which Claude Code stores in `~/.claude.json`, and Claude Code hides that row while a settings file sets the key.",
+    "note": "Session flag accepted; execution effect untested"
+  },
+  {
+    "key": "workflowKeywordTriggerEnabled",
+    "type": "boolean",
+    "scope": "`Any file`. Appears in `/config` as **Ultracode keyword trigger**.",
+    "note": "Session flag accepted; execution effect untested"
+  },
+  {
+    "key": "disableSkillShellExecution",
+    "type": "boolean",
+    "scope": "`Any file`. A `true` in managed settings can't be overridden by `false` elsewhere.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableWindowsBashCommandSplit",
+    "type": "boolean",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "defaultShell",
+    "type": "'bash'  /  'powershell'",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "bashEditDiffEnabled",
+    "type": "boolean",
+    "scope": "`User or managed`. A `true` counts only from your user settings, JSON passed with `--settings`, or managed settings, so a `true` in a repository's `.claude/settings.json` or `.claude/settings.local.json` can't turn the recording on. A `false` in either repository file still turns it off unless a higher-precedence file sets `true`.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "bashOutputMaxChars",
+    "type": "number",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "taskOutputMaxChars",
+    "type": "number",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "respondToBashCommands",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "allowManagedHooksOnly",
+    "type": "boolean",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "allowedHttpHookUrls",
+    "type": "string[]",
+    "scope": "`Any file`. Arrays merge across settings files.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "httpHookAllowedEnvVars",
+    "type": "string[]",
+    "scope": "`Any file`. Arrays merge across settings files.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "allowManagedPermissionRulesOnly",
+    "type": "boolean",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "allowManagedMcpServersOnly",
+    "type": "boolean",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "allowAllClaudeAiMcps",
+    "type": "boolean",
+    "scope": "`Managed`. Users can't re-enable connectors that exclusive control suppressed.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "allowClaudeInChromeWithManagedMcp",
+    "type": "boolean",
+    "scope": "`Managed`, from the device's own managed settings only: an MDM-deployed plist or HKLM registry key, or a system `managed-settings.json` file. Claude Code ignores it in server-managed settings, in the user-writable HKCU registry, and in user or project settings.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "strictPluginOnlyCustomization",
+    "type": "boolean  /  ('skills'  /  'agents'  /  'hooks'  /  'mcp')[]",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "statusLine",
+    "type": "{",
+    "scope": "`Any file`. When `allowManagedHooksOnly` is on, or `disableAllHooks` is set outside managed settings, only the managed settings value runs.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "prUrlTemplate",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "footerLinksRegexes",
+    "type": "({",
+    "scope": "`User or managed`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "subagentStatusLine",
+    "type": "{",
+    "scope": "See official key / provider policy",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "enabledPlugins",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "prependPlugins",
+    "type": "string[]",
+    "scope": "`User or managed`. Claude Code reads the key from managed settings. It reads the key from user settings only on a machine with no managed settings or `managed-mcp.json` file, in a session whose credential isn't a Team or Enterprise `/login`. It ignores the key in project and local settings and in a `--settings` file.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "appendPlugins",
+    "type": "string[]",
+    "scope": "`User or managed`. Claude Code reads the key from managed settings. It reads the key from user settings only on a machine with no managed settings or `managed-mcp.json` file, in a session whose credential isn't a Team or Enterprise `/login`. It ignores the key in project and local settings and in a `--settings` file.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "extraKnownMarketplaces",
+    "type": "{",
+    "scope": "`Any file`. Claude Code honors entries in a repository's `.claude/settings.json` or `.claude/settings.local.json` only after you accept the workspace trust dialog for that folder; in a folder you haven't trusted, including a `-p` run there, it ignores them without a message.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "additionalMarketplaces",
+    "type": "{",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "strictKnownMarketplaces",
+    "type": "({",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "allowedMarketplaces",
+    "type": "({",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "blockedMarketplaces",
+    "type": "({",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "disableCommandPluginSources",
+    "type": "boolean",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "disableSideloadFlags",
+    "type": "boolean",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "pluginSuggestionMarketplaces",
+    "type": "string[]",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "forceLoginMethod",
+    "type": "'claudeai'  /  'console'  /  'gateway'",
+    "scope": "`Any file`. Claude Code honors `\"gateway\"` from the same sources as `forceLoginGatewayUrl` and treats it as unset everywhere else.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "forceLoginGatewayUrl",
+    "type": "string",
+    "scope": "`User or managed`. Read from a managed source on the machine: `managed-settings.json`, the macOS plist or Windows HKLM registry, or a policy helper. On a machine with none of those, Claude Code v2.1.295 or later also reads it from user settings. Claude Code ignores it in HKCU and server-managed settings.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "gatewayInternalNetworks",
+    "type": "string[]",
+    "scope": "`Managed`. Read only from a source on the machine: `managed-settings.json`, the macOS plist or Windows HKLM registry, or a policy helper. Claude Code ignores it in HKCU and server-managed settings.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "parentSettingsBehavior",
+    "type": "'first-wins'  /  'merge'",
+    "scope": "`Managed`. Claude Code reads it from the highest-priority admin-controlled managed source.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "managedSourcesBehavior",
+    "type": "'first-wins'  /  'merge'",
+    "scope": "`Managed`. Claude Code reads this key from the highest-priority source that carries either this key or a policy key, and ignores this key in every source ranked lower, so a lower source can't opt itself into combining with the source above it. Neither the Windows HKCU registry nor parent settings from an embedding host take part in the merge.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "forceLoginOrgUUID",
+    "type": "string  /  string[]",
+    "scope": "`Any file`. In a settings file that isn't a managed source, Claude Code doesn't check which organization a login belongs to, and a single UUID pre-selects the organization during login.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "allowedProviders",
+    "type": "('anthropic'  /  'customEndpoint'  /  'bedrock'  /  'vertex'  /  'foundry'  /  'anthropicAws'  /  'mantle'  /  'gateway')[]",
+    "scope": "`Managed`. A list that the machine's own admin sources set, MDM policies and managed settings files, keeps applying when server-managed settings also deliver one: a session may then use only the providers on both lists, so a server-managed list can narrow what the machine allows but never widen it. Which machine source's `allowedProviders` counts follows how Claude Code combines managed sources. A list delivered through server-managed settings alone reaches only the sessions that fetch server-managed settings.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "forceRemoteSettingsRefresh",
+    "type": "boolean",
+    "scope": "`Managed`. Claude Code honors a `true` from any admin-controlled managed source, even one that isn't the highest-priority source.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "otelHeadersHelper",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Provider/startup configuration: masked inherited status"
+  },
+  {
+    "key": "outputStyle",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Live: initialize style readback"
+  },
+  {
+    "key": "viewMode",
+    "type": "'default'  /  'verbose'  /  'focus'",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "language",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Session flag accepted; model behavior untested"
+  },
+  {
+    "key": "skipWebFetchPreflight",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "sandbox",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "feedbackSurveyRate",
+    "type": "number",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "feedbackDrafts",
+    "type": "'notify'  /  'quiet'  /  'off'",
+    "scope": "`User or managed`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "spinnerTipsEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "spinnerVerbs",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "spinnerTipsOverride",
+    "type": "{",
+    "scope": "`Any file`. Claude Code honors tip objects, `tipsFile`, `label`, and `excludeDefault` from user settings, the `--settings` flag, and managed settings; from project and local settings it reads plain string tips only.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "syntaxHighlightingDisabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "maxProseWidth",
+    "type": "number",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "spellcheck",
+    "type": "{",
+    "scope": "`User or managed`. The block from the highest tier that sets it applies as a whole.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "terminalTitleFromRename",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "promptCacheTtl",
+    "type": "'5m'  /  '1h'",
+    "scope": "`Any file`",
+    "note": "Session flag accepted; API effect untested"
+  },
+  {
+    "key": "subagentPromptCacheTtl",
+    "type": "'5m'  /  '1h'",
+    "scope": "`Any file`",
+    "note": "Session flag accepted; API effect untested"
+  },
+  {
+    "key": "alwaysThinkingEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Model gated; prefer thinking control, effect unverified"
+  },
+  {
+    "key": "effortLevel",
+    "type": "'low'  /  'medium'  /  'high'  /  'xhigh'",
+    "scope": "`Any file`",
+    "note": "Live: applied readback"
+  },
+  {
+    "key": "maxEffortLevel",
+    "type": "'low'  /  'medium'  /  'high'  /  'xhigh'  /  'max'",
+    "scope": "`Any file`. Deploy it in managed settings to enforce it for an organization. When several scopes set a cap, the lowest applies, so a cap set in one scope can't be raised from another",
+    "note": "Live: cap readback verified"
+  },
+  {
+    "key": "modelSettings",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "ultracode",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Live: requested/applied/availability"
+  },
+  {
+    "key": "autoCompactWindow",
+    "type": "number",
+    "scope": "`Any file`",
+    "note": "Startup: launch flag verified; live readback did not change"
+  },
+  {
+    "key": "advisorModel",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Session flag accepted; applied advisor unavailable in probe"
+  },
+  {
+    "key": "fastMode",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Live: initialize state readback"
+  },
+  {
+    "key": "fastModePerSessionOptIn",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "promptSuggestionEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Session flag accepted; suggestion emission untested"
+  },
+  {
+    "key": "emojiCompletionEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "showClearContextOnPlanAccept",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "askUserQuestionTimeout",
+    "type": "'60s'  /  '5m'  /  '10m'  /  'never'",
+    "scope": "`User or managed`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "dialogExpiry",
+    "type": "'60s'  /  '5m'  /  '10m'  /  'never'",
+    "scope": "`User or managed`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "agent",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Live: native handler + ACK, prompt effect untested"
+  },
+  {
+    "key": "companyAnnouncements",
+    "type": "string[]",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "pluginConfigs",
+    "type": "{",
+    "scope": "`User or managed`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "remote",
+    "type": "{",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "autoUpdatesChannel",
+    "type": "'latest'  /  'stable'  /  'rc'",
+    "scope": "`Any file`. Set it in managed settings to enforce one channel across your organization.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "minimumVersion",
+    "type": "string",
+    "scope": "`Any file`. Set this key in managed settings to pin an organization-wide minimum that user and project settings can't override.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "requiredMinimumVersion",
+    "type": "string",
+    "scope": "`Managed`. Claude Code gives no warning when it ignores the key elsewhere.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "requiredMaximumVersion",
+    "type": "string",
+    "scope": "`Managed`. Claude Code gives no warning when it ignores the key elsewhere.",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "plansDirectory",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "tui",
+    "type": "'default'  /  'fullscreen'",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "voice",
+    "type": "{",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "channelsEnabled",
+    "type": "boolean",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "allowedChannelPlugins",
+    "type": "{",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "prefersReducedMotion",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "timeFormat",
+    "type": "('auto'  /  '12-hour'  /  '24-hour'  /  '24-hour-utc')  /  string",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "timeZone",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "autoMemoryEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "autoMemoryDirectory",
+    "type": "string",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "autoDreamEnabled",
+    "type": "boolean",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "showThinkingSummaries",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "skipDangerousModePermissionPrompt",
+    "type": "boolean",
+    "scope": "`User, local, or managed`, and files passed with `--settings`. Background sessions count only user and managed settings. An untrusted repository can't skip the dialog for you.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableAutoMode",
+    "type": "'disable'",
+    "scope": "`Any file`. Most useful in managed settings, where users can't override it. Also accepted under `permissions` as `permissions.disableAutoMode`.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "sshConfigs",
+    "type": "{",
+    "scope": "`User or managed`. The desktop app reads this key. By default, it reads managed connections from one managed source.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "sshHostCommands",
+    "type": "unknown[]",
+    "scope": "`User or managed`. Only the desktop app reads this key. It reads managed entries from one managed settings file or MDM policy on the computer, and ignores the key in server-managed settings.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "claudeMd",
+    "type": "string",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "claudeMdExcludes",
+    "type": "string[]",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "pluginTrustMessage",
+    "type": "string",
+    "scope": "`Managed`",
+    "note": "Managed policy: read-only inherited status"
+  },
+  {
+    "key": "theme",
+    "type": "('auto'  /  'dark'  /  'light'  /  'light-daltonized'  /  'dark-daltonized'  /  'light-ansi'  /  'dark-ansi')  /  string",
+    "scope": "`Any file`. A value in `~/.claude.json` from an older version applies when no settings file sets it.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "editorMode",
+    "type": "'normal'  /  'vim'",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "keybindingFlavor",
+    "type": "'classic'  /  'readline'",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "vimInsertModeRemaps",
+    "type": "{",
+    "scope": "`User or managed`. A repository can't remap your keystrokes.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "verbose",
+    "type": "boolean",
+    "scope": "`Any file`. A value in `~/.claude.json` from an older version applies when no settings file sets it.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "preferredNotifChannel",
+    "type": "'auto'  /  'iterm2'  /  'terminal_bell'  /  'iterm2_with_bell'  /  'kitty'  /  'ghostty'  /  'notifications_disabled'",
+    "scope": "`Any file`. Claude Code also reads a value left in `~/.claude.json` by older versions.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "autoCompactEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Live: context summary readback"
+  },
+  {
+    "key": "precomputeCompactionEnabled",
+    "type": "boolean",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "idleCompaction",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "switchModelsOnFlag",
+    "type": "boolean",
+    "scope": "`Any file`. Appears in `/config` as **Switch models when a message is flagged**, with the options **Switch automatically** and **Ask each time**.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "autoContinueAtUsageLimit",
+    "type": "boolean",
+    "scope": "`User or managed`. Read from user settings, `--settings`, and managed settings only. When none of those sets the key, a project or local settings file that sets it turns the feature off rather than being ignored.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "autoScrollEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "wheelScrollAccelerationEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "fileCheckpointingEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "showTurnDuration",
+    "type": "boolean",
+    "scope": "`Any file`. A value in `~/.claude.json` from an older version applies when no settings file sets it.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "showMessageTimestamps",
+    "type": "boolean",
+    "scope": "See official key / provider policy",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "terminalProgressBarEnabled",
+    "type": "boolean",
+    "scope": "`Any file`. A value in `~/.claude.json` from an older version applies when no settings file sets it.",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "todoFeatureEnabled",
+    "type": "boolean",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "teammateMode",
+    "type": "'auto'  /  'tmux'  /  'iterm2'  /  'in-process'",
+    "scope": "`Any file`. Claude Code also reads a value left in `~/.claude.json` by older versions.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "remoteControlAtStartup",
+    "type": "boolean",
+    "scope": "`Any file`. Claude Code also reads a value left in `~/.claude.json` by older versions.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "isolatePeerMachines",
+    "type": "boolean",
+    "scope": "`Any file`. A `true` from any scope applies, so a checked-in project file can turn the requirement on but not off.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "daemonColdStart",
+    "type": "'transient'  /  'ask'",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "crossSessionInbound",
+    "type": "'accept'  /  'hold'  /  'refuse'",
+    "scope": "`Any file`. A project or local value applies only when it's stricter than the value managed settings, the `--settings` flag, or user settings give.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "autoUploadSessions",
+    "type": "boolean",
+    "scope": "See official key / provider policy",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "inputNeededNotifEnabled",
+    "type": "boolean",
+    "scope": "`Any file`. Claude Code also reads a value left in `~/.claude.json` by older versions.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "agentPushNotifEnabled",
+    "type": "boolean",
+    "scope": "`Any file`. Claude Code also reads a value left in `~/.claude.json` by older versions.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "skipAutoPermissionPrompt",
+    "type": "boolean",
+    "scope": "`User or managed`. A repository can't set it for you.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "useAutoModeDuringPlan",
+    "type": "boolean",
+    "scope": "`User, local, or managed`. A repository can't turn it off for you.",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "autoMode",
+    "type": "{",
+    "scope": "`User or managed`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "disableDeepLinkRegistration",
+    "type": "'disable'",
+    "scope": "`Any file`",
+    "note": "Inherited/native setting; live application not verified"
+  },
+  {
+    "key": "voiceEnabled",
+    "type": "boolean",
+    "scope": "`Any file`",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  },
+  {
+    "key": "defaultView",
+    "type": "'chat'  /  'transcript'",
+    "scope": "See official key / provider policy",
+    "note": "Native terminal/interface setting; preserve inheritance, not an agent knob"
+  }
+]

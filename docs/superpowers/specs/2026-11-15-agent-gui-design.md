@@ -179,3 +179,159 @@ signing/notarization gates. Report the released version and how to open GUI mode
 - https://antigravity.google/docs/cli/acp/
 - Installed `agy 1.5.9` ACP help and generated local Codex app-server schema.
 - Latest base: origin/main @ 1dff686680e2cb0e1e11a39c36979d409dc71a4d.
+
+## Amendment: complete native agent controls (owner request, November 15)
+
+The owner explicitly expanded the original model-only scope to each AI's detailed
+features, including effort and native Claude Ultracode. This amendment supersedes
+any earlier narrow settings scope. The unpublished 0.3.0 candidate is held until
+this work and native UI verification finish; prior artifacts are not new proof.
+
+### Feature visibility and execution
+
+- Preserve provider-advertised model metadata, choices, groups, descriptions,
+  commands, skills, config options and current state. Keep account-dependent
+  catalogs dynamic. Missing capability, explicit empty list, unsupported operation,
+  pending intent, policy denial and confirmed applied state are distinct.
+- Use typed safe controls, not an arbitrary JSON/settings editor. Preserve every
+  advertised ACP option, including unknown categories. Unknown types remain visible
+  as unsupported with their names/descriptions. Full snapshots, including empty
+  ones, replace old catalogs; selection-only events must not erase them.
+- A configuration command has a unique generation-bound identity. Serialize config
+  operations with Submit. A successful write is not an applied setting: require the
+  native ACK and effective readback/notification where the protocol provides one.
+  Publish requested versus applied state separately. Optional discovery failures
+  must not terminate a usable conversation. Keep errors local to the operation.
+- Stop cancels deferred prompts, not already applied configuration. Retired replies
+  and a fresh readback/reconfirmation barrier prevent stale confirmation and an
+  O-to-A-to-Stop-to-O race. No prompt replay, auto retry or guessed rollback.
+- Changing model must reconcile dependent effort, tier, mode and availability.
+  A stale unsupported effort must never silently override a newly selected model.
+- Settings are session-local. Do not write native global files to implement a
+  session selector. Startup-only values must be labeled and routed through explicit
+  new-conversation launch options, with effective launch metadata displayed. Never
+  apply them by interrupting/restarting an existing task or replaying a prompt.
+
+### Claude Code
+
+Use installed 2.1.325 / SDK 0.3.325 as verified references, not guessed minimum
+versions. The research and full 182-key inventory live in the SDD workspace.
+
+- Model, supported effort levels, permission mode and independent Ultracode must
+  be directly discoverable. Preserve Ultracode intent when effort changes by sending
+  the compound flag patch. Read applied.ultracode/Requested/Available and applied
+  effort, not only merged effective settings. Show policy caps/unavailable reasons.
+- Typed advanced controls: Fast mode, thinking mode/budget/display where meaningful,
+  dynamic workflows and size/keyword trigger, output style, main-thread agent,
+  advisor, automatic compaction, response language, fallback models, cache TTLs,
+  prompt suggestions, and per-skill exposure. Merge skill override maps safely.
+  Native acceptance without a runtime-effect field is labeled requested/source
+  state; never invent an applied-effect readback. Initial load never opts into a
+  paid service or changes policy merely to discover capability.
+- Discover commands/skills/agents/styles, support native reload operations and
+  command-list changes. Native commands insert editable drafts and execute only on
+  Send. Terminal-only commands are marked; unknown slash text may still be sent
+  explicitly. Native MCP/tool/permission/context status uses a bounded safe
+  projection; raw settings, auth helpers, env, headers, hooks and server configs
+  never enter the event journal or transcript.
+- Auto-compact window and verified creation-only budgets/system instructions/settings
+  sources belong to new-conversation settings. Offer the normal Terminal launch for
+  terminal-only configuration. The complete upstream typed setting inventory is
+  searchable, with live/new-session/inherited/managed/terminal scope and documentation
+  links; non-editable settings must not masquerade as working GUI toggles.
+
+### Codex
+
+- Preserve each model's advertised effort strings/default, service tiers/default,
+  modalities, descriptions and relevant availability. Do not hardcode reasoning
+  strings. Support native thread settings and effective settings notifications.
+- Expose native default/plan collaboration with selected model and effort explicitly
+  merged into collaboration settings, preserving their protocol precedence. Expose
+  native permission profiles, approval policy/reviewer and sandbox constraints with
+  policy availability. Never silently select a bypass policy.
+- Use current native capabilities for multi-agent behavior: the installed schema's
+  deprecated/ignored multiAgentMode is not a working toggle; model-advertised effort
+  such as ultra remains available when the native catalog offers it.
+- Discover skills and insert native skill inputs (name/path) on explicit Send;
+  support skill refresh/invalidation, MCP health, context usage, explicit compaction
+  and other verified native actions. Show startup/inherited settings and optional
+  unavailable endpoints honestly. Do not production-call plugin APIs that official
+  documentation labels under development.
+
+### Antigravity
+
+- Retain the complete ordered ACP configOptions snapshot, grouped choices, current
+  values and optional categories. Installed 1.5.9 advertises model, thought_level
+  (low/medium/high) and mode; these are runtime data, not static allowlists.
+- Generic set_config_option uses exact advertised configId/value. Matching ACK
+  consumes the returned full snapshot, including dependent option changes. Prefer
+  config options over legacy modes; preserve legacy-only servers.
+- Retain available_commands_update and usage_update during session load as well
+  as live use. The actual catalog includes goal, compact, schedule, browser, plan,
+  grill-me, teamwork, learn, boost, agy-customizations, antigravity-guide,
+  run-workflow and swarm. Menus use actual native metadata, not a maintained list.
+- Do not invent AGY Ultracode or MCP health from empty client-supplied mcpServers.
+  Keep native permission choices and startup-only sandbox policy distinct.
+
+### Extension inheritance
+
+Saved account isolation must not hide the user's extension assets. Add a bounded,
+profile-safe reconciliation of native user skills, legacy commands, agents, output
+styles, workflows/routines and plugin metadata/assets where verified paths exist.
+Keep profile-local overrides/deletions and project precedence; source changes and
+deletions update only unchanged Kiln-owned imports. Never share/copy the entire
+config namespace, auth/history, account/provider settings or original credentials.
+Use synthetic global/profile/project fixtures and manifests containing fingerprints,
+not secret values. Source extension assets stay unchanged. Unresolvable plugin
+paths must yield visible errors rather than false parity claims.
+
+### Native presentation and acceptance
+
+Keep the approved graphite native identity and the existing light theme. Compact
+quick controls beside the composer cover model/effort/mode and independent
+Ultracode where applicable; wrap at 320pt. A labeled Session settings control opens
+a searchable, organized surface for every additional native feature. Commands and
+skills have a discoverable searchable palette, short descriptions and insert-only
+behavior. MCP/context status belongs in the same understandable settings surface.
+No system version strings or raw protocol fields in the normal task flow.
+
+Acceptance requires parser/reducer/transport tests for native metadata, full
+replacement, effective ACK/readback, unsupported queries, dependent choices,
+cancel/stale reply barriers, no auto-send, and no sensitive projections. UI tests
+must drive actual interactions and meaningful resulting commands at normal/narrow
+widths in both themes. Finish with actual isolated native GUI selection, observed
+confirmed native state and a task executed under the selected settings for all
+three providers, plus an exclusive Korean IME trial. Synthetic inference and real
+authenticated provider proof remain separately reported. User interaction takes
+priority; do not overwrite or close the QA app while the owner is using it.
+
+References: [Claude model controls](https://code.claude.com/docs/en/model-config.md),
+[Claude SDK types](https://code.claude.com/docs/en/agent-sdk/typescript),
+[settings reference](https://code.claude.com/docs/en/settings-reference.md),
+[Codex App Server](https://learn.chatgpt.com/docs/app-server),
+[ACP config](https://agentclientprotocol.com/protocol/v1/session-config-options),
+[ACP commands](https://agentclientprotocol.com/protocol/v1/slash-commands).
+
+### Amendment: localized tool presentation (owner's latest screenshots)
+
+The owner additionally requests tool-call names and action summaries in the app's
+selected language, including `AskUserQuestion` and `mcp__kiln_qa__echo`. Centralize
+presentation naming for all three providers, tool cards, approval/question cards
+and accessibility labels. Known native operations use the existing four-language
+catalog (for example AskUserQuestion → 사용자에게 질문). MCP server/tool identity is
+separate from its display title: use a meaningful localized known operation with
+readable server identity (for example Kiln QA · 메시지 반환), supported native display
+metadata when available, and a truthful localized external-tool fallback otherwise.
+Do not invent a specific operation from an unknown name or translate unknown tools
+by sending private metadata to an external translation service.
+
+Original invocation names/IDs remain unchanged in the protocol and stored history;
+show the original tool name in expanded details/tooltips for inspection. Do not
+translate commands, file paths, arguments, user questions, model output or diffs.
+Locale changes update existing tool headers immediately without rewriting history.
+Test the supplied examples and common native tools in en/ko/ja/zh-CN, unknown MCP
+names, exact original identifiers, unchanged approval behavior and visible native
+header/details at normal/narrow widths. Existing code currently falls back to raw
+tool.name for Claude/ACP and MCP command calls in `approval.rs::tool_title`.
+
+Reference: [MCP tool names and display titles](https://modelcontextprotocol.io/specification/2026-07-28/server/tools#tool).

@@ -11,6 +11,8 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Remote files and SSH](remote-files.md) | S3/OCI/GCS/R2, CLI profiles, FTP/SFTP, file transfers and SSH terminals |
 | [Object storage](object-storage.md) | AWS, OCI, Google and Cloudflare profiles, authentication and transfer limits |
 | [Native agent conversations](agent-gui.md) | GUI/Terminal mode, streamed tools, approvals, images and durable drafts |
+| [Native feature coverage](agent-feature-coverage.md) | Provider controls/actions, startup options, native references and extension boundaries |
+| [0.3.0 source notes](releases/0.3.0.md) | Unpublished expanded GUI features and delivery boundary |
 | [Agent accounts](accounts.md) | Browser sign-in, recovery, automatic usage updates and account switching |
 | [Antigravity CLI](antigravity.md) | Starting `agy`, conversation restart, updates and copies in Claude Code and Codex |
 | [Database tools](databases.md) | Connections, SQL completion, schema editing and metadata boundaries |

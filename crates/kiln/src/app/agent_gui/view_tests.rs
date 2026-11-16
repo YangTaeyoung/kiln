@@ -1176,6 +1176,7 @@ for line in sys.stdin:
         descriptor: descriptor.clone(),
         program: provider,
         environment: vec![],
+        launch_options: super::super::LaunchOptions::Inherited,
         initial_prompt: None,
     };
     let directory = root.path().join("agent-gui").join(&descriptor.id);
@@ -1396,12 +1397,12 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
                 p,
             );
             h.run();
-            assert_eq!(h.get_by_label("모델").accesskit_node().value().as_deref(), Some("기본 모델"));
-            assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("fixture-mode"));
+            assert_eq!(h.get_by_label("모델").accesskit_node().value().as_deref(), Some("모델: 기본 모델"));
+            assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("모드: Fixture mode"));
             let (outer, clip) = h.state().composer_geometry.expect("actual composer geometry");
             assert!(clip.contains_rect(outer), "the complete composer frame must fit its actual painting clip: {outer:?} vs {clip:?}");
             let message = h.get_by_label("메시지").rect();
-            let tool = h.get_by_label("Bash · 실행 중").rect();
+            let tool = h.get_by_label("명령 실행 · 실행 중").rect();
             let send = h.get_by_label("보내기").rect();
             let attach = h.get_by_label("이미지 첨부").rect();
             assert!(
@@ -1421,8 +1422,8 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
                 "attachment controls remain on the left"
             );
             assert!(
-                h.get_by_label("나").rect().top() < if width > 1000. { 80. } else { 110. },
-                "metadata header must stay compact: {:?}",
+                h.get_by_label("나").rect().top() < if width > 1000. { 112. } else { 144. },
+                "metadata and labeled settings navigation must stay compact: {:?}",
                 h.get_by_label("나").rect()
             );
             for rect in [
@@ -1435,7 +1436,7 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
             ] {
                 assert!(h.ctx.content_rect().contains_rect(rect));
             }
-            h.get_by_label("Bash · 실행 중").click();
+            h.get_by_label("명령 실행 · 실행 중").click();
             h.run();
             assert!(
                 h.query_all_by_label_contains("fixture command output")
@@ -1572,7 +1573,7 @@ fn visual_fix1_tool_uses_one_flush_card_boundary_and_native_keyboard_collapse() 
             p,
         );
         h.run();
-        let header = h.get_by_label("Bash · 완료").rect();
+        let header = h.get_by_label("명령 실행 · 완료").rect();
         let mut boundaries = vec![];
         for shape in &h.output().shapes {
             stroked_rects(&shape.shape, &mut boundaries);
@@ -1593,7 +1594,7 @@ fn visual_fix1_tool_uses_one_flush_card_boundary_and_native_keyboard_collapse() 
         );
         h.key_press(egui::Key::Tab);
         h.run();
-        assert!(h.get_by_label("Bash · 완료").accesskit_node().is_focused());
+        assert!(h.get_by_label("명령 실행 · 완료").accesskit_node().is_focused());
         h.key_press(egui::Key::Enter);
         h.run();
         assert!(h.query_by_label("keyboard expanded output").is_some());
@@ -1733,4 +1734,83 @@ fn visual_fix2_full_pane_approval_arguments_are_painted_before_decisions_after_l
             }
         }
     }
+}
+
+
+#[test]
+fn diagnostic_valid_hangul_preedit_commit_batches_preserve_text_and_never_autosend() {
+    fn preedit(text: &str) -> egui::Event {
+        let end = text.chars().count();
+        egui::Event::Ime(egui::ImeEvent::Preedit { text: text.into(), active_range_chars: Some(end..end) })
+    }
+    // A valid two-syllable composition: each preedit replaces the current mark;
+    // a committed syllable is followed by the next mark, not raw Jamo Text events.
+    let stages = vec![
+        vec![preedit("ㅎ")], vec![preedit("하")], vec![preedit("한")],
+        vec![preedit(""), egui::Event::Ime(egui::ImeEvent::Commit("한".into())), preedit("ㄱ")],
+        vec![preedit("그")], vec![preedit("글")],
+    ];
+    let groupings = [vec![vec![0],vec![1],vec![2],vec![3],vec![4],vec![5]], vec![vec![0,1,2,3,4,5]], vec![vec![0],vec![1],vec![2,3,4,5]]];
+    for (group_index, groups) in groupings.iter().enumerate() {
+        for commit_in_last_batch in [false, true] {
+            let mut p = pane(); p.transcript.lifecycle = Lifecycle::Ready;
+            let mut initialized = false;
+            let mut h = Harness::builder().with_size([520.,760.]).build_ui_state(|ui, p: &mut AgentPane| {
+                if !initialized { kiln_common::fonts::install(ui.ctx()); initialized = true; return; }
+                p.ui(ui);
+            }, p);
+            h.run(); h.get_by_label("메시지").click(); h.run();
+            let confirmation = || vec![preedit(""), egui::Event::Ime(egui::ImeEvent::Commit("글".into())), egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }];
+            for (batch, indices) in groups.iter().enumerate() {
+                for index in indices { h.input_mut().events.extend(stages[*index].clone()); }
+                if commit_in_last_batch && batch + 1 == groups.len() { h.input_mut().events.extend(confirmation()); }
+                h.run(); assert!(h.state().sent.is_empty(), "no automatic send in grouping {group_index}, batch {batch}");
+            }
+            if !commit_in_last_batch {
+                assert_eq!(h.state().composer.text, "한글");
+                assert!(h.state().composing);
+                assert_eq!(h.state().draft().composer.text, "한", "persist only committed syllables");
+                assert!(h.get_by_label("보내기").accesskit_node().is_disabled());
+                h.input_mut().events.extend(confirmation()); h.run();
+            }
+            assert_eq!(h.state().composer.text, "한글\n", "grouping {group_index}, same-frame confirmation {commit_in_last_batch}");
+            assert_eq!(h.state().draft().composer.text, "한글\n");
+            assert!(!h.state().composing); assert!(h.state().sent.is_empty());
+            h.get_by_label("보내기").click(); h.run();
+            assert!(matches!(h.state().sent.last(), Some(Command::Submit { text, .. }) if text == "한글\n"));
+            assert_eq!(h.state().sent.len(), 1);
+        }
+    }
+}
+
+#[test]
+fn task6_native_setting_barrier_blocks_explicit_send() {
+    let mut p = pane();
+    p.transcript.lifecycle = Lifecycle::Ready;
+    p.composer.text = "preserved draft".into();
+    p.transcript.controls.outcomes.insert("setting-1".into(), ControlOutcome {
+        operation: "setting-1".into(), control: "model".into(),
+        requested: ControlValue::Text("new-model".into()), effective: None,
+        state: ApplicationState::Unconfirmed, settled: false, message: None,
+    });
+    p.submit();
+    assert!(p.sent.is_empty(), "unsettled native settings must block Send");
+    assert_eq!(p.composer.text, "preserved draft");
+}
+
+#[test]
+fn task6_localized_tool_examples_preserve_wire_data() {
+    use kiln_common::i18n::{Language, with_language};
+    let tools = [
+        ("AskUserQuestion", "사용자에게 질문"),
+        ("mcp__kiln_qa__echo", "Kiln QA · 메시지 반환"),
+    ];
+    with_language(Language::Korean, || {
+        for (name, expected) in tools {
+            let tool = ToolCall { name: name.into(), input: serde_json::json!({"text":"exact 한글"}), ..Default::default() };
+            let original = tool.clone();
+            assert_eq!(super::super::approval::tool_title(&tool, Tool::Claude), expected);
+            assert_eq!(tool, original);
+        }
+    });
 }

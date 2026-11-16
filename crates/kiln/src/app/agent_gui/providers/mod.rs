@@ -1,4 +1,6 @@
 //! Each adapter owns native IDs and live requests; unknown requests fail closed.
+mod native;
+use native::*;
 mod antigravity;
 mod claude;
 mod codex;
@@ -54,16 +56,35 @@ struct ConfigOperation {
     prompt: Option<Value>,
     wire: Value,
     sent: bool,
+    started: std::time::Instant,
+    timeout_reported: bool,
 }
 impl ConfigOperation {
     fn matches(&self, id: &str) -> bool {
         self.sent && self.id == id
     }
 }
-fn cancel_config(pending: &mut Option<ConfigOperation>, retired: &mut BTreeSet<String>) -> bool {
+fn tick_config(pending: &mut Option<ConfigOperation>, effects: &mut Effects) {
+    if let Some(op) = pending {
+        if !op.timeout_reported && op.started.elapsed() >= std::time::Duration::from_secs(15) {
+            op.timeout_reported = true;
+            op.prompt = None;
+            effects.cancelled = true;
+            effects.event(Event::Controls(ControlEvent::Outcome(ControlOutcome{settled:false,operation:op.id.clone(),control:if op.mode.is_some(){"mode"}else{"model"}.into(),requested:op.model.as_ref().or(op.mode.as_ref()).cloned().map(ControlValue::Text).unwrap_or(ControlValue::Default),effective:None,state:ApplicationState::Unconfirmed,message:Some("Native configuration timed out. The deferred task was withdrawn; waiting for settlement before another Send.".into())})));
+            effects.state(Lifecycle::Ready);
+        }
+    }
+}
+fn cancel_config(
+    pending: &mut Option<ConfigOperation>,
+    retired: &mut BTreeSet<String>,
+    effects: &mut Effects,
+) -> bool {
     if let Some(operation) = pending.take() {
         if operation.sent {
             retired.insert(operation.id);
+        } else {
+            effects.event(Event::Controls(ControlEvent::Settlement(operation.id)));
         }
         true
     } else {
@@ -79,11 +100,13 @@ fn settle_retired_config(
     if !retired.remove(id) {
         return false;
     }
+    effects.event(Event::Controls(ControlEvent::Settlement(id.into())));
     if retired.is_empty()
         && let Some(operation) = pending
         && !operation.sent
     {
         operation.sent = true;
+        operation.started = std::time::Instant::now();
         effects.write(operation.wire.clone());
     }
     true
@@ -97,7 +120,8 @@ impl Adapter {
     pub fn tick(&mut self) -> Effects {
         match self {
             Self::Codex(adapter) => adapter.tick(),
-            _ => Effects::default(),
+            Self::Claude(adapter) => adapter.tick(),
+            Self::Antigravity(adapter) => adapter.tick(),
         }
     }
     pub fn new(tool: Tool, cwd: PathBuf, resume: Option<String>) -> Self {
@@ -105,6 +129,18 @@ impl Adapter {
             Tool::Claude => Self::Claude(claude::Claude::new(resume)),
             Tool::Codex => Self::Codex(codex::Codex::new(cwd, resume)),
             Tool::Antigravity => Self::Antigravity(antigravity::Antigravity::new(cwd, resume)),
+        }
+    }
+    pub fn launch_options(&mut self, options: LaunchOptions) {
+        if let Self::Codex(a) = self {
+            a.launch_options = options;
+        }
+    }
+    pub fn is_resume(&self) -> bool {
+        match self {
+            Self::Claude(a) => a.resuming(),
+            Self::Codex(a) => a.resuming(),
+            Self::Antigravity(a) => a.resuming(),
         }
     }
     pub fn arguments(&self) -> Vec<String> {
@@ -291,7 +327,14 @@ mod tests {
             .command(
                 &Command::Respond {
                     request_id: id,
-                    decision: Decision::Allow,
+                    decision: Decision::Grant(PermissionGrant {
+                        entry_indices: vec![],
+                        read_indices: vec![],
+                        write_indices: vec![],
+                        network: true,
+                        scope: PermissionScope::Turn,
+                        strict_review: false,
+                    }),
                     answers: BTreeMap::new(),
                 },
                 "fixture",
@@ -548,11 +591,13 @@ mod review_regressions {
             let settled = a.ingest(error(old)).unwrap();
             assert!(!settled.writes.iter().any(|v| prompt(tool, v)));
             let current = control_id(tool, &settled);
-            assert!(a.ingest(error(current)).is_err());
+            let failure = a.ingest(error(current)).unwrap();
+            assert!(failure.cancelled);
+            assert!(!failure.writes.iter().any(|v| prompt(tool, v)));
         }
     }
     #[test]
-    fn codex_publishes_selected_model_only_after_turn_ack() {
+    fn codex_turn_ack_does_not_fabricate_effective_model_readback() {
         let mut a = Adapter::new(Tool::Codex, "/tmp".into(), None);
         a.ingest(json!({"id":"thread","result":{"thread":{"id":"native"},"model":"old"}}))
             .unwrap();
@@ -570,7 +615,7 @@ mod review_regressions {
             accepted
                 .events
                 .iter()
-                .any(|e| matches!(e,Event::Models{selected:Some(model),..}if model=="new"))
+                .any(|e| matches!(e,Event::Models{selected:Some(model),..}if model=="old"))
         );
     }
     #[test]
@@ -737,7 +782,7 @@ mod review_regressions {
         a.command(&Command::Interrupt, "fixture").unwrap();
         let b = submit(&mut a, "old");
         assert!(b.writes.is_empty());
-        let settled=a.ingest(json!({"id":mode_id,"result":{"configOptions":[{"id":"mode","category":"mode","currentValue":"code","options":[{"value":"ask","name":"Ask"},{"value":"code","name":"Code"}]}]}})).unwrap();
+        let settled=a.ingest(json!({"id":mode_id,"result":{"configOptions":[{"id":"mode","category":"mode","type":"select","currentValue":"code","options":[{"value":"ask","name":"Ask"},{"value":"code","name":"Code"}]}]}})).unwrap();
         assert!(!settled.events.iter().any(|e| matches!(
             e,
             Event::Modes {
@@ -795,7 +840,7 @@ mod review_regressions {
             let metadata = if tool == Tool::Claude {
                 json!({"type":"system","model":"A"})
             } else {
-                json!({"method":"session/update","params":{"sessionId":"native","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"model","category":"model","currentValue":"A","options":[{"value":"old","name":"Old"},{"value":"A","name":"A"}]}]}}})
+                json!({"method":"session/update","params":{"sessionId":"native","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"model","category":"model","type":"select","currentValue":"A","options":[{"value":"old","name":"Old"},{"value":"A","name":"A"}]}]}}})
             };
             let update = a.ingest(metadata).unwrap();
             assert!(!update.events.iter().any(|e| matches!(
@@ -843,3 +888,6 @@ mod review_regressions {
         assert_eq!(restore.writes[0]["request"]["model"], "old");
     }
 }
+
+#[cfg(test)]
+mod controls_tests;

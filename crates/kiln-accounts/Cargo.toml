@@ -19,6 +19,8 @@ sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 toml = "1.1"
 url = "2"
+unicode-normalization = "0.1"
+semver = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

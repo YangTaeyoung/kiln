@@ -69,9 +69,9 @@ Already installed? Check for updates in **Kiln → Check for Updates** on macOS 
 
 ## Keep the whole task in view
 
-- **Agents, side by side.** Run Claude Code, Codex and Antigravity (`agy`) in separate
-  terminals. The sidebar shows reported working, waiting, completed and failed states;
-  click a task to reach its split. [Workspaces and agents](docs/workspaces.md)
+- **Agents, side by side.** Run Claude Code, Codex and Antigravity (`agy`) in native
+  conversations or terminals. Search session controls and commands, answer approvals
+  and keep drafts. [Native conversations](docs/agent-gui.md) · [Provider coverage](docs/agent-feature-coverage.md)
 - **Sessions beyond the window.** A local daemon keeps shells, agents, builds and
   servers running when the GUI closes or updates. Reopen Kiln to return to your
   tasks, splits and drafts. A reboot or ending a process still ends its session.

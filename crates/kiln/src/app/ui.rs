@@ -1368,6 +1368,8 @@ impl KilnApp {
                         let view=self.agent_views.get_mut(pid).unwrap();
                         if focus_req && is_focused {view.request_focus();focus_consumed=true;}
                         if view.ui(&mut child) {self.actions.push(Action::RestartPane(*pid));}
+                        if let Some(options)=view.take_launch_request() {self.actions.push(Action::GuiAgentWithOptions{tool:view.descriptor.tool,cwd:view.descriptor.cwd.clone(),options});}
+                        if view.take_terminal_request() {self.actions.push(Action::DirectAgent{tool:view.descriptor.tool,cwd:Some(view.descriptor.cwd.clone())});}
                         if !is_focused && child.ui_contains_pointer() && ui.input(|i|i.pointer.any_pressed()){new_focus=Some(*pid);}
                     }
                     Some(PaneKind::Term { view: Some(_), session: Some(_), .. }) if self.quick.open && self.quick.pane==Some(*pid) => {

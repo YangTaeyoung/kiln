@@ -373,6 +373,10 @@ fn command(config: &Config, adapter: &Adapter, accounts: &AccountManager) -> Res
         command.args(launch.args).envs(launch.env);
     }
     command.args(adapter.arguments());
+    if !adapter.is_resume() {
+        config.launch_options.validate(config.descriptor.tool)?;
+        command.args(config.launch_options.arguments());
+    }
     Ok(command)
 }
 fn mailbox(dir: &Path) -> Result<Vec<(PathBuf, QueuedCommand)>> {
@@ -413,6 +417,9 @@ fn resume_target(transcript: &Transcript) -> Result<Option<String>> {
 fn user_event(id: &str, c: &Command) -> Option<Event> {
     if let Command::Submit {
         text, attachments, ..
+    }
+    | Command::SubmitWithSkills {
+        text, attachments, ..
     } = c
     {
         Some(Event::Message {
@@ -441,6 +448,9 @@ fn dispatch(
     }
     let validation = if let Command::Submit {
         text, attachments, ..
+    }
+    | Command::SubmitWithSkills {
+        text, attachments, ..
     } = &q.command
     {
         if text.len() > 120_000
@@ -461,7 +471,10 @@ fn dispatch(
                 *active = Some(q.id.clone());
             }
             backend.effects(j, effects, active)?;
-            if !matches!(q.command, Command::Submit { .. }) {
+            if !matches!(
+                q.command,
+                Command::Submit { .. } | Command::SubmitWithSkills { .. }
+            ) {
                 j.push(Event::CommandState {
                     id: q.id,
                     state: if backend.draining.is_some() {
@@ -504,6 +517,28 @@ pub fn serve(id: &str) -> Result<()> {
     ensure!(config.descriptor.id == id, "agent config identity mismatch");
     let mut journal = Journal::open(&dir, journal::unique())?;
     journal.push(Event::Generation)?;
+    let report_path = dir.join("extension-report.json");
+    if report_path.exists() {
+        let report = kiln_accounts::extensions::ExtensionReport::read_prepared(&report_path)
+            .unwrap_or_else(|_| kiln_accounts::extensions::ExtensionReport {
+                entries: vec![kiln_accounts::extensions::ExtensionStatus {
+                    kind: "extensions".into(), name: "Prepared extension status".into(),
+                    state: "failed".into(), reason: "PREPARED_REPORT_INVALID".into(),
+                }],
+            });
+        for (index, entry) in report.entries.into_iter().enumerate() {
+            journal.push(Event::Controls(ControlEvent::Status(NativeStatus {
+                subject: format!("profile_extension:{index}"),
+                fields: [
+                    ("kind".into(), ControlValue::Text(entry.kind)),
+                    ("name".into(), ControlValue::Text(entry.name)),
+                    ("state".into(), ControlValue::Text(entry.state)),
+                    ("reason".into(), ControlValue::Text(entry.reason)),
+                ].into(),
+                unavailable: None,
+            })))?;
+        }
+    }
     let group = OwnedGroup::current()?;
     handlers();
     let accounts = AccountManager::with_env(kiln_accounts::Env::real());
@@ -515,6 +550,12 @@ pub fn serve(id: &str) -> Result<()> {
                 config.descriptor.cwd.clone(),
                 resume,
             );
+            if !adapter.is_resume() {
+                adapter.launch_options(config.launch_options.clone());
+                journal.push(Event::Controls(ControlEvent::Status(
+                    config.launch_options.metadata(),
+                )))?;
+            }
             let mut backend = Backend::spawn(command(&config, &adapter, &accounts)?)?;
             let mut active = None;
             backend.effects(&mut journal, adapter.start(), &mut active)?;
@@ -896,6 +937,7 @@ mod subprocess_tests {
             },
             program,
             environment: vec![],
+            launch_options: LaunchOptions::Inherited,
             initial_prompt: Some("fixture task".into()),
         }
     }
@@ -1325,6 +1367,7 @@ mod account_tests {
                 program: "fixture-agent".into(),
                 environment: pinned,
                 initial_prompt: None,
+                launch_options: LaunchOptions::Inherited,
             };
             let serialized = serde_json::to_string(&config).unwrap();
             assert!(!serialized.contains("fixture-first-key"));
@@ -1389,6 +1432,7 @@ mod subscription_tests {
             program: "fixture-agent".into(),
             environment: pinned,
             initial_prompt: None,
+            launch_options: LaunchOptions::Inherited,
         };
         let child = command(
             &config,

@@ -1,4 +1,9 @@
 //! Native structured agent runtime, owned by the persistent terminal session.
+mod launch;
+pub use launch::*;
+mod controls;
+pub use controls::*;
+mod tool_presentation;
 mod model;
 pub use model::*;
 mod client;
@@ -25,6 +30,8 @@ struct Config {
     program: PathBuf,
     environment: Vec<(String, String)>,
     initial_prompt: Option<String>,
+    #[serde(default)]
+    launch_options: LaunchOptions,
 }
 /// Call on the existing background launch-preparation worker. Captures the profile once.
 pub fn prepare(
@@ -33,6 +40,23 @@ pub fn prepare(
     accounts: &AccountManager,
     initial_prompt: Option<String>,
 ) -> Result<SpawnSpec> {
+    prepare_with_options(
+        tool,
+        cwd,
+        accounts,
+        initial_prompt,
+        LaunchOptions::Inherited,
+    )
+}
+/// Explicit creation-only options; the ordinary prepare API retains inherited defaults.
+pub fn prepare_with_options(
+    tool: Tool,
+    cwd: PathBuf,
+    accounts: &AccountManager,
+    initial_prompt: Option<String>,
+    launch_options: LaunchOptions,
+) -> Result<SpawnSpec> {
+    launch_options.validate(tool)?;
     ensure!(
         initial_prompt
             .as_ref()
@@ -40,7 +64,7 @@ pub fn prepare(
         "invalid initial prompt"
     );
     let agent = super::remote_terminal::agent(tool, cwd.clone()).map_err(anyhow::Error::msg)?;
-    let mut environment = accounts.launch_environment(tool)?;
+    let (mut environment, extension_report) = accounts.prepare_launch_environment(tool)?;
     if !environment
         .iter()
         .any(|(key, _)| key == "KILN_AGENT_PROFILE")
@@ -75,11 +99,13 @@ pub fn prepare(
         cwd: cwd.clone(),
         account_label: account_label.clone(),
     };
+    extension_report.write_prepared(&dir.join("extension-report.json"))?;
     let config = Config {
         descriptor,
         program: agent.program.context("missing CLI")?.into(),
         environment,
         initial_prompt,
+        launch_options,
     };
     journal::atomic(&dir.join("config.json"), &serde_json::to_vec(&config)?)?;
     let exe = if std::env::var_os("KILN_ACCOUNTS_SANDBOX").is_some() {

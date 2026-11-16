@@ -6,7 +6,18 @@ use kiln_common::{
     task::Task,
     widgets::{self, ButtonKind},
 };
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+#[path = "settings_ui.rs"]
+mod settings_ui;
+#[path = "commands_ui.rs"]
+mod commands_ui;
+#[path = "actions_ui.rs"]
+mod actions_ui;
+#[path = "launch_ui.rs"]
+mod launch_ui;
+#[path = "editing_text.rs"]
+mod editing_text;
+use settings_ui::{ControlsUi, Surface};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Presentation {
@@ -108,6 +119,11 @@ fn bounded(s: &str) -> &str {
 
 pub struct AgentPane {
     pub descriptor: Descriptor,
+    controls_ui: ControlsUi,
+    local_intents: BTreeSet<String>,
+    replay_required: bool,
+    launch_request: Option<LaunchOptions>,
+    terminal_request: bool,
     client: Option<Client>,
     pub transcript: Transcript,
     backlog: VecDeque<Envelope>,
@@ -151,6 +167,11 @@ impl AgentPane {
     fn new(descriptor: Descriptor) -> Self {
         Self {
             descriptor,
+            controls_ui: ControlsUi::default(),
+            local_intents: BTreeSet::new(),
+            replay_required: true,
+            launch_request: None,
+            terminal_request: false,
             client: None,
             transcript: Transcript::default(),
             backlog: VecDeque::new(),
@@ -191,6 +212,7 @@ impl AgentPane {
     #[cfg(test)]
     pub(super) fn fixture(descriptor: Descriptor) -> Self {
         let mut p = Self::new(descriptor);
+        p.replay_required = false;
         p.transport_alive = true;
         p.transport_known = true;
         p
@@ -214,6 +236,8 @@ impl AgentPane {
         if let Some(recovered) = &mut saved.recovered {
             recovered.draft.attachments.truncate(MAX_ATTACHMENTS);
         }
+        self.replay_required = true;
+        if let Some(client) = &self.client { client.invalidate_replay(); }
         self.composer = saved.composer;
         self.restored_pending = saved.pending.is_some();
         self.pending = saved.pending;
@@ -233,10 +257,16 @@ impl AgentPane {
             || !self.imports.is_empty()
     }
     pub fn set_transport_alive(&mut self, alive: bool) {
+        if !alive && self.transport_alive { self.require_replay(); }
         self.transport_alive = alive;
         self.transport_known = true;
     }
+    fn require_replay(&mut self) {
+        self.replay_required = true;
+        if let Some(client) = &self.client { client.invalidate_replay(); }
+    }
     pub fn transport_unverified(&mut self) {
+        if self.transport_alive { self.require_replay(); }
         self.transport_alive = false;
     }
     pub fn lifecycle(&self) -> Lifecycle {
@@ -270,6 +300,12 @@ impl AgentPane {
         self.focus = true;
     }
     fn send(&mut self, command: Command) -> Result<String, String> {
+        let serial = matches!(command, Command::Configure { .. } | Command::SetMode { .. } | Command::NativeAction(_));
+        let result = self.send_transport(command);
+        if serial && let Ok(id) = &result { self.local_intents.insert(id.clone()); }
+        result
+    }
+    fn send_transport(&mut self, command: Command) -> Result<String, String> {
         if let Some(client) = &self.client {
             return client
                 .send_for_generation(&self.transcript.generation, command)
@@ -288,13 +324,32 @@ impl AgentPane {
     }
     fn apply(&mut self, envelope: &Envelope) {
         if matches!(envelope.event, Event::Generation) {
+            self.local_intents.clear();
             self.answers.clear();
+            self.controls_ui.grants.clear();
             self.responding.clear();
+        }
+        if let Event::Controls(ControlEvent::Options(options)) = &envelope.event {
+            self.controls_ui.edits.retain(|id, edit| {
+                options.iter().any(|option| {
+                    option.id == *id && edit.compatible(option) && edit.dirty()
+                })
+            });
         }
         self.transcript.apply(envelope);
         self.reconcile();
     }
     fn reconcile(&mut self) {
+        // Host journals native Pending before transport Accepted. Accepted releases
+        // only local intent; native settled=false remains an independent barrier.
+        self.local_intents.retain(|id| !matches!(self.transcript.commands.get(id), Some(CommandPhase::Accepted | CommandPhase::Rejected)));
+        if self.replay_required && self.backlog.is_empty()
+            && self.client.as_ref().is_some_and(|c| c.replay_current(&self.transcript.generation, self.transcript.sequence)) {
+            self.replay_required = false;
+        }
+        if self.transcript.controls.options_reported {
+            self.composer.model = None; // Detailed native settings own the selection.
+        }
         if let Some(p) = &self.pending {
             let confirmed = self.transcript.commands.get(&p.id) == Some(&CommandPhase::Accepted)
                 || self
@@ -326,6 +381,7 @@ impl AgentPane {
                 self.recovered = None;
             }
         }
+        self.controls_ui.grants.retain(|id,_|self.transcript.requests.contains_key(id));
         self.answers
             .retain(|id, _| self.transcript.requests.contains_key(id));
         self.responding.retain(|id, command| {
@@ -381,6 +437,7 @@ impl AgentPane {
     fn submit(&mut self) {
         if self.composing
             || self.ime_frame
+            || self.settings_blocked()
             || !self.transport_alive
             || self.transcript.lifecycle != Lifecycle::Ready
             || self.pending.is_some()
@@ -398,17 +455,19 @@ impl AgentPane {
             return;
         }
         let draft = self.composer.clone();
-        match self.send(Command::Submit {
-            text: draft.text.clone(),
-            attachments: draft.attachments.clone(),
-            model: draft.model.clone(),
-        }) {
+        let command = if draft.skills.is_empty() {
+            Command::Submit { text: draft.text.clone(), attachments: draft.attachments.clone(), model: draft.model.clone() }
+        } else {
+            Command::SubmitWithSkills { text: draft.text.clone(), attachments: draft.attachments.clone(), model: draft.model.clone(), skills: draft.skills.clone() }
+        };
+        match self.send(command) {
             Ok(id) => {
                 self.pending = Some(PendingDraft { id, draft });
                 self.restored_pending = false;
                 self.recovered = None;
                 self.composer.text.clear();
                 self.composer.attachments.clear();
+                self.composer.skills.clear();
                 self.cached_revision = None;
             }
             Err(error) => self.error = Some(error),
@@ -619,20 +678,15 @@ impl AgentPane {
                     ui.small(RichText::new(metadata).color(t.text_dim)).on_hover_text(kiln_common::i18n::tr("적용된 모델"));
                 });
             });
+        self.surface_navigation(ui);
         ui.separator();
         let available = ui.available_rect_before_wrap();
-        let composer_h =
-            154. + if available.width() < 440. {
-                56. + if !self.transcript.models.is_empty() && !self.transcript.modes.is_empty() { 28. } else { 0. }
-            } else { 0. } + if self.pending.is_some() || self.recovered.is_some() {
-                62.
-            } else {
-                0.
-            } + if !self.composer.attachments.is_empty() || !self.imports.is_empty() {
-                62.
-            } else {
-                0.
-            };
+        let quick_count = self.transcript.controls.options.iter().filter(|o|o.scope==ControlScope::Live && (matches!(o.id.as_str(),"model"|"effort"|"effortLevel"|"thought_level"|"permissionMode"|"collaborationMode"|"mode"|"ultracode") || matches!(o.category.as_deref(),Some("model"|"thought_level"|"mode")))).count();
+        let quick_rows = if available.width() < 440. {quick_count.max(usize::from(!self.transcript.models.is_empty()) + usize::from(!self.transcript.modes.is_empty())).max(1)} else {1};
+        let composer_h = 188. + quick_rows as f32 * 38.
+            + if self.pending.is_some() || self.recovered.is_some() {62.}else{0.}
+            + if !self.composer.attachments.is_empty() || !self.imports.is_empty(){62.}else{0.}
+            + if !self.composer.skills.is_empty(){38.}else{0.};
         let transcript_rect = egui::Rect::from_min_max(
             available.min,
             egui::pos2(
@@ -646,13 +700,15 @@ impl AgentPane {
                 .id_salt("transcript"),
         );
         body.set_clip_rect(transcript_rect);
-        egui::ScrollArea::vertical().id_salt("messages").stick_to_bottom(true).auto_shrink([false,false]).show(&mut body,|ui|{
+        egui::ScrollArea::vertical().id_salt(("messages",self.controls_ui.surface as u8)).stick_to_bottom(self.controls_ui.surface==Surface::Conversation).auto_shrink([false,false]).show(&mut body,|ui|{
             let width = (ui.available_width() - 40.).clamp(0., 900.);
             let inset = (ui.available_width() - width) / 2.;
             ui.horizontal_top(|ui| {
                 ui.add_space(inset);
                 ui.vertical(|ui| {
                 ui.set_width(width);
+                if self.controls_ui.surface == Surface::Settings { self.settings_ui(ui); return; }
+                if self.controls_ui.surface == Surface::Commands { self.commands_ui(ui); return; }
                 let end=self.history_end.unwrap_or(self.transcript.entries.len()).min(self.transcript.entries.len());let start=end.saturating_sub(WINDOW);
                 if start > 0 || self.history_end.is_some() {
                 ui.horizontal_wrapped(|ui|{
@@ -776,6 +832,8 @@ impl AgentPane {
                                 .id_salt((&tool.id, "output"))
                                 .max_height(260.)
                                 .show(ui, |ui| {
+                                    ui.add(egui::Label::new(RichText::new(bounded(&tool.name)).monospace()).wrap());
+                                    if let Some(meta) = &tool.presentation && let Some(name) = &meta.native_name { ui.add(egui::Label::new(name).wrap()); }
                                     if let Some(input) = self.cache.inputs.get(&tool.id) {
                                         ui.add(
                                             egui::Label::new(RichText::new(input).monospace())
@@ -809,6 +867,7 @@ impl AgentPane {
                                 });
                         });
                     });
+                header.header_response.clone().on_hover_text(bounded(&tool.name));
                 widgets::focus_ring(ui, &header.header_response, 6);
                 let rect = header.header_response.rect;
                 ui.painter().galley(
@@ -849,8 +908,10 @@ impl AgentPane {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(16., 18.), egui::Sense::hover());
                     kiln_common::icons::paint(ui.painter(), rect, kiln_common::icons::Icon::Warning, t.orange);
-                    ui.label(RichText::new(kind.title()).color(t.orange).strong());
+                    ui.label(RichText::new(kind.title()).color(t.orange).strong()).on_hover_text(&request.title);
                 });
+                let request_title=super::tool_presentation::request_title(request,self.descriptor.tool);
+                if request_title!=kind.title() {ui.add(egui::Label::new(request_title).wrap()).on_hover_text(&request.title); }
                 if let Some(summary) = summary {
                     egui::ScrollArea::vertical()
                         .id_salt((&request.id, "summary"))
@@ -864,6 +925,8 @@ impl AgentPane {
                                 ui.label(
                                     RichText::new(kiln_common::i18n::tr(label)).color(t.text_dim),
                                 );
+                                let presented;
+                                let value = if *label == "작업" && value == &request.title { presented = super::tool_presentation::request_title(request, self.descriptor.tool); &presented } else { value };
                                 let value = RichText::new(value);
                                 let value = if *label == "도구 입력" {
                                     value.monospace()
@@ -917,15 +980,16 @@ impl AgentPane {
                     }
                 }
                 let answers = answers.clone();
-                let mut decision = None;
+                let summary_ready = summary.is_some();
+                let mut decision = self.permission_subset_ui(ui, request);
                 ui.add_enabled_ui(
                     self.transport_alive
-                        && summary.is_some()
+                        && summary_ready
                         && !self.responding.contains_key(&request.id),
                     |ui| {
                         ui.horizontal_wrapped(|ui| {
                             if request.options.is_empty() {
-                                if widgets::button(
+                                if !(self.descriptor.tool == Tool::Codex && request.title == "item/permissions/requestApproval") && widgets::button(
                                     ui,
                                     kiln_common::i18n::tr("한 번 허용"),
                                     ButtonKind::Primary,
@@ -1173,6 +1237,7 @@ impl AgentPane {
                         });
                     });
                 }
+                self.slash_completion_ui(ui);
                 ui.small(kiln_common::i18n::tr(
                     "Enter로 보내기 · Shift+Enter로 줄바꿈",
                 ));
@@ -1242,82 +1307,11 @@ impl AgentPane {
         widgets.inactive.bg_fill = t.bg_elevated;
         widgets.inactive.weak_bg_fill = if t.dark { t.bg_elevated } else { t.bg_hover };
         widgets.inactive.bg_stroke = Stroke::NONE;
-        if !self.transcript.models.is_empty() || self.composer.model.is_some() {
-            ui.allocate_ui(egui::vec2(125., 28.), |ui| {
-                let combo = egui::ComboBox::from_id_salt("composer-model")
-                    .selected_text(
-                        self.composer
-                            .model
-                            .as_deref()
-                            .unwrap_or(kiln_common::i18n::tr("기본 모델")),
-                    )
-                    .width(125.)
-                    .truncate()
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.composer.model,
-                            None,
-                            kiln_common::i18n::tr("기본 모델"),
-                        );
-                        for model in &self.transcript.models {
-                            ui.selectable_value(
-                                &mut self.composer.model,
-                                Some(model.id.clone()),
-                                &model.label,
-                            );
-                        }
-                    });
-                combo.response.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::ComboBox,
-                        ui.is_enabled(),
-                        kiln_common::i18n::tr("모델"),
-                    )
-                });
-            });
-        }
-        if !self.transcript.modes.is_empty() {
-            let mut selected = None;
-            ui.allocate_ui(egui::vec2(105., 28.), |ui| {
-                let combo = egui::ComboBox::from_id_salt("composer-mode")
-                    .selected_text(
-                        self.transcript
-                            .selected_mode
-                            .as_deref()
-                            .unwrap_or(kiln_common::i18n::tr("기본 모드")),
-                    )
-                    .width(105.)
-                    .truncate()
-                    .show_ui(ui, |ui| {
-                        for mode in &self.transcript.modes {
-                            if ui
-                                .selectable_label(
-                                    self.transcript.selected_mode.as_deref() == Some(&mode.id),
-                                    &mode.label,
-                                )
-                                .clicked()
-                            {
-                                selected = Some(mode.id.clone());
-                            }
-                        }
-                    });
-                combo.response.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::ComboBox,
-                        ui.is_enabled(),
-                        kiln_common::i18n::tr("모드"),
-                    )
-                });
-            });
-            if let Some(mode) = selected
-                && let Err(error) = self.send(Command::SetMode { mode })
-            {
-                self.error = Some(error);
-            }
-        }
+        self.quick_controls_ui(ui);
     }
+
     fn composer_action_ui(&mut self, ui: &mut Ui, enter: bool) {
-        if self.busy() {
+        if self.busy() || (!self.local_intents.is_empty() || self.transcript.controls.outcomes.values().any(|v| !v.settled)) {
             if widgets::button_with(
                 ui,
                 Some(kiln_common::icons::Icon::Stop),
@@ -1332,7 +1326,7 @@ impl AgentPane {
                 }
             }
         } else {
-            let enabled = self.transport_alive
+            let enabled = !self.settings_blocked() && self.transport_alive
                 && self.transcript.lifecycle == Lifecycle::Ready
                 && self.pending.is_none()
                 && self.backlog.is_empty()
@@ -1369,3 +1363,7 @@ impl AgentPane {
 #[cfg(test)]
 #[path = "view_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod settings_tests;

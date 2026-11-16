@@ -1,6 +1,6 @@
 ---
 title: Run Claude Code, Codex and Antigravity
-description: Start Claude Code, Codex and Antigravity tasks from a workspace, follow their state, and let Kiln retry Codex turns when the server is overloaded.
+description: Run Claude Code, Codex and Antigravity in native conversations or terminals, with provider settings, commands, permissions and durable drafts.
 ---
 
 Kiln runs Claude Code, Codex and Google's Antigravity CLI (`agy`) inside workspace panels. You write a request, pick an agent, and follow every task's state from the sidebar without hunting through terminals.
@@ -117,6 +117,40 @@ New Codex panels opened by Kiln run with `--no-daemon`, independent of Codex's o
 | **Restart with these settings** | Changes the shared settings. This can interrupt other clients' active or queued work, so check them first. |
 
 In newly opened Kiln Zsh terminals, plain `codex`, `codex resume …` and `codex fork …` also use `--no-daemon`, so a shared server reporting **Server is draining; retry after reconnecting** does not block those launches. Explicit `--remote` connections, existing aliases/functions, other command forms and other shells keep their normal behavior. Use `command codex …` to bypass the wrapper or add `--no-daemon` yourself for a local session. Reopen existing shells to load this integration. Kiln does not restart the shared server or change its update settings.
+
+## Native session settings and commands {#native-session-settings}
+
+In a conversation GUI, use **Session settings** for searchable provider controls and **Commands and skills** to find native commands. The composer keeps model, reasoning effort, mode and Claude Ultracode close to the message. Available choices come from the current provider and model; a missing catalog is different from an empty one.
+
+A changed setting shows its requested and native values separately. Send and conflicting settings wait for native confirmation; Stop remains available. A transport acknowledgment alone does not confirm that a setting took effect. Rejected or unconfirmed changes stay visible and are never automatically retried.
+
+Command selection inserts editable text without sending it. Existing text and images remain in the draft. Codex skills also carry their native skill input on explicit Send. Refresh the catalog after native skills change. Terminal-only, inherited and managed features are labeled in the advanced inventory instead of appearing as working switches. Use **New conversation in terminal** for terminal-only setup; the current GUI session stays open.
+
+**New conversation settings** opens a separate conversation with the currently selected account and explicit startup options. It preserves the current session and draft, and does not replay a prompt. Native actions such as review, goals and queued tasks run only from their explicit action buttons. Current-turn settings target the reported running turn and do not change work already captured by the provider.
+
+Tool headers use the app language, including questions and known MCP operations. Expand a card or hover its header to inspect the original tool name; arguments, output, questions and diffs keep their original content. Language changes relabel existing history. Unknown operations use an external-tool label. Extension preparation and retained cache versions do not prove that the native provider loaded an extension.
+
+## Provider feature coverage {#provider-coverage}
+
+The reference versions inspected for these controls are Claude Code 2.1.325 (SDK 0.3.325), Codex CLI 0.167.2 and Antigravity CLI 1.5.9. These are reference versions, not minimum requirements or a promise that every later release behaves identically. The installed CLI, model, account and organization policy determine availability. A visible control or prepared extension does not establish that an authenticated model task succeeded.
+
+| Provider | Current-conversation controls and actions | Separate new-conversation options |
+| --- | --- | --- |
+| Claude Code | Model, advertised effort, permission mode and independent Ultracode. Advanced controls cover Fast mode, workflows/size/keyword, output style, main agent/advisor, automatic compaction, response language, fallback models, cache lifetimes, prompt suggestions, skill exposure and meaningful thinking budget/display. Explicit skill/style/plugin reloads; plugin reload needs native safe-reload support. | Turn/cost budgets, compaction window, system/additional instructions, setting sources, tool list and tool allow/deny lists. |
+| Codex | Model, advertised effort/tier, collaboration mode, permission profile, approval policy/reviewer, summary and sandbox/granular approval. Explicit compaction, goals/budgets, queue editing/start, review, active-turn settings, memory mode/status and MCP reload. Skills keep their native input until Send. | Model/effort/tier, permission profile, summary, verbosity, web search, context/compaction limits, base/developer instructions, ephemeral conversation and absolute workspace roots. |
+| Antigravity | All advertised supported ACP select options, including model, reasoning effort and mode. Ordered groups/descriptions are retained; unknown categories stay visible and unsupported types stay read-only. Native commands insert drafts. Commands and usage update during load and live use; separate manual refresh/actions can be unavailable. | Sandbox request, main agent and additional absolute directories. |
+
+Use the scope filters in **Session settings**: **Current conversation**, **New conversation**, **Inherited**, **Managed** and **Terminal only**. The Claude settings reference inventory is broader than the editable subset; Codex's native method inventory also includes workflows with no GUI action. Under-development plugin APIs are not dispatched. Antigravity MCP health is not reported by this adapter; an empty client server list is not a connection-health result.
+
+Permission cards retain native offered decisions. Codex can grant a selected requested filesystem/network subset with turn/session scope and strict-review choice. Kiln does not silently select a bypass policy. Native policy, entitlement and endpoint errors remain visible. Current-turn changes affect the reported active turn's settings, not inference the provider already captured. Source acknowledgment without runtime-effect readback is shown separately from confirmed application.
+
+See the native [Claude model reference](https://code.claude.com/docs/en/model-config.md), [Codex App Server reference](https://learn.chatgpt.com/docs/app-server) and [ACP configuration contract](https://agentclientprotocol.com/protocol/v1/session-config-options). Native catalogs can change between accounts and models; an unavailable or partial result is not a complete list.
+
+## Personal extensions and account scope {#personal-extensions}
+
+New launches prepare supported personal Claude/Codex skills and self-contained plugin assets for the selected private profile. Claude also supports portable legacy commands, agents, output styles and workflow bundles. Native project precedence remains in effect; shared Codex HOME skills and Antigravity assets remain native. Existing account sign-in/bootstrap behavior is preserved. Source author files remain unchanged, and private profile edits/deletions survive later imports. Status polling and resuming a worker do not refresh these imports.
+
+**Extension prepared** means import preparation succeeded. **Existing extension retained** means a prior cache version remains for readers. Neither means enabled, loaded or executed. Native discovery and execution need their own result. Portable supported plugin declarations can retain bundled hooks/MCP/LSP configuration without running it during preparation. Credential-bearing configuration, account-linked connectors, unsupported formats, external paths, routines and scheduler state need native setup or produce a visible diagnostic. Kiln does not copy the entire configuration or account history. See [native plugin loading](https://code.claude.com/docs/en/plugins/loading.md).
 
 ## Next steps {#next-steps}
 

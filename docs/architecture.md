@@ -144,6 +144,22 @@ Dead PTYs override stale Ready journal state and disable sending. Explicit pane
 close ends the session; GUI quit saves drafts and only disconnects the clients.
 See [Native agent conversations](agent-gui.md).
 
+`agent_gui::controls` is the typed boundary for native controls, model metadata,
+catalogs, status and outcomes. Provider adapters publish full replacement snapshots
+and safe status projections rather than arbitrary configuration objects. An
+unsettled configuration outcome blocks conflicting operations and Submit even after
+transport acceptance, Stop or timeout; requested and effective values stay distinct.
+The native settings, commands, actions and launch views consume that boundary.
+Tool-header localization is a presentation projection; original protocol/history
+data remains unchanged. See the [provider coverage matrix](agent-feature-coverage.md).
+
+Explicit creation options use `prepare_with_options` on the existing background
+preparation worker. Resumed workers do not reapply them. New-launch account
+preparation also reconciles bounded author assets and hands a typed private report
+to the host. Validation/status reads and conversation-sync endpoint resolution do
+not reconcile extensions. Existing account bootstrap and credential handling remain
+separate; prepared/retained asset status does not establish native loading.
+
 Agent presentation commands use `Client::send_for_generation` with the generation
 actually reduced by the view. Draining into a bounded view backlog does not retarget
 an approval or Stop to an unseen worker. The compatible `Client::send` interface

@@ -191,6 +191,7 @@ pub enum Action {
     NewAgentTask,
     DirectAgent { tool: kiln_accounts::Tool, cwd: Option<PathBuf> },
     GuiAgent { tool: kiln_accounts::Tool, cwd: Option<PathBuf> },
+    GuiAgentWithOptions { tool: kiln_accounts::Tool, cwd: PathBuf, options: agent_gui::LaunchOptions },
     OpenAgentFolder(kiln_accounts::Tool),
     OpenSsh { alias: String, config_path: Option<PathBuf> },
     OpenSshConnection { alias: String, config_path: Option<PathBuf>, options: kiln_remote::ssh_config::SshOptions },
@@ -889,6 +890,10 @@ impl KilnApp {
     /// Prepares an agent's account environment and launch record on a worker; the page
     /// opens in the requesting workspace once they are ready.
     fn prepare_agent(&mut self, tool: kiln_accounts::Tool, cwd: PathBuf, request: Option<(String,String,String)>, gui: bool, ctx: &egui::Context) {
+        self.prepare_agent_with_options(tool,cwd,request,gui,agent_gui::LaunchOptions::Inherited,ctx);
+    }
+
+    fn prepare_agent_with_options(&mut self, tool: kiln_accounts::Tool, cwd: PathBuf, request: Option<(String,String,String)>, gui: bool, options: agent_gui::LaunchOptions, ctx: &egui::Context) {
         let accounts = self.rotator.mgr.clone();
         let is_request=request.is_some();
         let task = kiln_common::task::Task::spawn(ctx, move || {
@@ -900,7 +905,7 @@ impl KilnApp {
             };
             let result=if gui {
                 let initial_prompt=request.as_ref().map(|(_,context,prompt)|format!("{context}\n## 사용자 요청\n{prompt}"));
-                agent_gui::prepare(tool,cwd,&accounts,initial_prompt).map_err(|e|e.to_string())
+                agent_gui::prepare_with_options(tool,cwd,&accounts,initial_prompt,options).map_err(|e|e.to_string())
             }else{
                 agent_runtime::managed(tool,cwd,&accounts).and_then(|spec|match &prepared {
                     Some((prepared,_))=>agent_runtime::request_spec(&spec,&prepared.request_path),None=>Ok(spec),
@@ -1293,27 +1298,16 @@ impl KilnApp {
                 let root = self.ws().root.clone();
                 let Some(cwd) = rfd::FileDialog::new().set_title(kiln_common::i18n::tr("작업 폴더 열기")).set_directory(root).pick_folder() else { return; };
                 let cwd = normalize_path(cwd.canonical().unwrap_or(cwd));
-                if self.settings.agent_presentation==agent_gui::Presentation::Gui {
-                    self.add_workspace(cwd.clone(),ctx);self.prepare_agent(tool,cwd,None,true,ctx);return;
-                }
-                let spec = match agent_runtime::managed(tool, cwd.clone(), &self.rotator.mgr).map_err(|e|e.to_string()) {
-                    Ok(spec) => spec,
-                    Err(error) => { self.toast(kiln_common::i18n::tr("작업을 시작할 수 없습니다"), error, ToastKind::Error, None); return; }
-                };
-                let existing = self.workspaces.iter().any(|ws| normalize_path(ws.tools.canonical_root().to_owned()) == cwd);
-                self.add_workspace(cwd, ctx);
-                if existing { self.launch_terminal_page(spec, ctx); }
-                else if let Some(pane) = self.focused_pane() {
-                    self.ws().page_mut().title = None;
-                    self.launch_specs.insert(pane, spec);
-                    self.spawn_for_pane(pane);
-                    self.focus_terminal = true;
-                    self.reveal_work_surface(ctx);
-                }
+                let gui=self.settings.agent_presentation==agent_gui::Presentation::Gui;
+                self.add_workspace(cwd.clone(),ctx);
+                self.prepare_agent(tool,cwd,None,gui,ctx);
             }
             Action::DirectAgent { tool, cwd } => {
                 let cwd = cwd.unwrap_or_else(|| self.ws().root.clone());
                 self.prepare_agent(tool, cwd, None, false, ctx);
+            }
+            Action::GuiAgentWithOptions {tool,cwd,options} => {
+                self.prepare_agent_with_options(tool,cwd,None,true,options,ctx);
             }
             Action::GuiAgent {tool,cwd} => {
                 let cwd=cwd.unwrap_or_else(||self.ws().root.clone());
