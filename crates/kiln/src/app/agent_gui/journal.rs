@@ -122,6 +122,7 @@ pub(super) fn atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PublishPoint {
     BeforeRename,
+    RenameAttempt,
     AfterRename,
 }
 #[derive(Debug)]
@@ -149,6 +150,7 @@ fn atomic_observed(
         f.sync_all()?;
         observe(PublishPoint::BeforeRename)?;
         uncertain = true;
+        observe(PublishPoint::RenameAttempt)?;
         fs::rename(&tmp, path)?;
         observe(PublishPoint::AfterRename)?;
         sync_directory(path.parent().context("missing private parent")?)?;

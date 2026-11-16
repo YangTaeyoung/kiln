@@ -490,6 +490,8 @@ impl Dir {
     }
     pub fn write_new(&self, name: &str, bytes: &[u8], exec: bool) -> R<()> {
         component(name)?;
+        #[cfg(not(unix))]
+        let _ = exec;
         #[cfg(unix)]
         let mut file = opened(unsafe {
             libc::openat(
@@ -535,6 +537,7 @@ impl Dir {
             io(std::fs::rename(self.path.join(from), to.path.join(name)))
         }
     }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub fn swap(&self, from: &str, to: &Dir, name: &str) -> R<()> {
         component(from)?;
         component(name)?;

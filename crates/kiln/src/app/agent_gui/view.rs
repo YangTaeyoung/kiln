@@ -342,7 +342,24 @@ impl AgentPane {
     fn reconcile(&mut self) {
         // Host journals native Pending before transport Accepted. Accepted releases
         // only local intent; native settled=false remains an independent barrier.
-        self.local_intents.retain(|id| !matches!(self.transcript.commands.get(id), Some(CommandPhase::Accepted | CommandPhase::Rejected)));
+        self.local_intents.retain(|id| match self.transcript.commands.get(id) {
+            Some(CommandPhase::Accepted | CommandPhase::Rejected) => false,
+            Some(CommandPhase::Unconfirmed) => {
+                // The enqueue error remains visible, but a completed writer plus
+                // a consistent absent mailbox permits explicit user retry. Keep
+                // the host phase intact so a later authoritative ACK still wins.
+                !self.transcript.uncertain_deliveries.contains(id)
+                    || !self.backlog.is_empty()
+                    || !self.client.as_ref().is_some_and(|client| {
+                        client.submission_is_unknown(
+                            id,
+                            &self.transcript.generation,
+                            self.transcript.sequence,
+                        )
+                    })
+            }
+            _ => true,
+        });
         if self.replay_required && self.backlog.is_empty()
             && self.client.as_ref().is_some_and(|c| c.replay_current(&self.transcript.generation, self.transcript.sequence)) {
             self.replay_required = false;

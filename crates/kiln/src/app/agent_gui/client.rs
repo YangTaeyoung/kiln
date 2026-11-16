@@ -1,7 +1,8 @@
 use super::{Command, Descriptor, Envelope, Event, QueuedCommand, Transcript, journal};
 use anyhow::{Result, bail};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
+    path::{Component, Path, PathBuf},
     sync::{
         Arc, Mutex, OnceLock, Weak,
         atomic::{AtomicBool, Ordering},
@@ -15,14 +16,48 @@ struct WriterRegistry {
     revision: u64,
     mailboxes: Vec<Weak<LocalMailbox>>,
 }
-static LOCAL_MAILBOXES: OnceLock<Mutex<WriterRegistry>> = OnceLock::new();
-fn writers() -> &'static Mutex<WriterRegistry> {
-    LOCAL_MAILBOXES.get_or_init(Default::default)
+type SharedWriters = Arc<Mutex<WriterRegistry>>;
+static LOCAL_MAILBOXES: OnceLock<Mutex<BTreeMap<PathBuf, Weak<Mutex<WriterRegistry>>>>> =
+    OnceLock::new();
+// Runtime directories are generated from a single configured root. Normalize
+// relative/dot/parent spellings without adding filesystem I/O to GUI connection.
+fn runtime_identity(directory: &Path) -> std::io::Result<PathBuf> {
+    let absolute = std::path::absolute(directory)?;
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component),
+        }
+    }
+    Ok(normalized)
 }
-fn register_mailbox(local: &Arc<LocalMailbox>) {
-    let mut registry = writers().lock().unwrap();
-    registry.mailboxes.retain(|weak| weak.strong_count() > 0);
-    registry.mailboxes.push(Arc::downgrade(local));
+fn register_mailbox(directory: Option<&Path>, local: &Arc<LocalMailbox>) -> SharedWriters {
+    let writers = if let Some(directory) = directory {
+        let mut runtimes = LOCAL_MAILBOXES
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap();
+        runtimes.retain(|_, weak| weak.strong_count() > 0);
+        if let Some(writers) = runtimes.get(directory).and_then(Weak::upgrade) {
+            writers
+        } else {
+            let writers = SharedWriters::default();
+            runtimes.insert(directory.into(), Arc::downgrade(&writers));
+            writers
+        }
+    } else {
+        SharedWriters::default()
+    };
+    {
+        let mut registry = writers.lock().unwrap();
+        registry.mailboxes.retain(|weak| weak.strong_count() > 0);
+        registry.mailboxes.push(Arc::downgrade(local));
+    }
+    writers
 }
 fn queued_locally_in(registry: &mut WriterRegistry, id: &str) -> bool {
     registry.mailboxes.retain(|weak| weak.strong_count() > 0);
@@ -32,22 +67,18 @@ fn queued_locally_in(registry: &mut WriterRegistry, id: &str) -> bool {
         .filter_map(Weak::upgrade)
         .any(|local| local.lock().unwrap().contains(id))
 }
-#[cfg(test)]
-fn queued_locally(id: &str) -> bool {
-    queued_locally_in(&mut writers().lock().unwrap(), id)
-}
 // The revision is advanced both before I/O and when the write finishes, before
 // the worker can release its local mailbox. No writer mutex is held during I/O.
-struct EnqueuePublication;
+struct EnqueuePublication(SharedWriters);
 impl EnqueuePublication {
-    fn begin() -> Self {
-        writers().lock().unwrap().revision += 1;
-        Self
+    fn begin(writers: &SharedWriters) -> Self {
+        writers.lock().unwrap().revision += 1;
+        Self(writers.clone())
     }
 }
 impl Drop for EnqueuePublication {
     fn drop(&mut self) {
-        writers().lock().unwrap().revision += 1;
+        self.0.lock().unwrap().revision += 1;
     }
 }
 #[derive(Clone)]
@@ -113,8 +144,9 @@ fn enqueue_command(
     dir: &std::path::Path,
     command: &QueuedCommand,
     hooks: &mut WorkerHooks,
+    writers: &SharedWriters,
 ) -> std::result::Result<(), journal::PublicationError> {
-    let _publication = EnqueuePublication::begin();
+    let _publication = EnqueuePublication::begin(writers);
     hooks.inside_enqueue();
     #[cfg(test)]
     {
@@ -152,6 +184,7 @@ pub struct Client {
     error: Arc<Mutex<Option<String>>>,
     unavailable: Arc<Mutex<Option<String>>>,
     local_pending: Arc<Mutex<BTreeSet<String>>>,
+    writers: SharedWriters,
     stop: Arc<AtomicBool>,
     replay: Arc<Mutex<Option<ReplayCheckpoint>>>,
 }
@@ -201,7 +234,12 @@ impl Client {
         let error = Arc::new(Mutex::new(None));
         let unavailable = Arc::new(Mutex::new(None));
         let local_pending = Arc::new(Mutex::new(BTreeSet::new()));
-        register_mailbox(&local_pending);
+        let identity = directory
+            .as_ref()
+            .ok()
+            .and_then(|directory| runtime_identity(directory).ok());
+        let writers = register_mailbox(identity.as_deref(), &local_pending);
+        let worker_writers = writers.clone();
         let replay = Arc::new(Mutex::new(None));
         let checkpoint = replay.clone();
         let stop = Arc::new(AtomicBool::new(false));
@@ -277,7 +315,10 @@ impl Client {
                         let mut rejected = journal::pending_ids(&dir)
                             .into_iter()
                             .collect::<BTreeSet<_>>();
-                        rejected.extend(local.lock().unwrap().iter().cloned());
+                        // Sending shares the unavailable lock with the failure
+                        // transition. No new local registration can follow it;
+                        // retire exactly the IDs now conservatively accounted for.
+                        rejected.extend(std::mem::take(&mut *local.lock().unwrap()));
                         pending = Some(vec![Envelope {
                             sequence: 0,
                             generation: observed.generation.clone(),
@@ -296,10 +337,14 @@ impl Client {
                         if s.load(Ordering::Relaxed) {
                             break;
                         }
-                        if u.lock().unwrap().is_some() {
+                        if u.lock().unwrap().is_some()
+                            || !local.lock().unwrap().contains(&queued.id)
+                        {
+                            // A terminal-accounted ID must never publish later,
+                            // even if a new Generation makes the runtime usable.
                             continue;
                         }
-                        if let Err(err) = enqueue_command(&dir, &queued, &mut hooks) {
+                        if let Err(err) = enqueue_command(&dir, &queued, &mut hooks, &worker_writers) {
                             *e.lock().unwrap() = Some(err.to_string());
                             local.lock().unwrap().remove(&queued.id);
                             let outcome = Envelope {
@@ -321,7 +366,7 @@ impl Client {
                     && u.lock().unwrap().is_none()
                     && !observed.generation.is_empty()
                 {
-                    let revision = writers().lock().unwrap().revision;
+                    let revision = worker_writers.lock().unwrap().revision;
                     let queued = published_command_ids(&dir);
                     // Cover host outcome/removal ordering as well as concurrent
                     // local publications. Publishing and querying use writer ->
@@ -330,7 +375,7 @@ impl Client {
                     let journal_stable = std::fs::metadata(dir.join("events.jsonl"))
                         .is_ok_and(|meta| meta.len() == offset);
                     let checkpointed = {
-                        let registry = writers().lock().unwrap();
+                        let registry = worker_writers.lock().unwrap();
                         let mut checkpoint = checkpoint.lock().unwrap();
                         if let Ok(queued) = queued
                             && journal_stable
@@ -362,6 +407,7 @@ impl Client {
             error,
             unavailable,
             local_pending,
+            writers,
             stop,
             replay,
         }
@@ -375,7 +421,7 @@ impl Client {
         let (tx, events_rx) = crossbeam_channel::bounded(8);
         tx.send(events).unwrap();
         let local_pending = Arc::new(Mutex::new(BTreeSet::new()));
-        register_mailbox(&local_pending);
+        let writers = register_mailbox(None, &local_pending);
         (
             Self {
                 commands,
@@ -384,6 +430,7 @@ impl Client {
                 error: Arc::new(Mutex::new(None)),
                 unavailable: Arc::new(Mutex::new(None)),
                 local_pending,
+                writers,
                 stop: Arc::new(AtomicBool::new(false)),
                 replay: Arc::new(Mutex::new(None)),
             },
@@ -441,7 +488,7 @@ impl Client {
     /// inspection are consistent with this applied transcript watermark. Local
     /// mailboxes, including a dropped worker still finishing enqueue, take priority.
     pub fn submission_is_unknown(&self, id: &str, generation: &str, applied_sequence: u64) -> bool {
-        let mut registry = writers().lock().unwrap();
+        let mut registry = self.writers.lock().unwrap();
         let replay = self.replay.lock().unwrap();
         replay.as_ref().is_some_and(|r| {
             r.writer_revision == registry.revision
@@ -453,7 +500,7 @@ impl Client {
     pub fn invalidate_replay(&self) { *self.replay.lock().unwrap() = None; }
     /// Current background replay AND mailbox inspection, not only an old Ready event.
     pub fn replay_current(&self, generation: &str, sequence: u64) -> bool {
-        let mut registry = writers().lock().unwrap();
+        let mut registry = self.writers.lock().unwrap();
         registry.mailboxes.retain(|weak| weak.strong_count() > 0);
         let no_local = registry.mailboxes.iter().filter_map(Weak::upgrade)
             .all(|local| local.lock().unwrap().is_empty());
@@ -539,6 +586,10 @@ mod tests {
         assert!(
             excluded,
             "failure must wait for registered command identity"
+        );
+        assert!(
+            client.local_pending.lock().unwrap().is_empty(),
+            "terminal accounting retires local writers"
         );
         assert!(client.send(Command::Interrupt).is_err());
         assert!(!root.path().join("commands").exists());
@@ -650,6 +701,53 @@ mod review_tests {
 mod round2_tests {
     use super::*;
     #[test]
+    fn final_fix_other_conversation_publication_does_not_invalidate_checkpoint() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        for root in [&a, &b] {
+            let mut journal =
+                journal::Journal::open(root.path(), "shared-generation".into()).unwrap();
+            journal.push(Event::Generation).unwrap();
+            journal
+                .push(Event::Lifecycle(super::super::Lifecycle::Ready))
+                .unwrap();
+        }
+        let (reached_tx, reached_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        let mut reader = Client::at_directory_gated(
+            Ok(b.path().into()),
+            None,
+            WorkerHooks {
+                after_checkpoint: Some((reached_tx, release_rx)),
+                ..Default::default()
+            },
+        );
+        reached_rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+        let sequence = reader.drain().iter().map(|e| e.sequence).max().unwrap();
+        assert!(reader.replay_current("shared-generation", sequence));
+        let (writer, start) = Client::paused(a.path().into(), "shared-generation");
+        let id = writer.send(Command::Interrupt).unwrap();
+        assert!(
+            reader.replay_current("shared-generation", sequence),
+            "unrelated registration is independent"
+        );
+        start.send(()).unwrap();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !published_command_ids(a.path()).unwrap().contains(&id) {
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(
+            reader.replay_current("shared-generation", sequence),
+            "unrelated publication cannot expire B's paused checkpoint"
+        );
+        assert!(reader.submission_is_unknown(&id, "shared-generation", sequence));
+        assert!(!writer.submission_is_unknown(&id, "shared-generation", sequence));
+        release_tx.send(()).unwrap();
+    }
+    #[test]
     fn review_round2_i2_completed_old_publication_invalidates_paused_new_reader_checkpoint() {
         let root = tempfile::tempdir().unwrap();
         let mut journal = journal::Journal::open(root.path(), "G1".into()).unwrap();
@@ -682,8 +780,9 @@ mod round2_tests {
             .unwrap();
         let (b_reached_tx, b_reached_rx) = crossbeam_channel::bounded(1);
         let (b_release_tx, b_release_rx) = crossbeam_channel::bounded(1);
+        std::fs::create_dir(root.path().join("unused")).unwrap();
         let mut restored = Client::at_directory_gated(
-            Ok(root.path().into()),
+            Ok(root.path().join("unused/../.")),
             None,
             WorkerHooks {
                 after_checkpoint: Some((b_reached_tx, b_release_rx)),
@@ -709,7 +808,7 @@ mod round2_tests {
         drop(old);
         a_release_tx.send(()).unwrap();
         let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while queued_locally(&id) {
+        while queued_locally_in(&mut restored.writers.lock().unwrap(), &id) {
             assert!(std::time::Instant::now() < until);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }

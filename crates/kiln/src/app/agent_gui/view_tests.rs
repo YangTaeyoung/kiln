@@ -11,6 +11,244 @@ fn pane() -> AgentPane {
         account_label: "Pinned test account".into(),
     })
 }
+fn final_fix_published_ids(root: &std::path::Path) -> Vec<String> {
+    std::fs::read_dir(root.join("commands"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .map(|entry| {
+            super::super::journal::read::<super::super::QueuedCommand>(&entry.path())
+                .unwrap()
+                .id
+        })
+        .collect()
+}
+fn final_fix_wait(p: &mut AgentPane, ready: impl Fn(&AgentPane) -> bool) {
+    let ctx = egui::Context::default();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(4);
+    loop {
+        p.tick(&ctx);
+        if ready(p) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "final fix condition timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+#[test]
+fn final_fix_failed_open_conversation_does_not_gate_healthy_conversation() {
+    use super::super::journal;
+    let a_root = tempfile::tempdir().unwrap();
+    let b_root = tempfile::tempdir().unwrap();
+    let mut a_journal = journal::Journal::open(a_root.path(), "A".into()).unwrap();
+    a_journal.push(Event::Generation).unwrap();
+    let (a_client, start) = Client::paused(a_root.path().into(), "A");
+    let id = a_client.send(Command::Interrupt).unwrap();
+    let mut a = pane();
+    a.client = Some(a_client);
+    let mut b_journal = journal::Journal::open(b_root.path(), "B".into()).unwrap();
+    b_journal.push(Event::Generation).unwrap();
+    b_journal.push(Event::Lifecycle(Lifecycle::Ready)).unwrap();
+    let mut b = pane();
+    b.replay_required = true;
+    b.client = Some(Client::at_directory(Ok(b_root.path().into())));
+    // A still owns an unpublished local command, but B has no writer or backlog.
+    final_fix_wait(&mut b, |p| !p.replay_required);
+    start.send(()).unwrap();
+    final_fix_wait(&mut a, |_| {
+        final_fix_published_ids(a_root.path()).contains(&id)
+    });
+    journal::atomic(
+        &a_root.path().join("failure.json"),
+        br#"{"reason":"fixture failure"}"#,
+    )
+    .unwrap();
+    final_fix_wait(&mut a, |p| {
+        p.transcript.commands.get(&id) == Some(&CommandPhase::Rejected)
+    });
+    b.require_replay();
+    final_fix_wait(&mut b, |p| !p.replay_required);
+    assert!(!b.settings_blocked());
+    b.composer.text = "healthy B".into();
+    b.submit();
+    let submitted = b
+        .pending
+        .as_ref()
+        .expect("B can explicitly submit while failed A stays open")
+        .id
+        .clone();
+    final_fix_wait(&mut b, |_| {
+        final_fix_published_ids(b_root.path()).contains(&submitted)
+    });
+    assert!(a.client.as_ref().unwrap().send(Command::Interrupt).is_err());
+    assert_eq!(
+        a.transcript.commands.get(&id),
+        Some(&CommandPhase::Rejected)
+    );
+}
+#[test]
+fn final_fix_uncertain_settings_recover_only_after_absence_or_native_acceptance() {
+    use super::super::journal;
+    let commands = [
+        Command::Configure {
+            control: "model".into(),
+            value: ControlValue::Text("new".into()),
+        },
+        Command::SetMode {
+            mode: "plan".into(),
+        },
+        Command::NativeAction(NativeAction::Compact),
+    ];
+    for command in commands {
+        for (point, accepted) in [
+            (journal::PublishPoint::RenameAttempt, false),
+            (journal::PublishPoint::AfterRename, false),
+            (journal::PublishPoint::AfterRename, true),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let mut journal = journal::Journal::open(root.path(), "fixture".into()).unwrap();
+            journal.push(Event::Generation).unwrap();
+            journal.push(Event::Lifecycle(Lifecycle::Ready)).unwrap();
+            let (client, start) = Client::faulted_enqueue(root.path().into(), "fixture", point);
+            let mut p = pane();
+            p.client = Some(client);
+            start.send(()).unwrap();
+            final_fix_wait(&mut p, |p| p.transcript.sequence == 2);
+            let id = p.send(command.clone()).unwrap();
+            final_fix_wait(&mut p, |p| {
+                p.transcript.commands.get(&id) == Some(&CommandPhase::Unconfirmed)
+            });
+            assert!(p.error.is_some(), "publication failure remains visible");
+            let file = root.path().join("commands").join(format!("{id}.json"));
+            if point == journal::PublishPoint::RenameAttempt {
+                assert!(
+                    !file.exists(),
+                    "failure before rename leaves no executable command"
+                );
+                final_fix_wait(&mut p, |p| !p.local_intents.contains(&id));
+                assert!(!p.settings_blocked());
+                assert!(final_fix_published_ids(root.path()).is_empty());
+                p.send(command.clone()).unwrap(); // only explicit retry queues work
+                continue;
+            }
+            assert!(file.is_file());
+            assert!(p.settings_blocked());
+            let mut initialized = false;
+            let mut h = Harness::builder().with_size([700., 200.]).build_ui_state(
+                |ui, p: &mut AgentPane| {
+                    if !initialized {
+                        kiln_common::fonts::install(ui.ctx());
+                        initialized = true;
+                        return;
+                    }
+                    p.composer_action_ui(ui, false);
+                },
+                p,
+            );
+            h.run();
+            h.get_by_label("중지").click();
+            h.run();
+            assert!(
+                h.state().local_intents.contains(&id),
+                "Stop cannot guess delivery"
+            );
+            final_fix_wait(h.state_mut(), |_| {
+                final_fix_published_ids(root.path()).len() == 2
+            });
+            let interrupt = final_fix_published_ids(root.path())
+                .into_iter()
+                .find(|other| other != &id)
+                .unwrap();
+            let queued: super::super::QueuedCommand = journal::read(
+                &root
+                    .path()
+                    .join("commands")
+                    .join(format!("{interrupt}.json")),
+            )
+            .unwrap();
+            assert!(matches!(queued.command, Command::Interrupt));
+            journal
+                .push(Event::CommandState {
+                    id: interrupt.clone(),
+                    state: CommandPhase::Accepted,
+                })
+                .unwrap();
+            std::fs::remove_file(
+                root.path()
+                    .join("commands")
+                    .join(format!("{interrupt}.json")),
+            )
+            .unwrap();
+            if accepted {
+                journal
+                    .push(Event::Controls(ControlEvent::Outcome(ControlOutcome {
+                        operation: "native".into(),
+                        control: "model".into(),
+                        requested: ControlValue::Text("new".into()),
+                        effective: None,
+                        state: ApplicationState::Pending,
+                        settled: false,
+                        message: None,
+                    })))
+                    .unwrap();
+                journal
+                    .push(Event::CommandState {
+                        id: id.clone(),
+                        state: CommandPhase::Accepted,
+                    })
+                    .unwrap();
+            }
+            std::fs::remove_file(file).unwrap();
+            final_fix_wait(h.state_mut(), |p| !p.local_intents.contains(&id));
+            assert!(h.state().error.is_some());
+            if accepted {
+                assert_eq!(
+                    h.state().transcript.commands.get(&id),
+                    Some(&CommandPhase::Accepted)
+                );
+                assert!(
+                    h.state().settings_blocked(),
+                    "native unsettled state survives local ACK and Stop"
+                );
+                h.run();
+                assert!(h.query_by_label("중지").is_some());
+                journal
+                    .push(Event::Controls(ControlEvent::Settlement("native".into())))
+                    .unwrap();
+                final_fix_wait(h.state_mut(), |p| !p.settings_blocked());
+            } else {
+                assert_eq!(
+                    h.state().transcript.commands.get(&id),
+                    Some(&CommandPhase::Unconfirmed)
+                );
+                assert!(!h.state().settings_blocked());
+            }
+            h.run();
+            assert!(h.query_by_label("중지").is_none());
+            assert!(h.query_by_label("보내기").is_some());
+            assert!(
+                final_fix_published_ids(root.path()).is_empty(),
+                "no automatic replay"
+            );
+            // A late authoritative event always wins even after local absence recovery.
+            journal
+                .push(Event::CommandState {
+                    id: id.clone(),
+                    state: CommandPhase::Accepted,
+                })
+                .unwrap();
+            final_fix_wait(h.state_mut(), |p| {
+                p.transcript.commands.get(&id) == Some(&CommandPhase::Accepted)
+            });
+            assert!(!h.state().settings_blocked());
+            h.state_mut().send(command.clone()).unwrap(); // explicit user retry is available
+        }
+    }
+}
 #[test]
 fn failed_enqueue_before_publication_recovers_live_submit_and_approval_controls() {
     use super::super::journal;
