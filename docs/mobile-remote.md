@@ -22,7 +22,11 @@ unsupported or inherited controls remain visible with their scope. A queued requ
 is not completion. Requested, pending, Applied, Acknowledged and Unconfirmed states
 must be read separately. Connection loss never automatically retries a mutation or
 replays a prompt. Reconnect within the same app process preserves the unsent draft;
-explicit Disconnect clears the connection. Closing the process loses memory-only data.
+explicit Disconnect clears the connection. Uploaded image drafts survive settings,
+commands/skills and task-list navigation, and re-pairing to the same live host.
+An image from another address or host launch remains visibly unavailable; remove
+it and explicitly select/upload it again before sending to the new host. There is
+no automatic upload retry. Closing the process loses memory-only data.
 Terminal input targets an existing allowlisted native session and creates no shell.
 
 The [protocol](../mobile/protocol/v1.md) records request, image, snapshot, timeout,
@@ -122,28 +126,33 @@ IDs, tokens, raw captures and local paths in ignored private receipts. Verify:
 
 ### Dated verification: 2026-11-16
 
-The source-only host/app implementation is
-`e94f490a0432fe16d77ab9465ac9cea0a7216bb1`.
-This immutable input is distinct from subsequent delivery commits. Desktop source
-and capture provenance remain recorded independently in
-[site source metadata](../site/_build/source.json).
+The historical host/app implementation baseline is
+`e94f490a0432fe16d77ab9465ac9cea0a7216bb1`. Later fixes cover the bounded browser-test
+deadline, dark foreground inheritance (`c078e58`) and attachment draft retention
+(`f0b380f3f8b6ca154c6764b47f3f179847216646`). These are distinct source inputs, not repeated native
+acceptance runs. Desktop source and capture provenance remain recorded independently
+in [site source metadata](../site/_build/source.json).
 
 | Scope | Evidence status |
 | --- | --- |
-| Host/API and synthetic native-provider regression suites | Prior reviewed producer evidence: 17 HTTP + 8 shared tests; final delivery run recorded separately |
-| App behavior | Prior reviewed producer evidence: 33 tests; actual device acceptance is separate |
-| Installed Android + iOS conversation and MCP | Actual UI Create → explicit Submit → installed Claude 2.1.325 → real stdio MCP → one-time Allow → exact completed echo, with one effect on each platform. Verified at public implementation `b45beac`; later app changes are scoped separately below |
+| Host/API and synthetic native-provider regression suites | Prior reviewed producer evidence: 17 host tests (1 auth, 6 HTTP, 10 native), plus 8 shared tests. These unchanged suites were not repeated for the final app-state fix |
+| App behavior | Final attachment-state source: 47 tests passed, including 10 real App/useRemote component regressions for route navigation, same-host re-pairing, changed host/session, late completion, exact-revision consumption and unavailable digest support; TypeScript and development native asset sync passed. At `f0b380f`, a rebuilt/reinstalled iOS app passed fresh-process pairing (including the WebCrypto digest), existing-conversation selection and settings navigation in one 27.8s XCTest. Actual native attachment-navigation acceptance remains separate |
+| Installed Android + iOS conversation and MCP | Actual UI Create → explicit Send → installed Claude 2.1.325 → real stdio MCP → one-time Allow → exact completed echo, with one effect on each platform. Verified at public implementation `b45beac`; the adapter path is unchanged by later app fixes |
 | Model inference in actual-CLI acceptance | Synthetic loopback inference, explicitly separate from installed CLI/native/MCP execution |
-| Final iOS native setting and phone width | At public implementation `e94f490`, actual Effort Level high returned Applied, settled=true and effective high after the UI test (37.3s, PASS). Rendered main width 402px matched the 402px frame after the input/select fix; the earlier overflow was 459.5px |
-| Final Android native setting | At `e94f490`, actual UI selected Effort Level high and explicitly requested the change; Native confirmation high was rendered. Independent GET settlement verification remains pending |
-| Native redirect refusal | Both platforms refused HTTP 302 at `e94f490`: two requests reached the exact owned redirect listener, zero reached its destination, and zero authorized requests reached that destination |
-| Scoped native terminal effects | Both platforms sent explicit UI input + Enter to a real private `/bin/sh` and observed `REMOTE_TERMINAL_VERIFIED` plus exactly one marker effect. Android verified at `b45beac`; iOS at `e94f490` |
-| Mobile CI packages | Public delivery `21ca116` passed web and both native jobs, including development/production compilation. At `e94f490`, one web phone-layout test exceeded its 5s test deadline while 35 other tests passed; final CI acceptance remains pending. This test deadline is not evidence of a runtime product failure |
-| Remaining actual UI matrix | Native picker, reconnect/draft/no-replay, narrow-width and dark-theme matrix still in progress; individual observed cases above do not complete this gate |
-| Physical phones, signing and trusted remote network | Owner acceptance pending |
-| Cleanup | Controller-owned final exact-allowlist audit pending; three earlier normal Antigravity history entries retain their native cleanup boundary |
+| Native setting settlement | At `e94f490`, both actual UIs selected Effort Level high; independent GET confirmed Applied, effective high and settled=true on each platform |
+| Phone width | At `e94f490`, actual iOS input rendered main width 402px in a 402px frame (previously 459.5px); actual Android viewport and scroll width both measured 360 CSS px |
+| Native redirect refusal | Both platforms refused HTTP 302 at `e94f490`: two requests reached the owned redirect listener, zero reached its destination, and zero authorized requests reached that destination |
+| Scoped native terminal effects | At `e94f490`, both platforms sent explicit UI input + Enter to a real private shell and observed `REMOTE_TERMINAL_VERIFIED` with exactly one effect per platform |
+| Disconnect and re-pair | At `e94f490`, both actual apps retained a text draft after Disconnect/re-pair and made no extra MCP call (two total effects remained). This predates the attachment-state fix and does not prove native image-draft navigation |
+| Native image selection/upload | Android's actual native picker uploaded a 6,403-byte PNG and displayed its attachment chip at `e94f490`. Bounded iOS SDK/XCTest did not observe the Photo Library handoff; actual iOS upload remains unverified and needs owner physical-device acceptance |
+| Dark appearance | At `c078e58`, both rebuilt native apps were inspected with readable dark text. The rendered regression reproduced contrast 1.095 before the fix and passed ≥4.5 afterward; this does not certify every route or keyboard state |
+| Mobile CI packages | `c078e58` passed all three mobile jobs, including development/production native builds. Final attachment-state source CI and retained native artifacts remain controller closure gates |
+| Physical phones, signing and trusted remote network | Owner acceptance pending, including physical Korean IME. Production requires trusted HTTPS even when SSH carries the connection |
+| Cleanup | Desktop owned-resource cleanup completed for 93 base and 221 remaining exact-owned resources. Three normal Antigravity history entries retain their native cleanup boundary. Original installed 0.2.26 app, daemon, checkouts, auth/preferences and protected desktop 0.3.0 release were preserved. Mobile process/device/data cleanup and final controller audit remain pending |
 
 No public mobile tag, Store deployment or physical-device acceptance is implied by
-source integration. The MCP proof predates the final 16px phone inputs, settings
-priority and terminal fallback changes; it is not relabeled as a repeated final-head
-MCP run. Update this table only from sanitized actual receipts.
+source integration. The MCP proof predates later phone inputs, settings ordering,
+terminal labels, dark styling and attachment draft changes; it is not relabeled as
+a repeated final-head MCP run. The native pathname-to-process-spawn race remains
+uneliminated; the 16-reader bound and unsupported native actions/granular edits
+remain as documented. Update this table only from sanitized actual receipts.

@@ -195,23 +195,35 @@
 <tbody>
 <tr>
 <td>Source</td>
-<td>Current implementation <code>e94f490</code>; desktop source and capture provenance remain separate.</td>
+<td>Historical baseline <code>e94f490</code>; dark fix <code>c078e58</code>; attachment draft fix <code>f0b380f3f8b6ca154c6764b47f3f179847216646</code>. Desktop source and capture provenance remain separate.</td>
 </tr>
 <tr>
 <td>Android and iOS native execution</td>
-<td>Create, explicit Submit, installed Claude 2.1.325, real stdio MCP, one-time Allow and exact completed echo each produced one effect at <code>b45beac</code>. Model inference used a synthetic loopback service, not a cloud model.</td>
+<td>Create, explicit Send, installed Claude 2.1.325, real stdio MCP, one-time Allow and exact completed echo each produced one effect at <code>b45beac</code>. Inference used a synthetic loopback service. Later app fixes do not constitute a repeated final-head MCP run.</td>
 </tr>
 <tr>
-<td>Final iOS setting and layout</td>
-<td>At <code>e94f490</code>, Effort Level high was Applied and settled with effective high; the rendered main width matched the 402px frame. On final Android, selecting high and explicitly requesting the change rendered Native confirmation high; independent GET settlement verification remains pending.</td>
+<td>Settings and width</td>
+<td>At <code>e94f490</code>, both actual UIs selected Effort Level high; independent GET confirmed Applied, effective high and settled=true. iOS input width was 402px in a 402px frame; Android viewport and scroll width were both 360 CSS px.</td>
 </tr>
 <tr>
 <td>Redirects and terminals</td>
-<td>Both native apps refused the redirect; its destination received zero requests and zero authorized requests. Both platforms sent explicit terminal input to a real private shell and verified the expected output once. Android terminal proof is from <code>b45beac</code>, iOS from <code>e94f490</code>.</td>
+<td>At <code>e94f490</code>, both native apps refused redirects: two source requests, zero destination requests and zero forwarded authorization. Both explicitly sent terminal input + Enter to a real private shell and produced the expected effect once per platform.</td>
 </tr>
 <tr>
-<td>Remaining acceptance</td>
-<td>Earlier mobile CI passed all three jobs and both native build modes. Current-source CI, native picker, reconnect/draft/no-replay and narrow/dark-theme matrix remain pending. Physical devices, signing, physical IME and public-network acceptance remain owner tasks.</td>
+<td>Drafts and images</td>
+<td>Both actual apps preserved text after Disconnect/re-pair at <code>e94f490</code>, without extra MCP effects. Android uploaded a 6,403-byte PNG through its native picker and displayed a chip. Bounded iOS automation did not observe the Photo Library handoff; actual iOS upload remains unverified.</td>
+</tr>
+<tr>
+<td>Attachment draft fix</td>
+<td>Images now survive settings, commands/skills, task-list navigation and same-live-host re-pairing. Images from another address or host launch show Unavailable and block Send until removed and explicitly selected/uploaded again. No automatic retry. Ten real component regressions cover navigation, session boundaries and late receipts; the full app suite passed 47 tests. Native acceptance of this later fix remains pending.</td>
+</tr>
+<tr>
+<td>Dark appearance and CI</td>
+<td>Both rebuilt native apps were inspected as readable at <code>c078e58</code>; rendered contrast regression passed ≥4.5 after reproducing 1.095 before the fix. All three mobile CI jobs passed at that source, including development/production builds. Final attachment-source CI/artifacts remain pending. These observations do not certify every route, width or keyboard state.</td>
+</tr>
+<tr>
+<td>Owner acceptance and cleanup</td>
+<td>Physical phones, signing, Korean IME and trusted HTTPS remain owner tasks, including when using SSH forwarding. Desktop exact-owned cleanup is complete except the existing three normal Antigravity history cleanup boundaries; mobile processes/devices/data and the final audit remain pending. Original app, daemon, auth/preferences and protected desktop release remain preserved.</td>
 </tr>
 </tbody>
 </table></div><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="databases.html"><small>Previous</small>Databases</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">문서<b>도구</b></p></div><h1>원격 파일과 SSH</h1><p class="desc">Amazon S3, Google Cloud Storage, OCI Object Storage, Cloudflare R2, FTP/FTPS, SFTP의 파일을 살펴보고 편집하며, SSH 설정에 있는 호스트로 SSH 터미널을 엽니다.</p><p>Kiln의 워크스페이스 인스펙터에서는 터미널, 데이터베이스, 로컬 파일과 함께 오브젝트 스토리지, FTP 서버, SFTP 호스트도 살펴볼 수 있습니다. 원격 파일은 로컬 파일과 같은 편집기에서 열리고, OpenSSH 설정에 있는 SSH 호스트는 바로 골라 쓸 수 있습니다.</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-ko.webp" alt="" loading="lazy" decoding="async"></div><figcaption>데모 워크스페이스로 실행한 Kiln</figcaption></figure>
@@ -370,29 +382,41 @@
 <thead>
 <tr>
 <th>범위</th>
-<th>관찰한 근거와 남은 검증</th>
+<th>관찰한 근거와 남은 확인</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>소스</td>
-<td>현재 구현은 <code>e94f490</code>이며 데스크톱 소스와 화면 촬영 출처는 별도로 유지합니다.</td>
+<td>과거 기준 구현은 <code>e94f490</code>, 다크 수정은 <code>c078e58</code>, 첨부 초안 수정은 <code>f0b380f3f8b6ca154c6764b47f3f179847216646</code>입니다. 데스크톱 소스와 화면 촬영 출처는 별도로 유지합니다.</td>
 </tr>
 <tr>
 <td>Android·iOS 네이티브 실행</td>
-<td><code>b45beac</code>에서 생성, 명시적 Submit, 설치된 Claude 2.1.325, 실제 stdio MCP, 일회성 Allow, 정확한 완료 응답을 확인했으며 플랫폼별 효과는 각각 한 번이었습니다. 모델 추론은 클라우드 모델이 아닌 합성 루프백 서비스를 사용했습니다.</td>
+<td><code>b45beac</code>에서 만들기, 명시적 보내기, 설치된 Claude 2.1.325, 실제 stdio MCP, 한 번 허용, 정확한 완료 응답을 거쳐 각 플랫폼에서 효과가 한 번 발생했습니다. 모델 추론은 합성 루프백 서비스를 사용했습니다. 이후 앱 수정이 최종 소스의 MCP 재실행 검증을 뜻하지는 않습니다.</td>
 </tr>
 <tr>
-<td>최종 iOS 설정과 화면 폭</td>
-<td><code>e94f490</code>에서 Effort Level high의 Applied·settled 및 실제 high 적용을 확인했고, 본문 폭은 402px 프레임과 일치했습니다. 최종 Android에서도 high를 선택하고 변경을 명시적으로 요청한 뒤 Native confirmation high 표시를 확인했습니다. 별도 GET 적용 상태 확인은 대기 중입니다.</td>
+<td>설정과 화면 폭</td>
+<td><code>e94f490</code>에서 두 실제 UI 모두 Effort Level high를 선택했고, 별도 GET으로 Applied·실제 high·settled=true를 확인했습니다. iOS 입력 후 본문 폭은 402px 프레임과 일치했고, Android 뷰포트와 스크롤 폭은 모두 360 CSS px였습니다.</td>
 </tr>
 <tr>
 <td>리디렉션과 터미널</td>
-<td>두 네이티브 앱 모두 리디렉션을 거부했고 대상 서버의 요청과 인증 요청은 모두 0건이었습니다. 두 플랫폼 모두 실제 격리 셸에 명시적으로 입력하여 예상 출력을 한 번 확인했습니다. Android 터미널 근거는 <code>b45beac</code>, iOS는 <code>e94f490</code>입니다.</td>
+<td><code>e94f490</code>에서 두 네이티브 앱 모두 리디렉션을 거부했습니다. 시작점 요청은 2건, 대상 요청과 인증 전달은 0건이었습니다. 두 플랫폼 모두 실제 격리 셸에 명시적으로 입력하고 Enter를 포함하여 플랫폼별로 예상 효과가 한 번 발생했습니다.</td>
 </tr>
 <tr>
-<td>남은 검증</td>
-<td>이전 모바일 CI의 세 작업과 두 네이티브 빌드 모드는 통과했습니다. 현재 소스 CI, 네이티브 선택기, 재연결·초안·중복 전송 방지, 좁은 화면·다크 테마 검증은 대기 중입니다. 실제 기기, 서명, 물리적 IME와 공용 네트워크 검증은 소유자의 후속 작업입니다.</td>
+<td>초안과 이미지</td>
+<td><code>e94f490</code>에서 두 실제 앱 모두 연결 해제·재연결 후 텍스트를 유지했고 MCP 효과는 추가되지 않았습니다. Android는 네이티브 선택기로 6,403바이트 PNG를 업로드하고 첨부 칩을 표시했습니다. 제한된 iOS 자동화로 Photo Library 전환을 관찰하지 못했으므로 실제 iOS 업로드는 미검증입니다.</td>
+</tr>
+<tr>
+<td>첨부 초안 수정</td>
+<td>설정·명령/스킬·작업 목록 이동과 같은 실행 중 호스트로의 재연결 후에도 이미지를 유지합니다. 다른 주소나 새 호스트 실행의 이미지는 사용 불가로 표시하며, 제거 후 명시적으로 다시 선택·업로드하기 전까지 보내기를 막습니다. 자동 재시도는 없습니다. 실제 컴포넌트 회귀 10개가 화면 이동·세션 경계·지연 응답을 검증했고 전체 앱 테스트 47개가 통과했습니다. 이 후속 수정의 네이티브 검증은 대기 중입니다.</td>
+</tr>
+<tr>
+<td>다크 화면과 CI</td>
+<td><code>c078e58</code>로 다시 빌드한 두 네이티브 앱의 다크 텍스트 가독성을 확인했습니다. 렌더링 대비 회귀는 수정 전 1.095를 재현하고 수정 후 ≥4.5를 통과했습니다. 해당 소스의 모바일 CI 3개 작업과 개발·운영 빌드가 통과했습니다. 최종 첨부 수정 소스의 CI·산출물은 대기 중이며, 모든 화면·폭·키보드 상태를 검증한 것은 아닙니다.</td>
+</tr>
+<tr>
+<td>소유자 확인과 정리</td>
+<td>실물 휴대전화·서명·한국어 IME·신뢰할 수 있는 HTTPS는 소유자 확인 사항이며 SSH 포워딩에도 HTTPS가 필요합니다. 데스크톱의 정확히 식별한 소유 리소스 정리는 기존 일반 Antigravity 기록 3건의 정리 경계를 제외하고 완료했습니다. 모바일 프로세스·기기·데이터와 최종 감사는 대기 중입니다. 원래 앱·데몬·인증/환경설정·보호된 데스크톱 릴리스는 보존했습니다.</td>
 </tr>
 </tbody>
 </table></div><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="databases.html"><small>이전</small>데이터베이스</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">ドキュメント<b>ツール</b></p></div><h1>リモートファイルと SSH</h1><p class="desc">Amazon S3、Google Cloud Storage、OCI Object Storage、Cloudflare R2、FTP/FTPS、SFTP 上のファイルの閲覧・編集と、SSH config のホストで SSH ターミナルを開く方法を説明します。</p><p>Kiln では、オブジェクトストレージ、FTP サーバー、SFTP ホストを、ターミナルやデータベース、ローカルファイルと同じワークスペースインスペクターで閲覧できます。リモートファイルはローカルのファイルと同じエディターで開けます。OpenSSH の config にある SSH ホストは、一覧から選ぶだけで使えます。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-ja.webp" alt="" loading="lazy" decoding="async"></div><figcaption>デモ用ワークスペースで動かした Kiln</figcaption></figure>
@@ -551,29 +575,41 @@
 <thead>
 <tr>
 <th>範囲</th>
-<th>観察した証拠と残る確認</th>
+<th>観察した証拠と残りの確認</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>ソース</td>
-<td>現在の実装は <code>e94f490</code> です。デスクトップのソースと画面の撮影出典は別に維持します。</td>
+<td>過去の基準実装は <code>e94f490</code>、ダーク修正は <code>c078e58</code>、添付下書き修正は <code>f0b380f3f8b6ca154c6764b47f3f179847216646</code> です。デスクトップのソースと撮影出典は別に維持します。</td>
 </tr>
 <tr>
-<td>Android と iOS のネイティブ実行</td>
-<td><code>b45beac</code> で作成、明示的な Submit、インストール済み Claude 2.1.325、実際の stdio MCP、一度限りの Allow、正確な完了応答を確認し、各プラットフォームの効果は一回でした。モデル推論はクラウドモデルではなく合成ループバックサービスです。</td>
+<td>Android・iOS ネイティブ実行</td>
+<td><code>b45beac</code> で作成、明示的な送信、インストール済み Claude 2.1.325、実際の stdio MCP、一回の許可、正確な完了応答を経て、各プラットフォームで一回の効果を確認しました。推論には合成ループバックサービスを使用しました。後のアプリ修正は最終ソースでの MCP 再実行検証を意味しません。</td>
 </tr>
 <tr>
-<td>最終 iOS 設定と画面幅</td>
-<td><code>e94f490</code> で Effort Level high の Applied・settled と実効値 high を確認し、本文幅は 402px のフレームに一致しました。最終 Android でも high を選択し、変更を明示的に要求して Native confirmation high の表示を確認しました。別の GET による適用状態の確認は未完了です。</td>
+<td>設定と画面幅</td>
+<td><code>e94f490</code> で両方の実際の UI から Effort Level high を選び、独立した GET で Applied・実効値 high・settled=true を確認しました。iOS 入力後の本文幅は 402px のフレームと一致し、Android のビューポート幅とスクロール幅はともに 360 CSS px でした。</td>
 </tr>
 <tr>
 <td>リダイレクトとターミナル</td>
-<td>両ネイティブアプリがリダイレクトを拒否し、転送先への要求と認証付き要求はともに 0 件でした。両プラットフォームで実際の隔離シェルに明示的に入力し、期待する出力を一回確認しました。Android のターミナル証拠は <code>b45beac</code>、iOS は <code>e94f490</code> です。</td>
+<td><code>e94f490</code> で両アプリがリダイレクトを拒否しました。送信元への要求は 2 件、転送先への要求と認証転送は 0 件でした。両プラットフォームから実際の隔離シェルに明示的な入力と Enter を送り、期待する効果を各一回確認しました。</td>
 </tr>
 <tr>
-<td>残る検証</td>
-<td>以前のモバイル CI は全三ジョブと両ネイティブビルドモードで成功しました。現在のソースの CI、ネイティブ選択画面、再接続・下書き・再送防止、狭い画面とダークテーマの検証は未完了です。実機、署名、物理 IME、公開ネットワークの確認は所有者の作業です。</td>
+<td>下書きと画像</td>
+<td><code>e94f490</code> で両アプリは切断・再接続後もテキストを保持し、MCP の追加効果はありませんでした。Android はネイティブ選択画面から 6,403 バイトの PNG をアップロードし添付チップを表示しました。限定的な iOS 自動化では Photo Library への遷移を観察できず、実際の iOS アップロードは未検証です。</td>
+</tr>
+<tr>
+<td>添付下書き修正</td>
+<td>設定・コマンド/スキル・タスク一覧への移動と同じ稼働中ホストへの再接続後も画像を保持します。別のアドレスや新しいホスト起動の画像は使用不可と表示し、削除して明示的に再選択・アップロードするまで送信を止めます。自動再試行はありません。実際のコンポーネントの回帰 10 件が画面移動・セッション境界・遅延応答を検証し、全アプリテスト 47 件が成功しました。この後続修正のネイティブ検証は未完了です。</td>
+</tr>
+<tr>
+<td>ダーク表示と CI</td>
+<td><code>c078e58</code> で再ビルドした両ネイティブアプリの暗色テキストの可読性を確認しました。描画コントラスト回帰は修正前の 1.095 を再現し、修正後は ≥4.5 を満たしました。同ソースのモバイル CI 3 ジョブと開発・本番ビルドが成功しました。最終添付修正ソースの CI・成果物は未完了で、すべての画面・幅・キーボード状態の検証ではありません。</td>
+</tr>
+<tr>
+<td>所有者の確認と後片付け</td>
+<td>実機、署名、韓国語 IME、信頼できる HTTPS は所有者の確認事項です。SSH 転送にも HTTPS が必要です。デスクトップの厳密に特定した所有リソースは、既存の通常 Antigravity 履歴 3 件の削除境界を除き片付け済みです。モバイルのプロセス・端末・データと最終監査は未完了です。元のアプリ・デーモン・認証/設定・保護されたデスクトップリリースは保持しています。</td>
 </tr>
 </tbody>
 </table></div><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="databases.html"><small>前へ</small>データベース</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="23.0"></div><p class="crumb">文档<b>工具</b></p></div><h1>远程文件与 SSH</h1><p class="desc">浏览和编辑 Amazon S3、Google Cloud Storage、OCI Object Storage、Cloudflare R2、FTP/FTPS 和 SFTP 上的文件，并直接从 SSH 配置打开 SSH 终端。</p><p>在 Kiln 的工作区检查器中，可以浏览对象存储、FTP 服务器和 SFTP 主机，它们与终端、数据库和本地文件并列。远程文件和本地文件在同一个编辑器中打开，OpenSSH 配置里的 SSH 主机可以直接选用。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="17.0"><img src="../assets/shots/remote-zh-CN.webp" alt="" loading="lazy" decoding="async"></div><figcaption>运行演示工作区的 Kiln</figcaption></figure>
@@ -732,29 +768,41 @@
 <thead>
 <tr>
 <th>范围</th>
-<th>已观察的证据与待验证项目</th>
+<th>已观察的证据与待确认事项</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>源码</td>
-<td>当前实现为 <code>e94f490</code>，桌面源码和截图来源仍单独保留。</td>
+<td>历史基准实现为 <code>e94f490</code>，深色修复为 <code>c078e58</code>，附件草稿修复为 <code>f0b380f3f8b6ca154c6764b47f3f179847216646</code>。桌面源码与截图来源仍单独保留。</td>
 </tr>
 <tr>
 <td>Android 与 iOS 原生执行</td>
-<td>在 <code>b45beac</code> 上确认创建、明确 Submit、已安装的 Claude 2.1.325、真实 stdio MCP、一次性 Allow 及准确的完成响应，每个平台各产生一次效果。模型推理使用合成回环服务，并非云端模型。</td>
+<td>在 <code>b45beac</code> 上，通过创建、明确发送、已安装的 Claude 2.1.325、真实 stdio MCP、一次允许及精确完成响应，分别确认每个平台只产生一次效果。推理使用合成回环服务。后续应用修复不代表在最终源码上重新执行了 MCP 验证。</td>
 </tr>
 <tr>
-<td>最终 iOS 设置与宽度</td>
-<td>在 <code>e94f490</code> 上确认 Effort Level high 为 Applied、settled 且实际值为 high；正文宽度与 402px 框架一致。最终 Android 上也已选择 high 并明确请求变更，界面显示 Native confirmation high；独立 GET 的应用状态验证仍待完成。</td>
+<td>设置与宽度</td>
+<td>在 <code>e94f490</code> 上，两个真实 UI 均选择 Effort Level high，并通过独立 GET 确认 Applied、实际值 high 和 settled=true。iOS 输入后的正文宽度与 402px 框架一致；Android 视口和滚动宽度均为 360 CSS px。</td>
 </tr>
 <tr>
 <td>重定向与终端</td>
-<td>两个原生应用均拒绝重定向，目标服务器收到的请求和授权请求均为 0。两个平台均向真实隔离 shell 明确输入，并确认预期输出只出现一次。Android 终端证据来自 <code>b45beac</code>，iOS 来自 <code>e94f490</code>。</td>
+<td>在 <code>e94f490</code> 上，两个原生应用均拒绝重定向：源端收到 2 次请求，目标请求与授权转发均为 0。两个平台都向真实隔离 shell 明确发送输入并包含 Enter，各产生一次预期效果。</td>
 </tr>
 <tr>
-<td>剩余验收</td>
-<td>之前的移动 CI 三个任务及两种原生构建模式均已通过。当前源码 CI、原生选择器、重连与草稿及防重发、窄屏与深色主题矩阵仍待验证。实体设备、签名、物理 IME 和公共网络验收由所有者后续完成。</td>
+<td>草稿与图片</td>
+<td>在 <code>e94f490</code> 上，两个真实应用断开并重新配对后均保留文本，未增加 MCP 效果。Android 通过原生选择器上传了 6,403 字节 PNG 并显示附件标签。有限的 iOS 自动化未观察到 Photo Library 切换，因此实际 iOS 上传仍未验证。</td>
+</tr>
+<tr>
+<td>附件草稿修复</td>
+<td>图片在设置、命令/技能、任务列表导航及重新配对到同一运行中主机后保留。其他地址或新主机启动所属的图片会显示不可用，移除并明确重新选择、上传前禁止发送。不会自动重试。10 个真实组件回归测试涵盖导航、会话边界与延迟响应，全套 47 个应用测试通过。此后续修复的原生验证仍待完成。</td>
+</tr>
+<tr>
+<td>深色显示与 CI</td>
+<td>已检查以 <code>c078e58</code> 重建的两个原生应用，深色文本可读。渲染对比度回归复现修复前的 1.095，修复后通过 ≥4.5。该源码的 3 个移动 CI 作业及开发、生产构建通过。最终附件修复源码的 CI、产物仍待确认，这些观察不代表所有页面、宽度或键盘状态均已验证。</td>
+</tr>
+<tr>
+<td>所有者验收与清理</td>
+<td>实体手机、签名、韩语 IME 与受信任 HTTPS 仍由所有者验收，SSH 转发也需要 HTTPS。桌面精确标识的自有资源已清理，现有 3 条普通 Antigravity 历史记录仍受原有清理边界约束。移动进程、设备、数据及最终审计仍待完成。原应用、守护进程、认证/偏好设置与受保护桌面版本保持不变。</td>
 </tr>
 </tbody>
 </table></div><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="databases.html"><small>上一页</small>数据库</a></nav></article></main>

@@ -75,8 +75,13 @@ Replace `HOST_PORT` with this launch's selected port. Pair the app with the trus
 validation; do not add a trust bypass. Alternatively an owner-managed SSH client
 on the phone can forward its own localhost port to the Mac's loopback endpoint:
 `ssh -N -L 127.0.0.1:LOCAL_PORT:127.0.0.1:HOST_PORT owner@mac`. Its forwarding and
-local endpoint must remain loopback-only. Physical-device signing/network and
-acceptance belong to the owner, and are separate from simulator evidence.
+local endpoint must remain loopback-only. This command alone exposes plaintext HTTP
+and is not a pairable production endpoint: the production app requires trusted
+HTTPS even on localhost. If SSH carries the connection, the owner must still
+provide a trusted HTTPS endpoint in front of that forwarding path, with normal
+certificate validation. Physical-device signing/network and acceptance belong to
+the owner, and are separate from simulator evidence. These instructions provision
+no network or deployment changes.
 
 ## Verification
 
