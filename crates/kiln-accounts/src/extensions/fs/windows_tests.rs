@@ -793,8 +793,10 @@ fn cleanup_fixture(path: &Path) {
     };
     let after = Snapshot::one(b"NEW".to_vec());
     before.stage(&state, "backup-restart").unwrap();
-    after.stage(&root, "published").unwrap();
-    let target = Target::file("published");
+    let target = Target::file("commands/published");
+    target.valid().unwrap();
+    let (parent, leaf) = root.parent(&target.path, true).unwrap();
+    after.stage(&parent, &leaf).unwrap();
     let intent = Intent {
         entry: Entry {
             unit: None,
@@ -810,6 +812,7 @@ fn cleanup_fixture(path: &Path) {
         backup: "backup-restart".into(),
         cleanup_complete: Vec::new(),
     };
+    assert_eq!(physical(&root, &intent.entry.target).unwrap(), intent.after);
     state
         .atomic("intent.json", &serde_json::to_vec(&intent).unwrap())
         .unwrap();
@@ -830,6 +833,29 @@ fn recover_fixture(path: &Path) -> R<()> {
     let mut manifest: Manifest =
         serde_json::from_slice(&state.read(MANIFEST, METADATA_BYTES)?.0).unwrap();
     recover(&root, &state, &mut manifest)
+}
+
+fn assert_cleanup_recovered(path: &Path) {
+    use super::super::*;
+    let root = Dir::open(path).unwrap();
+    let state = root.dir(STATE, false).unwrap();
+    let target = Target::file("commands/published");
+    let manifest: Manifest =
+        serde_json::from_slice(&state.read(MANIFEST, METADATA_BYTES).unwrap().0).unwrap();
+    let entry = manifest.entries.get(&target.key()).unwrap();
+    assert_eq!(entry.target.path, target.path);
+    assert_eq!(entry.state, "owned");
+    assert_eq!(entry.written, physical(&root, &target).unwrap());
+    assert_eq!(host::read(path.join(&target.path)).unwrap(), b"NEW");
+    for name in [
+        "asset-restart",
+        "backup-restart",
+        "cleanup.json",
+        "cleanup-progress.json",
+        "intent.json",
+    ] {
+        assert!(state.kind(name).unwrap().is_none(), "remaining {name}");
+    }
 }
 
 #[test]
@@ -854,10 +880,7 @@ fn fix1_interrupted_cleanup_reopens_record_and_recovers_twice() {
     // recover_fixture's stack owns every handle; no in-memory plan survives.
     recover_fixture(temp.path()).unwrap();
     recover_fixture(temp.path()).unwrap();
-    assert_eq!(host::read(temp.path().join("published")).unwrap(), b"NEW");
-    assert!(!state.join("backup-restart").exists());
-    assert!(!state.join("cleanup.json").exists());
-    assert!(!state.join("intent.json").exists());
+    assert_cleanup_recovered(temp.path());
     temp.close().unwrap();
 }
 
@@ -891,7 +914,10 @@ fn fix1_cleanup_restart_preserves_inserted_replaced_modified_and_unproven_legacy
         assert!(recover_fixture(temp.path()).is_err());
         assert_eq!(canary(&backup), before);
         assert!(state.join("intent.json").exists());
-        assert_eq!(host::read(temp.path().join("published")).unwrap(), b"NEW");
+        assert_eq!(
+            host::read(temp.path().join("commands/published")).unwrap(),
+            b"NEW"
+        );
         temp.close().unwrap();
     }
 }
@@ -1088,8 +1114,7 @@ fn fix1_cleanup_metadata_retirement_restart_and_completed_target_reappearance() 
         } else {
             recover_fixture(temp.path()).unwrap();
             recover_fixture(temp.path()).unwrap();
-            assert!(!state.join("cleanup.json").exists());
-            assert!(!state.join("intent.json").exists());
+            assert_cleanup_recovered(temp.path());
         }
         temp.close().unwrap();
     }
