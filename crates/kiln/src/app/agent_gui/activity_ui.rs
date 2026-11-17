@@ -83,6 +83,7 @@ impl AgentPane {
         let mut output_request=None;
         Frame::new().fill(theme.bg_panel).stroke(Stroke::new(1.,theme.border)).corner_radius(10).inner_margin(10).show(ui,|ui|{
             ui.set_width(ui.available_width());
+            ui.set_min_height((max_h-20.).max(0.));
             ui.horizontal_wrapped(|ui|{
                 if animated {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(16.,16.),egui::Sense::hover());
@@ -96,6 +97,7 @@ impl AgentPane {
             });
             if !live.is_empty() || !tools.is_empty() || !self.transcript.activity.tasks.is_empty() {
                 egui::ScrollArea::vertical().id_salt("activity-tasks").max_height((max_h-45.).max(20.)).show(ui,|ui|{
+                    ui.visuals_mut().collapsing_header_frame=true;
                     let shells=live.iter().filter(|t|matches!(t.kind.as_str(),"local_bash"|"shell")).count();
                     let monitors=live.iter().filter(|t|t.kind.contains("monitor")).count();
                     ui.small(format!("{} {} · {} {} · {} {}",tr("셸"),shells,tr("Monitor"),monitors,tr("기타 작업"),live.len()-shells-monitors));
