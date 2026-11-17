@@ -691,8 +691,11 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
             Err(_) => std::thread::sleep(Duration::from_millis(5)),
         }
     }
-    let config: Config = journal::read(&dir.join("config.json"))?;
+    let mut config: Config = journal::read(&dir.join("config.json"))?;
     ensure!(config.descriptor.id == id, "agent config identity mismatch");
+    // Older saved conversations may predate an explicit runtime PATH. Repair
+    // the in-memory launch environment without rewriting the saved profile.
+    super::super::agent_launch::pin_runtime_path(&mut config.environment)?;
     if let Some(shell) = &config.shell {
         ensure!(shell.host_pid == std::process::id()
             && std::env::var("KILN_SESSION").ok().and_then(|value|value.parse::<u64>().ok()) == Some(shell.shell_session),

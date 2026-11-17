@@ -206,3 +206,5 @@ New launches prepare supported personal Claude/Codex skills and self-contained p
 - [Conversations and updates](conversations.html): continue a conversation in another CLI and restart after updates.
 
 If a shell-attached agent exits unexpectedly, its unsent draft is kept with that conversation. GUI remains available for the saved draft, and TUI returns to the original shell. The draft is not injected into a different agent started later in the same shell.
+
+Kiln preserves the launch PATH and appends installed CLI runtime directories for GUI and TUI workers. This also lets command hooks find Node installed in Homebrew or the local user bin. Existing running workers keep their original environment; start a new worker after updating. Your hook files are not rewritten.

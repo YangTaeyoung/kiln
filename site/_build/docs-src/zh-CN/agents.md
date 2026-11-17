@@ -208,3 +208,5 @@ Claude Code、Codex 和 Antigravity 的设置及基本选项会以应用语言�
 - [对话与更新](conversations.html)：在另一个 CLI 中继续对话，更新后重启。
 
 从 Shell 连接的代理意外退出时，未发送的草稿仍保留在原对话中。可在 GUI 中查看草稿，并在 TUI 中继续使用原来的 Shell。草稿不会自动插入同一 Shell 中随后启动的其他代理。
+
+启动GUI和TUI工作进程时，Kiln保留原有PATH并追加已安装的CLI运行时目录，让命令钩子也能找到Homebrew或用户本地bin中的Node。已运行的进程保留原有环境，更新后新启动的工作进程才会应用此修复。不会改写用户的钩子文件。

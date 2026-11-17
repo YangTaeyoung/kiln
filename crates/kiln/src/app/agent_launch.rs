@@ -8,11 +8,29 @@ static SEQUENCE:AtomicU64=AtomicU64::new(0);
 pub struct Prepared { pub command:String, pub title:String, pub request_path:PathBuf, pub request_offset:usize }
 #[cfg(not(windows))]
 fn quote(value:&str)->String {format!("'{}'",value.replace('\'',"'\\''"))}
-pub(super) fn executable(name:&str)->Option<PathBuf>{
+fn runtime_dirs() -> Vec<PathBuf> {
     let mut extra=Vec::new();
     if let Some(home)=kiln_common::paths::home() {extra.push(home.join(".local").join("bin"));}
+    #[cfg(not(windows))]
     extra.extend([PathBuf::from("/opt/homebrew/bin"),PathBuf::from("/usr/local/bin")]);
-    kiln_common::paths::find_executable(name,&extra)
+    extra
+}
+pub(super) fn executable(name:&str)->Option<PathBuf>{
+    kiln_common::paths::find_executable(name,&runtime_dirs())
+}
+fn runtime_path(inherited: &std::ffi::OsStr, extra: &[PathBuf]) -> anyhow::Result<std::ffi::OsString> {
+    let mut dirs=std::env::split_paths(inherited).collect::<Vec<_>>();
+    for dir in extra { if dir.is_dir() && !dirs.contains(dir) {dirs.push(dir.clone());} }
+    Ok(std::env::join_paths(dirs)?)
+}
+/// Pin the GUI/shell caller's search path before the persistent daemon can supply a different one.
+/// Preserve its priority; only append the same installed fallback directories used to find the CLI.
+pub(super) fn pin_runtime_path(environment: &mut Vec<(String,String)>) -> anyhow::Result<()> {
+    let index=environment.iter().position(|(key,_)| if cfg!(windows) {key.eq_ignore_ascii_case("PATH")} else {key=="PATH"});
+    let inherited=index.map(|i|std::ffi::OsString::from(&environment[i].1)).or_else(||std::env::var_os("PATH")).unwrap_or_default();
+    let value=runtime_path(&inherited,&runtime_dirs())?.to_string_lossy().into_owned();
+    if let Some(index)=index {environment[index].1=value;} else {environment.push(("PATH".into(),value));}
+    Ok(())
 }
 
 pub fn prepare(program:&str,context:&str,request:&str)->Result<Prepared,String>{
@@ -154,4 +172,26 @@ mod tests{
         for request in [" ".to_owned(),"가".repeat(MAX_REQUEST_CHARS+1),"bad\0input".into()]{assert!(prepare_in(&requests,Path::new("/bin/echo"),"context",&request).is_err());}
         assert!(!requests.exists());
     }
+}
+
+#[cfg(test)] mod runtime_path_tests {
+ use super::*;
+ #[test] fn runtime_search_preserves_priority_and_appends_installed_fallbacks_once() {
+  let root=tempfile::tempdir().unwrap();let first=root.path().join("existing path");let fallback=root.path().join("runtime bin");fs::create_dir(&first).unwrap();fs::create_dir(&fallback).unwrap();
+  let original=std::env::join_paths([&first]).unwrap();let missing=root.path().join("absent");
+  let merged=runtime_path(&original,&[first.clone(),missing,fallback.clone(),fallback.clone()]).unwrap();assert_eq!(std::env::split_paths(&merged).collect::<Vec<_>>(),[first.clone(),fallback.clone()]);assert_eq!(runtime_path(&merged,&[fallback]).unwrap(),merged);
+ }
+ #[test] fn explicit_profile_path_is_pinned_without_replacing_its_priority() {
+  let original=std::env::join_paths([PathBuf::from("profile bin")]).unwrap().to_string_lossy().into_owned();
+  let mut environment=vec![("PROFILE_MARKER".into(),"unchanged".into()),("PATH".into(),original)];
+  pin_runtime_path(&mut environment).unwrap();
+  assert_eq!(std::env::split_paths(&environment[1].1).next().unwrap(),PathBuf::from("profile bin"));
+  assert_eq!(environment[0],("PROFILE_MARKER".into(),"unchanged".into()));
+  let pinned=environment.clone();pin_runtime_path(&mut environment).unwrap();assert_eq!(environment,pinned);
+ }
+ #[cfg(unix)] #[test] fn non_login_hook_finds_node_from_the_same_runtime_path_as_its_agent() {
+  use std::os::unix::fs::PermissionsExt;
+  let root=tempfile::tempdir().unwrap();let bin=root.path().join("runtime");fs::create_dir(&bin).unwrap();let node=bin.join("node");fs::write(&node,"#!/bin/sh\nprintf 'owned-hook-node-ok'\n").unwrap();fs::set_permissions(&node,fs::Permissions::from_mode(0o700)).unwrap();
+  let path=runtime_path(std::ffi::OsStr::new("/usr/bin:/bin"),&[bin]).unwrap();let output=std::process::Command::new("/bin/sh").args(["-c","node"]).env_clear().env("PATH",path).output().unwrap();assert!(output.status.success());assert_eq!(output.stdout,b"owned-hook-node-ok");
+ }
 }

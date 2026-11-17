@@ -70,6 +70,7 @@ pub fn prepare_with_options(
     );
     let agent = super::remote_terminal::agent(tool, cwd.clone()).map_err(anyhow::Error::msg)?;
     let (mut environment, extension_report) = accounts.prepare_launch_environment(tool)?;
+    super::agent_launch::pin_runtime_path(&mut environment)?;
     if !environment
         .iter()
         .any(|(key, _)| key == "KILN_AGENT_PROFILE")
