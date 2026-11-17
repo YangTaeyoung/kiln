@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::app;
 
-const CLI_VERSION: &str = if cfg!(feature = "updater-test") {
+pub const CLI_VERSION: &str = if cfg!(feature = "updater-test") {
     concat!(env!("CARGO_PKG_VERSION"), "-updater-test")
 } else { env!("CARGO_PKG_VERSION") };
 

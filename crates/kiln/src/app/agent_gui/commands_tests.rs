@@ -234,8 +234,14 @@ fn command_ux_composer_highlight_marks_known_commands_and_keeps_exact_text() {
                 .job
                 .sections
                 .iter()
-                .filter(|section| section.format.color == Theme::current().accent)
+                // Other visual tests change the process-wide theme concurrently.
+                // Check the immutable rendered accent/tint pair, not a later theme read.
+                .filter(|section| section.format.background != egui::Color32::TRANSPARENT)
                 .map(|section| {
+                    assert!(Theme::ALL.iter().any(|theme| {
+                        section.format.color == theme.accent
+                            && section.format.background == widgets::tint(theme.accent, 0.10)
+                    }));
                     &galley.job.text[section.byte_range.start.0..section.byte_range.end.0]
                 })
                 .collect::<Vec<_>>();

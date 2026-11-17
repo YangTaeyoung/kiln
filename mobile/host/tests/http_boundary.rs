@@ -13,7 +13,11 @@ impl Host {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let cli = root.path().join("kiln");
-        std::fs::write(&cli, "#!/bin/sh\necho 'kiln 0.3.0'\n").unwrap();
+        std::fs::write(
+            &cli,
+            format!("#!/bin/sh\necho 'kiln {}'\n", kiln::cli::CLI_VERSION),
+        )
+        .unwrap();
         std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
         let pair = root.path().join("pairing/connection.json");
         let o = Options {
@@ -204,7 +208,11 @@ impl BoundaryProcess {
         std::fs::set_permissions(b.join("pairing"), std::fs::Permissions::from_mode(0o700))
             .unwrap();
         let cli = b.join("version-cli");
-        std::fs::write(&cli, "#!/bin/sh\necho 'kiln 0.3.0'\n").unwrap();
+        std::fs::write(
+            &cli,
+            format!("#!/bin/sh\necho 'kiln {}'\n", kiln::cli::CLI_VERSION),
+        )
+        .unwrap();
         std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
         let child = std::process::Command::new(env!("CARGO_BIN_EXE_kiln-mobile-host"))
             .env_clear()

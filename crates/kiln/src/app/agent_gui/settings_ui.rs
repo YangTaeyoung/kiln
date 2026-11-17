@@ -762,6 +762,7 @@ fn select_widget(
                     .clicked()
             {
                 *selected = None;
+                ui.close();
             }
             let mut group = None;
             for choice in &option.choices {
@@ -780,6 +781,7 @@ fn select_widget(
                     .clicked()
                 {
                     *selected = Some(ControlValue::Text(choice.value.clone()));
+                    ui.close();
                 }
             }
         });

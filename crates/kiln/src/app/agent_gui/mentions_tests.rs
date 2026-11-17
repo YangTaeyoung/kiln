@@ -108,7 +108,7 @@ fn path_mentions_mouse_click_inserts_the_visible_selection_without_sending() {
         h.state().composer.text,
         format!(
             "@{} ",
-            serde_json::to_string(file.to_str().unwrap()).unwrap()
+            serde_json::to_string(&file.to_str().unwrap().replace('\\', "/")).unwrap()
         )
     );
     assert!(h.state().sent.is_empty());
@@ -163,7 +163,7 @@ fn path_mentions_touch_press_and_release_keeps_the_popup_until_selection() {
         h.state().composer.text,
         format!(
             "@{} ",
-            serde_json::to_string(file.to_str().unwrap()).unwrap()
+            serde_json::to_string(&file.to_str().unwrap().replace('\\', "/")).unwrap()
         )
     );
     assert!(h.state().sent.is_empty());
@@ -228,7 +228,7 @@ fn path_mentions_mid_token_insertion_preserves_brackets_and_quoted_suffixes() {
             h.state().composer.text,
             format!(
                 "{leading}@{}{trailing}",
-                serde_json::to_string(file.to_str().unwrap()).unwrap()
+                serde_json::to_string(&file.to_str().unwrap().replace('\\', "/")).unwrap()
             )
         );
         assert!(h.state().sent.is_empty());
@@ -322,7 +322,7 @@ fn path_mentions_selection_preserves_provider_native_path_and_only_explicit_send
         );
         h.key_press(egui::Key::Enter);
         h.run();
-        let quoted = serde_json::to_string(file.to_str().unwrap()).unwrap();
+        let quoted = serde_json::to_string(&file.to_str().unwrap().replace('\\', "/")).unwrap();
         let expected = format!("{}{quoted} ", if tool == Tool::Codex { "" } else { "@" });
         assert_eq!(h.state().composer.text, expected);
         assert!(h.state().sent.is_empty());

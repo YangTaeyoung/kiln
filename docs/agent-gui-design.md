@@ -12,7 +12,7 @@ Sources: [font assets](https://github.com/YangTaeyoung/kiln/blob/996701312f834e2
 
 The conversation and composer share a centered column capped at 900 points, with 40 points removed from available width before centering. The history scrolls independently above the composer. User messages use a quiet elevated fill, 6-point corners and 12-point padding; assistant text uses a transparent surface and Markdown rendering. Preserve the workspace and task chrome around this column.
 
-A tool has one 1-point border and 6-point corners. Its full-width collapse header shares that boundary; it has no second outlined button inside the card. The real status sits at the right, with title truncation reserving its space. Expanded input/output and diffs scroll in a region capped at 260 points. Technical content is monospace; diffs retain explicit plus/minus characters as well as semantic red/green.
+A tool has one 1-point border and 6-point corners. Its full-width collapse header shares that boundary; it has no second outlined button inside the card. The real status sits at the right, with title truncation reserving its space. Expanded input/output uses a responsive, readable viewport rather than shrinking to the remaining transcript sliver. Recognized source files and commands receive cached syntax highlighting; full output remains scrollable and copyable. Diffs retain explicit plus/minus characters as well as semantic red/green.
 
 Sources: [column and messages](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln/src/app/agent_gui/view.rs#L629), [composer allocation](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln/src/app/agent_gui/view.rs#L668), [tool card](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln/src/app/agent_gui/view.rs#L693).
 
@@ -49,7 +49,7 @@ Sources: [composer and round action](../crates/kiln/src/app/agent_gui/view.rs)
 Conversation, Session settings and Commands and skills use quiet text navigation
 with a thin selected underline. Search controls use the shared input surface,
 vector search icon and explicit clear action. GUI settings omit terminal-only
-controls, preserve the remaining scope labels and start Change history collapsed.
+controls and other noneditable native inventory. Change history starts collapsed.
 Model and mode choices retain native descriptions so the reader can inspect what
 a selection means before choosing it.
 
@@ -120,3 +120,5 @@ source and egui harness geometry/renders. Those checks do not establish physical
 IME behavior, a real provider handoff or authenticated provider outcomes. Keep the
 historical native evidence above separate from the latest UI candidate. See
 [provider coverage](agent-feature-coverage.md) for control availability.
+
+The per-conversation presentation control is a single joined `GUI | TUI` track inside the content area at the top right, below the pane close button. It is not part of the frame header or global status bar. Assistant author rows use the matching native provider vector beside the provider name.

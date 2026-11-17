@@ -124,7 +124,7 @@ control/action family, startup option and inherited boundary with native referen
 
 ## Switching the same conversation between GUI and terminal
 
-Use the agent pane's **Conversation GUI / Terminal** switch for an already confirmed
+Use the joined **GUI | TUI** tabs inside each agent pane, at the top right below its close button, for an already confirmed
 native conversation. The handoff preserves the original executable, account
 environment, working folder and exact native conversation ID. It requires an idle
 conversation without active submissions, approval requests, running tools or queued
@@ -145,6 +145,12 @@ process exited before preparing the GUI from the recorded account environment an
 working folder. Disconnection or a missing session-list entry does not establish
 exit. Unknown terminals are not guessed from the newest native conversation, and
 conversion does not replay a prompt.
+
+Pane and automatic page titles use a shortened first confirmed request, so parallel conversations remain distinguishable. A manually named page keeps its chosen title. Empty conversations show the working folder beside New conversation. Draft edits and later tool output do not rename an established conversation.
+
+## Tool code and readable details
+
+Assistant authors show the provider vector beside their name. Expanded tool cards reserve a responsive reading area with internal scrolling and copy actions. Recognized source paths, shell commands, JSON arguments and fenced source receive the shared editor syntax colors. Unknown logs remain plain text. Highlighting is prepared off the UI thread and bounded; full stored output remains available to scrolling and copying.
 
 ## Extensions and tool labels
 

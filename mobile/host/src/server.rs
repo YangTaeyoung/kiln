@@ -140,8 +140,10 @@ async fn validate_cli(path: std::path::PathBuf) -> anyhow::Result<std::path::Pat
         anyhow::ensure!(
             status.success()
                 && bytes.len() <= 128
-                && String::from_utf8_lossy(&bytes).trim() == "kiln 0.3.0",
-            "Kiln CLI 0.3.0 required"
+                && String::from_utf8_lossy(&bytes).trim()
+                    == format!("kiln {}", kiln::cli::CLI_VERSION),
+            "Kiln CLI {} required",
+            kiln::cli::CLI_VERSION
         );
         Ok(path)
     })

@@ -2053,3 +2053,60 @@ fn task6_localized_tool_examples_preserve_wire_data() {
         }
     });
 }
+
+#[test]
+fn joined_agent_view_tabs_share_one_boundary_and_keep_disabled_transitions_inert() {
+    for dark in [true, false] {
+        let mut initialized = false;
+        let mut h = Harness::builder().with_size([320., 100.]).build_ui_state(
+            |ui, state: &mut (Presentation, bool)| {
+                if !initialized {
+                    kiln_common::fonts::install(ui.ctx());
+                    initialized = true;
+                    return;
+                }
+                Theme::set_current(if dark { "kiln-dark" } else { "kiln-light" });
+                Theme::current().apply(ui.ctx());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if let Some(target) = state.0.switch_ui(ui, [true, state.1]) {state.0 = target;}
+                });
+            },
+            (Presentation::Gui, true),
+        );
+        h.run();
+        let gui = h.get_by_label("GUI").rect();
+        let tui = h.get_by_label("TUI").rect();
+        assert!((gui.right() - tui.left()).abs() < 0.5, "segments touch at their shared divider");
+        assert!((gui.width() - tui.width()).abs() < 0.5);
+        assert!(h.ctx.content_rect().contains_rect(gui.union(tui)));
+        h.get_by_label("TUI").click();
+        h.run();
+        assert_eq!(h.state().0, Presentation::Terminal);
+        h.get_by_label("GUI").click();
+        h.run();
+        h.state_mut().1 = false;
+        h.run();
+        h.get_by_label("TUI").click();
+        h.run();
+        assert_eq!(h.state().0, Presentation::Gui);
+        visual_fix1_capture(&mut h, &format!("joined-view-tabs-{}", if dark {"dark"} else {"light"}));
+    }
+}
+
+#[test]
+fn agent_conversation_titles_use_confirmed_requests_and_survive_presentation_changes() {
+    let mut p = pane();
+    p.descriptor.cwd = "/fixture/example-project".into();
+    assert!(p.conversation_title().contains("example-project"));
+    p.composer.text = "unsent draft must not become a title".into();
+    assert!(!p.conversation_title().contains("unsent"));
+    let source = "로그인 버그를 수정해 주세요\n\n테스트도 실행해 주세요";
+    p.transcript.entries.push(Entry::Message(Message { id:"title-first".into(), role:Role::User, text:source.into(), attachments:vec![] }));
+    let title = p.conversation_title();
+    assert_eq!(title, "로그인 버그를 수정해 주세요 테스트도 실행해 주세요");
+    p.transcript.entries.push(Entry::Message(Message { id:"title-later".into(), role:Role::User, text:"later request".into(), attachments:vec![] }));
+    p.transcript.presentation = Presentation::Terminal;
+    assert_eq!(p.conversation_title(), title);
+    if let Entry::Message(message) = &mut p.transcript.entries[0] {message.text = "한".repeat(100);}
+    assert_eq!(p.conversation_title(), format!("{}…", "한".repeat(64)));
+}

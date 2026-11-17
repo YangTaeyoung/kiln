@@ -21,6 +21,8 @@ mod editing_text;
 #[path = "mentions_ui.rs"]
 mod mentions_ui;
 use settings_ui::{ControlsUi, Surface};
+#[path = "tool_code_ui.rs"]
+mod tool_code_ui;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Presentation {
@@ -29,6 +31,41 @@ pub enum Presentation {
     Terminal,
 }
 impl Presentation {
+    /// One joined control, used inside each agent canvas rather than its frame header.
+    pub fn switch_ui(self, ui: &mut Ui, enabled: [bool; 2]) -> Option<Self> {
+        let t = Theme::current();
+        let (track, _) = ui.allocate_exact_size(egui::vec2(112., 28.), egui::Sense::hover());
+        ui.painter().rect_filled(track, 6, t.bg_input);
+        let mut chosen = None;
+        for (index, (value, label)) in [(Self::Gui, "GUI"), (Self::Terminal, "TUI")].into_iter().enumerate() {
+            let rect = egui::Rect::from_min_max(
+                track.min + egui::vec2(index as f32 * 56., 0.),
+                track.min + egui::vec2((index + 1) as f32 * 56., 28.),
+            );
+            let response = ui.add_enabled_ui(enabled[index], |ui| {
+                let response = ui.interact(rect, ui.id().with(("agent-presentation", index)), egui::Sense::click());
+                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), self == value, label));
+                response
+            }).inner;
+            let selected = self == value;
+            if selected || (enabled[index] && response.hovered()) {
+                let radius = if index == 0 {
+                    egui::CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 }
+                } else {
+                    egui::CornerRadius { nw: 0, sw: 0, ne: 6, se: 6 }
+                };
+                ui.painter().rect_filled(rect.shrink(1.), radius, if selected {t.bg_selected} else {t.bg_hover});
+            }
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, kiln_common::fonts::medium(12.),
+                if selected {t.text} else if enabled[index] {t.text_dim} else {t.text_faint});
+            widgets::focus_ring(ui, &response, 5);
+            let response = response.on_disabled_hover_text(kiln_common::i18n::tr("응답과 승인 요청이 끝나고 대화 연결이 확인되면 전환할 수 있습니다."));
+            if enabled[index] && response.clicked() && !selected {chosen = Some(value);}
+        }
+        ui.painter().line_segment([track.center_top(), track.center_bottom()], Stroke::new(1., t.border));
+        ui.painter().rect_stroke(track, 6, Stroke::new(1., t.border_strong), egui::StrokeKind::Inside);
+        chosen
+    }
     pub fn ui(&mut self, ui: &mut Ui) {
         let t = Theme::current();
         let (track, _) = ui.allocate_exact_size(
@@ -107,6 +144,8 @@ struct Cached {
 struct PreparedDisplay {
     messages: HashMap<String, Cached>,
     inputs: HashMap<String, String>,
+    tools: HashMap<String, tool_code_ui::PreparedTool>,
+    theme: Theme,
     details: HashMap<String, (Request, super::approval::Summary)>,
 }
 const WINDOW: usize = 100;
@@ -159,6 +198,28 @@ pub struct AgentPane {
     composer_geometry: Option<(egui::Rect, egui::Rect)>,
 }
 impl AgentPane {
+    /// Stable across GUI/TUI handoffs and reconnects: use confirmed history,
+    /// never the unsent composer or the most recent assistant/tool response.
+    pub fn conversation_title(&self) -> String {
+        let first = self.transcript.entries.iter().find_map(|entry| match entry {
+            Entry::Message(message) if message.role == Role::User && !message.text.trim().is_empty() => Some(message.text.as_str()),
+            _ => None,
+        });
+        if let Some(text) = first {
+            let mut title = String::new();
+            let mut chars = text.split_whitespace().flat_map(|word| word.chars().chain(std::iter::once(' ')));
+            title.extend(chars.by_ref().take(64));
+            let more = chars.any(|c| !c.is_whitespace());
+            title.truncate(title.trim_end().len());
+            if more {title.push('…');}
+            return title;
+        }
+        let folder = self.descriptor.cwd.file_name().map(|name| name.to_string_lossy());
+        match folder {
+            Some(folder) if !folder.is_empty() => format!("{} · {folder}", kiln_common::i18n::tr("새 대화")),
+            _ => kiln_common::i18n::tr("새 대화").into(),
+        }
+    }
     pub fn from_spec(spec: &SpawnSpec) -> Option<Self> {
         let descriptor = descriptor(spec)?;
         let client = Client::connect(descriptor.clone());
@@ -185,6 +246,8 @@ impl AgentPane {
             cache: PreparedDisplay {
                 messages: HashMap::new(),
                 inputs: HashMap::new(),
+                tools: HashMap::new(),
+                theme: Theme::current(),
                 details: HashMap::new(),
             },
             parsing: None,
@@ -580,9 +643,10 @@ impl AgentPane {
             self.cached_revision = Some((revision, end));
             self.parsing = None;
         }
-        if self.parsing.is_none() && self.cached_revision != Some((self.transcript.sequence, end)) {
+        if self.parsing.is_none() && (self.cached_revision != Some((self.transcript.sequence, end)) || self.cache.theme != Theme::current()) {
             let entries = self.transcript.entries[end.saturating_sub(WINDOW)..end].to_vec();
             let previous = self.cache.messages.clone();
+            let previous_tools = self.cache.tools.clone();
             let revision = self.transcript.sequence;
             let provider = self.descriptor.tool;
             let requests = self
@@ -596,6 +660,8 @@ impl AgentPane {
                 let mut display = PreparedDisplay {
                     messages: HashMap::new(),
                     inputs: HashMap::new(),
+                    tools: HashMap::new(),
+                    theme: Theme::current(),
                     details: HashMap::new(),
                 };
                 for entry in entries {
@@ -610,6 +676,8 @@ impl AgentPane {
                             display.messages.insert(m.id, Cached { source, markdown });
                         }
                         Entry::Tool(t) => {
+                            let prepared = tool_code_ui::PreparedTool::reuse_or_new(previous_tools.get(&t.id), &t, provider);
+                            display.tools.insert(t.id.clone(), prepared);
                             let source = super::approval::tool_input(&t, provider);
                             display.inputs.insert(t.id, bounded(&source).to_owned());
                         }
@@ -722,7 +790,18 @@ impl AgentPane {
                 for entry in &self.transcript.entries[start..end] {match entry {
                     Entry::Message(m)=>{
                         let user=m.role==Role::User;
-                        ui.label(RichText::new(if user{kiln_common::i18n::tr("나")}else{self.descriptor.tool.display_name()}).color(t.text_dim).strong());
+                        if user {
+                            ui.label(RichText::new(kiln_common::i18n::tr("나")).color(t.text_dim).strong());
+                        } else { ui.horizontal(|ui| {
+                                let icon = match self.descriptor.tool {
+                                    Tool::Claude => kiln_common::icons::Icon::Claude,
+                                    Tool::Codex => kiln_common::icons::Icon::Codex,
+                                    Tool::Antigravity => kiln_common::icons::Icon::Antigravity,
+                                };
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(18., 18.), egui::Sense::hover());
+                                kiln_common::icons::paint(ui.painter(), rect, icon, super::super::ui::agent_ink(icon, &t));
+                            ui.label(RichText::new(self.descriptor.tool.display_name()).color(t.text_dim).strong());
+                        }); }
                         let frame=Frame::new().inner_margin(Margin::same(if user{12}else{2})).corner_radius(6).fill(if user{t.bg_elevated}else{egui::Color32::TRANSPARENT});
                         frame.show(ui,|ui|{
                             ui.set_width(ui.available_width());
@@ -834,43 +913,24 @@ impl AgentPane {
                     .id_salt(&tool.id)
                     .show(ui, |ui| {
                         Frame::NONE.inner_margin(Margin::same(8)).show(ui, |ui| {
-                            egui::ScrollArea::both()
-                                .id_salt((&tool.id, "output"))
-                                .max_height(260.)
-                                .show(ui, |ui| {
-                                    ui.add(egui::Label::new(RichText::new(bounded(&tool.name)).monospace()).wrap());
-                                    if let Some(meta) = &tool.presentation && let Some(name) = &meta.native_name { ui.add(egui::Label::new(name).wrap()); }
-                                    if let Some(input) = self.cache.inputs.get(&tool.id) {
-                                        ui.add(
-                                            egui::Label::new(RichText::new(input).monospace())
-                                                .wrap(),
-                                        );
-                                    }
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(bounded(&tool.output)).monospace(),
-                                        )
-                                        .wrap(),
-                                    );
-                                    for line in bounded(&tool.diff).lines().take(500) {
-                                        let color = if line.starts_with('+') {
-                                            t.green
-                                        } else if line.starts_with('-') {
-                                            t.red
-                                        } else {
-                                            t.text_dim
-                                        };
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(line)
-                                                    .monospace()
-                                                    .color(color)
-                                                    .background_color(color.gamma_multiply(0.08)),
-                                            )
-                                            .wrap(),
-                                        );
-                                    }
-                                });
+                            ui.add(egui::Label::new(RichText::new(bounded(&tool.name)).small().monospace().color(t.text_dim)).wrap());
+                            if let Some(prepared) = self.cache.tools.get(&tool.id).filter(|p| p.theme == t) {
+                                if !tool.output.is_empty() && ui.small_button(kiln_common::i18n::tr("출력 복사")).clicked() {
+                                    ui.ctx().copy_text(tool.output.clone());
+                                }
+                                prepared.show(ui, &tool.id);
+                            } else {
+                                // Preparation is off-thread; do not synchronously parse
+                                // source/JSON or draw a stale palette on this frame.
+                                let height = tool_code_ui::viewport_height(ui.clip_rect().height());
+                                egui::ScrollArea::both().id_salt((&tool.id, "pending-tool"))
+                                    .min_scrolled_height(height).max_height(height)
+                                    .show(ui, |ui| {
+                                        if let Some(input) = self.cache.inputs.get(&tool.id) { ui.add(egui::Label::new(RichText::new(input).monospace()).selectable(true)); }
+                                        if !tool.output.is_empty() { ui.add(egui::Label::new(RichText::new(bounded(&tool.output)).monospace()).selectable(true)); }
+                                        if !tool.diff.is_empty() { ui.add(egui::Label::new(RichText::new(bounded(&tool.diff)).monospace()).selectable(true)); }
+                                    });
+                            }
                         });
                     });
                 header.header_response.clone().on_hover_text(bounded(&tool.name));

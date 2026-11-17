@@ -48,6 +48,10 @@ Claude approvals include the actual MCP/tool arguments, including domain identif
 
 ### Switch the same conversation {#switch-presentation}
 
+Pane titles and automatic page names use a shortened first confirmed request. Manually named pages keep their names; editing a draft does not rename an established conversation.
+
+The **GUI | TUI** joined tabs sit inside each agent pane at the top right, below its close button. Replies show the agent icon beside its name. Expanded tool details provide a readable, scrollable code area with syntax highlighting for recognized file languages and shell commands, plus a copy action. Unknown output remains plain text.
+
 Use the agent pane’s **Conversation GUI / Terminal** switch to continue the same confirmed conversation with its original account and working folder. Switching to Terminal requires an idle conversation with no outstanding response, approval, queued work or background helper process. If other background processes remain, Kiln refuses the switch and leaves that work running.
 
 Selecting Conversation GUI while the native CLI is open requests a return; it does not close the CLI or send a command for you. Exit the CLI normally, using its own exit action. Kiln waits for its process to exit, then imports newly appended user/assistant text and reconnects the GUI. Images in imported native history appear as attachment notices; this is not a reconstruction of native tool cards. If earlier native history changed, Kiln preserves the retained GUI history and reports the mismatch.
