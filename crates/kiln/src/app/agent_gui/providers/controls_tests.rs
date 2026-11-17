@@ -942,3 +942,103 @@ fn ux_native_permission_snapshot_populates_visible_current_mode() {
     let options=e.events.iter().filter_map(|e|if let Event::Controls(ControlEvent::Options(v))=e{Some(v)}else{None}).last().unwrap();
     assert_eq!(options.iter().find(|o|o.id=="permissionMode").unwrap().current,Some(ControlValue::Text("auto".into())));
 }
+
+#[test]
+fn inflight_claude_followup_receipt_is_not_an_earlier_response() {
+    let mut a = configured(Tool::Claude);
+    submit(&mut a).unwrap();
+    a.ingest(json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"first"}}})).unwrap();
+    let sent = submit(&mut a).unwrap();
+    assert_eq!(sent.writes.len(), 1);
+    let id = sent.writes[0]["uuid"].as_str().unwrap();
+    assert_eq!(id.len(), 36);
+    let old = a.ingest(json!({"type":"assistant","message":{"id":"first","content":[]}})).unwrap();
+    assert!(!old.accepted);
+    let old_end = a.ingest(json!({"type":"result","queued_turn_count":1})).unwrap();
+    assert!(!old_end.accepted);
+    assert!(!old_end.events.iter().any(|e|matches!(e,Event::Lifecycle(Lifecycle::Ready))));
+    let receipt = a.ingest(json!({"type":"user","uuid":id,"message":{"role":"user","content":"test"}})).unwrap();
+    assert!(receipt.accepted);
+    let end = a.ingest(json!({"type":"result","user_message_uuids":[id],"queued_turn_count":0})).unwrap();
+    assert!(end.events.iter().any(|e|matches!(e,Event::Lifecycle(Lifecycle::Ready))));
+}
+
+#[test]
+fn inflight_codex_steer_uses_exact_turn_and_rejection_keeps_worker_alive() {
+    for reject in [false, true] {
+        let mut a = configured(Tool::Codex);
+        submit(&mut a).unwrap();
+        a.ingest(json!({"id":"turn","result":{"turn":{"id":"active"}}})).unwrap();
+        let sent = submit(&mut a).unwrap();
+        assert_eq!(sent.writes.len(), 1);
+        let wire = &sent.writes[0];
+        assert_eq!(wire["method"], "turn/steer");
+        assert_eq!(wire["params"]["expectedTurnId"], "active");
+        assert!(wire["params"].get("model").is_none());
+        let reply = if reject { json!({"id":wire["id"],"error":{"code":-32600,"message":"turn already ended"}}) }
+            else { json!({"id":wire["id"],"result":{"turnId":"active"}}) };
+        let receipt = a.ingest(reply).unwrap();
+        assert_eq!(receipt.accepted, !reject);
+        assert_eq!(receipt.cancelled, reject);
+        assert!(!receipt.events.iter().any(|e|matches!(e,Event::Lifecycle(Lifecycle::Failed|Lifecycle::Disconnected|Lifecycle::Ready))));
+    }
+}
+
+#[test]
+fn inflight_acp_followup_waits_for_prompt_reply_without_cancelling_work() {
+    let mut a = configured(Tool::Antigravity);
+    submit(&mut a).unwrap();
+    let queued = submit(&mut a).unwrap();
+    assert!(queued.writes.is_empty());
+    let old = a.ingest(json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old"}}}})).unwrap();
+    assert!(!old.accepted);
+    let end = a.ingest(json!({"id":"prompt","result":{"stopReason":"end_turn"}})).unwrap();
+    assert!(!end.accepted);
+    assert_eq!(end.writes.len(), 1);
+    assert_eq!(end.writes[0]["method"], "session/prompt");
+    let next = a.ingest(json!({"id":"prompt","result":{"stopReason":"end_turn"}})).unwrap();
+    assert!(next.accepted);
+}
+
+#[test]
+fn inflight_model_effort_and_mode_configuration_does_not_interrupt() {
+    for (tool, settings) in [
+        (Tool::Claude, vec![("model", "opus"), ("permissionMode", "default")]),
+        (Tool::Codex, vec![("model", "m"), ("effort", "ultra"), ("collaborationMode", "plan")]),
+        (Tool::Antigravity, vec![("thought_level", "high")]),
+    ] {
+        for (key, value) in settings {
+            let mut a = configured(tool);
+            submit(&mut a).unwrap();
+            let effects = configure(&mut a, key, ControlValue::Text(value.into()));
+            assert_eq!(effects.writes.len(), 1, "{tool:?} {key}");
+            assert!(!effects.cancelled);
+            assert!(!effects.events.iter().any(|e|matches!(e,Event::Lifecycle(Lifecycle::Ready|Lifecycle::Stopped))));
+            assert!(!effects.writes.iter().any(|w|w["method"]=="turn/interrupt" || w["request"]["subtype"]=="interrupt"));
+        }
+    }
+}
+
+#[test]
+fn inflight_claude_initial_receipt_unlocks_followup_before_first_response_token() {
+    let mut a = configured(Tool::Claude);
+    let initial = submit(&mut a).unwrap();
+    let id = initial.writes[0]["uuid"].clone();
+    let receipt = a.ingest(json!({"type":"user","uuid":id,"message":{"content":"test"}})).unwrap();
+    assert!(receipt.accepted);
+    let followup = submit(&mut a).unwrap();
+    assert_eq!(followup.writes[0]["type"], "user");
+    assert_ne!(followup.writes[0]["uuid"], id);
+}
+
+#[test]
+fn inflight_acp_legacy_mode_ack_keeps_the_response_running() {
+    let mut a = Adapter::new(Tool::Antigravity, "/fixture".into(), None);
+    a.ingest(json!({"id":"session","result":{"sessionId":"s","modes":{"currentModeId":"ask","availableModes":[{"id":"ask","name":"Ask"},{"id":"code","name":"Code"}]}}})).unwrap();
+    submit(&mut a).unwrap();
+    let change = a.command(&Command::SetMode{mode:"code".into()}, "runtime").unwrap();
+    assert_eq!(change.writes[0]["method"], "session/set_mode");
+    let receipt = a.ingest(json!({"id":change.writes[0]["id"],"result":{}})).unwrap();
+    assert!(!receipt.events.iter().any(|e|matches!(e, Event::Lifecycle(_))));
+    assert!(receipt.events.iter().any(|e|matches!(e, Event::Modes { selected:Some(mode), .. } if mode=="code")));
+}

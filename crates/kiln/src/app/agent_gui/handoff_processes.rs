@@ -641,7 +641,19 @@ mod tests {
     }
     #[cfg(windows)]
     #[test]
+    #[ignore = "owned subprocess fixture"]
+    fn windows_inspection_child() {
+        if std::env::var("KILN_INSPECTION_CHILD").as_deref() != Ok("1") { return; }
+        use std::io::{Read, Write};
+        println!("INSPECTION_READY");
+        std::io::stdout().flush().unwrap();
+        let mut byte = [0];
+        let _ = std::io::stdin().read_exact(&mut byte);
+    }
+    #[cfg(windows)]
+    #[test]
     fn native_windows_inspection_preserves_owned_child_identity_and_quoted_arguments() {
+        use std::io::BufRead;
         use std::process::{Command, Stdio};
         struct Child(std::process::Child);
         impl Drop for Child {
@@ -650,19 +662,33 @@ mod tests {
                 let _ = self.0.wait();
             }
         }
-        let program =
-            PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
-        let marker = "rem kiln process inspection 한국어 fixture";
-        // An idle cmd waits on its owned stdin pipe; no network or user shell.
-        let child = Child(
+        let program = std::env::current_exe().unwrap();
+        let marker = "kiln process inspection 한국어 fixture";
+        // Explicit readiness and an owned stdin barrier keep both snapshots on
+        // the same live process, independent of cmd.exe's console lifetime.
+        let mut child = Child(
             Command::new(&program)
-                .args(["/D", "/Q", "/K", marker])
+                .args(["--exact", "app::agent_gui::host::handoff_processes::tests::windows_inspection_child",
+                    "--ignored", "--nocapture", "--skip", marker])
+                .env("KILN_INSPECTION_CHILD", "1")
                 .stdin(Stdio::piped())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap(),
         );
+        let stdout = child.0.stdout.take().unwrap();
+        let (ready, received) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stdout).lines() {
+                if matches!(line.as_deref(), Ok("INSPECTION_READY")) {
+                    let _ = ready.send(());
+                    break;
+                }
+            }
+        });
+        received.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        reader.join().unwrap();
         let pid = child.0.id();
         let snapshot = inspect(&[pid]).unwrap();
         assert_eq!(snapshot[0].parent, std::process::id());

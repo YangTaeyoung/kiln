@@ -74,7 +74,7 @@ impl KilnApp {
                         agent_gui::Lifecycle::Ready if view.transcript.entries.iter().any(|e|matches!(e,agent_gui::Entry::Message(m) if m.role==agent_gui::Role::Assistant))=>TaskPhase::Done,
                         _=>TaskPhase::Unknown,
                     };
-                    let title=if panes.len()==1{page.title.clone()}else{None}.unwrap_or_else(||view.descriptor.tool.display_name().into());
+                    let title=agent_task_title(if panes.len()==1 {page.title.as_deref()} else {None}, view);
                     let created=self.panes.get(&pane).and_then(Pane::session).and_then(|s|self.conn.infos.get(&s)).map(|i|i.created_unix).unwrap_or_default();
                     tasks.push(WorkspaceTask{pane,title,qualifier:String::new(),phase,agent:Some(view.descriptor.tool),updated:created,recorded:None});
                     locations.push(view.descriptor.cwd.file_name().unwrap_or_default().to_string_lossy().into_owned());continue;
@@ -111,6 +111,12 @@ impl KilnApp {
         tasks.sort_by_key(|t|(t.phase.priority(),std::cmp::Reverse(t.updated)));
         tasks
     }
+}
+
+fn agent_task_title(page_title: Option<&str>, view: &agent_gui::AgentPane) -> String {
+    page_title.filter(|title| !title.trim().is_empty()
+        && !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == *title))
+        .map(str::to_owned).unwrap_or_else(|| view.conversation_title())
 }
 
 fn distinguish_titles(tasks:&mut [WorkspaceTask],locations:&[String]) {
@@ -380,5 +386,28 @@ mod tests {
             assert!(h.ctx.content_rect().contains_rect(last.rect()));last.click();h.run_steps(2);assert_eq!(*h.state(),Some(14));
             h.render().unwrap().save(std::env::temp_dir().join(format!("kiln-workspace-tasks-{}.png",width as u32))).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod agent_title_regression {
+    use super::*;
+    #[test]
+    fn workspace_agent_rows_follow_confirmed_conversation_titles() {
+        let mut view = agent_gui::AgentPane::fixture(agent_gui::Descriptor {
+            id: "title-fixture".into(), tool: kiln_accounts::Tool::Claude,
+            cwd: "/fixture/project".into(), account_label: "fixture".into(),
+        });
+        assert!(agent_task_title(Some("Claude Code"), &view).contains("project"));
+        view.transcript.entries.push(agent_gui::Entry::Message(agent_gui::Message {
+            id: "user-confirmed".into(), role: agent_gui::Role::User,
+            text: "결제 API 인증 방식을 수정해".into(), attachments: vec![],
+        }));
+        for title in [None, Some("Claude Code"), Some(""), Some("  ")] {
+            assert_eq!(agent_task_title(title, &view), "결제 API 인증 방식을 수정해");
+        }
+        assert_eq!(agent_task_title(Some("사용자가 지정한 제목"), &view), "사용자가 지정한 제목");
+        view.transcript.presentation = agent_gui::Presentation::Terminal;
+        assert_eq!(agent_task_title(None, &view), "결제 API 인증 방식을 수정해");
     }
 }

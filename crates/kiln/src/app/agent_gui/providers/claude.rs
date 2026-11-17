@@ -7,6 +7,8 @@ pub(in crate::app::agent_gui) struct Claude {
     session: String,
     ready: bool,
     busy: bool,
+    followup: Option<String>,
+    initial_receipt: Option<String>,
     pending: BTreeMap<String, Value>,
     tools: BTreeMap<String, ToolCall>,
     blocks: BTreeMap<usize, String>,
@@ -40,6 +42,8 @@ impl Claude {
             resume,
             ready: false,
             busy: false,
+            followup: None,
+            initial_receipt: None,
             pending: BTreeMap::new(),
             tools: BTreeMap::new(),
             blocks: BTreeMap::new(),
@@ -79,6 +83,7 @@ impl Claude {
             "--output-format",
             "stream-json",
             "--include-partial-messages",
+            "--replay-user-messages",
             "--verbose",
             "--permission-prompt-tool",
             "stdio",
@@ -184,8 +189,8 @@ impl Claude {
                 model,
             } => {
                 ensure!(
-                    self.ready && !self.busy,
-                    "Claude is not ready for a new turn"
+                    self.ready && self.followup.is_none(),
+                    "Claude is not ready for a new message"
                 );
                 let target = if !self.model_settled || !self.retired_configs.is_empty() {
                     Some(model.clone().or_else(||self.selected.clone()).context("The model configuration is unsettled; choose an explicit model before submitting")?)
@@ -194,7 +199,19 @@ impl Claude {
                 };
                 let mut content = vec![json!({"type":"text","text":text})];
                 content.extend(image_blocks(id, attachments, Tool::Claude)?);
-                let user = json!({"type":"user","message":{"role":"user","content":content},"session_id":self.session,"parent_tool_use_id":null});
+                let mut user = json!({"type":"user","message":{"role":"user","content":content},"session_id":self.session,"parent_tool_use_id":null});
+                let uuid = super::super::message_uuid()?;
+                user["uuid"] = json!(uuid);
+                if self.busy {
+                    ensure!(self.deferred.is_none() && self.retired_configs.is_empty() && self.model_settled,
+                        "Claude configuration is still settling");
+                    ensure!(target.is_none() || target == self.selected,
+                        "Apply the model setting before sending a follow-up");
+                    self.followup = Some(uuid);
+                    e.write(user);
+                    return Ok(e);
+                }
+                self.initial_receipt = Some(uuid);
                 if !self.model_settled
                     || !self.retired_configs.is_empty()
                     || (target.is_some() && target != self.selected)
@@ -302,6 +319,14 @@ impl Claude {
         e.event(Event::Tool(tool.clone()));
     }
     pub fn ingest(&mut self, v: Value) -> Result<Effects> {
+        let acknowledges_initial = self.initial_receipt.as_ref().is_some_and(|id|
+            v["type"] == "user" && v["uuid"].as_str() == Some(id));
+        let awaiting_followup = self.followup.is_some();
+        let acknowledges_followup = self.followup.as_ref().is_some_and(|id| {
+            (v["type"] == "user" && v["uuid"].as_str() == Some(id))
+                || v["user_message_uuid"].as_str() == Some(id)
+                || v["user_message_uuids"].as_array().is_some_and(|ids| ids.iter().any(|v| v.as_str() == Some(id)))
+        });
         let mut e = Effects::default();
         match s(&v, "type").as_str() {
             "control_response" => {
@@ -603,15 +628,22 @@ impl Claude {
                     self.session = s(&v, "session_id");
                     e.event(Event::Session(self.session.clone()));
                 }
-                self.busy = false;
+                self.busy = (awaiting_followup && !acknowledges_followup)
+                    || v["queued_turn_count"].as_u64().unwrap_or(0) > 0;
                 if v["is_error"].as_bool() == Some(true) {
                     e.event(Event::Error(
                         v.get("errors").map(text).unwrap_or_else(|| s(&v, "result")),
                     ));
                 }
-                e.state(Lifecycle::Ready);
+                e.state(if self.busy { Lifecycle::Running } else { Lifecycle::Ready });
             }
             _ => {}
+        }
+        if acknowledges_initial { e.accepted = true; }
+        if e.accepted { self.initial_receipt = None; }
+        if awaiting_followup {
+            e.accepted = acknowledges_followup;
+            if acknowledges_followup { self.followup = None; }
         }
         Ok(e)
     }

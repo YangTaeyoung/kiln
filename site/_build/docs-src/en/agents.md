@@ -52,7 +52,7 @@ Pane titles and automatic page names use a shortened first confirmed request. Ma
 
 The **GUI | TUI** joined tabs sit inside each agent pane at the top right, below its close button. Replies show the agent icon beside its name. Expanded tool details provide a readable, scrollable code area with syntax highlighting for recognized file languages and shell commands, plus a copy action. Unknown output remains plain text.
 
-Use the agent pane’s **GUI | TUI** tabs to continue the same confirmed conversation with its original account and working folder. A new Claude Code conversation can also open in the terminal before its first message, without trying to resume a history file that does not exist yet. Switching to Terminal requires an idle conversation with no outstanding response, approval or queued work. If a background task remains or Kiln cannot verify process ownership, it refuses the switch and leaves that work running. The terminal starts only after the previous agent has finished exiting; a refusal explains what blocks the switch.
+Use the agent pane’s **GUI | TUI** tabs to continue the same confirmed conversation with its original account and working folder. A new Claude Code conversation can also open in the terminal before its first message, without trying to resume a history file that does not exist yet. You can request TUI while work is running. Kiln keeps the work in GUI and switches automatically after the response, approvals and queued work finish and ownership checks pass. Select GUI to cancel a pending switch. This is a deferred native handoff, not an immediate move of a running model request between processes. A native TUI still needs to exit normally before its GUI writer starts; selecting TUI cancels that return request. If a background task remains or Kiln cannot verify process ownership, it refuses the switch and leaves that work running. The terminal starts only after the previous agent has finished exiting; a refusal explains what blocks the switch.
 
 Selecting Conversation GUI while the native CLI is open requests a return; it does not close the CLI or send a command for you. Exit the CLI normally, using its own exit action. Kiln waits for its process to exit, then imports newly appended user/assistant text and reconnects the GUI. Images in imported native history appear as attachment notices; this is not a reconstruction of native tool cards. If earlier native history changed, Kiln preserves the retained GUI history and reports the mismatch.
 
@@ -138,9 +138,23 @@ In newly opened Kiln Zsh terminals, plain `codex`, `codex resume …` and `codex
 
 ## Native session settings and commands {#native-session-settings}
 
+You can send a follow-up with Send or Enter while a response is running; Stop remains a separate button. Claude accepts streaming follow-ups and Codex steers the current turn. Antigravity holds one follow-up until its current prompt finishes. A pending receipt is kept separate from an accepted message and is never automatically resent.
+
+Model, effort and mode controls remain available during a response. Claude applies live changes at the native boundary; Codex composer selections update the next turn, while its explicit active-turn action changes supported settings of the current turn. Settings still wait for native confirmation. Workspace activity rows show the conversation title instead of the provider name, while preserving custom page titles.
+
 In a conversation GUI, use **Session settings** for searchable provider controls and **Commands and skills** to find native commands. A compact two-line message editor sits above one toolbar: attach an image, choose the model and mode, open **Reasoning settings**, or use the round Send/Stop control. Narrow panes keep the model beside **Conversation options**, which contains the remaining controls. Choices show readable model names and localized mode/effort labels while preserving the provider’s actual values. A missing catalog remains different from an empty one.
 
-Open Reasoning settings, or Conversation options in a narrow pane, to adjust the offered reasoning levels with a slider and Claude’s independent Ultracode switch. Enabled Ultracode has a purple indicator. The header continues to show the confirmed effective model and mode.
+Open Reasoning settings, or Conversation options in a narrow pane, to choose an offered reasoning level with an explanation of each choice. Claude’s independent Ultracode switch has a purple indicator when enabled. The header shows the confirmed effective model and mode.
+
+Claude Code, Codex and Antigravity share localized setting names and visible explanations for built-in choices. In Korean, approval policies use readable names such as “필요할 때 승인 요청” (ask when needed). The same presentation covers startup options, active-turn settings, sandbox controls and granular approvals. Provider-defined names and native values remain intact.
+
+Model comparison puts the current model first, with cards showing one model name, a concise summary, default reasoning effort and supported inputs. Choose **Use this model** to request a change; the provider confirms its application. Expand details for supported levels and the provider’s original description.
+
+<figure class="shot"><img src="../assets/shots/agent-models-en.webp" alt="Model comparison with the current model first" width="760" height="560" loading="lazy" decoding="async"><figcaption>Model comparison with the current model first</figcaption></figure>
+
+<figure class="shot"><img src="../assets/shots/agent-settings-en.webp" alt="Settings with visible explanations" width="1280" height="820" loading="lazy" decoding="async"><figcaption>Settings with visible explanations</figcaption></figure>
+
+Illustrations rendered from synthetic catalogs with the native UI; not an authenticated model response.
 
 A changed setting shows its requested and native values separately. Send and conflicting settings wait for native confirmation; Stop remains available. A transport acknowledgment alone does not confirm that a setting took effect. Rejected or unconfirmed changes stay visible and are never automatically retried.
 

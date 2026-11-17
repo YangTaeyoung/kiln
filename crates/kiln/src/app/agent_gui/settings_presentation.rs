@@ -2,36 +2,10 @@
 use super::*;
 
 pub(crate) fn present_value(control: &str, value: &ControlValue) -> String {
+    if let ControlValue::Sandbox(v) = value { return present_value("sandboxPolicy", &ControlValue::Text(v.policy_mode().into())); }
     if matches!(value,ControlValue::Default) { return tr("기본값").into(); }
     let ControlValue::Text(value) = value else { return value_label(Some(value)); };
-    if matches!(control, "permissionMode" | "collaborationMode" | "mode") {
-        return tr(match value.as_str() {
-            "auto" => "자동",
-            "default" => "기본",
-            "plan" => "계획",
-            "acceptEdits" => "편집 자동 승인",
-            "dontAsk" => "승인 요청 안 함",
-            "bypassPermissions" => "권한 확인 생략",
-            "ask" => "질문",
-            "code" => "코딩",
-            _ => value,
-        })
-        .into();
-    }
-    if matches!(control, "effort" | "effortLevel" | "thought_level") {
-        return tr(match value.as_str() {
-            "none" => "없음",
-            "minimal" => "최소",
-            "low" => "낮음",
-            "medium" => "보통",
-            "high" => "높음",
-            "xhigh" => "매우 높음",
-            "max" => "최대",
-            "ultra" => "최상",
-            _ => value,
-        })
-        .into();
-    }
+    if let Some((title, _)) = choice_copy(control, value) { return title.into(); }
     if matches!(control, "model" | "advisorModel") {
         return model_title(value);
     }
@@ -40,6 +14,9 @@ pub(crate) fn present_value(control: &str, value: &ControlValue) -> String {
 pub(crate) fn model_title(id: &str) -> String {
     if id == "default" {
         return tr("기본 모델").into();
+    }
+    for (id_value, name) in [("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6-astra", "GPT-6 Astra"), ("gpt-6.1-terra", "GPT-6.1 Terra"), ("gpt-6-sol", "GPT-6 Sol"), ("gpt-6-luna", "GPT-6 Luna")] {
+        if id == id_value { return name.into(); }
     }
     let clean = id.trim_start_matches("claude-");
     for (family, title) in [
@@ -67,12 +44,14 @@ pub(crate) fn model_title(id: &str) -> String {
     id.into()
 }
 pub(crate) fn metadata_title(metadata: &ModelMetadata) -> String {
-    if metadata.display_name.is_empty() { return model_title(&metadata.id); }
+    if metadata.id == "default" { return tr("기본 모델").into(); }
+    if metadata.display_name.is_empty() || metadata.display_name == metadata.id { return model_title(&metadata.id); }
     if ["opus","sonnet","fable","haiku"].contains(&metadata.display_name.to_lowercase().as_str()) && let Some(resolved)=&metadata.resolved_model { return model_title(resolved); }
     metadata.display_name.clone()
 }
-pub(super) fn choice_title(option: &ControlOption, choice: &ControlChoice) -> String {
-    if matches!(option.id.as_str(), "model" | "advisorModel") {
+pub(crate) fn choice_title(option: &ControlOption, choice: &ControlChoice) -> String {
+    let id = semantic_id(option);
+    if matches!(id, "model" | "advisorModel") {
         if choice.label.is_empty() || choice.label == choice.value {
             model_title(&choice.value)
         } else if choice.value == "default" {
@@ -81,132 +60,40 @@ pub(super) fn choice_title(option: &ControlOption, choice: &ControlChoice) -> St
             choice.label.clone()
         }
     } else {
-        let title = present_value(&option.id, &ControlValue::Text(choice.value.clone()));
+        let title = present_value(id, &ControlValue::Text(choice.value.clone()));
         if title == choice.value && !choice.label.is_empty() {
-            choice.label.clone()
+            format!("{} · {}", tr("사용자 정의"), choice.label)
         } else {
             title
         }
     }
 }
-pub(super) fn choice_row(
+pub(crate) fn choice_row(
     ui: &Ui,
     option: &ControlOption,
     choice: &ControlChoice,
 ) -> egui::WidgetText {
+    described_row(ui, &choice_title(option, choice), &choice_help(option, choice))
+}
+pub(crate) fn described_row(ui: &Ui, title: &str, description: &str) -> egui::WidgetText {
     let theme = Theme::current();
     let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &choice_title(option, choice),
-        0.,
-        egui::TextFormat {
-            font_id: kiln_common::fonts::medium(13.),
-            color: theme.text,
-            ..Default::default()
-        },
-    );
-    if !choice.description.is_empty() {
-        job.append(
-            &format!("\n{}", choice.description),
-            0.,
-            egui::TextFormat {
-                font_id: egui::FontId::proportional(11.5),
-                color: theme.text_dim,
-                ..Default::default()
-            },
-        );
-    }
-    job.wrap.max_width = ui.available_width().clamp(120., 360.);
-    job.wrap.max_rows = 3;
+    job.append(title, 0., egui::TextFormat { font_id: kiln_common::fonts::medium(13.), color: theme.text, ..Default::default() });
+    job.append(&format!("\n{description}"), 0., egui::TextFormat { font_id: egui::FontId::proportional(12.), color: theme.text_dim, ..Default::default() });
+    job.wrap.max_width = (ui.available_width() - 2. * ui.spacing().button_padding.x).min(ui.ctx().content_rect().width() - 64.).clamp(60., 360.);
     job.into()
+}
+pub(crate) fn described_choice(ui: &mut Ui, selected: bool, title: &str, description: &str) -> egui::Response {
+    ui.set_max_width(360_f32.min(ui.ctx().content_rect().width() - 48.));
+    let response = ui.add(egui::Button::selectable(selected, described_row(ui, title, description)).wrap());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, title));
+    response
 }
 pub(super) fn is_effort(option: &ControlOption) -> bool {
     matches!(
         option.id.as_str(),
         "effort" | "effortLevel" | "thought_level"
     ) || option.category.as_deref() == Some("thought_level")
-}
-#[derive(Clone, PartialEq)]
-struct SliderDraft {
-    native: Option<ControlValue>,
-    choices: Vec<String>,
-    index: usize,
-}
-pub(super) fn effort_slider(
-    ui: &mut Ui,
-    option: &ControlOption,
-    selected: &mut Option<ControlValue>,
-    quick: bool,
-) {
-    let id = ui.id().with(("effort-draft", &option.id));
-    let choices = option
-        .choices
-        .iter()
-        .map(|c| c.value.clone())
-        .collect::<Vec<_>>();
-    let current = option
-        .choices
-        .iter()
-        .position(|c| option.current == Some(ControlValue::Text(c.value.clone())));
-    let initial = SliderDraft {
-        native: option.current.clone(),
-        choices: choices.clone(),
-        index: current.unwrap_or(0),
-    };
-    let mut draft = ui
-        .data_mut(|d| d.get_temp::<SliderDraft>(id))
-        .filter(|s| s.native == initial.native && s.choices == choices)
-        .unwrap_or(initial);
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 1.;
-        ui.horizontal(|ui| {
-            let display = if current.is_some() {
-                present_value(
-                    &option.id,
-                    &ControlValue::Text(choices[draft.index].clone()),
-                )
-            } else {
-                value_label(option.current.as_ref())
-            };
-            ui.label(
-                RichText::new(format!("{} · {display}", label(&option.id)))
-                    .small()
-                    .strong(),
-            );
-        });
-        if choices.len() < 2 {
-            ui.small(tr("추론 강도를 제공하는 모델을 선택하세요."));
-            return;
-        }
-        let previous_width = ui.spacing().slider_width;
-        let previous_fill = ui.visuals().selection.bg_fill;
-        ui.visuals_mut().selection.bg_fill = if Theme::current().dark { egui::Color32::from_rgb(168,143,255) } else { egui::Color32::from_rgb(108,66,210) };
-        ui.spacing_mut().slider_width = ui.available_width().min(if quick { 190. } else { 280. });
-        let slider = ui.add(
-            egui::Slider::new(&mut draft.index, 0..=choices.len() - 1)
-                .integer()
-                .show_value(false)
-                .trailing_fill(true),
-        );
-        slider.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Slider, ui.is_enabled(), label(&option.id))
-        });
-        // A pointer drag previews locally; only release commits, keyboard/click commits once.
-        if slider.drag_stopped() || (slider.changed() && !slider.dragged()) {
-            *selected = Some(ControlValue::Text(choices[draft.index].clone()));
-        }
-        slider.on_hover_text(
-            option
-                .choices
-                .iter()
-                .map(|c| present_value(&option.id, &ControlValue::Text(c.value.clone())))
-                .collect::<Vec<_>>()
-                .join(" · "),
-        );
-        ui.spacing_mut().slider_width = previous_width;
-        ui.visuals_mut().selection.bg_fill = previous_fill;
-    });
-    ui.data_mut(|d| d.insert_temp(id, draft));
 }
 pub(super) fn ultracode_switch(
     ui: &mut Ui,

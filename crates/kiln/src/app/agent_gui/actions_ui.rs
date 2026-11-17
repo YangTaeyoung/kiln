@@ -305,15 +305,16 @@ impl AgentPane {
                 let metadata=self.transcript.controls.models.iter().find(|m|Some(m.id.as_str())==active_model || m.resolved_model.as_deref()==active_model);
 
                 let options=self.transcript.controls.options.iter().filter(|o|matches!(o.id.as_str(),"model"|"effort"|"serviceTier"|"summary"|"approvalsReviewer")).cloned().map(|mut o| {
+                    if o.id=="model" { for choice in &mut o.choices { if let Some(meta)=self.transcript.controls.models.iter().find(|m|m.id==choice.value) { choice.description=meta.description.clone(); } } }
                     if let Some(meta)=metadata {if o.id=="effort" {o.choices=meta.efforts.clone();}if o.id=="serviceTier" {o.choices=meta.tiers.clone();}}
                     o
                 }).collect::<Vec<_>>();
                 let form=&mut self.controls_ui.actions;
-                let control_combo = egui::ComboBox::from_id_salt("turn-control").selected_text(settings_ui::label(&form.turn_control)).show_ui(ui,|ui|{for o in &options{if ui.selectable_value(&mut form.turn_control,o.id.clone(),settings_ui::label(&o.id)).changed(){form.turn_value=None;}}});
+                let control_combo = egui::ComboBox::from_id_salt("turn-control").selected_text(settings_ui::label(&form.turn_control)).show_ui(ui,|ui|{for o in &options{if settings_ui::described_choice(ui,form.turn_control==o.id,settings_ui::label(&o.id),settings_ui::control_help(&o.id)).clicked(){form.turn_control=o.id.clone();form.turn_value=None;}}});
                 control_combo.response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::ComboBox,true,tr("현재 턴 설정 항목")));
                 if let Some(o)=options.iter().find(|o|o.id==form.turn_control) {
                     if form.turn_value.as_ref().is_some_and(|value| !o.choices.iter().any(|c| value==&ControlValue::Text(c.value.clone()))) {form.turn_value=None;}
-                    let value_combo = egui::ComboBox::from_id_salt("turn-value").selected_text(settings_ui::value_label(form.turn_value.as_ref())).show_ui(ui,|ui|{for c in &o.choices{ui.selectable_value(&mut form.turn_value,Some(ControlValue::Text(c.value.clone())),&c.label);}});
+                    let value_combo = egui::ComboBox::from_id_salt("turn-value").selected_text(form.turn_value.as_ref().map(|v| settings_ui::present_value(&o.id,v)).unwrap_or_else(|| tr("선택하세요").into())).show_ui(ui,|ui|{for c in &o.choices{if settings_ui::described_choice(ui,form.turn_value==Some(ControlValue::Text(c.value.clone())),&settings_ui::choice_title(o,c),&settings_ui::choice_help(o,c)).clicked(){form.turn_value=Some(ControlValue::Text(c.value.clone()));}}});
                     value_combo.response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::ComboBox,true,tr("현재 턴 설정 값")));
                 }
                 let action=form.turn_value.clone().map(|value|CodexAction::UpdateActiveTurn{turn_id:turn_id.clone().unwrap_or_default(),control:form.turn_control.clone(),value});
@@ -463,16 +464,8 @@ impl AgentPane {
                         "현재 세션"
                     }))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut grant.scope,
-                            PermissionScope::Turn,
-                            tr("현재 작업"),
-                        );
-                        ui.selectable_value(
-                            &mut grant.scope,
-                            PermissionScope::Session,
-                            tr("현재 세션"),
-                        );
+                        if settings_ui::described_choice(ui, grant.scope == PermissionScope::Turn, tr("현재 작업"), tr("현재 작업이 끝날 때까지만 이 권한을 허용합니다.")).clicked() { grant.scope = PermissionScope::Turn; }
+                        if settings_ui::described_choice(ui, grant.scope == PermissionScope::Session, tr("현재 세션"), tr("이 세션의 후속 작업에도 이 권한을 허용합니다.")).clicked() { grant.scope = PermissionScope::Session; }
                     });
                 ui.checkbox(&mut grant.strict_review, tr("엄격한 자동 검토"));
                 let nonempty = grant.network

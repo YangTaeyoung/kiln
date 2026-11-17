@@ -333,7 +333,7 @@ impl Claude {
         e: &mut Effects,
     ) -> Result<()> {
         ensure!(
-            self.ready && !self.busy && self.deferred.is_none() && self.retired_configs.is_empty(),
+            self.ready && self.deferred.is_none() && self.retired_configs.is_empty(),
             "Claude is not ready for configuration"
         );
         self.native.idle()?;

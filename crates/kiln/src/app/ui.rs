@@ -1368,6 +1368,12 @@ impl KilnApp {
                     bar.label(egui::RichText::new(kiln_common::i18n::tr("대화로 돌아가려면 CLI에서 /exit 또는 Ctrl-D로 종료하세요. 현재 작업은 계속 실행됩니다.")).color(t.orange));
                     egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
                 } else { body };
+                let body = if self.agent_views.get(pid).is_some_and(|view| view.presentation() == agent_gui::Presentation::Gui && view.transcript.return_requested) {
+                    let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 42.0));
+                    let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("agent-handoff", *pid)));
+                    bar.label(egui::RichText::new(kiln_common::i18n::tr("현재 작업이 끝나면 TUI로 전환합니다. GUI를 선택하면 전환을 취소합니다.")).color(t.orange));
+                    egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
+                } else { body };
                 let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("card", *pid)));
                 child.set_clip_rect(body);
                 match self.panes.get_mut(pid).map(|p| &mut p.kind) {
@@ -1555,7 +1561,7 @@ impl KilnApp {
         let mut bar = ui.new_child(UiBuilder::new().id_salt(("agent-view-tabs", pid)).max_rect(bar_rect.shrink2(vec2(8., 4.))).layout(egui::Layout::right_to_left(egui::Align::Center)));
         bar.set_clip_rect(body);
         if let Some(view) = self.agent_views.get_mut(&pid) {
-            let current = view.presentation();
+            let current = view.selected_presentation();
             if view.shell_detached() {
                 if let Some(target) = current.switch_ui(&mut bar, [true,true]) { view.preview_shell_presentation(target); }
                 return egui::Rect::from_min_max(pos2(body.left(),bar_rect.bottom()),body.max);

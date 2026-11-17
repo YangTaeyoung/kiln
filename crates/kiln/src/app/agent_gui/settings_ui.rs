@@ -5,7 +5,13 @@ use kiln_common::i18n::tr;
 #[path = "settings_presentation.rs"]
 mod presentation;
 use presentation::*;
-pub(super) use presentation::{model_title, present_value, metadata_title};
+#[path = "settings_copy.rs"]
+mod copy;
+use copy::*;
+#[path = "model_cards.rs"]
+mod model_cards;
+pub(super) use presentation::{model_title, present_value, metadata_title, choice_row, choice_title, described_choice};
+pub(super) use copy::{choice_copy, choice_help, control_help, help_text, option_title};
 #[derive(Default, Clone, Copy, PartialEq)]
 pub(super) enum Surface {
     #[default]
@@ -18,6 +24,7 @@ pub(super) struct ControlsUi {
     pub surface: Surface,
     pub search: String,
     pub command_search: String,
+    pub composer_options_open: bool,
     pub edits: BTreeMap<String, ControlEditor>,
     pub actions: actions_ui::ActionForm,
     pub launch: launch_ui::LaunchForm,
@@ -107,8 +114,12 @@ impl AgentPane {
             && !self.composing
             && !self.ime_frame
     }
+    fn live_settings_allowed(&self) -> bool {
+        self.live_input_allowed() && !self.settings_blocked()
+            && !self.composing && !self.ime_frame
+    }
     pub(super) fn configure(&mut self, option: &ControlOption, value: ControlValue) {
-        if !self.editing_allowed() {
+        if !self.live_settings_allowed() {
             return;
         }
         if let Err(error) = option.validate(&value) {
@@ -131,7 +142,7 @@ impl AgentPane {
                     let selected = self.controls_ui.surface == surface;
                     let response = ui.add(egui::Button::new(RichText::new(tr(title)).color(if selected {t.text} else {t.text_dim})).frame(false).fill(egui::Color32::TRANSPARENT));
                     if selected { ui.painter().line_segment([response.rect.left_bottom() + egui::vec2(0., 4.), response.rect.right_bottom() + egui::vec2(0., 4.)], Stroke::new(2., t.accent)); }
-                    if response.clicked() { self.controls_ui.surface = surface; }
+                    if response.clicked() { self.controls_ui.surface = surface; self.controls_ui.composer_options_open = false; }
                 }
             });
         });
@@ -158,7 +169,9 @@ impl AgentPane {
             if options.iter().any(|o| o.id == "ultracode" && o.current == Some(ControlValue::Bool(true))) {
                 kiln_common::icons::paint(ui.painter(), egui::Rect::from_center_size(response.rect.center(), egui::vec2(14.,14.)), kiln_common::icons::Icon::Gear, Theme::current().purple);
             }
-            egui::Popup::menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            let mut open = self.controls_ui.composer_options_open;
+            if response.clicked() { open = !open; }
+            egui::Popup::menu(&response).open_bool(&mut open).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 ui.set_width(240_f32.min(ui.ctx().content_rect().width() - 50.));
                 ui.strong(tr("대화 옵션"));
                 for option in options.iter().filter(|o| Some(o.id.as_str()) != model.map(|m| m.id.as_str())) {
@@ -166,16 +179,20 @@ impl AgentPane {
                     self.control_widget_inner(ui, option, false, false);
                 }
             });
+            self.controls_ui.composer_options_open = open;
         } else {
             for option in options.iter().filter(|o| matches!(o.id.as_str(), "mode" | "permissionMode" | "collaborationMode") || o.category.as_deref() == Some("mode")) {
                 ui.allocate_ui(egui::vec2(108., 28.), |ui| self.control_widget_inner(ui, option, true, false));
             }
             let thoughts = options.iter().filter(|o| is_effort(o) || o.id == "ultracode").collect::<Vec<_>>();
             if !thoughts.is_empty() {
-                let strength = thoughts.iter().find(|o| is_effort(o)).and_then(|o| o.current.as_ref().map(|v| present_value(&o.id, v))).unwrap_or_else(|| tr("사고 설정").into());
+                let strength = thoughts.iter().find(|o| is_effort(o)).and_then(|o| o.current.as_ref().map(|v| present_value(semantic_id(o), v))).unwrap_or_else(|| tr("사고 설정").into());
                 let ultra = thoughts.iter().any(|o| o.id == "ultracode" && o.current == Some(ControlValue::Bool(true)));
                 let text = if ultra { format!("    {strength}") } else { strength };
-                let response = ui.menu_button(RichText::new(text).color(if ultra { Theme::current().purple } else { Theme::current().text_dim }), |ui| {
+                let response = ui.button(RichText::new(text).color(if ultra { Theme::current().purple } else { Theme::current().text_dim }));
+                let mut open = self.controls_ui.composer_options_open;
+                if response.clicked() { open = !open; }
+                egui::Popup::menu(&response).open_bool(&mut open).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                     ui.set_width(240.);
                     ui.strong(tr("사고 설정"));
                     for option in &thoughts {
@@ -183,12 +200,13 @@ impl AgentPane {
                         self.control_widget_inner(ui, option, false, false);
                     }
                 });
+                self.controls_ui.composer_options_open = open;
                 if ultra {
-                    let rect = egui::Rect::from_center_size(egui::pos2(response.response.rect.left()+10., response.response.rect.center().y), egui::vec2(11.,11.));
+                    let rect = egui::Rect::from_center_size(egui::pos2(response.rect.left()+10., response.rect.center().y), egui::vec2(11.,11.));
                     kiln_common::icons::paint(ui.painter(), rect, kiln_common::icons::Icon::Sparkle, Theme::current().purple);
                 }
-                response.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("사고 설정")));
-                response.response.on_hover_text(tr("추론 강도"));
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("사고 설정")));
+                response.on_hover_text(tr("추론 강도"));
             }
         }
     }
@@ -199,13 +217,16 @@ impl AgentPane {
                 current:self.composer.model.clone().map(ControlValue::Text),scope:ControlScope::Live,available:true,reason:None,source:Some("legacy-model".into()),documentation:None };
             let mut selected=option.current.clone();
             let width=if compact {(ui.available_width()-38.).clamp(70.,150.)}else{158.};
-            ui.allocate_ui(egui::vec2(width,28.), |ui| {ui.add_enabled_ui(self.editing_allowed(), |ui|select_widget(ui,&option,&mut selected,true));});
+            ui.allocate_ui(egui::vec2(width,28.), |ui| {ui.add_enabled_ui(self.live_settings_allowed(), |ui|select_widget(ui,&option,&mut selected,true));});
             if selected != option.current { self.composer.model=selected.and_then(|v|if let ControlValue::Text(s)=v{Some(s)}else{None}); }
         }
         if !self.transcript.modes.is_empty() {
             if compact {
                 let response=widgets::icon_button(ui,kiln_common::icons::Icon::Gear,26.,false,tr("대화 옵션"));
-                egui::Popup::menu(&response).show(|ui|self.legacy_mode_widget(ui));
+                let mut open = self.controls_ui.composer_options_open;
+                if response.clicked() { open = !open; }
+                egui::Popup::menu(&response).open_bool(&mut open).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui|self.legacy_mode_widget(ui));
+                self.controls_ui.composer_options_open = open;
             } else {ui.allocate_ui(egui::vec2(108.,28.),|ui|self.legacy_mode_widget(ui));}
         }
     }
@@ -214,7 +235,7 @@ impl AgentPane {
             choices:self.transcript.modes.iter().map(|m|ControlChoice{value:m.id.clone(),label:m.label.clone(),description:m.description.clone(),group:None}).collect(),
             current:self.transcript.selected_mode.clone().map(ControlValue::Text),scope:ControlScope::Live,available:true,reason:None,source:None,documentation:None};
         let mut selected=option.current.clone();
-        ui.add_enabled_ui(self.editing_allowed(),|ui|select_widget(ui,&option,&mut selected,true));
+        ui.add_enabled_ui(self.live_settings_allowed(),|ui|select_widget(ui,&option,&mut selected,true));
         if selected != option.current && let Some(ControlValue::Text(mode))=selected && let Err(error)=self.send(Command::SetMode{mode}) {self.error=Some(error);}
     }
     pub(super) fn settings_ui(&mut self, ui: &mut Ui) {
@@ -241,7 +262,7 @@ impl AgentPane {
             .filter(|o| {
                 editable_option(o)
                     && (search.is_empty()
-                        || format!("{} {} {} {}", o.id, label(&o.id), o.label, o.description)
+                        || format!("{} {} {} {} {}", o.id, option_title(o), control_help(semantic_id(o)), o.label, o.description)
                             .to_lowercase()
                             .contains(&search))
             })
@@ -270,7 +291,7 @@ impl AgentPane {
                 "autoCompactEnabled"|"promptCacheTtl"|"subagentPromptCacheTtl"|"fallbackModel"|"thinkingBudget"|"serviceTier" => tr("컨텍스트와 비용"),
                 "permissions"|"approvalPolicy"|"approvalsReviewer"|"sandboxPolicy"|"granularApproval" => tr("권한과 실행"),
                 id if id.starts_with("skill:") => tr("스킬"),
-                _ => option.category.as_deref().filter(|c| *c != "Session").unwrap_or(tr("추가 설정")),
+                _ => tr("추가 설정"),
             };
             groups.entry(group.into()).or_default().push(option);
         }
@@ -281,64 +302,14 @@ impl AgentPane {
                 });
             });
         }
-        if filtered.is_empty() && !search.is_empty() {ui.label(tr("검색 결과가 없습니다."));}
+        if filtered.is_empty() && !search.is_empty() && !controls.models.iter().any(|m| format!("{} {} {}", m.id, metadata_title(m), model_summary(&m.description)).to_lowercase().contains(&search)) {ui.label(tr("검색 결과가 없습니다."));}
         egui::CollapsingHeader::new(tr("변경 기록")).id_salt("settings-history").show(ui, |ui| self.outcome_history_ui(ui));
-        egui::CollapsingHeader::new(tr("모델 정보")).show(ui, |ui| {
-            if !controls.models_reported {
-                ui.label(tr("목록을 아직 받지 못했습니다."));
-            }
-            for metadata in &controls.models {
-                if !search.is_empty()
-                    && !format!("{} {}", metadata.id, metadata.description)
-                        .to_lowercase()
-                        .contains(&search)
-                {
-                    continue;
-                }
-                ui.strong(&metadata.id);
-                ui.add(egui::Label::new(&metadata.description).wrap());
-                if let Some(model) = &metadata.resolved_model {
-                    ui.add(egui::Label::new(model).wrap());
-                }
-                ui.add(
-                    egui::Label::new(format!(
-                        "{}: {} · {}: {}",
-                        tr("기본 추론 강도"),
-                        metadata
-                            .default_effort
-                            .as_deref()
-                            .unwrap_or(tr("확인 대기")),
-                        tr("기본 서비스 등급"),
-                        metadata.default_tier.as_deref().unwrap_or(tr("확인 대기"))
-                    ))
-                    .wrap(),
-                );
-                ui.add(
-                    egui::Label::new(format!(
-                        "{}: {}",
-                        tr("지원 입력"),
-                        metadata.modalities.join(", ")
-                    ))
-                    .wrap(),
-                );
-                for (key, value) in &metadata.availability {
-                    ui.add(
-                        egui::Label::new(format!("{}: {}", label(key), value_label(Some(value))))
-                            .wrap(),
-                    );
-                }
-                for (key, value) in &metadata.capabilities {
-                    ui.add(
-                        egui::Label::new(format!(
-                            "{}: {}",
-                            label(key),
-                            value_label(Some(&ControlValue::Bool(*value)))
-                        ))
-                        .wrap(),
-                    );
-                }
-                ui.separator();
-            }
+        egui::CollapsingHeader::new(tr("모델 비교")).id_salt("model-catalog").open((!search.is_empty()).then_some(true)).show(ui, |ui| {
+            let model = controls.options.iter().find(|o| o.id == "model" || o.category.as_deref() == Some("model"));
+            let selected = model.and_then(|o| o.current.as_ref());
+            let enabled = self.live_settings_allowed();
+            if let Some(value) = model_cards::catalog(ui, &controls.models, controls.models_reported, selected, model, enabled, &search)
+                && let Some(option) = model { self.configure(option, value); }
         });
         egui::CollapsingHeader::new(tr("상태 및 연결")).show(ui, |ui| self.status_ui(ui));
         egui::CollapsingHeader::new(tr("네이티브 작업")).show(ui, |ui| self.actions_ui(ui));
@@ -359,11 +330,7 @@ impl AgentPane {
                     ui.set_width(ui.available_width());
                     ui.spacing_mut().item_spacing.y = 4.;
                     let heading = |ui: &mut Ui| {
-                        ui.strong(if option.label == option.id {
-                            label(&option.id)
-                        } else {
-                            &option.label
-                        });
+                        ui.strong(option_title(option));
                     };
                     if ui.available_width() >= 360. {
                         ui.horizontal(|ui| {
@@ -386,6 +353,10 @@ impl AgentPane {
                             self.control_widget_inner(ui, option, false, false)
                         });
                     }
+                    help_text(ui, control_help(semantic_id(option)));
+                    if let Some(choice) = option.choices.iter().find(|c| option.current == Some(ControlValue::Text(c.value.clone()))) {
+                        help_text(ui, &choice_help(option, choice));
+                    }
                     if !option.available {
                         ui.small(tr("이 대화에서 변경할 수 없음"));
                     }
@@ -403,7 +374,20 @@ impl AgentPane {
         egui::Popup::menu(&response).show(|ui| {
             ui.set_max_width(280.);
             if !option.description.is_empty() {
+                ui.strong(tr("제공자 설명"));
                 ui.add(egui::Label::new(&option.description).wrap());
+            }
+            if option.choices.iter().any(|c| !c.description.is_empty()) {
+                egui::CollapsingHeader::new(tr("제공자 설명 원문")).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(240.).show(ui, |ui| {
+                        for choice in &option.choices {
+                            if !choice.description.is_empty() {
+                                ui.strong(choice_title(option, choice));
+                                ui.add(egui::Label::new(&choice.description).wrap());
+                            }
+                        }
+                    });
+                });
             }
             if let Some(category) = &option.category {
                 ui.small(category);
@@ -436,6 +420,7 @@ impl AgentPane {
         if matches!(option.id.as_str(), "model" | "advisorModel") {
             for choice in &mut presented.choices {
                 if let Some(metadata) = self.transcript.controls.models.iter().find(|m| m.id == choice.value) {
+                    if choice.description.is_empty() { choice.description = metadata.description.clone(); }
                     if let Some(resolved) = &metadata.resolved_model {
                         if ["opus", "fable", "sonnet", "haiku"].contains(&choice.label.to_lowercase().as_str()) {
                             choice.label = model_title(resolved);
@@ -452,10 +437,9 @@ impl AgentPane {
         let option = &presented;
         let mut selected = option.current.clone();
         let enabled =
-            self.editing_allowed() && option.available && option.scope == ControlScope::Live;
+            self.live_settings_allowed() && option.available && option.scope == ControlScope::Live;
         ui.push_id((&option.id, quick), |ui| {
             ui.add_enabled_ui(enabled, |ui| match &option.kind {
-                ControlKind::Select if is_effort(option) => effort_slider(ui, option, &mut selected, quick),
                 ControlKind::Select => select_widget(ui, option, &mut selected, quick),
                 ControlKind::Boolean if option.id == "ultracode" => ultracode_switch(ui, option, &mut selected),
                 ControlKind::Boolean => {
@@ -585,9 +569,9 @@ impl AgentPane {
                 egui::Label::new(format!(
                     "{}: {} · {}: {}",
                     tr("요청값"),
-                    value_label(Some(&outcome.requested)),
+                    present_value(&outcome.control, &outcome.requested),
                     tr("네이티브 값"),
-                    value_label(outcome.effective.as_ref())
+                    outcome.effective.as_ref().map(|v| present_value(&outcome.control, v)).unwrap_or_else(|| tr("확인 대기").into())
                 ))
                 .wrap(),
             );
@@ -711,7 +695,7 @@ impl AgentPane {
         }
     }
 }
-fn select_widget(
+pub(super) fn select_widget(
     ui: &mut Ui,
     option: &ControlOption,
     selected: &mut Option<ControlValue>,
@@ -733,20 +717,17 @@ fn select_widget(
             if option.source.as_deref() == Some("legacy-model") && selected.is_none() {
                 tr("기본 모델").into()
             } else {
-                selected.as_ref().map(|v| present_value(&option.id,v)).unwrap_or_else(|| tr("선택하세요").into())
+                selected.as_ref().map(|v| present_value(semantic_id(option),v)).unwrap_or_else(|| tr("선택하세요").into())
             }
         });
-    let title = if option.label == option.id {
-        label(&option.id)
-    } else {
-        &option.label
-    };
+    let title = option_title(option);
     let text = if quick && option.id != "model" {
         if matches!(option.id.as_str(), "mode" | "permissionMode" | "collaborationMode") { display.clone() } else { format!("{title}: {display}") }
     } else {
         display
     };
     let combo = egui::ComboBox::from_id_salt(("choice", &option.id))
+        .height((ui.ctx().content_rect().height() * 0.6).min(400.))
         .width(if quick {
             ui.available_width().min(320.)
         } else {
@@ -755,7 +736,7 @@ fn select_widget(
         .selected_text(text)
         .truncate()
         .show_ui(ui, |ui| {
-            ui.set_max_width(380_f32.min(ui.ctx().content_rect().width() - 40.));
+            ui.set_max_width(360_f32.min(ui.ctx().content_rect().width() - 48.));
             if option.source.as_deref() == Some("legacy-model")
                 && ui
                     .selectable_label(selected.is_none(), tr("기본 모델"))
@@ -769,16 +750,13 @@ fn select_widget(
                 if choice.group != group {
                     group = choice.group.clone();
                     if let Some(group) = &group {
-                        ui.strong(group);
+                        ui.strong(format!("{} · {group}", tr("분류")));
                     }
                 }
-                if ui
-                    .selectable_label(
-                        selected.as_ref() == Some(&ControlValue::Text(choice.value.clone())),
-                        choice_row(ui, option, choice),
-                    )
-                    .on_hover_text(&choice.description)
-                    .clicked()
+                let is_selected = selected.as_ref() == Some(&ControlValue::Text(choice.value.clone()));
+                let response = ui.add(egui::Button::selectable(is_selected, choice_row(ui, option, choice)).wrap());
+                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), is_selected, choice_title(option, choice)));
+                if response.on_hover_text(choice_help(option, choice)).clicked()
                 {
                     *selected = Some(ControlValue::Text(choice.value.clone()));
                     ui.close();
@@ -786,12 +764,12 @@ fn select_widget(
             }
         });
     combo.response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), title)
+        egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), &title)
     });
     combo.response.on_hover_text(format!(
         "{title}\n{}\n{}",
-        option.description,
-        value_label(option.current.as_ref())
+        control_help(semantic_id(option)),
+        option.current.as_ref().map(|v| present_value(semantic_id(option),v)).unwrap_or_else(|| tr("확인 대기").into())
     ));
 }
 pub(super) struct ControlEditor {
@@ -885,6 +863,13 @@ fn edit_value(ui: &mut Ui, option: &ControlOption, edit: &mut ControlEditor) {
                 ("스킬 승인", &mut v.skill_approval),
             ] {
                 ui.checkbox(value, tr(key));
+                help_text(ui, tr(match key {
+                    "샌드박스 승인" => "샌드박스 제한을 넘는 실행의 승인 요청을 표시합니다.",
+                    "규칙 승인" => "실행 규칙이 요구하는 승인 요청을 표시합니다.",
+                    "MCP 정보 요청" => "MCP 서버가 추가 정보를 요청할 수 있게 합니다.",
+                    "권한 요청" => "추가 권한을 요청하는 도구의 승인 요청을 표시합니다.",
+                    _ => "스킬 스크립트 실행에 대한 승인 요청을 표시합니다.",
+                }));
             }
         }
         _ => {
@@ -895,10 +880,11 @@ fn edit_value(ui: &mut Ui, option: &ControlOption, edit: &mut ControlEditor) {
 fn sandbox_ui(ui: &mut Ui, value: &mut NativeSandbox, text: &mut EditingText) {
     let mut kind = value.policy_mode().to_owned();
     egui::ComboBox::from_id_salt("sandbox-kind")
-        .selected_text(&kind)
+        .selected_text(present_value("sandboxPolicy", &ControlValue::Text(kind.clone())))
         .show_ui(ui, |ui| {
             for id in ["read-only", "workspace-write", "external-sandbox"] {
-                ui.selectable_value(&mut kind, id.into(), id);
+                let (title, help) = choice_copy("sandboxPolicy", id).unwrap();
+                if described_choice(ui, kind == id, title, help).clicked() { kind = id.into(); }
             }
         });
     if kind != value.policy_mode() {
@@ -921,6 +907,7 @@ fn sandbox_ui(ui: &mut Ui, value: &mut NativeSandbox, text: &mut EditingText) {
     match value {
         NativeSandbox::ReadOnly { network_access } => {
             ui.checkbox(network_access, tr("네트워크 접근"));
+            help_text(ui, tr("켜면 이 샌드박스에서 네트워크 접근을 허용합니다."));
         }
         NativeSandbox::WorkspaceWrite {
             network_access,
@@ -929,8 +916,11 @@ fn sandbox_ui(ui: &mut Ui, value: &mut NativeSandbox, text: &mut EditingText) {
             exclude_tmpdir_env_var,
         } => {
             ui.checkbox(network_access, tr("네트워크 접근"));
+            help_text(ui, tr("켜면 이 샌드박스에서 네트워크 접근을 허용합니다."));
             ui.checkbox(exclude_slash_tmp, tr("공용 임시 폴더 제외"));
+            help_text(ui, tr("공용 임시 폴더를 기본 쓰기 허용 경로에서 제외합니다."));
             ui.checkbox(exclude_tmpdir_env_var, tr("환경 임시 폴더 제외"));
+            help_text(ui, tr("환경 변수로 지정된 임시 폴더를 기본 쓰기 허용 경로에서 제외합니다."));
             let title = tr("쓰기 허용 절대 경로 · 한 줄에 하나");
             ui.label(title);
             text.show(ui, title, true, 32000);
@@ -946,7 +936,7 @@ fn sandbox_ui(ui: &mut Ui, value: &mut NativeSandbox, text: &mut EditingText) {
             }
         }
         NativeSandbox::DangerFullAccess => {
-            ui.label(tr("네이티브 정책 적용"));
+            help_text(ui, choice_copy("sandboxPolicy", "danger-full-access").unwrap().1);
         }
     }
 }

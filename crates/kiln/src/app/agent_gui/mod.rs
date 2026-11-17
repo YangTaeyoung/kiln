@@ -430,3 +430,14 @@ fn handoff_error(error: &str) -> Option<&'static str> {
 }
 
 pub(super) fn shell_fallback_unavailable(error: &anyhow::Error) -> bool { host::shell_unavailable(error) }
+
+/// SDK message identity used to correlate a follow-up with its native receipt.
+fn message_uuid() -> Result<String> {
+    use ring::rand::SecureRandom;
+    let mut bytes = [0u8; 16];
+    ring::rand::SystemRandom::new().fill(&mut bytes).map_err(|_| anyhow::anyhow!("Could not allocate message identity"))?;
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..]))
+}

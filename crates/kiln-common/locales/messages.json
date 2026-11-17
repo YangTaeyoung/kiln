@@ -13773,5 +13773,1050 @@
     "en": "The agent exited. Your draft was kept; use TUI to continue in the original shell.",
     "ja": "エージェントが終了しました。下書きは保持され、TUIで元のシェルを続行できます。",
     "zh-CN": "代理已退出，草稿已保留。可在 TUI 中继续使用原来的 Shell。"
+  },
+  "현재 작업이 끝나면 TUI로 전환합니다. GUI를 선택하면 전환을 취소합니다.": {
+    "en": "Switching to TUI after the current work finishes. Select GUI to cancel the switch.",
+    "ja": "現在の作業が終了するとTUIに切り替えます。GUIを選ぶと切り替えを取り消せます。",
+    "zh-CN": "当前工作结束后切换到TUI。选择GUI可取消切换。"
+  },
+  "모델·추론 강도·모드 선택은 다음 턴에 적용됩니다.": {
+    "en": "Model, effort, and mode selections apply to the next turn.",
+    "ja": "モデル・推論強度・モードの選択は次のターンに適用されます。",
+    "zh-CN": "模型、推理强度和模式选择将在下一轮生效。"
+  },
+  "1시간": {
+    "en": "1 hour",
+    "ja": "1時間",
+    "zh-CN": "1小时"
+  },
+  "5분": {
+    "en": "5 minutes",
+    "ja": "5分",
+    "zh-CN": "5分钟"
+  },
+  "AI가 검토": {
+    "en": "AI review",
+    "ja": "AIによる確認",
+    "zh-CN": "由AI审核"
+  },
+  "AI가 답변할 언어를 지정합니다.": {
+    "en": "Specify the language in which the AI will respond.",
+    "ja": "AIが回答する言語を指定します。",
+    "zh-CN": "指定AI的回答语言。"
+  },
+  "AI가 사용할 수 없게 할 도구 규칙을 입력합니다.": {
+    "en": "Enter the rules for tools that you want to prevent the AI from using.",
+    "ja": "AIが使用できないようにするツールのルールを入力します。",
+    "zh-CN": "输入要禁止AI使用的工具规则。"
+  },
+  "AI가 여러 에이전트의 작업을 구성하는 워크플로 기능을 사용할 수 있게 합니다.": {
+    "en": "AI enables the use of workflow features that coordinate the tasks of multiple agents.",
+    "ja": "AIが、複数のエージェントの作業を構成するワークフロー機能を利用できるようにします。",
+    "zh-CN": "使AI能够使用工作流功能来协调多个代理的工作。"
+  },
+  "AI가 작업을 진행하는 방식을 선택합니다.": {
+    "en": "Select how the AI will perform the task.",
+    "ja": "AIが作業を進める方法を選択します。",
+    "zh-CN": "选择AI执行任务的方式。"
+  },
+  "AI가 허용 범위를 넘는 작업에 대해 승인을 요청할 수 있습니다.": {
+    "en": "AI may request approval for tasks that exceed its authorized scope.",
+    "ja": "AIは、許容範囲を超える作業について承認を求めることがあります。",
+    "zh-CN": "当AI需要执行超出允许范围的操作时，可能会请求批准。"
+  },
+  "AI에 스킬 이름과 설명을 제공하고 사용자도 실행할 수 있게 합니다.": {
+    "en": "Provide the AI with the skill name and description so that users can also execute it.",
+    "ja": "AIにスキルの名前と説明を提供し、ユーザーも実行できるようにします。",
+    "zh-CN": "向AI提供技能名称和说明，并允许用户执行该技能。"
+  },
+  "AI에 스킬 이름만 제공하고 설명은 숨깁니다.": {
+    "en": "Expose only the skill name to the AI, without its description.",
+    "ja": "AIにはスキルの名前だけを提示し、説明は非表示にします。",
+    "zh-CN": "仅向AI提供技能名称，隐藏说明。"
+  },
+  "AI에서 숨기고 사용자의 슬래시 명령 실행만 허용합니다.": {
+    "en": "Hide this skill from the AI; allow users to run it with a slash command.",
+    "ja": "AIにはこのスキルを表示せず、ユーザーのスラッシュコマンドによる実行のみを許可します。",
+    "zh-CN": "在AI中隐藏该功能，仅允许执行用户的斜杠命令。"
+  },
+  "AI와 사용자 모두에게서 이 스킬을 숨깁니다.": {
+    "en": "Hides this skill from both the AI and the user.",
+    "ja": "AIとユーザーの両方からこのスキルを非表示にします。",
+    "zh-CN": "向AI和用户隐藏此技能。"
+  },
+  "AI와 사용자가 이 스킬을 발견하고 실행할 수 있는 범위를 선택합니다.": {
+    "en": "Select the scope within which AI and users can discover and execute this skill.",
+    "ja": "AIとユーザーが、このスキルを発見・実行できる範囲を選択します。",
+    "zh-CN": "选择AI和用户能够发现并执行此技能的范围。"
+  },
+  "Antigravity에 격리된 실행 환경을 요청합니다. 적용 여부는 CLI가 결정합니다.": {
+    "en": "Requests an isolated execution environment in Antigravity. The CLI determines whether to apply this request.",
+    "ja": "Antigravityに隔離された実行環境をリクエストします。適用するかどうかはCLIが決定します。",
+    "zh-CN": "请求在Antigravity中创建隔离的运行环境。是否应用由CLI决定。"
+  },
+  "Claude의 검토기가 도구 실행을 평가하고 승인 여부를 결정합니다.": {
+    "en": "Claude's reviewer evaluates the tool's execution and decides whether to approve it.",
+    "ja": "Claudeのレビュー担当者がツールの実行状況を評価し、承認の可否を決定します。",
+    "zh-CN": "Claude的审核员会评估工具的运行情况，并决定是否批准。"
+  },
+  "GPT-6.1 Terra 계열의 Codex 모델": {
+    "en": "Codex model in the GPT-6.1 Terra family",
+    "ja": "GPT-6.1 TerraシリーズのCodexモデル",
+    "zh-CN": "GPT-6.1 Terra 系列的 Codex 模型"
+  },
+  "MCP 서버가 추가 정보를 요청할 수 있게 합니다.": {
+    "en": "This allows the MCP server to request additional information.",
+    "ja": "MCPサーバーが追加情報を要求できるようにします。",
+    "zh-CN": "允许MCP服务器请求更多信息。"
+  },
+  "간단한 작업에 맞춰 추론을 적게 사용하는 단계입니다.": {
+    "en": "This is a stage where inference is used sparingly for simple tasks.",
+    "ja": "単純な作業に合わせて、推論をあまり使わない段階です。",
+    "zh-CN": "这是一个针对简单任务、尽量减少推理使用的阶段。"
+  },
+  "간단한 작업을 위한 빠르고 경제적인 모델": {
+    "en": "A fast and economical model for simple tasks",
+    "ja": "簡単な作業に適した、高速で経済的なモデル",
+    "zh-CN": "适用于简单任务的快速、经济的模型"
+  },
+  "검토용 AI가 승인 대상 요청을 평가합니다. 모든 작업을 자동 허용하는 설정은 아닙니다.": {
+    "en": "The review AI evaluates requests for approval. This setting does not automatically approve all tasks.",
+    "ja": "審査用AIが承認対象のリクエストを評価します。すべての作業を自動的に許可する設定ではありません。",
+    "zh-CN": "审核用AI会对待审批的请求进行评估。该设置并非自动批准所有操作。"
+  },
+  "결과를 먼저 전달하고 불필요한 서두를 줄입니다.": {
+    "en": "Present the results first and keep the introduction brief.",
+    "ja": "まず結果を伝え、不必要な前置きを省きます。",
+    "zh-CN": "先传达结果，减少不必要的开场白。"
+  },
+  "계정과 요청에 맞는 처리 등급을 제공자가 선택합니다.": {
+    "en": "The provider selects the processing level appropriate for the account and request.",
+    "ja": "プロバイダーは、アカウントおよびリクエストに応じた処理レベルを選択します。",
+    "zh-CN": "提供方将根据账户和请求选择相应的处理级别。"
+  },
+  "고난도 작업을 위한 고성능 모델": {
+    "en": "High-performance model for demanding tasks",
+    "ja": "難易度の高い作業向けの高性能モデル",
+    "zh-CN": "适用于高难度任务的高性能模型"
+  },
+  "공용 임시 폴더를 기본 쓰기 허용 경로에서 제외합니다.": {
+    "en": "Exclude the public temporary folder from the default write-allowed paths.",
+    "ja": "共有の一時フォルダを、デフォルトの書き込み許可パスから除外します。",
+    "zh-CN": "将公共临时文件夹从默认允许写入的路径中排除。"
+  },
+  "구현 이유와 관련 개념을 함께 설명합니다.": {
+    "en": "This section explains the rationale for the implementation along with related concepts.",
+    "ja": "実装の理由と関連する概念について併せて説明します。",
+    "zh-CN": "将同时说明实现原因及相关概念。"
+  },
+  "구현에 앞서 작업 계획을 만들고 필요한 사항을 확인합니다.": {
+    "en": "Before implementation, we create a work plan and verify the necessary requirements.",
+    "ja": "実装に先立ち、作業計画を立て、必要な事項を確認します。",
+    "zh-CN": "在实施之前，先制定工作计划并确认所需事项。"
+  },
+  "권장 후속 모델": {
+    "en": "Suggested successor",
+    "ja": "おすすめの後継モデル",
+    "zh-CN": "推荐后续模型"
+  },
+  "규모 지침 없음": {
+    "en": "No size guideline",
+    "ja": "規模に関する指針なし",
+    "zh-CN": "无规模要求"
+  },
+  "기본 모델을 사용할 수 없을 때 시도할 모델을 한 줄에 하나씩 입력합니다.": {
+    "en": "Enter the models to try, one per line, when the default model is unavailable.",
+    "ja": "基本モデルが使用できない場合に試すモデルを、1行に1つずつ入力します。",
+    "zh-CN": "当无法使用基本模型时，请将要尝试的模型逐行输入，每行一个。"
+  },
+  "기본 시스템 지시 뒤에 추가할 지시를 입력합니다.": {
+    "en": "Enter the instructions to be added after the default system instructions.",
+    "ja": "基本システムの指示の後に追加する指示を入力します。",
+    "zh-CN": "请在基本系统指令之后输入要添加的指令。"
+  },
+  "기본값으로 되돌리기": {
+    "en": "Restore to Default",
+    "ja": "デフォルトに戻す",
+    "zh-CN": "恢复默认设置"
+  },
+  "기존 권한 규칙을 따르며, 승인이 필요한 도구 실행은 사용자에게 묻습니다.": {
+    "en": "It follows the existing permission rules and prompts the user when running a tool that requires approval.",
+    "ja": "既存の権限ルールに従い、承認が必要なツールの実行については、ユーザーに確認を行います。",
+    "zh-CN": "遵循现有的权限规则，对于需要批准的工具执行操作，系统会向用户征询意见。"
+  },
+  "내가 검토": {
+    "en": "User review",
+    "ja": "私が確認する",
+    "zh-CN": "我审阅"
+  },
+  "높음보다 더 많은 추론을 사용하는 단계입니다.": {
+    "en": "This is a stage that involves more reasoning than the \"High\" stage.",
+    "ja": "「高い」というレベルよりもさらに多くの推論を用いる段階です。",
+    "zh-CN": "这是一个比“高”阶段更注重推理的阶段。"
+  },
+  "다중 에이전트 버전": {
+    "en": "Multi-Agent Version",
+    "ja": "マルチエージェント版",
+    "zh-CN": "多智能体版本"
+  },
+  "답변에 자세한 설명을 포함합니다.": {
+    "en": "The response includes a detailed explanation.",
+    "ja": "回答には詳しい説明を含めます。",
+    "zh-CN": "答复中包含详细说明。"
+  },
+  "답변에 적당한 양의 설명을 포함합니다.": {
+    "en": "Include an appropriate amount of explanation in your response.",
+    "ja": "回答には適切な量の説明を含めます。",
+    "zh-CN": "在回答中包含适量的说明。"
+  },
+  "답변을 준비하는 추론 강도입니다. 높은 단계는 더 많은 시간과 사용량이 필요할 수 있습니다.": {
+    "en": "This indicates the intensity of the reasoning involved in preparing a response. Higher levels may require more time and resources.",
+    "ja": "推論の強度に応じて回答が準備されます。レベルが高いほど、より多くの時間とリソースが必要になる場合があります。",
+    "zh-CN": "这是准备答案所需的推理强度。级别越高，可能需要更多时间和资源。"
+  },
+  "답변을 짧고 간결하게 작성합니다.": {
+    "en": "Keep your answers short and concise.",
+    "ja": "回答は短く簡潔に書きます。",
+    "zh-CN": "请简明扼要地撰写回复。"
+  },
+  "답변의 구성과 설명 방식을 선택합니다.": {
+    "en": "Select the structure and explanation style for your response.",
+    "ja": "回答の構成と説明方法を選択します。",
+    "zh-CN": "选择回答的结构和说明方式。"
+  },
+  "대화가 길어지면 이전 내용을 자동으로 압축해 컨텍스트 공간을 확보합니다.": {
+    "en": "If the conversation gets long, it automatically condenses previous content to free up context space.",
+    "ja": "会話が長くなると、以前の内容を自動的に圧縮して、コンテキスト領域を確保します。",
+    "zh-CN": "当对话时间较长时，系统会自动压缩先前内容，以腾出上下文空间。"
+  },
+  "대화를 맡을 주 에이전트를 선택합니다. 이름은 설치된 에이전트의 이름입니다.": {
+    "en": "Select the primary agent to handle the conversation. The name is that of the installed agent.",
+    "ja": "対話を担当するメインエージェントを選択します。名前は、インストールされているエージェントの名前です。",
+    "zh-CN": "选择负责对话的主代理。名称即为已安装代理的名称。"
+  },
+  "대화에 이어 보낼 메시지 제안을 표시합니다.": {
+    "en": "Displays suggested messages to send following the conversation.",
+    "ja": "会話の続きとして送信するメッセージの候補を表示します。",
+    "zh-CN": "显示在对话结束后可发送的消息建议。"
+  },
+  "도구 실행에 대한 권한 확인을 생략합니다.": {
+    "en": "Skip the permission check for running the tool.",
+    "ja": "ツールの実行に関する権限の確認を省略します。",
+    "zh-CN": "跳过对运行工具的权限验证。"
+  },
+  "도구가 파일을 읽고 쓰거나 네트워크에 접근할 수 있는 범위를 정합니다.": {
+    "en": "This defines the scope within which the tool can read and write files or access the network.",
+    "ja": "ツールがファイルの読み書きやネットワークへのアクセスを行える範囲を指定します。",
+    "zh-CN": "指定工具读取和写入文件或访问网络的范围。"
+  },
+  "동영상": {
+    "en": "Video",
+    "ja": "動画",
+    "zh-CN": "视频"
+  },
+  "메시지에 ultracode를 포함하면 해당 턴에서 워크플로를 사용하도록 합니다.": {
+    "en": "Including \"ultracode\" in a message enables the workflow for that turn.",
+    "ja": "メッセージに「ultracode」を含めると、そのターンでワークフローが使用されます。",
+    "zh-CN": "如果消息中包含 ultracode，则将在该回合中启用工作流。"
+  },
+  "모델 비교": {
+    "en": "Model comparison",
+    "ja": "モデルの比較",
+    "zh-CN": "模型对比"
+  },
+  "모델 식별자": {
+    "en": "Model ID",
+    "ja": "モデル識別子",
+    "zh-CN": "模型标识符"
+  },
+  "모델 전문 분야": {
+    "en": "Model specialty",
+    "ja": "モデルの専門分野",
+    "zh-CN": "模型专长"
+  },
+  "모델이 적절한 추론 요약 방식을 선택합니다.": {
+    "en": "The model selects an appropriate inference summarization method.",
+    "ja": "モデルが適切な推論要約方法を選択します。",
+    "zh-CN": "模型会选择合适的推理摘要方式。"
+  },
+  "모두 사용": {
+    "en": "Available to AI and user",
+    "ja": "すべて使用",
+    "zh-CN": "全部使用"
+  },
+  "미지원": {
+    "en": "Not supported",
+    "ja": "未対応",
+    "zh-CN": "未支持"
+  },
+  "바로 작업을 수행할지, 먼저 계획을 세울지 선택합니다.": {
+    "en": "Choose whether to start the task right away or make a plan first.",
+    "ja": "すぐに作業を行うか、まず計画を立てるかを選択します。",
+    "zh-CN": "选择是立即开始工作，还是先制定计划。"
+  },
+  "변경 전 확인": {
+    "en": "Confirm Before Making Changes",
+    "ja": "変更前の確認",
+    "zh-CN": "修改前确认"
+  },
+  "변경을 수행하기 전에 승인을 요청합니다.": {
+    "en": "We request approval before making any changes.",
+    "ja": "変更を行う前に承認を求めます。",
+    "zh-CN": "在进行更改之前，请先申请批准。"
+  },
+  "별도 승인 없이 허용할 도구 규칙을 입력합니다.": {
+    "en": "Enter the rules for tools that will be allowed without separate approval.",
+    "ja": "別途の承認なしに許可するツールのルールを入力します。",
+    "zh-CN": "输入无需单独批准即可允许使用的工具规则。"
+  },
+  "복잡한 작업을 위해 더 깊게 추론하는 단계입니다.": {
+    "en": "This is the stage where we engage in deeper reasoning to tackle complex tasks.",
+    "ja": "複雑な作業を行うために、より深く推論する段階です。",
+    "zh-CN": "这是为处理复杂任务而进行更深入推理的阶段。"
+  },
+  "분류": {
+    "en": "Category",
+    "ja": "分類",
+    "zh-CN": "分类"
+  },
+  "빠른 응답": {
+    "en": "Quick Response",
+    "ja": "迅速な対応",
+    "zh-CN": "快速响应"
+  },
+  "사용 안 함": {
+    "en": "Disabled",
+    "ja": "使用しない",
+    "zh-CN": "未使用"
+  },
+  "사용자: 개인 공통 설정 · 프로젝트: 공유 프로젝트 설정 · 로컬: 이 프로젝트의 개인 설정": {
+    "en": "User: Personal settings · Project: Shared project settings · Local: Personal settings for this project",
+    "ja": "ユーザー：個人用共通設定 · プロジェクト：共有プロジェクトの設定 · ローカル：このプロジェクトの個人設定",
+    "zh-CN": "用户：个人通用设置 · 项目：共享项目设置 · 本地：此项目的个人设置"
+  },
+  "상세 정보": {
+    "en": "Details",
+    "ja": "詳細情報",
+    "zh-CN": "详细信息"
+  },
+  "새 대화를 맡을 설치된 에이전트의 이름을 입력합니다.": {
+    "en": "Enter the name of the installed agent that will handle the new conversation.",
+    "ja": "新しい会話を担当する、インストール済みのエージェントの名前を入力します。",
+    "zh-CN": "请输入将负责新对话的已安装代理的名称。"
+  },
+  "새 대화에 사용할 기본 지시를 지정합니다.": {
+    "en": "Specify the default prompt to use for new conversations.",
+    "ja": "新しい会話で使用するデフォルトの指示を指定します。",
+    "zh-CN": "指定新对话中要使用的默认指令。"
+  },
+  "새 대화에 사용할 시스템 지시를 지정합니다.": {
+    "en": "Specify the system directive to use for the new conversation.",
+    "ja": "新しい会話で使用するシステム指示を指定します。",
+    "zh-CN": "指定用于新对话的系统指令。"
+  },
+  "새 대화에 추가로 포함할 작업 폴더를 절대 경로로 입력합니다.": {
+    "en": "Enter the absolute path of the task folder you want to include in the new conversation.",
+    "ja": "新しいダイアログに追加する作業フォルダを、絶対パスで入力します。",
+    "zh-CN": "请输入要添加到新对话中的工作文件夹的绝对路径。"
+  },
+  "새 대화에서 AI가 수행할 턴 수의 상한입니다.": {
+    "en": "This is the maximum number of turns the AI can take in a new conversation.",
+    "ja": "新しい会話において、AIが実行するターン数の上限です。",
+    "zh-CN": "这是AI在新对话中执行回合数的上限。"
+  },
+  "새 대화에서 사용할 도구 이름을 한 줄에 하나씩 입력합니다.": {
+    "en": "Enter the names of the tools you want to use in the new conversation, one per line.",
+    "ja": "新しいダイアログで使用するツール名を、1行に1つずつ入力します。",
+    "zh-CN": "请在一行中输入一个将在新对话中使用的工具名称。"
+  },
+  "새 대화에서 읽을 설정 파일의 범위를 직접 선택합니다.": {
+    "en": "In the new dialog, manually select the range of configuration files to read.",
+    "ja": "新しいダイアログで、読み込む設定ファイルの範囲を直接選択します。",
+    "zh-CN": "在新的对话框中，直接选择要读取的配置文件的范围。"
+  },
+  "새 대화의 비용 상한을 미국 달러로 지정합니다.": {
+    "en": "Set the cost limit for new conversations in U.S. dollars.",
+    "ja": "新しい会話の費用上限を米ドルで指定します。",
+    "zh-CN": "将新对话的费用上限设定为美元。"
+  },
+  "새 대화의 작업 방식을 정하는 개발자 지시를 입력합니다.": {
+    "en": "Enter the developer's instructions for defining how the new conversation will work.",
+    "ja": "新しいダイアログの動作方法を定める開発者の指示を入力します。",
+    "zh-CN": "请输入开发人员关于确定新对话工作方式的指示。"
+  },
+  "새 대화의 작업 폴더를 절대 경로로 입력합니다.": {
+    "en": "Enter the absolute path to the working folder for the new dialog.",
+    "ja": "新しいダイアログの作業フォルダを絶対パスで入力します。",
+    "zh-CN": "请输入新对话的工作文件夹的绝对路径。"
+  },
+  "샌드박스 제한을 넘는 실행의 승인 요청을 표시합니다.": {
+    "en": "Displays a request for approval to run an operation that exceeds sandbox restrictions.",
+    "ja": "サンドボックスの制限を超える実行の承認リクエストを表示します。",
+    "zh-CN": "显示请求批准超出沙箱限制的执行操作。"
+  },
+  "생각 과정 표시를 생략합니다. 추론 자체를 끄는 설정은 아닙니다.": {
+    "en": "Hide the thinking display. This does not turn off reasoning.",
+    "ja": "思考過程の表示を省略します。推論そのものを無効にする設定ではありません。",
+    "zh-CN": "省略思维过程的显示。这并非关闭推理功能的设置。"
+  },
+  "생각 과정에 사용할 토큰의 최대 수를 지정합니다.": {
+    "en": "Specifies the maximum number of tokens to use in the thought process.",
+    "ja": "思考プロセスで使用するトークンの最大数を指定します。",
+    "zh-CN": "指定在推理过程中使用的令牌最大数量。"
+  },
+  "생각 과정을 요약해서 표시합니다.": {
+    "en": "Show a summary of the thinking process.",
+    "ja": "思考の過程を要約して示します。",
+    "zh-CN": "将思考过程总结如下。"
+  },
+  "생각 과정을 화면에 얼마나 표시할지 선택합니다.": {
+    "en": "Select how much of the thought process to display on the screen.",
+    "ja": "思考の過程を画面にどの程度表示するかを選択します。",
+    "zh-CN": "选择在屏幕上显示多少思考过程。"
+  },
+  "생각 과정의 주요 내용만 표시합니다.": {
+    "en": "Only the main points of the thought process are shown.",
+    "ja": "思考プロセスの主な内容のみを表示します。",
+    "zh-CN": "仅显示思考过程的主要内容。"
+  },
+  "설명 중심": {
+    "en": "Explanation-focused",
+    "ja": "説明中心",
+    "zh-CN": "以说明为主"
+  },
+  "설명을 제공하고 일부 코드를 직접 작성하며 배울 수 있게 합니다.": {
+    "en": "It provides explanations and lets you learn by writing some code yourself.",
+    "ja": "説明を提供し、一部のコードを実際に記述しながら学習できるようにします。",
+    "zh-CN": "通过提供说明并亲自编写部分代码，帮助您掌握相关知识。"
+  },
+  "설정 출처별 설명": {
+    "en": "Explanation of Settings by Source",
+    "ja": "設定の出典ごとの説明",
+    "zh-CN": "按来源分类的设置说明"
+  },
+  "설치된 CLI와 계정의 기본 설정을 따릅니다.": {
+    "en": "It follows the default settings of the installed CLI and the account.",
+    "ja": "インストールされたCLIとアカウントのデフォルト設定に従います。",
+    "zh-CN": "遵循已安装的 CLI 和账户的默认设置。"
+  },
+  "소프트웨어 개발에 맞춘 기본 응답 스타일입니다.": {
+    "en": "This is a default response style tailored for software development.",
+    "ja": "ソフトウェア開発に合わせた基本的な応答スタイルです。",
+    "zh-CN": "这是针对软件开发设计的基本回复风格。"
+  },
+  "숨김": {
+    "en": "Hidden",
+    "ja": "非表示",
+    "zh-CN": "隐藏"
+  },
+  "스킬 스크립트 실행에 대한 승인 요청을 표시합니다.": {
+    "en": "Displays a prompt requesting approval to run the skill script.",
+    "ja": "スキルスクリプトの実行に関する承認リクエストを表示します。",
+    "zh-CN": "显示关于执行技能脚本的授权请求。"
+  },
+  "승인 요청 자동 거절": {
+    "en": "Deny approval requests",
+    "ja": "承認リクエストの自動拒否",
+    "zh-CN": "自动拒绝审批请求"
+  },
+  "승인 요청을 직접 확인하고 허용 또는 거절합니다.": {
+    "en": "Review approval requests yourself and either approve or deny them.",
+    "ja": "承認リクエストを直接確認し、許可または却下します。",
+    "zh-CN": "直接查看批准请求，并予以批准或拒绝。"
+  },
+  "승인을 요청하지 않습니다. 현재 권한으로 실행할 수 없는 작업은 실패합니다.": {
+    "en": "No approval is requested. Any actions that cannot be performed with the current permissions will fail.",
+    "ja": "承認は求められません。現在の権限では実行できない操作は失敗します。",
+    "zh-CN": "不会请求批准。当前权限下无法执行的操作将失败。"
+  },
+  "승인이 필요한 요청을 누가 검토할지 선택합니다. 샌드박스의 허용 범위는 바뀌지 않습니다.": {
+    "en": "Select who will review requests that require approval. The sandbox's scope remains unchanged.",
+    "ja": "承認が必要なリクエストを誰が審査するかを選択します。サンドボックスの許可範囲は変更されません。",
+    "zh-CN": "选择由谁来审核需要批准的请求。沙盒的允许范围不会发生变化。"
+  },
+  "신뢰되지 않은 작업 확인": {
+    "en": "Check untrusted actions",
+    "ja": "信頼できないタスクの確認",
+    "zh-CN": "确认不受信任的操作"
+  },
+  "신뢰된 읽기 작업 외에는 승인을 요구하는 정책입니다. 설치된 CLI가 제공하는 경우에만 적용됩니다.": {
+    "en": "Requires approval except for trusted read operations. Applies only when the installed CLI offers this policy.",
+    "ja": "信頼された読み取り操作以外は承認を要求するポリシーです。インストール済みのCLIがこれを提供する場合にのみ適用されます。",
+    "zh-CN": "这是一项除受信任的读取操作外均需批准的策略。仅在已安装的 CLI 提供该功能时才适用。"
+  },
+  "실제 사용 모델": {
+    "en": "Resolved model",
+    "ja": "実際に使用されているモデル",
+    "zh-CN": "实际使用的型号"
+  },
+  "실패 후 승인 요청": {
+    "en": "Ask after failure",
+    "ja": "失敗後の承認リクエスト",
+    "zh-CN": "失败后请求批准"
+  },
+  "실행 규칙이 요구하는 승인 요청을 표시합니다.": {
+    "en": "Displays the approval requests required by the execution rules.",
+    "ja": "実行ルールで要求される承認リクエストを表示します。",
+    "zh-CN": "显示执行规则所要求的批准请求。"
+  },
+  "에이전트 10개 미만을 목표로 합니다. 강제 제한은 아닙니다.": {
+    "en": "We aim to have fewer than 10 agents. This is not a mandatory limit.",
+    "ja": "エージェントは10個未満を目標とします。ただし、これは強制的な制限ではありません。",
+    "zh-CN": "目标是10个以下的代理。但这并非强制性限制。"
+  },
+  "에이전트 50개 미만을 목표로 합니다. 강제 제한은 아닙니다.": {
+    "en": "We are aiming for fewer than 50 agents. This is not a mandatory limit.",
+    "ja": "エージェントは50未満を目標とします。強制的な制限ではありません。",
+    "zh-CN": "目标是少于50个代理。但这并非强制性限制。"
+  },
+  "에이전트 5개 미만을 목표로 합니다. 강제 제한은 아닙니다.": {
+    "en": "We aim for fewer than 5 agents. This is not a mandatory limit.",
+    "ja": "エージェントは5つ未満を目標とします。強制的な制限ではありません。",
+    "zh-CN": "目标是5个以下的代理。这不是强制性限制。"
+  },
+  "오디오": {
+    "en": "Audio",
+    "ja": "オーディオ",
+    "zh-CN": "音频"
+  },
+  "외부 샌드박스": {
+    "en": "External sandbox",
+    "ja": "外部サンドボックス",
+    "zh-CN": "外部沙箱"
+  },
+  "요약": {
+    "en": "Summary",
+    "ja": "要約",
+    "zh-CN": "摘要"
+  },
+  "요청 처리 등급을 선택합니다. 지원 여부와 요금은 계정 및 모델에 따라 다릅니다.": {
+    "en": "Select a request processing tier. Availability and pricing vary depending on your account and model.",
+    "ja": "リクエストの処理レベルを選択します。対応の可否および料金は、アカウントやモデルによって異なります。",
+    "zh-CN": "请选择请求处理等级。是否提供支持以及相关费用因账户和模型而异。"
+  },
+  "요청에 따라 코드를 수정하고 도구를 실행합니다. 권한 정책은 별도로 적용됩니다.": {
+    "en": "We will modify the code as requested and run the tool. The permission policy will be applied separately.",
+    "ja": "ご要望に応じてコードを修正し、ツールを実行します。権限ポリシーは別途適用されます。",
+    "zh-CN": "根据请求修改代码并运行工具。权限策略将另行应用。"
+  },
+  "우선 처리": {
+    "en": "Priority",
+    "ja": "優先処理",
+    "zh-CN": "优先处理"
+  },
+  "우선 처리 등급으로 요청합니다. 지원 여부와 요금은 제공자의 정책을 따릅니다.": {
+    "en": "Please submit this as a priority request. Eligibility and fees are subject to the provider's policy.",
+    "ja": "まずは処理ランクとしてご依頼ください。対応の可否および料金は、プロバイダーのポリシーに従います。",
+    "zh-CN": "请先提交处理等级申请。是否提供支持以及相关费用将遵循服务提供商的政策。"
+  },
+  "워크플로에 권장 에이전트 규모를 지정하지 않습니다.": {
+    "en": "Do not set a suggested number of agents for the workflow.",
+    "ja": "ワークフローには、推奨されるエージェントの規模を指定しません。",
+    "zh-CN": "请勿在工作流中指定推荐的代理规模。"
+  },
+  "워크플로의 권장 에이전트 규모입니다. 강제 실행 제한은 아닙니다.": {
+    "en": "These are the recommended agent sizes for the workflow. They are not mandatory limits.",
+    "ja": "ワークフローの推奨エージェント規模です。強制的な制限ではありません。",
+    "zh-CN": "这是工作流的推荐代理规模。并非强制执行限制。"
+  },
+  "웹 검색을 사용하지 않습니다.": {
+    "en": "Do not use web search.",
+    "ja": "ウェブ検索は使用しません。",
+    "zh-CN": "不使用网络搜索。"
+  },
+  "웹 검색을 사용하지 않을지, 저장된 결과 또는 실시간 결과를 사용할지 선택합니다.": {
+    "en": "Choose whether to use web search, saved results, or real-time results.",
+    "ja": "ウェブ検索を使用しないか、保存された検索結果またはリアルタイムの検索結果を使用するかを選択します。",
+    "zh-CN": "选择是否使用网页搜索，以及使用已保存的结果还是实时结果。"
+  },
+  "유연한 처리": {
+    "en": "Flex",
+    "ja": "柔軟な対応",
+    "zh-CN": "灵活处理"
+  },
+  "응답 시간과 추론 깊이의 균형을 맞추는 단계입니다.": {
+    "en": "This is the step where we balance response time and inference depth.",
+    "ja": "応答時間と推論の深さのバランスを取る段階です。",
+    "zh-CN": "这是在响应时间与推理深度之间寻求平衡的阶段。"
+  },
+  "응답을 생성할 AI 모델을 선택합니다.": {
+    "en": "Select the AI model to generate the response.",
+    "ja": "応答を生成するAIモデルを選択します。",
+    "zh-CN": "选择用于生成回复的AI模型。"
+  },
+  "이 계정에서 제공하는 AI 모델": {
+    "en": "AI model offered for this account",
+    "ja": "このアカウントで提供されているAIモデル",
+    "zh-CN": "该账号提供的AI模型"
+  },
+  "이 계정에서 제공하는 AI 모델 · 상세 정보에서 제공자 설명 확인": {
+    "en": "AI model offered for this account; see details for the provider description",
+    "ja": "このアカウントが提供するAIモデル・詳細情報で、提供者の説明を確認する",
+    "zh-CN": "请在该账号提供的AI模型·详细信息中查看提供者的说明"
+  },
+  "이 기능을 사용하지 않습니다.": {
+    "en": "Disable this feature.",
+    "ja": "この機能は使用しません。",
+    "zh-CN": "不使用此功能。"
+  },
+  "이 기능을 사용합니다.": {
+    "en": "Use this feature.",
+    "ja": "この機能を使用します。",
+    "zh-CN": "使用此功能。"
+  },
+  "이 대화를 기록에 저장하지 않습니다.": {
+    "en": "This conversation will not be saved in the records.",
+    "ja": "この会話は記録に保存されません。",
+    "zh-CN": "此对话不会保存到记录中。"
+  },
+  "이 대화를 기록에 저장할지 선택합니다.": {
+    "en": "Choose whether to save this conversation to your records.",
+    "ja": "この会話を記録に保存するかどうかを選択します。",
+    "zh-CN": "请选择是否将此对话保存到记录中。"
+  },
+  "이 대화를 기록에 저장합니다.": {
+    "en": "This conversation will be saved in the records.",
+    "ja": "この会話を記録として保存します。",
+    "zh-CN": "将此对话保存到记录中。"
+  },
+  "이 모델 사용": {
+    "en": "Use this model",
+    "ja": "このモデルを使用",
+    "zh-CN": "使用此模型"
+  },
+  "이 세션의 후속 작업에도 이 권한을 허용합니다.": {
+    "en": "This permission is also granted for follow-up tasks related to this session.",
+    "ja": "このセッションのその後の作業についても、この権限を許可します。",
+    "zh-CN": "也允许此权限用于该会话的后续操作。"
+  },
+  "이 이름으로 설치된 사용자 응답 스타일을 사용합니다.": {
+    "en": "Use the user response style installed under this name.",
+    "ja": "この名前で設定されたユーザー応答スタイルを使用します。",
+    "zh-CN": "使用以该名称安装的用户响应样式。"
+  },
+  "이 이름으로 설치된 에이전트의 지시와 도구 구성을 사용합니다.": {
+    "en": "Use the instructions and tool configuration for the agent installed under this name.",
+    "ja": "この名前でインストールされたエージェントの指示とツールの構成を使用します。",
+    "zh-CN": "使用以该名称安装的代理的配置和工具设置。"
+  },
+  "이 이름으로 정의된 권한 구성을 적용합니다. 정확한 접근 범위는 제공자 설명을 확인하세요.": {
+    "en": "Applies the permission configuration defined by this name. Please refer to the provider's description for the exact scope of access.",
+    "ja": "この名前で定義された権限構成を適用します。正確なアクセス範囲については、プロバイダーの説明をご確認ください。",
+    "zh-CN": "应用以此名称定义的权限配置。具体访问范围请参阅提供者说明。"
+  },
+  "이 토큰 수에 도달하면 대화 내용을 압축하도록 설정합니다.": {
+    "en": "Set the system to compress the conversation when this token count is reached.",
+    "ja": "このトークン数に達したら、会話内容を圧縮するように設定します。",
+    "zh-CN": "当达到该令牌数量时，系统将自动压缩对话内容。"
+  },
+  "이름만 공개": {
+    "en": "Name only",
+    "ja": "名前のみを公開",
+    "zh-CN": "仅公开名称"
+  },
+  "이미 허용된 작업은 실행하고, 추가 승인이 필요한 작업은 묻지 않고 거절합니다.": {
+    "en": "It executes tasks that have already been approved and automatically rejects tasks that require additional approval without prompting.",
+    "ja": "すでに許可されている操作は実行し、追加の承認が必要な操作は確認せずに拒否します。",
+    "zh-CN": "已获批准的操作将予以执行，而需要额外批准的操作则会直接拒绝，不会进行确认。"
+  },
+  "이용 안내": {
+    "en": "User Guide",
+    "ja": "ご利用案内",
+    "zh-CN": "使用指南"
+  },
+  "이용 프로그램": {
+    "en": "Access programs",
+    "ja": "利用対象プログラム",
+    "zh-CN": "可用方案"
+  },
+  "이전 세대 범용 모델": {
+    "en": "Previous-generation general-purpose model",
+    "ja": "前世代の汎用モデル",
+    "zh-CN": "上一代通用型号"
+  },
+  "자동 검토": {
+    "en": "Automatic Review",
+    "ja": "自動レビュー",
+    "zh-CN": "自动审核"
+  },
+  "자동 추론 조절": {
+    "en": "Adaptive thinking",
+    "ja": "自動推論の制御",
+    "zh-CN": "自动推理调节"
+  },
+  "작업 폴더에 쓰기": {
+    "en": "Write to the working folder",
+    "ja": "作業フォルダへの書き込み",
+    "zh-CN": "写入工作文件夹"
+  },
+  "작업 폴더와 추가로 허용한 경로에 파일을 쓸 수 있습니다.": {
+    "en": "You can save files to the working folder and any additional paths you have authorized.",
+    "ja": "作業フォルダや、追加で許可されたパスにファイルを書き込むことができます。",
+    "zh-CN": "可以将文件写入工作文件夹以及其他已允许的路径中。"
+  },
+  "작업을 수행하기 전에 계획을 세웁니다.": {
+    "en": "I make a plan before starting the task.",
+    "ja": "作業を行う前に計画を立てます。",
+    "zh-CN": "在开始工作之前，先制定计划。"
+  },
+  "재사용할 프롬프트 캐시의 유지 시간을 선택합니다. 요금은 제공자의 정책을 따릅니다.": {
+    "en": "Select the retention period for the reusable prompt cache. Billing is subject to the provider's policies.",
+    "ja": "再利用するプロンプトキャッシュの保持期間を選択します。料金はプロバイダーのポリシーに従います。",
+    "zh-CN": "选择要重复使用的提示词缓存的保留时间。费用按服务提供商的政策收取。"
+  },
+  "전체 접근": {
+    "en": "Full access",
+    "ja": "全体へのアクセス",
+    "zh-CN": "全面访问"
+  },
+  "제공자 설명": {
+    "en": "Provider Description",
+    "ja": "提供者による説明",
+    "zh-CN": "提供者说明"
+  },
+  "제공자 설명 원문": {
+    "en": "Original Provider Description",
+    "ja": "提供者による説明の原文",
+    "zh-CN": "提供者说明原文"
+  },
+  "제공자 정의": {
+    "en": "Provider-defined",
+    "ja": "プロバイダー定義",
+    "zh-CN": "提供方定义"
+  },
+  "제공자 정의 단계": {
+    "en": "Provider-defined level",
+    "ja": "プロバイダー定義の段階",
+    "zh-CN": "提供方定义的级别"
+  },
+  "제공자 정의 등급": {
+    "en": "Provider-defined tier",
+    "ja": "プロバイダー定義の等級",
+    "zh-CN": "提供方定义的服务等级"
+  },
+  "제공자가 이 대화에 제공한 추가 설정입니다. 고유한 이름은 그대로 표시합니다.": {
+    "en": "These are additional settings provided by the provider for this conversation. The unique names are displayed as-is.",
+    "ja": "プロバイダーがこの会話に提供した追加の設定です。固有の名前はそのまま表示されます。",
+    "zh-CN": "这是提供者在此对话中提供的附加设置。唯一名称将原样显示。"
+  },
+  "제공자가 저장한 웹 검색 결과를 사용합니다.": {
+    "en": "Uses web search results saved by the provider.",
+    "ja": "プロバイダが保存したウェブ検索結果を使用します。",
+    "zh-CN": "使用提供商保存的网页搜索结果。"
+  },
+  "제공자가 정의한 선택지입니다. 세부 동작은 제공자 설명을 확인하세요.": {
+    "en": "These are the options defined by the provider. Please refer to the provider's description for details on how they work.",
+    "ja": "プロバイダーが定義した選択肢です。詳細な動作については、プロバイダーの説明をご確認ください。",
+    "zh-CN": "这是提供商定义的选项。具体操作请参阅提供商的说明。"
+  },
+  "제공자가 정의한 최대 수준의 추론 단계입니다.": {
+    "en": "Use the provider-defined Max reasoning level.",
+    "ja": "プロバイダーが定義した最高レベルの推論段階です。",
+    "zh-CN": "这是提供者定义的最高级别的推理阶段。"
+  },
+  "제공자가 정의한 최상위 추론 단계입니다.": {
+    "en": "Use the provider-defined Ultra reasoning level.",
+    "ja": "プロバイダーによって定義された最上位の推論段階です。",
+    "zh-CN": "这是提供者定义的最高级推理阶段。"
+  },
+  "제공자가 정한 기본 작업 모드를 사용합니다.": {
+    "en": "Uses the default operating mode specified by the provider.",
+    "ja": "プロバイダーが指定したデフォルトの作業モードを使用します。",
+    "zh-CN": "使用提供商设定的默认工作模式。"
+  },
+  "제공자가 정한 자동 작업 모드를 사용합니다.": {
+    "en": "Use the automatic operation mode specified by the provider.",
+    "ja": "プロバイダーが設定した自動実行モードを使用します。",
+    "zh-CN": "使用提供商设定的自动操作模式。"
+  },
+  "제한된 실행이 실패하면 다시 실행하기 위한 승인을 요청하는 이전 정책입니다.": {
+    "en": "This is a legacy policy that requests authorization to retry if a restricted execution fails.",
+    "ja": "制限付きの実行が失敗した場合、再実行の承認を求める以前のポリシーです。",
+    "zh-CN": "这是一项旧政策，当受限执行失败时，会请求批准以重新执行。"
+  },
+  "주 에이전트가 자문을 구할 때 사용할 모델을 선택합니다.": {
+    "en": "Select the model that the main agent will use when seeking advice.",
+    "ja": "メインエージェントが助言を求める際に使用するモデルを選択します。",
+    "zh-CN": "选择主代理在寻求建议时将使用的模型。"
+  },
+  "주도적으로": {
+    "en": "Proactively",
+    "ja": "主体的に",
+    "zh-CN": "主动地"
+  },
+  "지원": {
+    "en": "Supported",
+    "ja": "支援",
+    "zh-CN": "申请"
+  },
+  "지원 추론 강도": {
+    "en": "Supported reasoning levels",
+    "ja": "支援推論の強度",
+    "zh-CN": "支持推断强度"
+  },
+  "지원하는 모델의 빠른 응답 모드를 사용합니다. 별도 사용량 요금이 적용될 수 있습니다.": {
+    "en": "Use the fast response mode for supported models. Additional usage fees may apply.",
+    "ja": "対応モデルの高速応答モードを使用します。別途利用料がかかる場合があります。",
+    "zh-CN": "使用所支持机型的快速响应模式。可能会产生额外的流量费用。"
+  },
+  "직접 승인": {
+    "en": "Manual approval",
+    "ja": "直接承認",
+    "zh-CN": "直接批准"
+  },
+  "직접 실행만": {
+    "en": "User invocation only",
+    "ja": "ユーザーによる実行のみ",
+    "zh-CN": "仅供用户调用"
+  },
+  "처리 시간과 가용성이 달라질 수 있는 유연한 처리 등급을 사용합니다.": {
+    "en": "We use flexible processing tiers, which may vary in terms of processing time and availability.",
+    "ja": "処理時間や可用性が異なる可能性のある、柔軟な処理レベルを採用しています。",
+    "zh-CN": "采用处理等级灵活的方案，处理时间和可用性可能会有所不同。"
+  },
+  "체크하면 새 대화에 이 값을 지정합니다. 해제하면 기본 설정을 따릅니다.": {
+    "en": "If checked, this value will be applied to new conversations. If unchecked, the default setting will be used.",
+    "ja": "チェックを入れると、新しい会話でこの値が指定されます。チェックを外すと、デフォルト設定が適用されます。",
+    "zh-CN": "勾选后，将在新对话中指定此值。取消勾选后，将遵循默认设置。"
+  },
+  "체크한 종류의 승인 요청을 표시합니다. 체크 해제한 요청은 자동 거절됩니다.": {
+    "en": "Displays approval requests for the selected types. Requests for which the checkbox is unchecked are automatically rejected.",
+    "ja": "チェックされた種類の承認リクエストが表示されます。チェックが外されたリクエストは自動的に却下されます。",
+    "zh-CN": "显示已勾选类型的审批请求。未勾选的请求将被自动拒绝。"
+  },
+  "최신 웹 검색 결과를 요청합니다.": {
+    "en": "Request fresh web search results.",
+    "ja": "最新のウェブ検索結果をリクエストします。",
+    "zh-CN": "请求最新的网页搜索结果。"
+  },
+  "최종 답변에 포함할 설명의 양을 선택합니다.": {
+    "en": "Select the amount of explanation to include in the final answer.",
+    "ja": "最終回答に含める説明の量を選択します。",
+    "zh-CN": "选择要包含在最终答案中的说明内容量。"
+  },
+  "추가 권한을 요청하는 도구의 승인 요청을 표시합니다.": {
+    "en": "Displays an authorization request from a tool asking for additional permissions.",
+    "ja": "追加の権限を要求するツールからの承認リクエストを表示します。",
+    "zh-CN": "显示请求额外权限的工具发出的授权请求。"
+  },
+  "추가 속성": {
+    "en": "Additional Properties",
+    "ja": "追加属性",
+    "zh-CN": "附加属性"
+  },
+  "추가 입력 형식": {
+    "en": "Additional Input Formats",
+    "ja": "追加の入力形式",
+    "zh-CN": "其他输入格式"
+  },
+  "추가 추론을 사용하지 않는 단계입니다.": {
+    "en": "This is a step that does not involve additional reasoning.",
+    "ja": "追加の推論を行わない段階です。",
+    "zh-CN": "这是一个不使用额外推理的步骤。"
+  },
+  "추론 강도 조절": {
+    "en": "Reasoning effort control",
+    "ja": "推論の強度の調整",
+    "zh-CN": "推理强度调节"
+  },
+  "추론 과정의 요약을 얼마나 자세히 표시할지 선택합니다.": {
+    "en": "Select how much detail to include in the summary of the reasoning process.",
+    "ja": "推論プロセスの要約をどの程度詳細に表示するかを選択します。",
+    "zh-CN": "选择以何种详细程度显示推理过程的摘要。"
+  },
+  "추론 요약을 자세히 표시합니다.": {
+    "en": "Displays a detailed summary of the inference.",
+    "ja": "推論の要約を詳細に表示します。",
+    "zh-CN": "详细显示推理摘要。"
+  },
+  "추론 요약을 짧게 표시합니다.": {
+    "en": "Displays a brief summary of the reasoning.",
+    "ja": "推論の要約を簡潔に表示します。",
+    "zh-CN": "简要显示推理摘要。"
+  },
+  "추론 요약을 표시하지 않습니다. 추론 강도는 바뀌지 않습니다.": {
+    "en": "Inference summaries are not displayed. The inference strength remains unchanged.",
+    "ja": "推論の要約は表示されません。推論の強度は変わりません。",
+    "zh-CN": "不显示推理摘要。推理强度保持不变。"
+  },
+  "추론을 최소화하는 단계입니다.": {
+    "en": "This is the step where we minimize inference.",
+    "ja": "推論を最小限に抑える段階です。",
+    "zh-CN": "这是将推理降至最低的步骤。"
+  },
+  "컨텍스트 창의 크기를 토큰 수로 지정합니다.": {
+    "en": "Specify the size of the context window in terms of the number of tokens.",
+    "ja": "コンテキストウィンドウのサイズをトークン数で指定します。",
+    "zh-CN": "根据令牌数量指定上下文窗口的大小。"
+  },
+  "켜면 이 샌드박스에서 네트워크 접근을 허용합니다.": {
+    "en": "When enabled, this sandbox allows network access.",
+    "ja": "有効にすると、このサンドボックスでのネットワークへのアクセスが許可されます。",
+    "zh-CN": "启用后，将允许在此沙箱中进行网络访问。"
+  },
+  "코드를 살펴보고 계획을 세웁니다. 일반적인 파일 편집과 실행을 제한합니다.": {
+    "en": "Review the code and develop a plan. Restrict general file editing and execution.",
+    "ja": "コードを確認し、計画を立てます。通常のファイル編集や実行を制限します。",
+    "zh-CN": "查看代码并制定计划。限制常规的文件编辑和执行操作。"
+  },
+  "코드를 작성하고 수정하는 작업 모드입니다.": {
+    "en": "This is the work mode for writing and editing code.",
+    "ja": "コードを作成・修正するための作業モードです。",
+    "zh-CN": "这是用于编写和修改代码的工作模式。"
+  },
+  "코딩과 일상적인 작업을 위한 최신 범용 모델": {
+    "en": "Latest general-purpose model for coding and everyday work",
+    "ja": "コーディングや日常的な作業のための最新の汎用モデル",
+    "zh-CN": "适用于编程和日常工作的最新通用模型"
+  },
+  "텍스트": {
+    "en": "Text",
+    "ja": "テキスト",
+    "zh-CN": "文本"
+  },
+  "파일 수정과 도구 실행 전에 승인을 받는 방식을 선택합니다.": {
+    "en": "Select the method for obtaining approval before modifying files or running tools.",
+    "ja": "ファイルの編集やツールの実行前に承認を得る方式を選択します。",
+    "zh-CN": "选择在修改文件和运行工具之前获取批准的方式。"
+  },
+  "파일 실행 격리를 외부 환경이 담당합니다.": {
+    "en": "The external environment is responsible for isolating file execution.",
+    "ja": "ファイルの実行の隔離は、外部環境が担当します。",
+    "zh-CN": "文件执行的隔离由外部环境负责。"
+  },
+  "파일 접근에 대한 샌드박스 제한 없이 실행합니다.": {
+    "en": "Runs without sandbox restrictions on file access.",
+    "ja": "ファイルへのアクセスに関するサンドボックスの制限なしに実行します。",
+    "zh-CN": "在不受沙盒对文件访问限制的情况下运行。"
+  },
+  "파일 편집을 자동 승인합니다. 그 밖의 도구 실행은 기존 권한 규칙을 따릅니다.": {
+    "en": "File edits are automatically approved. All other tool executions follow the existing permission rules.",
+    "ja": "ファイルの編集は自動的に承認されます。その他のツールの実行については、既存の権限ルールに従います。",
+    "zh-CN": "自动批准文件编辑。其他工具的执行则遵循现有的权限规则。"
+  },
+  "파일·네트워크 접근과 승인을 함께 정의하는 권한 프로필을 선택합니다.": {
+    "en": "Select a permission profile that defines both file and network access and authorization.",
+    "ja": "ファイルおよびネットワークへのアクセスと承認をまとめて定義する権限プロファイルを選択します。",
+    "zh-CN": "选择同时定义文件和网络访问权限及批准规则的权限配置文件。"
+  },
+  "파일을 읽을 수 있지만 변경할 수 없습니다.": {
+    "en": "You can read the file, but you cannot modify it.",
+    "ja": "ファイルは読み取ることができますが、変更することはできません。",
+    "zh-CN": "可以读取该文件，但无法对其进行修改。"
+  },
+  "표시 안 함": {
+    "en": "Do not display",
+    "ja": "非表示",
+    "zh-CN": "不显示"
+  },
+  "표준": {
+    "en": "Standard",
+    "ja": "標準",
+    "zh-CN": "标准"
+  },
+  "표준 처리 등급을 사용합니다.": {
+    "en": "Use the standard processing tier.",
+    "ja": "標準処理等級を使用します。",
+    "zh-CN": "使用标准处理等级。"
+  },
+  "프롬프트 캐시를 1시간 동안 유지하도록 요청합니다.": {
+    "en": "Please set the prompt cache to last for 1 hour.",
+    "ja": "プロンプトキャッシュを1時間保持するようにリクエストします。",
+    "zh-CN": "请求将提示词缓存保留1小时。"
+  },
+  "프롬프트 캐시를 5분 동안 유지하도록 요청합니다.": {
+    "en": "Please set the prompt cache to last for 5 minutes.",
+    "ja": "プロンプトキャッシュを5分間保持するようにリクエストします。",
+    "zh-CN": "请将提示词缓存保留5分钟。"
+  },
+  "필요할 때 승인 요청": {
+    "en": "Ask when needed",
+    "ja": "必要なときに承認を依頼する",
+    "zh-CN": "在需要时提交审批请求"
+  },
+  "학습 중심": {
+    "en": "Learning-Centered",
+    "ja": "学習中心",
+    "zh-CN": "以学习为中心"
+  },
+  "합리적인 가정으로 일상적인 작업을 시작하는 스타일입니다.": {
+    "en": "This is a style that begins routine tasks with reasonable assumptions.",
+    "ja": "合理的な前提に基づいて日常的な作業を始めるスタイルです。",
+    "zh-CN": "这是一种基于合理假设来开展日常工作的风格。"
+  },
+  "핵심만": {
+    "en": "Just the essentials",
+    "ja": "要点だけ",
+    "zh-CN": "只说重点"
+  },
+  "허용 범위를 넘는 작업에 대해 언제 승인을 요청할지 선택합니다.": {
+    "en": "Select when to request approval for tasks that exceed the allowed range.",
+    "ja": "許容範囲を超える作業について、いつ承認を依頼するかを選択します。",
+    "zh-CN": "选择在何时针对超出允许范围的操作请求批准。"
+  },
+  "현재 모델을 먼저 표시합니다. 다른 모델을 비교하고 바로 선택할 수 있습니다.": {
+    "en": "The current model is displayed first. You can compare it with other models and select one right away.",
+    "ja": "まず現在のモデルを表示します。他のモデルと比較して、すぐに選択することができます。",
+    "zh-CN": "首先显示当前型号。您可以进行对比，并直接选择其他型号。"
+  },
+  "현재 사용 중": {
+    "en": "Currently in use",
+    "ja": "現在使用中",
+    "zh-CN": "当前正在使用中"
+  },
+  "현재 작업이 끝날 때까지만 이 권한을 허용합니다.": {
+    "en": "This permission is granted only until the current task is completed.",
+    "ja": "この権限は、現在の作業が終了するまでのみ許可されます。",
+    "zh-CN": "仅在当前任务结束前允许此权限。"
+  },
+  "현재 추론 강도를 유지하면서 여러 에이전트를 활용하는 동적 워크플로를 사용합니다.": {
+    "en": "Use dynamic workflows with multiple agents while keeping the current reasoning effort.",
+    "ja": "現在の推論強度を維持しつつ、複数のエージェントを活用する動的なワークフローを採用しています。",
+    "zh-CN": "我们采用一种动态工作流，在保持当前推理强度同时利用多个代理。"
+  },
+  "환경 변수로 지정된 임시 폴더를 기본 쓰기 허용 경로에서 제외합니다.": {
+    "en": "Excludes the temporary folder specified as an environment variable from the default write-allowed paths.",
+    "ja": "環境変数で指定された一時フォルダを、デフォルトの書き込み許可パスから除外します。",
+    "zh-CN": "将环境变量中指定的临时文件夹从默认写入路径中排除。"
+  },
+  "사용자 정의": {
+    "en": "Custom",
+    "ja": "ユーザー定義",
+    "zh-CN": "自定义"
+  },
+  "일상적인 작업과 복잡한 작업을 위한 모델": {
+    "en": "Models for everyday and complex tasks",
+    "ja": "日常的な作業や複雑な作業向けのモデル",
+    "zh-CN": "适用于日常工作和复杂工作的机型"
+  },
+  "가장 어려운 작업과 장시간 작업을 위한 모델": {
+    "en": "A model designed for the most demanding tasks and long work hours",
+    "ja": "最も困難な作業や長時間の作業に適したモデル",
+    "zh-CN": "专为最艰巨的任务和长时间作业设计的机型"
+  },
+  "반복적인 일상 작업에 효율적인 모델": {
+    "en": "An Efficient Model for Repetitive Daily Tasks",
+    "ja": "反復的な日常業務に効率的なモデル",
+    "zh-CN": "适用于重复性日常工作的高效模型"
+  },
+  "빠른 답변을 위한 모델": {
+    "en": "A Model for Quick Responses",
+    "ja": "迅速な回答のためのモデル",
+    "zh-CN": "用于快速回复的模型"
+  },
+  "제공자가 현재 권장하는 기본 모델": {
+    "en": "The provider's current recommended default model",
+    "ja": "プロバイダーが現在推奨している基本モデル",
+    "zh-CN": "提供商当前推荐的标准模型"
+  },
+  "자동 승인 모드": {
+    "en": "Auto-Approval Mode",
+    "ja": "自動承認モード",
+    "zh-CN": "自动批准模式"
+  },
+  "추론 끄기": {
+    "en": "Turn Off Inference",
+    "ja": "推論をオフにする",
+    "zh-CN": "关闭推理"
   }
 }

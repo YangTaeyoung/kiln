@@ -623,6 +623,11 @@ fn dispatch(
     } else {
         Ok(())
     };
+    let validation = validation.and_then(|()| {
+        ensure!(!matches!(q.command, Command::Submit {..} | Command::SubmitWithSkills {..}) || active.is_none(),
+            "The previous message is still awaiting confirmation");
+        Ok(())
+    });
     match validation.and_then(|()| adapter.command(&q.command, runtime_id)) {
         Ok(effects) => {
             if let Some(event) = user_event(&q.id, &q.command) {
@@ -846,27 +851,35 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
                         }
                         if let Command::SetPresentation(target) = q.command {
                             if claim_command(&mut journal, &q)? {
-                                let handoff = target == Presentation::Terminal
-                                    && presentation::can_handoff(&journal.transcript, active.is_some())
-                                    && mailbox(&dir)?.len() == 1;
-                                if capture_bootstrap { backend.observe_bootstrap(&group); }
-                                let exclusive = handoff && backend.handoff_is_exclusive(&group, &config,
-                                    &mut adapter, &mut journal, &mut active).unwrap_or(false);
-                                // Native status reads can deliver late work/approval events.
-                                let handoff = exclusive
-                                    && presentation::can_handoff(&journal.transcript, active.is_some())
-                                    && mailbox(&dir)?.len() == 1;
-                                let same = target == Presentation::Gui;
-                                journal.push(Event::CommandState {
-                                    id: q.id,
-                                    state: if handoff || same { CommandPhase::Accepted } else { CommandPhase::Rejected },
-                                })?;
-                                if handoff {
-                                    terminal_handoff = true;
-                                } else if !same {
-                                    journal.push(Event::Error(if presentation::can_handoff(&journal.transcript, active.is_some()) {
-                                        "KILN_HANDOFF_HELPERS"
-                                    } else { "KILN_HANDOFF_BUSY" }.into()))?;
+                                if target == Presentation::Terminal
+                                    && !presentation::can_handoff(&journal.transcript, active.is_some())
+                                {
+                                    journal.push(Event::Presentation { current: Presentation::Gui, return_requested: true })?;
+                                    journal.push(Event::CommandState { id: q.id, state: CommandPhase::Accepted })?;
+                                } else {
+                                    journal.push(Event::Presentation { current: Presentation::Gui, return_requested: false })?;
+                                    let handoff = target == Presentation::Terminal
+                                        && presentation::can_handoff(&journal.transcript, active.is_some())
+                                        && mailbox(&dir)?.len() == 1;
+                                    if capture_bootstrap { backend.observe_bootstrap(&group); }
+                                    let exclusive = handoff && backend.handoff_is_exclusive(&group, &config,
+                                        &mut adapter, &mut journal, &mut active).unwrap_or(false);
+                                    // Native status reads can deliver late work/approval events.
+                                    let handoff = exclusive
+                                        && presentation::can_handoff(&journal.transcript, active.is_some())
+                                        && mailbox(&dir)?.len() == 1;
+                                    let same = target == Presentation::Gui;
+                                    journal.push(Event::CommandState {
+                                        id: q.id,
+                                        state: if handoff || same { CommandPhase::Accepted } else { CommandPhase::Rejected },
+                                    })?;
+                                    if handoff {
+                                        terminal_handoff = true;
+                                    } else if !same {
+                                        journal.push(Event::Error(if presentation::can_handoff(&journal.transcript, active.is_some()) {
+                                            "KILN_HANDOFF_HELPERS"
+                                        } else { "KILN_HANDOFF_BUSY" }.into()))?;
+                                    }
                                 }
                             }
                             fs::remove_file(path)?;
@@ -884,6 +897,24 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
                         if matches!(q.command, Command::Submit {..} | Command::SubmitWithSkills {..}) { capture_bootstrap = false; }
                         dispatch(&mut backend, &mut adapter, &mut journal, q, id, &mut active)?;
                         fs::remove_file(path)?;
+                    }
+                    if journal.transcript.return_requested
+                        && presentation::can_handoff(&journal.transcript, active.is_some())
+                        && mailbox(&dir)?.is_empty()
+                    {
+                        if capture_bootstrap { backend.observe_bootstrap(&group); }
+                        let exclusive = backend.handoff_is_exclusive(&group, &config, &mut adapter, &mut journal, &mut active).unwrap_or(false);
+                        if exclusive && journal.transcript.return_requested
+                            && presentation::can_handoff(&journal.transcript, active.is_some())
+                            && mailbox(&dir)?.is_empty()
+                        {
+                            terminal_handoff = true;
+                            return Ok(());
+                        }
+                        if !exclusive {
+                            journal.push(Event::Presentation { current: Presentation::Gui, return_requested: false })?;
+                            journal.push(Event::Error("KILN_HANDOFF_HELPERS".into()))?;
+                        }
                     }
                     std::thread::sleep(Duration::from_millis(15));
                 }
@@ -1368,7 +1399,7 @@ mod subprocess_tests {
     }
 
     #[test]
-    fn same_host_handoff_waits_for_native_exit_preserves_work_and_resumes_without_prompt_replay() {
+    fn inflight_handoff_waits_for_turn_and_native_exit_without_interrupt_or_prompt_replay() {
         use serde_json::json;
         let root = tempfile::tempdir().unwrap();
         let cwd = root.path().canonicalize().unwrap();
@@ -1397,7 +1428,7 @@ if '-p' not in sys.argv:
  sys.exit(0)
 "#;
         let provider = PROTOCOL_FIXTURE.replace("sid='fixture-session'", &format!("sid='{native_id}'"))
-            .replace(" elif typ=='user' or m in ['turn/start','session/prompt']:\n  turn+=1", " elif typ=='user' or m in ['turn/start','session/prompt']:\n  with open(root+'/prompts','a') as log: log.write(json.dumps(v)+'\\n')\n  finish()\n  continue\n  turn+=1");
+            .replace(" elif typ=='user' or m in ['turn/start','session/prompt']:\n  turn+=1", " elif typ=='user' or m in ['turn/start','session/prompt']:\n  with open(root+'/prompts','a') as log: log.write(json.dumps(v)+'\\n')\n  while not os.path.exists(root+'/finish-response'): time.sleep(.02)\n  finish()\n  continue\n  turn+=1");
         let program = script(&cwd, "handoff-provider", &format!("{prefix}\n{provider}"));
         let mut config = config(&cwd, program, Tool::Claude);
         config.initial_prompt = Some("existing task".into());
@@ -1410,10 +1441,17 @@ if '-p' not in sys.argv:
         ];
         let dir = cwd.join("agent-gui").join(&config.descriptor.id);
         let mut worker = worker(&config, &cwd);
-        let first = wait_transcript(&dir, |t|t.lifecycle == Lifecycle::Ready && t.provider_session_id.as_deref() == Some(native_id)
-            && t.entries.iter().any(|entry| matches!(entry, Entry::Message(message) if message.role == Role::User && message.text == "existing task"))
-            && t.commands.values().all(|phase|*phase == CommandPhase::Accepted));
+        let first = wait_transcript(&dir, |t|t.lifecycle == Lifecycle::Running && t.provider_session_id.as_deref() == Some(native_id)
+            && t.entries.iter().any(|entry| matches!(entry, Entry::Message(message) if message.role == Role::User && message.text == "existing task")));
         send(&dir, &first, Command::SetPresentation(Presentation::Terminal));
+        let waiting = wait_transcript(&dir, |t|t.return_requested && t.presentation == Presentation::Gui);
+        assert!(!cwd.join("native-pid").exists(), "the running structured writer must remain exclusive");
+        assert!(worker.try_wait().unwrap().is_none());
+        send(&dir, &waiting, Command::SetPresentation(Presentation::Gui));
+        let cancelled = wait_transcript(&dir, |t|!t.return_requested && t.lifecycle == Lifecycle::Running);
+        send(&dir, &cancelled, Command::SetPresentation(Presentation::Terminal));
+        wait_transcript(&dir, |t|t.return_requested);
+        fs::write(cwd.join("finish-response"), b"finish naturally").unwrap();
         let terminal = wait_transcript(&dir, |t|t.presentation == Presentation::Terminal && cwd.join("native-pid").exists());
         let native_pid: i32 = fs::read_to_string(cwd.join("native-pid")).unwrap().parse().unwrap();
         assert!(alive(native_pid));
@@ -1506,7 +1544,7 @@ open(root+'/mcp-clean','w').write('normal EOF')
                 assert!(alive(pid));
                 assert!(!cwd.join("terminal").exists());
             } else {
-                let terminal=wait_transcript(&dir, |t|t.presentation==Presentation::Terminal && cwd.join("terminal").exists());
+                let terminal=wait_transcript(&dir, |t|t.presentation==Presentation::Terminal && fs::read_to_string(cwd.join("terminal")).ok().as_deref() == Some(native.as_str()));
                 assert!(!alive(mcp_pid),"SDK EOF must close its own MCP before the TUI starts");
                 assert!(cwd.join("mcp-clean").exists());
                 assert_eq!(fs::read_to_string(cwd.join("terminal")).unwrap(),native);
