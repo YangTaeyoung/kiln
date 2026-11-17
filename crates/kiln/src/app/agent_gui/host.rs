@@ -1579,8 +1579,10 @@ background=subprocess.Popen([sys.executable,'-c',"import subprocess,os,time; chi
             ("BACKGROUND_PIDS".into(), root.path().join("background-pids").to_string_lossy().into_owned()),
         ];
         let dir = root.path().join("agent-gui").join(&config.descriptor.id);
-        let mut worker = worker(&config, root.path());
-        let first = wait_transcript(&dir, |t|t.lifecycle == Lifecycle::Ready && root.path().join("background-pids").is_file());
+        let mut worker = FixtureWorker(worker(&config, root.path()));
+        let first = wait_transcript(&dir, |t|t.lifecycle == Lifecycle::Ready
+            && fs::read_to_string(root.path().join("background-pids")).is_ok_and(|value|
+                value.lines().count() == 2 && value.lines().all(|line|line.parse::<i32>().is_ok())));
         let pids: Vec<i32> = fs::read_to_string(root.path().join("background-pids")).unwrap().lines().map(|line|line.parse().unwrap()).collect();
         assert_eq!(pids.len(), 2);
         let request = send(&dir, &first, Command::SetPresentation(Presentation::Terminal));
@@ -1589,9 +1591,9 @@ background=subprocess.Popen([sys.executable,'-c',"import subprocess,os,time; chi
         assert_eq!(rejected.lifecycle, Lifecycle::Ready);
         assert_eq!(rejected.generation, first.generation);
         assert!(pids.iter().all(|pid|alive(*pid)), "An idle presentation switch must never signal a background server or grandchild");
-        assert!(worker.try_wait().unwrap().is_none());
+        assert!(worker.0.try_wait().unwrap().is_none());
         // Explicitly close only this fixture's owned group after the survival assertions.
-        stop(&mut worker);
+        stop(&mut worker.0);
     }
     #[test]
     fn disconnected_worker_restarts_with_new_generation_and_same_native_session() {
