@@ -38,7 +38,7 @@ In **New Task** and the right/down split menu, choose **Conversation GUI** or **
 
 The conversation shows streamed Markdown, expandable tool input/output and file diffs. Answer inline permission or question cards; both allow and deny work. The header pins the starting account and shows the confirmed effective model/mode. Composer choices contain only models and modes advertised by the provider. Existing native MCP and permission settings are preserved.
 
-Press **Enter** or **Send** to submit; **Shift+Enter** adds a line. Korean IME preedit and commit do not submit. Use **Attach image** or drop up to eight images (PNG, JPEG, GIF, WebP; 20 MiB each). Remove missing or invalid restored attachments before sending. **Stop** interrupts the current turn.
+Press **Enter** or **Send** to submit; **Shift+Enter** adds a line. Korean IME preedit and commit do not submit. Use **Attach image** to select several files at once, paste an image while the message editor has focus, or drop files onto the intended conversation pane. Each draft accepts up to eight images (PNG, JPEG, GIF, WebP; 20 MiB each). Text paste still inserts text. Check the thumbnails and use each image’s **×** action to remove it before sending. Remove missing or invalid restored attachments before sending. **Stop** interrupts the current turn.
 
 Closing Kiln saves drafts while the daemon keeps the worker alive. Closing a pane ends its session and asks before discarding drafts. Locally queued sends wait for journal confirmation: reopening never resends them. An unconfirmed send offers **Recover as draft**; check history before intentionally sending again. Failed or disconnected sessions retain history and offer **Restart same conversation**. Earlier/latest message controls navigate a bounded display window without deleting history.
 
@@ -52,9 +52,15 @@ Pane titles and automatic page names use a shortened first confirmed request. Ma
 
 The **GUI | TUI** joined tabs sit inside each agent pane at the top right, below its close button. Replies show the agent icon beside its name. Expanded tool details provide a readable, scrollable code area with syntax highlighting for recognized file languages and shell commands, plus a copy action. Unknown output remains plain text.
 
-Use the agent pane’s **Conversation GUI / Terminal** switch to continue the same confirmed conversation with its original account and working folder. Switching to Terminal requires an idle conversation with no outstanding response, approval, queued work or background helper process. If other background processes remain, Kiln refuses the switch and leaves that work running.
+Use the agent pane’s **GUI | TUI** tabs to continue the same confirmed conversation with its original account and working folder. A new Claude Code conversation can also open in the terminal before its first message, without trying to resume a history file that does not exist yet. Switching to Terminal requires an idle conversation with no outstanding response, approval or queued work. If a background task remains or Kiln cannot verify process ownership, it refuses the switch and leaves that work running. The terminal starts only after the previous agent has finished exiting; a refusal explains what blocks the switch.
 
 Selecting Conversation GUI while the native CLI is open requests a return; it does not close the CLI or send a command for you. Exit the CLI normally, using its own exit action. Kiln waits for its process to exit, then imports newly appended user/assistant text and reconnects the GUI. Images in imported native history appear as attachment notices; this is not a reconstruction of native tool cards. If earlier native history changed, Kiln preserves the retained GUI history and reports the mismatch.
+
+Interactive `claude`, `codex` and `agy` commands started through Kiln’s registered shell functions can also use the joined **GUI | TUI** tabs. Kiln connects the pane only after verifying the exact live host binding for that terminal. The original PTY, parent shell, command arguments and selected account profile are retained. This applies to the functions supplied by Kiln’s zsh or PowerShell integration; the registered commands depend on the shell.
+
+To move from TUI to GUI, select **GUI**, then exit the native CLI normally, for example with `/exit` or **Ctrl+D** where that CLI supports it. Kiln waits for natural exit and does not terminate current work or inject a guessed quit command. If you exit the initial TUI without requesting GUI, the original shell resumes with the native exit status.
+
+Management, print and remote commands, pipelines, redirected input/output, and user aliases or custom functions that bypass Kiln’s integration keep their native execution path. Bash and fish do not receive automatic agent wrappers. Commands in terminals outside Kiln are not automatically tracked.
 
 For an older terminal-launched agent, GUI import requires an exactly tracked native conversation. Exit that CLI first. Kiln waits for the terminal daemon to confirm that the old terminal process exited, then opens the recorded conversation with its original account environment and working folder. A disconnected terminal or an unknown conversation does not establish a safe import boundary.
 
@@ -176,3 +182,5 @@ New launches prepare supported personal Claude/Codex skills and self-contained p
 
 - [Accounts](accounts.html): sign in, switch accounts and watch usage.
 - [Conversations and updates](conversations.html): continue a conversation in another CLI and restart after updates.
+
+If a shell-attached agent exits unexpectedly, its unsent draft is kept with that conversation. GUI remains available for the saved draft, and TUI returns to the original shell. The draft is not injected into a different agent started later in the same shell.

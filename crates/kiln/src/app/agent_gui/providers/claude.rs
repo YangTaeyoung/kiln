@@ -67,6 +67,10 @@ impl Claude {
             capabilities: BTreeSet::new(),
         }
     }
+    pub(super) fn fresh_session(&mut self, id: String) {
+        self.resume = None;
+        self.session = id;
+    }
     pub fn arguments(&self) -> Vec<String> {
         let mut a = vec![
             "-p",
@@ -84,6 +88,8 @@ impl Claude {
         .collect::<Vec<_>>();
         if let Some(id) = &self.resume {
             a.extend(["--resume".into(), id.clone()]);
+        } else if !self.session.is_empty() {
+            a.extend(["--session-id".into(), self.session.clone()]);
         }
         a
     }
@@ -341,6 +347,9 @@ impl Claude {
                 }
                 if id == "initialize" {
                     self.ready = true;
+                    if self.resume.is_none() && !self.session.is_empty() {
+                        e.event(Event::Session(self.session.clone()));
+                    }
                     self.catalog(&r["response"], &mut e);
                     self.discover(Discovery::Settings, &mut e);
                     e.event(Event::Models {

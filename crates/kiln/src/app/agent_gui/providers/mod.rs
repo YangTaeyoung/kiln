@@ -131,6 +131,9 @@ impl Adapter {
             Tool::Antigravity => Self::Antigravity(antigravity::Antigravity::new(cwd, resume)),
         }
     }
+    pub(super) fn fresh_claude_session(&mut self, id: String) {
+        if let Self::Claude(claude) = self { claude.fresh_session(id); }
+    }
     pub fn launch_options(&mut self, options: LaunchOptions) {
         if let Self::Codex(a) = self {
             a.launch_options = options;
@@ -891,3 +894,80 @@ mod review_regressions {
 
 #[cfg(test)]
 mod controls_tests;
+
+#[cfg(test)]
+mod image_wire_tests {
+    use super::*;
+    /// A child test process supplies isolated storage without changing the runner's environment.
+    #[test]
+    fn all_three_provider_commands_deliver_decodable_image_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "app::agent_gui::providers::image_wire_tests::image_wire_fixture_child", "--nocapture"])
+            .env("KILN_IMAGE_WIRE_FIXTURE", "1")
+            .env("KILN_CONFIG_DIR", root.path())
+            .status().unwrap();
+        assert!(status.success());
+    }
+    #[test]
+    fn image_wire_fixture_child() {
+        if std::env::var("KILN_IMAGE_WIRE_FIXTURE").as_deref() != Ok("1") { return; }
+        use base64::Engine;
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(2, 2, image::Rgba([34, 67, 90, 255])));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        for tool in [Tool::Claude, Tool::Codex, Tool::Antigravity] {
+            let descriptor = Descriptor { id: journal::unique(), tool, cwd: std::env::temp_dir(), account_label: "Image wire fixture".into() };
+            let source = kiln_common::paths::config_dir().join("fixture-source.png");
+            std::fs::write(&source, png.get_ref()).unwrap();
+            let attachment = super::super::import_attachment(&descriptor, &source).unwrap();
+            let mut adapter = Adapter::new(tool, descriptor.cwd.clone(), None);
+            adapter.start();
+            match tool {
+                Tool::Claude => {
+                    adapter.ingest(json!({"type":"control_response","response":{"request_id":"initialize","subtype":"success","response":{}}})).unwrap();
+                    adapter.ingest(json!({"type":"system","subtype":"init","session_id":"fixture","model":"fixture-model"})).unwrap();
+                }
+                Tool::Codex => {
+                    adapter.ingest(json!({"id":"initialize","result":{}})).unwrap();
+                    adapter.ingest(json!({"id":"thread","result":{"thread":{"id":"fixture"},"model":"fixture-model"}})).unwrap();
+                }
+                Tool::Antigravity => {
+                    adapter.ingest(json!({"id":"initialize","result":{"protocolVersion":1,"agentCapabilities":{"promptCapabilities":{"image":true}}}})).unwrap();
+                    adapter.ingest(json!({"id":"session","result":{"sessionId":"fixture","models":{"currentModelId":"fixture-model","availableModels":[{"modelId":"fixture-model","name":"Fixture"}]}}})).unwrap();
+                }
+            }
+            let mut effects = adapter.command(&Command::Submit { text: "inspect the image".into(), attachments: vec![attachment.clone()], model: None }, &descriptor.id).unwrap();
+            // Claude may require a model acknowledgement before dispatching a prompt.
+            if tool == Tool::Claude && !effects.writes.iter().any(|v| v["type"] == "user") {
+                let request = effects.writes.iter().find(|v| v["request"]["subtype"] == "set_model").unwrap();
+                effects = adapter.ingest(json!({"type":"control_response","response":{"request_id":request["request_id"],"subtype":"success","response":{}}})).unwrap();
+            }
+            let bytes = match tool {
+                Tool::Claude => {
+                    let wire = effects.writes.iter().find(|v| v["type"] == "user").unwrap();
+                    let block = &wire["message"]["content"][1];
+                    assert_eq!(block["source"]["media_type"], "image/png");
+                    base64::engine::general_purpose::STANDARD.decode(block["source"]["data"].as_str().unwrap()).unwrap()
+                }
+                Tool::Codex => {
+                    let wire = effects.writes.iter().find(|v| v["method"] == "turn/start").unwrap();
+                    let block = &wire["params"]["input"][1];
+                    assert_eq!(block["type"], "localImage");
+                    let path = PathBuf::from(block["path"].as_str().unwrap());
+                    assert_eq!(path, attachment.path);
+                    assert!(path.is_absolute());
+                    std::fs::read(path).unwrap()
+                }
+                Tool::Antigravity => {
+                    let wire = effects.writes.iter().find(|v| v["method"] == "session/prompt").unwrap();
+                    let block = &wire["params"]["prompt"][1];
+                    assert_eq!(block["mimeType"], "image/png");
+                    base64::engine::general_purpose::STANDARD.decode(block["data"].as_str().unwrap()).unwrap()
+                }
+            };
+            assert_eq!(bytes, *png.get_ref());
+            assert_eq!(super::super::decode_attachment_image(&bytes).unwrap().into_rgba8(), image.to_rgba8());
+        }
+    }
+}

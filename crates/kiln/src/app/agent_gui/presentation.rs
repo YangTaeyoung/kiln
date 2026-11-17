@@ -51,13 +51,18 @@ struct HistoryCheckpoint {
     count: usize,
     digest: String,
 }
-fn history(config: &Config, id: &str) -> Result<Vec<(String, String)>> {
-    super::super::super::conversation_sync::native_display_history(
-        config.descriptor.tool,
-        &config.environment,
-        &config.descriptor.cwd,
-        id,
-    )
+pub(super) fn has_user_history(transcript: &Transcript) -> bool {
+    transcript.entries.iter().any(|entry| matches!(entry, Entry::Message(message) if message.role == Role::User))
+}
+pub(super) fn optional_history(config: &Config, id: &str) -> Result<Option<Vec<(String,String)>>> {
+    super::super::super::conversation_sync::optional_native_display_history(config.descriptor.tool, &config.environment, &config.descriptor.cwd, id)
+}
+pub(super) fn fresh_claude_id() -> Result<String> {
+    use ring::rand::SecureRandom;
+    let mut bytes=[0u8;16];ring::rand::SystemRandom::new().fill(&mut bytes).map_err(|_|anyhow::anyhow!("Could not allocate native session identity"))?;
+    bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    let hex:String=bytes.iter().map(|b|format!("{b:02x}")).collect();
+    Ok(format!("{}-{}-{}-{}-{}",&hex[..8],&hex[8..12],&hex[12..16],&hex[16..20],&hex[20..]))
 }
 fn history_digest(messages: &[(String, String)]) -> Result<String> {
     Ok(super::super::image_digest(&serde_json::to_vec(messages)?))
@@ -68,7 +73,11 @@ fn import_terminal_history(
     checkpoint: &HistoryCheckpoint,
     journal: &mut Journal,
 ) -> Result<()> {
-    let messages = history(config, id)?;
+    let messages = match optional_history(config, id)? {
+        Some(messages) => messages,
+        None if checkpoint.count == 0 && !has_user_history(&journal.transcript) => vec![],
+        None => anyhow::bail!("KILN_HANDOFF_HISTORY"),
+    };
     ensure!(
         messages.len() >= checkpoint.count
             && history_digest(&messages[..checkpoint.count])? == checkpoint.digest,
@@ -100,13 +109,67 @@ pub(super) fn serve_terminal(
     dir: &Path,
     group: &OwnedGroup,
     journal: &mut Journal,
-) -> Result<()> {
+) -> Result<Option<i32>> {
+    let bootstrap = config.shell.as_ref().filter(|_| !dir.join("initial-intent").exists());
+    let mut shell_exit = None;
     let result = (|| -> Result<()> {
+        if let Some(shell) = bootstrap {
+            ensure!(claim_initial(dir)?, "The initial native launch was already attempted");
+            let spec = &shell.initial_spec;
+            let (program, lead) = super::super::super::agent_launch::launcher(Path::new(spec.program.as_deref().context("missing shell launcher")?));
+            let mut command = Process::new(program);
+            command.args(lead).args(&spec.args).envs(spec.env.iter().cloned());
+            if let Some(cwd) = &spec.cwd { command.current_dir(cwd); }
+            command.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+            let _ownership = TerminalOwnership::claim();
+            let mut child = command.spawn().context("Could not open the native shell conversation")?;
+            let mut observed = Instant::now() - Duration::from_secs(1);
+            let mut observation_error = None;
+            let mut antigravity = super::super::super::agent_runtime::Observer::default();
+            loop {
+                if TERMINATE.load(Ordering::Relaxed) { group.terminate(journal)?; return Ok(()); }
+                if config.descriptor.tool == Tool::Antigravity && antigravity.due() {
+                    antigravity.tick(vec![(shell.record_path.clone(), shell.record_generation.clone(), child.id())]);
+                }
+                if observed.elapsed() >= Duration::from_millis(150) {
+                    if let Err(error) = refresh_shell_identity(config, journal) { observation_error = Some(error.to_string()); }
+                    observed = Instant::now();
+                }
+                if let Err(error) = poll_terminal_commands(dir, journal) { observation_error = Some(error.to_string()); }
+                let status = match child.try_wait() {
+                    Ok(status) => status,
+                    Err(error) => { observation_error = Some(error.to_string()); std::thread::sleep(Duration::from_millis(100)); continue; }
+                };
+                if let Some(status) = status {
+                    refresh_shell_identity(config, journal)?;
+                    if !journal.transcript.return_requested {
+                        shell_exit = Some(status.code().unwrap_or(1));
+                        journal.push(Event::Lifecycle(Lifecycle::Stopped))?;
+                        journal.flush()?;
+                        return Ok(());
+                    }
+                    if let Some(error) = observation_error { journal.push(Event::Error(error))?; }
+                    ensure!(group.handoff_children_exited(), "KILN_HANDOFF_HELPERS");
+                    let id = resume_target(&journal.transcript)?.context("KILN_HANDOFF_HISTORY")?;
+                    let checkpoint = HistoryCheckpoint {count:0,digest:history_digest(&[])?};
+                    import_terminal_history(config,&id,&checkpoint,journal)?;
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        }
         let id =
             resume_target(&journal.transcript)?.context("Missing native conversation identity")?;
         let mut command = base_command(config, accounts)?;
-        command.args(native_args(config.descriptor.tool, &id)?);
-        let before = history(config, &id)?;
+        let before = match optional_history(config, &id)? {
+            Some(messages) => Some(messages),
+            None if !has_user_history(&journal.transcript) => None,
+            None => anyhow::bail!("KILN_HANDOFF_HISTORY"),
+        };
+        if config.descriptor.tool == Tool::Claude && before.is_none() {
+            command.args(["--session-id", &id]);
+        } else { command.args(native_args(config.descriptor.tool, &id)?); }
+        let before = before.unwrap_or_default();
         let checkpoint = HistoryCheckpoint {
             count: before.len(),
             digest: history_digest(&before)?,
@@ -156,6 +219,7 @@ pub(super) fn serve_terminal(
         import_terminal_history(config, &id, &checkpoint, journal)?;
         Ok(())
     })();
+    if shell_exit.is_some() { return Ok(shell_exit); }
     // A spawn failure also returns to the structured view, with a visible error.
     if let Err(error) = result {
         journal.push(Event::Error(error.to_string()))?;
@@ -166,7 +230,21 @@ pub(super) fn serve_terminal(
         current: Presentation::Gui,
         return_requested: false,
     })?;
-    journal.flush()
+    journal.flush()?;
+    Ok(None)
+}
+
+fn refresh_shell_identity(config: &Config, journal: &mut Journal) -> Result<()> {
+    let shell = config.shell.as_ref().context("missing shell launch metadata")?;
+    let Ok(record) = super::super::super::agent_runtime::read(&shell.record_path) else { return Ok(()); };
+    ensure!(record.generation == shell.record_generation && record.tool == config.descriptor.tool,
+        "Shell conversation identity changed unexpectedly");
+    if record.confirmed && let Some(id) = record.conversation.as_deref().filter(|id|valid_native_id(id))
+        && journal.transcript.provider_session_id.as_deref() != Some(id) {
+        journal.push(Event::Session(id.into()))?;
+        if journal.transcript.lifecycle == Lifecycle::Starting { journal.push(Event::Lifecycle(Lifecycle::Ready))?; }
+    }
+    Ok(())
 }
 
 fn poll_terminal_commands(dir: &Path, journal: &mut Journal) -> Result<()> {
@@ -283,6 +361,7 @@ mod tests {
                 environment: pinned,
                 initial_prompt: None,
                 launch_options: LaunchOptions::Inherited,
+            shell: None,
             };
             let mut command = base_command(&config, &accounts).unwrap();
             command.args(native_args(tool, ID).unwrap());

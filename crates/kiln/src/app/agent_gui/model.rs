@@ -293,6 +293,9 @@ impl Transcript {
         self.sequence = envelope.sequence;
         match &envelope.event {
             Event::Presentation { current, return_requested } => {
+                if *current == super::Presentation::Terminal && self.presentation != *current {
+                    self.errors.retain(|error| super::handoff_error(error).is_none());
+                }
                 self.presentation = *current;
                 self.return_requested = *return_requested;
             }
@@ -514,6 +517,18 @@ mod tests {
         assert_eq!(t.provider_session_id.as_deref(), Some("native-1"));
         assert_eq!(t.entries, vec![Entry::Tool(tool)]);
         assert_ne!(t.lifecycle, Lifecycle::Running);
+    }
+    #[test]
+    fn successful_terminal_entry_clears_old_handoff_notice_but_failed_import_remains_visible() {
+        let mut t = Transcript::default();
+        t.apply(&e(1,"a",Event::Generation));
+        t.apply(&e(2,"a",Event::Error("provider error".into())));
+        t.apply(&e(3,"a",Event::Error("KILN_HANDOFF_HELPERS".into())));
+        t.apply(&e(4,"a",Event::Presentation{current:super::super::Presentation::Terminal,return_requested:false}));
+        assert_eq!(t.errors,["provider error"]);
+        t.apply(&e(5,"a",Event::Error("KILN_HANDOFF_HISTORY".into())));
+        t.apply(&e(6,"a",Event::Presentation{current:super::super::Presentation::Gui,return_requested:false}));
+        assert_eq!(t.errors,["provider error","KILN_HANDOFF_HISTORY"]);
     }
     #[test]
     fn restoring_a_draft_cannot_submit_a_turn() {

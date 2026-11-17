@@ -1416,6 +1416,7 @@ for line in sys.stdin:
         environment: vec![],
         launch_options: super::super::LaunchOptions::Inherited,
         initial_prompt: None,
+        shell: None,
     };
     let directory = root.path().join("agent-gui").join(&descriptor.id);
     super::super::journal::private_dir(&directory).unwrap();

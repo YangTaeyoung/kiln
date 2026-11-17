@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.1",
-  "source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
-  "note": "0.3.1 executable build input. Subsequent documentation and site-image commits do not change executable sources. Agent illustrations are 2560x1540 native egui render fixtures with synthetic data on this source, not OS-window photographs. Native window checks separately verified model selection, joined tab placement, file-reference pointer insertion and explicit Send; native keyboard and full GUI/TUI UI acceptance remain unverified after controller timeouts.",
+  "kiln_version": "0.3.2",
+  "source_commit": "3744af694f89213f3eee1a95ed6ff281b62755d5",
+  "note": "Upcoming 0.3.2 guide updates cover image selection, focused paste/drop, attachment previews and guarded GUI/TUI handoff, including a fresh Claude conversation before its first message and interactive commands launched through Kiln-registered shell functions while preserving their parent shell. The recorded commit is the preparation baseline; replace it with the reviewed release source commit before publication. Existing agent illustrations remain the 0.3.1 synthetic native egui fixtures from 4126fdf5f0a734ed22274d5f84a8a1daf8f21555. No new screenshot, physical keyboard or end-to-end handoff acceptance is claimed by this documentation update.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",

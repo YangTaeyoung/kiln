@@ -156,6 +156,15 @@ pub fn run_shell(program: &str, cwd: PathBuf, args: Vec<String>) -> Result<()> {
     let tool = Tool::ALL.into_iter().find(|tool| tool.program() == program)
         .context("Unknown shell agent")?;
     let accounts = AccountManager::with_env(kiln_accounts::Env::real());
+    if super::agent_gui::shell_launch_eligible(tool, &args) {
+        match super::agent_gui::serve_shell(tool, cwd.clone(), args.clone(), &accounts) {
+            Ok(()) => return Ok(()),
+            Err(error) if super::agent_gui::shell_fallback_unavailable(&error) => {
+                eprintln!("Kiln GUI switching is unavailable in this terminal; continuing in the native CLI.");
+            }
+            Err(error) => return Err(error),
+        }
+    }
     if tool == Tool::Antigravity {
         let spec = managed(tool, cwd, &accounts)?;
         let path = record_path(&spec).context("missing launch record")?;
@@ -188,6 +197,40 @@ pub fn run_shell(program: &str, cwd: PathBuf, args: Vec<String>) -> Result<()> {
     }
     #[cfg(windows)]
     std::process::exit(run_contained(cmd)?);
+}
+/// Retains the exact native argument vector and pins the namespace before the shell host starts.
+pub(super) fn prepare_shell_record(tool: Tool, cwd: PathBuf, args: Vec<String>, accounts: &AccountManager) -> Result<(PathBuf, Record, SpawnSpec)> {
+    let spec = managed(tool, cwd, accounts)?;
+    let path = record_path(&spec).context("missing shell launch record")?;
+    let mut record = read(&path)?;
+    let mut args = args;
+    if tool == Tool::Codex && args.first().is_some_and(|arg|arg == "--no-daemon")
+        && record.spec.args.iter().any(|arg|arg == "--no-daemon") {
+        args.remove(0);
+    }
+    record.spec.args.extend(args);
+    if !record.spec.env.iter().any(|(key, _)| key == "KILN_AGENT_PROFILE") {
+        let env = accounts.env();
+        let (key, value) = match tool {
+            Tool::Claude => ("CLAUDE_CONFIG_DIR", env.claude_config_dir.clone().unwrap_or_else(|| env.home.join(".claude"))),
+            Tool::Codex => ("CODEX_HOME", env.codex_home.clone()),
+            Tool::Antigravity => ("HOME", env.home.clone()),
+        };
+        if !record.spec.env.iter().any(|(name, _)| name == key) {
+            record.spec.env.push((key.into(), value.to_string_lossy().into_owned()));
+        }
+        if tool == Tool::Antigravity {
+            for key in ["ANTIGRAVITY_APP_DATA_DIR", "ANTIGRAVITY_GEMINI_DIR"] {
+                if !record.spec.env.iter().any(|(name, _)| name == key)
+                    && let Some(value) = std::env::var_os(key) {
+                    record.spec.env.push((key.into(), value.to_string_lossy().into_owned()));
+                }
+            }
+        }
+    }
+    private_write(&path, &serde_json::to_vec(&record)?)?;
+    let spec = launch_spec(&path, &record, false, None)?;
+    Ok((path, record, spec))
 }
 /// The launch record and generation in a `kiln agent-run --record <path> --generation <id>`
 /// command line.

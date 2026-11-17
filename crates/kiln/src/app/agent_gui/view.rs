@@ -23,6 +23,8 @@ mod mentions_ui;
 use settings_ui::{ControlsUi, Surface};
 #[path = "tool_code_ui.rs"]
 mod tool_code_ui;
+#[path = "attachment_ui.rs"]
+mod attachment_ui;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Presentation {
@@ -177,7 +179,8 @@ pub struct AgentPane {
     cache: PreparedDisplay,
     parsing: Option<Task<(u64, usize, PreparedDisplay)>>,
     cached_revision: Option<(u64, usize)>,
-    imports: Vec<Task<Result<Attachment, String>>>,
+    imports: Vec<Task<Result<Option<Attachment>, String>>>,
+    image_ui: attachment_ui::ImageUi,
     validation: Option<Task<Result<(), String>>>,
     attachment_error: Option<String>,
     validate_on_tick: bool,
@@ -189,6 +192,7 @@ pub struct AgentPane {
     ime_frame: bool,
     ime_guard_frame: Option<u64>,
     transport_alive: bool,
+    detached_shell: bool,
     transport_known: bool,
     history_end: Option<usize>,
     focus: bool,
@@ -253,6 +257,7 @@ impl AgentPane {
             parsing: None,
             cached_revision: None,
             imports: vec![],
+            image_ui: attachment_ui::ImageUi::default(),
             validation: None,
             attachment_error: None,
             validate_on_tick: false,
@@ -264,6 +269,7 @@ impl AgentPane {
             ime_frame: false,
             ime_guard_frame: None,
             transport_alive: false,
+            detached_shell: false,
             transport_known: false,
             history_end: None,
             focus: true,
@@ -281,6 +287,20 @@ impl AgentPane {
         p.transport_known = true;
         p
     }
+    pub fn mark_shell_detached(&mut self) {
+        self.detached_shell = true;
+        self.set_transport_alive(false);
+    }
+    pub fn mark_shell_attached(&mut self) { self.detached_shell = false; }
+    pub fn shell_detached(&self) -> bool { self.detached_shell }
+    fn quiet_worker_error(&self, error: &str) -> bool {
+        self.detached_shell && self.pending.is_none() && self.recovered.is_none()
+            && error == "Agent worker is unavailable. Pending submissions are unconfirmed and will not be replayed."
+    }
+    /// Only a proven-dead shell host can use a local, read-only view toggle.
+    pub fn preview_shell_presentation(&mut self, target: Presentation) {
+        if self.detached_shell { self.transcript.presentation = target; self.transcript.return_requested = false; }
+    }
     pub fn presentation(&self) -> Presentation { self.transcript.presentation }
     pub fn presentation_pending(&self) -> bool {
         self.transcript.return_requested || !self.local_intents.is_empty()
@@ -288,14 +308,13 @@ impl AgentPane {
     pub fn can_switch_presentation(&self, target: Presentation) -> bool {
         if self.presentation_pending() || self.presentation() == target { return false; }
         if target == Presentation::Terminal {
-            self.editing_allowed() && self.transcript.requests.is_empty()
-                && self.transcript.provider_session_id.is_some()
-                && self.imports.is_empty() && self.validation.is_none()
-        } else { self.transport_alive && !self.replay_required }
+            self.editing_allowed() && super::host::can_handoff(&self.transcript)
+                && !self.image_import_pending() && self.validation.is_none()
+        } else { self.transport_alive && !self.replay_required && self.transcript.provider_session_id.is_some() }
     }
     pub fn request_presentation(&mut self, target: Presentation) -> bool {
         if !self.can_switch_presentation(target) { return false; }
-        if target == Presentation::Terminal && (!self.editing_allowed() || !self.imports.is_empty() || self.validation.is_some()) { return false; }
+        if target == Presentation::Terminal && (!self.editing_allowed() || self.image_import_pending() || self.validation.is_some()) { return false; }
         if target == Presentation::Gui && (!self.transport_alive || self.replay_required || self.transcript.return_requested) { return false; }
         match self.send(Command::SetPresentation(target)) { Ok(_) => true, Err(error) => { self.error = Some(error); false } }
     }
@@ -329,14 +348,14 @@ impl AgentPane {
         self.validate_on_tick = true;
     }
     pub fn importing(&self) -> bool {
-        !self.imports.is_empty()
+        self.image_import_pending()
     }
     pub fn has_draft(&self) -> bool {
         !self.composer.text.is_empty()
             || !self.composer.attachments.is_empty()
             || self.pending.is_some()
             || self.recovered.is_some()
-            || !self.imports.is_empty()
+            || self.image_import_pending()
     }
     pub fn set_transport_alive(&mut self, alive: bool) {
         if !alive && self.transport_alive { self.require_replay(); }
@@ -543,7 +562,7 @@ impl AgentPane {
             || !self.backlog.is_empty()
             || self.validation.is_some()
             || self.attachment_error.is_some()
-            || !self.imports.is_empty()
+            || self.image_import_pending()
             || self
                 .composer
                 .model
@@ -609,6 +628,7 @@ impl AgentPane {
             self.error = Some(error);
         }
         self.reconcile();
+        self.poll_image_picker(ctx);
         let mut i = 0;
         while i < self.imports.len() {
             if self.imports[i].is_pending() {
@@ -617,15 +637,24 @@ impl AgentPane {
             }
             if let Some(result) = self.imports.remove(i).take() {
                 match result {
-                    Ok(a) => {
+                    Ok(Some(a)) => {
+                        // A recovered draft can fill the composer while an import is running.
+                        // Preserve that draft and never exceed the provider attachment bound.
+                        if self.composer.attachments.len() >= MAX_ATTACHMENTS {
+                            self.image_limit_notice();
+                            continue;
+                        }
                         self.composer.attachments.push(a);
                         self.validation = None;
                         self.attachment_error = None;
+                        self.validate_attachments(ctx);
                     }
-                    Err(e) => self.error = Some(e),
+                    Ok(None) => {}
+                    Err(e) => self.image_import_notice(e),
                 }
             }
         }
+        self.prune_image_previews();
         if let Some(task) = &mut self.validation
             && !task.is_pending()
         {
@@ -706,6 +735,8 @@ impl AgentPane {
             attachments.extend(p.draft.attachments.clone());
         }
         if attachments.is_empty() {
+            self.validation = None;
+            self.attachment_error = None;
             return;
         }
         let id = self.descriptor.id.clone();
@@ -719,17 +750,17 @@ impl AgentPane {
     }
     fn import(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
         if self.composer.attachments.len() + self.imports.len() >= MAX_ATTACHMENTS {
-            self.error =
-                Some(kiln_common::i18n::tr("이미지는 최대 8개까지 첨부할 수 있습니다.").into());
+            self.image_limit_notice();
             return;
         }
         let descriptor = self.descriptor.clone();
         self.imports.push(Task::spawn(ctx, move || {
-            import_attachment(&descriptor, &path).map_err(|e| e.to_string())
+            import_attachment(&descriptor, &path).map(Some).map_err(|e| e.to_string())
         }));
     }
     /// Returns true only when a dead PTY needs an explicit daemon respawn.
     pub fn ui(&mut self, ui: &mut Ui) -> bool {
+        self.image_drop_ui(ui);
         let t = Theme::current();
         let mut restart = false;
         ui.spacing_mut().item_spacing.y = 10.;
@@ -814,9 +845,11 @@ impl AgentPane {
                 }}
                 let requests=self.transcript.requests.values().take(8).cloned().collect::<Vec<_>>();
                 for request in requests {self.request_ui(ui,&request);}
-                if let Some(error)=self.transcript.errors.last(){ui.add(egui::Label::new(RichText::new(bounded(error)).color(t.red)).wrap());}
-                if let Some(error)=&self.error{ui.add(egui::Label::new(RichText::new(bounded(error)).color(t.orange)).wrap());}
-                if matches!(self.lifecycle(),Lifecycle::Failed|Lifecycle::Disconnected|Lifecycle::Stopped) {
+                if let Some(error)=self.transcript.errors.last() && !self.quiet_worker_error(error) { let display = super::handoff_error(error).map(kiln_common::i18n::tr).unwrap_or_else(||bounded(error)); ui.add(egui::Label::new(RichText::new(display).color(t.red)).wrap());}
+                if let Some(error)=&self.error && self.transcript.errors.last()!=Some(error) && !self.quiet_worker_error(error) {ui.add(egui::Label::new(RichText::new(bounded(error)).color(t.orange)).wrap());}
+                if self.detached_shell {
+                    ui.add(egui::Label::new(kiln_common::i18n::tr("에이전트가 종료되어 초안을 보존했습니다. TUI에서 원래 셸을 계속 사용할 수 있습니다.")).wrap());
+                } else if matches!(self.lifecycle(),Lifecycle::Failed|Lifecycle::Disconnected|Lifecycle::Stopped) {
                     if ui.button(kiln_common::i18n::tr("같은 대화로 재시작")).clicked(){restart=self.restart();}
                 }
                 });
@@ -1149,6 +1182,7 @@ impl AgentPane {
             .show(ui, |ui| {
                 let id = ui.id().with("message");
                 let focused = ui.memory(|m| m.has_focus(id));
+                self.image_paste_ui(ui, focused);
                 self.ime_frame = self.ime_guard_frame == Some(ui.ctx().cumulative_frame_nr());
                 if !focused && self.composing {
                     if let Some(text) = self.committed_during_preedit.take() {
@@ -1259,7 +1293,8 @@ impl AgentPane {
                         .show(ui, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 let mut remove = None;
-                                for (index, a) in self.composer.attachments.iter().enumerate() {
+                                for (index, a) in self.composer.attachments.clone().iter().enumerate() {
+                                    self.attachment_preview_ui(ui, a);
                                     let label = a.name.chars().take(28).collect::<String>();
                                     if ui
                                         .button(format!("▧ {label} ×"))
@@ -1284,6 +1319,7 @@ impl AgentPane {
                             })
                         });
                 }
+                self.image_notice_ui(ui);
                 if let Some(error) = &self.attachment_error {
                     ui.add(egui::Label::new(RichText::new(error).color(t.red)).wrap());
                 }
@@ -1313,48 +1349,7 @@ impl AgentPane {
         frame.response.rect
     }
     fn composer_controls_ui(&mut self, ui: &mut Ui) {
-        if ui
-            .add_enabled_ui(
-                self.composer.attachments.len() + self.imports.len() < MAX_ATTACHMENTS,
-                |ui| {
-                    widgets::icon_button(
-                        ui,
-                        kiln_common::icons::Icon::Plus,
-                        28.,
-                        false,
-                        kiln_common::i18n::tr("이미지 첨부"),
-                    )
-                },
-            )
-            .inner
-            .clicked()
-        {
-            let descriptor = self.descriptor.clone();
-            self.imports.push(Task::spawn(ui.ctx(), move || {
-                let path = rfd::FileDialog::new()
-                    .add_filter("Image", &["png", "jpg", "jpeg", "gif", "webp"])
-                    .pick_file()
-                    .ok_or_else(|| kiln_common::i18n::tr("첨부 취소됨").to_owned())?;
-                import_attachment(&descriptor, &path).map_err(|e| e.to_string())
-            }));
-        }
-        let dropped = ui.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .map(|f| f.path().to_path_buf())
-                .take(MAX_ATTACHMENTS)
-                .collect::<Vec<_>>()
-        });
-        if ui.input(|i| {
-            i.pointer
-                .hover_pos()
-                .is_some_and(|pos| ui.clip_rect().contains(pos))
-        }) {
-            for path in dropped {
-                self.import(ui.ctx(), path);
-            }
-        }
+        self.image_picker_ui(ui);
         let t = Theme::current();
         let widgets = &mut ui.visuals_mut().widgets;
         for visuals in [
@@ -1383,7 +1378,7 @@ impl AgentPane {
                 && self.transcript.lifecycle == Lifecycle::Ready
                 && self.pending.is_none()
                 && self.backlog.is_empty()
-                && self.imports.is_empty()
+                && !self.image_import_pending()
                 && self.validation.is_none()
                 && self.attachment_error.is_none()
                 && !self.composing
