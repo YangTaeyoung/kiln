@@ -429,7 +429,7 @@ pub(super) type MetadataCache = HashMap<PathBuf, (u64, SystemTime, Option<Source
 
 /// Read an exact conversation from one pinned namespace. This path never
 /// registers, synchronizes, renames, or writes a native conversation.
-pub(super) fn exact_source(tool: Tool, root: &Path, cwd: &Path, id: &str) -> Result<Source> {
+pub(super) fn exact_source_optional(tool: Tool, root: &Path, cwd: &Path, id: &str) -> Result<Option<Source>> {
     let root = root.canonical()?;
     let cwd = cwd.canonical()?;
     let gate = Arc::new(AtomicBool::new(true));
@@ -459,7 +459,7 @@ pub(super) fn exact_source(tool: Tool, root: &Path, cwd: &Path, id: &str) -> Res
             found = Some(source);
         }
     }
-    found.context("The exact native conversation history is unavailable in the original account")
+    Ok(found)
 }
 
 pub(super) fn find(

@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.1",
-  "source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
-  "note": "0.3.1 executable build input. Subsequent documentation and site-image commits do not change executable sources. Agent illustrations are 2560x1540 native egui render fixtures with synthetic data on this source, not OS-window photographs. Native window checks separately verified model selection, joined tab placement, file-reference pointer insertion and explicit Send; native keyboard and full GUI/TUI UI acceptance remain unverified after controller timeouts.",
+  "kiln_version": "0.3.2",
+  "source_commit": "d3fc812e272f0e5548559b1d128d555f05c65585",
+  "note": "0.3.2 executable build input and four-language agent guide. The following provenance-only commit does not change executable sources. Existing agent illustrations remain the 0.3.1 synthetic native egui fixtures from 4126fdf5f0a734ed22274d5f84a8a1daf8f21555, not OS-window photographs. Separate private checks exercised the native macOS image picker, thumbnail and explicit PNG Send with an owned structured-CLI fixture, installed Claude 2.1.326 MCP handoff without real authentication or inference, and same-ID ordinary-shell Claude/Codex/Agy handoffs plus GUI draft recovery against isolated native PTYs. No physical-device or live-model acceptance is implied.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",

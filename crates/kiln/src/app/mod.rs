@@ -353,6 +353,10 @@ pub struct KilnApp {
     agent_views: HashMap<PaneId, agent_gui::AgentPane>,
     /// Native terminal imports wait for a proven PTY exit before starting a worker.
     agent_gui_imports: HashMap<PaneId, (SessionId, PathBuf, Option<kiln_common::task::Task<Result<SpawnSpec, String>>>)>,
+    shell_agent_views: HashMap<PaneId, SessionId>,
+    shell_agent_drafts: HashMap<PaneId, agent_gui::SavedDraft>,
+    shell_agent_scan: Option<kiln_common::task::Task<Vec<(PaneId, SessionId, Result<Option<SpawnSpec>, String>)>>>,
+    shell_agent_next_scan: Instant,
     agent_request_view: Option<agent_request::RequestView>,
     db: kiln_db::DbManager,
     rotator: rotation::Rotator,
@@ -472,6 +476,10 @@ impl KilnApp {
             preparing_agents: Vec::new(),
             agent_views: HashMap::new(),
             agent_gui_imports: HashMap::new(),
+            shell_agent_views: HashMap::new(),
+            shell_agent_drafts: HashMap::new(),
+            shell_agent_scan: None,
+            shell_agent_next_scan: Instant::now(),
             agent_request_view:None,
             db: kiln_db::DbManager::load(),
             rotator: rotation::Rotator::new({
@@ -571,6 +579,8 @@ impl KilnApp {
                             if let Some(mut view)=agent_gui::AgentPane::from_spec(spec) {
                                 if let Some(draft)=&pp.agent_draft {view.restore_draft(draft.clone());}
                                 self.agent_views.insert(pp.id,view);
+                            } else if let Some(draft) = &pp.agent_draft {
+                                self.shell_agent_drafts.insert(pp.id,draft.clone());
                             }
                             self.launch_specs.insert(pp.id, spec.clone());
                         }
@@ -640,7 +650,8 @@ impl KilnApp {
                                 cwd: p.session().and_then(|s| self.conn.infos.get(&s)).and_then(|i| i.cwd.clone()).or_else(|| p.cwd.clone()),
                                 tool: p.tool().and_then(|t| t.persist()),
                                 launch: self.launch_specs.get(&p.id).cloned(),
-                                agent_draft: self.agent_views.get(&p.id).map(agent_gui::AgentPane::draft),
+                                agent_draft: self.agent_views.get(&p.id).map(agent_gui::AgentPane::draft)
+                                    .or_else(|| self.shell_agent_drafts.get(&p.id).cloned()),
                             })
                             .collect(),
                     })
@@ -922,6 +933,98 @@ impl KilnApp {
         });
         let workspace=self.ws().id;
         self.preparing_agents.push(PreparingAgent {workspace,split:None,task,request:is_request});
+    }
+
+    fn tick_shell_agents(&mut self, ctx: &egui::Context) {
+        if let Some(results) = self.shell_agent_scan.as_mut().and_then(|task|task.take()) {
+            self.shell_agent_scan = None;
+            for (pane, session, result) in results {
+                if self.panes.get(&pane).and_then(Pane::session) != Some(session) { continue; }
+                match result {
+                    Ok(Some(spec)) => {
+                        let Some(descriptor) = agent_gui::descriptor(&spec) else { continue; };
+                        let attached = self.shell_agent_views.get(&pane) == Some(&session)
+                            && self.agent_views.get(&pane).is_some_and(|view|view.descriptor.id == descriptor.id);
+                        let detached = spec.env.iter().any(|(key,value)|key == "KILN_SHELL_GUI_DETACHED" && value == "1");
+                        if attached {
+                            if !detached && let Some(view) = self.agent_views.get_mut(&pane) { view.mark_shell_attached(); }
+                            continue;
+                        }
+                        if self.agent_views.contains_key(&pane) && !self.shell_agent_views.contains_key(&pane) { continue; }
+                        if let Some(view) = self.agent_views.get_mut(&pane)
+                            && view.descriptor.id != descriptor.id && view.has_draft() {
+                            // A newer CLI in the same shell does not own the previous
+                            // conversation's unsent or unconfirmed work.
+                            view.mark_shell_detached();
+                            continue;
+                        }
+                        let previous = self.launch_specs.get(&pane).and_then(|original|original.env.iter().find(|(key,_)|key == "KILN_SHELL_GUI_AGENT")).map(|(_,id)|id.as_str());
+                        if self.shell_agent_drafts.contains_key(&pane) && previous != Some(descriptor.id.as_str()) { continue; }
+                        if let Some(mut view) = agent_gui::AgentPane::from_spec(&spec) {
+                            view.transcript.presentation = agent_gui::Presentation::Terminal;
+                            let default_shell = SpawnSpec {
+                                cwd: Some(descriptor.cwd.to_string_lossy().into_owned()),
+                                program: (!self.settings.shell.is_empty()).then(||self.settings.shell.clone()),
+                                ..Default::default()
+                            };
+                            {
+                                let original = self.launch_specs.entry(pane).or_insert(default_shell);
+                                let previous = original.env.iter().find(|(key,_)|key == "KILN_SHELL_GUI_AGENT").map(|(_,id)|id.clone());
+                                if previous.as_deref() == Some(&descriptor.id)
+                                    && let Some(draft) = self.shell_agent_drafts.remove(&pane) { view.restore_draft(draft); }
+                                original.env.retain(|(key,_)|key != "KILN_SHELL_GUI_AGENT");
+                                original.env.push(("KILN_SHELL_GUI_AGENT".into(),descriptor.id));
+                            }
+                            if detached { view.mark_shell_detached(); view.preview_shell_presentation(agent_gui::Presentation::Gui); }
+                            self.agent_views.insert(pane,view);
+                            self.shell_agent_views.insert(pane,session);
+                        }
+                    }
+                    Ok(None) => {
+                        if self.shell_agent_views.contains_key(&pane) {
+                            if let Some(view) = self.agent_views.get_mut(&pane)
+                                && view.has_draft() {
+                                // Preserve the draft and exact identity after host exit;
+                                // clearing it explicitly lets a later scan retire this view.
+                                view.mark_shell_detached();
+                            } else {
+                                self.shell_agent_views.remove(&pane);
+                                self.agent_views.remove(&pane);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        if let Some(view) = self.agent_views.get_mut(&pane)
+                            && self.shell_agent_views.contains_key(&pane) { view.transport_unverified(); }
+                    }
+                }
+            }
+        }
+        self.shell_agent_views.retain(|pane,session|self.panes.get(pane).and_then(Pane::session) == Some(*session));
+        self.shell_agent_drafts.retain(|pane,_|self.panes.contains_key(pane));
+        if self.shell_agent_scan.is_none() && Instant::now() >= self.shell_agent_next_scan
+            && self.conn.is_connected() && self.conn.sessions_listed {
+            self.shell_agent_next_scan = Instant::now() + Duration::from_millis(400);
+            ctx.request_repaint_after(Duration::from_millis(400));
+            let sessions: Vec<_> = self.panes.iter().filter_map(|(pane,term)| {
+                if self.agent_views.contains_key(pane) && !self.shell_agent_views.contains_key(pane) { return None; }
+                let session = term.session()?;
+                self.conn.infos.get(&session).filter(|info| info.exited.is_none())?;
+                let saved = self.shell_agent_drafts.contains_key(pane).then(|| self.launch_specs.get(pane)
+                    .and_then(|spec| spec.env.iter().find(|(key,_)|key == "KILN_SHELL_GUI_AGENT")).map(|(_,id)|id.clone())).flatten();
+                Some((*pane,session,saved))
+            }).collect();
+            if !sessions.is_empty() {
+                self.shell_agent_scan = Some(kiln_common::task::Task::spawn(ctx, move || sessions.into_iter().map(|(pane,session,saved)| {
+                    let result = agent_gui::shell_binding(session).and_then(|live| match (live,saved) {
+                        (Some(spec),_) => Ok(Some(spec)),
+                        (None,Some(id)) => agent_gui::saved_shell_spec(session,&id).map(Some),
+                        (None,None) => Ok(None),
+                    });
+                    (pane,session,result.map_err(|error|error.to_string()))
+                }).collect()));
+            }
+        }
     }
 
     fn tick_agent_gui_imports(&mut self, ctx: &egui::Context) {
@@ -1786,6 +1889,11 @@ impl KilnApp {
             }
             Action::Toast(t) => self.toast(t, String::new(), ToastKind::Info, None),
             Action::RestartAgent(pane) => {
+                if self.shell_agent_views.contains_key(&pane)
+                    && self.agent_views.get_mut(&pane).is_some_and(|view|view.restart()) {
+                    return;
+                }
+                if self.shell_agent_views.contains_key(&pane) { return; }
                 if let Some(view)=self.agent_views.get_mut(&pane) {
                     if view.restart() {self.apply(Action::RestartPane(pane),ctx);}
                 } else {self.request_cli_restart(pane);}
@@ -2069,7 +2177,7 @@ impl KilnApp {
                 ConnEvent::Upgrading => self.transient_info(kiln_common::i18n::tr("데몬을 새 버전으로 교체하는 중"), kiln_common::i18n::tr("실행 중인 세션은 그대로 유지됩니다")),
                 ConnEvent::SessionText { session, text } => {
                     let mut out = Vec::new();
-                    self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).filter(|spec|agent_runtime::record_path(spec).is_some() || agent_gui::descriptor(spec).is_some()).and_then(|_|p.session())));
+                    self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).filter(|spec|agent_runtime::record_path(spec).is_some() || agent_gui::descriptor(spec).is_some() || self.shell_agent_views.contains_key(pane)).and_then(|_|p.session())));
                     self.rotator.on_text(&self.conn, session, &text, &mut out);
                     self.handle_rotation(out);
                 }
@@ -2339,7 +2447,7 @@ impl KilnApp {
         self.cancel_pane_layout();
         let snapshot=self.persist();
         let bytes=serde_json::to_vec(&snapshot).unwrap();
-        self.workspaces.clear();self.panes.clear();self.agent_views.clear();self.agent_gui_imports.clear();self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
+        self.workspaces.clear();self.panes.clear();self.agent_views.clear();self.agent_gui_imports.clear();self.shell_agent_views.clear();self.shell_agent_drafts.clear();self.shell_agent_scan=None;self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
         self.restore(serde_json::from_slice(&bytes).unwrap(),ctx);
     }
 
@@ -2718,12 +2826,13 @@ impl eframe::App for KilnApp {
         self.window_focused = focused_now;
         self.handle_conn_events(ctx);
         self.start_prepared_agents(ctx);
+        self.tick_shell_agents(ctx);
         self.tick_agent_gui_imports(ctx);
         for (id,view) in &mut self.agent_views {
             let alive=if self.conn.is_connected() && self.conn.sessions_listed {
                 self.panes.get(id).and_then(Pane::session).and_then(|s|self.conn.infos.get(&s)).map(|i|i.exited.is_none())
             }else{None};
-            match alive {Some(alive)=>view.set_transport_alive(alive),None=>view.transport_unverified()};view.tick(ctx);
+            if view.shell_detached() {view.set_transport_alive(false);} else {match alive {Some(alive)=>view.set_transport_alive(alive),None=>view.transport_unverified()}};view.tick(ctx);
         }
         while let Ok(r) = self.clones.1.try_recv() {
             match r {
@@ -2731,7 +2840,7 @@ impl eframe::App for KilnApp {
                 Err(e) => self.toast(kiln_common::i18n::tr("저장소 복제 실패"), e, ToastKind::Error, None),
             }
         }
-        self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).filter(|spec|agent_runtime::record_path(spec).is_some() || agent_gui::descriptor(spec).is_some()).and_then(|_|p.session())));
+        self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).filter(|spec|agent_runtime::record_path(spec).is_some() || agent_gui::descriptor(spec).is_some() || self.shell_agent_views.contains_key(pane)).and_then(|_|p.session())));
         self.tick_agent_handover(ctx);
         self.tick_cli_updates(ctx);
         if self.agy_conversations.due() {

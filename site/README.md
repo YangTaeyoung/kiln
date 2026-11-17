@@ -159,3 +159,5 @@ The wildcard/Googlebot permissions and sitemap discovery remain in effect for it
 crawler, following https://search.brave.com/help/brave-search-crawler.
 
 The 0.3.1 `agents-*.webp` illustrations use the actual native egui renderer with isolated synthetic data at the executable source recorded in `_build/source.json`. They show the agent component, not an OS-window photograph or a live model response. Other screenshot capture scripts retain their separate OS-window workflow.
+
+The upcoming 0.3.2 guide covers image attachment gestures and same-terminal agent switching through Kiln-registered shell functions. `_build/source.json` still identifies the preparation baseline until the final release source is reviewed. The guide text and existing illustrations do not establish final native QA or published-release acceptance.

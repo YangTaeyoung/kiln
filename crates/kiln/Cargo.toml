@@ -44,7 +44,7 @@ clap = { version = "4", features = ["derive"] }
 base64 = "0.22"
 ring = "0.17"
 roxmltree = "0.21"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 postcard.workspace = true
 arboard = "3"
 regex = "1"

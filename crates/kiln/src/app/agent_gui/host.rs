@@ -10,6 +10,14 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
+#[cfg(all(test, unix))]
+#[path = "native_handoff_smoke.rs"]
+mod native_handoff_smoke;
+#[cfg(windows)]
+#[path = "host_shell_job.rs"]
+mod host_shell_job;
+#[path = "handoff_processes.rs"]
+mod handoff_processes;
 #[path = "presentation.rs"]
 mod presentation;
 static TERMINATE: AtomicBool = AtomicBool::new(false);
@@ -47,21 +55,26 @@ fn handlers() {
 #[cfg(not(any(unix, windows)))]
 fn handlers() {}
 #[cfg(unix)]
-struct OwnedGroup(i32);
+struct OwnedGroup { pid: i32, session: i32 }
 #[cfg(unix)]
 impl OwnedGroup {
-    fn current() -> Result<Self> {
+    fn current(shell: bool) -> Result<Self> {
         // SAFETY: read-only process identity queries.
         let (pid, group, session) = unsafe { (libc::getpid(), libc::getpgrp(), libc::getsid(0)) };
-        ensure!(
-            pid > 1 && pid == group && pid == session,
-            "GUI agent host must own its PTY session process group"
-        );
-        Ok(Self(pid))
+        ensure!(pid > 1 && pid == group && session > 1,
+            "GUI agent host must own its foreground process group");
+        if shell {
+            ensure!(unsafe { libc::isatty(0) == 1 && libc::isatty(1) == 1
+                && libc::tcgetpgrp(0) == pid && libc::tcgetsid(0) == session },
+                "Shell agent host must own the foreground terminal job");
+        } else { ensure!(pid == session, "GUI agent host must own its PTY session"); }
+        let owned = Self {pid, session};
+        ensure!(owned.inspect_children()?.is_empty(), "Shell pipelines cannot be adopted as an agent job");
+        Ok(owned)
     }
     fn owns(&self) -> bool {
         unsafe {
-            libc::getpid() == self.0 && libc::getpgrp() == self.0 && libc::getsid(0) == self.0
+            libc::getpid() == self.pid && libc::getpgrp() == self.pid && libc::getsid(0) == self.session
         }
     }
     fn children(&self) -> Vec<i32> {
@@ -75,7 +88,7 @@ impl OwnedGroup {
             let size = (pids.len() * std::mem::size_of::<i32>()) as i32;
             // SAFETY: buffer is sized for `size`; PROC_PGRP_ONLY=2 is a read-only group query.
             let bytes =
-                unsafe { libc::proc_listpids(2, self.0 as u32, pids.as_mut_ptr().cast(), size) };
+                unsafe { libc::proc_listpids(2, self.pid as u32, pids.as_mut_ptr().cast(), size) };
             ensure!(bytes > 0 && bytes < size, "Could not inspect the complete PTY process group");
             pids.truncate(bytes.max(0) as usize / std::mem::size_of::<i32>());
             pids
@@ -87,9 +100,9 @@ impl OwnedGroup {
             .collect::<Vec<_>>();
         Ok(pids.into_iter()
             .filter(|pid| {
-                *pid != self.0
+                *pid != self.pid
                     && *pid > 1
-                    && unsafe { libc::getpgid(*pid) == self.0 && libc::getsid(*pid) == self.0 }
+                    && unsafe { libc::getpgid(*pid) == self.pid && libc::getsid(*pid) == self.session }
             })
             .collect())
     }
@@ -103,7 +116,7 @@ impl OwnedGroup {
         for sig in [libc::SIGTERM, libc::SIGKILL] {
             for pid in self.children() {
                 if self.owns()
-                    && unsafe { libc::getpgid(pid) == self.0 && libc::getsid(pid) == self.0 }
+                    && unsafe { libc::getpgid(pid) == self.pid && libc::getsid(pid) == self.session }
                 {
                     unsafe {
                         libc::kill(pid, sig);
@@ -122,12 +135,12 @@ impl OwnedGroup {
             // The handler keeps the leader alive until durable state is flushed and descendants
             // have received TERM. KILL only our still-owned session group, including this worker.
             unsafe {
-                libc::kill(-self.0, libc::SIGTERM);
+                libc::kill(-self.pid, libc::SIGTERM);
             }
             std::thread::sleep(Duration::from_millis(200));
             if self.owns() {
                 unsafe {
-                    libc::kill(-self.0, libc::SIGKILL);
+                    libc::kill(-self.pid, libc::SIGKILL);
                 }
             }
         }
@@ -137,15 +150,25 @@ impl OwnedGroup {
     }
 }
 #[cfg(not(unix))]
-struct OwnedGroup;
+struct OwnedGroup {
+    #[cfg(windows)]
+    shell_job: Option<host_shell_job::OwnedJob>,
+}
 #[cfg(not(unix))]
 impl OwnedGroup {
-    fn current() -> Result<Self> {
-        Ok(Self)
+    fn current(shell: bool) -> Result<Self> {
+        #[cfg(windows)]
+        { Ok(Self {shell_job: if shell {Some(host_shell_job::OwnedJob::claim_current_process()?)} else {None}}) }
+        #[cfg(not(windows))]
+        { let _ = shell; Ok(Self {}) }
     }
-    fn cleanup_children(&self) {}
+    fn cleanup_children(&self) {
+        #[cfg(windows)]
+        if let Some(job) = &self.shell_job { let _ = job.cleanup_children(); }
+    }
     #[cfg(windows)]
     fn inspect_children(&self) -> Result<Vec<u32>> {
+        if let Some(job) = &self.shell_job { return job.inspect_children(); }
         use windows_sys::Win32::System::JobObjects::{JobObjectBasicProcessIdList, QueryInformationJobObject};
         ensure!(CONSOLE_CONTROL_READY.load(Ordering::Relaxed), "Native terminal Ctrl-C protection is unavailable");
         #[repr(C)]
@@ -174,8 +197,15 @@ impl OwnedGroup {
     }
     fn terminate(&self, j: &mut Journal) -> Result<()> {
         j.push(Event::Lifecycle(Lifecycle::Stopped))?;
-        j.flush()
+        j.flush()?;
+        #[cfg(windows)]
+        if let Some(job) = &self.shell_job { job.terminate_owned(0)?; }
+        Ok(())
     }
+}
+
+pub(super) fn can_handoff(transcript: &Transcript) -> bool {
+    presentation::can_handoff(transcript, false)
 }
 
 fn claim_command(journal: &mut Journal, q: &QueuedCommand) -> Result<bool> {
@@ -235,6 +265,7 @@ struct Backend {
     out: crossbeam_channel::Sender<Value>,
     input: crossbeam_channel::Receiver<Input>,
     draining: Option<(Instant, String)>,
+    bootstrap: Vec<handoff_processes::Process>,
 }
 impl Backend {
     fn spawn(mut command: Process) -> Result<Self> {
@@ -315,6 +346,7 @@ impl Backend {
             out,
             input: rx,
             draining: None,
+            bootstrap: vec![],
         })
     }
     fn begin_drain(&mut self, reason: String) {
@@ -380,11 +412,74 @@ impl Backend {
         group.cleanup_children();
         let _ = self.child.wait();
     }
-    fn stop_for_handoff(&mut self) {
-        // The idle provider is the only process proven safe to stop. Never
-        // signal its process group: a background build/server must survive.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+    fn observe_bootstrap(&mut self, group: &OwnedGroup) {
+        let Ok(pids) = group.inspect_children() else { return; };
+        let pids: Vec<_> = pids.into_iter().map(|pid|pid as u32).collect();
+        if let Ok(processes) = handoff_processes::inspect(&pids) {
+            for process in processes {
+                // Preserve argv before native process-title changes. An exec into a
+                // different executable replaces the earlier launcher observation.
+                if self.bootstrap.iter().any(|old|old.pid == process.pid
+                    && (old.stamp != process.stamp || old.executable != process.executable)) {
+                    self.bootstrap.retain(|old|old.pid != process.pid);
+                }
+                // fork/exec may keep the executable while changing script argv;
+                // retain bounded pre-ready launch observations as well as titles.
+                if !self.bootstrap.iter().any(|old|old == &process) && self.bootstrap.len() < 512 {
+                    self.bootstrap.push(process);
+                }
+            }
+        }
+    }
+    fn handoff_is_exclusive(&mut self, group: &OwnedGroup, config: &Config,
+        adapter: &mut Adapter, journal: &mut Journal, active: &mut Option<String>) -> Result<bool> {
+        if group.backend_is_alone(self.child.id()) { return Ok(true); }
+        if config.descriptor.tool != Tool::Claude { return Ok(false); }
+        let request = format!("handoff-mcp-{}", journal::unique());
+        self.out.try_send(serde_json::json!({"type":"control_request", "request_id":request,
+            "request":{"subtype":"mcp_status"}}))?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            match self.input.recv_timeout(Duration::from_millis(15)) {
+                Ok(Input::Json(value)) if value["type"] == "control_response"
+                    && value["response"]["request_id"] == request => {
+                    if value["response"]["subtype"] != "success" { return Ok(false); }
+                    let Some(declarations) = value["response"]["response"]["mcpServers"].as_array() else { return Ok(false); };
+                    let pids: Vec<_> = group.inspect_children()?.into_iter().map(|pid|pid as u32).collect();
+                    let current = handoff_processes::inspect(&pids)?;
+                    return Ok(handoff_processes::helpers_are_declared(self.child.id(), &self.bootstrap,
+                        &current, declarations, &config.program));
+                }
+                Ok(Input::Json(value)) => {
+                    let effects = adapter.ingest(value)?;
+                    self.effects(journal, effects, active)?;
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {},
+                _ => return Ok(false),
+            }
+        }
+        Ok(false)
+    }
+    fn stop_for_handoff(&mut self, group: &OwnedGroup) -> Result<()> {
+        // EOF lets the SDK close its own MCP clients without persisting disabled
+        // servers or signaling background processes. Never signal the group here.
+        let (closed, _) = crossbeam_channel::bounded(0);
+        drop(std::mem::replace(&mut self.out, closed));
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while Instant::now() < deadline {
+            // Drain output so a last SDK status write cannot block normal exit.
+            while self.input.try_recv().is_ok() {}
+            if self.child.try_wait()?.is_some() && group.handoff_children_exited() { return Ok(()); }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        // A sole idle provider may not implement EOF shutdown. Only its verified
+        // primary can be stopped; unknown descendants always remain untouched.
+        if group.backend_is_alone(self.child.id()) {
+            self.child.kill()?;
+            self.child.wait()?;
+            if group.handoff_children_exited() { return Ok(()); }
+        }
+        anyhow::bail!("KILN_HANDOFF_STOP")
     }
 }
 impl Drop for Backend {
@@ -560,7 +655,21 @@ fn dispatch(
     Ok(())
 }
 /// Hidden CLI entry. The daemon's ordinary PTY/Job Object remains the lifecycle owner.
-pub fn serve(id: &str) -> Result<()> {
+pub fn serve(id: &str) -> Result<()> { serve_status(id).map(|_|()) }
+#[derive(Debug)]
+struct ShellExit(i32);
+impl std::fmt::Display for ShellExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f,"shell agent exited ({})",self.0) }
+}
+impl std::error::Error for ShellExit {}
+#[derive(Debug)]
+struct ShellUnavailable(anyhow::Error);
+impl std::fmt::Display for ShellUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f,"Shell GUI handoff is unavailable: {}",self.0) }
+}
+impl std::error::Error for ShellUnavailable {}
+pub(super) fn shell_unavailable(error: &anyhow::Error) -> bool { error.is::<ShellUnavailable>() }
+pub(super) fn serve_status(id: &str) -> Result<i32> {
     let dir = journal::directory(id)?;
     journal::private_dir(&dir)?;
     let lock = journal::open(&dir.join("host.lock"), false)?;
@@ -579,6 +688,14 @@ pub fn serve(id: &str) -> Result<()> {
     }
     let config: Config = journal::read(&dir.join("config.json"))?;
     ensure!(config.descriptor.id == id, "agent config identity mismatch");
+    if let Some(shell) = &config.shell {
+        ensure!(shell.host_pid == std::process::id()
+            && std::env::var("KILN_SESSION").ok().and_then(|value|value.parse::<u64>().ok()) == Some(shell.shell_session),
+            "Shell host identity does not match the original terminal job");
+        #[cfg(unix)]
+        ensure!(unsafe { libc::getsid(0) as u32 } == shell.parent_session,
+            "Shell host moved to a different terminal session");
+    }
     let mut journal = Journal::open(&dir, journal::unique())?;
     journal.push(Event::Generation)?;
     let report_path = dir.join("extension-report.json");
@@ -603,14 +720,22 @@ pub fn serve(id: &str) -> Result<()> {
             })))?;
         }
     }
-    let group = OwnedGroup::current()?;
+    let group = match OwnedGroup::current(config.shell.is_some()) {
+        Ok(group) => group,
+        Err(error) if config.shell.is_some() => return Err(ShellUnavailable(error).into()),
+        Err(error) => return Err(error),
+    };
     handlers();
     let accounts = AccountManager::with_env(kiln_accounts::Env::real());
     loop {
         let result = (|| -> Result<bool> {
             if journal.transcript.presentation == Presentation::Terminal {
-                presentation::serve_terminal(&config, &accounts, &dir, &group, &mut journal)?;
+                if let Some(code) = presentation::serve_terminal(&config, &accounts, &dir, &group, &mut journal)? {
+                    return Err(ShellExit(code).into());
+                }
                 if TERMINATE.load(Ordering::Relaxed) { return Ok(false); }
+                ensure!(group.handoff_children_exited(), "KILN_HANDOFF_HELPERS");
+                ensure!(config.shell.is_none() || journal.transcript.provider_session_id.is_some(), "KILN_HANDOFF_HISTORY");
             }
             let resume = resume_target(&journal.transcript)?;
             let mut adapter = Adapter::new(
@@ -618,6 +743,15 @@ pub fn serve(id: &str) -> Result<()> {
                 config.descriptor.cwd.clone(),
                 resume,
             );
+            if config.descriptor.tool == Tool::Claude && !presentation::has_user_history(&journal.transcript)
+                && config.environment.iter().any(|(key,_)|key == "CLAUDE_CONFIG_DIR") {
+                let id = match journal.transcript.provider_session_id.as_ref() {
+                    Some(id) if presentation::optional_history(&config, id)?.is_some() => None,
+                    Some(id) => Some(id.clone()),
+                    None => Some(presentation::fresh_claude_id()?),
+                };
+                if let Some(id) = id { adapter.fresh_claude_session(id); }
+            }
             if !adapter.is_resume() {
                 adapter.launch_options(config.launch_options.clone());
                 journal.push(Event::Controls(ControlEvent::Status(
@@ -625,16 +759,21 @@ pub fn serve(id: &str) -> Result<()> {
                 )))?;
             }
             let mut backend = Backend::spawn(command(&config, &adapter, &accounts)?)?;
+            backend.observe_bootstrap(&group);
             let mut active = None;
             backend.effects(&mut journal, adapter.start(), &mut active)?;
             let started = Instant::now();
             let mut initialized = false;
+            let mut capture_bootstrap = true;
             let mut terminal_handoff = false;
             let outcome = (|| -> Result<()> {
                 loop {
                     if TERMINATE.load(Ordering::Relaxed) {
                         group.terminate(&mut journal)?;
                         return Ok(());
+                    }
+                    if capture_bootstrap {
+                        backend.observe_bootstrap(&group);
                     }
                     backend.poll_exit()?;
                     let mut batch = adapter.tick();
@@ -698,6 +837,7 @@ pub fn serve(id: &str) -> Result<()> {
                                 model: None,
                             },
                         };
+                        capture_bootstrap = false;
                         dispatch(&mut backend, &mut adapter, &mut journal, q, id, &mut active)?;
                     }
                     for (path, q) in mailbox(&dir)? {
@@ -708,7 +848,13 @@ pub fn serve(id: &str) -> Result<()> {
                             if claim_command(&mut journal, &q)? {
                                 let handoff = target == Presentation::Terminal
                                     && presentation::can_handoff(&journal.transcript, active.is_some())
-                                    && group.backend_is_alone(backend.child.id())
+                                    && mailbox(&dir)?.len() == 1;
+                                if capture_bootstrap { backend.observe_bootstrap(&group); }
+                                let exclusive = handoff && backend.handoff_is_exclusive(&group, &config,
+                                    &mut adapter, &mut journal, &mut active).unwrap_or(false);
+                                // Native status reads can deliver late work/approval events.
+                                let handoff = exclusive
+                                    && presentation::can_handoff(&journal.transcript, active.is_some())
                                     && mailbox(&dir)?.len() == 1;
                                 let same = target == Presentation::Gui;
                                 journal.push(Event::CommandState {
@@ -718,7 +864,9 @@ pub fn serve(id: &str) -> Result<()> {
                                 if handoff {
                                     terminal_handoff = true;
                                 } else if !same {
-                                    journal.push(Event::Error("Finish the current response, approvals, queued work and background processes before switching to the terminal. A confirmed native conversation and exclusive process ownership are required.".into()))?;
+                                    journal.push(Event::Error(if presentation::can_handoff(&journal.transcript, active.is_some()) {
+                                        "KILN_HANDOFF_HELPERS"
+                                    } else { "KILN_HANDOFF_BUSY" }.into()))?;
                                 }
                             }
                             fs::remove_file(path)?;
@@ -733,6 +881,7 @@ pub fn serve(id: &str) -> Result<()> {
                             fs::remove_file(path)?;
                             continue;
                         }
+                        if matches!(q.command, Command::Submit {..} | Command::SubmitWithSkills {..}) { capture_bootstrap = false; }
                         dispatch(&mut backend, &mut adapter, &mut journal, q, id, &mut active)?;
                         fs::remove_file(path)?;
                     }
@@ -748,8 +897,7 @@ pub fn serve(id: &str) -> Result<()> {
             }
             let _ = journal.flush();
             if terminal_handoff {
-                backend.stop_for_handoff();
-                ensure!(group.handoff_children_exited(), "Background processes appeared during handoff; they were left running. The native terminal was not started.");
+                backend.stop_for_handoff(&group)?;
             } else { backend.stop(&group); }
             outcome?;
             if terminal_handoff {
@@ -760,8 +908,9 @@ pub fn serve(id: &str) -> Result<()> {
         })();
         if TERMINATE.load(Ordering::Relaxed) {
             group.terminate(&mut journal)?;
-            return Ok(());
+            return Ok(0);
         }
+        if let Err(error) = &result && let Some(exit) = error.downcast_ref::<ShellExit>() { return Ok(exit.0); }
         if let Err(error) = result {
             journal.push(Event::Error(error.to_string()))?;
             journal.push(Event::Lifecycle(Lifecycle::Disconnected))?;
@@ -773,7 +922,7 @@ pub fn serve(id: &str) -> Result<()> {
         'disconnected: loop {
             if TERMINATE.load(Ordering::Relaxed) {
                 group.terminate(&mut journal)?;
-                return Ok(());
+                return Ok(0);
             }
             for (path, q) in mailbox(&dir)? {
                 let restart =
@@ -1037,6 +1186,7 @@ mod subprocess_tests {
             program,
             environment: vec![],
             launch_options: LaunchOptions::Inherited,
+            shell: None,
             initial_prompt: Some("fixture task".into()),
         }
     }
@@ -1290,6 +1440,86 @@ if '-p' not in sys.argv:
         assert_eq!(fs::read_to_string(cwd.join("prompts")).unwrap().lines().count(), 1, "The original request is never replayed during handoff");
         assert_eq!(resumed.entries.iter().filter(|entry|matches!(entry, Entry::Message(message) if message.role == Role::User && message.text == "existing task")).count(), 1);
         stop(&mut worker);
+    }
+    #[test]
+    fn fresh_claude_handoff_closes_declared_mcp_without_changing_settings_or_replaying() {
+        struct FixtureWorker(Child);
+        impl Drop for FixtureWorker {
+            fn drop(&mut self) {
+                if self.0.try_wait().ok().flatten().is_none() { stop(&mut self.0); }
+            }
+        }
+        for unrelated in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let cwd = root.path().canonicalize().unwrap();
+            let namespace = cwd.join("claude");
+            fs::create_dir_all(&namespace).unwrap();
+            let helper = script(&cwd, "mcp-helper", "import sys\nfor line in sys.stdin: pass\n");
+            let program = script(&cwd, "fresh-provider", r#"import os,sys,json,subprocess,time
+root=os.environ['HANDOFF_ROOT']
+args=sys.argv[1:]
+sid=args[args.index('--session-id')+1]
+with open(root+'/launches','a') as f: f.write(json.dumps(args)+'\n')
+if '-p' not in args:
+ open(root+'/terminal','w').write(sid)
+ while not os.path.exists(root+'/exit-native'): time.sleep(.02)
+ sys.exit(0)
+helper=os.environ['MCP_HELPER']
+child=subprocess.Popen([helper],stdin=subprocess.PIPE)
+open(root+'/mcp-pid','w').write(str(child.pid))
+if os.environ.get('UNRELATED')=='yes':
+ bg=subprocess.Popen(['sleep','60']);open(root+'/background','w').write(str(bg.pid))
+for line in sys.stdin:
+ v=json.loads(line)
+ assert v.get('type')!='user','handoff must not replay/send a prompt'
+ if v.get('type')!='control_request': continue
+ sub=v['request']['subtype']
+ assert sub!='mcp_toggle','tab switch must not persist MCP settings'
+ payload={}
+ if sub=='mcp_status': payload={'mcpServers':[{'name':'owned','status':'connected','config':{'type':'stdio','command':helper,'args':[]}}]}
+ print(json.dumps({'type':'control_response','response':{'subtype':'success','request_id':v['request_id'],'response':payload}}),flush=True)
+child.stdin.close();child.wait(timeout=3)
+open(root+'/mcp-clean','w').write('normal EOF')
+"#);
+            let mut config = config(&cwd, program, Tool::Claude);
+            config.initial_prompt = None;
+            config.environment = vec![
+                ("CLAUDE_CONFIG_DIR".into(),namespace.to_string_lossy().into_owned()),
+                ("HANDOFF_ROOT".into(),cwd.to_string_lossy().into_owned()),
+                ("MCP_HELPER".into(),helper.to_string_lossy().into_owned()),
+                ("UNRELATED".into(),if unrelated {"yes"} else {"no"}.into()),
+            ];
+            let dir = cwd.join("agent-gui").join(&config.descriptor.id);
+            let mut worker = FixtureWorker(worker(&config, &cwd));
+            let ready = wait_transcript(&dir, |t|t.lifecycle==Lifecycle::Ready && t.provider_session_id.is_some());
+            let native = ready.provider_session_id.clone().unwrap();
+            assert_eq!(native.len(),36);
+            let mcp_pid:i32=fs::read_to_string(cwd.join("mcp-pid")).unwrap().parse().unwrap();
+            assert!(alive(mcp_pid));
+            let request=send(&dir,&ready,Command::SetPresentation(Presentation::Terminal));
+            if unrelated {
+                let blocked=wait_transcript(&dir, |t|t.commands.get(&request)==Some(&CommandPhase::Rejected));
+                assert_eq!(blocked.lifecycle,Lifecycle::Ready);
+                assert_eq!(blocked.generation,ready.generation);
+                assert!(alive(mcp_pid));
+                let pid:i32=fs::read_to_string(cwd.join("background")).unwrap().parse().unwrap();
+                assert!(alive(pid));
+                assert!(!cwd.join("terminal").exists());
+            } else {
+                let terminal=wait_transcript(&dir, |t|t.presentation==Presentation::Terminal && cwd.join("terminal").exists());
+                assert!(!alive(mcp_pid),"SDK EOF must close its own MCP before the TUI starts");
+                assert!(cwd.join("mcp-clean").exists());
+                assert_eq!(fs::read_to_string(cwd.join("terminal")).unwrap(),native);
+                send(&dir,&terminal,Command::SetPresentation(Presentation::Gui));
+                fs::write(cwd.join("exit-native"),b"exit").unwrap();
+                let gui=wait_transcript(&dir, |t|t.presentation==Presentation::Gui && t.lifecycle==Lifecycle::Ready && t.generation!=ready.generation);
+                assert_eq!(gui.provider_session_id,ready.provider_session_id);
+                assert!(gui.errors.is_empty(),"{:?}",gui.errors);
+                assert!(gui.entries.is_empty());
+                assert_eq!(fs::read_to_string(cwd.join("launches")).unwrap().lines().count(),3);
+            }
+            stop(&mut worker.0);
+        }
     }
     #[test]
     fn idle_handoff_rejects_background_descendants_without_signaling_their_work() {
@@ -1571,6 +1801,7 @@ mod account_tests {
                 environment: pinned,
                 initial_prompt: None,
                 launch_options: LaunchOptions::Inherited,
+            shell: None,
             };
             let serialized = serde_json::to_string(&config).unwrap();
             assert!(!serialized.contains("fixture-first-key"));
@@ -1636,6 +1867,7 @@ mod subscription_tests {
             environment: pinned,
             initial_prompt: None,
             launch_options: LaunchOptions::Inherited,
+            shell: None,
         };
         let child = command(
             &config,

@@ -13748,5 +13748,30 @@
     "en": "Command",
     "ja": "実行コマンド",
     "zh-CN": "执行命令"
+  },
+  "현재 응답과 대기 중인 승인을 완료한 뒤 전환하세요.": {
+    "en": "Finish the current response and pending approvals before switching.",
+    "ja": "現在の応答と保留中の承認を終えてから切り替えてください。",
+    "zh-CN": "请先完成当前响应和待处理的审批，再切换。"
+  },
+  "백그라운드 작업이 실행 중이거나 프로세스 소유권을 확인하지 못했습니다. 작업을 종료한 뒤 전환하세요.": {
+    "en": "A background task is still running or process ownership could not be verified. End it before switching.",
+    "ja": "バックグラウンドタスクが実行中か、プロセスの所有権を確認できません。タスクを終了してから切り替えてください。",
+    "zh-CN": "后台任务仍在运行，或无法验证进程归属。请结束任务后再切换。"
+  },
+  "저장된 원본 대화를 확인하지 못했습니다. GUI 기록은 보존되었습니다.": {
+    "en": "The saved native conversation could not be verified. The GUI history was kept.",
+    "ja": "保存済みのネイティブ会話を確認できませんでした。GUI の履歴は保持しました。",
+    "zh-CN": "无法验证已保存的原生对话。GUI 历史记录已保留。"
+  },
+  "이전 에이전트가 아직 종료되지 않았습니다. 터미널을 시작하지 않았습니다.": {
+    "en": "The previous agent has not finished exiting. The terminal was not started.",
+    "ja": "前のエージェントはまだ終了していません。ターミナルは起動していません。",
+    "zh-CN": "前一个代理尚未退出完成。终端未启动。"
+  },
+  "에이전트가 종료되어 초안을 보존했습니다. TUI에서 원래 셸을 계속 사용할 수 있습니다.": {
+    "en": "The agent exited. Your draft was kept; use TUI to continue in the original shell.",
+    "ja": "エージェントが終了しました。下書きは保持され、TUIで元のシェルを続行できます。",
+    "zh-CN": "代理已退出，草稿已保留。可在 TUI 中继续使用原来的 Shell。"
   }
 }

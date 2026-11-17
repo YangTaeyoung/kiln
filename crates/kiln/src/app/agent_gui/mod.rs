@@ -9,6 +9,8 @@ pub use model::*;
 mod client;
 mod host;
 mod journal;
+mod shell_launch;
+pub use shell_launch::{serve_shell, shell_binding, shell_launch_eligible, saved_shell_spec};
 mod providers;
 use anyhow::{Context, Result, ensure};
 pub use client::{Client, HistorySummary};
@@ -32,6 +34,8 @@ struct Config {
     initial_prompt: Option<String>,
     #[serde(default)]
     launch_options: LaunchOptions,
+    #[serde(default)]
+    shell: Option<shell_launch::ShellConfig>,
 }
 /// Call on the existing background launch-preparation worker. Captures the profile once.
 pub fn prepare(
@@ -114,6 +118,7 @@ pub fn prepare_with_options(
         environment,
         initial_prompt,
         launch_options,
+        shell: None,
     };
     journal::atomic(&dir.join("config.json"), &serde_json::to_vec(&config)?)?;
     host_spec(&config.descriptor)
@@ -164,6 +169,7 @@ pub fn prepare_existing_native(record_path: &Path) -> Result<SpawnSpec> {
         environment: record.spec.env,
         initial_prompt: None,
         launch_options: LaunchOptions::Inherited,
+        shell: None,
     };
     journal::atomic(&dir.join("config.json"), &serde_json::to_vec(&config)?)?;
     let mut journal = journal::Journal::open(&dir, journal::unique())?;
@@ -233,14 +239,22 @@ pub fn import_attachment(descriptor: &Descriptor, path: &Path) -> Result<Attachm
     ensure!(source.metadata()?.is_file(), "invalid image attachment");
     source.take(MAX_IMAGE + 1).read_to_end(&mut bytes)?;
     ensure!(bytes.len() as u64 <= MAX_IMAGE, "image exceeds 20 MiB");
-    let mime = image_mime(&bytes).context("unsupported image format")?;
+    import_image_bytes(descriptor, &path.file_name().unwrap_or_default().to_string_lossy(), &bytes)
+}
+/// The same private, validated storage path is used for file and clipboard images.
+fn import_image_bytes(descriptor: &Descriptor, name: &str, bytes: &[u8]) -> Result<Attachment> {
     let dir = journal::directory(&descriptor.id)?.join("attachments");
-    journal::private_dir(&dir)?;
+    store_image_bytes(&dir, name, bytes)
+}
+fn store_image_bytes(dir: &Path, name: &str, bytes: &[u8]) -> Result<Attachment> {
+    ensure!(bytes.len() as u64 <= MAX_IMAGE, "image exceeds 20 MiB");
+    let mime = image_mime(bytes).context("unsupported image format")?;
+    decode_attachment_image(bytes).context("invalid image contents or dimensions")?;
+    journal::private_dir(dir)?;
     let target = dir.join(journal::unique());
-    // Image payloads have their own higher bound; journal records remain bounded independently.
     let mut f = journal::open(&target, false)?;
     use std::io::Write;
-    f.write_all(&bytes)?;
+    f.write_all(bytes)?;
     f.sync_all()?;
     #[cfg(unix)]
     {
@@ -249,15 +263,34 @@ pub fn import_attachment(descriptor: &Descriptor, path: &Path) -> Result<Attachm
     }
     Ok(Attachment {
         path: target,
-        name: path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned(),
+        name: name.into(),
         mime: mime.into(),
-        sha256: image_digest(&bytes),
+        sha256: image_digest(bytes),
     })
 }
+const MAX_IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
+const MAX_IMAGE_EDGE: u32 = 16384;
+/// Inspect dimensions before allocating decoded pixels; preserve the original encoded bytes.
+fn decode_attachment_image(bytes: &[u8]) -> Result<image::DynamicImage> {
+    use std::io::Cursor;
+    let limits = || {
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(MAX_IMAGE_EDGE);
+        limits.max_image_height = Some(MAX_IMAGE_EDGE);
+        limits.max_alloc = Some(96 * 1024 * 1024);
+        limits
+    };
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    reader.limits(limits());
+    let (width, height) = reader.into_dimensions()?;
+    ensure!(width > 0 && height > 0 && width <= MAX_IMAGE_EDGE && height <= MAX_IMAGE_EDGE
+        && u64::from(width) * u64::from(height) <= MAX_IMAGE_PIXELS,
+        "image dimensions exceed the attachment limit");
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    reader.limits(limits());
+    Ok(reader.decode()?)
+}
+
 fn attachment_bytes(id: &str, attachment: &Attachment) -> Result<Vec<u8>> {
     use std::io::Read;
     let dir = journal::directory(id)?.join("attachments");
@@ -299,6 +332,7 @@ fn attachment_bytes(id: &str, attachment: &Attachment) -> Result<Vec<u8>> {
             && verify_image(&bytes, &attachment.mime, &attachment.sha256),
         "invalid attachment contents"
     );
+    decode_attachment_image(&bytes).context("invalid attachment image")?;
     Ok(bytes)
 }
 
@@ -353,3 +387,46 @@ fn verify_image(bytes: &[u8], mime: &str, digest: &str) -> bool {
 mod approval;
 mod view;
 pub use view::{AgentPane, Presentation, SavedDraft};
+
+#[cfg(test)]
+mod image_import_tests {
+    use super::*;
+    #[test]
+    fn imports_decode_real_supported_formats_and_preserve_original_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(2, 1, image::Rgb([30, 60, 90])));
+        for format in [image::ImageFormat::Png, image::ImageFormat::Jpeg, image::ImageFormat::Gif, image::ImageFormat::WebP] {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut bytes, format).unwrap();
+            let attachment = store_image_bytes(root.path(), "fixture", bytes.get_ref()).unwrap();
+            assert_eq!(std::fs::read(&attachment.path).unwrap(), *bytes.get_ref());
+            assert!(verify_image(bytes.get_ref(), &attachment.mime, &attachment.sha256));
+            assert_eq!(decode_attachment_image(bytes.get_ref()).unwrap().width(), 2);
+        }
+    }
+    #[test]
+    fn malformed_oversize_and_excessive_dimensions_never_create_private_files() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("attachments");
+        assert!(store_image_bytes(&output, "fake.png", b"\x89PNG\r\n\x1a\nfake").is_err());
+        assert!(store_image_bytes(&output, "huge.png", &vec![0; MAX_IMAGE as usize + 1]).is_err());
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::new(MAX_IMAGE_EDGE + 1, 1));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        assert!(store_image_bytes(&output, "too-wide.png", bytes.get_ref()).is_err());
+        assert!(!output.exists());
+    }
+}
+
+fn handoff_error(error: &str) -> Option<&'static str> {
+    Some(match error {
+        "KILN_HANDOFF_BUSY" => "현재 응답과 대기 중인 승인을 완료한 뒤 전환하세요.",
+        "KILN_HANDOFF_HELPERS" => "백그라운드 작업이 실행 중이거나 프로세스 소유권을 확인하지 못했습니다. 작업을 종료한 뒤 전환하세요.",
+        "KILN_HANDOFF_HISTORY" => "저장된 원본 대화를 확인하지 못했습니다. GUI 기록은 보존되었습니다.",
+        "KILN_HANDOFF_STOP" => "이전 에이전트가 아직 종료되지 않았습니다. 터미널을 시작하지 않았습니다.",
+        _ if error.starts_with("Finish the current response, approvals, queued work and background processes before switching") => "백그라운드 작업이 실행 중이거나 프로세스 소유권을 확인하지 못했습니다. 작업을 종료한 뒤 전환하세요.",
+        _ => return None,
+    })
+}
+
+pub(super) fn shell_fallback_unavailable(error: &anyhow::Error) -> bool { host::shell_unavailable(error) }

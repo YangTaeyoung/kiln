@@ -1556,6 +1556,10 @@ impl KilnApp {
         bar.set_clip_rect(body);
         if let Some(view) = self.agent_views.get_mut(&pid) {
             let current = view.presentation();
+            if view.shell_detached() {
+                if let Some(target) = current.switch_ui(&mut bar, [true,true]) { view.preview_shell_presentation(target); }
+                return egui::Rect::from_min_max(pos2(body.left(),bar_rect.bottom()),body.max);
+            }
             let pending = view.presentation_pending();
             let enabled = [agent_gui::Presentation::Gui, agent_gui::Presentation::Terminal]
                 .map(|target| !pending && (current == target || view.can_switch_presentation(target)));
