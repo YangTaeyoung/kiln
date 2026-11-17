@@ -380,7 +380,8 @@ fn actual_http_native_commands_are_once_generation_bound_and_survive_host_shutdo
     let generation = ready["generation"].as_str().unwrap();
     // Immutable upload IDs never expose/accept client filesystem paths.
     let upload_path = format!("{path}/attachments");
-    let upload = json!({"request_id":"image-one","filename":"pixel.png","mime":"image/png","bytes_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1EAAAAASUVORK5CYII="});
+    // Complete 1x1 RGBA PNG (pixel 12/34/56/ff), including valid IDAT CRC and zlib data.
+    let upload = json!({"request_id":"image-one","filename":"pixel.png","mime":"image/png","bytes_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQMgn7DwAClAGcHVtGXwAAAABJRU5ErkJggg=="});
     let image = f.post(&upload_path, &upload);
     assert_eq!(image.0, 202, "{image:?}");
     assert_eq!(f.post(&upload_path, &upload), image);

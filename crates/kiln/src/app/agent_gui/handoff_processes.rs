@@ -191,136 +191,82 @@ fn inspect_one(_: u32) -> Result<Process> {
 
 #[cfg(windows)]
 fn inspect_windows(pids: &BTreeSet<u32>) -> Result<Vec<Process>> {
-    use std::{
-        io::Read,
-        process::{Command, Stdio},
-        time::{Duration, Instant},
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, FILETIME, HANDLE},
+        System::Threading::{
+            GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            QueryFullProcessImageNameW,
+        },
     };
-    if pids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let filter = pids
-        .iter()
-        .map(|pid| format!("ProcessId = {pid}"))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let script = format!(
-        "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); @(Get-CimInstance -ClassName Win32_Process -Filter '{filter}' | Select-Object @{{n='pid';e={{[uint32]$_.ProcessId}}}},@{{n='parent';e={{[uint32]$_.ParentProcessId}}}},@{{n='stamp';e={{$_.CreationDate.ToUniversalTime().Ticks.ToString()}}}},@{{n='executable';e={{$_.ExecutablePath}}}},@{{n='commandLine';e={{$_.CommandLine}}}}) | ConvertTo-Json -Compress -Depth 3"
-    );
-    let powershell = std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .context("Windows system directory unavailable")?
-        .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-    let mut command = Command::new(powershell);
-    use std::os::windows::process::CommandExt;
-    command.creation_flags(0x08000000);
-    let mut child = command
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("process inspection output unavailable")?;
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout
-            .take(MAX_ARGUMENT_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map(|_| bytes)
-    });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
+    struct Handle(HANDLE);
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            // SAFETY: this owns the checked OpenProcess handle exactly once.
+            unsafe { CloseHandle(self.0) };
         }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("owned process inspection timed out");
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    let bytes = reader
-        .join()
-        .map_err(|_| anyhow::anyhow!("process inspection reader failed"))??;
-    ensure!(
-        status.success() && bytes.len() <= MAX_ARGUMENT_BYTES,
-        "owned process inspection failed"
-    );
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).context("invalid process inspection output")?;
-    let rows: Vec<&serde_json::Value> = match &value {
-        serde_json::Value::Array(rows) => rows.iter().collect(),
-        serde_json::Value::Object(_) => vec![&value],
-        serde_json::Value::Null => Vec::new(),
-        _ => anyhow::bail!("invalid process inspection output"),
-    };
-    let mut result = Vec::new();
-    for row in rows {
-        let pid = u32::try_from(row["pid"].as_u64().context("missing process ID")?)?;
-        ensure!(pids.contains(&pid), "unexpected process identity");
-        result.push(Process {
-            pid,
-            parent: u32::try_from(row["parent"].as_u64().context("missing process parent")?)?,
-            stamp: row["stamp"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .context("missing creation time")?
-                .into(),
-            executable: row["executable"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .context("missing process executable")?
-                .into(),
-            argv: parse_windows_arguments(
-                row["commandLine"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .context("missing process command line")?,
-            )?,
-        });
     }
-    ensure!(
-        result.len() == pids.len(),
-        "owned process identity unavailable"
-    );
-    Ok(result)
-}
-#[cfg(windows)]
-fn parse_windows_arguments(command: &str) -> Result<Vec<String>> {
-    ensure!(
-        command.len() <= MAX_ARGUMENT_BYTES && !command.contains('\0'),
-        "invalid process command line"
-    );
-    let wide: Vec<u16> = command.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut count = 0;
-    let pointer =
-        unsafe { windows_sys::Win32::UI::Shell::CommandLineToArgvW(wide.as_ptr(), &mut count) };
-    ensure!(
-        !pointer.is_null() && count > 0 && count <= 4096,
-        "invalid process command line"
-    );
-    let result = (|| {
-        let mut result = Vec::new();
-        for argument in unsafe { std::slice::from_raw_parts(pointer, count as usize) } {
-            let mut len = 0;
-            while len <= MAX_ARGUMENT_BYTES && unsafe { *argument.add(len) } != 0 {
-                len += 1;
-            }
-            ensure!(len <= MAX_ARGUMENT_BYTES, "invalid process argument");
-            result.push(String::from_utf16(unsafe {
-                std::slice::from_raw_parts(*argument, len)
-            })?);
-        }
-        Ok(result)
-    })();
-    unsafe {
-        windows_sys::Win32::Foundation::LocalFree(pointer.cast());
+    fn open(pid: u32) -> Result<Handle> {
+        // SAFETY: read-only query rights; never inherited by children.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        ensure!(!handle.is_null(), "owned process identity unavailable");
+        Ok(Handle(handle))
     }
-    result
+    fn identity(handle: &Handle) -> Result<u64> {
+        let zero = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+        let mut status = 0;
+        // SAFETY: output pointers refer to correctly sized values.
+        let valid = unsafe {
+            GetProcessTimes(handle.0, &mut created, &mut exited, &mut kernel, &mut user) != 0
+                && GetExitCodeProcess(handle.0, &mut status) != 0
+        };
+        ensure!(valid && status == 259, "owned process is unavailable"); // STILL_ACTIVE
+        Ok(u64::from(created.dwHighDateTime) << 32 | u64::from(created.dwLowDateTime))
+    }
+    pids.iter()
+        .map(|&pid| {
+            // Keep the original handle open across separate daemon metadata queries.
+            // Reopen and compare creation times afterwards to reject PID reuse.
+            let handle = open(pid)?;
+            let before = identity(&handle)?;
+            let mut image = vec![0u16; 32768];
+            let mut len = image.len() as u32;
+            // SAFETY: image has space for the advertised number of UTF-16 units.
+            ensure!(
+                unsafe { QueryFullProcessImageNameW(handle.0, 0, image.as_mut_ptr(), &mut len) }
+                    != 0,
+                "owned process executable unavailable"
+            );
+            let executable = PathBuf::from(std::ffi::OsString::from_wide(&image[..len as usize]));
+            // Reuse the daemon's bounded native command-line reader and parent
+            // creation-time check, without spawning PowerShell/CIM on every poll.
+            let parent = kiln_daemon::procinfo::parent_of(pid)
+                .context("owned process parent unavailable")?;
+            let argv = kiln_daemon::procinfo::cmdline(pid)
+                .context("owned process arguments unavailable")?;
+            ensure!(
+                !argv.is_empty()
+                    && argv.len() <= 4096
+                    && argv.iter().map(String::len).sum::<usize>() <= MAX_ARGUMENT_BYTES,
+                "invalid process arguments"
+            );
+            ensure!(
+                identity(&handle)? == before && identity(&open(pid)?)? == before,
+                "owned process identity changed during inspection"
+            );
+            Ok(Process {
+                pid,
+                parent,
+                stamp: before.to_string(),
+                executable,
+                argv,
+            })
+        })
+        .collect()
 }
 
 fn canonical(path: &Path) -> Option<PathBuf> {
@@ -417,7 +363,10 @@ pub(super) fn helpers_are_declared(
     let Some(_) = old.get(&backend) else {
         return false;
     };
-    if !initial.iter().any(|candidate| candidate.pid == backend && primary_matches(candidate, provider_program)) {
+    if !initial
+        .iter()
+        .any(|candidate| candidate.pid == backend && primary_matches(candidate, provider_program))
+    {
         return false;
     }
     for process in current {
@@ -434,8 +383,13 @@ pub(super) fn helpers_are_declared(
     }
     // Multiple argv observations of one stable identity allow fork/exec and
     // native process-title changes; identity disagreement still fails closed.
-    if initial.iter().any(|process| old.get(&process.pid).is_none_or(|other|
-        process.stamp != other.stamp || process.parent != other.parent || process.executable != other.executable)) {
+    if initial.iter().any(|process| {
+        old.get(&process.pid).is_none_or(|other| {
+            process.stamp != other.stamp
+                || process.parent != other.parent
+                || process.executable != other.executable
+        })
+    }) {
         return false;
     }
     let mut allowed = BTreeSet::from([backend]);
@@ -684,6 +638,39 @@ mod tests {
         );
         bytes[..4].copy_from_slice(&4097i32.to_ne_bytes());
         assert!(parse_macos_arguments(&bytes).is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_inspection_preserves_owned_child_identity_and_quoted_arguments() {
+        use std::process::{Command, Stdio};
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let program =
+            PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
+        let marker = "rem kiln process inspection 한국어 fixture";
+        // An idle cmd waits on its owned stdin pipe; no network or user shell.
+        let child = Child(
+            Command::new(&program)
+                .args(["/D", "/Q", "/K", marker])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let pid = child.0.id();
+        let snapshot = inspect(&[pid]).unwrap();
+        assert_eq!(snapshot[0].parent, std::process::id());
+        assert!(same_file(&snapshot[0].executable, &program));
+        assert_eq!(snapshot[0].argv.last().map(String::as_str), Some(marker));
+        assert_eq!(snapshot[0].stamp, inspect(&[pid]).unwrap()[0].stamp);
+        drop(child);
+        assert!(inspect(&[pid]).is_err());
     }
     #[test]
     fn own_identity_is_stable_across_read_only_snapshots() {
