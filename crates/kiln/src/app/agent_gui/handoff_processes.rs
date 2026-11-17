@@ -277,19 +277,20 @@ fn same_file(left: &Path, right: &Path) -> bool {
         .zip(canonical(right))
         .is_some_and(|(left, right)| left == right)
 }
-fn command_path(command: &str, config: &serde_json::Value) -> Option<PathBuf> {
+fn command_path(command: &str, config: &serde_json::Value, environment: &[(String, String)], cwd: &Path) -> Option<PathBuf> {
     let file = Path::new(command);
     if file.is_absolute() || file.components().count() > 1 {
-        return canonical(file);
+        return canonical(&cwd.join(file));
     }
     let path = config
         .get("env")
         .and_then(|env| env.get("PATH"))
         .and_then(serde_json::Value::as_str)
         .map(std::ffi::OsString::from)
+        .or_else(|| environment.iter().rev().find(|(key, _)| key == "PATH").map(|(_, value)| value.into()))
         .or_else(|| std::env::var_os("PATH"))?;
     for directory in std::env::split_paths(&path) {
-        let candidate = directory.join(file);
+        let candidate = cwd.join(directory).join(file);
         if let Some(path) = canonical(&candidate) {
             return Some(path);
         }
@@ -328,10 +329,10 @@ fn matches_command(process: &Process, command: &Path, args: &[String]) -> bool {
                 .all(|(left, right)| same_argument(left, right))
     })
 }
-fn primary_matches(process: &Process, program: &Path) -> bool {
+fn primary_matches(process: &Process, program: &Path, environment: &[(String, String)], cwd: &Path) -> bool {
     let resolved = program
         .to_str()
-        .and_then(|program| command_path(program, &serde_json::Value::Null));
+        .and_then(|program| command_path(program, &serde_json::Value::Null, environment, cwd));
     let program = resolved.as_deref().unwrap_or(program);
     same_file(&process.executable, program)
         || process
@@ -348,6 +349,8 @@ pub(super) fn helpers_are_declared(
     current: &[Process],
     declarations: &[serde_json::Value],
     provider_program: &Path,
+    environment: &[(String, String)],
+    cwd: &Path,
 ) -> bool {
     if initial.len() > MAX_PROCESSES || current.is_empty() || current.len() > MAX_PROCESSES {
         return false;
@@ -365,7 +368,7 @@ pub(super) fn helpers_are_declared(
     };
     if !initial
         .iter()
-        .any(|candidate| candidate.pid == backend && primary_matches(candidate, provider_program))
+        .any(|candidate| candidate.pid == backend && primary_matches(candidate, provider_program, environment, cwd))
     {
         return false;
     }
@@ -424,7 +427,7 @@ pub(super) fn helpers_are_declared(
             }
             _ => continue,
         };
-        let Some(command) = command_path(command, config) else {
+        let Some(command) = command_path(command, config, environment, cwd) else {
             continue;
         };
         for root in initial
@@ -506,13 +509,13 @@ mod tests {
             &initial,
             &initial,
             &declarations,
-            &backend
+            &backend, &[], temp.path()
         ));
-        assert!(!helpers_are_declared(1, &initial, &initial, &[], &backend));
+        assert!(!helpers_are_declared(1, &initial, &initial, &[], &backend, &[], temp.path()));
         let mut wrong = declarations.clone();
         wrong[0]["config"]["args"] = json!(["other.py", "--stdio"]);
         assert!(!helpers_are_declared(
-            1, &initial, &initial, &wrong, &backend
+            1, &initial, &initial, &wrong, &backend, &[], temp.path()
         ));
         let mut titled = initial.clone();
         titled[0].argv = vec!["provider title after ready".into()];
@@ -522,7 +525,7 @@ mod tests {
             &initial,
             &titled,
             &declarations,
-            &backend
+            &backend, &[], temp.path()
         ));
         let mut reparented = initial.clone();
         reparented[3].parent = 7;
@@ -531,7 +534,7 @@ mod tests {
             &initial,
             &reparented,
             &declarations,
-            &backend
+            &backend, &[], temp.path()
         ));
         let mut current = initial.clone();
         current[3].stamp = "reused-pid".into();
@@ -540,7 +543,7 @@ mod tests {
             &initial,
             &current,
             &declarations,
-            &backend
+            &backend, &[], temp.path()
         ));
         let mut current = initial.clone();
         current.push(process(6, 3, &python, &["new worker"]));
@@ -549,7 +552,7 @@ mod tests {
             &initial,
             &current,
             &declarations,
-            &backend
+            &backend, &[], temp.path()
         ));
         let mut initial = initial;
         initial.push(process(7, 1, &shell, &["unrelated background"]));
@@ -558,14 +561,14 @@ mod tests {
             &initial,
             &initial,
             &declarations,
-            &backend
+            &backend, &[], temp.path()
         ));
         assert!(!helpers_are_declared(
             9,
             &initial,
             &initial,
             &declarations,
-            &backend
+            &backend, &[], temp.path()
         ));
     }
     #[cfg(unix)]
@@ -605,14 +608,14 @@ mod tests {
             &initial,
             &titled,
             &[declaration],
-            &backend
+            &backend, &[], temp.path()
         ));
         assert!(!helpers_are_declared(
             1,
             &initial,
             &initial,
             &[json!({"config":{"command":"mcp","args":["stdio"],"type":"http"}})],
-            &backend
+            &backend, &[], temp.path()
         ));
         let wrong_dir = temp.path().join("other");
         std::fs::create_dir(&wrong_dir).unwrap();
@@ -623,8 +626,28 @@ mod tests {
             &initial,
             &initial,
             &[json!({"config":{"command":other,"args":["stdio"]}})],
-            &backend
+            &backend, &[], temp.path()
         ));
+    }
+    #[test]
+    fn declared_helpers_resolve_in_the_provider_environment_and_working_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        let bin = cwd.join("provider-bin");
+        std::fs::create_dir(&bin).unwrap();
+        let backend = cwd.join("provider");
+        let helper = bin.join("kiln-handoff-environment-fixture");
+        for p in [&backend, &helper] { std::fs::write(p, "owned fixture").unwrap(); }
+        let initial = vec![process(1, 0, &backend, &[backend.to_str().unwrap()]),
+            process(2, 1, &helper, &[helper.to_str().unwrap(), "stdio"])];
+        let environment = vec![("PATH".into(), "provider-bin".into())];
+        let declaration = json!({"config":{"command":"kiln-handoff-environment-fixture","args":["stdio"]}});
+        assert!(helpers_are_declared(1, &initial, &initial, &[declaration.clone()], &backend, &environment, cwd));
+        assert!(!helpers_are_declared(1, &initial, &initial, &[declaration.clone()], &backend, &[], cwd));
+        let override_path = json!({"config":{"command":"kiln-handoff-environment-fixture","args":["stdio"],"env":{"PATH":"missing"}}});
+        assert!(!helpers_are_declared(1, &initial, &initial, &[override_path], &backend, &environment, cwd));
+        let relative = json!({"config":{"command":"./provider-bin/kiln-handoff-environment-fixture","args":["stdio"]}});
+        assert!(helpers_are_declared(1, &initial, &initial, &[relative], &backend, &[], cwd));
     }
     #[test]
     fn macos_argc_parser_stops_before_environment_and_preserves_empty_arguments() {

@@ -48,6 +48,8 @@ Claude approvals include the actual MCP/tool arguments, including domain identif
 
 ### Switch the same conversation {#switch-presentation}
 
+Idle GUI-to-TUI checks resolve declared MCP helper commands using the conversation’s saved environment and working folder, including a helper-specific `PATH` override. A connected MCP service by itself is not a running model task.
+
 Pane titles and automatic page names use a shortened first confirmed request. Manually named pages keep their names; editing a draft does not rename an established conversation.
 
 The **GUI | TUI** joined tabs sit inside each agent pane at the top right, below its close button. Replies show the agent icon beside its name. Expanded tool details provide a readable, scrollable code area with syntax highlighting for recognized file languages and shell commands, plus a copy action. Unknown output remains plain text.

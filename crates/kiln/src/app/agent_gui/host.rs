@@ -448,7 +448,7 @@ impl Backend {
                     let pids: Vec<_> = group.inspect_children()?.into_iter().map(|pid|pid as u32).collect();
                     let current = handoff_processes::inspect(&pids)?;
                     return Ok(handoff_processes::helpers_are_declared(self.child.id(), &self.bootstrap,
-                        &current, declarations, &config.program));
+                        &current, declarations, &config.program, &config.environment, &config.descriptor.cwd));
                 }
                 Ok(Input::Json(value)) => {
                     let effects = adapter.ingest(value)?;
@@ -1514,7 +1514,7 @@ for line in sys.stdin:
  sub=v['request']['subtype']
  assert sub!='mcp_toggle','tab switch must not persist MCP settings'
  payload={}
- if sub=='mcp_status': payload={'mcpServers':[{'name':'owned','status':'connected','config':{'type':'stdio','command':helper,'args':[]}}]}
+ if sub=='mcp_status': payload={'mcpServers':[{'name':'owned','status':'connected','config':{'type':'stdio','command':os.environ['MCP_DECLARED_COMMAND'],'args':[]}}]}
  print(json.dumps({'type':'control_response','response':{'subtype':'success','request_id':v['request_id'],'response':payload}}),flush=True)
 child.stdin.close();child.wait(timeout=3)
 open(root+'/mcp-clean','w').write('normal EOF')
@@ -1525,6 +1525,8 @@ open(root+'/mcp-clean','w').write('normal EOF')
                 ("CLAUDE_CONFIG_DIR".into(),namespace.to_string_lossy().into_owned()),
                 ("HANDOFF_ROOT".into(),cwd.to_string_lossy().into_owned()),
                 ("MCP_HELPER".into(),helper.to_string_lossy().into_owned()),
+                ("MCP_DECLARED_COMMAND".into(),"mcp-helper".into()),
+                ("PATH".into(),format!("{}:{}",cwd.display(),std::env::var("PATH").unwrap_or_default())),
                 ("UNRELATED".into(),if unrelated {"yes"} else {"no"}.into()),
             ];
             let dir = cwd.join("agent-gui").join(&config.descriptor.id);
