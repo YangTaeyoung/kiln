@@ -1,7 +1,7 @@
 {
   "kiln_version": "0.3.2",
-  "source_commit": "3744af694f89213f3eee1a95ed6ff281b62755d5",
-  "note": "Upcoming 0.3.2 guide updates cover image selection, focused paste/drop, attachment previews and guarded GUI/TUI handoff, including a fresh Claude conversation before its first message and interactive commands launched through Kiln-registered shell functions while preserving their parent shell. The recorded commit is the preparation baseline; replace it with the reviewed release source commit before publication. Existing agent illustrations remain the 0.3.1 synthetic native egui fixtures from 4126fdf5f0a734ed22274d5f84a8a1daf8f21555. No new screenshot, physical keyboard or end-to-end handoff acceptance is claimed by this documentation update.",
+  "source_commit": "e984554a848d9eeeb5b431c206bd6853e5840593",
+  "note": "0.3.2 executable build input and four-language agent guide. The following provenance-only commit does not change executable sources. Existing agent illustrations remain the 0.3.1 synthetic native egui fixtures from 4126fdf5f0a734ed22274d5f84a8a1daf8f21555, not OS-window photographs. Separate private checks exercised the native macOS image picker, thumbnail and explicit PNG Send with an owned structured-CLI fixture, installed Claude 2.1.326 MCP handoff without real authentication or inference, and same-ID ordinary-shell Claude/Codex/Agy handoffs plus GUI draft recovery against isolated native PTYs. No physical-device or live-model acceptance is implied.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
