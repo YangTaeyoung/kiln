@@ -60,6 +60,8 @@ pub enum Command {
     },
     Interrupt,
     Restart,
+    /// Exclusive host-owned handoff; never forwarded to a provider adapter.
+    SetPresentation(super::Presentation),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueuedCommand {
@@ -160,6 +162,10 @@ pub struct Model {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Event {
     Generation,
+    Presentation {
+        current: super::Presentation,
+        return_requested: bool,
+    },
     Controls(ControlEvent),
     Lifecycle(Lifecycle),
     Session(String),
@@ -215,6 +221,8 @@ pub struct Transcript {
     pub errors: Vec<String>,
     pub commands: BTreeMap<String, CommandPhase>,
     pub uncertain_deliveries: BTreeSet<String>,
+    pub presentation: super::Presentation,
+    pub return_requested: bool,
 }
 impl Transcript {
     fn invalidate_pending(&mut self) {
@@ -284,6 +292,10 @@ impl Transcript {
         }
         self.sequence = envelope.sequence;
         match &envelope.event {
+            Event::Presentation { current, return_requested } => {
+                self.presentation = *current;
+                self.return_requested = *return_requested;
+            }
             Event::Generation => {
                 self.controls = NativeControls::default();
             }

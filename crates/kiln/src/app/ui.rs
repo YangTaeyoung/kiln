@@ -1361,10 +1361,16 @@ impl KilnApp {
                     });
                     egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
                 } else { body };
+                let body = if self.agent_gui_imports.contains_key(pid) || self.agent_views.get(pid).is_some_and(|view| view.presentation() == agent_gui::Presentation::Terminal && view.transcript.return_requested) {
+                    let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 42.0));
+                    let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("agent-return", *pid)));
+                    bar.label(egui::RichText::new(kiln_common::i18n::tr("대화로 돌아가려면 CLI에서 /exit 또는 Ctrl-D로 종료하세요. 현재 작업은 계속 실행됩니다.")).color(t.orange));
+                    egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
+                } else { body };
                 let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("card", *pid)));
                 child.set_clip_rect(body);
                 match self.panes.get_mut(pid).map(|p| &mut p.kind) {
-                    Some(PaneKind::Term { .. }) if self.agent_views.contains_key(pid) => {
+                    Some(PaneKind::Term { .. }) if self.agent_views.get(pid).is_some_and(|view|view.presentation() == agent_gui::Presentation::Gui) => {
                         let view=self.agent_views.get_mut(pid).unwrap();
                         if focus_req && is_focused {view.request_focus();focus_consumed=true;}
                         if view.ui(&mut child) {self.actions.push(Action::RestartPane(*pid));}
@@ -1479,15 +1485,17 @@ impl KilnApp {
         }
         let mut x = rect.left() + if show_identity {47.0}else{8.0};
         let is_terminal = matches!(self.panes.get(&pid).map(|p|&p.kind),Some(PaneKind::Term {..}));
+        let tracked_native = self.launch_specs.get(&pid).and_then(agent_runtime::record_path).is_some();
+        let show_presentation = (self.agent_views.contains_key(&pid) || tracked_native) && rect.width() >= 180.0;
         // Preserve the three frequent actions at narrow widths. Secondary actions
         // move into More before the title or button hit targets overlap.
-        let show_splits = rect.width() >= 100.0;
-        let show_close = rect.width() >= 68.0;
-        let show_more = !show_splits || rect.width() >= 220.0;
-        let show_zoom = rect.width() >= 280.0;
-        let show_history = is_terminal && rect.width() >= 360.0;
+        let show_splits = rect.width() >= if show_presentation { 450.0 } else { 100.0 };
+        let show_close = rect.width() >= if show_presentation { 220.0 } else { 68.0 };
+        let show_more = if show_presentation {rect.width() >= 340.0} else {!show_splits || rect.width() >= 220.0};
+        let show_zoom = rect.width() >= if show_presentation {520.0} else {280.0};
+        let show_history = is_terminal && !self.agent_views.contains_key(&pid) && rect.width() >= 360.0;
         let button_count = usize::from(show_close) + 2*usize::from(show_splits) + usize::from(show_more) + usize::from(show_zoom) + usize::from(show_history);
-        let buttons_w = button_count as f32 * 28.0 + 8.0;
+        let buttons_w = button_count as f32 * 28.0 + 8.0 + if show_presentation { 120.0 } else { 0.0 };
         let right_limit = rect.right() - 10.0 - buttons_w;
         let clip = egui::Rect::from_min_max(pos2(x, rect.top()), pos2(right_limit.max(x), rect.bottom()));
         let p = ui.painter().with_clip_rect(clip);
@@ -1537,6 +1545,23 @@ impl KilnApp {
         if show_history && !self.agent_views.contains_key(&pid) {
             if let Some(Pane{kind:PaneKind::Term{view:Some(view),..},..})=self.panes.get_mut(&pid) {
                 if widgets::icon_button(&mut bui,Icon::History,26.0,view.inspector_open(),kiln_common::i18n::tr("명령 기록")).clicked(){view.open_history();}
+            }
+        }
+        if show_presentation && let Some(view) = self.agent_views.get_mut(&pid) {
+            let current = view.presentation();
+            let pending = view.presentation_pending();
+            // right_to_left places Conversation before Terminal on screen.
+            for (target, label) in [(agent_gui::Presentation::Terminal, "터미널"), (agent_gui::Presentation::Gui, "대화")] {
+                let enabled = !pending && (current == target || view.can_switch_presentation(target));
+                let response = bui.add_enabled(enabled, egui::Button::new(kiln_common::i18n::tr(label)).selected(current == target))
+                    .on_disabled_hover_text(kiln_common::i18n::tr("응답과 승인 요청이 끝나고 대화 연결이 확인되면 전환할 수 있습니다."));
+                if response.clicked() && current != target { view.request_presentation(target); }
+            }
+        } else if show_presentation {
+            let pending = self.agent_gui_imports.contains_key(&pid);
+            bui.add(egui::Button::new(kiln_common::i18n::tr("터미널")).selected(true));
+            if bui.add_enabled(!pending, egui::Button::new(kiln_common::i18n::tr("대화"))).clicked() {
+                self.actions.push(Action::AdoptAgentGui(pid));
             }
         }
     }

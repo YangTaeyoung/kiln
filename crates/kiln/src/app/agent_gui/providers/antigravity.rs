@@ -258,7 +258,7 @@ impl Antigravity {
                 }
                 e.write(json!({"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":self.session}}));
             }
-            Command::Restart => anyhow::bail!("host restart is handled by the runtime"),
+            Command::Restart | Command::SetPresentation(_) => anyhow::bail!("host lifecycle is handled by the runtime"),
         }
         Ok(e)
     }

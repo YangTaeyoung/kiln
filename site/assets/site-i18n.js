@@ -2,8 +2,8 @@ window.KILN_I18N = {
   "en": {
     "m_mobile": "Kiln Remote · source build",
     "f_agents_t": "Agents, side by side",
-    "shot_agents": "Claude Code session settings in a synthetic example workspace.",
-    "f_agents_d": "Choose native conversations or terminals, with settings, commands and approvals.",
+    "shot_agents": "Compact Claude Code controls in a synthetic example workspace.",
+    "f_agents_d": "Switch between native conversations and terminals, with compact controls and command completion.",
     "f_daemon_t": "Sessions that never stop",
     "f_daemon_d": "Close or update Kiln. Your shells and agents keep running.",
     "f_review_t": "Review in the same window",
@@ -105,8 +105,8 @@ window.KILN_I18N = {
   "ko": {
     "m_mobile": "Kiln Remote · 소스 빌드",
     "f_agents_t": "에이전트를 나란히",
-    "shot_agents": "합성 예제 워크스페이스의 Claude Code 대화 설정.",
-    "f_agents_d": "대화 GUI 또는 터미널에서 제공자 설정·명령·권한 요청을 다루세요.",
+    "shot_agents": "합성 예제 워크스페이스의 간결한 Claude Code 제어 화면.",
+    "f_agents_d": "간결한 입력창과 명령 자동완성으로 대화 GUI와 터미널을 오가세요.",
     "f_daemon_t": "꺼지지 않는 세션",
     "f_daemon_d": "Kiln을 닫거나 업데이트해도 셸과 에이전트는 계속 돌아갑니다.",
     "f_review_t": "리뷰도 같은 창에서",
@@ -208,8 +208,8 @@ window.KILN_I18N = {
   "ja": {
     "m_mobile": "Kiln Remote · ソースビルド",
     "f_agents_t": "エージェントを並べて",
-    "shot_agents": "合成サンプルワークスペースの Claude Code セッション設定。",
-    "f_agents_d": "会話 GUI またはターミナルで、設定・コマンド・権限確認を操作。",
+    "shot_agents": "合成サンプルワークスペースのコンパクトな Claude Code 操作画面。",
+    "f_agents_d": "コンパクトな操作とコマンド補完で、会話 GUI とターミナルを切り替え。",
     "f_daemon_t": "止まらないセッション",
     "f_daemon_d": "Kiln を閉じても更新しても、シェルとエージェントは動き続けます。",
     "f_review_t": "レビューも同じウィンドウで",
@@ -311,8 +311,8 @@ window.KILN_I18N = {
   "zh-CN": {
     "m_mobile": "Kiln Remote · 源码构建",
     "f_agents_t": "代理并排运行",
-    "shot_agents": "合成示例工作区中的 Claude Code 会话设置。",
-    "f_agents_d": "选择对话 GUI 或终端，使用提供方设置、命令及权限审批。",
+    "shot_agents": "合成示例工作区中的紧凑 Claude Code 控件。",
+    "f_agents_d": "使用紧凑控件和命令补全，在对话 GUI 与终端之间切换。",
     "f_daemon_t": "不会中断的会话",
     "f_daemon_d": "关闭或更新 Kiln，Shell 和代理照常运行。",
     "f_review_t": "在同一窗口审查",

@@ -33,6 +33,41 @@ fn messages() -> Vec<Message> {
 }
 
 #[test]
+fn presentation_history_reads_only_exact_pinned_namespace_and_native_identity() {
+    for tool in PROJECTED {
+        let fixture = Fixture::new(tool);
+        let environment = vec![(env_key(tool).into(), fixture.source.root.to_string_lossy().into_owned())];
+        let before = fs::read(&fixture.source.path).unwrap();
+        let history = native_display_history(tool, &environment, Path::new(&fixture.source.cwd), &fixture.source.id).unwrap();
+        assert_eq!(history, messages().into_iter().map(|message| (message.role, message.text)).collect::<Vec<_>>());
+        assert_eq!(fs::read(&fixture.source.path).unwrap(), before);
+        assert!(native_display_history(tool, &[], Path::new(&fixture.source.cwd), &fixture.source.id).is_err());
+        assert!(native_display_history(tool, &environment, Path::new(&fixture.source.cwd), "different-id").is_err());
+        let other = fixture._temp.path().join("other-workspace");
+        fs::create_dir(&other).unwrap();
+        assert!(native_display_history(tool, &environment, &other, &fixture.source.id).is_err());
+    }
+}
+
+#[test]
+fn presentation_history_reads_antigravity_native_paths_for_default_and_saved_accounts() {
+    let temporary = tempfile::tempdir().unwrap();
+    let cwd = temporary.path().canonicalize().unwrap();
+    for saved in [false, true] {
+        let home = cwd.join(if saved { "saved-home" } else { "default-home" });
+        fs::create_dir_all(&home).unwrap();
+        let root = kiln_accounts::antigravity::data_dir(&home);
+        let fixture = Agy::new(&root, if saved { "saved-native" } else { "default-native" }, &cwd.to_string_lossy(), None, &agy_turn());
+        let environment = if saved { kiln_accounts::antigravity::environment(&home) } else { vec![("HOME".into(), home.to_string_lossy().into_owned())] };
+        let history = native_display_history(Tool::Antigravity, &environment, &cwd, &fixture.id).unwrap();
+        let expected = agy_messages().into_iter().map(|message|(message.role,message.text)).collect::<Vec<_>>();
+        assert_eq!(history, expected);
+        assert!(fixture.transcript.ends_with(format!("brain/{}/.system_generated/logs/transcript_full.jsonl",fixture.id)));
+        assert!(native_display_history(Tool::Antigravity, &environment, &cwd, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").is_err());
+    }
+}
+
+#[test]
 fn active_append_preserves_checkpoint_but_rewrite_and_replacement_retry() {
     for tool in PROJECTED {
         let f = Fixture::new(tool);

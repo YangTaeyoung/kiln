@@ -501,7 +501,7 @@ impl Codex {
                 &ControlValue::Text(mode.clone()),
                 &mut e,
             )?,
-            Command::Restart => anyhow::bail!("host restart is handled by the runtime"),
+            Command::Restart | Command::SetPresentation(_) => anyhow::bail!("host lifecycle is handled by the runtime"),
         }
         Ok(e)
     }

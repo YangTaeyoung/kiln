@@ -923,3 +923,22 @@ fn task6_active_turn_identity_is_published_and_cleared_for_native_form() {
     let end=a.ingest(json!({"method":"turn/completed","params":{"threadId":"s","turn":{"id":"turn-exact","status":"completed"}}})).unwrap();
     assert!(end.events.iter().any(|e|matches!(e,Event::Controls(ControlEvent::Status(s)) if s.subject=="active_turn_settings" && !s.fields.contains_key("turnId") && s.unavailable.is_some())));
 }
+
+#[test]
+fn ux_claude_model_picker_retains_native_name_and_description() {
+    let mut a = Adapter::new(Tool::Claude, "/tmp".into(), None);
+    let e = a.ingest(claude_reply(&json!("initialize"), json!({"models":[{"value":"claude-fable-5-2[1m]","displayName":"Fable 5.2","description":"Native hardest tasks","resolvedModel":"claude-fable-5-2"}]}))).unwrap();
+    let options = e.events.iter().filter_map(|e| if let Event::Controls(ControlEvent::Options(v))=e {Some(v)} else {None}).last().unwrap();
+    let model = options.iter().find(|o|o.id=="model").unwrap();
+    assert_eq!(model.choices[0].value,"claude-fable-5-2[1m]");
+    assert_eq!(model.choices[0].label,"Fable 5.2");
+    assert_eq!(model.choices[0].description,"Native hardest tasks");
+}
+
+#[test]
+fn ux_native_permission_snapshot_populates_visible_current_mode() {
+    let mut a=Adapter::new(Tool::Claude,"/tmp".into(),None);
+    let e=a.ingest(claude_reply(&json!("initialize"),json!({"current_permission_mode":"auto","models":[]}))).unwrap();
+    let options=e.events.iter().filter_map(|e|if let Event::Controls(ControlEvent::Options(v))=e{Some(v)}else{None}).last().unwrap();
+    assert_eq!(options.iter().find(|o|o.id=="permissionMode").unwrap().current,Some(ControlValue::Text("auto".into())));
+}

@@ -210,9 +210,9 @@
     "zh-CN": "更改后点击“保存快捷键”以应用"
   },
   "보통": {
-    "en": "Normal",
+    "en": "Medium",
     "ja": "標準",
-    "zh-CN": "标准"
+    "zh-CN": "中"
   },
   "비워 두면 로그인 셸($SHELL)을 씁니다": {
     "en": "Leave blank to use your login shell ($SHELL)",
@@ -5560,7 +5560,7 @@
     "zh-CN": "临时查询"
   },
   "자동": {
-    "en": "Automatic",
+    "en": "Auto",
     "ja": "自動",
     "zh-CN": "自动"
   },
@@ -8850,9 +8850,9 @@
     "zh-CN": "无法加载元数据"
   },
   "↑↓ 선택 · Tab/Enter 삽입 · Esc 닫기": {
-    "en": "↑↓ choose · Tab/Enter insert · Esc close",
-    "ja": "↑↓ 選択 · Tab/Enter 挿入 · Esc 閉じる",
-    "zh-CN": "↑↓ 选择 · Tab/Enter 插入 · Esc 关闭"
+    "en": "↑↓ Select · Tab/Enter Complete · Esc Dismiss",
+    "ja": "↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる",
+    "zh-CN": "↑↓ 选择 · Tab/Enter 补全 · Esc 关闭"
   },
   "자동완성 메타데이터 새로고침": {
     "en": "Refresh completion metadata",
@@ -12345,9 +12345,9 @@
     "zh-CN": "拟写内容"
   },
   "질문": {
-    "en": "Question",
+    "en": "Ask",
     "ja": "質問",
-    "zh-CN": "问题"
+    "zh-CN": "询问"
   },
   "서버": {
     "en": "Server",
@@ -13608,5 +13608,140 @@
     "en": "Fetch external data",
     "ja": "外部データを取得",
     "zh-CN": "获取外部数据"
+  },
+  "기본": {
+    "en": "Default",
+    "ja": "デフォルト",
+    "zh-CN": "默认"
+  },
+  "계획": {
+    "en": "Plan",
+    "ja": "計画",
+    "zh-CN": "计划"
+  },
+  "편집 자동 승인": {
+    "en": "Auto-approve edits",
+    "ja": "編集を自動承認",
+    "zh-CN": "自动批准编辑"
+  },
+  "승인 요청 안 함": {
+    "en": "Never ask",
+    "ja": "承認を求めない",
+    "zh-CN": "不请求批准"
+  },
+  "권한 확인 생략": {
+    "en": "Bypass permissions",
+    "ja": "権限確認を省略",
+    "zh-CN": "跳过权限检查"
+  },
+  "코딩": {
+    "en": "Code",
+    "ja": "コーディング",
+    "zh-CN": "编码"
+  },
+  "최소": {
+    "en": "Minimal",
+    "ja": "最小",
+    "zh-CN": "最低"
+  },
+  "매우 높음": {
+    "en": "Extra high",
+    "ja": "非常に高い",
+    "zh-CN": "很高"
+  },
+  "최대": {
+    "en": "Maximum",
+    "ja": "最大",
+    "zh-CN": "最高"
+  },
+  "최상": {
+    "en": "Ultra",
+    "ja": "最高",
+    "zh-CN": "极高"
+  },
+  "변경 기록": {
+    "en": "Change history",
+    "ja": "変更履歴",
+    "zh-CN": "更改记录"
+  },
+  "대화로 돌아가려면 CLI에서 /exit 또는 Ctrl-D로 종료하세요. 현재 작업은 계속 실행됩니다.": {
+    "en": "Exit the CLI with /exit or Ctrl-D to return to the conversation. Current work keeps running.",
+    "ja": "会話に戻るには CLI で /exit または Ctrl-D で終了してください。現在の作業は継続します。",
+    "zh-CN": "在 CLI 中用 /exit 或 Ctrl-D 退出后返回对话。当前任务会继续运行。"
+  },
+  "대화로 전환할 수 없습니다": {
+    "en": "Cannot switch to conversation",
+    "ja": "会話に切り替えられません",
+    "zh-CN": "无法切换到对话"
+  },
+  "응답과 승인 요청이 끝나고 대화 연결이 확인되면 전환할 수 있습니다.": {
+    "en": "Switch after responses and approval requests finish and the conversation is connected.",
+    "ja": "応答と承認リクエストが完了し、会話の接続が確認されると切り替えられます。",
+    "zh-CN": "响应和审批请求结束并确认对话连接后即可切换。"
+  },
+  "대화 옵션": {
+    "en": "Conversation options",
+    "ja": "会話オプション",
+    "zh-CN": "对话选项"
+  },
+  "사고 설정": {
+    "en": "Reasoning settings",
+    "ja": "推論設定",
+    "zh-CN": "推理设置"
+  },
+  "예제 계정": {
+    "en": "Example account",
+    "ja": "サンプルアカウント",
+    "zh-CN": "示例账户"
+  },
+  "현재 대화에 사용할 모델과 작업 방식을 선택하세요.": {
+    "en": "Choose the model and working style for this conversation.",
+    "ja": "この会話で使うモデルと作業方法を選んでください。",
+    "zh-CN": "选择此对话使用的模型和工作方式。"
+  },
+  "컨텍스트와 비용": {
+    "en": "Context and cost",
+    "ja": "コンテキストとコスト",
+    "zh-CN": "上下文与费用"
+  },
+  "권한과 실행": {
+    "en": "Permissions and execution",
+    "ja": "権限と実行",
+    "zh-CN": "权限与执行"
+  },
+  "추가 설정": {
+    "en": "More settings",
+    "ja": "追加設定",
+    "zh-CN": "更多设置"
+  },
+  "선택하세요": {
+    "en": "Choose a value",
+    "ja": "値を選択",
+    "zh-CN": "选择一个值"
+  },
+  "파일 및 폴더": {
+    "en": "Files and folders",
+    "ja": "ファイルとフォルダー",
+    "zh-CN": "文件与文件夹"
+  },
+  "경로를 찾는 중…": {
+    "en": "Finding paths…",
+    "ja": "パスを検索中…",
+    "zh-CN": "正在查找路径…"
+  },
+  "폴더를 읽을 수 없습니다.": {
+    "en": "Cannot read this folder.",
+    "ja": "このフォルダーを読み取れません。",
+    "zh-CN": "无法读取此文件夹。"
+  },
+  "응답": {
+    "en": "Responses",
+    "ja": "応答",
+    "zh-CN": "回复"
+  },
+  "작업 방식": {
+    "en": "Working style",
+    "ja": "作業方法",
+    "zh-CN": "工作方式"
   }
 }

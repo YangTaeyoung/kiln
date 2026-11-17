@@ -427,6 +427,41 @@ fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
 
 pub(super) type MetadataCache = HashMap<PathBuf, (u64, SystemTime, Option<Source>)>;
 
+/// Read an exact conversation from one pinned namespace. This path never
+/// registers, synchronizes, renames, or writes a native conversation.
+pub(super) fn exact_source(tool: Tool, root: &Path, cwd: &Path, id: &str) -> Result<Source> {
+    let root = root.canonical()?;
+    let cwd = cwd.canonical()?;
+    let gate = Arc::new(AtomicBool::new(true));
+    let mut paths = Vec::new();
+    let mut budget = 100_000;
+    if tool == Tool::Antigravity {
+        antigravity_files(&root, &mut budget, &mut paths, &gate)?;
+    } else {
+        files(&root, &root.join(if tool == Tool::Claude { "projects" } else { "sessions" }), if tool == Tool::Claude { 1 } else { 3 }, &mut budget, &mut paths, &gate)?;
+    }
+    let summaries = if tool == Tool::Antigravity { Some(antigravity_summaries(&root)?) } else { None };
+    let mut found = None;
+    for path in paths {
+        // Avoid opening unrelated transcript contents during a presentation change.
+        let candidate = if tool == Tool::Antigravity {
+            path.ancestors().nth(3).and_then(|directory|directory.file_name()).is_some_and(|name| name == id)
+        } else {
+            path.file_name().is_some_and(|name| name.to_string_lossy().contains(id))
+        };
+        if !candidate { continue; }
+        let source = if let Some(summaries) = &summaries {
+            antigravity_metadata(&root, &path, summaries)?
+        } else { metadata(tool, &root, &path)? };
+        if let Some(source) = source
+            && source.id == id && Path::new(&source.cwd).canonical()? == cwd {
+            ensure!(found.is_none(), "Multiple native files claim the same conversation identity");
+            found = Some(source);
+        }
+    }
+    found.context("The exact native conversation history is unavailable in the original account")
+}
+
 pub(super) fn find(
     config: &Path,
     scope: &Scope,

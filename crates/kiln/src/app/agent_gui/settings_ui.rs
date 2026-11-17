@@ -2,6 +2,10 @@
 use super::editing_text::EditingText;
 use super::*;
 use kiln_common::i18n::tr;
+#[path = "settings_presentation.rs"]
+mod presentation;
+use presentation::*;
+pub(super) use presentation::{model_title, present_value, metadata_title};
 #[derive(Default, Clone, Copy, PartialEq)]
 pub(super) enum Surface {
     #[default]
@@ -13,7 +17,6 @@ pub(super) enum Surface {
 pub(super) struct ControlsUi {
     pub surface: Surface,
     pub search: String,
-    pub scope: Option<ControlScope>,
     pub command_search: String,
     pub edits: BTreeMap<String, ControlEditor>,
     pub actions: actions_ui::ActionForm,
@@ -120,174 +123,109 @@ impl AgentPane {
         }
     }
     pub(super) fn surface_navigation(&mut self, ui: &mut Ui) {
-        ui.horizontal_wrapped(|ui| {
-            for (surface, title) in [
-                (Surface::Conversation, "대화"),
-                (Surface::Settings, "대화 설정"),
-                (Surface::Commands, "명령 및 스킬"),
-            ] {
-                if ui
-                    .selectable_label(self.controls_ui.surface == surface, tr(title))
-                    .clicked()
-                {
-                    self.controls_ui.surface = surface;
+        Frame::NONE.inner_margin(Margin::symmetric(16, 0)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.;
+                let t = Theme::current();
+                for (surface, title) in [(Surface::Conversation, "대화"), (Surface::Settings, "대화 설정"), (Surface::Commands, "명령 및 스킬")] {
+                    let selected = self.controls_ui.surface == surface;
+                    let response = ui.add(egui::Button::new(RichText::new(tr(title)).color(if selected {t.text} else {t.text_dim})).frame(false).fill(egui::Color32::TRANSPARENT));
+                    if selected { ui.painter().line_segment([response.rect.left_bottom() + egui::vec2(0., 4.), response.rect.right_bottom() + egui::vec2(0., 4.)], Stroke::new(2., t.accent)); }
+                    if response.clicked() { self.controls_ui.surface = surface; }
                 }
-            }
+            });
         });
     }
-    pub(super) fn quick_controls_ui(&mut self, ui: &mut Ui) {
-        let options = self.transcript.controls.options.clone();
-        for option in options.iter().filter(|o| {
-            o.scope == ControlScope::Live
-                && (matches!(
-                    o.id.as_str(),
-                    "model"
-                        | "effort"
-                        | "effortLevel"
-                        | "thought_level"
-                        | "permissionMode"
-                        | "collaborationMode"
-                        | "mode"
-                        | "ultracode"
-                ) || matches!(
-                    o.category.as_deref(),
-                    Some("model" | "thought_level" | "mode")
-                ))
-        }) {
-            ui.allocate_ui(egui::vec2(quick_width(ui, option), 28.), |ui| {
-                self.control_widget(ui, option, true)
-            });
-        }
-        // Legacy providers without configOptions retain their native quick selectors.
+    pub(super) fn composer_options_ui(&mut self, ui: &mut Ui, compact: bool) {
         if !self.transcript.controls.options_reported {
-            if !self.transcript.models.is_empty() {
-                let option = ControlOption {
-                    id: "model".into(),
-                    label: "model".into(),
-                    description: String::new(),
-                    category: None,
-                    kind: ControlKind::Select,
-                    choices: self
-                        .transcript
-                        .models
-                        .iter()
-                        .map(|m| ControlChoice {
-                            value: m.id.clone(),
-                            label: m.label.clone(),
-                            description: String::new(),
-                            group: None,
-                        })
-                        .collect(),
-                    current: self.composer.model.clone().map(ControlValue::Text),
-                    scope: ControlScope::Live,
-                    available: true,
-                    reason: None,
-                    source: Some("legacy-model".into()),
-                    documentation: None,
-                };
-                let mut selected = option.current.clone();
-                ui.allocate_ui(egui::vec2(quick_width(ui, &option), 28.), |ui| {
-                    ui.add_enabled_ui(self.editing_allowed(), |ui| {
-                        select_widget(ui, &option, &mut selected, true);
-                    });
-                });
-                if selected != option.current {
-                    self.composer.model = selected.and_then(|v| {
-                        if let ControlValue::Text(s) = v {
-                            Some(s)
-                        } else {
-                            None
-                        }
-                    });
-                }
-            }
-            if !self.transcript.modes.is_empty() {
-                let option = ControlOption {
-                    id: "mode".into(),
-                    label: "mode".into(),
-                    description: String::new(),
-                    category: None,
-                    kind: ControlKind::Select,
-                    choices: self
-                        .transcript
-                        .modes
-                        .iter()
-                        .map(|m| ControlChoice {
-                            value: m.id.clone(),
-                            label: m.label.clone(),
-                            description: m.description.clone(),
-                            group: None,
-                        })
-                        .collect(),
-                    current: self
-                        .transcript
-                        .selected_mode
-                        .clone()
-                        .map(ControlValue::Text),
-                    scope: ControlScope::Live,
-                    available: true,
-                    reason: None,
-                    source: None,
-                    documentation: None,
-                };
-                let mut selected = option.current.clone();
-                ui.allocate_ui(egui::vec2(quick_width(ui, &option), 28.), |ui| {
-                    ui.add_enabled_ui(self.editing_allowed(), |ui| {
-                        select_widget(ui, &option, &mut selected, true);
-                    });
-                });
-                if selected != option.current
-                    && let Some(ControlValue::Text(mode)) = selected
-                    && let Err(e) = self.send(Command::SetMode { mode })
-                {
-                    self.error = Some(e);
-                }
-            }
+            self.legacy_composer_options(ui, compact);
+            return;
         }
-        if self.settings_blocked() {
-            ui.allocate_ui(egui::vec2(140., 20.), |ui| {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(tr("설정 확인 대기")).color(Theme::current().orange),
-                    )
-                    .wrap(),
-                );
+        let options = self.transcript.controls.options.iter().filter(|o| editable_option(o) && quick_option(o)).cloned().collect::<Vec<_>>();
+        ui.spacing_mut().icon_width = 10.;
+        ui.spacing_mut().icon_spacing = 5.;
+        let visuals = &mut ui.visuals_mut().widgets;
+        for v in [&mut visuals.inactive, &mut visuals.hovered, &mut visuals.active] { v.corner_radius = egui::CornerRadius::same(6); }
+        visuals.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+        visuals.inactive.bg_stroke = Stroke::NONE;
+        let model = options.iter().find(|o| o.id == "model" || o.category.as_deref() == Some("model"));
+        if let Some(model) = model {
+            let width = if compact { (ui.available_width() - 38.).clamp(70., 150.) } else { 158_f32.min(ui.available_width()) };
+            ui.allocate_ui(egui::vec2(width, 28.), |ui| self.control_widget_inner(ui, model, true, false));
+        }
+        if compact {
+            let response = widgets::icon_button(ui, kiln_common::icons::Icon::Gear, 26., false, tr("대화 옵션"));
+            if options.iter().any(|o| o.id == "ultracode" && o.current == Some(ControlValue::Bool(true))) {
+                kiln_common::icons::paint(ui.painter(), egui::Rect::from_center_size(response.rect.center(), egui::vec2(14.,14.)), kiln_common::icons::Icon::Gear, Theme::current().purple);
+            }
+            egui::Popup::menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                ui.set_width(240_f32.min(ui.ctx().content_rect().width() - 50.));
+                ui.strong(tr("대화 옵션"));
+                for option in options.iter().filter(|o| Some(o.id.as_str()) != model.map(|m| m.id.as_str())) {
+                    ui.add_space(6.);
+                    self.control_widget_inner(ui, option, false, false);
+                }
             });
+        } else {
+            for option in options.iter().filter(|o| matches!(o.id.as_str(), "mode" | "permissionMode" | "collaborationMode") || o.category.as_deref() == Some("mode")) {
+                ui.allocate_ui(egui::vec2(108., 28.), |ui| self.control_widget_inner(ui, option, true, false));
+            }
+            let thoughts = options.iter().filter(|o| is_effort(o) || o.id == "ultracode").collect::<Vec<_>>();
+            if !thoughts.is_empty() {
+                let strength = thoughts.iter().find(|o| is_effort(o)).and_then(|o| o.current.as_ref().map(|v| present_value(&o.id, v))).unwrap_or_else(|| tr("사고 설정").into());
+                let ultra = thoughts.iter().any(|o| o.id == "ultracode" && o.current == Some(ControlValue::Bool(true)));
+                let text = if ultra { format!("    {strength}") } else { strength };
+                let response = ui.menu_button(RichText::new(text).color(if ultra { Theme::current().purple } else { Theme::current().text_dim }), |ui| {
+                    ui.set_width(240.);
+                    ui.strong(tr("사고 설정"));
+                    for option in &thoughts {
+                        ui.add_space(8.);
+                        self.control_widget_inner(ui, option, false, false);
+                    }
+                });
+                if ultra {
+                    let rect = egui::Rect::from_center_size(egui::pos2(response.response.rect.left()+10., response.response.rect.center().y), egui::vec2(11.,11.));
+                    kiln_common::icons::paint(ui.painter(), rect, kiln_common::icons::Icon::Sparkle, Theme::current().purple);
+                }
+                response.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("사고 설정")));
+                response.response.on_hover_text(tr("추론 강도"));
+            }
         }
+    }
+    fn legacy_composer_options(&mut self, ui: &mut Ui, compact: bool) {
+        if !self.transcript.models.is_empty() {
+            let option = ControlOption { id:"model".into(), label:"model".into(), description:String::new(), category:None, kind:ControlKind::Select,
+                choices:self.transcript.models.iter().map(|m|ControlChoice{value:m.id.clone(),label:m.label.clone(),description:String::new(),group:None}).collect(),
+                current:self.composer.model.clone().map(ControlValue::Text),scope:ControlScope::Live,available:true,reason:None,source:Some("legacy-model".into()),documentation:None };
+            let mut selected=option.current.clone();
+            let width=if compact {(ui.available_width()-38.).clamp(70.,150.)}else{158.};
+            ui.allocate_ui(egui::vec2(width,28.), |ui| {ui.add_enabled_ui(self.editing_allowed(), |ui|select_widget(ui,&option,&mut selected,true));});
+            if selected != option.current { self.composer.model=selected.and_then(|v|if let ControlValue::Text(s)=v{Some(s)}else{None}); }
+        }
+        if !self.transcript.modes.is_empty() {
+            if compact {
+                let response=widgets::icon_button(ui,kiln_common::icons::Icon::Gear,26.,false,tr("대화 옵션"));
+                egui::Popup::menu(&response).show(|ui|self.legacy_mode_widget(ui));
+            } else {ui.allocate_ui(egui::vec2(108.,28.),|ui|self.legacy_mode_widget(ui));}
+        }
+    }
+    fn legacy_mode_widget(&mut self, ui:&mut Ui) {
+        let option=ControlOption{id:"mode".into(),label:"mode".into(),description:String::new(),category:None,kind:ControlKind::Select,
+            choices:self.transcript.modes.iter().map(|m|ControlChoice{value:m.id.clone(),label:m.label.clone(),description:m.description.clone(),group:None}).collect(),
+            current:self.transcript.selected_mode.clone().map(ControlValue::Text),scope:ControlScope::Live,available:true,reason:None,source:None,documentation:None};
+        let mut selected=option.current.clone();
+        ui.add_enabled_ui(self.editing_allowed(),|ui|select_widget(ui,&option,&mut selected,true));
+        if selected != option.current && let Some(ControlValue::Text(mode))=selected && let Err(error)=self.send(Command::SetMode{mode}) {self.error=Some(error);}
     }
     pub(super) fn settings_ui(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.y = 6.;
         ui.heading(tr("대화 설정"));
-        ui.add(egui::Label::new(tr("설정은 네이티브 확인 후 적용됩니다.")).wrap());
-        let search = ui.add(
-            egui::TextEdit::singleline(&mut self.controls_ui.search)
-                .hint_text(tr("설정 검색"))
-                .desired_width(f32::INFINITY),
-        );
-        search.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tr("설정 검색"))
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.controls_ui.scope, None, tr("전체"));
-            for scope in [
-                ControlScope::Live,
-                ControlScope::NewConversation,
-                ControlScope::Inherited,
-                ControlScope::Managed,
-                ControlScope::Terminal,
-            ] {
-                let title = scope_label(&scope);
-                ui.selectable_value(&mut self.controls_ui.scope, Some(scope), title);
-            }
-            if ui
-                .add_enabled(
-                    !self.settings_blocked(),
-                    egui::Button::new(tr("설정 새로 고침")),
-                )
-                .clicked()
-            {
-                self.discover(Discovery::Settings);
-            }
+        ui.add(egui::Label::new(tr("현재 대화에 사용할 모델과 작업 방식을 선택하세요.")).wrap());
+        search_field(ui, &mut self.controls_ui.search, tr("설정 검색"));
+        ui.horizontal(|ui| {
+            ui.small(tr("현재 대화"));
+            let refresh=widgets::icon_button(ui,kiln_common::icons::Icon::Refresh,24.,false,tr("설정 새로 고침"));
+            if refresh.clicked() && !self.settings_blocked() { self.discover(Discovery::Settings); }
         });
         self.outcomes_ui(ui);
         let controls = self.transcript.controls.clone();
@@ -301,10 +239,7 @@ impl AgentPane {
             .options
             .iter()
             .filter(|o| {
-                self.controls_ui
-                    .scope
-                    .as_ref()
-                    .is_none_or(|scope| scope == &o.scope)
+                editable_option(o)
                     && (search.is_empty()
                         || format!("{} {} {} {}", o.id, label(&o.id), o.label, o.description)
                             .to_lowercase()
@@ -314,54 +249,40 @@ impl AgentPane {
             .collect::<Vec<_>>();
         ui.add_space(6.);
         ui.strong(tr("주요 설정"));
-        for option in filtered
-            .iter()
-            .filter(|o| o.scope == ControlScope::Live && quick_option(o))
-        {
-            self.option_row(ui, option);
+        let core = filtered.iter().filter(|o| o.scope == ControlScope::Live && quick_option(o)).collect::<Vec<_>>();
+        if !core.is_empty() {
+            Frame::new().fill(Theme::current().bg_panel).stroke(Stroke::new(1.,Theme::current().border)).corner_radius(10).inner_margin(6).show(ui, |ui| {
+                for (index, option) in core.iter().enumerate() {
+                    if index > 0 { ui.separator(); }
+                    self.option_row(ui, option);
+                }
+            });
         }
         let advanced = filtered
             .iter()
             .filter(|o| o.scope == ControlScope::Live && !quick_option(o))
             .collect::<Vec<_>>();
-        if !advanced.is_empty() {
-            egui::CollapsingHeader::new(format!("{} · {}", tr("고급 설정"), advanced.len()))
-                .open((!search.is_empty()).then_some(true))
-                .show(ui, |ui| {
-                    for option in advanced {
-                        self.option_row(ui, option);
-                    }
+        let mut groups:BTreeMap<String,Vec<&ControlOption>>=BTreeMap::new();
+        for option in advanced {
+            let group=match option.id.as_str() {
+                "language"|"outputStyle"|"agent"|"advisorModel"|"promptSuggestionEnabled"|"summary"|"thinkingDisplay" => tr("응답"),
+                "fastMode"|"enableWorkflows"|"workflowSizeGuideline"|"workflowKeywordTriggerEnabled" => tr("작업 방식"),
+                "autoCompactEnabled"|"promptCacheTtl"|"subagentPromptCacheTtl"|"fallbackModel"|"thinkingBudget"|"serviceTier" => tr("컨텍스트와 비용"),
+                "permissions"|"approvalPolicy"|"approvalsReviewer"|"sandboxPolicy"|"granularApproval" => tr("권한과 실행"),
+                id if id.starts_with("skill:") => tr("스킬"),
+                _ => option.category.as_deref().filter(|c| *c != "Session").unwrap_or(tr("추가 설정")),
+            };
+            groups.entry(group.into()).or_default().push(option);
+        }
+        for (group,options) in groups {
+            egui::CollapsingHeader::new(&group).open((!search.is_empty()).then_some(true)).show(ui,|ui| {
+                Frame::new().fill(Theme::current().bg_panel).stroke(Stroke::new(1.,Theme::current().border)).corner_radius(10).inner_margin(6).show(ui,|ui| {
+                    for (index,option) in options.iter().enumerate() { if index>0 {ui.separator();} self.option_row(ui,option); }
                 });
+            });
         }
-        let reference = filtered
-            .iter()
-            .filter(|o| o.scope != ControlScope::Live)
-            .collect::<Vec<_>>();
-        if !reference.is_empty() {
-            egui::CollapsingHeader::new(format!("{} · {}", tr("고급 기능 목록"), reference.len()))
-                .open((!search.is_empty() || self.controls_ui.scope.is_some()).then_some(true))
-                .show(ui, |ui| {
-                    for option in reference {
-                        self.option_row(ui, option);
-                    }
-                });
-        }
-        if controls
-            .options
-            .iter()
-            .any(|o| o.scope == ControlScope::Terminal)
-        {
-            ui.add(
-                egui::Label::new(tr(
-                    "터미널 전용 기능은 현재 선택한 계정의 새 터미널에서 설정합니다.",
-                ))
-                .wrap(),
-            );
-            if ui.button(tr("터미널에서 새 대화")).clicked() {
-                self.terminal_request = true;
-            }
-        }
-        self.coverage_ui(ui, None);
+        if filtered.is_empty() && !search.is_empty() {ui.label(tr("검색 결과가 없습니다."));}
+        egui::CollapsingHeader::new(tr("변경 기록")).id_salt("settings-history").show(ui, |ui| self.outcome_history_ui(ui));
         egui::CollapsingHeader::new(tr("모델 정보")).show(ui, |ui| {
             if !controls.models_reported {
                 ui.label(tr("목록을 아직 받지 못했습니다."));
@@ -422,42 +343,6 @@ impl AgentPane {
         egui::CollapsingHeader::new(tr("상태 및 연결")).show(ui, |ui| self.status_ui(ui));
         egui::CollapsingHeader::new(tr("네이티브 작업")).show(ui, |ui| self.actions_ui(ui));
         egui::CollapsingHeader::new(tr("새 대화 설정")).show(ui, |ui| self.launch_ui(ui));
-        if !controls.capabilities.is_empty() {
-            egui::CollapsingHeader::new(format!(
-                "{} · {}",
-                tr("고급 네이티브 기능"),
-                controls.capabilities.len()
-            ))
-            .show(ui, |ui| {
-                for cap in &controls.capabilities {
-                    if !search.is_empty()
-                        && !format!("{} {}", cap.id, cap.description)
-                            .to_lowercase()
-                            .contains(&search)
-                    {
-                        continue;
-                    }
-                    ui.label(actions_ui::capability_label(&cap.id));
-                    ui.small(format!(
-                        "{} · {}",
-                        scope_label(&cap.scope),
-                        tr(if cap.available {
-                            "네이티브 정책 적용"
-                        } else {
-                            "전용 네이티브 흐름 필요"
-                        })
-                    ));
-                    ui.hyperlink_to(tr("공식 문서"), &cap.documentation);
-                    egui::CollapsingHeader::new(tr("진단 정보"))
-                        .id_salt(&cap.id)
-                        .show(ui, |ui| {
-                            ui.label(&cap.id);
-                            ui.add(egui::Label::new(&cap.description).wrap());
-                        });
-                    ui.separator();
-                }
-            });
-        }
         if let Some(error) = &self.error {
             ui.add(egui::Label::new(RichText::new(error).color(Theme::current().red)).wrap());
         }
@@ -467,12 +352,9 @@ impl AgentPane {
     }
     fn core_option_row(&mut self, ui: &mut Ui, option: &ControlOption) {
         ui.push_id((&option.id, "row"), |ui| {
-            let theme = Theme::current();
             Frame::new()
-                .fill(theme.bg_panel)
-                .stroke(Stroke::new(1., theme.border))
-                .corner_radius(8)
-                .inner_margin(8)
+                .fill(egui::Color32::TRANSPARENT)
+                .inner_margin(Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.spacing_mut().item_spacing.y = 4.;
@@ -482,12 +364,11 @@ impl AgentPane {
                         } else {
                             &option.label
                         });
-                        ui.small(scope_label(&option.scope));
                     };
-                    if ui.available_width() >= 680. {
+                    if ui.available_width() >= 360. {
                         ui.horizontal(|ui| {
                             ui.allocate_ui(egui::vec2(140., 28.), heading);
-                            let width = (ui.available_width() - 90.).max(0.);
+                            let width = (ui.available_width() - 34.).max(0.);
                             ui.allocate_ui_with_layout(
                                 egui::vec2(width, 28.),
                                 egui::Layout::left_to_right(egui::Align::Center)
@@ -518,7 +399,8 @@ impl AgentPane {
         });
     }
     fn core_details(&mut self, ui: &mut Ui, option: &ControlOption) {
-        ui.menu_button(tr("세부 정보"), |ui| {
+        let response=widgets::icon_button(ui,kiln_common::icons::Icon::Info,22.,false,tr("세부 정보"));
+        egui::Popup::menu(&response).show(|ui| {
             ui.set_max_width(280.);
             if !option.description.is_empty() {
                 ui.add(egui::Label::new(&option.description).wrap());
@@ -538,64 +420,7 @@ impl AgentPane {
         });
     }
     fn option_row(&mut self, ui: &mut Ui, option: &ControlOption) {
-        if option.scope == ControlScope::Live
-            && quick_option(option)
-            && matches!(option.kind, ControlKind::Select | ControlKind::Boolean)
-        {
-            self.core_option_row(ui, option);
-            return;
-        }
-        ui.push_id((&option.id, "row"), |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.strong(if option.label == option.id {
-                    label(&option.id)
-                } else {
-                    &option.label
-                });
-                ui.small(scope_label(&option.scope));
-            });
-            if !option.description.is_empty() {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(
-                            if option.category.as_deref() == Some("Native settings inventory") {
-                                tr("이 설정은 네이티브 환경에서 관리합니다.")
-                            } else {
-                                &option.description
-                            },
-                        )
-                        .small()
-                        .color(Theme::current().text_dim),
-                    )
-                    .wrap(),
-                );
-            }
-            if let Some(category) = &option.category
-                && category != "Session"
-                && category != "Native settings inventory"
-            {
-                ui.small(category);
-            }
-            if option.scope == ControlScope::Live {
-                self.control_widget(ui, option, false);
-            } else {
-                ui.add(egui::Label::new(value_label(option.current.as_ref())).wrap());
-            }
-            if !option.available {
-                ui.small(tr("이 대화에서 변경할 수 없음"));
-            }
-            if let Some(reason) = &option.reason {
-                ui.add(egui::Label::new(RichText::new(native_notice(reason)).small()).wrap());
-            }
-            if let Some(source) = &option.source {
-                ui.small(format!("{}: {}", tr("출처"), source));
-            }
-            if let Some(doc) = &option.documentation {
-                ui.hyperlink_to(tr("공식 문서"), doc);
-            }
-            ui.add_space(4.);
-            ui.separator();
-        });
+        self.core_option_row(ui, option);
     }
     pub(super) fn control_widget(&mut self, ui: &mut Ui, option: &ControlOption, quick: bool) {
         self.control_widget_inner(ui, option, quick, !quick);
@@ -607,12 +432,32 @@ impl AgentPane {
         quick: bool,
         reset: bool,
     ) {
+        let mut presented = option.clone();
+        if matches!(option.id.as_str(), "model" | "advisorModel") {
+            for choice in &mut presented.choices {
+                if let Some(metadata) = self.transcript.controls.models.iter().find(|m| m.id == choice.value) {
+                    if let Some(resolved) = &metadata.resolved_model {
+                        if ["opus", "fable", "sonnet", "haiku"].contains(&choice.label.to_lowercase().as_str()) {
+                            choice.label = model_title(resolved);
+                        }
+                        if metadata.id != "default" && option.current == Some(ControlValue::Text(resolved.clone())) {
+                            // Mark a resolved selection against its advertised alias, without
+                            // changing the provider catalog or sending an implicit config.
+                            choice.value = resolved.clone();
+                        }
+                    }
+                }
+            }
+        }
+        let option = &presented;
         let mut selected = option.current.clone();
         let enabled =
             self.editing_allowed() && option.available && option.scope == ControlScope::Live;
         ui.push_id((&option.id, quick), |ui| {
             ui.add_enabled_ui(enabled, |ui| match &option.kind {
+                ControlKind::Select if is_effort(option) => effort_slider(ui, option, &mut selected, quick),
                 ControlKind::Select => select_widget(ui, option, &mut selected, quick),
+                ControlKind::Boolean if option.id == "ultracode" => ultracode_switch(ui, option, &mut selected),
                 ControlKind::Boolean => {
                     // Unknown is shown explicitly before a deliberate on/off selection.
                     let mut o = option.clone();
@@ -650,14 +495,6 @@ impl AgentPane {
                     ui.label(tr("지원되지 않는 설정 유형"));
                 }
                 _ => {
-                    ui.add(
-                        egui::Label::new(format!(
-                            "{}: {}",
-                            tr("네이티브 값"),
-                            value_label(option.current.as_ref())
-                        ))
-                        .wrap(),
-                    );
                     let edit = self
                         .controls_ui
                         .edits
@@ -666,13 +503,19 @@ impl AgentPane {
                     if !edit.compatible(option) {
                         *edit = ControlEditor::new(option);
                     }
-                    edit_value(ui, option, edit);
-                    if ui
-                        .add_enabled(edit.text.ready(ui.ctx()), egui::Button::new(tr("적용")))
-                        .clicked()
-                    {
-                        selected = Some(edit.value());
+                    let scalar=matches!(edit.value,ControlValue::Text(_)|ControlValue::Integer(_));
+                    let mut apply=false;
+                    if scalar {
+                        ui.horizontal(|ui| {
+                            let width=(ui.available_width()-64.).clamp(40.,280.);
+                            ui.allocate_ui(egui::vec2(width,28.),|ui|edit_value(ui,option,edit));
+                            apply=ui.add_enabled(edit.text.ready(ui.ctx()) && edit.dirty(),egui::Button::new(tr("적용"))).clicked();
+                        });
+                    } else {
+                        edit_value(ui,option,edit);
+                        apply=ui.add_enabled(edit.text.ready(ui.ctx()) && edit.dirty(),egui::Button::new(tr("적용"))).clicked();
                     }
+                    if apply { selected=Some(edit.value()); }
                 }
             });
         });
@@ -726,7 +569,7 @@ impl AgentPane {
         if !self.local_intents.is_empty() || self.replay_required {
             ui.colored_label(Theme::current().orange, tr("설정 확인 대기"));
         }
-        for outcome in outcomes.iter().rev().take(8) {
+        for outcome in outcomes.iter().rev().filter(|v| !v.settled || !matches!(v.state, ApplicationState::Applied | ApplicationState::Cancelled)).take(3) {
             ui.horizontal_wrapped(|ui| {
                 ui.strong(label(&outcome.control));
                 ui.label(tr(match outcome.state {
@@ -765,6 +608,17 @@ impl AgentPane {
                 }
             }
         }
+    }
+    fn outcome_history_ui(&self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().id_salt("outcome-history-list").max_height(180.).show(ui, |ui| {
+            for outcome in self.transcript.controls.outcomes.values().rev().take(20) {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(label(&outcome.control));
+                    ui.label(present_value(&outcome.control, outcome.effective.as_ref().unwrap_or(&outcome.requested)));
+                    ui.small(tr(match outcome.state { ApplicationState::Applied => "적용됨", ApplicationState::Pending => "적용 대기", ApplicationState::Rejected => "거부됨", ApplicationState::Cancelled => "취소됨", _ => "확인되지 않음" }));
+                });
+            }
+        });
     }
     pub(super) fn coverage_ui(&self, ui: &mut Ui, subject: Option<&str>) {
         for coverage in self
@@ -857,37 +711,6 @@ impl AgentPane {
         }
     }
 }
-fn quick_width(ui: &Ui, option: &ControlOption) -> f32 {
-    let title = if option.label == option.id {
-        label(&option.id)
-    } else {
-        &option.label
-    };
-    let display = option
-        .choices
-        .iter()
-        .find(|choice| option.current == Some(ControlValue::Text(choice.value.clone())))
-        .map(|choice| choice.label.clone())
-        .unwrap_or_else(|| value_label(option.current.as_ref()));
-    let text = egui::WidgetText::from(format!("{title}: {display}"));
-    let text_width = text
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Extend),
-            f32::INFINITY,
-            egui::TextStyle::Button,
-        )
-        .size()
-        .x;
-    (text_width
-        + ui.spacing().icon_width
-        + ui.spacing().icon_spacing
-        + 2. * ui.spacing().button_padding.x
-        + 4.)
-        .max(140.)
-        .min(320.)
-        .min(ui.max_rect().width())
-}
 fn select_widget(
     ui: &mut Ui,
     option: &ControlOption,
@@ -905,12 +728,12 @@ fn select_widget(
         .choices
         .iter()
         .find(|c| Some(c.value.as_str()) == value)
-        .map(|c| c.label.clone())
+        .map(|c| choice_title(option, c))
         .unwrap_or_else(|| {
             if option.source.as_deref() == Some("legacy-model") && selected.is_none() {
                 tr("기본 모델").into()
             } else {
-                value_label(selected.as_ref())
+                selected.as_ref().map(|v| present_value(&option.id,v)).unwrap_or_else(|| tr("선택하세요").into())
             }
         });
     let title = if option.label == option.id {
@@ -918,8 +741,8 @@ fn select_widget(
     } else {
         &option.label
     };
-    let text = if quick {
-        format!("{title}: {display}")
+    let text = if quick && option.id != "model" {
+        if matches!(option.id.as_str(), "mode" | "permissionMode" | "collaborationMode") { display.clone() } else { format!("{title}: {display}") }
     } else {
         display
     };
@@ -932,6 +755,7 @@ fn select_widget(
         .selected_text(text)
         .truncate()
         .show_ui(ui, |ui| {
+            ui.set_max_width(380_f32.min(ui.ctx().content_rect().width() - 40.));
             if option.source.as_deref() == Some("legacy-model")
                 && ui
                     .selectable_label(selected.is_none(), tr("기본 모델"))
@@ -950,7 +774,7 @@ fn select_widget(
                 if ui
                     .selectable_label(
                         selected.as_ref() == Some(&ControlValue::Text(choice.value.clone())),
-                        &choice.label,
+                        choice_row(ui, option, choice),
                     )
                     .on_hover_text(&choice.description)
                     .clicked()
@@ -1163,6 +987,9 @@ pub(super) fn extension_reason(reason: &str) -> &'static str {
     })
 }
 
+fn editable_option(option: &ControlOption) -> bool {
+    option.scope == ControlScope::Live && option.available && match &option.kind { ControlKind::Unsupported(_) => false, ControlKind::Select => !option.choices.is_empty(), _ => true }
+}
 fn quick_option(option: &ControlOption) -> bool {
     matches!(
         option.id.as_str(),

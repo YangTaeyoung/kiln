@@ -1,6 +1,6 @@
 # Native agent GUI component notes
 
-Recorded from `996701312f834e262839f814d8b0ec69b2fb9931` on 2026-11-15. These notes extend the existing [Graphite Workbench design system](../DESIGN.md) and [product commitments](../PRODUCT.md); they document implemented components, not a replacement visual identity. See [agent GUI behavior](agent-gui.md) for runtime and recovery rules. Dimensions below are egui logical points.
+Updated on 2026-11-17 for the compact composer, settings, command catalog and presentation handoff. Historical links pinned to `996701312f834e262839f814d8b0ec69b2fb9931` record the earlier baseline; the current sections link to source files and name their entry points. These notes extend the existing [Graphite Workbench design system](../DESIGN.md) and [product commitments](../PRODUCT.md); they document implemented components, not a replacement visual identity. See [agent GUI behavior](agent-gui.md) for runtime and recovery rules. Dimensions below are egui logical points.
 
 ## Theme and reading hierarchy
 
@@ -18,11 +18,84 @@ Sources: [column and messages](https://github.com/YangTaeyoung/kiln/blob/9967013
 
 ## Composer
 
-One outer surface uses `bg_input`, a 1-point `border_strong`, 12-point corners and 12-point padding. The three-row multiline editor has no inner frame. Focus adds a 1.5-point accent stroke at 0.7 tint around the outer surface. Keep the attachment plus button, model/mode selectors and Send/Stop inside this surface, with a subordinate shortcut hint below them.
+Use one quiet outer `bg_input` surface with a strong border, restrained corner radius
+and an unframed two-row editor for the conversation. Settings and catalog surfaces
+can use a one-row companion editor. Focus draws one accent boundary around the
+composer. Do not add a second boxed panel around its controls.
 
-The attachment control has a 28-point target and an accessible name. Model and mode selectors allocate 125 and 105 points respectively, use rounded quiet fills, and expose available provider choices. Send uses the native arrow and primary button; Stop uses the native stop mark and secondary button. Both use the shared 32-point button height. Below 400 points of composer content width, controls wrap and the action moves to its own right-aligned row. The outer layout reserves additional height below a 440-point pane width, supporting the 320-point fixture without clipping its action or outer border. Retain Enter/Shift+Enter copy and the IME submit guard when refining geometry.
+One toolbar contains the attachment control, model, mode, Reasoning settings and a
+28-point round Send/Stop control. The primary action reserves its own space at the
+right. Below 560 points of toolbar content width, retain the model and place the
+remaining controls in Conversation options. The toolbar stays on one row. Attachment
+chips and validation errors can increase height; a suggestion list must not.
 
-Sources: [outer frame/editor](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln/src/app/agent_gui/view.rs#L993), [responsive footer and focus](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln/src/app/agent_gui/view.rs#L1136), [selectors](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln/src/app/agent_gui/view.rs#L1213), [actions](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln/src/app/agent_gui/view.rs#L1299), [button dimensions](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f814d8b0ec69b2fb9931/crates/kiln-common/src/widgets.rs#L209).
+Reasoning settings contains the provider's advertised effort levels as an ordered
+step slider and Claude's independent Ultracode switch. Compact Conversation options
+contains those controls together with mode. Use purple to signal enabled Ultracode;
+its indicator is native vector artwork rather than a font-dependent character.
+Readable model names and localized mode/effort labels retain exact native values.
+The header displays confirmed runtime values, separately from requested changes.
+Keep the subordinate Enter/Shift+Enter hint and the IME submit guard.
+
+Sources: [composer and round action](../crates/kiln/src/app/agent_gui/view.rs)
+(`composer_ui`, `composer_action_ui`, `composer_icon`),
+[responsive options](../crates/kiln/src/app/agent_gui/settings_ui.rs)
+(`composer_options_ui`), and
+[effort and Ultracode](../crates/kiln/src/app/agent_gui/settings_presentation.rs)
+(`effort_slider`, `ultracode_switch`).
+
+## Settings and command discovery
+
+Conversation, Session settings and Commands and skills use quiet text navigation
+with a thin selected underline. Search controls use the shared input surface,
+vector search icon and explicit clear action. GUI settings omit terminal-only
+controls, preserve the remaining scope labels and start Change history collapsed.
+Model and mode choices retain native descriptions so the reader can inspect what
+a selection means before choosing it.
+
+The command/skill catalog scrolls inside a bounded region. Each compact row has a
+thin expansion chevron, a left-aligned name, one-line description preview and a
+right-aligned Insert into draft action. Reserve the row's full rectangle first:
+intrinsic control widths must not grow successive rows. Expanded descriptions and
+metadata remain inside the catalog's scrolling boundary. Terminal-only entries and
+Codex skills without a native path are hidden from the invocable GUI catalog.
+
+Completion is a floating list above the editor with short descriptions, a visible
+active row and its own bounded scroll. Up/Down changes selection; Tab/Enter inserts
+without submitting; Esc dismisses until the token changes. Recognized command/skill
+tokens use an accent treatment in the editor. Reserve Tab/Esc in the focused
+editor's event filter while the list is open, because egui processes focus
+navigation before the completion handler runs. Preserve IME guards and restore the
+cursor after the inserted token.
+
+Sources: [settings and navigation](../crates/kiln/src/app/agent_gui/settings_ui.rs)
+(`surface_navigation`, `settings_ui`),
+[catalog and completion](../crates/kiln/src/app/agent_gui/commands_ui.rs)
+(`command_row`, `slash_completion_input`, `slash_completion_ui`, `command_layouter`),
+and [geometry and painted-text checks](../crates/kiln/src/app/agent_gui/commands_tests.rs).
+The focus filter follows egui's [EventFilter contract](https://docs.rs/egui/0.36.2/egui/struct.EventFilter.html).
+
+## Presentation ownership
+
+GUI/Terminal changes reuse the confirmed native conversation with its original
+account environment and working folder. The host must be idle, free of pending
+approvals/tools/queued work, and exclusively own its backend before opening the
+native terminal. Additional background helpers cause refusal; they are not killed
+for a presentation switch.
+
+A return to GUI waits for natural native CLI exit. A tab click records the request
+without synthesizing termination or input. After exit, appended user/assistant text
+is imported only if the prior native-history prefix still matches. Image notices
+can appear in that text, but native tool cards and image payloads are not rebuilt.
+Older terminal tasks require an exact tracked native conversation and daemon-confirmed
+PTY exit before import. Missing or disconnected session state is not exit proof.
+
+Sources: [handoff and prefix validation](../crates/kiln/src/app/agent_gui/presentation.rs)
+(`can_handoff`, `serve_terminal`, `import_terminal_history`),
+[exclusive child ownership](../crates/kiln/src/app/agent_gui/host.rs),
+[recorded-conversation preparation](../crates/kiln/src/app/agent_gui/mod.rs)
+(`prepare_existing_native`), and
+[daemon exit gate](../crates/kiln/src/app/mod.rs) (`tick_agent_gui_imports`).
 
 ## Pending decisions
 
@@ -42,8 +115,8 @@ Sources: [menu](https://github.com/YangTaeyoung/kiln/blob/996701312f834e262839f8
 
 The visual review disposition was **ship** for the scoped source/harness correction at `9967013`. Its approval-summary fix was **Approved** in dark/light full-pane renders at 1400/520 widths with short/long arguments. Subsequent actual native light approval/result/menu captures closed the earlier **CannotVerify** approval-visibility gate: actual MCP arguments and both decisions were readable before the controller selected one-time Allow, and the native result showed the matching completed echo. The scoped actual-native review was **Approved**, with a ship disposition. This is installed Claude plus local loopback inference and a real stdio MCP fixture, not authenticated remote Claude inference or whole-feature/release approval. See [current native verification](maintainers/0.3.0-status.md) for the later expanded controls/tools, authenticated Antigravity result and unresolved physical IME boundary.
 
-The composer dimensions above record the original model/mode presentation at
-`9967013`. Expanded controls also include advertised reasoning effort and independent
-Claude Ultracode, plus searchable session settings and commands/skills; see
-[provider coverage](agent-feature-coverage.md). Harness geometry, native interaction,
-physical IME input and provider outcomes remain separate evidence.
+The current compact composer, command catalog and settings changes are verified by
+source and egui harness geometry/renders. Those checks do not establish physical
+IME behavior, a real provider handoff or authenticated provider outcomes. Keep the
+historical native evidence above separate from the latest UI candidate. See
+[provider coverage](agent-feature-coverage.md) for control availability.

@@ -71,6 +71,11 @@ fn harness(p: AgentPane, width: f32, dark: bool) -> Harness<'static, AgentPane> 
         p,
     )
 }
+fn open_composer_options(h: &mut Harness<'_, AgentPane>) {
+    let compact = h.query_by_label(kiln_common::i18n::tr("대화 옵션")).is_some();
+    let name = kiln_common::i18n::tr(if compact { "대화 옵션" } else { "사고 설정" });
+    if let Some(button) = h.query_by_label(name) { button.click(); h.run(); }
+}
 #[test]
 fn task6_actual_quick_controls_serialize_intent_and_native_settlement_all_sizes() {
     for width in [320., 900.] {
@@ -140,6 +145,7 @@ fn task6_actual_quick_controls_serialize_intent_and_native_settlement_all_sizes(
                 Some(ControlValue::Text("new".into()));
             h.run();
             assert!(!h.state().settings_blocked());
+            open_composer_options(&mut h);
             for name in ["모델", "추론 강도", "모드", "보내기"] {
                 let rect = h.get_by_label(name).rect();
                 assert!(
@@ -208,18 +214,17 @@ fn task6_unknown_empty_catalogs_and_model_choices_replace_actual_widgets() {
     h.state_mut().transcript.controls.options =
         vec![select("thought_level", "low", &["low", "high"])];
     h.run();
-    h.get_by_label("추론 강도").click();
-    h.run();
-    assert!(h.query_by_label("high").is_some());
+    open_composer_options(&mut h);
+    assert_eq!(h.get_by_label("추론 강도").accesskit_node().role(), egui::accesskit::Role::Slider);
+    assert!(h.query_by_label("추론 강도 · 낮음").is_some());
     h.key_press(egui::Key::Escape);
     h.run();
     h.state_mut().transcript.controls.options =
         vec![select("thought_level", "medium", &["medium"])];
     h.run();
-    h.get_by_label("추론 강도").click();
-    h.run();
-    assert!(h.query_by_label("high").is_none());
-    assert!(h.query_by_label("medium").is_some());
+    open_composer_options(&mut h);
+    assert!(h.query_by_label("추론 강도 · 보통").is_some());
+    assert!(h.query_by_label("추론 강도").is_none(), "a single supported level needs no slider");
     h.key_press(egui::Key::Escape);
     h.run();
     h.state_mut().transcript.controls.options.clear();
@@ -696,7 +701,7 @@ fn task6_settings_search_preserves_unknown_options_scope_and_draft() {
 }
 
 #[test]
-fn task6_terminal_only_feature_opens_separate_terminal_intent_without_sending() {
+fn task6_terminal_only_feature_is_hidden_from_gui_without_sending() {
     let mut p = fixture(Tool::Claude);
     p.controls_ui.surface = Surface::Settings;
     let mut option = select("native-terminal-setting", "one", &["one"]);
@@ -706,9 +711,9 @@ fn task6_terminal_only_feature_opens_separate_terminal_intent_without_sending() 
     p.transcript.controls.options = vec![option];
     let mut h = harness(p, 900., true);
     h.run();
-    h.get_by_label("터미널에서 새 대화").click();
-    h.run();
-    assert!(h.state_mut().take_terminal_request());
+    assert!(h.query_by_label("터미널 전용").is_none());
+    assert!(h.query_by_label("native-terminal-setting").is_none());
+    assert!(h.query_by_label("터미널에서 새 대화").is_none());
     assert!(!h.state_mut().take_terminal_request());
     assert_eq!(h.state().composer.text, "keep 한글 draft");
     assert!(h.state().sent.is_empty());
@@ -1346,43 +1351,9 @@ fn task6_visual_core_settings_fit_and_quick_labels_remain_readable() {
             for shape in &h.output().shapes {
                 text_shapes(&shape.shape, &mut texts);
             }
-            if width > 900. {
-                for needle in ["모델: claude-opus-5-5", "추론 강도: medium"] {
-                    let text = texts
-                        .iter()
-                        .find(|s| s.galley.text() == needle)
-                        .expect("quick selected label painted");
-                    assert!(
-                        !text.galley.elided,
-                        "wide quick value must be readable: {needle}"
-                    );
-                }
-                let combos = h
-                    .query_all_by_role(egui::accesskit::Role::ComboBox)
-                    .collect::<Vec<_>>();
-                let model = combos
-                    .iter()
-                    .find(|n| n.accesskit_node().label().as_deref() == Some("모델"))
-                    .unwrap()
-                    .rect();
-                let mode = combos
-                    .iter()
-                    .find(|n| n.accesskit_node().label().as_deref() == Some("모드"))
-                    .unwrap()
-                    .rect();
-                println!(
-                    "settings width={width} dark={dark}: first={model:?} last={mode:?}, composer_top={}",
-                    h.get_by_label("메시지").rect().top()
-                );
-                assert!(
-                    mode.top() - model.top() < 210.,
-                    "core controls must fit compact rows: {model:?} {mode:?}"
-                );
-                assert!(
-                    mode.bottom() < h.get_by_label("메시지").rect().top(),
-                    "all core values above composer"
-                );
-            }
+            assert!(h.query_by_label("추론 강도 · 보통").is_some());
+            assert!(texts.iter().any(|s| s.galley.text() == "Opus 5.5"));
+            assert_eq!(h.query_all_by_role(egui::accesskit::Role::Slider).count(), 1, "settings uses one effort slider; compact footer does not duplicate it");
             for combo in h.query_all_by_role(egui::accesskit::Role::ComboBox) {
                 assert!(
                     combo.rect().right() <= width + 1.,
@@ -1463,5 +1434,99 @@ fn task6_visual_command_cards_are_compact_and_details_preserve_native_text() {
             assert!(h.state().composer.text.ends_with("/native-0 "));
             assert!(h.state().sent.is_empty());
         }
+    }
+}
+
+#[test]
+fn ux_localized_mode_values_preserve_native_identifiers() {
+    use kiln_common::i18n::{Language, with_language};
+    for (language, expected) in [(Language::Korean,"자동"),(Language::English,"Auto"),(Language::Japanese,"自動"),(Language::ChineseSimplified,"自动")] {
+        with_language(language, || {
+            let o = select("permissionMode", "auto", &["auto", "plan"]);
+            let mut h = harness(fixture(Tool::Claude), 520., true);
+            h.state_mut().transcript.controls.options_reported = true;
+            h.state_mut().transcript.controls.options = vec![o];
+            h.run();
+            open_composer_options(&mut h);
+            assert!(h.get_by_label(kiln_common::i18n::tr("모드")).accesskit_node().value().unwrap().contains(expected));
+            assert_eq!(h.state().transcript.controls.options[0].current,Some(ControlValue::Text("auto".into())));
+            assert!(h.state().sent.is_empty());
+        });
+    }
+}
+
+#[test]
+fn ux_effort_drag_commits_once_on_release_and_unknown_never_autowrites() {
+    let mut p=fixture(Tool::Claude);
+    p.transcript.controls.options_reported=true;
+    p.transcript.controls.options=vec![select("effortLevel","low", &["low","medium","high","xhigh","max"])];
+    let mut h=harness(p,900.,true);h.run();
+    open_composer_options(&mut h);
+    let rect=h.get_by_label("추론 강도").rect();
+    let start=egui::pos2(rect.left()+6.,rect.center().y);
+    let end=egui::pos2(rect.right()-6.,rect.center().y);
+    h.event(egui::Event::PointerMoved(start));
+    h.event(egui::Event::PointerButton{pos:start,button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::NONE});h.step();
+    h.event(egui::Event::PointerMoved(end));h.step();
+    assert!(h.state().sent.is_empty(),"drag previews without reconfiguring the provider");
+    h.event(egui::Event::PointerButton{pos:end,button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::NONE});h.run();
+    assert_eq!(h.state().sent,vec![Command::Configure{control:"effortLevel".into(),value:ControlValue::Text("max".into())}]);
+    let mut p=fixture(Tool::Claude);p.transcript.controls.options_reported=true;
+    let mut option=select("effortLevel","future-level", &["low","high"]);option.current=None;
+    p.transcript.controls.options=vec![option];
+    let mut h=harness(p,520.,false);h.run();assert!(h.state().sent.is_empty());
+}
+
+#[test]
+fn ux_ultracode_is_an_independent_toggle_and_terminal_controls_are_hidden() {
+    let mut p=fixture(Tool::Claude);p.transcript.controls.options_reported=true;
+    let mut toggle=select("ultracode","", &[]);toggle.kind=ControlKind::Boolean;toggle.current=Some(ControlValue::Bool(false));
+    p.transcript.controls.options=vec![toggle, select("effortLevel","high", &["low","high"])];
+    let mut h=harness(p,520.,true);h.run();open_composer_options(&mut h);h.get_by_label("Ultracode").click();h.run();
+    assert_eq!(h.state().sent,vec![Command::Configure{control:"ultracode".into(),value:ControlValue::Bool(true)}]);
+    assert_eq!(h.state().transcript.controls.options[1].current,Some(ControlValue::Text("high".into())));
+    assert_eq!(h.state().composer.text,"keep 한글 draft");
+}
+
+#[test]
+fn ux_visual_review_matrix() {
+    for dark in [true,false] { for width in [320.,520.,1100.] {
+        let mut p=fixture(Tool::Claude);p.composer.text=String::new();p.transcript.selected_model=Some("claude-opus-5-5".into());
+        p.transcript.controls.options_reported=true;
+        let mut model=select("model","claude-opus-5-5", &["default","opus","claude-fable-5-2[1m]","sonnet","haiku"]);
+        for c in &mut model.choices { c.label=match c.value.as_str(){"default"=>"기본 모델","opus"=>"Opus 5.5","claude-fable-5-2[1m]"=>"Fable 5.2","sonnet"=>"Sonnet 5.5",_=>"Haiku 5.5"}.into();c.description="Native model description · coding tasks".into(); }
+        let mut toggle=select("ultracode","", &[]);toggle.kind=ControlKind::Boolean;toggle.current=Some(ControlValue::Bool(true));
+        p.transcript.controls.options=vec![model,select("effortLevel","high", &["low","medium","high","xhigh","max"]),select("permissionMode","auto", &["default","plan","acceptEdits","auto","dontAsk"]),toggle];
+        p.transcript.controls.models=vec![ModelMetadata{id:"opus".into(),display_name:"Opus 5.5".into(),resolved_model:Some("claude-opus-5-5".into()),..Default::default()}];
+        p.transcript.controls.commands=Some((0..30).map(|i|{let mut e=entry(&format!("command-{i:02}"));e.description="Review the workspace and explain the changes before applying them.".into();e}).collect());
+        p.transcript.controls.skills=Some(vec![entry("code-review"),entry("frontend-design")]);
+        let mut h=harness(p,width,dark);h.run_steps(3);
+        for (surface,name) in [(Surface::Conversation,"conversation"),(Surface::Settings,"settings"),(Surface::Commands,"commands")] {
+            h.state_mut().controls_ui.surface=surface;h.run_steps(3);
+            let frame=h.state().composer_geometry.unwrap();assert!(frame.1.contains_rect(frame.0),"composer fully visible {name} {width} {frame:?}");
+            let rendered=h.render().unwrap();
+            if let Some(dir)=std::env::var_os("KILN_VISUAL_CAPTURE_DIR"){let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();rendered.save(dir.join(format!("ux-{name}-{}-{width:.0}.png",if dark{"dark"}else{"light"}))).unwrap();}
+        }
+        h.state_mut().controls_ui.surface=Surface::Conversation;h.run_steps(3);
+        open_composer_options(&mut h);
+        assert!(h.query_by_label("추론 강도").is_some());
+        assert!(h.query_by_label("Ultracode").is_some());
+        if let Some(dir)=std::env::var_os("KILN_VISUAL_CAPTURE_DIR") { h.render().unwrap().save(std::path::PathBuf::from(dir).join(format!("ux-options-{}-{width:.0}.png",if dark{"dark"}else{"light"}))).unwrap(); }
+        h.key_press(egui::Key::Escape);h.run_steps(3);
+        h.state_mut().composer.text="/command".into();h.state_mut().focus=true;h.run_steps(3);
+        if let Some(dir)=std::env::var_os("KILN_VISUAL_CAPTURE_DIR") { h.render().unwrap().save(std::path::PathBuf::from(dir).join(format!("ux-completion-{}-{width:.0}.png",if dark{"dark"}else{"light"}))).unwrap(); }
+        assert!(h.state().sent.is_empty());
+    }}
+}
+
+#[test]
+fn ux_settings_search_never_exposes_native_schema_or_noninteractive_controls() {
+    for (id,scope,available,kind) in [("$schema",ControlScope::Inherited,false,ControlKind::Unsupported("schema".into())),("apiKeyHelper",ControlScope::Inherited,false,ControlKind::Text),("no_gui_support",ControlScope::Live,false,ControlKind::Text),("unknown_widget",ControlScope::Live,true,ControlKind::Unsupported("future".into()))] {
+        let mut p=fixture(Tool::Claude);p.controls_ui.surface=Surface::Settings;p.controls_ui.search=id.into();
+        let mut o=select(id,"",&[]);o.scope=scope;o.available=available;o.kind=kind;
+        p.transcript.controls.options_reported=true;p.transcript.controls.options=vec![o];
+        let mut h=harness(p,900.,true);h.run();
+        assert!(h.query_by_label(id).is_none(),"noninteractive inventory must not be presented as settings: {id}");
+        assert!(h.query_by_label("확인 대기").is_none());
     }
 }

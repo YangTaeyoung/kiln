@@ -1635,8 +1635,10 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
                 p,
             );
             h.run();
-            assert_eq!(h.get_by_label("모델").accesskit_node().value().as_deref(), Some("모델: 기본 모델"));
-            assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("모드: Fixture mode"));
+            assert_eq!(h.get_by_label("모델").accesskit_node().value().as_deref(), Some("기본 모델"));
+            if width < 700. { h.get_by_label("대화 옵션").click();h.run(); }
+            assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("Fixture mode"));
+            if width < 700. { h.key_press(egui::Key::Escape);h.run(); }
             let (outer, clip) = h.state().composer_geometry.expect("actual composer geometry");
             assert!(clip.contains_rect(outer), "the complete composer frame must fit its actual painting clip: {outer:?} vs {clip:?}");
             let message = h.get_by_label("메시지").rect();
@@ -1669,8 +1671,7 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
                 tool,
                 send,
                 attach,
-                h.get_by_label("Enter로 보내기 · Shift+Enter로 줄바꿈")
-                    .rect(),
+
             ] {
                 assert!(h.ctx.content_rect().contains_rect(rect));
             }

@@ -50,6 +50,7 @@ impl Claude {
                 .take(256)
                 .map(|v| ModelMetadata {
                     id: s(v, "value"),
+                    display_name: controls::bounded(v, "displayName"),
                     description: controls::bounded(v, "description"),
                     resolved_model: v["resolvedModel"].as_str().map(str::to_owned),
                     efforts: v["supportedEffortLevels"]
@@ -143,7 +144,12 @@ impl Claude {
             option(
                 "model",
                 ControlKind::Select,
-                self.metadata.iter().map(|m| choice(&m.id)).collect(),
+                self.metadata.iter().map(|m| ControlChoice {
+                    value: m.id.clone(),
+                    label: if m.display_name.is_empty() { m.id.clone() } else { m.display_name.clone() },
+                    description: m.description.clone(),
+                    group: None,
+                }).collect(),
             ),
             option(
                 "permissionMode",
@@ -187,7 +193,12 @@ impl Claude {
             option(
                 "advisorModel",
                 ControlKind::Select,
-                self.metadata.iter().map(|m| choice(&m.id)).collect(),
+                self.metadata.iter().map(|m| ControlChoice {
+                    value: m.id.clone(),
+                    label: if m.display_name.is_empty() { m.id.clone() } else { m.display_name.clone() },
+                    description: m.description.clone(),
+                    group: None,
+                }).collect(),
             ),
             option("autoCompactEnabled", ControlKind::Boolean, vec![]),
             option("language", ControlKind::Text, vec![]),
@@ -247,6 +258,8 @@ impl Claude {
         }
         for item in &mut live {
             item.current = self.safe_settings.get(&item.id).cloned();
+            if item.id == "permissionMode" { item.current = self.permission.clone().map(ControlValue::Text); }
+            if item.id == "model" && item.current.is_none() { item.current = self.selected.clone().map(ControlValue::Text); }
             item.source = self.sources.get(&item.id).cloned();
             if item.id == "effortLevel"
                 && (item.choices.is_empty()

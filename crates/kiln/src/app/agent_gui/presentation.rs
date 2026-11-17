@@ -1,0 +1,329 @@
+//! Exclusive native presentation handoff. The daemon PTY and host lock never change.
+use super::*;
+
+fn valid_native_id(id: &str) -> bool {
+    id.len() == 36
+        && id.bytes().enumerate().all(|(index, byte)| {
+            if [8, 13, 18, 23].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+pub(super) fn can_handoff(transcript: &Transcript, active_submission: bool) -> bool {
+    transcript.lifecycle == Lifecycle::Ready
+        && transcript.requests.is_empty()
+        && !active_submission
+        && !transcript.entries.iter().any(|entry|matches!(entry, Entry::Tool(tool) if matches!(tool.status, ToolStatus::Pending | ToolStatus::Running)))
+        && transcript.controls.queue.as_ref().is_none_or(|queue|queue.is_empty())
+        && transcript.provider_session_id.as_deref().is_some_and(valid_native_id)
+}
+
+fn native_args(tool: Tool, id: &str) -> Result<Vec<String>> {
+    ensure!(
+        valid_native_id(id),
+        "A confirmed native conversation UUID is required"
+    );
+    Ok(match tool {
+        Tool::Claude => vec!["--resume".into(), id.into()],
+        Tool::Codex => vec!["resume".into(), id.into(), "--no-daemon".into()],
+        Tool::Antigravity => vec!["--conversation".into(), id.into()],
+    })
+}
+
+struct TerminalOwnership;
+impl TerminalOwnership {
+    fn claim() -> Self {
+        TERMINAL_ACTIVE.store(true, Ordering::Relaxed);
+        Self
+    }
+}
+impl Drop for TerminalOwnership {
+    fn drop(&mut self) {
+        TERMINAL_ACTIVE.store(false, Ordering::Relaxed);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct HistoryCheckpoint {
+    count: usize,
+    digest: String,
+}
+fn history(config: &Config, id: &str) -> Result<Vec<(String, String)>> {
+    super::super::super::conversation_sync::native_display_history(
+        config.descriptor.tool,
+        &config.environment,
+        &config.descriptor.cwd,
+        id,
+    )
+}
+fn history_digest(messages: &[(String, String)]) -> Result<String> {
+    Ok(super::super::image_digest(&serde_json::to_vec(messages)?))
+}
+fn import_terminal_history(
+    config: &Config,
+    id: &str,
+    checkpoint: &HistoryCheckpoint,
+    journal: &mut Journal,
+) -> Result<()> {
+    let messages = history(config, id)?;
+    ensure!(
+        messages.len() >= checkpoint.count
+            && history_digest(&messages[..checkpoint.count])? == checkpoint.digest,
+        "Native history changed before the handoff boundary; retained GUI history was preserved"
+    );
+    for (index, (role, text)) in messages.into_iter().enumerate().skip(checkpoint.count) {
+        journal.push(Event::Message {
+            message: Message {
+                id: format!("native-terminal-{id}-{index}"),
+                role: if role == "user" {
+                    Role::User
+                } else {
+                    Role::Assistant
+                },
+                text,
+                attachments: vec![],
+            },
+            append: false,
+        })?;
+    }
+    Ok(())
+}
+
+/// The child inherits the real PTY. Returning to GUI waits for its natural exit;
+/// no Ctrl-C, kill, prompt, or provider command is synthesized by a tab click.
+pub(super) fn serve_terminal(
+    config: &Config,
+    accounts: &AccountManager,
+    dir: &Path,
+    group: &OwnedGroup,
+    journal: &mut Journal,
+) -> Result<()> {
+    let result = (|| -> Result<()> {
+        let id =
+            resume_target(&journal.transcript)?.context("Missing native conversation identity")?;
+        let mut command = base_command(config, accounts)?;
+        command.args(native_args(config.descriptor.tool, &id)?);
+        let before = history(config, &id)?;
+        let checkpoint = HistoryCheckpoint {
+            count: before.len(),
+            digest: history_digest(&before)?,
+        };
+        command
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        let _ownership = TerminalOwnership::claim();
+        let mut child = command
+            .spawn()
+            .context("Could not open the native conversation terminal")?;
+        let mut transport_error = None;
+        loop {
+            if TERMINATE.load(Ordering::Relaxed) {
+                group.terminate(journal)?;
+                return Ok(());
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() {
+                        journal.push(Event::Error(format!(
+                            "Native terminal exited ({status}); resuming the saved conversation"
+                        )))?;
+                    }
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    // Failed observation is never proof that the native writer
+                    // exited. Keep ownership and do not start a second backend.
+                    transport_error = Some(error.to_string());
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+            }
+            if let Err(error) = poll_terminal_commands(dir, journal) {
+                // Storage errors leave the real CLI running. We only reconnect
+                // the structured backend after the CLI reports a natural exit.
+                transport_error = Some(error.to_string());
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        if let Some(error) = transport_error {
+            journal.push(Event::Error(error))?;
+        }
+        import_terminal_history(config, &id, &checkpoint, journal)?;
+        Ok(())
+    })();
+    // A spawn failure also returns to the structured view, with a visible error.
+    if let Err(error) = result {
+        journal.push(Event::Error(error.to_string()))?;
+    }
+    journal.generation = journal::unique();
+    journal.push(Event::Generation)?;
+    journal.push(Event::Presentation {
+        current: Presentation::Gui,
+        return_requested: false,
+    })?;
+    journal.flush()
+}
+
+fn poll_terminal_commands(dir: &Path, journal: &mut Journal) -> Result<()> {
+    for (path, queued) in mailbox(dir)? {
+        if claim_command(journal, &queued)? {
+            let accepted = if let Command::SetPresentation(target) = queued.command {
+                journal.push(Event::Presentation {
+                    current: Presentation::Terminal,
+                    return_requested: target == Presentation::Gui,
+                })?;
+                true
+            } else {
+                false
+            };
+            journal.push(Event::CommandState {
+                id: queued.id,
+                state: if accepted {
+                    CommandPhase::Accepted
+                } else {
+                    CommandPhase::Rejected
+                },
+            })?;
+        }
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const ID: &str = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    #[test]
+    fn only_idle_confirmed_native_conversations_can_handoff() {
+        let mut transcript = Transcript::default();
+        transcript.lifecycle = Lifecycle::Ready;
+        assert!(!can_handoff(&transcript, false));
+        transcript.provider_session_id = Some(ID.into());
+        assert!(can_handoff(&transcript, false));
+        assert!(!can_handoff(&transcript, true));
+        for lifecycle in [
+            Lifecycle::Running,
+            Lifecycle::Waiting,
+            Lifecycle::Disconnected,
+            Lifecycle::Starting,
+        ] {
+            transcript.lifecycle = lifecycle;
+            assert!(!can_handoff(&transcript, false));
+        }
+        transcript.lifecycle = Lifecycle::Ready;
+        transcript.requests.insert(
+            "approval".into(),
+            Request {
+                id: "approval".into(),
+                title: String::new(),
+                questions: vec![],
+                options: vec![],
+                details: Value::Null,
+            },
+        );
+        assert!(!can_handoff(&transcript, false));
+        transcript.requests.clear();
+        transcript.entries.push(Entry::Tool(ToolCall {
+            status: ToolStatus::Running,
+            ..Default::default()
+        }));
+        assert!(!can_handoff(&transcript, false));
+    }
+    #[test]
+    fn exact_resume_has_no_prompt_or_latest_session_fallback() {
+        assert_eq!(native_args(Tool::Claude, ID).unwrap(), ["--resume", ID]);
+        assert_eq!(
+            native_args(Tool::Codex, ID).unwrap(),
+            ["resume", ID, "--no-daemon"]
+        );
+        assert_eq!(
+            native_args(Tool::Antigravity, ID).unwrap(),
+            ["--conversation", ID]
+        );
+        for id in ["", "latest", "../other", "native\ncommand"] {
+            assert!(native_args(Tool::Claude, id).is_err());
+        }
+    }
+    #[test]
+    fn native_handoff_uses_original_account_cwd_and_executable_after_account_selection_changes() {
+        use kiln_accounts::connection::{Connection, Preset};
+        for tool in [Tool::Claude, Tool::Codex] {
+            let root = tempfile::tempdir().unwrap();
+            let (environment, _) = kiln_accounts::Env::sandbox(root.path(), false);
+            let accounts = AccountManager::with_env(environment);
+            let connection = |key: &str| Connection {
+                preset: Preset::Gateway,
+                base_url: "https://fixture.invalid/v1".into(),
+                key: key.into(),
+                ..Default::default()
+            };
+            let original = accounts
+                .save_connection(tool, None, "Original", connection("fixture-original"))
+                .unwrap();
+            let other = accounts
+                .save_connection(tool, None, "Other", connection("fixture-other"))
+                .unwrap();
+            accounts.switch_to(tool, &original.id).unwrap();
+            let pinned = accounts.launch_environment(tool).unwrap();
+            accounts.switch_to(tool, &other.id).unwrap();
+            let config = Config {
+                descriptor: Descriptor {
+                    id: "fixture".into(),
+                    tool,
+                    cwd: root.path().into(),
+                    account_label: "Original".into(),
+                },
+                program: "original-executable".into(),
+                environment: pinned,
+                initial_prompt: None,
+                launch_options: LaunchOptions::Inherited,
+            };
+            let mut command = base_command(&config, &accounts).unwrap();
+            command.args(native_args(tool, ID).unwrap());
+            assert_eq!(command.get_current_dir(), Some(root.path()));
+            assert_eq!(command.get_program(), "original-executable");
+            let key = if tool == Tool::Claude {
+                "ANTHROPIC_AUTH_TOKEN"
+            } else {
+                "KILN_CODEX_API_KEY"
+            };
+            assert!(command.get_envs().any(|(name, value)| name == key
+                && value == Some(std::ffi::OsStr::new("fixture-original"))));
+            assert!(
+                !command
+                    .get_envs()
+                    .any(|(_, value)| value == Some(std::ffi::OsStr::new("fixture-other")))
+            );
+            assert_eq!(accounts.active(tool).as_deref(), Some(other.id.as_str()));
+            assert!(command.get_args().any(|argument| argument == ID));
+            assert!(!command.get_args().any(|argument| argument == "--last"
+                || argument == "-p"
+                || argument == "app-server"));
+        }
+    }
+    #[test]
+    fn journal_replay_keeps_terminal_and_return_request_across_reconnect() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = Journal::open(root.path(), "owned".into()).unwrap();
+        journal.push(Event::Generation).unwrap();
+        journal.push(Event::Session(ID.into())).unwrap();
+        journal
+            .push(Event::Presentation {
+                current: Presentation::Terminal,
+                return_requested: true,
+            })
+            .unwrap();
+        journal.flush().unwrap();
+        drop(journal);
+        let journal = Journal::open(root.path(), "owned".into()).unwrap();
+        assert_eq!(journal.transcript.presentation, Presentation::Terminal);
+        assert!(journal.transcript.return_requested);
+        assert_eq!(journal.transcript.provider_session_id.as_deref(), Some(ID));
+    }
+}

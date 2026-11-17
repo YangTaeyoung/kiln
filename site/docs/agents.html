@@ -76,6 +76,10 @@
 <p>Closing Kiln saves drafts while the daemon keeps the worker alive. Closing a pane ends its session and asks before discarding drafts. Locally queued sends wait for journal confirmation: reopening never resends them. An unconfirmed send offers <strong>Recover as draft</strong>; check history before intentionally sending again. Failed or disconnected sessions retain history and offer <strong>Restart same conversation</strong>. Earlier/latest message controls navigate a bounded display window without deleting history.</p>
 <p>Approval cards show the command, folder, affected paths, reason and requested access with localized titles. Transport IDs and schemas stay out of the decision. After full history replay, a restored send absent from the journal and mailbox offers explicit recovery even if the worker is Ready; it is never resent automatically.</p>
 <p>Claude approvals include the actual MCP/tool arguments, including domain identifiers; long previews are bounded and labeled partial. Codex transport parameters and schemas stay filtered. Recovery also waits for a queue observation that follows any final publication by the old client.</p>
+<h3 id="switch-presentation">Switch the same conversation</h3>
+<p>Use the agent pane’s <strong>Conversation GUI / Terminal</strong> switch to continue the same confirmed conversation with its original account and working folder. Switching to Terminal requires an idle conversation with no outstanding response, approval, queued work or background helper process. If other background processes remain, Kiln refuses the switch and leaves that work running.</p>
+<p>Selecting Conversation GUI while the native CLI is open requests a return; it does not close the CLI or send a command for you. Exit the CLI normally, using its own exit action. Kiln waits for its process to exit, then imports newly appended user/assistant text and reconnects the GUI. Images in imported native history appear as attachment notices; this is not a reconstruction of native tool cards. If earlier native history changed, Kiln preserves the retained GUI history and reports the mismatch.</p>
+<p>For an older terminal-launched agent, GUI import requires an exactly tracked native conversation. Exit that CLI first. Kiln waits for the terminal daemon to confirm that the old terminal process exited, then opens the recorded conversation with its original account environment and working folder. A disconnected terminal or an unknown conversation does not establish a safe import boundary.</p>
 <h2 id="work-across-several-repositories">Work across several repositories</h2>
 <p>Open a parent folder, such as <code>~/dev/projects</code>, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.</p>
 <p>Inspecting a repository in the Git or GitHub tools does not change the task's working directory. Use the repository selector in those tools to target one repository for Git operations. See <a href="workspaces.html">Workspaces and tasks</a> and <a href="git.html">Git and GitHub</a>.</p>
@@ -184,11 +188,15 @@
 </table></div>
 <p>In newly opened Kiln Zsh terminals, plain <code>codex</code>, <code>codex resume …</code> and <code>codex fork …</code> also use <code>--no-daemon</code>, so a shared server reporting <strong>Server is draining; retry after reconnecting</strong> does not block those launches. Explicit <code>--remote</code> connections, existing aliases/functions, other command forms and other shells keep their normal behavior. Use <code>command codex …</code> to bypass the wrapper or add <code>--no-daemon</code> yourself for a local session. Reopen existing shells to load this integration. Kiln does not restart the shared server or change its update settings.</p>
 <h2 id="native-session-settings">Native session settings and commands</h2>
-<p>In a conversation GUI, use <strong>Session settings</strong> for searchable provider controls and <strong>Commands and skills</strong> to find native commands. The composer keeps model, reasoning effort, mode and Claude Ultracode close to the message. Available choices come from the current provider and model; a missing catalog is different from an empty one.</p>
+<p>In a conversation GUI, use <strong>Session settings</strong> for searchable provider controls and <strong>Commands and skills</strong> to find native commands. A compact two-line message editor sits above one toolbar: attach an image, choose the model and mode, open <strong>Reasoning settings</strong>, or use the round Send/Stop control. Narrow panes keep the model beside <strong>Conversation options</strong>, which contains the remaining controls. Choices show readable model names and localized mode/effort labels while preserving the provider’s actual values. A missing catalog remains different from an empty one.</p>
+<p>Open Reasoning settings, or Conversation options in a narrow pane, to adjust the offered reasoning levels with a slider and Claude’s independent Ultracode switch. Enabled Ultracode has a purple indicator. The header continues to show the confirmed effective model and mode.</p>
 <p>A changed setting shows its requested and native values separately. Send and conflicting settings wait for native confirmation; Stop remains available. A transport acknowledgment alone does not confirm that a setting took effect. Rejected or unconfirmed changes stay visible and are never automatically retried.</p>
-<p>Command selection inserts editable text without sending it. Existing text and images remain in the draft. Codex skills also carry their native skill input on explicit Send. Refresh the catalog after native skills change. Terminal-only, inherited and managed features are labeled in the advanced inventory instead of appearing as working switches. Use <strong>New conversation in terminal</strong> for terminal-only setup; the current GUI session stays open.</p>
+<p>Commands and skills has a search icon, a clear action and a bounded scrolling list. Names align to the left; expand a row to read its full description and details. Search covers names, descriptions and aliases. Terminal-only commands and skills that cannot be invoked in the GUI stay out of the list. Selecting an entry only inserts an editable draft, preserving existing text and images; Codex skills also retain their native input until explicit Send.</p>
+<p>Typing <code>/</code> opens a scrolling completion list with short descriptions; Codex skills also complete from <code>$</code>. Use Up/Down to select, Tab or Enter to insert, and Esc to dismiss. Completion does not send the message. Recognized command/skill tokens are visually distinct from ordinary text. Refresh the catalog after native skills change.</p>
+<p>Session settings shows controls that can actually be edited in the GUI, grouped by response, working style, context and permissions. Read-only native inventories and unavailable controls are omitted. Change history, reset actions and reference information stay behind details controls. Start a separate terminal from <strong>New task</strong> when you need the CLI interface.</p>
 <p><strong>New conversation settings</strong> opens a separate conversation with the currently selected account and explicit startup options. It preserves the current session and draft, and does not replay a prompt. Native actions such as review, goals and queued tasks run only from their explicit action buttons. Current-turn settings target the reported running turn and do not change work already captured by the provider.</p>
 <p>Tool headers use the app language, including questions and known MCP operations. Expand a card or hover its header to inspect the original tool name; arguments, output, questions and diffs keep their original content. Language changes relabel existing history. Unknown operations use an external-tool label. Extension preparation and retained cache versions do not prove that the native provider loaded an extension.</p>
+<p>Type <code>@</code> in the message to search files and folders in the current workspace. Use the arrow keys to choose, Tab to browse a folder, Enter to insert, and Esc to dismiss. Paths with spaces and non-Latin names are quoted. Selection only edits the draft; sending remains explicit. Claude keeps its native <code>@</code> reference syntax, Codex uses the same path-as-text contract as its TUI, and Antigravity receives the selected full path. Provider permissions and native context handling still apply.</p>
 <h2 id="provider-coverage">Provider feature coverage</h2>
 <p>The reference versions inspected for these controls are Claude Code 2.1.325 (SDK 0.3.325), Codex CLI 0.167.2 and Antigravity CLI 1.5.9. These are reference versions, not minimum requirements or a promise that every later release behaves identically. The installed CLI, model, account and organization policy determine availability. A visible control or prepared extension does not establish that an authenticated model task succeeded.</p>
 <div class="table"><table>
@@ -212,12 +220,12 @@
 </tr>
 <tr>
 <td>Antigravity</td>
-<td>All advertised supported ACP select options, including model, reasoning effort and mode. Ordered groups/descriptions are retained; unknown categories stay visible and unsupported types stay read-only. Native commands insert drafts. Commands and usage update during load and live use; separate manual refresh/actions can be unavailable.</td>
+<td>All advertised supported ACP select options, including model, reasoning effort and mode. Ordered groups/descriptions are retained; unknown categories stay visible and unsupported types are omitted from the GUI. Native commands insert drafts. Commands and usage update during load and live use; separate manual refresh/actions can be unavailable.</td>
 <td>Sandbox request, main agent and additional absolute directories.</td>
 </tr>
 </tbody>
 </table></div>
-<p>Use the scope filters in <strong>Session settings</strong>: <strong>Current conversation</strong>, <strong>New conversation</strong>, <strong>Inherited</strong>, <strong>Managed</strong> and <strong>Terminal only</strong>. The Claude settings reference inventory is broader than the editable subset; Codex's native method inventory also includes workflows with no GUI action. Under-development plugin APIs are not dispatched. Antigravity MCP health is not reported by this adapter; an empty client server list is not a connection-health result.</p>
+<p>Only editable GUI controls appear in <strong>Session settings</strong>. Native reference catalogs and method inventories cover more than the GUI exposes; they are not presented as configurable settings. Under-development plugin APIs are not dispatched. This adapter does not report Antigravity MCP connection health; an empty client server list is not a health result.</p>
 <p>Permission cards retain native offered decisions. Codex can grant a selected requested filesystem/network subset with turn/session scope and strict-review choice. Kiln does not silently select a bypass policy. Native policy, entitlement and endpoint errors remain visible. Current-turn changes affect the reported active turn's settings, not inference the provider already captured. Source acknowledgment without runtime-effect readback is shown separately from confirmed application.</p>
 <p>See the native <a href="https://code.claude.com/docs/en/model-config.md">Claude model reference</a>, <a href="https://learn.chatgpt.com/docs/app-server">Codex App Server reference</a> and <a href="https://agentclientprotocol.com/protocol/v1/session-config-options">ACP configuration contract</a>. Native catalogs can change between accounts and models; an unavailable or partial result is not a complete list.</p>
 <h2 id="personal-extensions">Personal extensions and account scope</h2>
@@ -270,6 +278,10 @@
 <p>Kiln을 닫으면 초안을 저장하고 데몬이 작업 프로세스를 유지합니다. 패널을 닫으면 세션이 끝나며 초안을 버리기 전에 확인합니다. 로컬 전송 대기는 저널 확인 전까지 보관하고 다시 열어도 재전송하지 않습니다. 전송 미확인 시 <strong>초안으로 복구</strong>할 수 있으며 다시 보내기 전에 기록을 확인하세요. 실패·연결 끊김 상태에서도 기록을 유지하고 <strong>같은 대화로 재시작</strong>할 수 있습니다. 이전·최근 메시지 버튼은 기록을 삭제하지 않고 표시 범위만 이동합니다.</p>
 <p>승인 카드에는 번역된 제목과 함께 명령·작업 폴더·대상 경로·이유·요청 권한을 표시하고 전송 ID와 스키마는 노출하지 않습니다. 기록 복원이 완료된 뒤에도 저널과 전송함에 없는 이전 요청은 에이전트가 준비 상태여도 직접 초안으로 복구할 수 있으며 자동 재전송하지 않습니다.</p>
 <p>Claude 승인 카드에는 업무 식별자를 포함한 실제 MCP·도구 인수를 표시합니다. 긴 입력은 일부만 표시한다고 안내하며 Codex 전송 매개변수와 스키마는 계속 숨깁니다. 초안 복구는 이전 클라이언트의 마지막 전송 기록까지 반영한 관찰값이 확인된 뒤에만 가능합니다.</p>
+<h3 id="switch-presentation">같은 대화에서 화면 전환하기</h3>
+<p>에이전트 패널의 <strong>대화 GUI / 터미널</strong> 전환으로 기존 계정과 작업 폴더를 유지하며 같은 대화를 이어갈 수 있습니다. 터미널로 전환하려면 대화가 유휴 상태여야 하며, 진행 중인 응답·승인 요청·대기 작업·백그라운드 보조 프로세스가 없어야 합니다. 다른 백그라운드 프로세스가 남아 있으면 전환을 거부하고 해당 작업은 계속 실행합니다.</p>
+<p>네이티브 CLI가 열려 있을 때 대화 GUI를 선택하면 돌아오기만 요청합니다. CLI를 닫거나 종료 명령을 대신 입력하지 않습니다. CLI 자체의 종료 기능으로 정상 종료하세요. 프로세스 종료를 확인한 뒤 추가된 사용자·에이전트 텍스트를 가져와 GUI를 다시 연결합니다. 가져온 기록의 이미지는 첨부 안내로 표시되며 네이티브 도구 카드를 재구성하지는 않습니다. 기존 네이티브 기록이 달라졌다면 보관 중인 GUI 기록을 유지하고 불일치를 알립니다.</p>
+<p>이전에 터미널로 시작한 에이전트는 정확한 네이티브 대화가 추적된 경우에만 GUI로 가져올 수 있습니다. 먼저 해당 CLI를 종료하세요. 터미널 데몬이 기존 프로세스의 종료를 확인한 뒤, 기록된 계정 환경과 작업 폴더로 같은 대화를 엽니다. 연결이 끊겼거나 대화를 식별하지 못했다는 사실만으로 가져오기를 시작하지 않습니다.</p>
 <h2 id="work-across-several-repositories">여러 저장소 함께 다루기</h2>
 <p>프론트엔드, 백엔드, 공유 라이브러리가 각각 다른 Git 저장소에 있다면 <code>~/dev/projects</code> 같은 상위 폴더를 여세요. Kiln은 이 폴더를 에이전트의 작업 루트로 유지하고 찾아낸 저장소 구성을 요청에 함께 넣을 수 있으므로, 요청 하나로 모든 저장소를 다룰 수 있습니다.</p>
 <p>Git이나 GitHub 도구에서 저장소를 살펴봐도 작업이 실행되는 디렉터리는 바뀌지 않습니다. Git 작업을 적용할 저장소는 해당 도구의 저장소 선택기에서 고릅니다. <a href="workspaces.html">워크스페이스와 작업</a>과 <a href="git.html">Git과 GitHub</a>를 참고하세요.</p>
@@ -378,11 +390,15 @@
 </table></div>
 <p>새로 연 Kiln Zsh 터미널에서 직접 입력하는 <code>codex</code>, <code>codex resume …</code>, <code>codex fork …</code>에도 <code>--no-daemon</code>이 적용됩니다. 따라서 공유 서버가 <strong>Server is draining; retry after reconnecting</strong>을 반환해도 이 명령들은 독립적으로 시작합니다. 명시적인 <code>--remote</code> 연결, 기존 별칭·함수, 그 밖의 명령 형식과 다른 셸은 기존 방식대로 동작합니다. 래퍼를 건너뛰려면 <code>command codex …</code>를 사용하고, 로컬 세션을 직접 실행할 때는 <code>--no-daemon</code>을 붙이세요. 기존 셸은 다시 열어야 적용됩니다. Kiln은 공유 서버를 재시작하거나 업데이트 설정을 바꾸지 않습니다.</p>
 <h2 id="native-session-settings">네이티브 대화 설정과 명령</h2>
-<p>대화 GUI의 <strong>대화 설정</strong>에서 공급자별 설정을 검색하고 <strong>명령 및 스킬</strong>에서 네이티브 명령을 찾으세요. 입력창 가까이에 모델, 추론 강도, 모드와 Claude Ultracode가 표시됩니다. 선택지는 현재 공급자와 모델이 제공하며, 아직 받지 못한 목록과 빈 목록을 구분합니다.</p>
+<p>대화 GUI의 <strong>대화 설정</strong>에서 공급자별 설정을 검색하고 <strong>명령 및 스킬</strong>에서 네이티브 명령을 찾으세요. 두 줄 입력창 아래 한 줄 도구 모음에서 이미지를 첨부하고 모델·모드를 고르며 <strong>사고 설정</strong>을 열거나 원형 보내기·중지 버튼을 사용할 수 있습니다. 좁은 패널에는 모델과 <strong>대화 옵션</strong>을 표시하고 나머지 설정은 대화 옵션에 담습니다. 모델 이름은 읽기 쉽게, 모드·추론 강도는 앱 언어로 표시하되 공급자에게 전달하는 값은 유지합니다. 아직 받지 못한 목록과 빈 목록도 구분합니다.</p>
+<p>사고 설정이나 좁은 패널의 대화 옵션에서 제공된 추론 단계를 슬라이더로 조절하고 Claude의 독립된 Ultracode 스위치를 사용할 수 있습니다. Ultracode가 켜지면 보라색으로 표시합니다. 헤더는 적용이 확인된 모델과 모드를 계속 보여 줍니다.</p>
 <p>설정을 변경하면 요청값과 네이티브 값을 따로 표시합니다. 네이티브 확인을 기다리는 동안 전송과 충돌하는 설정 변경을 막고 중지는 계속 사용할 수 있습니다. 전송 수락만으로 설정 적용을 확정하지 않습니다. 거부되거나 미확인된 변경은 표시하며 자동 재시도하지 않습니다.</p>
-<p>명령을 선택하면 보내지 않고 편집 가능한 초안에 삽입합니다. 기존 내용과 이미지는 유지됩니다. Codex 스킬은 명시적으로 보내기를 누를 때 네이티브 스킬 입력도 전달합니다. 네이티브 스킬이 바뀌면 목록을 새로 고치세요. 터미널 전용·상속·관리 기능은 작동하는 스위치처럼 표시하지 않고 고급 목록에서 범위를 안내합니다. <strong>터미널에서 새 대화</strong>로 터미널 전용 설정을 진행해도 현재 GUI 세션은 유지됩니다.</p>
+<p>명령 및 스킬에는 검색 아이콘, 검색 초기화와 높이가 제한된 스크롤 목록이 있습니다. 이름을 왼쪽에 정렬하며 행을 펼치면 전체 설명과 세부 정보를 읽을 수 있습니다. 이름·설명·별칭을 검색하고, GUI에서 실행할 수 없는 터미널 전용 항목과 스킬은 숨깁니다. 항목을 선택하면 기존 내용과 이미지를 유지한 채 편집 가능한 초안에만 삽입합니다. Codex 스킬의 네이티브 입력도 명시적으로 보낼 때까지 보관합니다.</p>
+<p><code>/</code>를 입력하면 짧은 설명이 있는 자동완성 목록이 열립니다. Codex 스킬은 <code>$</code>로도 완성할 수 있습니다. 위·아래 방향키로 고르고 Tab이나 Enter로 삽입하며 Esc로 닫습니다. 자동완성으로 메시지가 전송되지는 않습니다. 인식된 명령·스킬은 일반 문장과 구분해 표시합니다. 네이티브 스킬이 바뀌면 목록을 새로 고치세요.</p>
+<p>대화 설정에는 GUI에서 실제로 바꿀 수 있는 항목을 응답·작업 방식·컨텍스트·권한별로 묶어 표시합니다. 읽기 전용 목록과 사용할 수 없는 설정은 노출하지 않습니다. 변경 기록·기본값 복원·참고 정보는 세부 정보에서 확인합니다. CLI 화면이 필요하면 <strong>새 작업</strong>에서 별도 터미널을 여세요.</p>
 <p><strong>새 대화 설정</strong>은 현재 선택한 계정과 지정한 시작 옵션으로 별도 대화를 엽니다. 현재 세션과 초안은 유지되며 프롬프트를 재실행하지 않습니다. 검토·목표·대기 작업 같은 네이티브 작업은 명시적인 실행 버튼으로만 시작합니다. 현재 턴 설정은 확인된 실행 중 턴의 이후 작업에 적용되며 이미 시작한 작업을 바꾸지 않습니다.</p>
 <p>질문과 알려진 MCP 작업을 포함한 도구 제목은 앱 언어를 따릅니다. 카드를 펼치거나 제목에 마우스를 올리면 원래 도구 이름을 확인할 수 있으며 인수·출력·질문·변경 내용은 원문을 유지합니다. 언어 변경은 이전 기록의 제목에도 반영됩니다. 알 수 없는 작업은 외부 도구로 표시합니다. 확장 준비나 이전 캐시 보존 상태는 네이티브 로드 완료를 뜻하지 않습니다.</p>
+<p>메시지에서 <code>@</code>를 입력하면 현재 작업 폴더의 파일과 폴더를 검색합니다. 방향키로 고르고 Tab으로 폴더를 탐색하며 Enter로 삽입하고 Esc로 닫습니다. 공백이나 한글이 있는 경로도 따옴표로 보존합니다. 선택은 초안만 바꾸며 전송은 별도 동작입니다. Claude에는 네이티브 <code>@</code> 참조 형식, Codex에는 정식 TUI와 같은 경로 텍스트, Antigravity에는 선택한 전체 경로를 전달합니다. 공급자의 권한과 컨텍스트 처리 규칙은 그대로 적용됩니다.</p>
 <h2 id="provider-coverage">제공자별 기능 범위</h2>
 <p>이 제어 기능을 구현할 때 확인한 기준 버전은 Claude Code 2.1.325(SDK 0.3.325), Codex CLI 0.167.2, Antigravity CLI 1.5.9입니다. 최소 요구 버전이나 이후 모든 버전의 동일한 동작을 보장하는 목록이 아닙니다. 설치된 CLI, 모델, 계정과 조직 정책에 따라 사용 가능 여부가 결정됩니다. 제어 항목이 보이거나 확장이 준비되었다는 사실만으로 로그인한 계정의 모델 작업이 성공했다고 판단하지 않습니다.</p>
 <div class="table"><table>
@@ -411,7 +427,7 @@
 </tr>
 </tbody>
 </table></div>
-<p><strong>대화 설정</strong>에서 <strong>현재 대화</strong>, <strong>새 대화</strong>, <strong>상속됨</strong>, <strong>관리됨</strong>, <strong>터미널 전용</strong> 필터를 사용하세요. Claude 설정 참고 목록은 실제 편집 항목보다 넓으며, Codex의 네이티브 메서드 목록에도 GUI 동작이 없는 절차가 포함됩니다. 개발 중인 플러그인 API는 호출하지 않습니다. 이 어댑터는 Antigravity의 MCP 연결 상태를 보고하지 않으므로 빈 클라이언트 서버 목록을 연결 상태로 해석하지 않습니다.</p>
+<p><strong>대화 설정</strong>에는 실제로 변경할 수 있는 GUI 설정만 표시합니다. 네이티브 설정·메서드 참고 목록의 모든 항목을 설정 화면에 노출하지 않습니다. 개발 중인 플러그인 API는 호출하지 않습니다. 이 어댑터는 Antigravity MCP 연결 상태를 보고하지 않으며, 빈 클라이언트 서버 목록도 연결 상태 결과가 아닙니다.</p>
 <p>권한 카드에는 네이티브가 제공한 선택지를 유지합니다. Codex에서는 요청된 파일 시스템·네트워크 권한의 일부를 골라 턴·세션 범위와 엄격한 검토 여부를 정할 수 있습니다. Kiln이 권한 우회 정책을 자동 선택하지 않습니다. 네이티브 정책·이용 자격·기능 오류는 그대로 표시됩니다. 현재 턴 변경은 보고된 실행 턴의 설정에 적용되며 제공자가 이미 처리에 사용한 추론까지 바꾸지는 않습니다. 실행 효과의 확인값이 없는 설정 접수는 실제 적용 확인과 구분해 표시합니다.</p>
 <p>네이티브 <a href="https://code.claude.com/docs/en/model-config.md">Claude 모델 참고 문서</a>, <a href="https://learn.chatgpt.com/docs/app-server">Codex App Server 참고 문서</a>, <a href="https://agentclientprotocol.com/protocol/v1/session-config-options">ACP 설정 규약</a>을 참고하세요. 계정과 모델마다 목록이 달라지며, 사용 불가·일부 결과를 전체 목록으로 보지 마세요.</p>
 <h2 id="personal-extensions">개인 확장과 계정 범위</h2>
@@ -464,6 +480,10 @@
 <p>Kiln を閉じると下書きが保存され、デーモンはワーカーを維持します。パネルを閉じるとセッションが終了し、下書きの破棄前に確認します。ローカル送信はジャーナルの確認を待ち、再表示しても再送しません。未確認の送信は <strong>下書きに戻す</strong>で復元できます。意図的に再送する前に履歴を確認してください。失敗や切断時も履歴は残り、<strong>同じ会話で再起動</strong>できます。以前/最新のメッセージ操作は履歴を削除せず、表示範囲を移動します。</p>
 <p>承認カードには翻訳済みの見出しとコマンド、作業フォルダー、対象パス、理由、要求権限を表示し、通信 ID やスキーマは表示しません。履歴の読み込み後、ジャーナルと送信待ち一覧に存在しない以前の送信は、ワーカーが準備完了でも明示的に下書きへ戻せます。自動再送はしません。</p>
 <p>Claude の承認カードには業務 ID を含む実際の MCP・ツール引数を表示します。長い入力は一部のみの表示と明示し、Codex の通信パラメーターやスキーマは引き続き表示しません。下書きの復元は、以前のクライアントによる最後の送信書き込みを反映した確認を待ちます。</p>
+<h3 id="switch-presentation">同じ会話の表示を切り替える</h3>
+<p>エージェントパネルの <strong>会話 GUI / ターミナル</strong>切り替えで、元のアカウントと作業フォルダーのまま同じ会話を続けられます。ターミナルへの切り替えには、応答・承認要求・待機中の作業・バックグラウンド補助プロセスが残っていない、待機状態の会話が必要です。他のバックグラウンドプロセスが残っている場合、Kiln は切り替えを拒否し、その作業を実行したままにします。</p>
+<p>ネイティブ CLI が開いている間に会話 GUI を選ぶと、戻る要求だけを記録します。CLI を閉じたり、終了コマンドを代わりに入力したりはしません。CLI 自体の終了操作で通常どおり終了してください。プロセスの終了を確認してから、追加されたユーザー・アシスタントのテキストを取り込み、GUI を再接続します。取り込んだ履歴の画像は添付の案内として表示され、ネイティブのツールカードは再構成しません。以前のネイティブ履歴が変更されている場合は、保存済みの GUI 履歴を保持して不一致を表示します。</p>
+<p>以前ターミナルから起動したエージェントを GUI に取り込むには、正確なネイティブ会話が追跡されている必要があります。まずその CLI を終了してください。ターミナルデーモンが元のプロセスの終了を確認してから、記録されたアカウント環境と作業フォルダーで同じ会話を開きます。切断や会話の識別失敗だけでは、取り込みを開始しません。</p>
 <h2 id="work-across-several-repositories">複数のリポジトリにまたがって作業する</h2>
 <p>フロントエンド、バックエンド、共有ライブラリが別々の Git リポジトリにある場合は、<code>~/dev/projects</code> のような親フォルダーを開きます。Kiln はそのフォルダーをエージェントの作業ルートとして保ち、検出したリポジトリ構成をリクエストに含めることができるため、1 つのリクエストですべてのリポジトリを扱えます。</p>
 <p>Git や GitHub のツールでリポジトリを確認しても、作業ディレクトリは変わりません。Git 操作の対象を 1 つのリポジトリにするには、それらのツールにあるリポジトリセレクターを使います。詳しくは<a href="workspaces.html">ワークスペースと作業</a>と <a href="git.html">Git と GitHub</a> を参照してください。</p>
@@ -572,11 +592,15 @@
 </table></div>
 <p>新しく開いた Kiln の Zsh ターミナルでは、直接入力する <code>codex</code>、<code>codex resume …</code>、<code>codex fork …</code> にも <code>--no-daemon</code> が適用されます。共有サーバーが <strong>Server is draining; retry after reconnecting</strong> を返しても、これらのコマンドは独立して起動します。明示的な <code>--remote</code> 接続、既存のエイリアスや関数、その他のコマンド形式とシェルは従来どおりに動作します。ラッパーを使わない場合は <code>command codex …</code> を、ローカルセッションを直接実行する場合は <code>--no-daemon</code> を使用してください。既存のシェルには開き直した後で適用されます。Kiln は共有サーバーを再起動したり、更新設定を変更したりしません。</p>
 <h2 id="native-session-settings">ネイティブの会話設定とコマンド</h2>
-<p>会話 GUI の <strong>セッション設定</strong>でプロバイダーの設定を検索し、<strong>コマンドとスキル</strong>でネイティブのコマンドを探せます。入力欄の近くにモデル、推論の強度、モード、Claude Ultracode が表示されます。選択肢は現在のプロバイダーとモデルから取得し、未取得の一覧と空の一覧を区別します。</p>
+<p>会話 GUI の <strong>セッション設定</strong>でプロバイダーの設定を検索し、<strong>コマンドとスキル</strong>でネイティブのコマンドを探せます。コンパクトな 2 行の入力欄の下に、画像添付、モデル・モード、<strong>推論設定</strong>、丸い送信・停止ボタンを 1 行にまとめています。狭いパネルではモデルと <strong>会話オプション</strong>を表示し、残りの設定を会話オプションにまとめます。モデル名は読みやすく、モードと推論の強度はアプリの言語で表示し、プロバイダーへ送る値は保持します。未取得の一覧と空の一覧も区別します。</p>
+<p>推論設定、または狭いパネルの会話オプションで、提供された推論の段階をスライダーで選び、Claude の独立した Ultracode スイッチを使えます。Ultracode が有効なときは紫色の表示で示します。ヘッダーは引き続き、適用が確認されたモデルとモードを表示します。</p>
 <p>設定を変更すると、要求した値とネイティブ値を別々に表示します。ネイティブの確認待ちの間は送信と競合する設定変更を止め、停止は引き続き使えます。送信の受理だけでは設定の適用を確定しません。拒否・未確認の変更は表示を維持し、自動で再試行しません。</p>
-<p>コマンドの選択は編集可能な下書きへの挿入のみで、送信しません。既存の本文と画像は保持されます。Codex スキルは明示的に送信するときにネイティブのスキル入力も渡します。ネイティブスキルを変更したら一覧を更新してください。ターミナル専用・継承・管理対象の機能は、動作するスイッチとしてではなく詳細一覧で適用範囲を示します。<strong>ターミナルで新しい会話</strong>から専用の設定を行っても、現在の GUI セッションは保持されます。</p>
+<p>コマンドとスキルには検索アイコン、検索のクリア、高さを制限したスクロール一覧があります。名前は左揃えで、行を展開すると説明全文と詳細を読めます。名前・説明・別名を検索し、GUI から実行できないターミナル専用項目やスキルは表示しません。選択すると既存の本文と画像を保持して、編集可能な下書きにだけ挿入します。Codex スキルのネイティブ入力も、明示的に送信するまで保持します。</p>
+<p><code>/</code> を入力すると短い説明付きの補完一覧が開き、Codex スキルは <code>$</code> からも補完できます。上下キーで選択、Tab または Enter で挿入、Esc で閉じます。補完操作ではメッセージを送信しません。認識したコマンド・スキルは通常の文章と区別して表示します。ネイティブスキルを変更したら一覧を更新してください。</p>
+<p>セッション設定には GUI で実際に変更できる項目だけを、応答・作業方法・コンテキスト・権限別に表示します。読み取り専用の一覧と利用できない設定は表示しません。変更履歴・初期値への復元・参考情報は詳細から確認できます。CLI が必要な場合は <strong>新しいタスク</strong>から別のターミナルを開いてください。</p>
 <p><strong>新しい会話の設定</strong>は、現在選択中のアカウントと明示した起動オプションで別の会話を開きます。現在のセッションと下書きを保持し、プロンプトを再実行しません。レビュー・目標・待機タスクなどのネイティブ操作は、明示的な実行ボタンからのみ開始します。現在のターン設定は、確認された実行中ターンの以降の処理に適用し、開始済みの処理は変更しません。</p>
 <p>質問や既知の MCP 操作を含むツールの見出しはアプリの言語で表示します。カードを展開するか見出しにポインターを合わせると元のツール名を確認でき、引数・出力・質問・差分は原文のままです。言語変更は既存の履歴の見出しにも反映されます。不明な操作は外部ツールとして表示します。拡張の準備や古いキャッシュの保持は、ネイティブの読み込み完了を意味しません。</p>
+<p>メッセージに <code>@</code> を入力すると、現在の作業フォルダーのファイルとフォルダーを検索できます。矢印キーで選び、Tab でフォルダーを参照し、Enter で挿入、Esc で閉じます。空白や日本語を含むパスも引用符で保持します。選択は下書きだけを変更し、送信は明示操作です。Claude はネイティブの <code>@</code> 参照形式、Codex は正式 TUI と同じパステキスト、Antigravity は選択したフルパスを受け取ります。プロバイダーの権限とコンテキスト処理ルールは引き続き適用されます。</p>
 <h2 id="provider-coverage">プロバイダー別の機能範囲</h2>
 <p>この実装で確認した参照バージョンは Claude Code 2.1.325（SDK 0.3.325）、Codex CLI 0.167.2、Antigravity CLI 1.5.9 です。最低要件や、将来の全バージョンで同じ動作を保証するものではありません。利用可否はインストール済み CLI、モデル、アカウント、組織ポリシーが決めます。コントロールの表示や拡張の準備完了だけでは、認証済みモデルのタスク成功を証明しません。</p>
 <div class="table"><table>
@@ -605,7 +629,7 @@
 </tr>
 </tbody>
 </table></div>
-<p><strong>セッション設定</strong>の <strong>現在の会話</strong>、<strong>新しい会話</strong>、<strong>継承</strong>、<strong>管理対象</strong>、<strong>ターミナル専用</strong>フィルターを使ってください。Claude の設定参照一覧は編集可能な項目より広く、Codex のネイティブメソッド一覧にも GUI 操作のない手順が含まれます。開発中のプラグイン API は呼び出しません。このアダプターは Antigravity の MCP 接続状態を報告しません。空のクライアント側サーバー一覧は接続状態の結果ではありません。</p>
+<p><strong>セッション設定</strong>には実際に変更できる GUI 設定だけを表示します。ネイティブ設定やメソッドの参考一覧の全項目を設定画面に並べることはありません。開発中のプラグイン API は呼び出しません。このアダプターは Antigravity の MCP 接続状態を報告せず、空のクライアントサーバー一覧も接続状態の結果ではありません。</p>
 <p>権限カードはネイティブが提示した選択肢を保持します。Codex では要求されたファイルシステム・ネットワーク権限の一部を選び、ターン・セッション範囲と厳格レビューを指定できます。Kiln が権限を迂回するポリシーを自動選択することはありません。ネイティブのポリシー、利用資格、機能エラーは表示されます。現在のターン変更は報告された実行中ターンの設定に適用され、プロバイダーがすでに処理に使用した推論を変更しません。実行効果の読み戻しがない設定の受理は、適用確認と区別して表示します。</p>
 <p>ネイティブの <a href="https://code.claude.com/docs/en/model-config.md">Claude モデル参照</a>、<a href="https://learn.chatgpt.com/docs/app-server">Codex App Server 参照</a>、<a href="https://agentclientprotocol.com/protocol/v1/session-config-options">ACP 設定契約</a>をご覧ください。アカウントやモデルで一覧は変わり、利用不可や部分的な結果は完全な一覧ではありません。</p>
 <h2 id="personal-extensions">個人の拡張とアカウントの範囲</h2>
@@ -658,6 +682,10 @@
 <p>关闭 Kiln 会保存草稿，守护进程继续保持工作进程。关闭面板会结束会话，并在丢弃草稿前确认。本地排队发送会等待日志确认，重新打开不会重发。发送未确认时可<strong>恢复为草稿</strong>，有意再次发送前请检查记录。失败或断开时保留记录，并可<strong>重启同一对话</strong>。较早/最新消息控件只移动显示范围，不会删除记录。</p>
 <p>批准卡片以本地化标题显示命令、工作目录、目标路径、原因和请求权限，不显示传输 ID 或架构。完整恢复记录后，如果原请求既不在日志也不在发送队列中，即使代理已就绪，也可明确选择恢复为草稿，且不会自动重发。</p>
 <p>Claude 批准卡片会显示实际的 MCP 和工具参数，包括业务标识符。较长的预览会注明仅显示部分内容，Codex 传输参数和架构仍会过滤。草稿恢复还会等待确认队列观测已包含旧客户端可能完成的最后一次写入。</p>
+<h3 id="switch-presentation">切换同一对话的显示方式</h3>
+<p>使用代理面板的<strong>对话 GUI / 终端</strong>切换，在原账户和工作文件夹中继续同一个已确认的对话。切换到终端前，对话必须处于空闲状态，且没有未完成的响应、审批、排队任务或后台辅助进程。如果仍有其他后台进程，Kiln 会拒绝切换并保留这些进程运行。</p>
+<p>原生 CLI 仍打开时，选择对话 GUI 只会记录返回请求，不会关闭 CLI 或替你输入退出命令。请使用 CLI 自身的退出操作正常退出。确认进程退出后，Kiln 才导入新增的用户和助手文本并重新连接 GUI。导入记录中的图片显示为附件提示，不会重建原生工具卡片。如果之前的原生记录发生变化，Kiln 会保留已有 GUI 记录并显示不匹配信息。</p>
+<p>对于以前从终端启动的代理，只有准确跟踪到原生对话后才能导入 GUI。请先退出该 CLI。终端守护进程确认原进程已退出后，Kiln 才使用记录的账户环境和工作文件夹打开同一对话。终端断开或无法识别对话，并不能作为开始导入的依据。</p>
 <h2 id="work-across-several-repositories">跨多个仓库工作</h2>
 <p>如果前端、后端和共享库分属不同的 Git 仓库，就打开它们的父文件夹，例如 <code>~/dev/projects</code>。Kiln 把这个文件夹作为代理的工作根目录，还可以把扫描到的仓库结构随请求一起附上，一个请求就能覆盖所有仓库。</p>
 <p>在 Git 或 GitHub 工具中查看某个仓库，不会改变任务的工作目录。要让 Git 操作针对某个仓库，请使用这些工具中的仓库选择器。详见<a href="workspaces.html">工作区与任务</a>和 <a href="git.html">Git 与 GitHub</a>。</p>
@@ -766,11 +794,15 @@
 </table></div>
 <p>在新打开的 Kiln Zsh 终端中，直接输入的 <code>codex</code>、<code>codex resume …</code> 和 <code>codex fork …</code> 也使用 <code>--no-daemon</code>。即使共享服务器返回 <strong>Server is draining; retry after reconnecting</strong>，这些命令仍可独立启动。显式 <code>--remote</code> 连接、已有别名或函数、其他命令形式和其他 shell 保持原有行为。使用 <code>command codex …</code> 可绕过包装函数，也可以自行添加 <code>--no-daemon</code> 来启动本地会话。已有 shell 需要重新打开才能加载此集成。Kiln 不会重启共享服务器或更改其更新设置。</p>
 <h2 id="native-session-settings">原生会话设置与命令</h2>
-<p>在对话 GUI 中，使用<strong>会话设置</strong>搜索提供方设置，使用<strong>命令与技能</strong>查找原生命令。输入框附近显示模型、推理强度、模式和 Claude Ultracode。选项由当前提供方和模型提供，尚未收到的目录与空目录会明确区分。</p>
+<p>在对话 GUI 中，使用<strong>会话设置</strong>搜索提供方设置，使用<strong>命令与技能</strong>查找原生命令。紧凑的两行输入框下方是一行工具栏，可附加图片、选择模型和模式、打开<strong>推理设置</strong>，并使用圆形发送或停止按钮。较窄的面板只保留模型和<strong>对话选项</strong>，其余控件收在对话选项中。模型名称便于阅读，模式和推理强度使用应用语言显示，同时保留传给提供方的实际值。尚未收到的目录与空目录也会明确区分。</p>
+<p>打开推理设置，或窄面板中的对话选项，可通过滑块选择提供的推理等级，并使用 Claude 独立的 Ultracode 开关。Ultracode 启用时以紫色标记显示。标题仍显示已经确认生效的模型和模式。</p>
 <p>更改设置后，请求值和原生值分开显示。等待原生确认时，发送和有冲突的设置操作会暂停，停止按钮仍可使用。传输确认不代表设置已经生效。被拒绝或未确认的更改保持可见，不会自动重试。</p>
-<p>选择命令仅将可编辑文本插入草稿，不会发送。现有内容和图片会保留。明确点击发送时，Codex 技能还会携带原生技能输入。原生技能变化后请刷新目录。终端专用、继承和受管理的功能会在高级目录中标明范围，不会伪装成可用开关。使用<strong>在终端中开始新对话</strong>进行终端专用设置，当前 GUI 会话将保持打开。</p>
+<p>命令与技能提供搜索图标、清空搜索操作和限制高度的滚动列表。名称左对齐，展开一行可阅读完整说明和详细信息。可搜索名称、说明和别名，仅限终端的项目以及无法在 GUI 中调用的技能不会显示。选择项目只会插入可编辑草稿，并保留已有文字和图片。Codex 技能的原生输入也会保留到明确发送时。</p>
+<p>输入 <code>/</code> 可打开带简短说明的补全列表；Codex 技能也可从 <code>$</code> 补全。用上下方向键选择，按 Tab 或 Enter 插入，按 Esc 关闭。补全不会发送消息。已识别的命令和技能与普通文字分别显示。原生技能变化后请刷新目录。</p>
+<p>会话设置只显示可在 GUI 中实际修改的项目，并按回复、工作方式、上下文和权限分组。只读列表和不可用设置不再显示。更改记录、恢复默认值和参考信息可从详情中查看。需要 CLI 界面时，请从<strong>新建任务</strong>打开单独的终端。</p>
 <p><strong>新对话设置</strong>使用当前选定账户和明确指定的启动选项打开独立对话。当前会话与草稿保持不变，也不会重放提示。审查、目标和排队任务等原生操作只会通过明确的执行按钮启动。当前轮次设置作用于已确认的运行中轮次的后续工作，不会更改已开始的工作。</p>
 <p>包括提问和已知 MCP 操作在内的工具标题使用应用语言。展开卡片或将鼠标悬停在标题上可查看原始工具名；参数、输出、问题和差异内容保持原文。切换语言也会更新已有历史记录的标题。未知操作显示为外部工具。扩展准备或保留旧缓存的状态不代表已完成原生加载。</p>
+<p>在消息中输入 <code>@</code>，即可搜索当前工作目录中的文件和文件夹。使用方向键选择、Tab 浏览文件夹、Enter 插入、Esc 关闭。包含空格或中文的路径也会用引号保留。选择只会修改草稿，发送仍需明确操作。Claude 保留原生 <code>@</code> 引用格式，Codex 使用与正式 TUI 相同的路径文本，Antigravity 接收所选完整路径。提供方的权限与上下文处理规则仍然适用。</p>
 <h2 id="provider-coverage">各提供方的功能范围</h2>
 <p>实现这些控件时核对的参考版本为 Claude Code 2.1.325（SDK 0.3.325）、Codex CLI 0.167.2 和 Antigravity CLI 1.5.9。这不是最低版本要求，也不保证后续所有版本行为相同。实际可用性由已安装的 CLI、模型、账户和组织策略决定。显示控件或准备好扩展，并不能证明已认证模型的任务执行成功。</p>
 <div class="table"><table>
@@ -794,12 +826,12 @@
 </tr>
 <tr>
 <td>Antigravity</td>
-<td>所有已提供且受支持的 ACP 选择项，包括模型、推理强度和模式。保留分组顺序和描述，未知分类仍显示，不支持的类型为只读。原生命令插入草稿。在加载和运行期间更新命令及用量；单独的手动刷新·操作可能不可用。</td>
+<td>所有已提供且受支持的 ACP 选择项，包括模型、推理强度和模式。保留分组顺序和描述，未知分类仍显示，不支持的类型不显示在 GUI 中。原生命令插入草稿。在加载和运行期间更新命令及用量；单独的手动刷新·操作可能不可用。</td>
 <td>沙盒请求、主智能体及附加绝对路径。</td>
 </tr>
 </tbody>
 </table></div>
-<p>在<strong>会话设置</strong>中使用<strong>当前对话</strong>、<strong>新对话</strong>、<strong>继承</strong>、<strong>受管理</strong>及<strong>仅限终端</strong>筛选。Claude 设置参考清单的范围大于可编辑项；Codex 原生方法清单也包含没有 GUI 操作的流程。开发中的插件 API 不会被调用。此适配器不报告 Antigravity 的 MCP 连接健康状态，空的客户端服务器列表并不是连接健康结果。</p>
+<p><strong>会话设置</strong>只显示可实际修改的 GUI 设置。原生设置和方法参考列表中的所有条目不会都出现在设置界面中。开发中的插件 API 不会被调用。此适配器不报告 Antigravity 的 MCP 连接健康状态，空的客户端服务器列表也不是健康结果。</p>
 <p>权限卡保留原生提供的选项。Codex 可从请求的文件系统·网络权限中选择子集，并指定轮次·会话范围及严格审核。Kiln 不会自动选择绕过权限的策略。原生策略、使用资格和功能错误会保持可见。当前轮次变更适用于已报告的活动轮次设置，不会改变提供方已用于处理的推理。没有运行效果回读的设置接收状态会与确认应用分开显示。</p>
 <p>请参阅原生 <a href="https://code.claude.com/docs/en/model-config.md">Claude 模型参考</a>、<a href="https://learn.chatgpt.com/docs/app-server">Codex App Server 参考</a>和 <a href="https://agentclientprotocol.com/protocol/v1/session-config-options">ACP 配置约定</a>。清单随账户与模型变化，不可用或部分结果不代表完整清单。</p>
 <h2 id="personal-extensions">个人扩展与账户范围</h2>

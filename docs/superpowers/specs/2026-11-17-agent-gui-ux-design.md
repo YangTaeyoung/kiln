@@ -1,0 +1,11 @@
+# Agent conversation usability
+
+User requested autonomous completion of ten specific GUI refinements. Keep Rust/egui, actual provider choices and native confirmation barriers. The user-facing surface must present localized mode names, native model display names and short descriptions, discrete supported-effort sliders and an independent violet Ultracode switch. Do not invent provider capabilities or prices. Separate compact composer controls from the right-aligned attachment/send action bar. Commands use a searchable, bounded catalog with expandable details; slash suggestions support arrows, Tab/Enter completion and Escape, never submission on selection. Hide terminal-only controls and commands. Settings show current values first, with history collapsed and unresolved failures visible. Inspect dark/light and narrow widths.
+
+A header presentation selector retains the exact provider session, cwd/account and draft. Never send a task twice or terminate running native work to switch presentation. The existing host may hand off its PTY only after the structured backend is idle; returning from native CLI waits for its graceful exit before resuming the structured backend. If an existing terminal cannot prove its conversation identity, do not manufacture continuity.
+
+Design reference: 12ui candidate D, with explicit user requirements (localized names, real slider, no invented brand) overriding generated placeholders. Official references: https://code.claude.com/docs/en/model-config and https://www.w3.org/WAI/ARIA/apg/patterns/combobox/ .
+
+## User corrections during implementation
+
+The owner rejected the initial large multi-row composer. The current implementation direction is a compact two-line editor with one toolbar, reasoning/Ultracode in a popover and no divider/help row. Hide the entire noninteractive native settings inventory rather than collapsing hundreds of unusable rows. Show only editable GUI controls, grouped by purpose; move per-row reset and docs to an information menu. Slash completion uses a 456-point maximum, left-aligned two-line rows. The owner also requested missing `@` file/folder references: implement provider-native path contracts, Unicode/space quoting, asynchronous bounded workspace completion and no implicit submission.
