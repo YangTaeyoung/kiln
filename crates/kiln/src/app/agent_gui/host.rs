@@ -1021,6 +1021,13 @@ mod tests {
 #[cfg(all(test, unix))]
 mod subprocess_tests {
     use super::*;
+
+    struct FixtureWorker(Child);
+    impl Drop for FixtureWorker {
+        fn drop(&mut self) {
+            if self.0.try_wait().ok().flatten().is_none() { stop(&mut self.0); }
+        }
+    }
     use std::collections::BTreeMap;
     use std::os::unix::process::CommandExt;
     #[test]
@@ -1484,12 +1491,6 @@ if '-p' not in sys.argv:
     }
     #[test]
     fn fresh_claude_handoff_closes_declared_mcp_without_changing_settings_or_replaying() {
-        struct FixtureWorker(Child);
-        impl Drop for FixtureWorker {
-            fn drop(&mut self) {
-                if self.0.try_wait().ok().flatten().is_none() { stop(&mut self.0); }
-            }
-        }
         for unrelated in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let cwd = root.path().canonicalize().unwrap();
