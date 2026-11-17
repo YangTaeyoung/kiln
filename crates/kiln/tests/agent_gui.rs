@@ -315,6 +315,33 @@ fn native_command_stop(runtime: &Runtime) {
         "codex process Stop: exact current native process terminated, prior background completed, delayed side effect absent after 2s, next turn accepted"
     );
 }
+fn inflight_followups(runtime: &Runtime) {
+    for tool in Tool::ALL {
+        let (_, descriptor, session, _) = runtime.spawn(tool, "followup");
+        let project = descriptor.cwd.clone();
+        let mut client = Client::connect(descriptor);
+        let mut transcript = Transcript::default();
+        wait(&mut client, &mut transcript, |t|t.lifecycle == Lifecycle::Ready);
+        let original_pid = runtime.session(session).pid;
+        let first = client.send(Command::Submit { text: "first task".into(), attachments: vec![], model: None }).unwrap();
+        wait(&mut client, &mut transcript, |t|t.commands.get(&first) == Some(&CommandPhase::Accepted));
+        assert_eq!(transcript.lifecycle, Lifecycle::Running);
+        let second = client.send(Command::Submit { text: "follow-up while running".into(), attachments: vec![], model: None }).unwrap();
+        if tool == Tool::Antigravity {
+            wait(&mut client, &mut transcript, |t|t.commands.get(&second) == Some(&CommandPhase::Dispatched));
+            assert_eq!(prompts(&wires(&project)), 1);
+            fs::write(project.join("finish-first"), "finish normally").unwrap();
+        }
+        wait(&mut client, &mut transcript, |t|t.commands.get(&second) == Some(&CommandPhase::Accepted) && t.lifecycle == Lifecycle::Ready);
+        assert_eq!(runtime.session(session).pid, original_pid);
+        assert_eq!(transcript.entries.iter().filter(|e|matches!(e, Entry::Message(m) if m.text=="follow-up while running")).count(), 1);
+        let wire = wires(&project);
+        assert!(!wire.iter().any(|v|v["method"]=="turn/interrupt" || v["method"]=="session/cancel" || v["request"]["subtype"]=="interrupt"));
+        assert_eq!(prompts(&wire), if tool == Tool::Codex {1} else {2});
+        if tool == Tool::Codex { assert_eq!(wire.iter().filter(|v|v["method"]=="turn/steer").count(), 1); }
+    }
+}
+
 #[test]
 fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
     let runtime = Runtime::new();
@@ -447,6 +474,7 @@ fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
         );
     }
     native_command_stop(&runtime);
+    inflight_followups(&runtime);
     for tool in Tool::ALL {
         for mode in ["closed-input", "exit", "exit-held"] {
             if mode == "closed-input" && tool != Tool::Claude {

@@ -107,8 +107,12 @@ impl AgentPane {
             && !self.composing
             && !self.ime_frame
     }
+    fn live_settings_allowed(&self) -> bool {
+        self.live_input_allowed() && !self.settings_blocked()
+            && !self.composing && !self.ime_frame
+    }
     pub(super) fn configure(&mut self, option: &ControlOption, value: ControlValue) {
-        if !self.editing_allowed() {
+        if !self.live_settings_allowed() {
             return;
         }
         if let Err(error) = option.validate(&value) {
@@ -199,7 +203,7 @@ impl AgentPane {
                 current:self.composer.model.clone().map(ControlValue::Text),scope:ControlScope::Live,available:true,reason:None,source:Some("legacy-model".into()),documentation:None };
             let mut selected=option.current.clone();
             let width=if compact {(ui.available_width()-38.).clamp(70.,150.)}else{158.};
-            ui.allocate_ui(egui::vec2(width,28.), |ui| {ui.add_enabled_ui(self.editing_allowed(), |ui|select_widget(ui,&option,&mut selected,true));});
+            ui.allocate_ui(egui::vec2(width,28.), |ui| {ui.add_enabled_ui(self.live_settings_allowed(), |ui|select_widget(ui,&option,&mut selected,true));});
             if selected != option.current { self.composer.model=selected.and_then(|v|if let ControlValue::Text(s)=v{Some(s)}else{None}); }
         }
         if !self.transcript.modes.is_empty() {
@@ -214,7 +218,7 @@ impl AgentPane {
             choices:self.transcript.modes.iter().map(|m|ControlChoice{value:m.id.clone(),label:m.label.clone(),description:m.description.clone(),group:None}).collect(),
             current:self.transcript.selected_mode.clone().map(ControlValue::Text),scope:ControlScope::Live,available:true,reason:None,source:None,documentation:None};
         let mut selected=option.current.clone();
-        ui.add_enabled_ui(self.editing_allowed(),|ui|select_widget(ui,&option,&mut selected,true));
+        ui.add_enabled_ui(self.live_settings_allowed(),|ui|select_widget(ui,&option,&mut selected,true));
         if selected != option.current && let Some(ControlValue::Text(mode))=selected && let Err(error)=self.send(Command::SetMode{mode}) {self.error=Some(error);}
     }
     pub(super) fn settings_ui(&mut self, ui: &mut Ui) {
@@ -452,7 +456,7 @@ impl AgentPane {
         let option = &presented;
         let mut selected = option.current.clone();
         let enabled =
-            self.editing_allowed() && option.available && option.scope == ControlScope::Live;
+            self.live_settings_allowed() && option.available && option.scope == ControlScope::Live;
         ui.push_id((&option.id, quick), |ui| {
             ui.add_enabled_ui(enabled, |ui| match &option.kind {
                 ControlKind::Select if is_effort(option) => effort_slider(ui, option, &mut selected, quick),

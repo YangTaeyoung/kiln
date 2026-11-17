@@ -749,6 +749,9 @@ fn rejected_and_user_journal_reconcile_pending_identity() {
             attachments: vec![],
         }));
         p.reconcile();
+        assert!(p.pending.is_some(), "a local user row is not a native receipt");
+        p.transcript.commands.insert(id, CommandPhase::Accepted);
+        p.reconcile();
         assert!(p.pending.is_none());
         assert_eq!(p.sent.len(), 1);
     }
@@ -2110,4 +2113,21 @@ fn agent_conversation_titles_use_confirmed_requests_and_survive_presentation_cha
     assert_eq!(p.conversation_title(), title);
     if let Entry::Message(message) = &mut p.transcript.entries[0] {message.text = "한".repeat(100);}
     assert_eq!(p.conversation_title(), format!("{}…", "한".repeat(64)));
+}
+
+#[test]
+fn inflight_presentation_request_is_cancellable_without_interrupting_the_turn() {
+    let mut p = pane();
+    p.transcript.lifecycle = Lifecycle::Running;
+    p.transcript.provider_session_id = Some("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee".into());
+    assert!(p.request_presentation(Presentation::Terminal));
+    assert_eq!(p.sent, vec![Command::SetPresentation(Presentation::Terminal)]);
+    p.local_intents.clear();
+    p.transcript.return_requested = true;
+    assert_eq!(p.selected_presentation(), Presentation::Terminal);
+    assert_eq!(p.presentation(), Presentation::Gui);
+    assert!(p.can_switch_presentation(Presentation::Gui));
+    assert!(p.request_presentation(Presentation::Gui));
+    assert_eq!(p.transcript.lifecycle, Lifecycle::Running);
+    assert!(!p.sent.iter().any(|c|matches!(c,Command::Interrupt)));
 }

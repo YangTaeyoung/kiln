@@ -410,7 +410,7 @@ impl Codex {
         e: &mut Effects,
     ) -> Result<()> {
         ensure!(
-            self.ready && !self.busy,
+            self.ready && self.stopping.is_none(),
             "Codex is not ready for thread settings"
         );
         self.native.idle()?;

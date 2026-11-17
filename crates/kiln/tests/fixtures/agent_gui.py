@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import threading
 
 provider = os.environ["FIXTURE_PROVIDER"]
 mode = os.environ.get("FIXTURE_MODE", "conversation")
@@ -116,11 +117,33 @@ for line in sys.stdin:
         child.terminate()
         child.wait(timeout=3)
         result(value["id"], {"terminated": True})
+    elif mode == "followup" and method == "turn/steer":
+        assert value["params"]["expectedTurnId"] == str(turn)
+        # An old start receipt cannot confirm the newly submitted follow-up.
+        result("turn", {"turn": {"id": str(turn)}})
+        result(value["id"], {"turnId": str(turn)})
+        finish()
     elif kind == "user" or method in ("turn/start", "session/prompt"):
         turn += 1
         prompt_id = value.get("id")
         if provider == "codex":
             result(value["id"], {"turn": {"id": str(turn)}})
+        if mode == "followup":
+            if provider == "claude":
+                emit({"type": "user", "uuid": value["uuid"], "message": value["message"]})
+                if turn > 1:
+                    finish()
+            elif provider == "antigravity":
+                if turn == 1:
+                    notice("session/update", {"sessionId": session, "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "still working"}}})
+                    def finish_when_released():
+                        while not Path("finish-first").exists():
+                            time.sleep(.01)
+                        finish()
+                    threading.Thread(target=finish_when_released, daemon=True).start()
+                else:
+                    finish()
+            continue
         if mode == "codex-process-stop":
             for child in processes.values():
                 child.poll()

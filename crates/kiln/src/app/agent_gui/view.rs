@@ -280,7 +280,7 @@ impl AgentPane {
         }
     }
     #[cfg(test)]
-    pub(super) fn fixture(descriptor: Descriptor) -> Self {
+    pub(crate) fn fixture(descriptor: Descriptor) -> Self {
         let mut p = Self::new(descriptor);
         p.replay_required = false;
         p.transport_alive = true;
@@ -303,19 +303,26 @@ impl AgentPane {
     }
     pub fn presentation(&self) -> Presentation { self.transcript.presentation }
     pub fn presentation_pending(&self) -> bool {
-        self.transcript.return_requested || !self.local_intents.is_empty()
+        !self.local_intents.is_empty()
+    }
+    pub fn selected_presentation(&self) -> Presentation {
+        if self.transcript.return_requested {
+            match self.presentation() { Presentation::Gui => Presentation::Terminal, Presentation::Terminal => Presentation::Gui }
+        } else { self.presentation() }
     }
     pub fn can_switch_presentation(&self, target: Presentation) -> bool {
-        if self.presentation_pending() || self.presentation() == target { return false; }
+        if self.presentation_pending() || self.selected_presentation() == target
+            || !self.transport_alive || self.replay_required { return false; }
+        // Selecting the owning view cancels a deferred handoff, without touching its process.
+        if self.presentation() == target { return true; }
         if target == Presentation::Terminal {
-            self.editing_allowed() && super::host::can_handoff(&self.transcript)
+            self.live_input_allowed() && !self.settings_blocked() && self.pending.is_none()
+                && self.transcript.provider_session_id.is_some()
                 && !self.image_import_pending() && self.validation.is_none()
-        } else { self.transport_alive && !self.replay_required && self.transcript.provider_session_id.is_some() }
+        } else { self.transcript.provider_session_id.is_some() }
     }
     pub fn request_presentation(&mut self, target: Presentation) -> bool {
         if !self.can_switch_presentation(target) { return false; }
-        if target == Presentation::Terminal && (!self.editing_allowed() || self.image_import_pending() || self.validation.is_some()) { return false; }
-        if target == Presentation::Gui && (!self.transport_alive || self.replay_required || self.transcript.return_requested) { return false; }
         match self.send(Command::SetPresentation(target)) { Ok(_) => true, Err(error) => { self.error = Some(error); false } }
     }
     pub fn draft(&self) -> SavedDraft {
@@ -469,12 +476,7 @@ impl AgentPane {
             self.composer.model = None; // Detailed native settings own the selection.
         }
         if let Some(p) = &self.pending {
-            let confirmed = self.transcript.commands.get(&p.id) == Some(&CommandPhase::Accepted)
-                || self
-                    .transcript
-                    .entries
-                    .iter()
-                    .any(|e| matches!(e,Entry::Message(m) if m.id==format!("user-{}",p.id)));
+            let confirmed = self.transcript.commands.get(&p.id) == Some(&CommandPhase::Accepted);
             if confirmed {
                 self.pending = None;
                 self.restored_pending = false;
@@ -482,10 +484,7 @@ impl AgentPane {
         }
         if let Some(recovered) = &self.recovered {
             let accepted = self.transcript.commands.get(&recovered.id)
-                == Some(&CommandPhase::Accepted)
-                || self.transcript.entries.iter().any(
-                    |e| matches!(e,Entry::Message(m) if m.id==format!("user-{}",recovered.id)),
-                );
+                == Some(&CommandPhase::Accepted);
             if accepted {
                 if self.composer == recovered.draft {
                     self.composer = Draft::default();
@@ -552,12 +551,17 @@ impl AgentPane {
                 )
         })
     }
+    fn live_input_allowed(&self) -> bool {
+        self.transport_alive
+            && self.presentation() == Presentation::Gui
+            && matches!(self.transcript.lifecycle, Lifecycle::Ready | Lifecycle::Running | Lifecycle::Waiting)
+    }
     fn submit(&mut self) {
         if self.composing
             || self.ime_frame
             || self.settings_blocked()
             || !self.transport_alive
-            || self.transcript.lifecycle != Lifecycle::Ready
+            || !self.live_input_allowed()
             || self.pending.is_some()
             || !self.backlog.is_empty()
             || self.validation.is_some()
@@ -1325,7 +1329,7 @@ impl AgentPane {
                 }
                 ui.add_space(6.);
                 ui.horizontal(|ui| {
-                    let controls_width = (ui.available_width() - 38.).max(0.);
+                    let controls_width = (ui.available_width() - if self.show_stop() { 74. } else { 38. }).max(0.);
                     let compact = ui.available_width() < 560.;
                     ui.allocate_ui_with_layout(egui::vec2(controls_width, 28.), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 6.;
@@ -1334,6 +1338,9 @@ impl AgentPane {
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.composer_action_ui(ui, enter));
                 });
+                if self.busy() && self.descriptor.tool == Tool::Codex {
+                    ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("모델·추론 강도·모드 선택은 다음 턴에 적용됩니다.")).small().color(t.text_dim)).wrap());
+                }
                 self.slash_completion_ui(ui);
                 self.mention_completion_ui(ui);
 
@@ -1364,8 +1371,12 @@ impl AgentPane {
         widgets.inactive.bg_stroke = Stroke::NONE;
     }
 
+    fn show_stop(&self) -> bool {
+        self.busy() || !self.local_intents.is_empty()
+            || self.transcript.controls.outcomes.values().any(|v| !v.settled)
+    }
     fn composer_action_ui(&mut self, ui: &mut Ui, enter: bool) {
-        if self.busy() || (!self.local_intents.is_empty() || self.transcript.controls.outcomes.values().any(|v| !v.settled)) {
+        if self.show_stop() {
             if composer_icon(ui, kiln_common::icons::Icon::Stop, kiln_common::i18n::tr("중지"), false)
             .clicked()
             {
@@ -1373,9 +1384,9 @@ impl AgentPane {
                     self.error = Some(error);
                 }
             }
-        } else {
-            let enabled = !self.settings_blocked() && self.transport_alive
-                && self.transcript.lifecycle == Lifecycle::Ready
+        }
+        {
+            let enabled = !self.settings_blocked() && self.live_input_allowed()
                 && self.pending.is_none()
                 && self.backlog.is_empty()
                 && !self.image_import_pending()

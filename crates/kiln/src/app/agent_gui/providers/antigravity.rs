@@ -6,6 +6,7 @@ pub(in crate::app::agent_gui) struct Antigravity {
     session: String,
     ready: bool,
     busy: bool,
+    next_prompt: Option<(Command, String)>,
     loading: bool,
     image: bool,
     pending: BTreeMap<String, (Value, Value)>,
@@ -31,6 +32,7 @@ impl Antigravity {
             resume,
             ready: false,
             busy: false,
+            next_prompt: None,
             loading: false,
             image: false,
             pending: BTreeMap::new(),
@@ -94,7 +96,6 @@ impl Antigravity {
             Command::Configure { control, value } => {
                 ensure!(
                     self.ready
-                        && !self.busy
                         && self.deferred.is_none()
                         && self.retired_configs.is_empty(),
                     "Antigravity configuration is not ready"
@@ -122,8 +123,8 @@ impl Antigravity {
                 model,
             } => {
                 ensure!(
-                    self.ready && !self.busy,
-                    "Antigravity is not ready for a new turn"
+                    self.ready && self.next_prompt.is_none(),
+                    "Antigravity is not ready for a new message"
                 );
                 ensure!(
                     attachments.is_empty() || self.image,
@@ -141,6 +142,11 @@ impl Antigravity {
                     "session/prompt",
                     json!({"sessionId":self.session,"prompt":prompt}),
                 );
+                if self.busy {
+                    ensure!(self.deferred.is_none() && self.retired_configs.is_empty(), "Antigravity configuration is still settling");
+                    self.next_prompt = Some((c.clone(), id.into()));
+                    return Ok(e);
+                }
                 if !self.model_settled || (target.is_some() && target != self.selected) {
                     ensure!(
                         self.models.iter().any(|m| Some(&m.id) == target.as_ref()),
@@ -203,9 +209,18 @@ impl Antigravity {
             }
             Command::SetMode { mode } => {
                 ensure!(
-                    self.ready && !self.busy && self.modes.iter().any(|m| m.id == *mode),
+                    self.ready && self.deferred.is_none() && self.retired_configs.is_empty()
+                        && self.modes.iter().any(|m| m.id == *mode),
                     "mode is not available in this session"
                 );
+                if self.busy {
+                    if let Some(control) = self.mode_config.clone() {
+                        return self.command(&Command::Configure { control, value: ControlValue::Text(mode.clone()) }, id);
+                    }
+                    let request = self.native.begin("legacyMode", ControlValue::Text(mode.clone()), &mut e)?;
+                    e.write(rpc(json!(request), "session/set_mode", json!({"sessionId":self.session,"modeId":mode})));
+                    return Ok(e);
+                }
                 let (method, params) = if let Some(config) = &self.mode_config {
                     (
                         "session/set_config_option",
@@ -246,6 +261,7 @@ impl Antigravity {
                 e.state(Lifecycle::Running);
             }
             Command::Interrupt => {
+                if self.next_prompt.take().is_some() { e.cancelled = true; }
                 self.native.cancel(&mut e);
                 if cancel_config(&mut self.deferred, &mut self.retired_configs, &mut e) {
                     self.busy = false;
@@ -543,6 +559,14 @@ impl Antigravity {
                     );
                     return Ok(e);
                 }
+                if let Some(op) = self.native.operation.as_ref().filter(|op| op.control == "legacyMode") {
+                    let value = op.value.clone();
+                    if let ControlValue::Text(mode) = &value {
+                        e.event(Event::Modes { choices: vec![], selected: Some(mode.clone()) });
+                    }
+                    self.native.finish(ApplicationState::Applied, Some(value), None, &mut e);
+                    return Ok(e);
+                }
                 self.config_ack = true;
                 if !v["result"]["configOptions"].is_array() {
                     let op = self.native.operation.as_ref().unwrap();
@@ -698,8 +722,12 @@ impl Antigravity {
                 "prompt" => {
                     self.busy = false;
                     self.pending.clear();
-                    e.accepted = true;
-                    e.state(Lifecycle::Ready);
+                    if let Some((command, runtime)) = self.next_prompt.take() {
+                        e.merge(self.command(&command, &runtime)?);
+                    } else {
+                        e.accepted = true;
+                        e.state(Lifecycle::Ready);
+                    }
                 }
                 _ => {}
             }
@@ -726,13 +754,13 @@ impl Antigravity {
 
             match s(u, "sessionUpdate").as_str() {
                 "agent_message_chunk" => {
-                    e.accepted = self.busy;
+                    e.accepted = self.busy && self.next_prompt.is_none();
                     if let Some(t) = u["content"].get("text").and_then(Value::as_str) {
                         e.event(message(self.message.clone(), t.into(), true));
                     }
                 }
                 "tool_call" | "tool_call_update" => {
-                    e.accepted = self.busy;
+                    e.accepted = self.busy && self.next_prompt.is_none();
                     self.tool(u, &mut e);
                     self.message = format!("agy-{}", journal::unique());
                 }

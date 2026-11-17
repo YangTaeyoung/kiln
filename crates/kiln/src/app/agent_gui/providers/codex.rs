@@ -44,6 +44,7 @@ pub(in crate::app::agent_gui) struct Codex {
     turn: String,
     ready: bool,
     busy: bool,
+    steering: Option<(String, String)>,
     interrupt_pending: bool,
     pending: BTreeMap<String, (Value, String, Value)>,
     tools: BTreeMap<String, ToolCall>,
@@ -89,6 +90,7 @@ impl Codex {
             turn: String::new(),
             ready: false,
             busy: false,
+            steering: None,
             interrupt_pending: false,
             pending: BTreeMap::new(),
             tools: BTreeMap::new(),
@@ -362,8 +364,8 @@ impl Codex {
                 ..
             } => {
                 ensure!(
-                    self.ready && !self.busy,
-                    "Codex is not ready for a new turn"
+                    self.ready && self.stopping.is_none() && self.steering.is_none(),
+                    "Codex is not ready for a new message"
                 );
                 if model.is_none() {
                     if let Some(meta) = self.metadata.iter().find(|m| {
@@ -396,6 +398,13 @@ impl Codex {
                         );
                         input.push(json!({"type":"skill","name":skill.name,"path":skill.path}));
                     }
+                }
+                if self.busy {
+                    ensure!(!self.turn.is_empty(), "The active turn is not confirmed yet");
+                    let request = format!("steer-{}", journal::unique());
+                    e.write(rpc(json!(request), "turn/steer", json!({"threadId":self.thread,"expectedTurnId":self.turn,"input":input})));
+                    self.steering = Some((request, self.turn.clone()));
+                    return Ok(e);
                 }
                 let mut params = json!({"threadId":self.thread,"input":input});
                 if let Some(model) = model {
@@ -638,6 +647,17 @@ impl Codex {
             if self.stop_response(&id, &v, &mut e) {
                 return Ok(e);
             }
+            if self.steering.as_ref().is_some_and(|(request, _)| request == &id) {
+                let (_, expected_turn) = self.steering.take().unwrap();
+                if let Some(error) = v.get("error") {
+                    e.cancelled = true;
+                    e.event(Event::Error(native_error_message(error)));
+                } else {
+                    ensure!(v["result"]["turnId"].as_str() == Some(expected_turn.as_str()), "Codex follow-up receipt did not match the requested turn");
+                    e.accepted = true;
+                }
+                return Ok(e);
+            }
             if let Some(error) = v.get("error") {
                 anyhow::bail!("Codex request failed: {}", native_error_message(error));
             }
@@ -704,7 +724,7 @@ impl Codex {
                     });
                     self.adopt_turn(s(&r["turn"], "id"));
                     self.publish_active_turn(&mut e);
-                    e.accepted = true;
+                    e.accepted = self.steering.is_none();
                     if std::mem::take(&mut self.interrupt_pending) {
                         self.interrupt(&mut e);
                     }
@@ -728,7 +748,7 @@ impl Codex {
                 }
                 self.adopt_turn(s(&p["turn"], "id"));
                 self.publish_active_turn(&mut e);
-                e.accepted = true;
+                e.accepted = self.steering.is_none();
                 if self.stopping.is_some() {
                     self.stop_state(&mut e);
                 } else {

@@ -13773,5 +13773,16 @@
     "en": "The agent exited. Your draft was kept; use TUI to continue in the original shell.",
     "ja": "エージェントが終了しました。下書きは保持され、TUIで元のシェルを続行できます。",
     "zh-CN": "代理已退出，草稿已保留。可在 TUI 中继续使用原来的 Shell。"
+  },
+  "현재 작업이 끝나면 TUI로 전환합니다. GUI를 선택하면 전환을 취소합니다.": {
+    "en": "Switching to TUI after the current work finishes. Select GUI to cancel the switch.",
+    "ja": "現在の作業が終了するとTUIに切り替えます。GUIを選ぶと切り替えを取り消せます。",
+    "zh-CN": "当前工作结束后切换到TUI。选择GUI可取消切换。"
+  },
+  "모델·추론 강도·모드 선택은 다음 턴에 적용됩니다.": {
+    "en": "Model, effort, and mode selections apply to the next turn.",
+    "ja": "モデル・推論強度・モードの選択は次のターンに適用されます。",
+    "zh-CN": "模型、推理强度和模式选择将在下一轮生效。"
   }
+
 }

@@ -1530,3 +1530,80 @@ fn ux_settings_search_never_exposes_native_schema_or_noninteractive_controls() {
         assert!(h.query_by_label("확인 대기").is_none());
     }
 }
+
+#[test]
+fn inflight_composer_exposes_send_and_stop_and_sends_without_interrupt() {
+    for tool in [Tool::Claude, Tool::Codex, Tool::Antigravity] {
+        for state in [Lifecycle::Running, Lifecycle::Waiting] {
+            let mut p = fixture(tool);
+            p.transcript.lifecycle = state;
+            let mut h = harness(p, 420., true);
+            h.run();
+            assert!(!h.get_by_label("보내기").accesskit_node().is_disabled());
+            assert!(!h.get_by_label("중지").accesskit_node().is_disabled());
+            let send = h.get_by_label("보내기").rect();
+            let stop = h.get_by_label("중지").rect();
+            assert!(!send.intersects(stop));
+            if let Some(dir) = std::env::var_os("KILN_VISUAL_CAPTURE_DIR") {
+                h.render().unwrap().save(std::path::PathBuf::from(dir).join(format!("inflight-{:?}-{:?}.png", tool, h.state().transcript.lifecycle))).unwrap();
+            }
+            h.get_by_label("보내기").click();
+            h.run();
+            assert_eq!(h.state().sent.len(), 1);
+            assert!(matches!(&h.state().sent[0], Command::Submit{text,..} if text=="keep 한글 draft"));
+            assert!(h.state().pending.is_some());
+        }
+    }
+}
+
+#[test]
+fn inflight_settings_preserve_draft_and_keep_handoff_and_destructive_actions_gated() {
+    for state in [Lifecycle::Running, Lifecycle::Waiting] {
+        for control in ["model", "effort", "permissionMode", "collaborationMode"] {
+            let mut p = fixture(Tool::Codex);
+            p.transcript.lifecycle = state.clone();
+            let option = select(control, "first", &["first", "second"]);
+            p.configure(&option, ControlValue::Text("second".into()));
+            assert_eq!(p.sent.len(), 1);
+            assert_eq!(p.composer.text, "keep 한글 draft");
+            assert!(!p.editing_allowed());
+            assert!(matches!(&p.sent[0],Command::Configure{control:key,..} if key==control));
+        }
+    }
+}
+
+#[test]
+fn inflight_model_selector_is_clickable_in_the_actual_composer() {
+    let mut p = fixture(Tool::Claude);
+    p.transcript.lifecycle = Lifecycle::Running;
+    p.transcript.controls.options_reported = true;
+    p.transcript.controls.options = vec![select("model", "old", &["old", "new"])];
+    let mut h = harness(p, 320., true);
+    h.run();
+    h.get_by_label("모델").click(); h.run();
+    h.get_by_label("new").click(); h.run();
+    assert!(matches!(h.state().sent.as_slice(), [Command::Configure {control, value: ControlValue::Text(value)}] if control=="model" && value=="new"));
+    assert_eq!(h.state().composer.text, "keep 한글 draft");
+}
+
+#[test]
+fn inflight_enter_sends_without_stopping_the_current_response() {
+    let mut p = fixture(Tool::Claude);
+    p.transcript.lifecycle = Lifecycle::Running;
+    let mut h = harness(p, 320., false);
+    h.run();
+    h.get_by_label("메시지").click(); h.run();
+    h.key_press(egui::Key::Enter); h.run();
+    assert!(matches!(h.state().sent.as_slice(), [Command::Submit {..}]));
+}
+
+#[test]
+fn inflight_settings_remain_editable_while_the_first_message_receipt_is_pending() {
+    let mut p = fixture(Tool::Claude);
+    p.submit();
+    assert!(p.pending.is_some());
+    p.transcript.lifecycle = Lifecycle::Running;
+    p.configure(&select("model", "first", &["first", "second"]), ControlValue::Text("second".into()));
+    assert!(matches!(p.sent.as_slice(), [Command::Submit{..}, Command::Configure{..}]));
+    assert!(p.pending.is_some());
+}

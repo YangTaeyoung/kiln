@@ -52,7 +52,7 @@ unsent or unconfirmed draft. Running/waiting work participates in the existing
 close confirmation; an idle GUI host is not treated as a busy task.
 
 A locally queued message is not provider acceptance. Kiln saves its command ID and
-payload until the journal confirms acceptance or a matching user message. Reopening
+payload until the journal confirms acceptance from the provider; a locally recorded user row alone is not a receipt. Reopening
 never sends a draft automatically. After complete replay, a restored local send
 missing from both journal and mailbox becomes explicitly unknown and recoverable even when its worker remains Ready.
 A shared writer revision invalidates an older queue observation after any final
@@ -71,7 +71,7 @@ source of truth. Automatic bottom following stops when the user scrolls away.
 
 Open **Session settings** to search controls by name and scope. The conversation
 composer has a two-line editor and one compact toolbar: attachment, model, mode,
-**Reasoning settings**, and a round Send/Stop control. Narrow panes show the model
+**Reasoning settings**, and separate round Send and Stop controls during a response. Narrow panes show the model
 and **Conversation options**, with the remaining controls inside that popover.
 Reasoning settings contains the advertised effort levels as a step slider and
 Claude's independent Ultracode switch. Enabled Ultracode uses a purple indicator.
@@ -132,9 +132,10 @@ Use the joined **GUI | TUI** tabs inside each agent pane, at the top right below
 native conversation. A new Claude Code conversation can also open in the terminal
 before its first message; Kiln starts that empty conversation without trying to
 resume a history file that does not exist yet. The handoff preserves the original executable, account
-environment, working folder and exact native conversation ID. It requires an idle
-conversation without active submissions, approval requests, running tools or queued
-work. Kiln refuses the switch when a background task remains or it cannot verify
+environment, working folder and exact native conversation ID. The tab accepts a
+request during work and shows a cancellable pending switch. Actual transfer waits
+for an idle conversation without active submissions, approval requests, running
+tools or queued work. Kiln refuses the switch when a background task remains or it cannot verify
 process ownership; those processes stay running. The terminal starts only after
 the previous agent has finished exiting. A refusal explains the blocking state
 without changing the current conversation.
@@ -213,3 +214,13 @@ Type `@` in the composer to search the current workspace. Completion runs off th
 The current settings surface omits noninteractive inventories, unsupported widgets and unavailable controls, including inherited, managed and terminal-only schema entries. Editable settings are grouped by purpose; reset/help is available from the row information menu.
 
 If a shell-attached agent exits unexpectedly, its unsent draft is kept with that conversation. GUI remains available for the saved draft, and TUI returns to the original shell. The draft is not injected into a different agent started later in the same shell.
+
+## Follow-ups and settings during work
+
+Send or Enter remains available while the provider is running or waiting. Claude uses streaming user input with UUID receipts; old response fragments cannot accept a newer message. Codex uses `turn/steer` with the confirmed `expectedTurnId` and correlates the response. A rejected steer leaves the worker running and the draft recoverable. ACP holds one follow-up until the current prompt completes; Stop withdraws that unsent follow-up. No provider is automatically interrupted to submit a message.
+
+Model, effort and mode controls stay available during work, while native setting settlement still serializes conflicting changes. Codex thread defaults apply to subsequent turns; the existing explicit active-turn action remains separate. Claude uses its streaming control setters. ACP applies advertised configuration options and live mode changes without resetting the running lifecycle.
+
+The GUI can request a native TUI handoff during work. The request is cancellable by selecting GUI; the existing idle, approval, queue and process-ownership gates perform the eventual handoff. Native TUI-to-GUI still waits for normal CLI exit. This does not implement instant active computation transfer between the SDK worker and the native terminal process.
+
+Protocol references: [Claude streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode), [Claude live controls and UUID receipts](https://code.claude.com/docs/en/agent-sdk/typescript), [Codex steering](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn), [ACP live modes](https://agentclientprotocol.com/protocol/v1/session-modes). Codex thread/active-turn setting scope was also checked against the installed CLI's experimental JSON schema and an isolated local-inference app-server session.
