@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.3",
-  "source_commit": "09dde92643e3500b7972851e7db229f5be9b9281",
-  "note": "0.3.3 executable build input and four-language agent guide. The following provenance-only commit does not change executable sources. Agent conversation, settings and model-comparison illustrations use this source with synthetic native egui fixtures, not OS-window photographs. Private validation covers in-flight composer controls and native daemon/PTY roundtrips for three providers, plus installed Claude and Codex CLI follow-ups and configuration using isolated synthetic loopback inference. GUI-to-native-TUI handoff waits for safe idle; native TUI-to-GUI requires normal CLI exit. Immediate bidirectional active-runtime switching and live-model acceptance are not claimed.",
+  "kiln_version": "0.3.4",
+  "source_commit": "923e4b1f54dc0fc1e66cfdc0ced28a28872fef0c",
+  "note": "0.3.4 executable build input and four-language guide. Idle GUI-to-TUI validation resolves declared MCP commands in the saved provider environment and working folder. Isolated process tests cover provider PATH, MCP PATH precedence, relative paths, exact ownership and refusal with unrelated background work. Installed Claude CLI GUI-to-TUI-to-GUI smoke passes with synthetic MCP data and no model inference. Native TUI-to-GUI still requires normal CLI exit. Existing native egui agent illustrations remain from 0.3.3 executable source 09dde92643e3500b7972851e7db229f5be9b9281; this backend correction does not change their visual layout.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
