@@ -18,7 +18,7 @@ GROUPS = [
 ORDER = [s for _, slugs in GROUPS for s in slugs]
 
 SHOTS = {"index": "agents", "workspaces": "agents", "agents": "agents", "terminal": "files", "git": "git", "databases": "db", "editor": "editor", "remote": "remote", "install": "settings"}
-SHOT_SIZES = {"agents": (2560, 1540)}
+SHOT_SIZES = {"agents": (1280, 820)}
 GLAZE = ["tenmoku", "celadon", "shino", "kaki"]
 GROUP_OF = {s: g for g, slugs in GROUPS for s in slugs}
 

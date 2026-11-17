@@ -144,7 +144,17 @@ Model, effort and mode controls remain available during a response. Claude appli
 
 In a conversation GUI, use **Session settings** for searchable provider controls and **Commands and skills** to find native commands. A compact two-line message editor sits above one toolbar: attach an image, choose the model and mode, open **Reasoning settings**, or use the round Send/Stop control. Narrow panes keep the model beside **Conversation options**, which contains the remaining controls. Choices show readable model names and localized mode/effort labels while preserving the provider’s actual values. A missing catalog remains different from an empty one.
 
-Open Reasoning settings, or Conversation options in a narrow pane, to adjust the offered reasoning levels with a slider and Claude’s independent Ultracode switch. Enabled Ultracode has a purple indicator. The header continues to show the confirmed effective model and mode.
+Open Reasoning settings, or Conversation options in a narrow pane, to choose an offered reasoning level with an explanation of each choice. Claude’s independent Ultracode switch has a purple indicator when enabled. The header shows the confirmed effective model and mode.
+
+Claude Code, Codex and Antigravity share localized setting names and visible explanations for built-in choices. In Korean, approval policies use readable names such as “필요할 때 승인 요청” (ask when needed). The same presentation covers startup options, active-turn settings, sandbox controls and granular approvals. Provider-defined names and native values remain intact.
+
+Model comparison puts the current model first, with cards showing one model name, a concise summary, default reasoning effort and supported inputs. Choose **Use this model** to request a change; the provider confirms its application. Expand details for supported levels and the provider’s original description.
+
+<figure class="shot"><img src="../assets/shots/agent-models-en.webp" alt="Model comparison with the current model first" width="760" height="560" loading="lazy" decoding="async"><figcaption>Model comparison with the current model first</figcaption></figure>
+
+<figure class="shot"><img src="../assets/shots/agent-settings-en.webp" alt="Settings with visible explanations" width="1280" height="820" loading="lazy" decoding="async"><figcaption>Settings with visible explanations</figcaption></figure>
+
+Illustrations rendered from synthetic catalogs with the native UI; not an authenticated model response.
 
 A changed setting shows its requested and native values separately. Send and conflicting settings wait for native confirmation; Stop remains available. A transport acknowledgment alone does not confirm that a setting took effect. Rejected or unconfirmed changes stay visible and are never automatically retried.
 

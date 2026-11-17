@@ -1641,7 +1641,7 @@ fn final_alignment_cards_actions_and_readable_column_fit_native_themes() {
             h.run();
             assert_eq!(h.get_by_label("모델").accesskit_node().value().as_deref(), Some("기본 모델"));
             if width < 700. { h.get_by_label("대화 옵션").click();h.run(); }
-            assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("Fixture mode"));
+            assert_eq!(h.get_by_label("모드").accesskit_node().value().as_deref(), Some("사용자 정의 · Fixture mode"));
             if width < 700. { h.key_press(egui::Key::Escape);h.run(); }
             let (outer, clip) = h.state().composer_geometry.expect("actual composer geometry");
             assert!(clip.contains_rect(outer), "the complete composer frame must fit its actual painting clip: {outer:?} vs {clip:?}");

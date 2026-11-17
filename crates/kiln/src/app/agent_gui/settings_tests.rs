@@ -215,16 +215,16 @@ fn task6_unknown_empty_catalogs_and_model_choices_replace_actual_widgets() {
         vec![select("thought_level", "low", &["low", "high"])];
     h.run();
     open_composer_options(&mut h);
-    assert_eq!(h.get_by_label("추론 강도").accesskit_node().role(), egui::accesskit::Role::Slider);
-    assert!(h.query_by_label("추론 강도 · 낮음").is_some());
+    assert_eq!(h.get_by_label("추론 강도").accesskit_node().role(), egui::accesskit::Role::ComboBox);
+    assert!(h.query_by_label("추론 강도").is_some());
     h.key_press(egui::Key::Escape);
     h.run();
     h.state_mut().transcript.controls.options =
         vec![select("thought_level", "medium", &["medium"])];
     h.run();
     open_composer_options(&mut h);
-    assert!(h.query_by_label("추론 강도 · 보통").is_some());
-    assert!(h.query_by_label("추론 강도").is_none(), "a single supported level needs no slider");
+    assert!(h.query_by_label("추론 강도").is_some());
+    assert!(h.query_by_label("추론 강도").is_some(), "a single supported level remains readable with its description");
     h.key_press(egui::Key::Escape);
     h.run();
     h.state_mut().transcript.controls.options.clear();
@@ -679,13 +679,13 @@ fn task6_settings_search_preserves_unknown_options_scope_and_draft() {
             h.run();
             h.get_by_label("설정 검색").type_text("future");
             h.run();
-            assert!(h.query_by_label("new-category").is_some());
+            assert!(h.query_by_label("추가 설정").is_some());
             h.query_all_by_role(egui::accesskit::Role::ComboBox)
                 .next()
                 .unwrap()
                 .click();
             h.run();
-            h.get_by_label("two").click();
+            h.get_by_label("사용자 정의 · two").click();
             h.run();
             assert_eq!(
                 h.state().sent,
@@ -1351,9 +1351,9 @@ fn task6_visual_core_settings_fit_and_quick_labels_remain_readable() {
             for shape in &h.output().shapes {
                 text_shapes(&shape.shape, &mut texts);
             }
-            assert!(h.query_by_label("추론 강도 · 보통").is_some());
+            assert!(h.query_all_by_role(egui::accesskit::Role::ComboBox).any(|n| n.accesskit_node().label().as_deref() == Some("추론 강도")));
             assert!(texts.iter().any(|s| s.galley.text() == "Opus 5.5"));
-            assert_eq!(h.query_all_by_role(egui::accesskit::Role::Slider).count(), 1, "settings uses one effort slider; compact footer does not duplicate it");
+            assert_eq!(h.query_all_by_role(egui::accesskit::Role::Slider).count(), 0, "settings use described choices for every effort level");
             for combo in h.query_all_by_role(egui::accesskit::Role::ComboBox) {
                 assert!(
                     combo.rect().right() <= width + 1.,
@@ -1456,20 +1456,15 @@ fn ux_localized_mode_values_preserve_native_identifiers() {
 }
 
 #[test]
-fn ux_effort_drag_commits_once_on_release_and_unknown_never_autowrites() {
+fn ux_effort_selection_commits_once_and_unknown_never_autowrites() {
     let mut p=fixture(Tool::Claude);
     p.transcript.controls.options_reported=true;
     p.transcript.controls.options=vec![select("effortLevel","low", &["low","medium","high","xhigh","max"])];
     let mut h=harness(p,900.,true);h.run();
     open_composer_options(&mut h);
-    let rect=h.get_by_label("추론 강도").rect();
-    let start=egui::pos2(rect.left()+6.,rect.center().y);
-    let end=egui::pos2(rect.right()-6.,rect.center().y);
-    h.event(egui::Event::PointerMoved(start));
-    h.event(egui::Event::PointerButton{pos:start,button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::NONE});h.step();
-    h.event(egui::Event::PointerMoved(end));h.step();
-    assert!(h.state().sent.is_empty(),"drag previews without reconfiguring the provider");
-    h.event(egui::Event::PointerButton{pos:end,button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::NONE});h.run();
+    h.get_by_label("추론 강도").click();h.run();
+    assert!(h.state().sent.is_empty(),"opening the list never changes the provider");
+    h.get_by_label("최대").click();h.run();
     assert_eq!(h.state().sent,vec![Command::Configure{control:"effortLevel".into(),value:ControlValue::Text("max".into())}]);
     let mut p=fixture(Tool::Claude);p.transcript.controls.options_reported=true;
     let mut option=select("effortLevel","future-level", &["low","high"]);option.current=None;
@@ -1545,7 +1540,7 @@ fn inflight_composer_exposes_send_and_stop_and_sends_without_interrupt() {
             let stop = h.get_by_label("중지").rect();
             assert!(!send.intersects(stop));
             if let Some(dir) = std::env::var_os("KILN_VISUAL_CAPTURE_DIR") {
-                h.render().unwrap().save(std::path::PathBuf::from(dir).join(format!("inflight-{:?}-{:?}.png", tool, h.state().transcript.lifecycle))).unwrap();
+                std::fs::create_dir_all(&dir).unwrap(); h.render().unwrap().save(std::path::PathBuf::from(dir).join(format!("inflight-{:?}-{:?}.png", tool, h.state().transcript.lifecycle))).unwrap();
             }
             h.get_by_label("보내기").click();
             h.run();
@@ -1606,4 +1601,68 @@ fn inflight_settings_remain_editable_while_the_first_message_receipt_is_pending(
     p.configure(&select("model", "first", &["first", "second"]), ControlValue::Text("second".into()));
     assert!(matches!(p.sent.as_slice(), [Command::Submit{..}, Command::Configure{..}]));
     assert!(p.pending.is_some());
+}
+
+#[test]
+fn described_choices_all_providers_keep_wire_values_and_show_explanations() {
+    for (tool, id, old, new, title, help) in [
+        (Tool::Codex, "approvalPolicy", "never", "on-request", "필요할 때 승인 요청", "AI가 허용 범위를 넘는 작업에 대해 승인을 요청할 수 있습니다."),
+        (Tool::Codex, "permissions", ":read-only", ":workspace", "작업 폴더에 쓰기", "작업 폴더와 추가로 허용한 경로에 파일을 쓸 수 있습니다."),
+        (Tool::Claude, "permissionMode", "default", "dontAsk", "승인 요청 자동 거절", "이미 허용된 작업은 실행하고, 추가 승인이 필요한 작업은 묻지 않고 거절합니다."),
+        (Tool::Antigravity, "custom-mode", "ask", "code", "코딩", "코드를 작성하고 수정하는 작업 모드입니다."),
+    ] {
+        for width in [320., 760.] {
+            let mut p = fixture(tool);
+            p.transcript.controls.options_reported = true;
+            let mut option = select(id, old, &[old, new]);
+            if tool == Tool::Antigravity { option.category = Some("mode".into()); option.label = "Session Mode".into(); }
+            let mut initialized = false;
+            let mut h = Harness::builder().with_size([width, 480.]).build_ui_state(move |ui, p: &mut AgentPane| {
+                if !initialized { kiln_common::fonts::install(ui.ctx()); initialized = true; return; }
+                p.control_widget(ui, &option, false);
+            }, p);
+            h.run();
+            h.query_all_by_role(egui::accesskit::Role::ComboBox).next().unwrap().click();h.run();
+            let mut text=String::new();
+            fn collect(shape:&egui::Shape,text:&mut String) {match shape {egui::Shape::Text(t)=>text.push_str(t.galley.text()),egui::Shape::Vec(v)=>for s in v {collect(s,text)},_=>{}}}
+            for shape in &h.output().shapes {collect(&shape.shape,&mut text);}
+            assert!(text.contains(help),"visible explanation for {tool:?} at {width}: {text}");
+            let row = h.get_by_label(title);assert!(row.rect().right()<=width+1., "popup at {width}: {:?}", row.rect());row.click();h.run();
+            assert_eq!(h.state().sent,vec![Command::Configure{control:id.into(),value:ControlValue::Text(new.into())}]);
+            assert_eq!(h.state().composer.text,"keep 한글 draft");
+        }
+    }
+}
+
+/// Reproducible public illustrations, always synthetic and isolated from real sessions.
+#[test]
+#[ignore = "explicit site illustration export"]
+fn export_agent_site_illustrations() {
+    use kiln_common::i18n::{Language, with_language};
+    let dir = PathBuf::from(std::env::var_os("KILN_VISUAL_CAPTURE_DIR").expect("explicit output directory"));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (lang, name, account, prompt, answer) in [
+        (Language::Korean, "ko", "개인 계정", "인사말 예제 코드를 검토해 주세요", "문자열과 출력 코드를 확인했습니다. 예제 코드는 실행할 준비가 되었습니다."),
+        (Language::English, "en", "Personal account", "Review the greeting example", "The string and output code look correct. The example is ready to run."),
+        (Language::Japanese, "ja", "個人アカウント", "挨拶のサンプルコードを確認してください", "文字列と出力コードを確認しました。サンプルを実行できます。"),
+        (Language::ChineseSimplified, "zh-CN", "个人账户", "请检查问候语示例代码", "已检查字符串和输出代码。示例已准备好运行。"),
+    ] {
+        with_language(lang, || {
+            let mut p=fixture(Tool::Claude);p.descriptor.account_label=account.into();p.composer.text.clear();
+            p.transcript.selected_model=Some("claude-opus-5-5".into());p.transcript.selected_mode=Some("auto".into());
+            p.transcript.controls.options_reported=true;
+            let mut model=select("model","opus", &["opus","fable","sonnet"]);model.choices[0].label="Opus 5.5".into();model.choices[1].label="Fable 5.2".into();model.choices[2].label="Sonnet 5.5".into();
+            let mut ultra=select("ultracode","", &[]);ultra.kind=ControlKind::Boolean;ultra.current=Some(ControlValue::Bool(true));
+            p.transcript.controls.options=vec![model,select("effortLevel","high", &["low","medium","high","xhigh","max"]),select("permissionMode","auto", &["default","plan","acceptEdits","auto","dontAsk"]),ultra];
+            p.transcript.entries=vec![
+                Entry::Message(Message{id:"site-user".into(),role:Role::User,text:prompt.into(),attachments:vec![]}),
+                Entry::Tool(ToolCall{id:"site-read".into(),name:"Read".into(),status:ToolStatus::Completed,input:serde_json::json!({"file_path":"src/main.rs"}),output:"fn main() {\n    let greeting = \"Hello, Kiln!\";\n    println!(\"{greeting}\");\n}\n".into(),..Default::default()}),
+                Entry::Message(Message{id:"site-assistant".into(),role:Role::Assistant,text:answer.into(),attachments:vec![]}),
+            ];
+            let mut h=harness(p,1280.,true);h.run();
+            h.render().unwrap().save(dir.join(format!("agents-{name}.png"))).unwrap();
+            h.state_mut().controls_ui.surface=Surface::Settings;h.run();
+            h.render().unwrap().save(dir.join(format!("agent-settings-{name}.png"))).unwrap();
+        });
+    }
 }
