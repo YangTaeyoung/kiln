@@ -1,7 +1,7 @@
 {
   "kiln_version": "0.3.4",
-  "source_commit": "923e4b1f54dc0fc1e66cfdc0ced28a28872fef0c",
-  "note": "0.3.4 executable build input and four-language guide. Idle GUI-to-TUI validation resolves declared MCP commands in the saved provider environment and working folder. Isolated process tests cover provider PATH, MCP PATH precedence, relative paths, exact ownership and refusal with unrelated background work. Installed Claude CLI GUI-to-TUI-to-GUI smoke passes with synthetic MCP data and no model inference. Native TUI-to-GUI still requires normal CLI exit. Existing native egui agent illustrations remain from 0.3.3 executable source 09dde92643e3500b7972851e7db229f5be9b9281; this backend correction does not change their visual layout.",
+  "source_commit": "3f4a5c3134b52a58dd490b89864817be0696ae0c",
+  "note": "0.3.4 executable build input: idle GUI-to-TUI helper resolution, fixed chat activity strip, latest-message navigation and native task/output presentation. Four-language agent/activity illustrations use this source with synthetic native egui data, not OS-window photographs. Model/settings illustrations remain 0.3.3 at 09dde92643e3500b7972851e7db229f5be9b9281. Native Claude 2.1.326 was verified with isolated localhost synthetic inference: background shell membership, completion removal and read-only output retrieval; no authenticated live-model inference. Installed native GUI-to-TUI-to-GUI smoke passes with synthetic MCP data. GUI-to-TUI still waits for safe idle and ownership; native TUI-to-GUI requires normal CLI exit. Documentation/provenance commits after this input do not change executable sources.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
