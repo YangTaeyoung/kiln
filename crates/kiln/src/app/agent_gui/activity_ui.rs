@@ -112,7 +112,7 @@ impl AgentPane {
                             if !task.summary.is_empty(){ui.add(egui::Label::new(&task.summary).wrap());}
                             if let Some(ms)=task.duration_ms {ui.small(format!("{} {}",tr("실행 시간"),duration(ms/1000)));}
                             if !task.output_file.is_empty(){ui.add(egui::Label::new(format!("{}: {}",tr("출력 파일"),task.output_file)).wrap());}
-                            
+
                             ui.small(tr(if task.ambient {"상시 · 감시 작업"}else if task.status=="paused" {"일시 정지"} else {"실행 중"}));
                         });
                         ui.painter().galley(egui::pos2(response.header_response.rect.right()-badge.size().x-4.,response.header_response.rect.center().y-badge.size().y/2.),badge,theme.text_dim);
