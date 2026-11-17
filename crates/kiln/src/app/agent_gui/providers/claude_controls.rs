@@ -2,7 +2,8 @@
 use super::*;
 impl Claude {
     pub(super) fn discover(&mut self, target: Discovery, e: &mut Effects) -> String {
-        let request = match target {
+        let request = match &target {
+            Discovery::TaskOutput {task_id,..} => json!({"subtype":"get_task_output","task_id":task_id}),
             Discovery::Goal | Discovery::Queue | Discovery::Memory => {
                 e.event(unavailable("native_discovery"));
                 return String::new();
@@ -567,6 +568,7 @@ impl Claude {
             .as_ref()
             .is_some_and(|op| op.readback.as_deref() == Some(id));
         if s(r, "subtype") == "error" {
+            if let Discovery::TaskOutput {task_id,run_id}=&target {e.event(Event::TaskActivity(super::super::super::activity::Event::Output{task_id:task_id.clone(),run_id:run_id.clone(),text:String::new(),truncated:false,unavailable:true}));}
             e.event(unavailable(&format!("{target:?}")));
             if owns {
                 self.native.finish(
@@ -590,6 +592,10 @@ impl Claude {
         }
         let payload = &r["response"];
         match target {
+            Discovery::TaskOutput {task_id,run_id} => {
+                let raw=payload["output"].as_str().unwrap_or_default();
+                e.event(Event::TaskActivity(super::super::super::activity::Event::Output{task_id,run_id,text:raw.chars().take(8192).collect(),truncated:payload["truncated"]==true || raw.chars().count()>8192,unavailable:false}));
+            }
             Discovery::Goal | Discovery::Queue | Discovery::Memory => {}
             Discovery::Settings => self.settings(payload, e),
             Discovery::Commands | Discovery::Skills => self.catalog(payload, e),

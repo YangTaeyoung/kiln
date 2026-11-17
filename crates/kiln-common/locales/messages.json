@@ -14818,5 +14818,130 @@
     "en": "Turn Off Inference",
     "ja": "推論をオフにする",
     "zh-CN": "关闭推理"
+  },
+  "연결 중": {
+    "en": "Connecting",
+    "ja": "接続中",
+    "zh-CN": "正在连接"
+  },
+  "응답 작성 중": {
+    "en": "Preparing response",
+    "ja": "応答を作成中",
+    "zh-CN": "正在生成回复"
+  },
+  "도구 실행 중": {
+    "en": "Running tools",
+    "ja": "ツールを実行中",
+    "zh-CN": "正在运行工具"
+  },
+  "응답 완료 · 백그라운드 작업 실행 중": {
+    "en": "Response complete · Background work continues",
+    "ja": "応答完了 · バックグラウンド処理中",
+    "zh-CN": "回复完成 · 后台任务仍在运行"
+  },
+  "응답 완료": {
+    "en": "Response complete",
+    "ja": "応答完了",
+    "zh-CN": "回复完成"
+  },
+  "작업 실패": {
+    "en": "Task failed",
+    "ja": "タスク失敗",
+    "zh-CN": "任务失败"
+  },
+  "표시 경과": {
+    "en": "Observed",
+    "ja": "表示開始から",
+    "zh-CN": "已观察"
+  },
+  "GUI에서 현재 작업을 관찰한 시간입니다.": {
+    "en": "Time since this GUI began observing the current work.",
+    "ja": "GUI が現在の処理を観察し始めてからの時間です。",
+    "zh-CN": "此 GUI 开始观察当前工作的时间。"
+  },
+  "기타 작업": {
+    "en": "Other tasks",
+    "ja": "その他のタスク",
+    "zh-CN": "其他任务"
+  },
+  "Monitor": {
+    "en": "Monitor",
+    "ja": "Monitor",
+    "zh-CN": "Monitor"
+  },
+  "실행 시간": {
+    "en": "Run time",
+    "ja": "実行時間",
+    "zh-CN": "运行时间"
+  },
+  "출력 파일": {
+    "en": "Output file",
+    "ja": "出力ファイル",
+    "zh-CN": "输出文件"
+  },
+  "일시 정지": {
+    "en": "Paused",
+    "ja": "一時停止",
+    "zh-CN": "已暂停"
+  },
+  "종료된 작업": {
+    "en": "Ended tasks",
+    "ja": "終了したタスク",
+    "zh-CN": "已结束的任务"
+  },
+  "결과 확인 대기": {
+    "en": "Awaiting result",
+    "ja": "結果を確認中",
+    "zh-CN": "等待结果"
+  },
+  "하위 에이전트": {
+    "en": "Subagent",
+    "ja": "サブエージェント",
+    "zh-CN": "子代理"
+  },
+  "MCP 작업": {
+    "en": "MCP task",
+    "ja": "MCP タスク",
+    "zh-CN": "MCP 任务"
+  },
+  "↓ 최신 메시지로 이동": {
+    "en": "↓ Jump to latest",
+    "ja": "↓ 最新メッセージへ",
+    "zh-CN": "↓ 跳至最新消息"
+  },
+  "상시 · 감시 작업": {
+    "en": "Ambient · Watcher",
+    "ja": "常駐 · 監視タスク",
+    "zh-CN": "常驻 · 监视任务"
+  },
+  "상태 확인 불가": {
+    "en": "Status unavailable",
+    "ja": "状態を確認できません",
+    "zh-CN": "无法确认状态"
+  },
+  "출력 보기 · 새로고침": {
+    "en": "View output · Refresh",
+    "ja": "出力を表示 · 更新",
+    "zh-CN": "查看输出 · 刷新"
+  },
+  "이 CLI에서 작업 출력을 가져올 수 없습니다.": {
+    "en": "Task output is unavailable from this CLI.",
+    "ja": "この CLI からタスクの出力を取得できません。",
+    "zh-CN": "无法从此 CLI 获取任务输出。"
+  },
+  "아직 출력이 없습니다.": {
+    "en": "No output yet.",
+    "ja": "まだ出力がありません。",
+    "zh-CN": "尚无输出。"
+  },
+  "출력의 마지막 부분을 표시합니다.": {
+    "en": "Showing the end of the output.",
+    "ja": "出力の末尾を表示しています。",
+    "zh-CN": "正在显示输出的末尾。"
+  },
+  "상시 작업": {
+    "en": "Ambient",
+    "ja": "常駐",
+    "zh-CN": "常驻"
   }
 }

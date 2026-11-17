@@ -14,6 +14,7 @@ fn valid_native_id(id: &str) -> bool {
 
 pub(super) fn can_handoff(transcript: &Transcript, active_submission: bool) -> bool {
     transcript.lifecycle == Lifecycle::Ready
+        && transcript.activity.live().next().is_none()
         && transcript.requests.is_empty()
         && !active_submission
         && !transcript.entries.iter().any(|entry|matches!(entry, Entry::Tool(tool) if matches!(tool.status, ToolStatus::Pending | ToolStatus::Running)))

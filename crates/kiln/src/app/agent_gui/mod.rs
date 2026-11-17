@@ -4,6 +4,7 @@ pub use launch::*;
 mod controls;
 pub use controls::*;
 mod tool_presentation;
+mod activity;
 mod model;
 pub use model::*;
 mod client;

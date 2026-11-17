@@ -17,6 +17,7 @@ impl Codex {
         }
 
         let (method, params) = match target {
+            Discovery::TaskOutput {..} => {e.event(unavailable("task_output"));return;},
             Discovery::Goal => ("thread/goal/get", json!({"threadId":self.thread})),
             Discovery::Queue => (
                 "thread/queue/list",
@@ -690,6 +691,7 @@ impl Codex {
             return true;
         }
         match target {
+            Discovery::TaskOutput {..} => {},
             Discovery::Goal => e.event(status(
                 "goal",
                 &r["goal"],

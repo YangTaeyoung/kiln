@@ -162,6 +162,7 @@ pub struct NativeEntry {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Discovery {
+    TaskOutput { task_id: String, run_id: String },
     Settings,
     Commands,
     Skills,

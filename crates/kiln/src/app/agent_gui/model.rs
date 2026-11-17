@@ -161,6 +161,7 @@ pub struct Model {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Event {
+    TaskActivity(super::activity::Event),
     Generation,
     Presentation {
         current: super::Presentation,
@@ -208,6 +209,7 @@ pub struct Envelope {
 #[derive(Clone, Debug, Default)]
 pub struct Transcript {
     pub generation: String,
+    pub activity: super::activity::State,
     pub controls: NativeControls,
     pub sequence: u64,
     pub lifecycle: Lifecycle,
@@ -299,7 +301,9 @@ impl Transcript {
                 self.presentation = *current;
                 self.return_requested = *return_requested;
             }
+            Event::TaskActivity(event) => self.activity.apply(event),
             Event::Generation => {
+                self.activity = Default::default();
                 self.controls = NativeControls::default();
             }
             Event::Controls(event) => {

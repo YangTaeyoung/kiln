@@ -25,6 +25,8 @@ use settings_ui::{ControlsUi, Surface};
 mod tool_code_ui;
 #[path = "attachment_ui.rs"]
 mod attachment_ui;
+#[path = "activity_ui.rs"]
+mod activity_ui;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Presentation {
@@ -195,6 +197,7 @@ pub struct AgentPane {
     detached_shell: bool,
     transport_known: bool,
     history_end: Option<usize>,
+    activity_ui: activity_ui::ActivityUi,
     focus: bool,
     #[cfg(test)]
     pub(super) sent: Vec<Command>,
@@ -272,6 +275,7 @@ impl AgentPane {
             detached_shell: false,
             transport_known: false,
             history_end: None,
+            activity_ui: Default::default(),
             focus: true,
             #[cfg(test)]
             sent: vec![],
@@ -792,11 +796,13 @@ impl AgentPane {
             + if !self.composer.skills.is_empty(){38.}else{0.};
         let measurement_id = ui.id().with(("composer-height", self.controls_ui.surface as u8, available.width().round() as i32));
         let composer_h = ui.data(|d| d.get_temp::<f32>(measurement_id)).unwrap_or(if self.controls_ui.surface == Surface::Conversation { estimated_h } else { 160. }) + 18.;
+        let activity_h = self.activity_height(available.height());
+        let composer_top = (available.bottom() - composer_h).max(available.top() + 60.);
         let transcript_rect = egui::Rect::from_min_max(
             available.min,
             egui::pos2(
                 available.right(),
-                (available.bottom() - composer_h).max(available.top() + 60.),
+                (composer_top - activity_h - if activity_h > 0. {8.}else{0.}).max(available.top()+20.),
             ),
         );
         let mut body = ui.new_child(
@@ -805,7 +811,12 @@ impl AgentPane {
                 .id_salt("transcript"),
         );
         body.set_clip_rect(transcript_rect);
-        egui::ScrollArea::vertical().id_salt(("messages",self.controls_ui.surface as u8)).stick_to_bottom(self.controls_ui.surface==Surface::Conversation).auto_shrink([false,false]).show(&mut body,|ui|{
+        let jump = self.activity_ui.jump;
+        self.activity_ui.jump = false;
+        if jump {self.history_end=None;}
+        let scroll = egui::ScrollArea::vertical().id_salt(("messages",self.controls_ui.surface as u8));
+        let scroll = if jump {scroll.animated(false)} else {scroll};
+        let scroll = scroll.stick_to_bottom(self.controls_ui.surface==Surface::Conversation).auto_shrink([false,false]).show(&mut body,|ui|{
             let width = (ui.available_width() - 40.).clamp(0., 900.);
             let inset = (ui.available_width() - width) / 2.;
             ui.horizontal_top(|ui| {
@@ -858,13 +869,28 @@ impl AgentPane {
                 }
                 });
             });
+            if jump { ui.scroll_to_cursor(Some(egui::Align::BOTTOM)); }
         });
+        if self.controls_ui.surface==Surface::Conversation {
+            self.activity_ui.away=self.history_end.is_some() || scroll.content_size.y - scroll.inner_rect.height() - scroll.state.offset.y > 36.;
+            #[cfg(test)] {self.activity_ui.offset=scroll.state.offset.y;}
+            if self.activity_ui.away {
+                let jump_rect=egui::Rect::from_min_size(egui::pos2(transcript_rect.center().x-(transcript_rect.width()-20.).min(220.)/2.,transcript_rect.bottom()-36.),egui::vec2((transcript_rect.width()-20.).min(220.),32.));
+                let mut overlay=ui.new_child(egui::UiBuilder::new().max_rect(jump_rect).id_salt("jump-latest"));
+                if overlay.add_sized(jump_rect.size(),egui::Button::new(kiln_common::i18n::tr("↓ 최신 메시지로 이동")).corner_radius(16)).clicked(){self.activity_ui.jump=true;ui.ctx().request_repaint();}
+            }
+        }
         let column_width = (available.width() - 40.).clamp(0., 900.);
         let column_left = available.center().x - column_width / 2.;
         let composer_rect = egui::Rect::from_min_max(
-            egui::pos2(column_left, transcript_rect.bottom() + 8.),
+            egui::pos2(column_left, composer_top + 8.),
             egui::pos2(column_left + column_width, available.bottom() - 4.),
         ).round_to_pixels(ui.ctx().pixels_per_point());
+        if activity_h > 0. {
+            let activity_rect=egui::Rect::from_min_max(egui::pos2(column_left,transcript_rect.bottom()+4.),egui::pos2(column_left+column_width,composer_top));
+            let mut activity=ui.new_child(egui::UiBuilder::new().max_rect(activity_rect).id_salt("conversation-activity"));
+            activity.set_clip_rect(activity_rect);self.activity_ui(&mut activity);
+        }
         let mut composer = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(composer_rect)
