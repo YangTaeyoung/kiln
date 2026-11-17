@@ -433,10 +433,29 @@ with open(os.environ['KILN_SMOKE_MCP_EOF'],'a') as f: f.write(str(os.getpid())+'
             unsafe { libc::getpgid(native_pid as i32) },
             worker.child.id() as i32
         );
-        std::thread::sleep(Duration::from_millis(600));
+        // Wait for the real auth dialog and use its advertised Escape cancellation.
+        // Ctrl-D during startup can be ignored by this dialog instead of exiting.
+        let dialog_deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let output = worker.output.lock().unwrap();
+            let text = String::from_utf8_lossy(&output);
+            if text.contains("ANTHROPIC_API_KEY") && text.contains("cancel") { break; }
+            assert!(Instant::now() < dialog_deadline, "native auth cancellation was not rendered");
+            drop(output);
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        worker.terminal.write_all(b"\x1b").unwrap();
+        worker.terminal.flush().unwrap();
+        let prompt_deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let output = worker.output.lock().unwrap();
+            if String::from_utf8_lossy(&output).contains("Not logged in") { break; }
+            assert!(Instant::now() < prompt_deadline, "isolated native prompt was not rendered");
+            drop(output);
+            std::thread::sleep(Duration::from_millis(25));
+        }
         worker.terminal.write_all(b"\x04").unwrap();
         worker.terminal.flush().unwrap();
-        // Native Claude explicitly asks for a second Ctrl-D to confirm exit.
         std::thread::sleep(Duration::from_millis(150));
         worker.terminal.write_all(b"\x04").unwrap();
         worker.terminal.flush().unwrap();
@@ -455,13 +474,7 @@ with open(os.environ['KILN_SMOKE_MCP_EOF'],'a') as f: f.write(str(os.getpid())+'
             resumed.entries.is_empty(),
             "handoff must not send/replay user prompts"
         );
-        let expected_auth_cancel =
-            "Native terminal exited (exit status: 1); resuming the saved conversation";
-        assert_eq!(
-            resumed.errors,
-            [expected_auth_cancel],
-            "only the explicit native auth-cancel exit warning is permitted"
-        );
+        assert!(resumed.errors.is_empty(), "normal native exit: {:?}", resumed.errors);
         assert!(
             String::from_utf8_lossy(&worker.output.lock().unwrap()).contains("ANTHROPIC_API_KEY"),
             "the real native auth confirmation was rendered"
@@ -476,7 +489,7 @@ with open(os.environ['KILN_SMOKE_MCP_EOF'],'a') as f: f.write(str(os.getpid())+'
             assert_eq!(value["mcpServers"], mcp);
         }
         println!(
-            "native CLI 2.1.326: owned MCP {initial_mcp}; native PTY {native_pid}; same UUID {native_id}; Ready→native auth confirmation→Ctrl-D twice/exit1→Ready; zero prompts"
+            "native CLI 2.1.326: owned MCP {initial_mcp}; native PTY {native_pid}; same UUID {native_id}; Ready→native auth confirmation→Escape→native prompt→Ctrl-D twice/exit0→Ready; zero prompts"
         );
     }));
     if let Ok(report) = std::env::var("KILN_NATIVE_HANDOFF_SMOKE_REPORT") {
