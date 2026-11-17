@@ -1,13 +1,13 @@
 {
-  "kiln_version": "0.3.0",
-  "source_commit": "6e5fa22943bf7325446b0fa94b0a32afb590cf33",
-  "note": "0.3.0 published production build source; v0.3.0 resolves to merge 561284352e8e2a520a064f7084994df6ec20dc71 with the same c1b960100acc04ce4f6e87bf422e86cd1e3afff1 tree. Localized agent images remain actual synthetic-data captures of renderer 83ffa78, with presentation equivalence verified against 3e3a136; they are not fresh 6e5fa22 images. Dated verification separates final CI and public artifact checks from native execution, physical IME and incomplete cleanup.",
+  "kiln_version": "0.3.1",
+  "source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
+  "note": "0.3.1 executable build input. Subsequent documentation and site-image commits do not change executable sources. Agent illustrations are 2560x1540 native egui render fixtures with synthetic data on this source, not OS-window photographs. Native window checks separately verified model selection, joined tab placement, file-reference pointer insertion and explicit Send; native keyboard and full GUI/TUI UI acceptance remain unverified after controller timeouts.",
   "mobile": {
     "version": "0.1.0",
-    "host_source_commit": "e94f490a0432fe16d77ab9465ac9cea0a7216bb1",
+    "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
     "app_source_commit": "e94f490a0432fe16d77ab9465ac9cea0a7216bb1",
-    "verification_date": "2026-11-16",
+    "verification_date": "2026-11-17",
     "verification": "docs/mobile-remote.md",
-    "note": "Separate mobile implementation input. Actual Android/iOS installed Claude CLI and stdio MCP execution was verified at public b45beac with synthetic loopback inference. Final e94f490 iOS effort/402px layout, both native redirect refusal and iOS terminal effects were observed separately; Android high native confirmation was also rendered; its independent GET settlement, picker/reconnect/theme matrix and current-head CI acceptance remain pending. Desktop source/capture provenance above is unchanged; no physical-device acceptance is implied."
+    "note": "Separate mobile implementation input. Actual Android/iOS installed Claude CLI and stdio MCP execution was verified at public b45beac with synthetic loopback inference. Final e94f490 iOS effort/402px layout, both native redirect refusal and iOS terminal effects were observed separately; Android high native confirmation was also rendered; its independent GET settlement, picker/reconnect/theme matrix and current-head CI acceptance remain pending. Desktop source/capture provenance above is unchanged; no physical-device acceptance is implied. Host CLI compatibility now uses the source-built CLI_VERSION instead of a fixed desktop version. Android/iOS/web CI builds and host HTTP/native roundtrip fixtures passed at 4126fdf; this does not add physical-device acceptance."
   }
 }

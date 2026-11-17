@@ -737,7 +737,7 @@ impl KilnApp {
         if let Some(view)=self.agent_views.get(&pid) {
             let lifecycle=view.lifecycle();
             let dot=match lifecycle {agent_gui::Lifecycle::Running|agent_gui::Lifecycle::Waiting=>t.orange,agent_gui::Lifecycle::Failed=>t.red,agent_gui::Lifecycle::Ready=>t.green,_=>t.text_dim};
-            return CardInfo{name:view.descriptor.tool.display_name().into(),detail:view.status().into(),right:view.descriptor.account_label.clone(),dot,pulse:view.busy(),running:lifecycle==agent_gui::Lifecycle::Running,icon:agent_icon(Some(view.descriptor.tool))};
+            return CardInfo{name:view.conversation_title(),detail:view.status().into(),right:view.descriptor.account_label.clone(),dot,pulse:view.busy(),running:lifecycle==agent_gui::Lifecycle::Running,icon:agent_icon(Some(view.descriptor.tool))};
         }
         match &pane.kind {
             PaneKind::Term { session, .. } => match session.and_then(|s| self.conn.infos.get(&s)) {
@@ -1352,6 +1352,7 @@ impl KilnApp {
                     self.actions.push(Action::ToggleZoom(Some(*pid)));
                 }
                 let launch_error=self.terminal_launch_error(*pid).map(str::to_owned);
+                let body = self.agent_presentation_bar(ui, *pid, body);
                 let body = if let Some(label) = self.capacity_recovery.label(*pid) {
                     let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 34.0));
                     let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("capacity", *pid)));
@@ -1361,10 +1362,16 @@ impl KilnApp {
                     });
                     egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
                 } else { body };
+                let body = if self.agent_gui_imports.contains_key(pid) || self.agent_views.get(pid).is_some_and(|view| view.presentation() == agent_gui::Presentation::Terminal && view.transcript.return_requested) {
+                    let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 42.0));
+                    let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("agent-return", *pid)));
+                    bar.label(egui::RichText::new(kiln_common::i18n::tr("대화로 돌아가려면 CLI에서 /exit 또는 Ctrl-D로 종료하세요. 현재 작업은 계속 실행됩니다.")).color(t.orange));
+                    egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
+                } else { body };
                 let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("card", *pid)));
                 child.set_clip_rect(body);
                 match self.panes.get_mut(pid).map(|p| &mut p.kind) {
-                    Some(PaneKind::Term { .. }) if self.agent_views.contains_key(pid) => {
+                    Some(PaneKind::Term { .. }) if self.agent_views.get(pid).is_some_and(|view|view.presentation() == agent_gui::Presentation::Gui) => {
                         let view=self.agent_views.get_mut(pid).unwrap();
                         if focus_req && is_focused {view.request_focus();focus_consumed=true;}
                         if view.ui(&mut child) {self.actions.push(Action::RestartPane(*pid));}
@@ -1479,13 +1486,12 @@ impl KilnApp {
         }
         let mut x = rect.left() + if show_identity {47.0}else{8.0};
         let is_terminal = matches!(self.panes.get(&pid).map(|p|&p.kind),Some(PaneKind::Term {..}));
-        // Preserve the three frequent actions at narrow widths. Secondary actions
-        // move into More before the title or button hit targets overlap.
+        // Presentation belongs to the agent canvas below this frame header.
         let show_splits = rect.width() >= 100.0;
         let show_close = rect.width() >= 68.0;
         let show_more = !show_splits || rect.width() >= 220.0;
         let show_zoom = rect.width() >= 280.0;
-        let show_history = is_terminal && rect.width() >= 360.0;
+        let show_history = is_terminal && !self.agent_views.contains_key(&pid) && rect.width() >= 360.0;
         let button_count = usize::from(show_close) + 2*usize::from(show_splits) + usize::from(show_more) + usize::from(show_zoom) + usize::from(show_history);
         let buttons_w = button_count as f32 * 28.0 + 8.0;
         let right_limit = rect.right() - 10.0 - buttons_w;
@@ -1539,6 +1545,28 @@ impl KilnApp {
                 if widgets::icon_button(&mut bui,Icon::History,26.0,view.inspector_open(),kiln_common::i18n::tr("명령 기록")).clicked(){view.open_history();}
             }
         }
+    }
+
+    /// Anchored in each agent's content area, directly below its close control.
+    fn agent_presentation_bar(&mut self, ui: &mut egui::Ui, pid: PaneId, body: egui::Rect) -> egui::Rect {
+        let tracked_native = self.launch_specs.get(&pid).and_then(agent_runtime::record_path).is_some();
+        if !(self.agent_views.contains_key(&pid) || tracked_native) || body.width() < 130. || body.height() < 60. {return body;}
+        let bar_rect = egui::Rect::from_min_size(body.min, vec2(body.width(), 36.));
+        let mut bar = ui.new_child(UiBuilder::new().id_salt(("agent-view-tabs", pid)).max_rect(bar_rect.shrink2(vec2(8., 4.))).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        bar.set_clip_rect(body);
+        if let Some(view) = self.agent_views.get_mut(&pid) {
+            let current = view.presentation();
+            let pending = view.presentation_pending();
+            let enabled = [agent_gui::Presentation::Gui, agent_gui::Presentation::Terminal]
+                .map(|target| !pending && (current == target || view.can_switch_presentation(target)));
+            if let Some(target) = current.switch_ui(&mut bar, enabled) {view.request_presentation(target);}
+        } else {
+            let pending = self.agent_gui_imports.contains_key(&pid);
+            if let Some(agent_gui::Presentation::Gui) = agent_gui::Presentation::Terminal.switch_ui(&mut bar, [!pending, true]) {
+                self.actions.push(Action::AdoptAgentGui(pid));
+            }
+        }
+        egui::Rect::from_min_max(pos2(body.left(), bar_rect.bottom()), body.max)
     }
 
     fn terminal_header_menu(&mut self,ui:&mut egui::Ui,pid:PaneId){

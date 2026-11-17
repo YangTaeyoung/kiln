@@ -530,6 +530,26 @@ struct Status {
 fn read_messages(source: &Source) -> Result<Vec<format::Message>> {
     read_messages_titled(source, &mut String::new())
 }
+
+/// Display-only history for an exclusive GUI/native-CLI handoff. Account and
+/// conversation identity are explicit; never select the newest transcript.
+pub(super) fn native_display_history(tool: Tool, environment: &[(String, String)], cwd: &Path, id: &str) -> Result<Vec<(String, String)>> {
+    let value = |key: &str|environment.iter().find(|(name, _)|name == key).map(|(_, value)|PathBuf::from(value));
+    let root = if tool == Tool::Antigravity {
+        value("ANTIGRAVITY_APP_DATA_DIR")
+            .or_else(||value("ANTIGRAVITY_GEMINI_DIR").map(|directory|directory.join("antigravity-cli")))
+            .or_else(||value("HOME").map(|home|kiln_accounts::antigravity::data_dir(&home)))
+    } else { value(env_key(tool)) }.context("The original native conversation namespace is not pinned")?;
+    let source = discovery::exact_source(tool, &root, cwd, id)?;
+    Ok(read_messages(&source)?.into_iter().map(|message| {
+        let mut text = message.text;
+        if !message.images.is_empty() {
+            if !text.is_empty() { text.push('\n'); }
+            text.push_str("[Image attached in native conversation]");
+        }
+        (message.role, text)
+    }).collect())
+}
 fn read_messages_titled(source: &Source, title: &mut String) -> Result<Vec<format::Message>> {
     read_rows_titled(source, title).map(|(_, messages)| messages)
 }

@@ -62,7 +62,7 @@ jobs:
             crates/*/tests/snapshots/**/*.new.png
           if-no-files-found: ignore
       - name: Mobile host boundaries and isolated native effects
-        # Synthetic provider protocol; actual source-built 0.3.0 CLI/daemon/PTY.
+        # Synthetic provider protocol; actual source-built CLI/daemon/PTY.
         # Existing desktop/shared Client coverage above stays intact.
         run: bash mobile/scripts/verify-host.sh
       - name: Validate release scripts

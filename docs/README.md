@@ -44,3 +44,5 @@ See [third-party notices](../THIRD_PARTY_NOTICES.md) for bundled assets and depe
 - [Codex capacity recovery](codex-capacity-recovery.md)
 
 - [0.1.25 conversation-sync verification](maintainers/0.1.25-status.md)
+
+- [0.3.1 source, native UI and artifact verification](maintainers/0.3.1-status.md)

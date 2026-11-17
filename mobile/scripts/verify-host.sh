@@ -12,8 +12,10 @@ mkdir -p "$CARGO_TARGET_DIR"
 CARGO_TARGET_DIR=$(cd "$CARGO_TARGET_DIR" && pwd)
 cargo build --locked -p kiln --bin kiln
 export KILN_MOBILE_TEST_CLI="$CARGO_TARGET_DIR/debug/kiln"
-[[ $("$KILN_MOBILE_TEST_CLI" --version) == 'kiln 0.3.0' ]] || {
-  echo 'Expected the current source-built Kiln 0.3.0 CLI' >&2; exit 1;
+expected_version=$(cargo metadata --locked --no-deps --format-version 1 | python3 -c \
+  'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "kiln"))')
+[[ $("$KILN_MOBILE_TEST_CLI" --version) == "kiln $expected_version" ]] || {
+  echo "Expected the current source-built Kiln $expected_version CLI" >&2; exit 1;
 }
 # Keep legacy shared Client deadlines/upgrade behavior covered alongside opt-in calls.
 cargo test --locked -p kiln-daemon --lib client::

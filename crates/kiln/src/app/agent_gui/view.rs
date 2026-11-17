@@ -1,6 +1,7 @@
 //! Native conversation presentation. The daemon owns the worker; this owns only a client.
 use super::*;
 use egui::{Frame, Margin, RichText, Stroke, Ui};
+use egui::emath::GuiRounding;
 use kiln_common::{
     Theme,
     task::Task,
@@ -17,7 +18,11 @@ mod actions_ui;
 mod launch_ui;
 #[path = "editing_text.rs"]
 mod editing_text;
+#[path = "mentions_ui.rs"]
+mod mentions_ui;
 use settings_ui::{ControlsUi, Surface};
+#[path = "tool_code_ui.rs"]
+mod tool_code_ui;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Presentation {
@@ -26,6 +31,41 @@ pub enum Presentation {
     Terminal,
 }
 impl Presentation {
+    /// One joined control, used inside each agent canvas rather than its frame header.
+    pub fn switch_ui(self, ui: &mut Ui, enabled: [bool; 2]) -> Option<Self> {
+        let t = Theme::current();
+        let (track, _) = ui.allocate_exact_size(egui::vec2(112., 28.), egui::Sense::hover());
+        ui.painter().rect_filled(track, 6, t.bg_input);
+        let mut chosen = None;
+        for (index, (value, label)) in [(Self::Gui, "GUI"), (Self::Terminal, "TUI")].into_iter().enumerate() {
+            let rect = egui::Rect::from_min_max(
+                track.min + egui::vec2(index as f32 * 56., 0.),
+                track.min + egui::vec2((index + 1) as f32 * 56., 28.),
+            );
+            let response = ui.add_enabled_ui(enabled[index], |ui| {
+                let response = ui.interact(rect, ui.id().with(("agent-presentation", index)), egui::Sense::click());
+                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), self == value, label));
+                response
+            }).inner;
+            let selected = self == value;
+            if selected || (enabled[index] && response.hovered()) {
+                let radius = if index == 0 {
+                    egui::CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 }
+                } else {
+                    egui::CornerRadius { nw: 0, sw: 0, ne: 6, se: 6 }
+                };
+                ui.painter().rect_filled(rect.shrink(1.), radius, if selected {t.bg_selected} else {t.bg_hover});
+            }
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, kiln_common::fonts::medium(12.),
+                if selected {t.text} else if enabled[index] {t.text_dim} else {t.text_faint});
+            widgets::focus_ring(ui, &response, 5);
+            let response = response.on_disabled_hover_text(kiln_common::i18n::tr("응답과 승인 요청이 끝나고 대화 연결이 확인되면 전환할 수 있습니다."));
+            if enabled[index] && response.clicked() && !selected {chosen = Some(value);}
+        }
+        ui.painter().line_segment([track.center_top(), track.center_bottom()], Stroke::new(1., t.border));
+        ui.painter().rect_stroke(track, 6, Stroke::new(1., t.border_strong), egui::StrokeKind::Inside);
+        chosen
+    }
     pub fn ui(&mut self, ui: &mut Ui) {
         let t = Theme::current();
         let (track, _) = ui.allocate_exact_size(
@@ -104,6 +144,8 @@ struct Cached {
 struct PreparedDisplay {
     messages: HashMap<String, Cached>,
     inputs: HashMap<String, String>,
+    tools: HashMap<String, tool_code_ui::PreparedTool>,
+    theme: Theme,
     details: HashMap<String, (Request, super::approval::Summary)>,
 }
 const WINDOW: usize = 100;
@@ -120,6 +162,7 @@ fn bounded(s: &str) -> &str {
 pub struct AgentPane {
     pub descriptor: Descriptor,
     controls_ui: ControlsUi,
+    mentions: mentions_ui::MentionsState,
     local_intents: BTreeSet<String>,
     replay_required: bool,
     launch_request: Option<LaunchOptions>,
@@ -148,8 +191,6 @@ pub struct AgentPane {
     transport_alive: bool,
     transport_known: bool,
     history_end: Option<usize>,
-    canvas_task: Option<Task<Option<egui::ColorImage>>>,
-    canvas: Option<egui::TextureHandle>,
     focus: bool,
     #[cfg(test)]
     pub(super) sent: Vec<Command>,
@@ -157,6 +198,28 @@ pub struct AgentPane {
     composer_geometry: Option<(egui::Rect, egui::Rect)>,
 }
 impl AgentPane {
+    /// Stable across GUI/TUI handoffs and reconnects: use confirmed history,
+    /// never the unsent composer or the most recent assistant/tool response.
+    pub fn conversation_title(&self) -> String {
+        let first = self.transcript.entries.iter().find_map(|entry| match entry {
+            Entry::Message(message) if message.role == Role::User && !message.text.trim().is_empty() => Some(message.text.as_str()),
+            _ => None,
+        });
+        if let Some(text) = first {
+            let mut title = String::new();
+            let mut chars = text.split_whitespace().flat_map(|word| word.chars().chain(std::iter::once(' ')));
+            title.extend(chars.by_ref().take(64));
+            let more = chars.any(|c| !c.is_whitespace());
+            title.truncate(title.trim_end().len());
+            if more {title.push('…');}
+            return title;
+        }
+        let folder = self.descriptor.cwd.file_name().map(|name| name.to_string_lossy());
+        match folder {
+            Some(folder) if !folder.is_empty() => format!("{} · {folder}", kiln_common::i18n::tr("새 대화")),
+            _ => kiln_common::i18n::tr("새 대화").into(),
+        }
+    }
     pub fn from_spec(spec: &SpawnSpec) -> Option<Self> {
         let descriptor = descriptor(spec)?;
         let client = Client::connect(descriptor.clone());
@@ -168,6 +231,7 @@ impl AgentPane {
         Self {
             descriptor,
             controls_ui: ControlsUi::default(),
+            mentions: Default::default(),
             local_intents: BTreeSet::new(),
             replay_required: true,
             launch_request: None,
@@ -182,6 +246,8 @@ impl AgentPane {
             cache: PreparedDisplay {
                 messages: HashMap::new(),
                 inputs: HashMap::new(),
+                tools: HashMap::new(),
+                theme: Theme::current(),
                 details: HashMap::new(),
             },
             parsing: None,
@@ -200,8 +266,6 @@ impl AgentPane {
             transport_alive: false,
             transport_known: false,
             history_end: None,
-            canvas_task: None,
-            canvas: None,
             focus: true,
             #[cfg(test)]
             sent: vec![],
@@ -216,6 +280,24 @@ impl AgentPane {
         p.transport_alive = true;
         p.transport_known = true;
         p
+    }
+    pub fn presentation(&self) -> Presentation { self.transcript.presentation }
+    pub fn presentation_pending(&self) -> bool {
+        self.transcript.return_requested || !self.local_intents.is_empty()
+    }
+    pub fn can_switch_presentation(&self, target: Presentation) -> bool {
+        if self.presentation_pending() || self.presentation() == target { return false; }
+        if target == Presentation::Terminal {
+            self.editing_allowed() && self.transcript.requests.is_empty()
+                && self.transcript.provider_session_id.is_some()
+                && self.imports.is_empty() && self.validation.is_none()
+        } else { self.transport_alive && !self.replay_required }
+    }
+    pub fn request_presentation(&mut self, target: Presentation) -> bool {
+        if !self.can_switch_presentation(target) { return false; }
+        if target == Presentation::Terminal && (!self.editing_allowed() || !self.imports.is_empty() || self.validation.is_some()) { return false; }
+        if target == Presentation::Gui && (!self.transport_alive || self.replay_required || self.transcript.return_requested) { return false; }
+        match self.send(Command::SetPresentation(target)) { Ok(_) => true, Err(error) => { self.error = Some(error); false } }
     }
     pub fn draft(&self) -> SavedDraft {
         let mut composer = self.composer.clone();
@@ -280,10 +362,10 @@ impl AgentPane {
     }
     pub fn busy(&self) -> bool {
         self.transport_alive
-            && matches!(
+            && (self.presentation() == Presentation::Terminal || matches!(
                 self.transcript.lifecycle,
                 Lifecycle::Running | Lifecycle::Waiting
-            )
+            ))
     }
     pub fn status(&self) -> &'static str {
         kiln_common::i18n::tr(match self.lifecycle() {
@@ -300,7 +382,7 @@ impl AgentPane {
         self.focus = true;
     }
     fn send(&mut self, command: Command) -> Result<String, String> {
-        let serial = matches!(command, Command::Configure { .. } | Command::SetMode { .. } | Command::NativeAction(_));
+        let serial = matches!(command, Command::Configure { .. } | Command::SetMode { .. } | Command::NativeAction(_) | Command::SetPresentation(_));
         let result = self.send_transport(command);
         if serial && let Ok(id) = &result { self.local_intents.insert(id.clone()); }
         result
@@ -502,25 +584,6 @@ impl AgentPane {
     }
     /// Poll all panes, including hidden panes. Background jobs bound disk/parse work.
     pub fn tick(&mut self, ctx: &egui::Context) {
-        if self.canvas.is_none() && self.canvas_task.is_none() {
-            self.canvas_task = Some(Task::spawn(ctx, || {
-                let decoded = image::load_from_memory(include_bytes!("clean-0-71f28052a152.png"))
-                    .ok()?
-                    .to_rgba8();
-                Some(egui::ColorImage::from_rgba_unmultiplied(
-                    [decoded.width() as usize, decoded.height() as usize],
-                    decoded.as_raw(),
-                ))
-            }));
-        }
-        if let Some(task) = &mut self.canvas_task
-            && let Some(Some(image)) = task.take()
-        {
-            self.canvas =
-                Some(ctx.load_texture("agent-canvas", image, egui::TextureOptions::LINEAR));
-            self.canvas_task = None;
-        }
-
         if self.validate_on_tick {
             self.validate_on_tick = false;
             self.validate_attachments(ctx);
@@ -580,9 +643,10 @@ impl AgentPane {
             self.cached_revision = Some((revision, end));
             self.parsing = None;
         }
-        if self.parsing.is_none() && self.cached_revision != Some((self.transcript.sequence, end)) {
+        if self.parsing.is_none() && (self.cached_revision != Some((self.transcript.sequence, end)) || self.cache.theme != Theme::current()) {
             let entries = self.transcript.entries[end.saturating_sub(WINDOW)..end].to_vec();
             let previous = self.cache.messages.clone();
+            let previous_tools = self.cache.tools.clone();
             let revision = self.transcript.sequence;
             let provider = self.descriptor.tool;
             let requests = self
@@ -596,6 +660,8 @@ impl AgentPane {
                 let mut display = PreparedDisplay {
                     messages: HashMap::new(),
                     inputs: HashMap::new(),
+                    tools: HashMap::new(),
+                    theme: Theme::current(),
                     details: HashMap::new(),
                 };
                 for entry in entries {
@@ -610,6 +676,8 @@ impl AgentPane {
                             display.messages.insert(m.id, Cached { source, markdown });
                         }
                         Entry::Tool(t) => {
+                            let prepared = tool_code_ui::PreparedTool::reuse_or_new(previous_tools.get(&t.id), &t, provider);
+                            display.tools.insert(t.id.clone(), prepared);
                             let source = super::approval::tool_input(&t, provider);
                             display.inputs.insert(t.id, bounded(&source).to_owned());
                         }
@@ -664,35 +732,18 @@ impl AgentPane {
     pub fn ui(&mut self, ui: &mut Ui) -> bool {
         let t = Theme::current();
         let mut restart = false;
-        if t.dark
-            && let Some(canvas) = &self.canvas
-        {
-            ui.painter().image(
-                canvas.id(),
-                ui.available_rect_before_wrap(),
-                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
-                egui::Color32::WHITE,
-            );
-        }
         ui.spacing_mut().item_spacing.y = 10.;
         Frame::new()
             .inner_margin(Margin::symmetric(16, 6))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let icon = super::super::ui::agent_icon(Some(self.descriptor.tool));
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(18., 18.), egui::Sense::hover());
-                    kiln_common::icons::paint(ui.painter(), rect, icon, super::super::ui::agent_ink(icon, &t));
-                    ui.label(RichText::new(self.descriptor.tool.display_name()).strong());
                     ui.label(RichText::new(&self.descriptor.account_label).color(t.text_dim));
                     ui.small(RichText::new(self.status()).color(if self.busy() { t.orange } else { t.text_dim }));
-                    let model = self.transcript.selected_model.as_deref().unwrap_or(kiln_common::i18n::tr("확인 대기"));
-                    let metadata = if self.transcript.modes.is_empty() {
-                        model.to_owned()
-                    } else {
-                        format!("{model} · {}", self.transcript.selected_mode.as_deref().unwrap_or(kiln_common::i18n::tr("확인 대기")))
-                    };
+                    if let Some(raw_model) = self.transcript.selected_model.as_deref() {
+                    let model = self.transcript.controls.models.iter().find(|m| m.id == raw_model).or_else(|| self.transcript.controls.models.iter().find(|m| m.id != "default" && m.resolved_model.as_deref() == Some(raw_model))).filter(|m| !m.display_name.is_empty()).map(settings_ui::metadata_title).unwrap_or_else(|| settings_ui::model_title(raw_model));
+                    let metadata = self.transcript.selected_mode.as_ref().map(|mode| format!("{model} · {}", settings_ui::present_value("mode", &ControlValue::Text(mode.clone())))).unwrap_or(model);
                     ui.small(RichText::new(metadata).color(t.text_dim)).on_hover_text(kiln_common::i18n::tr("적용된 모델"));
+                    }
                 });
             });
         self.surface_navigation(ui);
@@ -700,10 +751,12 @@ impl AgentPane {
         let available = ui.available_rect_before_wrap();
         let quick_count = self.transcript.controls.options.iter().filter(|o|o.scope==ControlScope::Live && (matches!(o.id.as_str(),"model"|"effort"|"effortLevel"|"thought_level"|"permissionMode"|"collaborationMode"|"mode"|"ultracode") || matches!(o.category.as_deref(),Some("model"|"thought_level"|"mode")))).count();
         let quick_rows = if available.width() < 440. {quick_count.max(usize::from(!self.transcript.models.is_empty()) + usize::from(!self.transcript.modes.is_empty())).max(1)} else {1};
-        let composer_h = 188. + quick_rows as f32 * 38.
+        let estimated_h = 188. + quick_rows as f32 * 38.
             + if self.pending.is_some() || self.recovered.is_some() {62.}else{0.}
             + if !self.composer.attachments.is_empty() || !self.imports.is_empty(){62.}else{0.}
             + if !self.composer.skills.is_empty(){38.}else{0.};
+        let measurement_id = ui.id().with(("composer-height", self.controls_ui.surface as u8, available.width().round() as i32));
+        let composer_h = ui.data(|d| d.get_temp::<f32>(measurement_id)).unwrap_or(if self.controls_ui.surface == Surface::Conversation { estimated_h } else { 160. }) + 18.;
         let transcript_rect = egui::Rect::from_min_max(
             available.min,
             egui::pos2(
@@ -737,7 +790,18 @@ impl AgentPane {
                 for entry in &self.transcript.entries[start..end] {match entry {
                     Entry::Message(m)=>{
                         let user=m.role==Role::User;
-                        ui.label(RichText::new(if user{kiln_common::i18n::tr("나")}else{self.descriptor.tool.display_name()}).color(t.text_dim).strong());
+                        if user {
+                            ui.label(RichText::new(kiln_common::i18n::tr("나")).color(t.text_dim).strong());
+                        } else { ui.horizontal(|ui| {
+                                let icon = match self.descriptor.tool {
+                                    Tool::Claude => kiln_common::icons::Icon::Claude,
+                                    Tool::Codex => kiln_common::icons::Icon::Codex,
+                                    Tool::Antigravity => kiln_common::icons::Icon::Antigravity,
+                                };
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(18., 18.), egui::Sense::hover());
+                                kiln_common::icons::paint(ui.painter(), rect, icon, super::super::ui::agent_ink(icon, &t));
+                            ui.label(RichText::new(self.descriptor.tool.display_name()).color(t.text_dim).strong());
+                        }); }
                         let frame=Frame::new().inner_margin(Margin::same(if user{12}else{2})).corner_radius(6).fill(if user{t.bg_elevated}else{egui::Color32::TRANSPARENT});
                         frame.show(ui,|ui|{
                             ui.set_width(ui.available_width());
@@ -763,7 +827,7 @@ impl AgentPane {
         let composer_rect = egui::Rect::from_min_max(
             egui::pos2(column_left, transcript_rect.bottom() + 8.),
             egui::pos2(column_left + column_width, available.bottom() - 4.),
-        );
+        ).round_to_pixels(ui.ctx().pixels_per_point());
         let mut composer = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(composer_rect)
@@ -775,6 +839,10 @@ impl AgentPane {
             .auto_shrink([false, false])
             .show(&mut composer, |ui| {
                 let frame = self.composer_ui(ui);
+                if (composer_h - frame.height() - 18.).abs() > 1. {
+                    ui.data_mut(|d| d.insert_temp(measurement_id, frame.height()));
+                    ui.ctx().request_repaint();
+                }
                 #[cfg(test)]
                 { self.composer_geometry = Some((frame, ui.clip_rect())); }
                 #[cfg(not(test))]
@@ -845,43 +913,24 @@ impl AgentPane {
                     .id_salt(&tool.id)
                     .show(ui, |ui| {
                         Frame::NONE.inner_margin(Margin::same(8)).show(ui, |ui| {
-                            egui::ScrollArea::both()
-                                .id_salt((&tool.id, "output"))
-                                .max_height(260.)
-                                .show(ui, |ui| {
-                                    ui.add(egui::Label::new(RichText::new(bounded(&tool.name)).monospace()).wrap());
-                                    if let Some(meta) = &tool.presentation && let Some(name) = &meta.native_name { ui.add(egui::Label::new(name).wrap()); }
-                                    if let Some(input) = self.cache.inputs.get(&tool.id) {
-                                        ui.add(
-                                            egui::Label::new(RichText::new(input).monospace())
-                                                .wrap(),
-                                        );
-                                    }
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(bounded(&tool.output)).monospace(),
-                                        )
-                                        .wrap(),
-                                    );
-                                    for line in bounded(&tool.diff).lines().take(500) {
-                                        let color = if line.starts_with('+') {
-                                            t.green
-                                        } else if line.starts_with('-') {
-                                            t.red
-                                        } else {
-                                            t.text_dim
-                                        };
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(line)
-                                                    .monospace()
-                                                    .color(color)
-                                                    .background_color(color.gamma_multiply(0.08)),
-                                            )
-                                            .wrap(),
-                                        );
-                                    }
-                                });
+                            ui.add(egui::Label::new(RichText::new(bounded(&tool.name)).small().monospace().color(t.text_dim)).wrap());
+                            if let Some(prepared) = self.cache.tools.get(&tool.id).filter(|p| p.theme == t) {
+                                if !tool.output.is_empty() && ui.small_button(kiln_common::i18n::tr("출력 복사")).clicked() {
+                                    ui.ctx().copy_text(tool.output.clone());
+                                }
+                                prepared.show(ui, &tool.id);
+                            } else {
+                                // Preparation is off-thread; do not synchronously parse
+                                // source/JSON or draw a stale palette on this frame.
+                                let height = tool_code_ui::viewport_height(ui.clip_rect().height());
+                                egui::ScrollArea::both().id_salt((&tool.id, "pending-tool"))
+                                    .min_scrolled_height(height).max_height(height)
+                                    .show(ui, |ui| {
+                                        if let Some(input) = self.cache.inputs.get(&tool.id) { ui.add(egui::Label::new(RichText::new(input).monospace()).selectable(true)); }
+                                        if !tool.output.is_empty() { ui.add(egui::Label::new(RichText::new(bounded(&tool.output)).monospace()).selectable(true)); }
+                                        if !tool.diff.is_empty() { ui.add(egui::Label::new(RichText::new(bounded(&tool.diff)).monospace()).selectable(true)); }
+                                    });
+                            }
                         });
                     });
                 header.header_response.clone().on_hover_text(bounded(&tool.name));
@@ -1135,7 +1184,9 @@ impl AgentPane {
                 if self.ime_frame {
                     self.ime_guard_frame = Some(ui.ctx().cumulative_frame_nr());
                 }
+                let completion_handled = self.mention_completion_input(ui, focused) || self.slash_completion_input(ui, focused);
                 let enter = focused
+                    && !completion_handled
                     && !self.composing
                     && !self.ime_frame
                     && ui.input(|i| {
@@ -1150,12 +1201,14 @@ impl AgentPane {
                         i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
                     });
                 }
+                let mut command_layouter = self.command_layouter();
                 let output = egui::TextEdit::multiline(&mut self.composer.text)
+                    .layouter(&mut command_layouter)
                     .id(id)
                     .hint_text(kiln_common::i18n::tr("작업을 입력하세요…"))
                     .frame(Frame::NONE)
                     .desired_width(f32::INFINITY)
-                    .desired_rows(3)
+                    .desired_rows(if self.controls_ui.surface == Surface::Conversation { 2 } else { 1 })
                     .char_limit(120_000)
                     .show(ui);
                 if self.composing
@@ -1175,7 +1228,7 @@ impl AgentPane {
                             .collect(),
                     );
                 }
-                let edit = output.response;
+                let edit = output.response.response.clone().on_hover_text(kiln_common::i18n::tr("Enter로 보내기 · Shift+Enter로 줄바꿈"));
                 edit.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::TextEdit,
@@ -1234,30 +1287,20 @@ impl AgentPane {
                 if let Some(error) = &self.attachment_error {
                     ui.add(egui::Label::new(RichText::new(error).color(t.red)).wrap());
                 }
-                if ui.available_width() < 400. {
-                    ui.horizontal_wrapped(|ui| self.composer_controls_ui(ui));
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            self.composer_action_ui(ui, enter);
-                        });
+                ui.add_space(6.);
+                ui.horizontal(|ui| {
+                    let controls_width = (ui.available_width() - 38.).max(0.);
+                    let compact = ui.available_width() < 560.;
+                    ui.allocate_ui_with_layout(egui::vec2(controls_width, 28.), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.;
+                        self.composer_controls_ui(ui);
+                        if self.controls_ui.surface == Surface::Conversation { self.composer_options_ui(ui, compact); }
                     });
-                } else {
-                    ui.horizontal(|ui| {
-                        let controls_width = (ui.available_width() - 100.).max(0.);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(controls_width, ui.spacing().interact_size.y),
-                            egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
-                            |ui| self.composer_controls_ui(ui),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            self.composer_action_ui(ui, enter);
-                        });
-                    });
-                }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.composer_action_ui(ui, enter));
+                });
                 self.slash_completion_ui(ui);
-                ui.small(kiln_common::i18n::tr(
-                    "Enter로 보내기 · Shift+Enter로 줄바꿈",
-                ));
+                self.mention_completion_ui(ui);
+
             });
         if editor_focused {
             ui.painter().rect_stroke(
@@ -1319,23 +1362,16 @@ impl AgentPane {
             &mut widgets.hovered,
             &mut widgets.active,
         ] {
-            visuals.corner_radius = egui::CornerRadius::same(12);
+            visuals.corner_radius = egui::CornerRadius::same(6);
         }
         widgets.inactive.bg_fill = t.bg_elevated;
         widgets.inactive.weak_bg_fill = if t.dark { t.bg_elevated } else { t.bg_hover };
         widgets.inactive.bg_stroke = Stroke::NONE;
-        self.quick_controls_ui(ui);
     }
 
     fn composer_action_ui(&mut self, ui: &mut Ui, enter: bool) {
         if self.busy() || (!self.local_intents.is_empty() || self.transcript.controls.outcomes.values().any(|v| !v.settled)) {
-            if widgets::button_with(
-                ui,
-                Some(kiln_common::icons::Icon::Stop),
-                kiln_common::i18n::tr("중지"),
-                ButtonKind::Secondary,
-                false,
-            )
+            if composer_icon(ui, kiln_common::icons::Icon::Stop, kiln_common::i18n::tr("중지"), false)
             .clicked()
             {
                 if let Err(error) = self.send(Command::Interrupt) {
@@ -1359,13 +1395,7 @@ impl AgentPane {
                     .is_none_or(|id| self.transcript.models.iter().any(|m| &m.id == id));
             let clicked = ui
                 .add_enabled_ui(enabled, |ui| {
-                    widgets::button_with(
-                        ui,
-                        Some(kiln_common::icons::Icon::ArrowUp),
-                        kiln_common::i18n::tr("보내기"),
-                        ButtonKind::Primary,
-                        false,
-                    )
+                    composer_icon(ui, kiln_common::icons::Icon::ArrowUp, kiln_common::i18n::tr("보내기"), true)
                 })
                 .inner
                 .clicked();
@@ -1375,6 +1405,16 @@ impl AgentPane {
         }
     }
 
+}
+
+fn composer_icon(ui: &mut Ui, icon: kiln_common::icons::Icon, label: &str, primary: bool) -> egui::Response {
+    let t = Theme::current();
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(28., 28.), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    ui.painter().circle_filled(rect.center(), 14., if primary { t.accent } else { t.bg_hover });
+    kiln_common::icons::paint(ui.painter(), egui::Rect::from_center_size(rect.center(), egui::vec2(15.,15.)), icon, if primary { t.accent_fg } else { t.text });
+    widgets::focus_ring(ui, &response, 14);
+    response.on_hover_text(label)
 }
 
 #[cfg(test)]

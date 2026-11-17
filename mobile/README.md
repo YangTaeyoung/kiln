@@ -1,7 +1,7 @@
 # Kiln Remote
 
 Optional manually started companion for installed Android/iPhone clients. The
-mobile host is a separate **0.1.0** Cargo workspace; desktop Kiln stays **0.3.0**.
+mobile host is a separate **0.1.0** Cargo workspace; desktop Kiln keeps its own version.
 No listener starts with the desktop app. Native conversations, provider login and
 inference lifecycle remain owned by Kiln's existing CLI/daemon.
 
@@ -21,8 +21,9 @@ mobile/host/target/debug/kiln-mobile-host \
 ```
 
 Repeat `--workspace` to enable more folders. The actual CLI must report
-`kiln 0.3.0`; its native daemon must already be running under the same selected
-configuration/socket. The companion never upgrades or shuts down that daemon.
+the version of the Kiln source linked into the host; its native daemon must already
+be running under the same selected configuration/socket. The companion never
+upgrades or shuts down that daemon.
 `CARGO_TARGET_DIR=/absolute/owned/target` may reuse a build cache. Root desktop
 manifests/lock/version are unchanged; this nested workspace retains both reviewed
 local IME vendor patches and seeds its lock from the desktop lock.
@@ -93,8 +94,9 @@ KILN_MOBILE_TEST_CLI="$PWD/target/release/Kiln.app/Contents/MacOS/kiln" \
   --manifest-path mobile/host/Cargo.toml --test native_roundtrip -- --nocapture
 ```
 
-The native suite requires an explicitly selected verified owned 0.3.0 CLI, starts
-fresh private HOME/config/account/socket/project fixtures, uses an inert structured
+The native suite requires an explicitly selected verified owned CLI matching the
+host's Kiln source, starts fresh private HOME/config/account/socket/project fixtures,
+uses an inert structured
 provider fixture with real journal/daemon/PTY/native command/file effects, and owns
 its separate cleanup. It does not establish a real provider inference call or a
 real installed-CLI MCP call. Those are separate app acceptance gates. No test may

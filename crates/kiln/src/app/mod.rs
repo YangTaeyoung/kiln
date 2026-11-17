@@ -192,6 +192,7 @@ pub enum Action {
     DirectAgent { tool: kiln_accounts::Tool, cwd: Option<PathBuf> },
     GuiAgent { tool: kiln_accounts::Tool, cwd: Option<PathBuf> },
     GuiAgentWithOptions { tool: kiln_accounts::Tool, cwd: PathBuf, options: agent_gui::LaunchOptions },
+    AdoptAgentGui(PaneId),
     OpenAgentFolder(kiln_accounts::Tool),
     OpenSsh { alias: String, config_path: Option<PathBuf> },
     OpenSshConnection { alias: String, config_path: Option<PathBuf>, options: kiln_remote::ssh_config::SshOptions },
@@ -350,6 +351,8 @@ pub struct KilnApp {
     /// Agent launches whose account environment is prepared off the UI thread.
     preparing_agents: Vec<PreparingAgent>,
     agent_views: HashMap<PaneId, agent_gui::AgentPane>,
+    /// Native terminal imports wait for a proven PTY exit before starting a worker.
+    agent_gui_imports: HashMap<PaneId, (SessionId, PathBuf, Option<kiln_common::task::Task<Result<SpawnSpec, String>>>)>,
     agent_request_view: Option<agent_request::RequestView>,
     db: kiln_db::DbManager,
     rotator: rotation::Rotator,
@@ -468,6 +471,7 @@ impl KilnApp {
             pending_agent_prompts: HashMap::new(),
             preparing_agents: Vec::new(),
             agent_views: HashMap::new(),
+            agent_gui_imports: HashMap::new(),
             agent_request_view:None,
             db: kiln_db::DbManager::load(),
             rotator: rotation::Rotator::new({
@@ -920,6 +924,40 @@ impl KilnApp {
         self.preparing_agents.push(PreparingAgent {workspace,split:None,task,request:is_request});
     }
 
+    fn tick_agent_gui_imports(&mut self, ctx: &egui::Context) {
+        let panes: Vec<_> = self.agent_gui_imports.keys().copied().collect();
+        for pane in panes {
+            if !self.panes.contains_key(&pane) { self.agent_gui_imports.remove(&pane); continue; }
+            let (session, path, task) = self.agent_gui_imports.get_mut(&pane).unwrap();
+            if task.is_none() {
+                // A disconnected transport or missing list entry never proves exit.
+                let exited = self.conn.is_connected() && self.conn.sessions_listed
+                    && self.conn.infos.get(session).is_some_and(|info| info.exited.is_some());
+                if !exited { continue; }
+                let path = path.clone();
+                *task = Some(kiln_common::task::Task::spawn(ctx, move || agent_gui::prepare_existing_native(&path).map_err(|error| error.to_string())));
+            }
+            let result = task.as_mut().and_then(|task|task.take());
+            if let Some(result) = result {
+                self.agent_gui_imports.remove(&pane);
+                match result {
+                    Ok(spec) => {
+                        if let Some(view) = agent_gui::AgentPane::from_spec(&spec) { self.agent_views.insert(pane, view); }
+                        self.launch_specs.insert(pane, spec);
+                        if let Some(Pane {kind: PaneKind::Term {session, pending, ..}, ..}) = self.panes.get_mut(&pane) {
+                            *session = None; *pending = None;
+                        }
+                        self.pending_input.remove(&pane);
+                        self.pending_agent_prompts.remove(&pane);
+                        self.spawn_for_pane(pane);
+                        self.focus_terminal = true;
+                    }
+                    Err(error) => self.toast(kiln_common::i18n::tr("대화로 전환할 수 없습니다"), error, ToastKind::Error, None),
+                }
+            }
+        }
+    }
+
     fn start_prepared_agents(&mut self, ctx: &egui::Context) {
         let mut index = 0;
         while index < self.preparing_agents.len() {
@@ -1099,6 +1137,7 @@ impl KilnApp {
 
     fn drop_pane(&mut self, p: PaneId) {
         self.agent_views.remove(&p);
+        self.agent_gui_imports.remove(&p);
         self.pending_input.remove(&p);
         self.launch_specs.remove(&p);
         self.cli_restarts.remove(&p);self.cli_confirmations.remove(&p);
@@ -1534,6 +1573,13 @@ impl KilnApp {
                     }
                 }
                 self.spawn_for_pane(p);
+            }
+            Action::AdoptAgentGui(pane) => {
+                if self.agent_views.contains_key(&pane) || self.agent_gui_imports.contains_key(&pane) { return; }
+                if let Some(session) = self.panes.get(&pane).and_then(Pane::session)
+                    && let Some(path) = self.launch_specs.get(&pane).and_then(agent_runtime::record_path) {
+                    self.agent_gui_imports.insert(pane, (session, path, None));
+                }
             }
             Action::RetryTerminalLaunch(p) => {
                 if !self.conn.is_connected() {
@@ -2293,7 +2339,7 @@ impl KilnApp {
         self.cancel_pane_layout();
         let snapshot=self.persist();
         let bytes=serde_json::to_vec(&snapshot).unwrap();
-        self.workspaces.clear();self.panes.clear();self.agent_views.clear();self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
+        self.workspaces.clear();self.panes.clear();self.agent_views.clear();self.agent_gui_imports.clear();self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
         self.restore(serde_json::from_slice(&bytes).unwrap(),ctx);
     }
 
@@ -2672,6 +2718,7 @@ impl eframe::App for KilnApp {
         self.window_focused = focused_now;
         self.handle_conn_events(ctx);
         self.start_prepared_agents(ctx);
+        self.tick_agent_gui_imports(ctx);
         for (id,view) in &mut self.agent_views {
             let alive=if self.conn.is_connected() && self.conn.sessions_listed {
                 self.panes.get(id).and_then(Pane::session).and_then(|s|self.conn.infos.get(&s)).map(|i|i.exited.is_none())

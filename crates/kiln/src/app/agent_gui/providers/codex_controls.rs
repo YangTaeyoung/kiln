@@ -67,6 +67,7 @@ impl Codex {
             });
             self.metadata.push(ModelMetadata {
                 id,
+                display_name: controls::bounded(v, "displayName"),
                 description: controls::bounded(v, "description"),
                 resolved_model: v["model"].as_str().map(str::to_owned),
                 efforts: v["supportedReasoningEfforts"]

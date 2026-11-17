@@ -118,6 +118,8 @@ impl ControlOption {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct ModelMetadata {
     pub id: String,
+    #[serde(default)]
+    pub display_name: String,
     pub description: String,
     pub resolved_model: Option<String>,
     pub efforts: Vec<ControlChoice>,

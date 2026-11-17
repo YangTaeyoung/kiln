@@ -81,6 +81,14 @@ pub fn prepare_with_options(
             Tool::Antigravity => ("HOME", env.home.clone()),
         };
         environment.push((key.into(), value.to_string_lossy().into_owned()));
+        if tool == Tool::Antigravity {
+            for key in ["ANTIGRAVITY_APP_DATA_DIR", "ANTIGRAVITY_GEMINI_DIR"] {
+                if !environment.iter().any(|(name, _)|name == key)
+                    && let Some(value) = std::env::var_os(key) {
+                    environment.push((key.into(), value.to_string_lossy().into_owned()));
+                }
+            }
+        }
     }
     let profile = environment
         .iter()
@@ -108,6 +116,9 @@ pub fn prepare_with_options(
         launch_options,
     };
     journal::atomic(&dir.join("config.json"), &serde_json::to_vec(&config)?)?;
+    host_spec(&config.descriptor)
+}
+fn host_spec(descriptor: &Descriptor) -> Result<SpawnSpec> {
     let exe = if std::env::var_os("KILN_ACCOUNTS_SANDBOX").is_some() {
         super::conn::daemon_exe()
     } else {
@@ -115,13 +126,13 @@ pub fn prepare_with_options(
     };
     Ok(SpawnSpec {
         program: Some(exe.to_string_lossy().into_owned()),
-        args: vec!["agent-gui-host".into(), "--id".into(), id.clone()],
-        cwd: Some(cwd.to_string_lossy().into_owned()),
-        name: Some(tool.display_name().into()),
+        args: vec!["agent-gui-host".into(), "--id".into(), descriptor.id.clone()],
+        cwd: Some(descriptor.cwd.to_string_lossy().into_owned()),
+        name: Some(descriptor.tool.display_name().into()),
         env: vec![
-            ("KILN_GUI_AGENT".into(), id),
-            ("KILN_GUI_TOOL".into(), tool.key().into()),
-            ("KILN_GUI_ACCOUNT".into(), account_label),
+            ("KILN_GUI_AGENT".into(), descriptor.id.clone()),
+            ("KILN_GUI_TOOL".into(), descriptor.tool.key().into()),
+            ("KILN_GUI_ACCOUNT".into(), descriptor.account_label.clone()),
             (
                 "KILN_CONFIG_DIR".into(),
                 std::path::absolute(kiln_common::paths::config_dir())?
@@ -131,6 +142,42 @@ pub fn prepare_with_options(
         ],
         ..Default::default()
     })
+}
+
+/// Adopt only an explicitly tracked native conversation after its old PTY has
+/// reported exit. Call on a background worker; never resolve the active account.
+pub fn prepare_existing_native(record_path: &Path) -> Result<SpawnSpec> {
+    let record = super::agent_runtime::read(record_path)?;
+    ensure!(record.confirmed, "The terminal has no confirmed native conversation identity");
+    let native_id = record.conversation.as_deref().context("Missing native conversation identity")?;
+    let cwd: PathBuf = record.spec.cwd.as_ref().context("The original working directory is missing")?.into();
+    let history = super::conversation_sync::native_display_history(record.tool, &record.spec.env, &cwd, native_id)?;
+    let descriptor = Descriptor {
+        id: journal::unique(), tool: record.tool, cwd,
+        account_label: "Original terminal account".into(),
+    };
+    let dir = journal::directory(&descriptor.id)?;
+    journal::private_dir(&dir)?;
+    let config = Config {
+        descriptor,
+        program: record.spec.program.as_ref().context("The original CLI executable is missing")?.into(),
+        environment: record.spec.env,
+        initial_prompt: None,
+        launch_options: LaunchOptions::Inherited,
+    };
+    journal::atomic(&dir.join("config.json"), &serde_json::to_vec(&config)?)?;
+    let mut journal = journal::Journal::open(&dir, journal::unique())?;
+    journal.push(Event::Generation)?;
+    journal.push(Event::Session(native_id.into()))?;
+    for (index, (role, text)) in history.into_iter().enumerate() {
+        journal.push(Event::Message { message: Message {
+            id: format!("native-import-{index}"),
+            role: if role == "user" { Role::User } else { Role::Assistant },
+            text, attachments: vec![],
+        }, append: false })?;
+    }
+    journal.flush()?;
+    host_spec(&config.descriptor)
 }
 pub fn descriptor(spec: &SpawnSpec) -> Option<Descriptor> {
     let get = |key: &str| {

@@ -157,3 +157,5 @@ Brave exposes a public URL re-fetch form at https://search.brave.com/submit-url.
 A successful submission acknowledges a request, not indexing or Claude citations.
 The wildcard/Googlebot permissions and sitemap discovery remain in effect for its
 crawler, following https://search.brave.com/help/brave-search-crawler.
+
+The 0.3.1 `agents-*.webp` illustrations use the actual native egui renderer with isolated synthetic data at the executable source recorded in `_build/source.json`. They show the agent component, not an OS-window photograph or a live model response. Other screenshot capture scripts retain their separate OS-window workflow.

@@ -46,6 +46,18 @@ Approval cards show the command, folder, affected paths, reason and requested ac
 
 Claude approvals include the actual MCP/tool arguments, including domain identifiers; long previews are bounded and labeled partial. Codex transport parameters and schemas stay filtered. Recovery also waits for a queue observation that follows any final publication by the old client.
 
+### Switch the same conversation {#switch-presentation}
+
+Pane titles and automatic page names use a shortened first confirmed request. Manually named pages keep their names; editing a draft does not rename an established conversation.
+
+The **GUI | TUI** joined tabs sit inside each agent pane at the top right, below its close button. Replies show the agent icon beside its name. Expanded tool details provide a readable, scrollable code area with syntax highlighting for recognized file languages and shell commands, plus a copy action. Unknown output remains plain text.
+
+Use the agent pane’s **Conversation GUI / Terminal** switch to continue the same confirmed conversation with its original account and working folder. Switching to Terminal requires an idle conversation with no outstanding response, approval, queued work or background helper process. If other background processes remain, Kiln refuses the switch and leaves that work running.
+
+Selecting Conversation GUI while the native CLI is open requests a return; it does not close the CLI or send a command for you. Exit the CLI normally, using its own exit action. Kiln waits for its process to exit, then imports newly appended user/assistant text and reconnects the GUI. Images in imported native history appear as attachment notices; this is not a reconstruction of native tool cards. If earlier native history changed, Kiln preserves the retained GUI history and reports the mismatch.
+
+For an older terminal-launched agent, GUI import requires an exactly tracked native conversation. Exit that CLI first. Kiln waits for the terminal daemon to confirm that the old terminal process exited, then opens the recorded conversation with its original account environment and working folder. A disconnected terminal or an unknown conversation does not establish a safe import boundary.
+
 ## Work across several repositories {#work-across-several-repositories}
 
 Open a parent folder, such as `~/dev/projects`, when your frontend, backend and shared libraries live in separate Git repositories. Kiln keeps that folder as the agent's working root and can include the discovered repository layout with your request, so one request can cover all of them.
@@ -120,15 +132,23 @@ In newly opened Kiln Zsh terminals, plain `codex`, `codex resume …` and `codex
 
 ## Native session settings and commands {#native-session-settings}
 
-In a conversation GUI, use **Session settings** for searchable provider controls and **Commands and skills** to find native commands. The composer keeps model, reasoning effort, mode and Claude Ultracode close to the message. Available choices come from the current provider and model; a missing catalog is different from an empty one.
+In a conversation GUI, use **Session settings** for searchable provider controls and **Commands and skills** to find native commands. A compact two-line message editor sits above one toolbar: attach an image, choose the model and mode, open **Reasoning settings**, or use the round Send/Stop control. Narrow panes keep the model beside **Conversation options**, which contains the remaining controls. Choices show readable model names and localized mode/effort labels while preserving the provider’s actual values. A missing catalog remains different from an empty one.
+
+Open Reasoning settings, or Conversation options in a narrow pane, to adjust the offered reasoning levels with a slider and Claude’s independent Ultracode switch. Enabled Ultracode has a purple indicator. The header continues to show the confirmed effective model and mode.
 
 A changed setting shows its requested and native values separately. Send and conflicting settings wait for native confirmation; Stop remains available. A transport acknowledgment alone does not confirm that a setting took effect. Rejected or unconfirmed changes stay visible and are never automatically retried.
 
-Command selection inserts editable text without sending it. Existing text and images remain in the draft. Codex skills also carry their native skill input on explicit Send. Refresh the catalog after native skills change. Terminal-only, inherited and managed features are labeled in the advanced inventory instead of appearing as working switches. Use **New conversation in terminal** for terminal-only setup; the current GUI session stays open.
+Commands and skills has a search icon, a clear action and a bounded scrolling list. Names align to the left; expand a row to read its full description and details. Search covers names, descriptions and aliases. Terminal-only commands and skills that cannot be invoked in the GUI stay out of the list. Selecting an entry only inserts an editable draft, preserving existing text and images; Codex skills also retain their native input until explicit Send.
+
+Typing `/` opens a scrolling completion list with short descriptions; Codex skills also complete from `$`. Use Up/Down to select, Tab or Enter to insert, and Esc to dismiss. Completion does not send the message. Recognized command/skill tokens are visually distinct from ordinary text. Refresh the catalog after native skills change.
+
+Session settings shows controls that can actually be edited in the GUI, grouped by response, working style, context and permissions. Read-only native inventories and unavailable controls are omitted. Change history, reset actions and reference information stay behind details controls. Start a separate terminal from **New task** when you need the CLI interface.
 
 **New conversation settings** opens a separate conversation with the currently selected account and explicit startup options. It preserves the current session and draft, and does not replay a prompt. Native actions such as review, goals and queued tasks run only from their explicit action buttons. Current-turn settings target the reported running turn and do not change work already captured by the provider.
 
 Tool headers use the app language, including questions and known MCP operations. Expand a card or hover its header to inspect the original tool name; arguments, output, questions and diffs keep their original content. Language changes relabel existing history. Unknown operations use an external-tool label. Extension preparation and retained cache versions do not prove that the native provider loaded an extension.
+
+Type `@` in the message to search files and folders in the current workspace. Use the arrow keys to choose, Tab to browse a folder, Enter to insert, and Esc to dismiss. Paths with spaces and non-Latin names are quoted. Selection only edits the draft; sending remains explicit. Claude keeps its native `@` reference syntax, Codex uses the same path-as-text contract as its TUI, and Antigravity receives the selected full path. Provider permissions and native context handling still apply.
 
 ## Provider feature coverage {#provider-coverage}
 
@@ -138,9 +158,9 @@ The reference versions inspected for these controls are Claude Code 2.1.325 (SDK
 | --- | --- | --- |
 | Claude Code | Model, advertised effort, permission mode and independent Ultracode. Advanced controls cover Fast mode, workflows/size/keyword, output style, main agent/advisor, automatic compaction, response language, fallback models, cache lifetimes, prompt suggestions, skill exposure and meaningful thinking budget/display. Explicit skill/style/plugin reloads; plugin reload needs native safe-reload support. | Turn/cost budgets, compaction window, system/additional instructions, setting sources, tool list and tool allow/deny lists. |
 | Codex | Model, advertised effort/tier, collaboration mode, permission profile, approval policy/reviewer, summary and sandbox/granular approval. Explicit compaction, goals/budgets, queue editing/start, review, active-turn settings, memory mode/status and MCP reload. Skills keep their native input until Send. | Model/effort/tier, permission profile, summary, verbosity, web search, context/compaction limits, base/developer instructions, ephemeral conversation and absolute workspace roots. |
-| Antigravity | All advertised supported ACP select options, including model, reasoning effort and mode. Ordered groups/descriptions are retained; unknown categories stay visible and unsupported types stay read-only. Native commands insert drafts. Commands and usage update during load and live use; separate manual refresh/actions can be unavailable. | Sandbox request, main agent and additional absolute directories. |
+| Antigravity | All advertised supported ACP select options, including model, reasoning effort and mode. Ordered groups/descriptions are retained; unknown categories stay visible and unsupported types are omitted from the GUI. Native commands insert drafts. Commands and usage update during load and live use; separate manual refresh/actions can be unavailable. | Sandbox request, main agent and additional absolute directories. |
 
-Use the scope filters in **Session settings**: **Current conversation**, **New conversation**, **Inherited**, **Managed** and **Terminal only**. The Claude settings reference inventory is broader than the editable subset; Codex's native method inventory also includes workflows with no GUI action. Under-development plugin APIs are not dispatched. Antigravity MCP health is not reported by this adapter; an empty client server list is not a connection-health result.
+Only editable GUI controls appear in **Session settings**. Native reference catalogs and method inventories cover more than the GUI exposes; they are not presented as configurable settings. Under-development plugin APIs are not dispatched. This adapter does not report Antigravity MCP connection health; an empty client server list is not a health result.
 
 Permission cards retain native offered decisions. Codex can grant a selected requested filesystem/network subset with turn/session scope and strict-review choice. Kiln does not silently select a bypass policy. Native policy, entitlement and endpoint errors remain visible. Current-turn changes affect the reported active turn's settings, not inference the provider already captured. Source acknowledgment without runtime-effect readback is shown separately from confirmed application.
 
