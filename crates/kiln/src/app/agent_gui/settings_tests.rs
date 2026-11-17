@@ -1711,3 +1711,10 @@ fn activity_task_output_is_a_read_only_request_with_the_confirmed_task_identity(
     h.state_mut().transcript.activity.apply(&super::super::activity::Event::Output{task_id:"owned-shell".into(),run_id:"run-2".into(),text:"waiting for test output".into(),truncated:true,unavailable:false});h.run();
     assert!(h.query_by_label("waiting for test output").is_some());assert!(h.query_by_label("출력의 마지막 부분을 표시합니다.").is_some());
 }
+
+#[test]
+fn activity_without_a_native_task_inventory_does_not_invent_zero_shell_counts() {
+    let mut p=fixture(Tool::Codex);p.transcript.lifecycle=Lifecycle::Running;
+    p.transcript.entries.push(Entry::Tool(ToolCall{id:"running-command".into(),name:"commandExecution".into(),input:serde_json::json!({"command":"cargo test"}),status:ToolStatus::Running,..Default::default()}));
+    let mut h=harness(p,760.,true);h.run();assert!(h.query_by_label("도구 실행 중: 1").is_some());assert!(h.query_by_label("셸 0 · Monitor 0 · 기타 작업 0").is_none());
+}

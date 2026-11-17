@@ -100,7 +100,9 @@ impl AgentPane {
                     ui.visuals_mut().collapsing_header_frame=true;
                     let shells=live.iter().filter(|t|matches!(t.kind.as_str(),"local_bash"|"shell")).count();
                     let monitors=live.iter().filter(|t|t.kind.contains("monitor")).count();
-                    ui.small(format!("{} {} · {} {} · {} {}",tr("셸"),shells,tr("Monitor"),monitors,tr("기타 작업"),live.len()-shells-monitors));
+                    if self.transcript.activity.background.is_some() || !self.transcript.activity.tasks.is_empty() {
+                        ui.small(format!("{} {} · {} {} · {} {}",tr("셸"),shells,tr("Monitor"),monitors,tr("기타 작업"),live.len()-shells-monitors));
+                    } else {ui.small(format!("{}: {}",tr("도구 실행 중"),tools.len()));}
                     for task in &live {
                         let kind=task_kind(&task.kind);
                         let label=if task.description.is_empty(){kind.clone()}else{task.description.clone()};
