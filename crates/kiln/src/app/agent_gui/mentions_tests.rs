@@ -417,7 +417,6 @@ fn path_mentions_tab_browses_spaced_directory_and_escape_or_ime_never_sends() {
     open(&mut h);
     loaded(&mut h);
     h.key_press(egui::Key::Tab);
-    h.run();
     loaded(&mut h);
     h.get_by_label("folder name/child.txt");
     assert!(h.state().sent.is_empty());
@@ -426,7 +425,6 @@ fn path_mentions_tab_browses_spaced_directory_and_escape_or_ime_never_sends() {
     assert!(h.query_by_label("folder name/child.txt").is_none());
     h.state_mut().composer.text = "@missing-path".into();
     h.state_mut().focus = true;
-    h.run();
     loaded(&mut h);
     h.key_press(egui::Key::Enter);
     h.run();

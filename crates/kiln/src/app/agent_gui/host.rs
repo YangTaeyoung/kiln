@@ -448,7 +448,7 @@ impl Backend {
                     let pids: Vec<_> = group.inspect_children()?.into_iter().map(|pid|pid as u32).collect();
                     let current = handoff_processes::inspect(&pids)?;
                     return Ok(handoff_processes::helpers_are_declared(self.child.id(), &self.bootstrap,
-                        &current, declarations, &config.program));
+                        &current, declarations, &config.program, &config.environment, &config.descriptor.cwd));
                 }
                 Ok(Input::Json(value)) => {
                     let effects = adapter.ingest(value)?;
@@ -691,8 +691,11 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
             Err(_) => std::thread::sleep(Duration::from_millis(5)),
         }
     }
-    let config: Config = journal::read(&dir.join("config.json"))?;
+    let mut config: Config = journal::read(&dir.join("config.json"))?;
     ensure!(config.descriptor.id == id, "agent config identity mismatch");
+    // Older saved conversations may predate an explicit runtime PATH. Repair
+    // the in-memory launch environment without rewriting the saved profile.
+    super::super::agent_launch::pin_runtime_path(&mut config.environment)?;
     if let Some(shell) = &config.shell {
         ensure!(shell.host_pid == std::process::id()
             && std::env::var("KILN_SESSION").ok().and_then(|value|value.parse::<u64>().ok()) == Some(shell.shell_session),
@@ -1018,6 +1021,13 @@ mod tests {
 #[cfg(all(test, unix))]
 mod subprocess_tests {
     use super::*;
+
+    struct FixtureWorker(Child);
+    impl Drop for FixtureWorker {
+        fn drop(&mut self) {
+            if self.0.try_wait().ok().flatten().is_none() { stop(&mut self.0); }
+        }
+    }
     use std::collections::BTreeMap;
     use std::os::unix::process::CommandExt;
     #[test]
@@ -1481,12 +1491,6 @@ if '-p' not in sys.argv:
     }
     #[test]
     fn fresh_claude_handoff_closes_declared_mcp_without_changing_settings_or_replaying() {
-        struct FixtureWorker(Child);
-        impl Drop for FixtureWorker {
-            fn drop(&mut self) {
-                if self.0.try_wait().ok().flatten().is_none() { stop(&mut self.0); }
-            }
-        }
         for unrelated in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let cwd = root.path().canonicalize().unwrap();
@@ -1514,7 +1518,7 @@ for line in sys.stdin:
  sub=v['request']['subtype']
  assert sub!='mcp_toggle','tab switch must not persist MCP settings'
  payload={}
- if sub=='mcp_status': payload={'mcpServers':[{'name':'owned','status':'connected','config':{'type':'stdio','command':helper,'args':[]}}]}
+ if sub=='mcp_status': payload={'mcpServers':[{'name':'owned','status':'connected','config':{'type':'stdio','command':os.environ['MCP_DECLARED_COMMAND'],'args':[]}}]}
  print(json.dumps({'type':'control_response','response':{'subtype':'success','request_id':v['request_id'],'response':payload}}),flush=True)
 child.stdin.close();child.wait(timeout=3)
 open(root+'/mcp-clean','w').write('normal EOF')
@@ -1525,6 +1529,8 @@ open(root+'/mcp-clean','w').write('normal EOF')
                 ("CLAUDE_CONFIG_DIR".into(),namespace.to_string_lossy().into_owned()),
                 ("HANDOFF_ROOT".into(),cwd.to_string_lossy().into_owned()),
                 ("MCP_HELPER".into(),helper.to_string_lossy().into_owned()),
+                ("MCP_DECLARED_COMMAND".into(),"mcp-helper".into()),
+                ("PATH".into(),format!("{}:{}",cwd.display(),std::env::var("PATH").unwrap_or_default())),
                 ("UNRELATED".into(),if unrelated {"yes"} else {"no"}.into()),
             ];
             let dir = cwd.join("agent-gui").join(&config.descriptor.id);
@@ -1574,8 +1580,10 @@ background=subprocess.Popen([sys.executable,'-c',"import subprocess,os,time; chi
             ("BACKGROUND_PIDS".into(), root.path().join("background-pids").to_string_lossy().into_owned()),
         ];
         let dir = root.path().join("agent-gui").join(&config.descriptor.id);
-        let mut worker = worker(&config, root.path());
-        let first = wait_transcript(&dir, |t|t.lifecycle == Lifecycle::Ready && root.path().join("background-pids").is_file());
+        let mut worker = FixtureWorker(worker(&config, root.path()));
+        let first = wait_transcript(&dir, |t|t.lifecycle == Lifecycle::Ready
+            && fs::read_to_string(root.path().join("background-pids")).is_ok_and(|value|
+                value.lines().count() == 2 && value.lines().all(|line|line.parse::<i32>().is_ok())));
         let pids: Vec<i32> = fs::read_to_string(root.path().join("background-pids")).unwrap().lines().map(|line|line.parse().unwrap()).collect();
         assert_eq!(pids.len(), 2);
         let request = send(&dir, &first, Command::SetPresentation(Presentation::Terminal));
@@ -1584,9 +1592,9 @@ background=subprocess.Popen([sys.executable,'-c',"import subprocess,os,time; chi
         assert_eq!(rejected.lifecycle, Lifecycle::Ready);
         assert_eq!(rejected.generation, first.generation);
         assert!(pids.iter().all(|pid|alive(*pid)), "An idle presentation switch must never signal a background server or grandchild");
-        assert!(worker.try_wait().unwrap().is_none());
+        assert!(worker.0.try_wait().unwrap().is_none());
         // Explicitly close only this fixture's owned group after the survival assertions.
-        stop(&mut worker);
+        stop(&mut worker.0);
     }
     #[test]
     fn disconnected_worker_restarts_with_new_generation_and_same_native_session() {

@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.3",
-  "source_commit": "09dde92643e3500b7972851e7db229f5be9b9281",
-  "note": "0.3.3 executable build input and four-language agent guide. The following provenance-only commit does not change executable sources. Agent conversation, settings and model-comparison illustrations use this source with synthetic native egui fixtures, not OS-window photographs. Private validation covers in-flight composer controls and native daemon/PTY roundtrips for three providers, plus installed Claude and Codex CLI follow-ups and configuration using isolated synthetic loopback inference. GUI-to-native-TUI handoff waits for safe idle; native TUI-to-GUI requires normal CLI exit. Immediate bidirectional active-runtime switching and live-model acceptance are not claimed.",
+  "kiln_version": "0.3.4",
+  "source_commit": "de9a08c97608a3c867c1f4c2b636d0dd3c5d209c",
+  "note": "0.3.4 executable input: safe MCP helper handoff resolution; fixed chat activity and latest-message navigation; native background task/output presentation; GUI/TUI runtime PATH propagation for command hooks. Agent/activity illustrations use synthetic native egui data from 3f4a5c3134b52a58dd490b89864817be0696ae0c with unchanged layout. Model/settings illustrations retain 0.3.3 input 09dde92643e3500b7972851e7db229f5be9b9281. Native Claude 2.1.326 localhost synthetic inference verified task membership/output and Stop hook Node lookup, without authenticated live-model inference. GUI-to-TUI waits for safe idle and exact ownership; native TUI-to-GUI requires normal CLI exit. Existing running workers retain their original environments.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",

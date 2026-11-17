@@ -114,6 +114,7 @@ pub fn managed(tool: Tool, cwd: PathBuf, accounts: &AccountManager) -> Result<Sp
 fn prepare_managed_record(tool: Tool, mut spec: SpawnSpec, accounts: &AccountManager, records: &Path) -> Result<(PathBuf, Record)> {
     let (environment, extension_report) = accounts.prepare_launch_environment(tool)?;
     spec.env = environment;
+    agent_launch::pin_runtime_path(&mut spec.env)?;
     if tool == Tool::Codex {
         spec.args.push("--no-daemon".into());
         if spec.env.iter().any(|(k, _)| k == "KILN_AGENT_PROFILE") {
@@ -174,7 +175,8 @@ pub fn run_shell(program: &str, cwd: PathBuf, args: Vec<String>) -> Result<()> {
         return run_request(&path, &record.generation, None, false);
     }
     let spec = remote_terminal::agent(tool, cwd).map_err(anyhow::Error::msg)?;
-    let (env, extension_report) = accounts.prepare_launch_environment(tool)?;
+    let (mut env, extension_report) = accounts.prepare_launch_environment(tool)?;
+    agent_launch::pin_runtime_path(&mut env)?;
     print_extension_report(&extension_report);
     let (program, lead) = agent_launch::launcher(Path::new(spec.program.as_ref().context("missing CLI executable")?));
     let mut cmd = Command::new(program);

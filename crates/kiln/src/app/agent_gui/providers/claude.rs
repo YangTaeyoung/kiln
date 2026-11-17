@@ -139,6 +139,9 @@ impl Claude {
                     "Too many native discovery requests"
                 );
                 ensure!(self.ready, "Claude is not ready");
+                if let Discovery::TaskOutput {task_id,run_id}=target {
+                    ensure!(!task_id.is_empty() && task_id.len()<=1024 && run_id.len()<=1024 && !task_id.chars().any(char::is_control), "Invalid task identity");
+                }
                 if matches!(target, Discovery::Skills) {
                     ensure!(
                         !self.busy && self.deferred.is_none() && self.retired_configs.is_empty(),
@@ -440,6 +443,7 @@ impl Claude {
                 e.event(Event::RequestResolved(id));
             }
             "system" => {
+                if let Some(activity) = super::super::activity::parse(&v) { e.event(Event::TaskActivity(activity)); }
                 if let Some(caps) = v["capabilities"].as_array() {
                     self.capabilities = caps
                         .iter()
@@ -646,5 +650,31 @@ impl Claude {
             if acknowledges_followup { self.followup = None; }
         }
         Ok(e)
+    }
+}
+
+#[cfg(test)] mod task_activity_tests {
+    use super::*;
+    #[test] fn task_stream_keeps_background_membership_separate_from_the_main_turn() {
+        let mut cli=Claude::new(None);
+        for packet in [json!({"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"sh1","task_type":"local_bash","description":"sleep 60"},{"task_id":"m1","task_type":"monitor","description":"Watch logs","ambient":true}]}),json!({"type":"system","subtype":"task_progress","task_id":"m1","summary":"Waiting for changes","usage":{"duration_ms":36000}})] {
+            let effects=cli.ingest(packet).unwrap();
+            assert!(effects.events.iter().any(|e|matches!(e,Event::TaskActivity(_))));
+            assert!(!effects.accepted);assert!(effects.writes.is_empty());
+            assert!(!effects.events.iter().any(|e|matches!(e,Event::Lifecycle(_))));
+        }
+    }
+}
+
+#[cfg(test)] mod task_output_tests {
+    use super::*;
+    #[test] fn reading_task_output_during_a_turn_never_sends_a_prompt_or_settles_a_send() {
+        let mut cli=Claude::new(None);cli.ready=true;cli.busy=true;
+        let effects=cli.command(&Command::Discover(Discovery::TaskOutput{task_id:"shell-1".into(),run_id:"run-2".into()}),"gui-read").unwrap();
+        assert_eq!(effects.writes.len(),1);let wire=&effects.writes[0];assert_eq!(wire["request"],json!({"subtype":"get_task_output","task_id":"shell-1"}));
+        let response=cli.ingest(json!({"type":"control_response","response":{"request_id":wire["request_id"],"subtype":"success","response":{"output":"waiting for tests\n","total_bytes":42000,"truncated":true}}})).unwrap();
+        assert!(!response.accepted);assert!(response.writes.is_empty());
+        assert!(response.events.iter().any(|e|matches!(e,Event::TaskActivity(super::super::super::activity::Event::Output{task_id,run_id,text,truncated:true,unavailable:false}) if task_id=="shell-1" && run_id=="run-2" && text=="waiting for tests\n")));
+        assert!(cli.busy);
     }
 }

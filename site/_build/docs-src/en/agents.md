@@ -46,7 +46,15 @@ Approval cards show the command, folder, affected paths, reason and requested ac
 
 Claude approvals include the actual MCP/tool arguments, including domain identifiers; long previews are bounded and labeled partial. Codex transport parameters and schemas stay filtered. Recovery also waits for a queue observation that follows any final publication by the old client.
 
+The activity strip above the composer distinguishes preparing a response, running tools, waiting for input and response completion. It stays visible while you read older messages. Claude’s native shell, Monitor and other background tasks show their reported descriptions, states, progress summaries and available durations; expand a task for details. Ambient watchers remain listed without treating them as an unfinished response. Other providers show their reported running tools. When you scroll up or open earlier history, choose **↓ Jump to latest** to return to the latest messages without changing your draft.
+
+Use **View output · Refresh** in a shell or Monitor task to read its latest output without sending an AI prompt. A partial tail, empty output and unavailable output are labeled separately.
+
+<figure class="shot"><img src="../assets/shots/agent-activity-en.webp" alt="Conversation activity and background tasks" width="1280" height="820" loading="lazy" decoding="async"></figure>
+
 ### Switch the same conversation {#switch-presentation}
+
+Idle GUI-to-TUI checks resolve declared MCP helper commands using the conversation’s saved environment and working folder, including a helper-specific `PATH` override. A connected MCP service by itself is not a running model task.
 
 Pane titles and automatic page names use a shortened first confirmed request. Manually named pages keep their names; editing a draft does not rename an established conversation.
 
@@ -198,3 +206,5 @@ New launches prepare supported personal Claude/Codex skills and self-contained p
 - [Conversations and updates](conversations.html): continue a conversation in another CLI and restart after updates.
 
 If a shell-attached agent exits unexpectedly, its unsent draft is kept with that conversation. GUI remains available for the saved draft, and TUI returns to the original shell. The draft is not injected into a different agent started later in the same shell.
+
+Kiln preserves the launch PATH and appends installed CLI runtime directories for GUI and TUI workers. This also lets command hooks find Node installed in Homebrew or the local user bin. Existing running workers keep their original environment; start a new worker after updating. Your hook files are not rewritten.

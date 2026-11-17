@@ -1661,8 +1661,60 @@ fn export_agent_site_illustrations() {
             ];
             let mut h=harness(p,1280.,true);h.run();
             h.render().unwrap().save(dir.join(format!("agents-{name}.png"))).unwrap();
+            h.state_mut().transcript.lifecycle=Lifecycle::Running;
+            h.state_mut().transcript.activity.apply(&super::super::activity::parse(&serde_json::json!({"subtype":"background_tasks_changed","tasks":[{"task_id":"site-shell","task_type":"local_bash","description":"python -m unittest tests/example.py"},{"task_id":"site-monitor","task_type":"monitor","description":"Watch test output","ambient":true}]})).unwrap());
+            h.state_mut().history_end=Some(2);h.run();
+            h.render().unwrap().save(dir.join(format!("agent-activity-{name}.png"))).unwrap();
+            h.state_mut().transcript.lifecycle=Lifecycle::Ready;
+            h.state_mut().transcript.activity=Default::default();h.state_mut().history_end=None;
             h.state_mut().controls_ui.surface=Surface::Settings;h.run();
             h.render().unwrap().save(dir.join(format!("agent-settings-{name}.png"))).unwrap();
         });
     }
+}
+
+#[test]
+fn activity_strip_shows_shells_monitors_and_jumps_to_latest_without_changing_draft() {
+    use kiln_common::i18n::{Language, with_language, tr};
+    for lang in [Language::Korean,Language::English,Language::Japanese,Language::ChineseSimplified] {
+      with_language(lang,||{
+       for width in [320.,760.] { for dark in [true,false] {
+        let mut p=fixture(Tool::Claude);p.transcript.lifecycle=Lifecycle::Running;
+        p.transcript.entries=(0..80).map(|i|Entry::Message(Message{id:format!("history-{i}"),role:if i%2==0{Role::User}else{Role::Assistant},text:format!("Example message {i}: review the isolated fixture and report the result."),attachments:vec![]})).collect();
+        p.transcript.activity.apply(&super::super::activity::parse(&serde_json::json!({"subtype":"background_tasks_changed","tasks":[{"task_id":"shell","task_type":"local_bash","description":"python -m unittest tests/example.py"},{"task_id":"watch","task_type":"monitor","description":"Watch test output","ambient":true}]})).unwrap());
+        p.history_end=Some(30);
+        let mut h=harness(p,width,dark);h.run();
+        assert!(h.query_by_label(tr("응답 작성 중")).is_some());
+        let button=h.query_by_label(tr("↓ 최신 메시지로 이동")).expect("jump action is fixed outside scrolled history");
+        button.click();h.run();assert!(h.state().history_end.is_none());assert!(!h.state().activity_ui.away);assert!(h.state().activity_ui.offset>100.);
+        assert_eq!(h.state().composer.text,"keep 한글 draft");assert!(h.state().sent.is_empty());
+        // A real wheel scroll in the transcript keeps the reader in place and reveals the shortcut.
+        h.event(egui::Event::PointerMoved(egui::pos2(width/2.,190.)));
+        h.event(egui::Event::MouseWheel{unit:egui::MouseWheelUnit::Point,phase:egui::TouchPhase::Move,delta:egui::vec2(0.,500.),modifiers:egui::Modifiers::NONE});h.run();
+        assert!(h.state().activity_ui.away);
+        h.get_by_label(tr("↓ 최신 메시지로 이동")).click();h.run();assert!(!h.state().activity_ui.away);
+        if let Some(dir)=std::env::var_os("KILN_VISUAL_CAPTURE_DIR") {let dir=PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();h.render().unwrap().save(dir.join(format!("activity-{}-{width}-{dark}.png",lang.code()))).unwrap();}
+        h.state_mut().transcript.lifecycle=Lifecycle::Ready;h.run();assert!(h.query_by_label(tr("응답 완료 · 백그라운드 작업 실행 중")).is_some());
+        h.state_mut().transcript.activity.apply(&super::super::activity::parse(&serde_json::json!({"subtype":"background_tasks_changed","tasks":[{"task_id":"watch","task_type":"monitor","description":"Watch test output","ambient":true}]})).unwrap());h.run();assert!(h.query_by_label(tr("응답 완료")).is_some());
+       }}
+      });
+    }
+}
+
+#[test]
+fn activity_task_output_is_a_read_only_request_with_the_confirmed_task_identity() {
+    let mut p=fixture(Tool::Claude);p.transcript.activity.apply(&super::super::activity::parse(&serde_json::json!({"subtype":"background_tasks_changed","tasks":[{"task_id":"owned-shell","run_id":"run-2","task_type":"local_bash","description":"watch-tests"}]})).unwrap());
+    let mut h=harness(p,760.,true);h.run();h.get_by_label("셸 · watch-tests").click();h.run();
+    h.get_by_label("출력 보기 · 새로고침").click();h.run();
+    assert_eq!(h.state().sent,vec![Command::Discover(Discovery::TaskOutput{task_id:"owned-shell".into(),run_id:"run-2".into()})]);
+    assert_eq!(h.state().composer.text,"keep 한글 draft");
+    h.state_mut().transcript.activity.apply(&super::super::activity::Event::Output{task_id:"owned-shell".into(),run_id:"run-2".into(),text:"waiting for test output".into(),truncated:true,unavailable:false});h.run();
+    assert!(h.query_by_label("waiting for test output").is_some());assert!(h.query_by_label("출력의 마지막 부분을 표시합니다.").is_some());
+}
+
+#[test]
+fn activity_without_a_native_task_inventory_does_not_invent_zero_shell_counts() {
+    let mut p=fixture(Tool::Codex);p.transcript.lifecycle=Lifecycle::Running;
+    p.transcript.entries.push(Entry::Tool(ToolCall{id:"running-command".into(),name:"commandExecution".into(),input:serde_json::json!({"command":"cargo test"}),status:ToolStatus::Running,..Default::default()}));
+    let mut h=harness(p,760.,true);h.run();assert!(h.query_by_label("도구 실행 중: 1").is_some());assert!(h.query_by_label("셸 0 · Monitor 0 · 기타 작업 0").is_none());
 }

@@ -158,6 +158,8 @@ A successful submission acknowledges a request, not indexing or Claude citations
 The wildcard/Googlebot permissions and sitemap discovery remain in effect for its
 crawler, following https://search.brave.com/help/brave-search-crawler.
 
-The 0.3.3 `agents-*.webp`, `agent-settings-*.webp` and `agent-models-*.webp` illustrations use the actual native egui renderer with isolated synthetic data at the executable source recorded in `_build/source.json`. They show the agent component, not an OS-window photograph or a live model response. Other screenshot capture scripts retain their separate OS-window workflow.
+The `agent-settings-*.webp` and `agent-models-*.webp` illustrations remain native egui renders from 0.3.3 executable source `09dde92643e3500b7972851e7db229f5be9b9281`, with isolated synthetic data. They show the agent component, not an OS-window photograph or a live model response. Other screenshot capture scripts retain their separate OS-window workflow.
 
 The 0.3.3 guide includes in-flight input and settings, deferred terminal handoff, localized option explanations and model comparison cards. Model-card illustrations are rendered from isolated synthetic catalogs, not authenticated model responses. Release acceptance is recorded separately from these component illustrations.
+
+The 0.3.4 `agents-*.webp` and `agent-activity-*.webp` illustrations use the native egui renderer with isolated synthetic conversation and shell/Monitor data. The task output protocol is separately verified against an installed CLI and localhost synthetic inference. The activity strip does not move ongoing computation between GUI/TUI processes.
