@@ -2,7 +2,7 @@ window.KILN_I18N = {
   "en": {
     "m_mobile": "Kiln Remote · source build",
     "f_agents_t": "Agents, side by side",
-    "shot_agents": "Compact Claude Code controls in a synthetic example workspace.",
+    "shot_agents": "Native Claude Code controls rendered with synthetic sample data.",
     "f_agents_d": "Switch between native conversations and terminals, with compact controls and command completion.",
     "f_daemon_t": "Sessions that never stop",
     "f_daemon_d": "Close or update Kiln. Your shells and agents keep running.",
@@ -105,7 +105,7 @@ window.KILN_I18N = {
   "ko": {
     "m_mobile": "Kiln Remote · 소스 빌드",
     "f_agents_t": "에이전트를 나란히",
-    "shot_agents": "합성 예제 워크스페이스의 간결한 Claude Code 제어 화면.",
+    "shot_agents": "합성 예제 데이터로 렌더링한 Claude Code 네이티브 제어 화면.",
     "f_agents_d": "간결한 입력창과 명령 자동완성으로 대화 GUI와 터미널을 오가세요.",
     "f_daemon_t": "꺼지지 않는 세션",
     "f_daemon_d": "Kiln을 닫거나 업데이트해도 셸과 에이전트는 계속 돌아갑니다.",
@@ -208,7 +208,7 @@ window.KILN_I18N = {
   "ja": {
     "m_mobile": "Kiln Remote · ソースビルド",
     "f_agents_t": "エージェントを並べて",
-    "shot_agents": "合成サンプルワークスペースのコンパクトな Claude Code 操作画面。",
+    "shot_agents": "合成サンプルデータで描画した Claude Code のネイティブ操作画面。",
     "f_agents_d": "コンパクトな操作とコマンド補完で、会話 GUI とターミナルを切り替え。",
     "f_daemon_t": "止まらないセッション",
     "f_daemon_d": "Kiln を閉じても更新しても、シェルとエージェントは動き続けます。",
@@ -311,7 +311,7 @@ window.KILN_I18N = {
   "zh-CN": {
     "m_mobile": "Kiln Remote · 源码构建",
     "f_agents_t": "代理并排运行",
-    "shot_agents": "合成示例工作区中的紧凑 Claude Code 控件。",
+    "shot_agents": "使用合成示例数据渲染的 Claude Code 原生控件。",
     "f_agents_d": "使用紧凑控件和命令补全，在对话 GUI 与终端之间切换。",
     "f_daemon_t": "不会中断的会话",
     "f_daemon_d": "关闭或更新 Kiln，Shell 和代理照常运行。",
