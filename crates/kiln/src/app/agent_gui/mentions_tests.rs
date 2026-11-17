@@ -47,6 +47,13 @@ fn loaded(h: &mut Harness<'_, AgentPane>) {
         std::thread::sleep(Duration::from_millis(5));
     }
 }
+fn capture_if_requested(h: &mut Harness<'_, AgentPane>, name: &str) {
+    if let Some(directory) = std::env::var_os("KILN_MENTIONS_RENDER_DIR") {
+        let directory = PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        h.render().unwrap().save(directory.join(name)).unwrap();
+    }
+}
 
 #[test]
 fn path_mentions_parse_cursor_unicode_quoted_spaces_and_ignore_email() {
@@ -67,6 +74,165 @@ fn path_mentions_parse_cursor_unicode_quoted_spaces_and_ignore_email() {
     let query = query_at(text, "read @\"folder name/fi".chars().count()).unwrap();
     assert_eq!(query.needle, "folder name/fi");
     assert_eq!(&text[query.start..query.end], "@\"folder name/file.rs\"");
+}
+
+#[test]
+fn path_mentions_keep_closing_punctuation_outside_the_replaced_token() {
+    for (text, prefix, expected) in [
+        ("read (@fo) suffix", "read (@fo", "@fo"),
+        ("read [@fo] suffix", "read [@fo", "@fo"),
+        ("read @fo, next", "read @fo", "@fo"),
+        (
+            "read [@\"folder name/fi\"] suffix",
+            "read [@\"folder name/fi",
+            "@\"folder name/fi\"",
+        ),
+    ] {
+        let query = query_at(text, prefix.chars().count()).unwrap();
+        assert_eq!(&text[query.start..query.end], expected, "{text}");
+    }
+}
+
+#[test]
+fn path_mentions_mouse_click_inserts_the_visible_selection_without_sending() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("selected.txt");
+    std::fs::write(&file, "fixture only").unwrap();
+    let mut h = harness(pane(Tool::Claude, root.path(), "@sel"), 520.);
+    open(&mut h);
+    loaded(&mut h);
+    capture_if_requested(&mut h, "mention-before-mouse-click.png");
+    h.get_by_label("selected.txt").click();
+    h.run();
+    assert_eq!(
+        h.state().composer.text,
+        format!(
+            "@{} ",
+            serde_json::to_string(file.to_str().unwrap()).unwrap()
+        )
+    );
+    assert!(h.state().sent.is_empty());
+    capture_if_requested(&mut h, "mention-after-mouse-click.png");
+}
+
+#[test]
+fn path_mentions_touch_press_and_release_keeps_the_popup_until_selection() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("selected.txt");
+    std::fs::write(&file, "fixture only").unwrap();
+    let mut h = harness(pane(Tool::Claude, root.path(), "@sel"), 520.);
+    open(&mut h);
+    loaded(&mut h);
+    let position = h.get_by_label("selected.txt").rect().center();
+    h.event(egui::Event::Touch {
+        device_id: egui::TouchDeviceId(1),
+        id: egui::TouchId(1),
+        phase: egui::TouchPhase::Start,
+        pos: position,
+        force: None,
+    });
+    h.event(egui::Event::PointerMoved(position));
+    h.event(egui::Event::PointerButton {
+        pos: position,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(2);
+    assert_eq!(
+        h.state().composer.text,
+        "@sel",
+        "A press must wait for its release"
+    );
+    h.get_by_label("selected.txt");
+    h.event(egui::Event::Touch {
+        device_id: egui::TouchDeviceId(1),
+        id: egui::TouchId(1),
+        phase: egui::TouchPhase::End,
+        pos: position,
+        force: None,
+    });
+    h.event(egui::Event::PointerButton {
+        pos: position,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(2);
+    assert_eq!(
+        h.state().composer.text,
+        format!(
+            "@{} ",
+            serde_json::to_string(file.to_str().unwrap()).unwrap()
+        )
+    );
+    assert!(h.state().sent.is_empty());
+}
+
+#[test]
+fn path_mentions_mid_token_insertion_preserves_brackets_and_quoted_suffixes() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("file with spaces.txt");
+    std::fs::write(&file, "fixture only").unwrap();
+    for (text, prefix, leading, trailing) in [
+        (
+            "Review (@README.md) next",
+            "Review (@READ",
+            "Review (",
+            ") next",
+        ),
+        (
+            "Review [@README.md] next",
+            "Review [@READ",
+            "Review [",
+            "] next",
+        ),
+        (
+            "Review [@\"folder name/README.md\"] next",
+            "Review [@\"folder name/READ",
+            "Review [",
+            "] next",
+        ),
+    ] {
+        let mut inserted = false;
+        let entry = Entry {
+            path: file.clone(),
+            label: "file with spaces.txt".into(),
+            directory: false,
+            rank: 0,
+        };
+        let mut h = Harness::builder().build_ui_state(
+            |ui, pane: &mut AgentPane| {
+                let id = ui.id().with("message");
+                egui::TextEdit::multiline(&mut pane.composer.text)
+                    .id(id)
+                    .show(ui);
+                if inserted {
+                    return;
+                }
+                let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(prefix.chars().count()),
+                    )));
+                state.store(ui.ctx(), id);
+                pane.mentions.query = query_at(text, prefix.chars().count());
+                pane.insert_mention(ui, &entry, false);
+                inserted = true;
+            },
+            pane(Tool::Claude, root.path(), text),
+        );
+        h.run();
+        assert_eq!(
+            h.state().composer.text,
+            format!(
+                "{leading}@{}{trailing}",
+                serde_json::to_string(file.to_str().unwrap()).unwrap()
+            )
+        );
+        assert!(h.state().sent.is_empty());
+    }
 }
 
 #[test]

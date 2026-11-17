@@ -33,6 +33,14 @@ pub(super) struct MentionsState {
     active: usize,
     dismissed: bool,
     scroll: bool,
+    popup_rect: Option<egui::Rect>,
+}
+
+fn closing_punctuation(ch: char) -> bool {
+    matches!(
+        ch,
+        ')' | ']' | '}' | ',' | ';' | '>' | '）' | '】' | '，' | '。' | '；'
+    )
 }
 
 fn byte_at_char(text: &str, index: usize) -> usize {
@@ -47,7 +55,7 @@ fn query_at(text: &str, cursor: usize) -> Option<Query> {
         (ch == '@'
             && (index == 0
                 || text[..index].chars().next_back().is_some_and(|previous| {
-                    previous.is_whitespace() || matches!(previous, '(' | '[')
+                    previous.is_whitespace() || matches!(previous, '(' | '[' | '{')
                 })))
         .then_some(index)
     })?;
@@ -83,13 +91,15 @@ fn query_at(text: &str, cursor: usize) -> Option<Query> {
     } else {
         if token
             .chars()
-            .any(|ch| ch.is_whitespace() || matches!(ch, '"' | '<' | '>'))
+            .any(|ch| ch.is_whitespace() || closing_punctuation(ch) || matches!(ch, '"' | '<'))
         {
             return None;
         }
         let end = text[cursor..]
             .char_indices()
-            .find_map(|(offset, ch)| ch.is_whitespace().then_some(cursor + offset))
+            .find_map(|(offset, ch)| {
+                (ch.is_whitespace() || closing_punctuation(ch)).then_some(cursor + offset)
+            })
             .unwrap_or(text.len());
         (token.to_owned(), end)
     };
@@ -293,9 +303,17 @@ impl AgentPane {
         } else {
             "@"
         };
+        let suffix_is_punctuation = self.composer.text[query.end..]
+            .chars()
+            .next()
+            .is_some_and(closing_punctuation);
         let insertion = format!(
             "{sigil}{quoted}{}",
-            if browse && entry.directory { "" } else { " " }
+            if (browse && entry.directory) || suffix_is_punctuation {
+                ""
+            } else {
+                " "
+            }
         );
         self.composer
             .text
@@ -362,10 +380,26 @@ impl AgentPane {
         false
     }
     pub(super) fn mention_completion_ui(&mut self, ui: &mut Ui) {
-        if self.composing
-            || self.ime_frame
-            || !ui.memory(|memory| memory.has_focus(ui.id().with("message")))
+        if self.composing || self.ime_frame {
+            return;
+        }
+        // TextEdit surrenders focus on the press before this popup processes
+        // its row's release. Keep that one pointer interaction alive across
+        // frames; ordinary focus changes still close the popup.
+        let choosing_with_pointer = self.mentions.popup_rect.is_some_and(|rect| {
+            ui.input(|input| {
+                (input.pointer.any_down()
+                    || input.pointer.any_pressed()
+                    || input.pointer.any_released())
+                    && input
+                        .pointer
+                        .interact_pos()
+                        .is_some_and(|position| rect.contains(position))
+            })
+        });
+        if !ui.memory(|memory| memory.has_focus(ui.id().with("message"))) && !choosing_with_pointer
         {
+            self.mentions.popup_rect = None;
             return;
         }
         self.refresh_mentions(ui);
@@ -396,7 +430,7 @@ impl AgentPane {
         );
         let entries = self.mentions.entries.clone();
         let mut chosen = None;
-        egui::Area::new(egui::Id::new(("agent-path-mentions", &self.descriptor.id)))
+        let popup = egui::Area::new(egui::Id::new(("agent-path-mentions", &self.descriptor.id)))
             .order(egui::Order::Foreground)
             .fixed_pos(position)
             .constrain_to(bounds)
@@ -489,6 +523,7 @@ impl AgentPane {
                         })
                 });
             });
+        self.mentions.popup_rect = Some(popup.response.rect);
         self.mentions.scroll = false;
         if let Some(entry) = chosen {
             self.insert_mention(ui, &entry, false);
