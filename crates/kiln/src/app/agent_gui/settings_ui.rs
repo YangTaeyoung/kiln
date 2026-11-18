@@ -640,10 +640,11 @@ impl AgentPane {
                 }
             }
         });
-        if self.transcript.controls.status.is_empty() {
+        let visible: Vec<_> = self.transcript.controls.status.values().filter(|status| !matches!(status.subject.as_str(), "native_terminal_return" | "prompt_suggestion")).collect();
+        if visible.is_empty() {
             ui.label(tr("네이티브 상태를 아직 받지 못했습니다."));
         }
-        for status in self.transcript.controls.status.values() {
+        for status in visible {
             let extension = status.subject.starts_with("profile_extension:");
             ui.strong(if extension {
                 tr("상속된 확장")

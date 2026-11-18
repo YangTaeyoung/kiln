@@ -217,8 +217,21 @@ fn owned_pids(worker: u32) -> Vec<u32> {
 }
 
 #[test]
-#[ignore = "requires an installed Claude 2.1.326; isolated localhost-only credentials and owned PTY"]
+#[ignore = "requires an installed Claude 2.1.327; isolated localhost-only credentials and owned PTY"]
 fn installed_claude_mcp_gui_tui_gui_preserves_uuid_without_prompts() {
+    native_handoff(false);
+}
+#[test]
+#[ignore = "requires installed Claude; isolated localhost-only credentials and owned PTY"]
+fn installed_claude_idle_tui_returns_to_gui_without_manual_exit() {
+    native_handoff(false);
+}
+#[test]
+#[ignore = "requires installed Claude; isolated localhost-only credentials and owned PTY"]
+fn installed_claude_native_draft_defers_return_and_tui_cancels_it() {
+    native_handoff(true);
+}
+fn native_handoff(guard_draft: bool) {
     use serde_json::json;
     let cli = kiln_common::paths::find_executable("claude", &[])
         .expect("installed Claude CLI")
@@ -324,7 +337,7 @@ with open(os.environ['KILN_SMOKE_MCP_EOF'],'a') as f: f.write(str(os.getpid())+'
         .arg("--version")
         .output()
         .unwrap();
-    assert!(String::from_utf8_lossy(&version.stdout).starts_with("2.1.326"));
+    assert!(String::from_utf8_lossy(&version.stdout).starts_with("2.1.327"));
     let config = Config {
         descriptor: Descriptor {
             id: journal::unique(),
@@ -422,17 +435,6 @@ with open(os.environ['KILN_SMOKE_MCP_EOF'],'a') as f: f.write(str(os.getpid())+'
             -1,
             "SDK EOF must finish its owned MCP before terminal launch"
         );
-        let request = send(&dir, &terminal, Command::SetPresentation(Presentation::Gui));
-        wait(
-            &dir,
-            Duration::from_secs(5),
-            "GUI request keeps native CLI alive",
-            |t| t.return_requested && t.commands.get(&request) == Some(&CommandPhase::Accepted),
-        );
-        assert_eq!(
-            unsafe { libc::getpgid(native_pid as i32) },
-            worker.child.id() as i32
-        );
         // Wait for the real auth dialog and use its advertised Escape cancellation.
         // Ctrl-D during startup can be ignored by this dialog instead of exiting.
         let dialog_deadline = Instant::now() + Duration::from_secs(15);
@@ -454,11 +456,44 @@ with open(os.environ['KILN_SMOKE_MCP_EOF'],'a') as f: f.write(str(os.getpid())+'
             drop(output);
             std::thread::sleep(Duration::from_millis(25));
         }
-        worker.terminal.write_all(b"\x04").unwrap();
-        worker.terminal.flush().unwrap();
-        std::thread::sleep(Duration::from_millis(150));
-        worker.terminal.write_all(b"\x04").unwrap();
-        worker.terminal.flush().unwrap();
+        wait(&dir, Duration::from_secs(12), "cooperative native return handshake", |t| {
+            t.controls.status.get("native_terminal_return").and_then(|s|s.fields.get("automatic")) == Some(&ControlValue::Bool(true))
+        });
+        if guard_draft {
+            worker.terminal.write_all(b"preserve this unsubmitted draft").unwrap();
+            worker.terminal.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(400));
+        }
+        let request = send(&dir, &terminal, Command::SetPresentation(Presentation::Gui));
+        wait(
+            &dir,
+            Duration::from_secs(5),
+            "GUI request keeps native CLI alive",
+            |t| t.return_requested && t.commands.get(&request) == Some(&CommandPhase::Accepted),
+        );
+        assert_eq!(
+            unsafe { libc::getpgid(native_pid as i32) },
+            worker.child.id() as i32
+        );
+        if guard_draft {
+            std::thread::sleep(Duration::from_millis(900));
+            let deferred = transcript(&dir);
+            assert_eq!(deferred.presentation, Presentation::Terminal);
+            assert!(deferred.return_requested);
+            assert_eq!(unsafe {libc::getpgid(native_pid as i32)}, worker.child.id() as i32);
+            let cancel = send(&dir, &deferred, Command::SetPresentation(Presentation::Terminal));
+            wait(&dir, Duration::from_secs(5), "TUI cancels deferred return", |t| !t.return_requested && t.commands.get(&cancel) == Some(&CommandPhase::Accepted));
+            // Clear only the fixture's own unsubmitted text, then prove cancellation
+            // remains effective at the now-idle prompt without sending a model turn.
+            worker.terminal.write_all(b"\x15").unwrap();
+            worker.terminal.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(900));
+            let cancelled = transcript(&dir);
+            assert_eq!(cancelled.presentation, Presentation::Terminal);
+            assert!(!cancelled.return_requested);
+            assert_eq!(unsafe {libc::getpgid(native_pid as i32)}, worker.child.id() as i32);
+            send(&dir, &cancelled, Command::SetPresentation(Presentation::Gui));
+        }
         let resumed = wait(
             &dir,
             Duration::from_secs(25),
@@ -489,7 +524,7 @@ with open(os.environ['KILN_SMOKE_MCP_EOF'],'a') as f: f.write(str(os.getpid())+'
             assert_eq!(value["mcpServers"], mcp);
         }
         println!(
-            "native CLI 2.1.326: owned MCP {initial_mcp}; native PTY {native_pid}; same UUID {native_id}; Ready→native auth confirmation→Escape→native prompt→Ctrl-D twice/exit0→Ready; zero prompts"
+            "native CLI 2.1.327: owned MCP {initial_mcp}; native PTY {native_pid}; same UUID {native_id}; Ready→native prompt→cooperative idle exit0→Ready; draft guard={guard_draft}; zero prompts"
         );
     }));
     if let Ok(report) = std::env::var("KILN_NATIVE_HANDOFF_SMOKE_REPORT") {

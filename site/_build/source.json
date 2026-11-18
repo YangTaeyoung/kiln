@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.4",
-  "source_commit": "de9a08c97608a3c867c1f4c2b636d0dd3c5d209c",
-  "note": "0.3.4 executable input: safe MCP helper handoff resolution; fixed chat activity and latest-message navigation; native background task/output presentation; GUI/TUI runtime PATH propagation for command hooks. Agent/activity illustrations use synthetic native egui data from 3f4a5c3134b52a58dd490b89864817be0696ae0c with unchanged layout. Model/settings illustrations retain 0.3.3 input 09dde92643e3500b7972851e7db229f5be9b9281. Native Claude 2.1.326 localhost synthetic inference verified task membership/output and Stop hook Node lookup, without authenticated live-model inference. GUI-to-TUI waits for safe idle and exact ownership; native TUI-to-GUI requires normal CLI exit. Existing running workers retain their original environments.",
+  "kiln_version": "0.3.5",
+  "source_commit": "4cffcf93fdddd96901b206e543b14d1438725d11",
+  "note": "0.3.5 executable input: cooperative idle Claude native terminal return, including managed shell bootstrap; per-launch/session binding, draft/work/background guards and cancellation; native prompt suggestions with explicit Tab acceptance and send; workspace terminal titles take precedence over saved generic provider names. Claude 2.1.327 verified using isolated profiles, real managed shell startup and localhost synthetic responses, without authenticated model inference. Existing workers retain their original code; unsupported/disabled mods and other providers use normal CLI exit. Suggestion illustrations are synthetic native egui component renders from suggestion_capture_commit, with unchanged component layout. Existing activity/settings/model illustrations retain their recorded earlier provenance.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
@@ -9,5 +9,6 @@
     "verification_date": "2026-11-17",
     "verification": "docs/mobile-remote.md",
     "note": "Separate mobile implementation input. Actual Android/iOS installed Claude CLI and stdio MCP execution was verified at public b45beac with synthetic loopback inference. Final e94f490 iOS effort/402px layout, both native redirect refusal and iOS terminal effects were observed separately; Android high native confirmation was also rendered; its independent GET settlement, picker/reconnect/theme matrix and current-head CI acceptance remain pending. Desktop source/capture provenance above is unchanged; no physical-device acceptance is implied. Host CLI compatibility now uses the source-built CLI_VERSION instead of a fixed desktop version. Android/iOS/web CI builds and host HTTP/native roundtrip fixtures passed at 4126fdf; this does not add physical-device acceptance."
-  }
+  },
+  "suggestion_capture_commit": "bde82c70046aee4bd58f91de5b9a6c032012e0df"
 }

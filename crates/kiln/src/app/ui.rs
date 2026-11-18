@@ -1365,7 +1365,10 @@ impl KilnApp {
                 let body = if self.agent_gui_imports.contains_key(pid) || self.agent_views.get(pid).is_some_and(|view| view.presentation() == agent_gui::Presentation::Terminal && view.transcript.return_requested) {
                     let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 42.0));
                     let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("agent-return", *pid)));
-                    bar.label(egui::RichText::new(kiln_common::i18n::tr("대화로 돌아가려면 CLI에서 /exit 또는 Ctrl-D로 종료하세요. 현재 작업은 계속 실행됩니다.")).color(t.orange));
+                    let automatic = self.agent_views.get(pid).is_some_and(|view| view.automatic_terminal_return());
+                    let message = if automatic { "작업이 끝나고 입력이 비면 GUI로 전환합니다. TUI를 선택하면 전환을 취소합니다." }
+                        else { "대화로 돌아가려면 CLI에서 /exit 또는 Ctrl-D로 종료하세요. 현재 작업은 계속 실행됩니다." };
+                    bar.label(egui::RichText::new(kiln_common::i18n::tr(message)).color(t.orange));
                     egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
                 } else { body };
                 let body = if self.agent_views.get(pid).is_some_and(|view| view.presentation() == agent_gui::Presentation::Gui && view.transcript.return_requested) {

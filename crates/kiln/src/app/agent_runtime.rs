@@ -447,6 +447,13 @@ fn request_mode(record: &Record, has_request: bool, resumed: bool) -> Result<boo
     }
     Ok(resumed)
 }
+fn valid_native_return_plugin(config: &Path, plugin: &Path, token: &str) -> bool {
+    let (Ok(root), Ok(plugin)) = (config.join("agent-gui").canonicalize(), plugin.canonicalize()) else { return false; };
+    let Ok(relative) = plugin.strip_prefix(root) else { return false; };
+    let parts: Vec<_> = relative.components().map(|part|part.as_os_str()).collect();
+    parts.len() == 4 && parts[1] == "native-return" && parts[2] == token && parts[3] == "plugin"
+        && plugin.join(".claude-plugin/plugin.json").is_file()
+}
 pub fn run_request(
     path: &Path,
     generation: &str,
@@ -529,6 +536,13 @@ pub fn run_request(
     cmd.args(lead).args(&spec.args).envs(spec.env)
         .env("KILN_CONFIG_DIR", kiln_common::paths::config_dir())
         .env_remove("KILN_CAPACITY_RETRY_TURN");
+    // The shell bootstrap starts this managed helper before it execs the CLI.
+    // Keep the private mod argument off Kiln's own command line and launch record.
+    if record.tool == Tool::Claude
+        && let (Some(plugin), Ok(token)) = (std::env::var_os("KILN_NATIVE_RETURN_PLUGIN"), std::env::var("KILN_NATIVE_RETURN_TOKEN"))
+        && valid_native_return_plugin(&kiln_common::paths::config_dir(), Path::new(&plugin), &token)
+    { cmd.arg("--plugin-dir").arg(plugin); }
+    cmd.env_remove("KILN_NATIVE_RETURN_PLUGIN");
     if record.spec.env.iter().any(|(key, _)| key == kiln_accounts::connection::MARKER) {
         let accounts = AccountManager::with_env(kiln_accounts::Env::real());
         if let Some(launch) = accounts.connection_launch(record.tool, &record.spec.env)? {
@@ -1160,6 +1174,19 @@ fn latest_version(tool: Tool, offline: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn managed_native_return_requires_the_private_worker_launch_path() {
+        let root = tempfile::tempdir().unwrap();
+        let plugin = root.path().join("agent-gui/worker/native-return/token/plugin");
+        fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+        fs::write(plugin.join(".claude-plugin/plugin.json"), "{}").unwrap();
+        assert!(valid_native_return_plugin(root.path(), &plugin, "token"));
+        assert!(!valid_native_return_plugin(root.path(), &plugin, "stale"));
+        assert!(!valid_native_return_plugin(root.path(), &plugin.join(".."), "token"));
+        let outside = tempfile::tempdir().unwrap();
+        assert!(!valid_native_return_plugin(outside.path(), &plugin, "token"));
+    }
+
     #[test]
     fn review_r5_managed_launch_prepares_once_and_hands_off_safe_status() {
         let temp = tempfile::tempdir().unwrap();

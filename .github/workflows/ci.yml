@@ -67,6 +67,7 @@ jobs:
         run: bash mobile/scripts/verify-host.sh
       - name: Validate release scripts
         run: |
+          node --test scripts/test-native-return.mjs
           sh -n install.sh
           bash -n scripts/bundle-macos.sh scripts/release-macos.sh
           python3 -m py_compile scripts/fetch-sparkle.py scripts/sign-framework.py scripts/make-appcast.py scripts/collect-licenses.py scripts/configure-network-privacy.py scripts/prepare-updater-test.py scripts/configure-document-types.py scripts/update-completion-docker.py

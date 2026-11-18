@@ -85,9 +85,7 @@ impl KilnApp {
                 let command_time=telemetry.into_iter().flat_map(|t|&t.commands)
                     .map(|c|c.started_unix.max(c.finished_unix.unwrap_or(0))).max().unwrap_or(0);
                 let notice_time=self.notifications.items.iter().filter(|n|n.session==Some(session)).map(|n|n.timestamp).max().unwrap_or(0);
-                let mut title=if panes.len()==1 {page.title.clone()} else {None}
-                    .or_else(||info.name.clone().filter(|name|!name.trim().is_empty()))
-                    .unwrap_or_else(|| self.card_info(pane).name);
+                let mut title=terminal_task_title(if panes.len()==1 {page.title.as_deref()} else {None}, info, &self.card_info(pane).name);
                 if title.is_empty() || super::shells().contains(&title.as_str()) || title==kiln_common::i18n::tr("셸") {
                     title=telemetry.and_then(|t|t.commands.last()).map(|c|c.command.lines().next().unwrap_or("").chars().take(120).collect())
                         .filter(|s:&String|!s.is_empty()).unwrap_or_else(||kiln_common::i18n::tr("터미널").into());
@@ -114,9 +112,17 @@ impl KilnApp {
 }
 
 fn agent_task_title(page_title: Option<&str>, view: &agent_gui::AgentPane) -> String {
-    page_title.filter(|title| !title.trim().is_empty()
-        && !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == *title))
+    page_title.filter(|title| named_task_title(title))
         .map(str::to_owned).unwrap_or_else(|| view.conversation_title())
+}
+fn named_task_title(title: &str) -> bool {
+    let title = title.trim();
+    !title.is_empty() && !kiln_accounts::Tool::ALL.iter().any(|tool| tool.display_name() == title || tool.program() == title)
+}
+fn terminal_task_title(page_title: Option<&str>, info: &SessionInfo, card_title: &str) -> String {
+    page_title.filter(|title| named_task_title(title))
+        .or_else(|| info.name.as_deref().filter(|title| named_task_title(title)))
+        .unwrap_or(card_title).to_owned()
 }
 
 fn distinguish_titles(tasks:&mut [WorkspaceTask],locations:&[String]) {
@@ -392,6 +398,23 @@ mod tests {
 #[cfg(test)]
 mod agent_title_regression {
     use super::*;
+    #[test]
+    fn native_agent_rows_do_not_let_saved_brand_names_hide_the_current_title() {
+        for tool in kiln_accounts::Tool::ALL {
+            let mut info = SessionInfo {name: Some(tool.display_name().into()), title: "✳ 로그인 API 버그 수정".into(), ..Default::default()};
+            let visible = super::super::ui::meaningful_title(&info.title, tool.program(), None).unwrap();
+            for page in [None, Some(tool.display_name()), Some(tool.program()), Some("  ")] {
+                assert_eq!(terminal_task_title(page, &info, &visible), "로그인 API 버그 수정");
+            }
+            info.name = Some("내가 지정한 작업 이름".into());
+            assert_eq!(terminal_task_title(Some(tool.display_name()), &info, &visible), "내가 지정한 작업 이름");
+            assert_eq!(terminal_task_title(Some("직접 지정한 탭"), &info, &visible), "직접 지정한 탭");
+            info.title = "✳ 테스트 결과 확인".into();
+            info.name = Some(tool.display_name().into());
+            let changed = super::super::ui::meaningful_title(&info.title, tool.program(), None).unwrap();
+            assert_eq!(terminal_task_title(Some(tool.display_name()), &info, &changed), "테스트 결과 확인");
+        }
+    }
     #[test]
     fn workspace_agent_rows_follow_confirmed_conversation_titles() {
         let mut view = agent_gui::AgentPane::fixture(agent_gui::Descriptor {

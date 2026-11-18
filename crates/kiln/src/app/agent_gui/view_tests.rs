@@ -2131,3 +2131,88 @@ fn inflight_presentation_request_is_cancellable_without_interrupting_the_turn() 
     assert_eq!(p.transcript.lifecycle, Lifecycle::Running);
     assert!(!p.sent.iter().any(|c|matches!(c,Command::Interrupt)));
 }
+
+fn suggestion_pane() -> AgentPane {
+    let mut p = pane();
+    p.descriptor.tool = Tool::Claude;
+    p.transcript.lifecycle = Lifecycle::Ready;
+    p.transcript.controls.status.insert("prompt_suggestion".into(), NativeStatus {
+        subject:"prompt_suggestion".into(),
+        fields:[("id".into(),ControlValue::Text("native-suggestion-1".into())),("text".into(),ControlValue::Text("테스트도 실행해줘".into()))].into(),
+        unavailable:None,
+    });
+    p
+}
+#[test]
+fn native_suggestion_tab_fills_the_draft_and_never_sends_it() {
+    let p = suggestion_pane();
+    let mut initialized=false;
+    let mut h=Harness::builder().with_size([760.,700.]).build_ui_state(|ui,p:&mut AgentPane| {
+        if !initialized {kiln_common::fonts::install(ui.ctx());initialized=true;return;}
+        p.ui(ui);
+    },p);
+    h.run();h.get_by_label("메시지").click();h.run();
+    assert!(h.state().composer.text.is_empty(),"The ghost hint is not draft content");
+    assert!(h.query_by_label("Tab으로 추천 입력 · Esc로 숨기기").is_some());
+    h.key_press(egui::Key::Tab);h.run();
+    assert_eq!(h.state().composer.text,"테스트도 실행해줘");
+    assert!(h.get_by_label("메시지").accesskit_node().is_focused(), "Tab acceptance retains the input focus");
+    assert!(h.state().sent.is_empty(),"Accepting a suggestion is separate from sending");
+    h.key_press(egui::Key::Enter);h.run();
+    assert!(matches!(h.state().sent.last(),Some(Command::Submit{text,..}) if text=="테스트도 실행해줘"), "sent={:?}; focus={}; composing={}; ime={}; text={:?}; pending={:?}; blocked={}", h.state().sent, h.get_by_label("메시지").accesskit_node().is_focused(),h.state().composing,h.state().ime_frame,h.state().composer.text,h.state().pending,h.state().settings_blocked());
+}
+#[test]
+fn native_suggestions_leave_existing_drafts_busy_turns_and_ime_untouched() {
+    let mut p=suggestion_pane();
+    p.composer.text="내가 작성한 초안".into();assert!(p.prompt_suggestion().is_none());
+    p.composer.text.clear();p.transcript.lifecycle=Lifecycle::Running;assert!(p.prompt_suggestion().is_none());
+    p.transcript.lifecycle=Lifecycle::Ready;p.composing=true;assert!(p.prompt_suggestion().is_none());
+    p.composing=false;p.ime_frame=true;assert!(p.prompt_suggestion().is_none());
+    p.ime_frame=false;p.composer.attachments.push(Attachment{path:"/owned/image.png".into(),name:"image.png".into(),mime:"image/png".into(),sha256:String::new()});assert!(p.prompt_suggestion().is_none());
+}
+#[test]
+fn escape_dismisses_only_the_current_native_suggestion() {
+    let mut initialized=false;
+    let mut h=Harness::builder().with_size([520.,700.]).build_ui_state(|ui,p:&mut AgentPane| {
+        if !initialized {kiln_common::fonts::install(ui.ctx());initialized=true;return;}
+        p.ui(ui);
+    },suggestion_pane());
+    h.run();h.get_by_label("메시지").click();h.run();
+    h.key_press(egui::Key::Escape);h.run();
+    assert!(h.state().composer.text.is_empty());assert!(h.state().sent.is_empty());assert!(h.state().prompt_suggestion().is_none());
+    h.state_mut().transcript.controls.status.get_mut("prompt_suggestion").unwrap().fields.insert("id".into(),ControlValue::Text("native-suggestion-2".into()));
+    h.run();assert!(h.state().prompt_suggestion().is_some());
+}
+
+#[test]
+fn native_suggestion_hint_stays_inside_the_composer_in_all_languages_and_themes() {
+    use kiln_common::i18n::{Language, with_language};
+    for language in Language::ALL {
+        with_language(language, || {
+            for dark in [true, false] {
+                for width in [400., 1280.] {
+                    let mut p = suggestion_pane();
+                    let text = match language.code() {
+                        "ko" => "테스트도 실행해줘",
+                        "ja" => "テストも実行して",
+                        "zh-CN" => "也运行一下测试",
+                        _ => "Run the tests",
+                    };
+                    p.transcript.controls.status.get_mut("prompt_suggestion").unwrap().fields.insert("text".into(), ControlValue::Text(text.into()));
+                    let mut initialized = false;
+                    let mut h = Harness::builder().with_size([width, 700.]).build_ui_state(|ui, p: &mut AgentPane| {
+                        if !initialized {kiln_common::fonts::install(ui.ctx());initialized=true;return;}
+                        Theme::set_current(if dark {"kiln-dark"} else {"kiln-light"});
+                        Theme::current().apply(ui.ctx());
+                        p.ui(ui);
+                    }, p);
+                    h.run();
+                    let hint = h.get_by_label(kiln_common::i18n::tr("Tab으로 추천 입력 · Esc로 숨기기")).rect();
+                    assert!(h.ctx.content_rect().contains_rect(hint));
+                    assert!(h.state().composer.text.is_empty());
+                    visual_fix1_capture(&mut h, &format!("native-suggestion-{}-{}-{width:.0}", language.code(), if dark {"dark"} else {"light"}));
+                }
+            }
+        });
+    }
+}
