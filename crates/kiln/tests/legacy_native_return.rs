@@ -145,6 +145,7 @@ struct Runtime {
     base: PathBuf,
     socket: String,
     client: Client,
+    initial_daemon: Option<std::process::Child>,
 }
 impl Runtime {
     fn start() -> Self {
@@ -185,6 +186,17 @@ impl Runtime {
             std::env::set_var("KILN_DB_NO_KEYCHAIN", "1");
             std::env::set_var("KILN_REMOTE_NO_KEYCHAIN", "1");
         }
+        let initial_daemon = std::env::var_os("KILN_LEGACY_DAEMON_EXE").map(|program| {
+            let child = std::process::Command::new(program)
+                .args(["daemon", "--socket", &socket])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(fs::File::create(base.join("initial-daemon.log")).unwrap())
+                .spawn()
+                .unwrap();
+            wait(10, || Path::new(&socket).exists());
+            child
+        });
         let client =
             Client::connect_or_spawn(&socket, Path::new(env!("CARGO_BIN_EXE_kiln")), None).unwrap();
         Self {
@@ -192,6 +204,7 @@ impl Runtime {
             base,
             socket,
             client,
+            initial_daemon,
         }
     }
     fn create(&self, spec: SpawnSpec) -> u64 {
@@ -272,6 +285,12 @@ impl Drop for Runtime {
         }
         self.client.send(ClientMsg::Shutdown);
         std::thread::sleep(Duration::from_millis(350));
+        if let Some(child) = &mut self.initial_daemon {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
     }
 }
 fn wait(timeout: u64, mut predicate: impl FnMut() -> bool) {
@@ -295,6 +314,10 @@ fn existing_claude_without_a_mod_keeps_its_draft_and_cancels_then_returns_to_the
         .canonicalize()
         .unwrap();
     let current = kiln_common::paths::find_executable("claude", &[]).unwrap();
+    if std::env::var_os("KILN_LEGACY_GUI_FIXTURE").is_some() {
+        scenario(&cli, &current, true, None, false);
+        return;
+    }
     if std::env::var_os("KILN_LEGACY_ONLY_GUI").is_none()
         && std::env::var_os("KILN_LEGACY_ONLY_BACKGROUND").is_none()
     {
@@ -434,7 +457,7 @@ fn scenario(cli: &Path, current: &Path, seeded: bool, old_gui: Option<&Path>, ba
             serde_json::to_vec_pretty(&state).unwrap(),
         )
         .unwrap();
-        fs::write(destination,serde_json::to_vec_pretty(&json!({"base":base,"socket":runtime.socket,"native_session":native,"native_pid":pid,"conversation":ID})).unwrap()).unwrap();
+        fs::write(destination,serde_json::to_vec_pretty(&json!({"base":base,"socket":runtime.socket,"native_session":native,"native_pid":pid,"conversation":ID,"initial_daemon_pid":runtime.client.server_pid,"initial_daemon_build":runtime.client.server_build})).unwrap()).unwrap();
         eprintln!("owned GUI fixture ready {}", base.display());
         wait(1800, || base.join("finish-gui-fixture").exists());
         return;
