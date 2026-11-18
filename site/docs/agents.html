@@ -81,6 +81,7 @@
 <figure class="shot"><img src="../assets/shots/agent-activity-en.webp" alt="Conversation activity and background tasks" width="1280" height="820" loading="lazy" decoding="async"></figure>
 
 <h3 id="switch-presentation">Switch the same conversation</h3>
+<p>Native terminal task rows also ignore a saved generic provider name, such as “Claude Code”, when the terminal already reports a conversation title. Meaningful custom tab and session names remain preferred.</p>
 <p>Idle GUI-to-TUI checks resolve declared MCP helper commands using the conversation’s saved environment and working folder, including a helper-specific <code>PATH</code> override. A connected MCP service by itself is not a running model task.</p>
 <p>Pane titles and automatic page names use a shortened first confirmed request. Manually named pages keep their names; editing a draft does not rename an established conversation.</p>
 <p>The <strong>GUI | TUI</strong> joined tabs sit inside each agent pane at the top right, below its close button. Replies show the agent icon beside its name. Expanded tool details provide a readable, scrollable code area with syntax highlighting for recognized file languages and shell commands, plus a copy action. Unknown output remains plain text.</p>
@@ -308,6 +309,7 @@
 <figure class="shot"><img src="../assets/shots/agent-activity-ko.webp" alt="대화 진행 상태와 백그라운드 작업" width="1280" height="820" loading="lazy" decoding="async"></figure>
 
 <h3 id="switch-presentation">같은 대화에서 화면 전환하기</h3>
+<p>네이티브 터미널 작업 목록에서도 저장된 “Claude Code” 같은 기본 제공자 이름이 실제 대화 제목을 덮어쓰지 않도록 합니다. 직접 지정한 의미 있는 탭·세션 이름은 우선합니다.</p>
 <p>유휴 상태의 GUI→TUI 전환 검사에서는 대화에 저장된 환경 변수와 작업 폴더로 MCP 실행 파일을 확인합니다. MCP별 <code>PATH</code> 재정의도 반영합니다. MCP 서비스가 연결되어 있다는 사실만으로 AI가 작업 중인 것은 아닙니다.</p>
 <p>창 제목과 자동 작업 탭 이름은 처음 전송한 요청을 짧게 표시합니다. 직접 지정한 작업 이름은 유지되며, 초안을 편집해도 기존 대화 제목은 바뀌지 않습니다.</p>
 <p>각 에이전트 창 안의 우측 상단, 닫기 버튼 아래에 붙어 있는 <strong>GUI | TUI</strong> 탭으로 전환합니다. 응답 작성자 이름 옆에는 에이전트 아이콘이 표시됩니다. 도구 내역을 펼치면 파일 언어와 셸 명령어에 맞는 구문 강조, 읽기 편한 스크롤 영역과 복사 기능을 사용할 수 있습니다. 언어를 식별하지 못한 출력은 일반 텍스트로 표시합니다.</p>
@@ -535,6 +537,7 @@
 <figure class="shot"><img src="../assets/shots/agent-activity-ja.webp" alt="会話の進行状況とバックグラウンドタスク" width="1280" height="820" loading="lazy" decoding="async"></figure>
 
 <h3 id="switch-presentation">同じ会話の表示を切り替える</h3>
+<p>ネイティブ端末の作業一覧でも、保存済みの「Claude Code」などの既定名で実際の会話タイトルを隠しません。意味のあるカスタムタブ名とセッション名を優先します。</p>
 <p>待機中の GUI→TUI 切り替えでは、会話に保存された環境変数と作業フォルダーで MCP コマンドを確認します。MCP 固有の <code>PATH</code> 設定も反映します。MCP サービスの接続自体は、モデルの処理中を意味しません。</p>
 <p>作業中もTUIへの切り替えを要求できます。現在の作業はGUIで続行し、応答・承認・待機作業が終わり所有権の確認に成功すると自動で切り替えます。GUIを選ぶと予約を取り消せます。実行中のモデル要求を別プロセスに即座に移す方式ではありません。ネイティブTUIからGUIに戻る場合は、GUIの実行主体を開始する前にCLIの正常終了が必要です。TUIを選ぶと復帰要求を取り消せます。</p>
 <p>パネルのタイトルと自動作業名には、最初に送信したリクエストを短く表示します。手動で付けた名前は維持され、下書きの編集で既存の会話名は変わりません。</p>
@@ -763,6 +766,7 @@
 <figure class="shot"><img src="../assets/shots/agent-activity-zh-CN.webp" alt="对话进度与后台任务" width="1280" height="820" loading="lazy" decoding="async"></figure>
 
 <h3 id="switch-presentation">切换同一对话的显示方式</h3>
+<p>原生终端的任务列表也会忽略已保存的“Claude Code”等默认提供方名称，避免覆盖终端报告的对话标题。有意义的自定义标签和会话名称仍优先显示。</p>
 <p>空闲时从 GUI 切换到 TUI，会使用会话保存的环境变量和工作目录验证 MCP 命令，并遵循 MCP 自身的 <code>PATH</code> 设置。MCP 服务保持连接并不表示模型正在执行任务。</p>
 <p>工作进行中也可请求切换到TUI。当前工作继续在GUI中运行，回复、审批和排队工作结束并通过所有权检查后自动切换。选择GUI可取消切换请求。这不是将正在执行的模型请求立即移至另一个进程。原生TUI返回GUI时，CLI仍须正常退出后才会启动GUI执行方；选择TUI可取消返回请求。</p>
 <p>窗口标题和自动任务名称使用首次已发送请求的简短内容。手动命名的任务保留原名，编辑草稿不会改变已有对话标题。</p>

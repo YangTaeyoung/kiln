@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.4",
-  "source_commit": "de9a08c97608a3c867c1f4c2b636d0dd3c5d209c",
-  "note": "0.3.4 executable input: safe MCP helper handoff resolution; fixed chat activity and latest-message navigation; native background task/output presentation; GUI/TUI runtime PATH propagation for command hooks. Agent/activity illustrations use synthetic native egui data from 3f4a5c3134b52a58dd490b89864817be0696ae0c with unchanged layout. Model/settings illustrations retain 0.3.3 input 09dde92643e3500b7972851e7db229f5be9b9281. Native Claude 2.1.326 localhost synthetic inference verified task membership/output and Stop hook Node lookup, without authenticated live-model inference. GUI-to-TUI waits for safe idle and exact ownership; native TUI-to-GUI requires normal CLI exit. Existing running workers retain their original environments.",
+  "kiln_version": "0.3.5",
+  "source_commit": "bde82c70046aee4bd58f91de5b9a6c032012e0df",
+  "note": "0.3.5 executable input: cooperative idle Claude native terminal return with launch/session binding, deferred draft/work/background guards and cancellation; native stream-json next-prompt suggestions with explicit Tab acceptance and send. Claude 2.1.327 verified using isolated profiles and localhost synthetic responses, without authenticated model inference. Existing workers retain their original code; unsupported/disabled mods and other providers use explicit normal CLI exit. New suggestion illustrations are native egui component renders from this input with synthetic data, not OS-window photos. Existing activity/settings/model illustrations retain their recorded earlier provenance.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",

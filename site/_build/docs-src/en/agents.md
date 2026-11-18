@@ -54,6 +54,8 @@ Use **View output · Refresh** in a shell or Monitor task to read its latest out
 
 ### Switch the same conversation {#switch-presentation}
 
+Native terminal task rows also ignore a saved generic provider name, such as “Claude Code”, when the terminal already reports a conversation title. Meaningful custom tab and session names remain preferred.
+
 Idle GUI-to-TUI checks resolve declared MCP helper commands using the conversation’s saved environment and working folder, including a helper-specific `PATH` override. A connected MCP service by itself is not a running model task.
 
 Pane titles and automatic page names use a shortened first confirmed request. Manually named pages keep their names; editing a draft does not rename an established conversation.

@@ -15,6 +15,10 @@ struct Request<'a> {
     token: &'a str,
     session: &'a str,
 }
+pub(super) enum Target {
+    Direct,
+    Managed,
+}
 pub(super) struct Bridge {
     root: PathBuf,
     plugin: PathBuf,
@@ -28,6 +32,7 @@ impl Bridge {
         dir: &Path,
         command: &mut Process,
         journal: &mut Journal,
+        target: Target,
     ) -> Result<Option<Self>> {
         journal.push(Event::Controls(ControlEvent::Status(NativeStatus {
             subject: SUBJECT.into(),
@@ -57,10 +62,15 @@ impl Bridge {
             &plugin.join("hooks/register.js"),
             include_bytes!("native_return.js"),
         )?;
-        command
-            .arg("--plugin-dir")
-            .arg(&plugin)
-            .env("KILN_NATIVE_RETURN_TOKEN", &token);
+        command.env("KILN_NATIVE_RETURN_TOKEN", &token);
+        match target {
+            Target::Direct => {
+                command.arg("--plugin-dir").arg(&plugin);
+            }
+            Target::Managed => {
+                command.env("KILN_NATIVE_RETURN_PLUGIN", &plugin);
+            }
+        }
         Ok(Some(Self {
             root,
             plugin,
@@ -137,9 +147,15 @@ mod tests {
             })
             .unwrap();
         let mut command = Process::new("owned-fixture");
-        let mut bridge = Bridge::prepare(Tool::Claude, root.path(), &mut command, &mut journal)
-            .unwrap()
-            .unwrap();
+        let mut bridge = Bridge::prepare(
+            Tool::Claude,
+            root.path(),
+            &mut command,
+            &mut journal,
+            Target::Direct,
+        )
+        .unwrap()
+        .unwrap();
         assert!(command.get_args().any(|arg| arg == "--plugin-dir"));
         let state_path = bridge.plugin.join("bridge.state");
         let request_path = bridge.plugin.join("return.request");

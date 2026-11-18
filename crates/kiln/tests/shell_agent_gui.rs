@@ -132,7 +132,8 @@ struct Fixture {
     socket: String,
 }
 impl Fixture {
-    fn start() -> Self {
+    fn start() -> Self { Self::with_native_claude(None) }
+    fn with_native_claude(native: Option<&Path>) -> Self {
         let root = tempfile::Builder::new()
             .prefix("kiln-shell-gui-")
             .tempdir_in("/tmp")
@@ -156,10 +157,26 @@ impl Fixture {
             fs::write(&path, format!("#!{}\n{}", python.display(), PROVIDER)).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         }
+        if let Some(cli) = native {
+            fs::write(base.join("bin/claude"), format!("#!/bin/sh\nexec {} \"$@\"\n", quote(cli))).unwrap();
+            let project = base.join("work").to_string_lossy().into_owned();
+            let onboarding = serde_json::json!({"hasCompletedOnboarding":true,"theme":"dark","numStartups":1,
+                "projects":{project:{"hasTrustDialogAccepted":true,"allowedTools":[]}}});
+            for path in [base.join("home/.claude.json"),base.join("claude/.claude.json")] {
+                fs::write(path, serde_json::to_vec(&onboarding).unwrap()).unwrap();
+            }
+        }
         let socket = base.join("d.sock").to_string_lossy().into_owned();
         let log = fs::File::create(base.join("daemon.log")).unwrap();
-        let daemon = Process::new(env!("CARGO_BIN_EXE_kiln"))
-            .env_clear()
+        let mut command = Process::new(env!("CARGO_BIN_EXE_kiln"));
+        command.env_clear();
+        if native.is_some() {
+            command.env("ANTHROPIC_API_KEY", "sk-ant-api03-kiln-isolated-fixture-no-real-auth")
+                .env("ANTHROPIC_BASE_URL", "http://127.0.0.1:9")
+                .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+                .env("DISABLE_TELEMETRY", "1").env("DISABLE_ERROR_REPORTING", "1").env("DISABLE_AUTOUPDATER", "1");
+        }
+        let daemon = command
             .args(["daemon", "--socket", &socket])
             .env("HOME", base.join("home"))
             .env("ZDOTDIR", base.join("home"))
@@ -413,6 +430,37 @@ fn logs(root: &Path, tool: &str) -> Vec<Value> {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+#[test]
+#[ignore = "requires installed Claude 2.1.327; owned shell and localhost-only dummy credentials"]
+fn installed_claude_initial_shell_returns_to_gui_when_idle_without_manual_exit() {
+    let cli = kiln_common::paths::find_executable("claude", &[]).unwrap().canonicalize().unwrap();
+    let mut fixture = Fixture::with_native_claude(Some(&cli));
+    let base = fixture.base();
+    let _env = ConfigEnv::install(&base, &fixture.socket);
+    let daemon = fixture.connect();
+    let session = match daemon.request(|req| ClientMsg::Create {req, spec: SpawnSpec {
+        program:Some("/bin/zsh".into()), cwd:Some(base.join("work").to_string_lossy().into_owned()), cols:120, rows:40, ..Default::default()
+    }}, Duration::from_secs(5)).unwrap() {ServerMsg::Created {session,..}=>session, value=>panic!("{value:?}")};
+    wait_text(&daemon, session, "OWNED_SHELL>");
+    line(&daemon, session, "claude");
+    let spec = binding(session);
+    let mut client = agent_gui::Client::connect(agent_gui::descriptor(&spec).unwrap());
+    let mut state = Transcript::default();
+    wait_text(&daemon, session, "ANTHROPIC_API_KEY");
+    input(&daemon, session, "\x1b");
+    wait_text(&daemon, session, "Not logged in");
+    pump(&mut client, &mut state, |s| s.provider_session_id.is_some()
+        && s.controls.status.get("native_terminal_return").and_then(|v|v.fields.get("automatic")) == Some(&agent_gui::ControlValue::Bool(true)));
+    let native_id = state.provider_session_id.clone();
+    client.send(Command::SetPresentation(Presentation::Gui)).unwrap();
+    pump(&mut client, &mut state, |s| s.presentation == Presentation::Gui && s.lifecycle == Lifecycle::Ready);
+    assert_eq!(state.provider_session_id, native_id);
+    assert!(state.entries.is_empty(), "No prompt was submitted or replayed");
+    assert!(state.errors.is_empty(), "{:?}", state.errors);
+    println!("installed Claude shell bootstrap → native idle → GUI Ready; same UUID {:?}; zero prompts; no manual exit", native_id);
+    daemon.send(ClientMsg::Kill {session});
 }
 
 #[test]

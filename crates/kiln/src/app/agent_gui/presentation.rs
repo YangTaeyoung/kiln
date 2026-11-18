@@ -122,7 +122,7 @@ pub(super) fn serve_terminal(
             command.args(lead).args(&spec.args).envs(spec.env.iter().cloned());
             if let Some(cwd) = &spec.cwd { command.current_dir(cwd); }
             command.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
-            let mut return_bridge = super::native_return::Bridge::prepare(config.descriptor.tool, dir, &mut command, journal)?;
+            let mut return_bridge = super::native_return::Bridge::prepare(config.descriptor.tool, dir, &mut command, journal, super::native_return::Target::Managed)?;
             let _ownership = TerminalOwnership::claim();
             let mut child = command.spawn().context("Could not open the native shell conversation")?;
             let mut observed = Instant::now() - Duration::from_secs(1);
@@ -181,7 +181,7 @@ pub(super) fn serve_terminal(
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        let mut return_bridge = super::native_return::Bridge::prepare(config.descriptor.tool, dir, &mut command, journal)?;
+        let mut return_bridge = super::native_return::Bridge::prepare(config.descriptor.tool, dir, &mut command, journal, super::native_return::Target::Direct)?;
         let _ownership = TerminalOwnership::claim();
         let mut child = command
             .spawn()
