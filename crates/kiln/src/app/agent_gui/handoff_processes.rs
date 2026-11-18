@@ -732,3 +732,34 @@ mod tests {
         assert!(!first[0].argv.is_empty());
     }
 }
+
+/// Candidate children only; callers must validate executable, birth stamp and argv.
+pub(super) fn children(parent: u32) -> Result<Vec<u32>> {
+    ensure!(parent>0 && parent<=i32::MAX as u32,"invalid parent process");
+    #[cfg(target_os="macos")]
+    {
+        let mut pids=vec![0u32;MAX_PROCESSES];let size=(pids.len()*std::mem::size_of::<u32>()) as i32;
+        // PROC_PPID_ONLY=6, as in kiln_daemon::procinfo's libproc queries.
+        let bytes=unsafe {libc::proc_listpids(6,parent,pids.as_mut_ptr().cast(),size)};
+        ensure!(bytes>=0 && bytes<size,"Could not inspect the complete native child list");
+        pids.truncate(bytes as usize/std::mem::size_of::<u32>());pids.retain(|pid|*pid>0);Ok(pids)
+    }
+    #[cfg(all(unix,not(target_os="macos")))]
+    {
+        let value=std::fs::read_to_string(format!("/proc/{parent}/task/{parent}/children"))?;
+        let pids:Vec<_>=value.split_whitespace().map(str::parse::<u32>).collect::<std::result::Result<_,_>>()?;
+        ensure!(pids.len()<=MAX_PROCESSES,"Too many native children");Ok(pids)
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::{Foundation::{CloseHandle,INVALID_HANDLE_VALUE},System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot,PROCESSENTRY32W,Process32FirstW,Process32NextW,TH32CS_SNAPPROCESS}};
+        let snapshot=unsafe{CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0)};
+        ensure!(snapshot!=INVALID_HANDLE_VALUE,"Could not inspect native children");
+        let mut entry:PROCESSENTRY32W=unsafe{std::mem::zeroed()};entry.dwSize=std::mem::size_of::<PROCESSENTRY32W>() as u32;let mut pids=Vec::new();
+        let mut more=unsafe{Process32FirstW(snapshot,&mut entry)}!=0;
+        while more {if entry.th32ParentProcessID==parent {pids.push(entry.th32ProcessID);}more=unsafe{Process32NextW(snapshot,&mut entry)}!=0;}
+        unsafe{CloseHandle(snapshot)};ensure!(pids.len()<=MAX_PROCESSES,"Too many native children");Ok(pids)
+    }
+    #[cfg(not(any(unix,windows)))]
+    anyhow::bail!("Native process inspection is unavailable")
+}

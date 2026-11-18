@@ -352,7 +352,7 @@ pub struct KilnApp {
     preparing_agents: Vec<PreparingAgent>,
     agent_views: HashMap<PaneId, agent_gui::AgentPane>,
     /// Native terminal imports wait for a proven PTY exit before starting a worker.
-    agent_gui_imports: HashMap<PaneId, (SessionId, PathBuf, Option<kiln_common::task::Task<Result<SpawnSpec, String>>>)>,
+    agent_gui_imports: HashMap<PaneId, agent_gui::NativeImport>,
     shell_agent_views: HashMap<PaneId, SessionId>,
     shell_agent_drafts: HashMap<PaneId, agent_gui::SavedDraft>,
     shell_agent_scan: Option<kiln_common::task::Task<Vec<(PaneId, SessionId, Result<Option<SpawnSpec>, String>)>>>,
@@ -1031,21 +1031,27 @@ impl KilnApp {
         let panes: Vec<_> = self.agent_gui_imports.keys().copied().collect();
         for pane in panes {
             if !self.panes.contains_key(&pane) { self.agent_gui_imports.remove(&pane); continue; }
-            let (session, path, task) = self.agent_gui_imports.get_mut(&pane).unwrap();
-            if task.is_none() {
+            let import = self.agent_gui_imports.get_mut(&pane).unwrap();
+            if let Some(error) = import.take_error() { self.toast(kiln_common::i18n::tr("대화로 전환할 수 없습니다"), error, ToastKind::Error, None); }
+            let import = self.agent_gui_imports.get_mut(&pane).unwrap();
+            if import.cancelled() { self.agent_gui_imports.remove(&pane); continue; }
+            if import.task.is_none() {
                 // A disconnected transport or missing list entry never proves exit.
                 let exited = self.conn.is_connected() && self.conn.sessions_listed
-                    && self.conn.infos.get(session).is_some_and(|info| info.exited.is_some());
-                if !exited { continue; }
-                let path = path.clone();
-                *task = Some(kiln_common::task::Task::spawn(ctx, move || agent_gui::prepare_existing_native(&path).map_err(|error| error.to_string())));
+                    && self.conn.infos.get(&import.session).is_some_and(|info| info.exited.is_some());
+                if !exited || import.bridge_pending() { continue; }
+                import.task = Some(import.prepare_task(ctx));
             }
-            let result = task.as_mut().and_then(|task|task.take());
+            let result = import.task.as_mut().and_then(|task|task.take());
             if let Some(result) = result {
+                let return_to_terminal = import.cancel_requested();
                 self.agent_gui_imports.remove(&pane);
                 match result {
                     Ok(spec) => {
-                        if let Some(view) = agent_gui::AgentPane::from_spec(&spec) { self.agent_views.insert(pane, view); }
+                        if let Some(mut view) = agent_gui::AgentPane::from_spec(&spec) {
+                            if return_to_terminal { view.defer_terminal_after_native_exit(); }
+                            self.agent_views.insert(pane, view);
+                        }
                         self.launch_specs.insert(pane, spec);
                         if let Some(Pane {kind: PaneKind::Term {session, pending, ..}, ..}) = self.panes.get_mut(&pane) {
                             *session = None; *pending = None;
@@ -1681,7 +1687,9 @@ impl KilnApp {
                 if self.agent_views.contains_key(&pane) || self.agent_gui_imports.contains_key(&pane) { return; }
                 if let Some(session) = self.panes.get(&pane).and_then(Pane::session)
                     && let Some(path) = self.launch_specs.get(&pane).and_then(agent_runtime::record_path) {
-                    self.agent_gui_imports.insert(pane, (session, path, None));
+                    if let Some(info) = self.conn.infos.get(&session) {
+                        self.agent_gui_imports.insert(pane, agent_gui::NativeImport::new(ctx, session, info.pid, path, self.conn.socket().to_owned()));
+                    }
                 }
             }
             Action::RetryTerminalLaunch(p) => {

@@ -388,7 +388,7 @@ impl Conn {
             ServerMsg::TerminalHealth { session, health, .. } => {
                 if !self.closing_sessions.contains(&session) && self.is_alive(session) {self.terminal_health.insert(session,health);}
             }
-            ServerMsg::Hello { .. } | ServerMsg::Pong { .. } => {}
+            ServerMsg::Hello { .. } | ServerMsg::Pong { .. } | ServerMsg::InputState {..} | ServerMsg::InputAccepted {..} => {}
         }
     }
 
@@ -435,6 +435,8 @@ impl Conn {
         if info.exited.is_some() { return None; }
         super::ui::session_agent(info).or_else(|| self.observed_agents.get(&session).copied())
     }
+
+    pub fn socket(&self) -> &str { &self.socket }
 
     pub fn send(&self, m: ClientMsg) {
         if let Some(c) = &self.client {

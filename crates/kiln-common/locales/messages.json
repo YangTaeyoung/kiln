@@ -14953,5 +14953,40 @@
     "en": "Return to GUI when work is finished and the draft is empty. Select TUI to cancel.",
     "ja": "作業が終わり入力が空になるとGUIに戻ります。TUIを選ぶと取り消します。",
     "zh-CN": "任务结束且草稿为空时返回 GUI。选择 TUI 可取消。"
+  },
+  "같은 대화를 GUI로 전환하고 있습니다.": {
+    "en": "Switching the same conversation to GUI.",
+    "ja": "同じ会話を GUI に切り替えています。",
+    "zh-CN": "正在将同一对话切换到 GUI。"
+  },
+  "기존 대화에 전환 연결을 준비하고 있습니다. TUI를 선택하면 취소합니다.": {
+    "en": "Preparing to switch this existing conversation. Select TUI to cancel.",
+    "ja": "既存の会話に切り替え接続を準備しています。TUI で取り消せます。",
+    "zh-CN": "正在为现有对话准备切换连接。选择 TUI 可取消。"
+  },
+  "백그라운드 작업을 유지하고 있습니다. 작업이 끝나면 GUI로 전환합니다.": {
+    "en": "Background tasks are being preserved. Switching to GUI when they finish.",
+    "ja": "バックグラウンド作業を維持しています。終了後に GUI に切り替えます。",
+    "zh-CN": "正在保留后台任务。任务结束后切换到 GUI。"
+  },
+  "자동 전환 연결을 확인하지 못했습니다. 현재 대화와 작업은 계속 유지됩니다.": {
+    "en": "The automatic switch connection could not be verified. Your conversation and work remain active.",
+    "ja": "自動切り替えの接続を確認できませんでした。現在の会話と作業は維持されています。",
+    "zh-CN": "无法确认自动切换连接。当前对话和工作保持运行。"
+  },
+  "전환 취소를 확인하고 있습니다. 현재 대화와 작업은 계속 유지됩니다.": {
+    "en": "Confirming cancellation. Your conversation and work remain active.",
+    "ja": "切り替えの取り消しを確認しています。現在の会話と作業は維持されています。",
+    "zh-CN": "正在确认取消切换。当前对话和工作保持运行。"
+  },
+  "터미널에 작성 중인 입력이 있습니다. 입력을 보내거나 비우면 GUI로 전환합니다.": {
+    "en": "The terminal contains an unsent draft. Send or clear it to switch to GUI.",
+    "ja": "ターミナルに入力中の下書きがあります。送信するか消去すると GUI に切り替えます。",
+    "zh-CN": "终端中有未发送的草稿。发送或清空后切换到 GUI。"
+  },
+  "현재 작업이 끝나면 GUI로 전환합니다. TUI를 선택하면 취소합니다.": {
+    "en": "Switching to GUI after the current work finishes. Select TUI to cancel.",
+    "ja": "現在の作業が終わると GUI に切り替えます。TUI で取り消せます。",
+    "zh-CN": "当前工作结束后切换到 GUI。选择 TUI 可取消。"
   }
 }

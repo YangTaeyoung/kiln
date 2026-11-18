@@ -117,6 +117,8 @@ impl Client {
                 ServerMsg::Sessions { req, .. }
                 | ServerMsg::Created { req, .. }
                 | ServerMsg::Text { req, .. }
+                | ServerMsg::InputState {req,..}
+                | ServerMsg::InputAccepted {req,..}
                 | ServerMsg::CommandOutput { req, .. }
                 | ServerMsg::Error { req, .. }
                 | ServerMsg::Pong { req }

@@ -1,9 +1,16 @@
 //! Ordered PTY input with a bounded upgrade checkpoint. An empty channel alone
 //! does not establish delivery: its worker may still be blocked writing a frame.
 
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use std::io::{self, Write};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::time::{Duration, Instant};
+
+const INPUT_QUIET_PERIOD: Duration = Duration::from_millis(500);
 
 enum Message {
     Data(Vec<u8>),
@@ -13,16 +20,21 @@ enum Message {
 pub(crate) struct InputQueue {
     sender: Sender<Message>,
     ingress: Mutex<Ingress>,
+    pending: Arc<AtomicUsize>,
 }
 
 struct Ingress {
     accepting: bool,
+    revision: u64,
+    last_input: Instant,
     replies: Vec<Vec<u8>>,
 }
 
 impl InputQueue {
     pub(crate) fn new(mut writer: impl Write + Send + 'static, id: u64) -> io::Result<Self> {
         let (sender, receiver) = unbounded();
+        let pending = Arc::new(AtomicUsize::new(0));
+        let writes = pending.clone();
         std::thread::Builder::new()
             .name(format!("pty-w-{id}"))
             .spawn(move || {
@@ -33,6 +45,7 @@ impl InputQueue {
                                 break;
                             }
                             let _ = writer.flush();
+                            writes.fetch_sub(1, Ordering::Release);
                         }
                         Message::Delivered(reply) => {
                             let _ = reply.send(());
@@ -42,24 +55,66 @@ impl InputQueue {
             })?;
         Ok(Self {
             sender,
+            pending,
             ingress: Mutex::new(Ingress {
                 accepting: true,
+                revision: 0,
+                last_input: Instant::now(),
                 replies: Vec::new(),
             }),
         })
     }
 
     pub(crate) fn send(&self, data: Vec<u8>) -> io::Result<()> {
-        let ingress = self.ingress.lock();
+        let mut ingress = self.ingress.lock();
         if !ingress.accepting {
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "terminal is upgrading",
             ));
         }
-        self.sender
-            .send(Message::Data(data))
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "terminal input worker closed"))
+        ingress.revision = ingress.revision.wrapping_add(1);
+        ingress.last_input = Instant::now();
+        self.enqueue(data)
+    }
+
+    fn enqueue(&self, data: Vec<u8>) -> io::Result<()> {
+        self.pending.fetch_add(1, Ordering::Release);
+        self.sender.send(Message::Data(data)).map_err(|_| {
+            self.pending.fetch_sub(1, Ordering::Release);
+            io::Error::new(io::ErrorKind::BrokenPipe, "terminal input worker closed")
+        })
+    }
+    /// Observe input and screen under the same ingress lock used to accept all
+    /// terminal keystrokes. In-flight or recently accepted input cannot prove idle.
+    pub(crate) fn observe<T>(&self, read: impl FnOnce() -> T) -> (Option<u64>, T) {
+        let ingress = self.ingress.lock();
+        let ready = ingress.accepting
+            && self.pending.load(Ordering::Acquire) == 0
+            && ingress.last_input.elapsed() >= INPUT_QUIET_PERIOD;
+        (ready.then_some(ingress.revision), read())
+    }
+    /// New work typed after observation wins. The control bytes are never queued
+    /// behind input the native process has not consumed/rendered yet.
+    pub(crate) fn send_if_unchanged(
+        &self,
+        revision: u64,
+        unchanged: impl FnOnce() -> bool,
+        data: Vec<u8>,
+    ) -> io::Result<bool> {
+        let mut ingress = self.ingress.lock();
+        if !ingress.accepting
+            || ingress.revision != revision
+            || self.pending.load(Ordering::Acquire) != 0
+            || ingress.last_input.elapsed() < INPUT_QUIET_PERIOD
+            || !unchanged()
+        {
+            return Ok(false);
+        }
+        ingress.revision = ingress.revision.wrapping_add(1);
+        ingress.last_input = Instant::now();
+        self.enqueue(data)?;
+        Ok(true)
     }
 
     /// Readers still consume output until Detach. Preserve their terminal
@@ -70,9 +125,7 @@ impl InputQueue {
             ingress.replies.push(data);
             return Ok(());
         }
-        self.sender
-            .send(Message::Data(data))
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "terminal input worker closed"))
+        self.enqueue(data)
     }
 
     pub(crate) fn pending_replies(&self) -> Vec<Vec<u8>> {
@@ -94,7 +147,7 @@ impl InputQueue {
     pub(crate) fn resume(&self) {
         let mut ingress = self.ingress.lock();
         for data in ingress.replies.drain(..) {
-            let _ = self.sender.send(Message::Data(data));
+            let _ = self.enqueue(data);
         }
         ingress.accepting = true;
     }
@@ -165,6 +218,67 @@ mod tests {
         second.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(&*bytes.lock(), b"beforequeuedreplyafter");
         assert!(queue.pending_replies().is_empty());
+    }
+
+    #[test]
+    fn new_work_after_a_snapshot_and_in_flight_input_reject_control_bytes() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (entered, started) = bounded(1);
+        let (release, held) = bounded(1);
+        let queue = InputQueue::new(
+            HeldWriter {
+                bytes: bytes.clone(),
+                entered,
+                release: held,
+                held: false,
+            },
+            3,
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(510));
+        let (revision, _) = queue.observe(|| "idle native prompt");
+        let revision = revision.unwrap();
+        queue.send(b"start real work".to_vec()).unwrap();
+        started.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(
+            queue.observe(|| ()).0.is_none(),
+            "In-flight input cannot prove idle"
+        );
+        assert!(
+            !queue
+                .send_if_unchanged(revision, || true, b"must not run".to_vec())
+                .unwrap()
+        );
+        release.send(()).unwrap();
+        queue
+            .pause()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        queue.resume();
+        std::thread::sleep(Duration::from_millis(510));
+        assert!(
+            !queue
+                .send_if_unchanged(revision, || true, b"stale input".to_vec())
+                .unwrap()
+        );
+        let fresh = queue.observe(|| ()).0.unwrap();
+        assert!(
+            !queue
+                .send_if_unchanged(fresh, || false, b"changed screen".to_vec())
+                .unwrap()
+        );
+        assert!(
+            queue
+                .send_if_unchanged(fresh, || true, b"fresh control".to_vec())
+                .unwrap()
+        );
+        queue
+            .pause()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(&*bytes.lock(), b"start real workfresh control");
     }
 
     #[test]
