@@ -1042,3 +1042,18 @@ fn inflight_acp_legacy_mode_ack_keeps_the_response_running() {
     assert!(!receipt.events.iter().any(|e|matches!(e, Event::Lifecycle(_))));
     assert!(receipt.events.iter().any(|e|matches!(e, Event::Modes { selected:Some(mode), .. } if mode=="code")));
 }
+
+#[test]
+fn claude_native_prompt_suggestions_are_display_data_and_clear_on_submission() {
+    let mut adapter = configured(Tool::Claude);
+    let effects = adapter.ingest(json!({"type":"prompt_suggestion","suggestion":"테스트도 실행해줘","uuid":"suggestion-1","session_id":"s"})).unwrap();
+    assert!(effects.writes.is_empty(), "A suggestion never becomes a user prompt");
+    assert!(effects.events.iter().any(|event| matches!(event,
+        Event::Controls(ControlEvent::Status(status)) if status.subject=="prompt_suggestion"
+        && status.fields.get("text")==Some(&ControlValue::Text("테스트도 실행해줘".into())))));
+    let effects = submit(&mut adapter).unwrap();
+    assert!(effects.events.iter().any(|event| matches!(event,
+        Event::Controls(ControlEvent::Status(status)) if status.subject=="prompt_suggestion" && status.fields.is_empty())));
+    let stale = adapter.ingest(json!({"type":"prompt_suggestion","suggestion":"오래된 추천","uuid":"stale","session_id":"s"})).unwrap();
+    assert!(stale.events.is_empty(), "A late suggestion never appears while a newer turn is running");
+}

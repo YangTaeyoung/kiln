@@ -102,8 +102,8 @@ fn import_terminal_history(
     Ok(())
 }
 
-/// The child inherits the real PTY. Returning to GUI waits for its natural exit;
-/// no Ctrl-C, kill, prompt, or provider command is synthesized by a tab click.
+/// The child inherits the real PTY. A native extension requests its documented
+/// idle exit; the host waits for actual exit before starting another writer.
 pub(super) fn serve_terminal(
     config: &Config,
     accounts: &AccountManager,
@@ -122,6 +122,7 @@ pub(super) fn serve_terminal(
             command.args(lead).args(&spec.args).envs(spec.env.iter().cloned());
             if let Some(cwd) = &spec.cwd { command.current_dir(cwd); }
             command.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+            let mut return_bridge = super::native_return::Bridge::prepare(config.descriptor.tool, dir, &mut command, journal)?;
             let _ownership = TerminalOwnership::claim();
             let mut child = command.spawn().context("Could not open the native shell conversation")?;
             let mut observed = Instant::now() - Duration::from_secs(1);
@@ -137,6 +138,7 @@ pub(super) fn serve_terminal(
                     observed = Instant::now();
                 }
                 if let Err(error) = poll_terminal_commands(dir, journal) { observation_error = Some(error.to_string()); }
+                if let Some(bridge) = &mut return_bridge && let Err(error) = bridge.poll(journal) { observation_error = Some(error.to_string()); }
                 let status = match child.try_wait() {
                     Ok(status) => status,
                     Err(error) => { observation_error = Some(error.to_string()); std::thread::sleep(Duration::from_millis(100)); continue; }
@@ -179,6 +181,7 @@ pub(super) fn serve_terminal(
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
+        let mut return_bridge = super::native_return::Bridge::prepare(config.descriptor.tool, dir, &mut command, journal)?;
         let _ownership = TerminalOwnership::claim();
         let mut child = command
             .spawn()
@@ -212,6 +215,7 @@ pub(super) fn serve_terminal(
                 // the structured backend after the CLI reports a natural exit.
                 transport_error = Some(error.to_string());
             }
+            if let Some(bridge) = &mut return_bridge && let Err(error) = bridge.poll(journal) { transport_error = Some(error.to_string()); }
             std::thread::sleep(Duration::from_millis(30));
         }
         if let Some(error) = transport_error {

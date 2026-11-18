@@ -14943,5 +14943,15 @@
     "en": "Ambient",
     "ja": "常駐",
     "zh-CN": "常驻"
+  },
+  "Tab으로 추천 입력 · Esc로 숨기기": {
+    "en": "Tab to accept suggestion · Esc to dismiss",
+    "ja": "Tabで候補を入力 · Escで非表示",
+    "zh-CN": "Tab 采用建议 · Esc 隐藏"
+  },
+  "작업이 끝나고 입력이 비면 GUI로 전환합니다. TUI를 선택하면 전환을 취소합니다.": {
+    "en": "Return to GUI when work is finished and the draft is empty. Select TUI to cancel.",
+    "ja": "作業が終わり入力が空になるとGUIに戻ります。TUIを選ぶと取り消します。",
+    "zh-CN": "任务结束且草稿为空时返回 GUI。选择 TUI 可取消。"
   }
 }

@@ -175,6 +175,7 @@ pub struct AgentPane {
     pub transcript: Transcript,
     backlog: VecDeque<Envelope>,
     composer: Draft,
+    dismissed_suggestion: Option<String>,
     pending: Option<PendingDraft>,
     recovered: Option<PendingDraft>,
     restored_pending: bool,
@@ -247,6 +248,7 @@ impl AgentPane {
             transcript: Transcript::default(),
             backlog: VecDeque::new(),
             composer: Draft::default(),
+            dismissed_suggestion: None,
             pending: None,
             recovered: None,
             restored_pending: false,
@@ -306,6 +308,20 @@ impl AgentPane {
         if self.detached_shell { self.transcript.presentation = target; self.transcript.return_requested = false; }
     }
     pub fn presentation(&self) -> Presentation { self.transcript.presentation }
+    pub fn automatic_terminal_return(&self) -> bool {
+        self.transcript.controls.status.get("native_terminal_return").and_then(|status|status.fields.get("automatic")) == Some(&ControlValue::Bool(true))
+    }
+    fn prompt_suggestion(&self) -> Option<(&str, &str)> {
+        if self.transcript.lifecycle != Lifecycle::Ready || self.pending.is_some()
+            || !self.composer.text.is_empty() || !self.composer.attachments.is_empty()
+            || self.composing || self.ime_frame { return None; }
+        let status = self.transcript.controls.status.get("prompt_suggestion")?;
+        let ControlValue::Text(id) = status.fields.get("id")? else {return None;};
+        let ControlValue::Text(text) = status.fields.get("text")? else {return None;};
+        if self.dismissed_suggestion.as_deref() == Some(id) || text.is_empty() {return None;}
+        Some((id, text))
+    }
+
     pub fn presentation_pending(&self) -> bool {
         !self.local_intents.is_empty()
     }
@@ -1248,7 +1264,23 @@ impl AgentPane {
                 if self.ime_frame {
                     self.ime_guard_frame = Some(ui.ctx().cumulative_frame_nr());
                 }
-                let completion_handled = self.mention_completion_input(ui, focused) || self.slash_completion_input(ui, focused);
+                let suggestion = self.prompt_suggestion().map(|(id, text)|(id.to_owned(), text.to_owned()));
+                let mut suggestion_handled = false;
+                if focused && ui.input(|input| !input.modifiers.any()) && let Some((suggestion_id, text)) = &suggestion {
+                    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+                        self.composer.text = text.clone();
+                        self.dismissed_suggestion = Some(suggestion_id.clone());
+                        let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(text.chars().count()))));
+                        state.store(ui.ctx(), id);
+                        ui.ctx().memory_mut(|memory| { memory.move_focus(egui::FocusDirection::None); memory.request_focus(id); });
+                        suggestion_handled = true;
+                    } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                        self.dismissed_suggestion = Some(suggestion_id.clone());
+                        suggestion_handled = true;
+                    }
+                }
+                let completion_handled = suggestion_handled || self.mention_completion_input(ui, focused) || self.slash_completion_input(ui, focused);
                 let enter = focused
                     && !completion_handled
                     && !self.composing
@@ -1269,7 +1301,8 @@ impl AgentPane {
                 let output = egui::TextEdit::multiline(&mut self.composer.text)
                     .layouter(&mut command_layouter)
                     .id(id)
-                    .hint_text(kiln_common::i18n::tr("작업을 입력하세요…"))
+                    .event_filter(egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, escape: suggestion.is_some() && !suggestion_handled, ..Default::default() })
+                    .hint_text(suggestion.as_ref().filter(|_|!suggestion_handled).map(|(_, text)|text.as_str()).unwrap_or_else(||kiln_common::i18n::tr("작업을 입력하세요…")))
                     .frame(Frame::NONE)
                     .desired_width(f32::INFINITY)
                     .desired_rows(if self.controls_ui.surface == Surface::Conversation { 2 } else { 1 })
@@ -1292,7 +1325,11 @@ impl AgentPane {
                             .collect(),
                     );
                 }
-                let edit = output.response.response.clone().on_hover_text(kiln_common::i18n::tr("Enter로 보내기 · Shift+Enter로 줄바꿈"));
+                if output.response.response.changed() && !self.composer.text.is_empty()
+                    && let Some((suggestion_id, _)) = &suggestion { self.dismissed_suggestion = Some(suggestion_id.clone()); }
+                let edit = output.response.response.clone().on_hover_text(kiln_common::i18n::tr(if suggestion.is_some() && !suggestion_handled {
+                    "Tab으로 추천 입력 · Esc로 숨기기"
+                } else { "Enter로 보내기 · Shift+Enter로 줄바꿈" }));
                 edit.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::TextEdit,
@@ -1366,6 +1403,9 @@ impl AgentPane {
                 });
                 if self.busy() && self.descriptor.tool == Tool::Codex {
                     ui.add(egui::Label::new(RichText::new(kiln_common::i18n::tr("모델·추론 강도·모드 선택은 다음 턴에 적용됩니다.")).small().color(t.text_dim)).wrap());
+                }
+                if suggestion.is_some() && !suggestion_handled && self.composer.text.is_empty() {
+                    ui.small(kiln_common::i18n::tr("Tab으로 추천 입력 · Esc로 숨기기"));
                 }
                 self.slash_completion_ui(ui);
                 self.mention_completion_ui(ui);

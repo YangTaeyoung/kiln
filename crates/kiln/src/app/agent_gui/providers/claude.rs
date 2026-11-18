@@ -85,6 +85,7 @@ impl Claude {
             "--include-partial-messages",
             "--replay-user-messages",
             "--verbose",
+            "--prompt-suggestions",
             "--permission-prompt-tool",
             "stdio",
         ]
@@ -97,6 +98,11 @@ impl Claude {
             a.extend(["--session-id".into(), self.session.clone()]);
         }
         a
+    }
+    fn clear_suggestion(effects: &mut Effects) {
+        effects.event(Event::Controls(ControlEvent::Status(NativeStatus {
+            subject: "prompt_suggestion".into(), fields: Default::default(), unavailable: None,
+        })));
     }
     fn control(id: &str, request: Value) -> Value {
         json!({"type":"control_request","request_id":id,"request":request})
@@ -195,6 +201,7 @@ impl Claude {
                     self.ready && self.followup.is_none(),
                     "Claude is not ready for a new message"
                 );
+                Self::clear_suggestion(&mut e);
                 let target = if !self.model_settled || !self.retired_configs.is_empty() {
                     Some(model.clone().or_else(||self.selected.clone()).context("The model configuration is unsettled; choose an explicit model before submitting")?)
                 } else {
@@ -601,6 +608,19 @@ impl Claude {
                     }
                 }
             }
+            "prompt_suggestion" => {
+                let suggestion = s(&v, "suggestion");
+                let id = s(&v, "uuid");
+                if self.ready && !self.busy && s(&v, "session_id") == self.session
+                    && !id.is_empty() && !suggestion.trim().is_empty() && suggestion.len() <= 16 * 1024
+                {
+                    e.event(Event::Controls(ControlEvent::Status(NativeStatus {
+                        subject: "prompt_suggestion".into(),
+                        fields: [("id".into(), ControlValue::Text(id)), ("text".into(), ControlValue::Text(suggestion))].into(),
+                        unavailable: None,
+                    })));
+                }
+            }
             "user" => {
                 for block in v["message"]["content"].as_array().into_iter().flatten() {
                     if s(block, "type") == "tool_result" {
@@ -627,6 +647,7 @@ impl Claude {
                 }
             }
             "result" => {
+                Self::clear_suggestion(&mut e);
                 e.accepted = true;
                 if !s(&v, "session_id").is_empty() {
                     self.session = s(&v, "session_id");

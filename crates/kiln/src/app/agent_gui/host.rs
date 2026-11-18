@@ -20,6 +20,8 @@ mod host_shell_job;
 mod handoff_processes;
 #[path = "presentation.rs"]
 mod presentation;
+#[path = "native_return.rs"]
+mod native_return;
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
@@ -1427,7 +1429,10 @@ mod subprocess_tests {
 root=os.environ['HANDOFF_ROOT']
 with open(root+'/launches','a') as log: log.write(json.dumps({'args':sys.argv[1:],'cwd':os.getcwd(),'home':os.environ.get('CLAUDE_CONFIG_DIR')})+'\n')
 if '-p' not in sys.argv:
- assert sys.argv[1:]==['--resume','aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee']
+ assert sys.argv[1:3]==['--resume','aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee']
+ assert len(sys.argv)==5 and sys.argv[3]=='--plugin-dir'
+ assert sys.argv[4].startswith(root+'/agent-gui/') and '/native-return/' in sys.argv[4]
+ with open(sys.argv[4]+'/.claude-plugin/plugin.json') as manifest: assert json.load(manifest)['name']=='kiln-native-return'
  with open(root+'/native-pid','w') as f: f.write(str(os.getpid()))
  print('NATIVE TERMINAL',flush=True)
  while not os.path.exists(root+'/exit-native'): time.sleep(.02)

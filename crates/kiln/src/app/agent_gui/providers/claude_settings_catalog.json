@@ -711,7 +711,7 @@
     "key": "promptSuggestionEnabled",
     "type": "boolean",
     "scope": "`Any file`",
-    "note": "Session flag accepted; suggestion emission untested"
+    "note": "Native stream-json suggestion emission and disabled preference verified with isolated Claude 2.1.327"
   },
   {
     "key": "emojiCompletionEnabled",
