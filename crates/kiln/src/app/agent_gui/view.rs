@@ -196,6 +196,8 @@ pub struct AgentPane {
     ime_guard_frame: Option<u64>,
     transport_alive: bool,
     detached_shell: bool,
+    legacy_return: Option<super::legacy_return::LegacyReturn>,
+    legacy_cancel_to_terminal: bool,
     transport_known: bool,
     history_end: Option<usize>,
     activity_ui: activity_ui::ActivityUi,
@@ -275,6 +277,8 @@ impl AgentPane {
             ime_guard_frame: None,
             transport_alive: false,
             detached_shell: false,
+            legacy_return: None,
+            legacy_cancel_to_terminal: false,
             transport_known: false,
             history_end: None,
             activity_ui: Default::default(),
@@ -308,6 +312,15 @@ impl AgentPane {
         if self.detached_shell { self.transcript.presentation = target; self.transcript.return_requested = false; }
     }
     pub fn presentation(&self) -> Presentation { self.transcript.presentation }
+    pub fn legacy_return_error(&self) -> Option<&str> { self.legacy_return.as_ref().and_then(|bridge|bridge.error()) }
+    pub fn legacy_return_label(&self) -> Option<&'static str> { self.legacy_return.as_ref().map(|bridge|bridge.label()) }
+    pub fn start_legacy_return(&mut self, ctx: &egui::Context, session: u64, pid: u32, socket: String) {
+        if self.descriptor.tool != Tool::Claude || self.transcript.controls.status.contains_key("native_terminal_return") || self.legacy_return.is_some() { return; }
+        if let Some(conversation) = self.transcript.provider_session_id.clone() {
+            self.legacy_return = Some(super::legacy_return::LegacyReturn::start(ctx, super::legacy_return::Source::Gui {worker:self.descriptor.id.clone(),conversation},session,pid,socket));
+        }
+    }
+    pub fn defer_terminal_after_native_exit(&mut self) { self.legacy_cancel_to_terminal = true; }
     pub fn automatic_terminal_return(&self) -> bool {
         self.transcript.controls.status.get("native_terminal_return").and_then(|status|status.fields.get("automatic")) == Some(&ControlValue::Bool(true))
     }
@@ -323,7 +336,7 @@ impl AgentPane {
     }
 
     pub fn presentation_pending(&self) -> bool {
-        !self.local_intents.is_empty()
+        !self.local_intents.is_empty() || self.legacy_return.as_ref().is_some_and(|bridge|bridge.cancel_requested())
     }
     pub fn selected_presentation(&self) -> Presentation {
         if self.transcript.return_requested {
@@ -343,6 +356,15 @@ impl AgentPane {
     }
     pub fn request_presentation(&mut self, target: Presentation) -> bool {
         if !self.can_switch_presentation(target) { return false; }
+        if target == Presentation::Terminal {
+            if let Some(bridge) = &self.legacy_return {
+                // Keep the old host's GUI takeover armed until native cancellation
+                // is acknowledged. A committed native exit must still be adopted.
+                bridge.request_cancel();
+                self.legacy_cancel_to_terminal = true;
+                return true;
+            }
+        }
         match self.send(Command::SetPresentation(target)) { Ok(_) => true, Err(error) => { self.error = Some(error); false } }
     }
     pub fn draft(&self) -> SavedDraft {
@@ -652,6 +674,19 @@ impl AgentPane {
             self.error = Some(error);
         }
         self.reconcile();
+        if self.presentation() == Presentation::Gui { self.legacy_return = None; }
+        else if let Some(bridge) = &mut self.legacy_return {
+            if let Some(error) = bridge.take_error() { self.error=Some(error); }
+            if bridge.cancelled() {
+                self.legacy_return = None;
+                self.legacy_cancel_to_terminal = false;
+                if let Err(error) = self.send(Command::SetPresentation(Presentation::Terminal)) { self.error=Some(error); }
+            }
+        }
+        if self.legacy_cancel_to_terminal && self.presentation() == Presentation::Gui && self.can_switch_presentation(Presentation::Terminal) {
+            self.legacy_cancel_to_terminal = false;
+            self.request_presentation(Presentation::Terminal);
+        }
         self.poll_image_picker(ctx);
         let mut i = 0;
         while i < self.imports.len() {

@@ -1366,7 +1366,9 @@ impl KilnApp {
                     let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 42.0));
                     let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("agent-return", *pid)));
                     let automatic = self.agent_views.get(pid).is_some_and(|view| view.automatic_terminal_return());
-                    let message = if automatic { "작업이 끝나고 입력이 비면 GUI로 전환합니다. TUI를 선택하면 전환을 취소합니다." }
+                    let message = if let Some(import) = self.agent_gui_imports.get(pid) { import.label() }
+                        else if let Some(label) = self.agent_views.get(pid).and_then(|view|view.legacy_return_label()) { label }
+                        else if automatic { "작업이 끝나고 입력이 비면 GUI로 전환합니다. TUI를 선택하면 전환을 취소합니다." }
                         else { "대화로 돌아가려면 CLI에서 /exit 또는 Ctrl-D로 종료하세요. 현재 작업은 계속 실행됩니다." };
                     bar.label(egui::RichText::new(kiln_common::i18n::tr(message)).color(t.orange));
                     egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
@@ -1572,11 +1574,20 @@ impl KilnApp {
             let pending = view.presentation_pending();
             let enabled = [agent_gui::Presentation::Gui, agent_gui::Presentation::Terminal]
                 .map(|target| !pending && (current == target || view.can_switch_presentation(target)));
-            if let Some(target) = current.switch_ui(&mut bar, enabled) {view.request_presentation(target);}
+            if let Some(target) = current.switch_ui(&mut bar, enabled) {
+                if view.request_presentation(target) && target == agent_gui::Presentation::Gui {
+                    if let Some(info) = self.panes.get(&pid).and_then(Pane::session).and_then(|session|self.conn.infos.get(&session)) {
+                        view.start_legacy_return(ui.ctx(),info.id,info.pid,self.conn.socket().to_owned());
+                    }
+                }
+            }
         } else {
             let pending = self.agent_gui_imports.contains_key(&pid);
-            if let Some(agent_gui::Presentation::Gui) = agent_gui::Presentation::Terminal.switch_ui(&mut bar, [!pending, true]) {
-                self.actions.push(Action::AdoptAgentGui(pid));
+            let cancelling = self.agent_gui_imports.get(&pid).is_some_and(|import|import.cancel_requested());
+            let selected = if pending && !cancelling { agent_gui::Presentation::Gui } else { agent_gui::Presentation::Terminal };
+            if let Some(target) = selected.switch_ui(&mut bar, [!cancelling, !cancelling]) {
+                if target == agent_gui::Presentation::Gui { self.actions.push(Action::AdoptAgentGui(pid)); }
+                else if let Some(import) = self.agent_gui_imports.get(&pid) { import.request_cancel(); }
             }
         }
         egui::Rect::from_min_max(pos2(body.left(), bar_rect.bottom()), body.max)

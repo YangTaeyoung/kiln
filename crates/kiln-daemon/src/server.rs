@@ -771,6 +771,25 @@ impl Daemon {
                 }
                 self.completion_update(session,None);
             }
+            ClientMsg::ReadInputState {req,session} => match self.session(session) {
+                Some(s)=> {
+                    let (revision,text)=s.input.observe(||s.emu.lock().text(0));
+                    reply(ServerMsg::InputState {req,pid:s.info.lock().pid,revision,text});
+                },
+                None=>reply(ServerMsg::Error {req,message:format!("no session {session}")}),
+            },
+            ClientMsg::InputIfUnchanged {req,session,pid,revision,text,data} => {
+                let accepted=self.session(session).is_some_and(|s| {
+                    if data.len()>32 || text.len()>1024*1024 {return false;}
+                    s.input.send_if_unchanged(revision,|| {
+                        // Match resize's emulator-before-info order.
+                        let emu=s.emu.lock();
+                        let info=s.info.lock();
+                        info.pid==pid && info.exited.is_none() && emu.text(0)==text
+                    },data).unwrap_or(false)
+                });
+                reply(ServerMsg::InputAccepted {req,accepted});
+            },
             ClientMsg::Input { session, data } => {
                 if self.completions.lock().remove(&session).is_some(){self.completion_update(session,None);}
                 if let Some(s) = self.session(session) {

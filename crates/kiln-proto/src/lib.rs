@@ -96,6 +96,9 @@ pub enum ClientMsg {
     /// Repair this terminal's transport/screen without restarting its child.
     RecoverTerminal { session: SessionId },
     ApplyShellCompletion { session: SessionId, revision: u64, buffer: String, cursor: usize },
+    /// Snapshot used only for conditional control input; never accepts stale UI observations.
+    ReadInputState { req:u32, session:SessionId },
+    InputIfUnchanged { req:u32, session:SessionId, pid:u32, revision:u64, text:String, data:Vec<u8> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -128,6 +131,8 @@ pub enum ServerMsg {
     CommandOutput { req: u32, session: SessionId, command: u64, text: String, truncated: bool },
     TerminalHealth { req: u32, session: SessionId, health: TerminalHealth },
     ShellCompletion { session: SessionId, request: Option<ShellCompletion> },
+    InputState { req:u32, pid:u32, revision:Option<u64>, text:String },
+    InputAccepted { req:u32, accepted:bool },
 }
 
 /// Ephemeral Zsh edit snapshot for passive previews or explicit menu requests.

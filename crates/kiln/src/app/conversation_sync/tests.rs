@@ -50,6 +50,21 @@ fn presentation_history_reads_only_exact_pinned_namespace_and_native_identity() 
 }
 
 #[test]
+fn exact_handoff_can_resume_an_empty_claude_session_without_making_it_a_discovery_candidate() {
+    let fixture=Fixture::new(Tool::Claude);
+    let row=json!({"type":"user","uuid":"12345678-1234-4234-8234-123456789abc","parentUuid":null,"sessionId":fixture.source.id,"cwd":fixture.source.cwd,"message":{"role":"user","content":"<command-name>/reload-plugins</command-name>"}});
+    fs::write(&fixture.source.path,row.to_string()+"\n").unwrap();
+    let env=vec![(env_key(Tool::Claude).into(),fixture.source.root.to_string_lossy().into_owned())];
+    let cwd=Path::new(&fixture.source.cwd);
+    assert!(native_display_history(Tool::Claude,&env,cwd,&fixture.source.id).unwrap().is_empty());
+    let scope=workspace_scope(&fixture);
+    assert!(discovery::find(&fixture.config,&scope,&Arc::new(AtomicBool::new(true)),&mut Default::default()).unwrap().is_empty());
+    let other=fixture._temp.path().join("wrong-cwd");fs::create_dir(&other).unwrap();
+    assert!(native_display_history(Tool::Claude,&env,&other,&fixture.source.id).is_err());
+    assert!(native_display_history(Tool::Claude,&env,cwd,"11111111-1111-4111-8111-111111111111").is_err());
+}
+
+#[test]
 fn presentation_history_reads_antigravity_native_paths_for_default_and_saved_accounts() {
     let temporary = tempfile::tempdir().unwrap();
     let cwd = temporary.path().canonicalize().unwrap();

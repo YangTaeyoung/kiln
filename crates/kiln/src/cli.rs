@@ -32,6 +32,8 @@ enum Cmd {
     #[command(hide = true)]
     AgentHook,
     #[command(hide = true)]
+    AgentNativeIdentity,
+    #[command(hide = true)]
     AgentGuiHost { #[arg(long)] id: String },
     #[command(hide = true)]
     SyncWorker,
@@ -137,6 +139,7 @@ pub fn main() -> anyhow::Result<()> {
         _ => {}
     }
     match cli.cmd {
+        Some(Cmd::AgentNativeIdentity) => app::agent_gui::native_parent_identity(),
         Some(Cmd::AgentGuiHost { id }) => app::agent_gui::serve(&id),
         Some(Cmd::AgentHook) => {
             #[cfg(windows)]

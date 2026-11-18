@@ -1943,3 +1943,96 @@ mod subscription_tests {
         );
     }
 }
+
+/// The legacy CLI must itself own the PTY root; a shell or another backend is not a target.
+pub(super) fn legacy_cli_identity(pid: u32, expected: &Path, version: &str) -> Result<(PathBuf, String)> {
+    let process = handoff_processes::inspect(&[pid])?.into_iter().next().context("Missing native process")?;
+    let executable = process.executable.canonicalize()?;
+    let expected = expected.canonicalize()?;
+    let prior_version = version.split_whitespace().next().unwrap_or("");
+    let retained_version = !prior_version.is_empty() && executable.parent() == expected.parent()
+        && executable.file_name().and_then(|name|name.to_str()) == Some(prior_version);
+    ensure!(executable == expected || retained_version, "The terminal root is not its original native CLI");
+    ensure!(!process.argv.iter().any(|arg|matches!(arg.as_str(),"-p"|"--print"|"--output-format"|"--input-format")), "The native CLI is not interactive");
+    Ok((executable, process.stamp))
+}
+
+pub(super) fn legacy_gui_cli_identity(root: u32, session: u64, expected: &Path, worker: &str, conversation: &str) -> Result<(u32, PathBuf, String)> {
+    let root = legacy_gui_owner(root, session, worker)?;
+    // Process display names can be version numbers, and an MCP process may also
+    // be named claude. Select only an exact resume child of the declared host.
+    let mut matches=Vec::new();
+    for child in handoff_processes::children(root)? {
+        let Ok(mut processes)=handoff_processes::inspect(&[child]) else {continue;};
+        let process=processes.remove(0);
+        if process.parent==root && process.argv.windows(2).any(|args|matches!(args[0].as_str(),"--resume"|"--session-id") && args[1]==conversation)
+            && !process.argv.iter().any(|arg|matches!(arg.as_str(),"-p"|"--print")) {matches.push(process);}
+    }
+    ensure!(matches.len()==1,"The native frontend belongs to another conversation or is ambiguous");
+    let process=matches.remove(0);let native=process.pid;
+    let version=process.executable.file_name().and_then(|name|name.to_str()).unwrap_or("");
+    ensure!(version.split('.').count()==3 && version.split('.').all(|part|part.parse::<u32>().is_ok()) || process.executable.canonicalize()? == expected.canonicalize()?, "Native executable identity cannot be confirmed");
+    let (path,stamp)=legacy_cli_identity(native,expected,version)?;
+    Ok((native,path,stamp))
+}
+
+/// A shell's PTY leader differs from its foreground structured worker. Validate
+/// the durable binding and the actual parent chain before using that job's PGID.
+pub(super) fn legacy_gui_owner(root:u32, session:u64, worker:&str)->Result<u32> {
+    let config: Config = journal::read(&journal::directory(worker)?.join("config.json"))?;
+    ensure!(config.descriptor.id==worker,"GUI worker identity changed");
+    let owner = if let Some(shell)=config.shell {
+        ensure!(shell.shell_session==session && shell_launch::shell_binding(session)?.is_some_and(|spec|descriptor(&spec).is_some_and(|descriptor|descriptor.id==worker)),"The foreground shell binding changed");
+        let mut child=shell.host_pid;
+        let mut anchored=false;
+        for _ in 0..16 {
+            if child==root {anchored=true;break;}
+            let process=handoff_processes::inspect(&[child])?.into_iter().next().context("Missing shell worker")?;
+            if process.parent<=1 || process.parent==child {break;}
+            child=process.parent;
+        }
+        ensure!(anchored,"GUI worker belongs to another terminal");
+        shell.host_pid
+    } else {
+        let parent=handoff_processes::inspect(&[root])?.into_iter().next().context("Missing GUI worker process")?;
+        ensure!(parent.argv.windows(2).any(|args|args[0]=="--id" && args[1]==worker),"The terminal root is not its original GUI host");
+        root
+    };
+    Ok(owner)
+}
+
+pub(super) fn legacy_input_is_foreground(root: u32, native: u32) -> Result<bool> {
+    #[cfg(target_os="macos")]
+    {
+        let mut info:libc::proc_bsdinfo=unsafe{std::mem::zeroed()};let size=std::mem::size_of_val(&info) as i32;
+        let count=unsafe{libc::proc_pidinfo(native as i32,libc::PROC_PIDTBSDINFO,0,(&mut info as *mut libc::proc_bsdinfo).cast(),size)};
+        ensure!(count==size && info.pbi_pid==native,"Native foreground ownership is unavailable");
+        Ok(info.pbi_pgid==root && info.e_tpgid==root)
+    }
+    #[cfg(all(unix,not(target_os="macos")))]
+    {
+        let text=std::fs::read_to_string(format!("/proc/{native}/stat"))?;
+        let fields:Vec<_>=text[text.rfind(')').context("Invalid native process state")?+1..].split_whitespace().collect();
+        Ok(fields.get(2).and_then(|value|value.parse::<u32>().ok())==Some(root) && fields.get(5).and_then(|value|value.parse::<u32>().ok())==Some(root))
+    }
+    #[cfg(windows)]
+    { let _ = (root, native); Ok(false) }
+    #[cfg(not(any(unix,windows)))]
+    { Ok(false) }
+}
+
+/// Reports only the direct caller's kernel identity to a late-loaded native mod.
+pub fn native_parent_identity() -> Result<()> {
+    #[cfg(unix)]
+    let parent = unsafe { libc::getppid() } as u32;
+    #[cfg(windows)]
+    let parent = kiln_daemon::procinfo::parent_of(std::process::id()).context("Missing native parent")?;
+    #[cfg(not(any(unix,windows)))]
+    anyhow::bail!("Native parent identity is unavailable");
+    #[cfg(any(unix,windows))]
+    {
+        let process = handoff_processes::inspect(&[parent])?.into_iter().next().context("Missing native caller")?;
+        println!("{}",serde_json::json!({"protocol":1,"pid":process.pid,"stamp":process.stamp}));
+        Ok(())
+    }
+}

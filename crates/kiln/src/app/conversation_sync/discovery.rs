@@ -316,11 +316,15 @@ fn antigravity_metadata(root: &Path, path: &Path, summaries: &Summaries) -> Resu
 
 /// Read only bounded leading rows until the native session identity appears.
 fn metadata(tool: Tool, root: &Path, path: &Path) -> Result<Option<Source>> {
+    metadata_for_handoff(tool, root, path, false)
+}
+
+fn metadata_for_handoff(tool: Tool, root: &Path, path: &Path, include_empty: bool) -> Result<Option<Source>> {
     if tool == Tool::Claude && storage::compressed(path) { return Ok(None); }
     safe_path(root, path)?;
     // Native CLIs create metadata-only session files before a first prompt. These
     // are not conversations and must not consume the initial twenty slots.
-    if fs::metadata(path)?.len() < 2 * 1024 * 1024 {
+    if !include_empty && fs::metadata(path)?.len() < 2 * 1024 * 1024 {
         let mut input = BufReader::new(storage::open(root, path)?.0.take(2 * 1024 * 1024));
         let mut line = Vec::new();
         let mut has_prompt = false;
@@ -452,7 +456,7 @@ pub(super) fn exact_source_optional(tool: Tool, root: &Path, cwd: &Path, id: &st
         if !candidate { continue; }
         let source = if let Some(summaries) = &summaries {
             antigravity_metadata(&root, &path, summaries)?
-        } else { metadata(tool, &root, &path)? };
+        } else { metadata_for_handoff(tool, &root, &path, tool == Tool::Claude)? };
         if let Some(source) = source
             && source.id == id && Path::new(&source.cwd).canonical()? == cwd {
             ensure!(found.is_none(), "Multiple native files claim the same conversation identity");
