@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.5",
-  "source_commit": "4cffcf93fdddd96901b206e543b14d1438725d11",
-  "note": "0.3.5 executable input: cooperative idle Claude native terminal return, including managed shell bootstrap; per-launch/session binding, draft/work/background guards and cancellation; native prompt suggestions with explicit Tab acceptance and send; workspace terminal titles take precedence over saved generic provider names. Claude 2.1.327 verified using isolated profiles, real managed shell startup and localhost synthetic responses, without authenticated model inference. Existing workers retain their original code; unsupported/disabled mods and other providers use normal CLI exit. Suggestion illustrations are synthetic native egui component renders from suggestion_capture_commit, with unchanged component layout. Existing activity/settings/model illustrations retain their recorded earlier provenance.",
+  "kiln_version": "0.3.6",
+  "source_commit": "5909361362c1e0737766e97b637390731a07ed06",
+  "note": "0.3.6 executable input: late native bridge for existing tracked macOS Claude terminals and older persistent GUI workers; exact PID/creation-stamp and conversation/account binding; acknowledged cancellation, shortcut crash recovery, conditional daemon input and exact empty-history resume. Actual Claude 2.1.326 history/empty/draft/cancel/old 0.3.4 worker and real shell completion scenarios verified in isolated profiles. Shell completion inference uses a loopback synthetic responder, never authenticated inference. Older Windows workers without verified foreground bootstrap input, other providers, unavailable mods and custom shortcut conflicts retain manual CLI-exit fallback. Existing component images and separate mobile provenance retain their prior recorded capture inputs.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
