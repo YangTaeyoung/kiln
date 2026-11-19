@@ -1,6 +1,6 @@
 {
   "kiln_version": "0.3.7",
-  "source_commit": "5909361362c1e0737766e97b637390731a07ed06",
+  "source_commit": "f99d58822f6c3e72fd29b9691aefce6d899ffdaa",
   "note": "0.3.7 source: Codex GUI steering remains available during unsettled thread setting updates on a confirmed active turn; native terminal extension preparation emits one summary instead of per-extension failures. Existing component images and separate mobile provenance retain their prior recorded capture inputs.",
   "mobile": {
     "version": "0.1.0",
