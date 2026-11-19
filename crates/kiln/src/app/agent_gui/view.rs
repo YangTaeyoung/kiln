@@ -601,7 +601,7 @@ impl AgentPane {
     fn submit(&mut self) {
         if self.composing
             || self.ime_frame
-            || self.settings_blocked()
+            || self.submit_settings_blocked()
             || !self.transport_alive
             || !self.live_input_allowed()
             || self.pending.is_some()
@@ -1487,7 +1487,7 @@ impl AgentPane {
             }
         }
         {
-            let enabled = !self.settings_blocked() && self.live_input_allowed()
+            let enabled = !self.submit_settings_blocked() && self.live_input_allowed()
                 && self.pending.is_none()
                 && self.backlog.is_empty()
                 && !self.image_import_pending()

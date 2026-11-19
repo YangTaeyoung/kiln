@@ -11,6 +11,59 @@ fn pane() -> AgentPane {
         account_label: "Pinned test account".into(),
     })
 }
+#[test]
+fn codex_gui_can_send_repeated_steers_while_thread_setting_is_unsettled() {
+    let mut p = pane();
+    p.transcript.lifecycle = Lifecycle::Running;
+    p.transcript.controls.status.insert("active_turn_settings".into(), NativeStatus {
+        subject: "active_turn_settings".into(),
+        fields: [("turnId".into(), ControlValue::Text("active-turn".into()))].into(),
+        unavailable: None,
+    });
+    p.transcript.controls.outcomes.insert("setting".into(), ControlOutcome {
+        operation: "setting".into(),
+        control: "effort".into(),
+        requested: ControlValue::Text("high".into()),
+        effective: None,
+        state: ApplicationState::Pending,
+        settled: false,
+        message: None,
+    });
+    assert!(p.settings_blocked());
+    assert!(!p.submit_settings_blocked());
+    let mut initialized = false;
+    let mut h = Harness::builder().with_size([700., 200.]).build_ui_state(
+        |ui, p: &mut AgentPane| {
+            if !initialized {
+                kiln_common::fonts::install(ui.ctx());
+                initialized = true;
+                return;
+            }
+            p.composer_action_ui(ui, false);
+        },
+        p,
+    );
+    for (index, text) in ["first follow-up", "second follow-up"].into_iter().enumerate() {
+        h.state_mut().composer.text = text.into();
+        h.run();
+        h.get_by_label("보내기").click();
+        h.run();
+        assert_eq!(h.state().sent.len(), index + 1);
+        assert!(matches!(&h.state().sent[index], Command::Submit { text: sent, .. } if sent == text));
+        let id = h.state().pending.as_ref().unwrap().id.clone();
+        h.state_mut().transcript.commands.insert(id, CommandPhase::Accepted);
+        h.state_mut().reconcile();
+    }
+    h.state_mut().transcript.lifecycle = Lifecycle::Ready;
+    assert!(h.state().submit_settings_blocked(), "a new turn must await setting settlement");
+    h.state_mut().transcript.lifecycle = Lifecycle::Running;
+    h.state_mut().transcript.controls.outcomes.insert("action".into(), ControlOutcome {
+        operation: "action".into(), control: "action:queue-start".into(),
+        requested: ControlValue::Default, effective: None,
+        state: ApplicationState::Pending, settled: false, message: None,
+    });
+    assert!(h.state().submit_settings_blocked(), "native actions remain serialized");
+}
 fn final_fix_published_ids(root: &std::path::Path) -> Vec<String> {
     std::fs::read_dir(root.join("commands"))
         .into_iter()

@@ -200,7 +200,7 @@
 </table></div>
 <p>In newly opened Kiln Zsh terminals, plain <code>codex</code>, <code>codex resume …</code> and <code>codex fork …</code> also use <code>--no-daemon</code>, so a shared server reporting <strong>Server is draining; retry after reconnecting</strong> does not block those launches. Explicit <code>--remote</code> connections, existing aliases/functions, other command forms and other shells keep their normal behavior. Use <code>command codex …</code> to bypass the wrapper or add <code>--no-daemon</code> yourself for a local session. Reopen existing shells to load this integration. Kiln does not restart the shared server or change its update settings.</p>
 <h2 id="native-session-settings">Native session settings and commands</h2>
-<p>You can send a follow-up with Send or Enter while a response is running; Stop remains a separate button. Claude accepts streaming follow-ups and Codex steers the current turn. Antigravity holds one follow-up until its current prompt finishes. A pending receipt is kept separate from an accepted message and is never automatically resent.</p>
+<p>You can send a follow-up with Send or Enter while a response is running; Stop remains a separate button. Claude accepts streaming follow-ups and Codex steers the current turn, including while a thread setting is awaiting confirmation. Antigravity holds one follow-up until its current prompt finishes. A pending receipt is kept separate from an accepted message and is never automatically resent.</p>
 <p>Model, effort and mode controls remain available during a response. Claude applies live changes at the native boundary; Codex composer selections update the next turn, while its explicit active-turn action changes supported settings of the current turn. Settings still wait for native confirmation. Workspace activity rows show the conversation title instead of the provider name, while preserving custom page titles.</p>
 <p>In a conversation GUI, use <strong>Session settings</strong> for searchable provider controls and <strong>Commands and skills</strong> to find native commands. A compact two-line message editor sits above one toolbar: attach an image, choose the model and mode, open <strong>Reasoning settings</strong>, or use the round Send/Stop control. Narrow panes keep the model beside <strong>Conversation options</strong>, which contains the remaining controls. Choices show readable model names and localized mode/effort labels while preserving the provider’s actual values. A missing catalog remains different from an empty one.</p>
 <p>Open Reasoning settings, or Conversation options in a narrow pane, to choose an offered reasoning level with an explanation of each choice. Claude’s independent Ultracode switch has a purple indicator when enabled. The header shows the confirmed effective model and mode.</p>
@@ -255,7 +255,7 @@
 <p>See the native <a href="https://code.claude.com/docs/en/model-config.md">Claude model reference</a>, <a href="https://learn.chatgpt.com/docs/app-server">Codex App Server reference</a> and <a href="https://agentclientprotocol.com/protocol/v1/session-config-options">ACP configuration contract</a>. Native catalogs can change between accounts and models; an unavailable or partial result is not a complete list.</p>
 <h2 id="personal-extensions">Personal extensions and account scope</h2>
 <p>New launches prepare supported personal Claude/Codex skills and self-contained plugin assets for the selected private profile. Claude also supports portable legacy commands, agents, output styles and workflow bundles. Native project precedence remains in effect; shared Codex HOME skills and Antigravity assets remain native. Existing account sign-in/bootstrap behavior is preserved. Source author files remain unchanged, and private profile edits/deletions survive later imports. Status polling and resuming a worker do not refresh these imports.</p>
-<p><strong>Extension prepared</strong> means import preparation succeeded. <strong>Existing extension retained</strong> means a prior cache version remains for readers. Neither means enabled, loaded or executed. Native discovery and execution need their own result. Portable supported plugin declarations can retain bundled hooks/MCP/LSP configuration without running it during preparation. Credential-bearing configuration, account-linked connectors, unsupported formats, external paths, routines and scheduler state need native setup or produce a visible diagnostic. Kiln does not copy the entire configuration or account history. See <a href="https://code.claude.com/docs/en/plugins/loading.md">native plugin loading</a>.</p>
+<p><strong>Extension prepared</strong> means import preparation succeeded. <strong>Existing extension retained</strong> means a prior cache version remains for readers. Neither means enabled, loaded or executed. Native discovery and execution need their own result. Portable supported plugin declarations can retain bundled hooks/MCP/LSP configuration without running it during preparation. Credential-bearing configuration, account-linked connectors, unsupported formats, external paths, routines and scheduler state need native setup or produce a visible diagnostic. The terminal shows one summary instead of a line for each skipped extension; set <code>KILN_EXTENSION_DIAGNOSTICS=1</code> before launch to see individual reasons. Kiln does not copy the entire configuration or account history. See <a href="https://code.claude.com/docs/en/plugins/loading.md">native plugin loading</a>.</p>
 <h2 id="next-steps">Next steps</h2>
 <ul>
 <li><a href="accounts.html">Accounts</a>: sign in, switch accounts and watch usage.</li>
@@ -429,7 +429,7 @@
 </table></div>
 <p>새로 연 Kiln Zsh 터미널에서 직접 입력하는 <code>codex</code>, <code>codex resume …</code>, <code>codex fork …</code>에도 <code>--no-daemon</code>이 적용됩니다. 따라서 공유 서버가 <strong>Server is draining; retry after reconnecting</strong>을 반환해도 이 명령들은 독립적으로 시작합니다. 명시적인 <code>--remote</code> 연결, 기존 별칭·함수, 그 밖의 명령 형식과 다른 셸은 기존 방식대로 동작합니다. 래퍼를 건너뛰려면 <code>command codex …</code>를 사용하고, 로컬 세션을 직접 실행할 때는 <code>--no-daemon</code>을 붙이세요. 기존 셸은 다시 열어야 적용됩니다. Kiln은 공유 서버를 재시작하거나 업데이트 설정을 바꾸지 않습니다.</p>
 <h2 id="native-session-settings">네이티브 대화 설정과 명령</h2>
-<p>응답 처리 중에도 보내기 버튼이나 Enter로 후속 메시지를 보낼 수 있으며, 중지 버튼은 별도로 유지됩니다. Claude는 스트리밍 후속 입력을 받고 Codex는 현재 턴에 입력을 추가합니다. Antigravity는 현재 요청이 끝날 때까지 후속 메시지 하나를 보관합니다. 전송 확인 대기와 수신 완료를 구분하며 자동으로 다시 보내지 않습니다.</p>
+<p>응답 처리 중에도 보내기 버튼이나 Enter로 후속 메시지를 보낼 수 있으며, 중지 버튼은 별도로 유지됩니다. Claude는 스트리밍 후속 입력을 받고 Codex는 현재 턴에 입력을 추가합니다. Codex에서는 대화 설정 변경의 확인을 기다리는 동안에도 확인된 현재 작업에 후속 메시지를 보낼 수 있습니다. Antigravity는 현재 요청이 끝날 때까지 후속 메시지 하나를 보관합니다. 전송 확인 대기와 수신 완료를 구분하며 자동으로 다시 보내지 않습니다.</p>
 <p>응답 처리 중에도 모델·추론 강도·모드를 선택할 수 있습니다. Claude는 네이티브 적용 시점에 변경하고, Codex 입력창의 선택은 다음 턴에 적용합니다. Codex의 명시적인 현재 턴 설정 작업은 지원되는 설정을 현재 턴에 적용합니다. 설정은 네이티브 확인을 기다립니다. 워크스페이스 내역은 제공자 이름 대신 대화 제목을 표시하며 사용자가 지정한 페이지 제목을 유지합니다.</p>
 <p>대화 GUI의 <strong>대화 설정</strong>에서 공급자별 설정을 검색하고 <strong>명령 및 스킬</strong>에서 네이티브 명령을 찾으세요. 두 줄 입력창 아래 한 줄 도구 모음에서 이미지를 첨부하고 모델·모드를 고르며 <strong>사고 설정</strong>을 열거나 원형 보내기·중지 버튼을 사용할 수 있습니다. 좁은 패널에는 모델과 <strong>대화 옵션</strong>을 표시하고 나머지 설정은 대화 옵션에 담습니다. 모델 이름은 읽기 쉽게, 모드·추론 강도는 앱 언어로 표시하되 공급자에게 전달하는 값은 유지합니다. 아직 받지 못한 목록과 빈 목록도 구분합니다.</p>
 <p>사고 설정이나 좁은 패널의 대화 옵션에서 각 단계의 설명을 읽고 추론 강도를 선택할 수 있습니다. Claude의 Ultracode는 독립된 스위치이며, 켜지면 보라색으로 표시합니다. 헤더는 적용이 확인된 모델과 모드를 보여 줍니다.</p>
@@ -485,6 +485,7 @@
 <h2 id="personal-extensions">개인 확장과 계정 범위</h2>
 <p>새 실행은 지원되는 개인 Claude·Codex 스킬과 자체 완결된 플러그인 자산을 선택한 비공개 프로필에 준비합니다. Claude는 이식 가능한 이전 명령·에이전트·응답 스타일·워크플로 묶음도 지원합니다. 프로젝트 우선순위는 네이티브 규칙을 따르며, 공유 Codex HOME 스킬과 Antigravity 자산은 네이티브에서 관리합니다. 기존 계정 로그인·초기 설정 동작은 유지됩니다. 원본 작성 파일은 변경하지 않으며, 이후 가져오기에서도 비공개 프로필의 편집·삭제를 보존합니다. 상태 조회와 작업 프로세스 재개는 이 항목들을 새로 가져오지 않습니다.</p>
 <p><strong>확장 준비됨</strong>은 가져오기 준비 성공을, <strong>기존 확장 보존됨</strong>은 이전 캐시 버전이 사용 중인 프로세스를 위해 남았음을 뜻합니다. 활성화·로드·실행 성공을 뜻하지 않으며 네이티브 발견·실행 결과는 별도로 확인해야 합니다. 지원되는 이식 가능한 플러그인 선언은 준비 중 실행하지 않고 묶음의 hooks·MCP·LSP 설정을 보존할 수 있습니다. 인증 정보가 든 설정, 계정 연결형 커넥터, 미지원 형식, 외부 경로, 루틴·스케줄러 상태는 네이티브 설정이 필요하거나 진단이 표시됩니다. 전체 설정이나 계정 기록을 복사하지 않습니다. <a href="https://code.claude.com/docs/en/plugins/loading.md">네이티브 플러그인 로드</a>를 참고하세요.</p>
+<p>터미널에는 건너뛴 확장마다 오류를 출력하는 대신 요약 한 줄을 표시합니다. 개별 사유는 실행 전에 <code>KILN_EXTENSION_DIAGNOSTICS=1</code>을 설정하면 확인할 수 있습니다.</p>
 <h2 id="next-steps">다음 단계</h2>
 <ul>
 <li><a href="accounts.html">계정</a>: 로그인, 계정 전환, 사용량 확인</li>
@@ -659,7 +660,7 @@
 </table></div>
 <p>新しく開いた Kiln の Zsh ターミナルでは、直接入力する <code>codex</code>、<code>codex resume …</code>、<code>codex fork …</code> にも <code>--no-daemon</code> が適用されます。共有サーバーが <strong>Server is draining; retry after reconnecting</strong> を返しても、これらのコマンドは独立して起動します。明示的な <code>--remote</code> 接続、既存のエイリアスや関数、その他のコマンド形式とシェルは従来どおりに動作します。ラッパーを使わない場合は <code>command codex …</code> を、ローカルセッションを直接実行する場合は <code>--no-daemon</code> を使用してください。既存のシェルには開き直した後で適用されます。Kiln は共有サーバーを再起動したり、更新設定を変更したりしません。</p>
 <h2 id="native-session-settings">ネイティブの会話設定とコマンド</h2>
-<p>応答中も送信ボタンまたはEnterで追加メッセージを送信できます。停止ボタンは別に表示されます。Claudeはストリーミング追加入力を受け取り、Codexは現在のターンに入力を追加します。Antigravityは現在の要求が完了するまで追加メッセージを1件保持します。受領確認待ちと受領済みを区別し、自動再送しません。</p>
+<p>応答中も送信ボタンまたはEnterで追加メッセージを送信できます。停止ボタンは別に表示されます。Claudeはストリーミング追加入力を受け取り、Codexは現在のターンに入力を追加します。Codexでは会話設定の確認待ちでも、確認済みの現在のターンに追加メッセージを送信できます。Antigravityは現在の要求が完了するまで追加メッセージを1件保持します。受領確認待ちと受領済みを区別し、自動再送しません。</p>
 <p>応答中もモデル・推論強度・モードを選択できます。Claudeはネイティブの適用タイミングで変更します。Codexの入力欄の選択は次のターンに適用され、明示的な現在のターン設定アクションは対応する設定を現在のターンに適用します。設定はネイティブの確認を待ちます。ワークスペースの履歴にはプロバイダー名ではなく会話タイトルを表示し、独自のページタイトルは保持します。</p>
 <p>会話 GUI の <strong>セッション設定</strong>でプロバイダーの設定を検索し、<strong>コマンドとスキル</strong>でネイティブのコマンドを探せます。コンパクトな 2 行の入力欄の下に、画像添付、モデル・モード、<strong>推論設定</strong>、丸い送信・停止ボタンを 1 行にまとめています。狭いパネルではモデルと <strong>会話オプション</strong>を表示し、残りの設定を会話オプションにまとめます。モデル名は読みやすく、モードと推論の強度はアプリの言語で表示し、プロバイダーへ送る値は保持します。未取得の一覧と空の一覧も区別します。</p>
 <p>推論設定や狭いパネルの対話オプションで、各ステップの説明を読み、推論の強さを選択できます。ClaudeのUltracodeは独立したスイッチであり、オンにすると紫色で表示されます。ヘッダーには、適用が確認されたモデルとモードが表示されます。</p>
@@ -715,6 +716,7 @@
 <h2 id="personal-extensions">個人の拡張とアカウントの範囲</h2>
 <p>新規起動時に、対応する個人の Claude・Codex スキルと自己完結したプラグイン資産を、選択した非公開プロファイルに準備します。Claude は移植可能な従来のコマンド、エージェント、応答スタイル、ワークフローバンドルにも対応します。プロジェクトの優先順位はネイティブ規則に従い、共有 Codex HOME スキルと Antigravity 資産はネイティブで管理します。既存のログイン・初期設定動作は維持されます。元の作成ファイルは変更せず、後のインポートでも非公開プロファイルの編集・削除を保持します。状態照会やワーカーの再開では再インポートしません。</p>
 <p><strong>拡張を準備済み</strong>はインポート準備の成功、<strong>既存の拡張を保持</strong>は利用中のプロセスのために以前のキャッシュ版を残したことを示します。有効化・読み込み・実行の成功ではなく、ネイティブの検出・実行結果は別途必要です。対応する移植可能なプラグイン宣言は、準備中に実行せず、バンドル内の hooks・MCP・LSP 設定を保持できます。認証情報を含む設定、アカウント連携コネクター、未対応形式、外部パス、ルーチン・スケジューラー状態はネイティブ設定が必要か、診断が表示されます。設定全体やアカウント履歴はコピーしません。<a href="https://code.claude.com/docs/en/plugins/loading.md">ネイティブのプラグイン読み込み</a>をご覧ください。</p>
+<p>ターミナルでは、スキップした拡張ごとのエラーを出力せず、要約を1行表示します。個別の理由を確認するには、起動前に <code>KILN_EXTENSION_DIAGNOSTICS=1</code> を設定してください。</p>
 <h2 id="next-steps">次のステップ</h2>
 <ul>
 <li><a href="accounts.html">アカウント</a>では、ログイン、アカウントの切り替え、使用量の確認について説明しています。</li>
@@ -889,7 +891,7 @@
 </table></div>
 <p>在新打开的 Kiln Zsh 终端中，直接输入的 <code>codex</code>、<code>codex resume …</code> 和 <code>codex fork …</code> 也使用 <code>--no-daemon</code>。即使共享服务器返回 <strong>Server is draining; retry after reconnecting</strong>，这些命令仍可独立启动。显式 <code>--remote</code> 连接、已有别名或函数、其他命令形式和其他 shell 保持原有行为。使用 <code>command codex …</code> 可绕过包装函数，也可以自行添加 <code>--no-daemon</code> 来启动本地会话。已有 shell 需要重新打开才能加载此集成。Kiln 不会重启共享服务器或更改其更新设置。</p>
 <h2 id="native-session-settings">原生会话设置与命令</h2>
-<p>回复进行中也可通过发送按钮或Enter发送后续消息，停止按钮保持独立。Claude接收流式后续输入，Codex向当前轮次追加输入。Antigravity会保存一条后续消息，直到当前请求结束。发送确认等待与已接收状态分开显示，不会自动重发。</p>
+<p>回复进行中也可通过发送按钮或Enter发送后续消息，停止按钮保持独立。Claude接收流式后续输入，Codex向当前轮次追加输入。Codex 的会话设置等待确认时，仍可向已确认的当前轮次发送后续消息。Antigravity会保存一条后续消息，直到当前请求结束。发送确认等待与已接收状态分开显示，不会自动重发。</p>
 <p>回复进行中仍可选择模型、推理强度和模式。Claude按原生应用时机更新；Codex输入区的选择用于下一轮，明确的当前轮设置操作可修改当前轮支持的设置。设置仍需等待原生确认。工作区活动列表显示对话标题而不是提供方名称，并保留自定义页面标题。</p>
 <p>在对话 GUI 中，使用<strong>会话设置</strong>搜索提供方设置，使用<strong>命令与技能</strong>查找原生命令。紧凑的两行输入框下方是一行工具栏，可附加图片、选择模型和模式、打开<strong>推理设置</strong>，并使用圆形发送或停止按钮。较窄的面板只保留模型和<strong>对话选项</strong>，其余控件收在对话选项中。模型名称便于阅读，模式和推理强度使用应用语言显示，同时保留传给提供方的实际值。尚未收到的目录与空目录也会明确区分。</p>
 <p>在推理设置或窄面板的对话选项中，您可以阅读各步骤的说明并选择推理强度。Claude的Ultracode是一个独立开关，开启时会显示为紫色。标题栏会显示已确认适用的模型和模式。</p>
@@ -945,6 +947,7 @@
 <h2 id="personal-extensions">个人扩展与账户范围</h2>
 <p>新启动时，会为所选私有配置准备受支持的个人 Claude·Codex 技能及自包含插件资源。Claude 还支持可移植的旧版命令、智能体、回复样式及工作流包。项目优先级遵循原生规则；共享 Codex HOME 技能与 Antigravity 资源仍由原生管理。现有账户登录·初始化行为保持不变。原始作者文件不会被修改，后续导入仍保留私有配置中的编辑·删除。状态轮询和恢复工作进程不会重新导入这些资源。</p>
 <p><strong>扩展已准备</strong>表示导入准备成功；<strong>已保留现有扩展</strong>表示为仍在使用的进程保留了旧缓存版本。它们都不表示已启用、已加载或已执行，原生发现和执行需要各自的结果。受支持的可移植插件声明能保留包内 hooks·MCP·LSP 配置，准备过程不会运行它们。含凭据的配置、账户关联连接器、不支持的格式、外部路径、例程及调度器状态需要原生设置，或显示诊断。Kiln 不会复制整个配置或账户历史。请参阅<a href="https://code.claude.com/docs/en/plugins/loading.md">原生插件加载</a>。</p>
+<p>终端会用一行摘要代替逐条显示被跳过扩展的错误。若需查看各项原因，请在启动前设置 <code>KILN_EXTENSION_DIAGNOSTICS=1</code>。</p>
 <h2 id="next-steps">后续步骤</h2>
 <ul>
 <li><a href="accounts.html">账户</a>：登录、切换账户和查看用量。</li>

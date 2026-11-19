@@ -217,7 +217,7 @@ If a shell-attached agent exits unexpectedly, its unsent draft is kept with that
 
 ## Follow-ups and settings during work
 
-Send or Enter remains available while the provider is running or waiting. Claude uses streaming user input with UUID receipts; old response fragments cannot accept a newer message. Codex uses `turn/steer` with the confirmed `expectedTurnId` and correlates the response. A rejected steer leaves the worker running and the draft recoverable. ACP holds one follow-up until the current prompt completes; Stop withdraws that unsent follow-up. No provider is automatically interrupted to submit a message.
+Send or Enter remains available while the provider is running or waiting. Claude uses streaming user input with UUID receipts; old response fragments cannot accept a newer message. Codex uses `turn/steer` with the confirmed `expectedTurnId` and correlates the response. A pending thread-default setting update does not block steering an already confirmed active Codex turn; starting a new turn still waits for setting settlement. A rejected steer leaves the worker running and the draft recoverable. ACP holds one follow-up until the current prompt completes; Stop withdraws that unsent follow-up. No provider is automatically interrupted to submit a message.
 
 Model, effort and mode controls stay available during work, while native setting settlement still serializes conflicting changes. Codex thread defaults apply to subsequent turns; the existing explicit active-turn action remains separate. Claude uses its streaming control setters. ACP applies advertised configuration options and live mode changes without resetting the running lifecycle.
 

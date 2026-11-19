@@ -106,6 +106,24 @@ impl AgentPane {
                 .values()
                 .any(|v| !v.settled)
     }
+    pub(super) fn submit_settings_blocked(&self) -> bool {
+        if self.descriptor.tool != kiln_accounts::Tool::Codex
+            || !matches!(self.transcript.lifecycle, Lifecycle::Running | Lifecycle::Waiting)
+            || !self.transcript.controls.status.get("active_turn_settings")
+                .and_then(|status| status.fields.get("turnId"))
+                .is_some_and(|id| matches!(id, ControlValue::Text(id) if !id.is_empty()))
+        {
+            return self.settings_blocked();
+        }
+        // A confirmed active turn accepts turn/steer independently of thread
+        // default setting readback. Keep all local and non-setting barriers.
+        self.replay_required
+            || !self.local_intents.is_empty()
+            || !self.backlog.is_empty()
+            || self.transcript.controls.outcomes.values().any(|outcome| {
+                !outcome.settled && outcome.control.starts_with("action:")
+            })
+    }
     pub(super) fn editing_allowed(&self) -> bool {
         self.transport_alive
             && self.transcript.lifecycle == Lifecycle::Ready

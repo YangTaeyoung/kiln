@@ -150,7 +150,7 @@ In newly opened Kiln Zsh terminals, plain `codex`, `codex resume …` and `codex
 
 ## Native session settings and commands {#native-session-settings}
 
-You can send a follow-up with Send or Enter while a response is running; Stop remains a separate button. Claude accepts streaming follow-ups and Codex steers the current turn. Antigravity holds one follow-up until its current prompt finishes. A pending receipt is kept separate from an accepted message and is never automatically resent.
+You can send a follow-up with Send or Enter while a response is running; Stop remains a separate button. Claude accepts streaming follow-ups and Codex steers the current turn, including while a thread setting is awaiting confirmation. Antigravity holds one follow-up until its current prompt finishes. A pending receipt is kept separate from an accepted message and is never automatically resent.
 
 Model, effort and mode controls remain available during a response. Claude applies live changes at the native boundary; Codex composer selections update the next turn, while its explicit active-turn action changes supported settings of the current turn. Settings still wait for native confirmation. Workspace activity rows show the conversation title instead of the provider name, while preserving custom page titles.
 
@@ -208,7 +208,7 @@ See the native [Claude model reference](https://code.claude.com/docs/en/model-co
 
 New launches prepare supported personal Claude/Codex skills and self-contained plugin assets for the selected private profile. Claude also supports portable legacy commands, agents, output styles and workflow bundles. Native project precedence remains in effect; shared Codex HOME skills and Antigravity assets remain native. Existing account sign-in/bootstrap behavior is preserved. Source author files remain unchanged, and private profile edits/deletions survive later imports. Status polling and resuming a worker do not refresh these imports.
 
-**Extension prepared** means import preparation succeeded. **Existing extension retained** means a prior cache version remains for readers. Neither means enabled, loaded or executed. Native discovery and execution need their own result. Portable supported plugin declarations can retain bundled hooks/MCP/LSP configuration without running it during preparation. Credential-bearing configuration, account-linked connectors, unsupported formats, external paths, routines and scheduler state need native setup or produce a visible diagnostic. Kiln does not copy the entire configuration or account history. See [native plugin loading](https://code.claude.com/docs/en/plugins/loading.md).
+**Extension prepared** means import preparation succeeded. **Existing extension retained** means a prior cache version remains for readers. Neither means enabled, loaded or executed. Native discovery and execution need their own result. Portable supported plugin declarations can retain bundled hooks/MCP/LSP configuration without running it during preparation. Credential-bearing configuration, account-linked connectors, unsupported formats, external paths, routines and scheduler state need native setup or produce a visible diagnostic. The terminal shows one summary instead of a line for each skipped extension; set `KILN_EXTENSION_DIAGNOSTICS=1` before launch to see individual reasons. Kiln does not copy the entire configuration or account history. See [native plugin loading](https://code.claude.com/docs/en/plugins/loading.md).
 
 ## Next steps {#next-steps}
 
