@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     fs,
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     process::{Command as Process, Stdio},
     sync::{
         Arc, Condvar, Mutex, OnceLock, Weak,
@@ -460,6 +461,14 @@ fn run(
             }
         }
     };
+    if record.tool == Tool::Codex {
+        return match source {
+            Source::Gui { worker, conversation } => run_codex_gui_return(
+                worker, conversation, &record, session, pid, socket, cancel, requested, armed, wake, phase,
+            ),
+            Source::Native(_) => { phase("manual"); Ok(()) }
+        };
+    }
     if record.tool != Tool::Claude {
         phase("manual");
         return Ok(());
@@ -492,7 +501,7 @@ fn run(
             (pid, path, stamp)
         }
         Source::Gui { worker, .. } => {
-            host::legacy_gui_cli_identity(pid, session, program, worker, id)?
+            host::legacy_gui_cli_identity(pid, session, program, worker, id, Tool::Claude)?
         }
     };
     let foreground_owner = match source {
@@ -745,6 +754,179 @@ fn run(
         }
     }
 }
+
+/// Codex has no return hook in Kiln's GUI host. Ask its own quit handler only
+/// after the native log and the visible composer both prove an idle boundary.
+fn run_codex_gui_return(
+    worker: &str,
+    conversation: &str,
+    record: &super::super::agent_runtime::Record,
+    session: SessionId,
+    pid: u32,
+    socket: &str,
+    cancel: &AtomicBool,
+    requested: &AtomicBool,
+    armed: &AtomicBool,
+    wake: &(Mutex<()>, Condvar),
+    phase: impl Fn(&str),
+) -> Result<()> {
+    ensure!(record.confirmed && conversation.len() == 36, "Missing confirmed Codex conversation");
+    if cfg!(windows) { phase("manual"); return Ok(()); }
+    let program = Path::new(record.spec.program.as_deref().context("Missing Codex executable")?);
+    let identity = host::legacy_gui_cli_identity(pid, session, program, worker, conversation, Tool::Codex)?;
+    let owner = host::legacy_gui_owner(pid, session, worker)?;
+    let client = kiln_daemon::client::Client::connect(socket, None)?;
+    ensure!(client.server_build == kiln_daemon::exe_build_id(&super::super::conn::daemon_exe()), "Update the daemon before switching this terminal");
+    let root = record.spec.env.iter().find(|(key, _)| key == "CODEX_HOME")
+        .map(|(_, value)| PathBuf::from(value))
+        .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".codex")))
+        .context("Codex home is unavailable")?;
+    let mut log = None;
+    let mut last_scan = Instant::now() - Duration::from_secs(2);
+    let mut stable: Option<(u64, String, Instant)> = None;
+    let mut last_send = Instant::now() - Duration::from_secs(3);
+    let mut sent = false;
+    let mut sent_at = None;
+    loop {
+        if cancel.load(Ordering::Acquire) { return Ok(()); }
+        if requested.load(Ordering::Acquire) {
+            if !sent { phase("cancelled"); return Ok(()); }
+            // An accepted quit may already be in flight. Keep the host's
+            // takeover armed until it observes the native process exit.
+            if sent_at.is_some_and(|at: Instant| at.elapsed() >= Duration::from_secs(5)) {
+                phase("cancelled");
+                return Ok(());
+            }
+            phase("closing");
+        }
+        if !verify_session(&client, session, pid)? { return Ok(()); }
+        match host::legacy_cli_identity(identity.0, program, identity.1.file_name().and_then(|name|name.to_str()).unwrap_or("")) {
+            Ok(observed) => ensure!(observed == (identity.1.clone(), identity.2.clone()), "Codex process identity changed"),
+            Err(_) if sent => return Ok(()),
+            Err(error) => return Err(error),
+        }
+        if !host::legacy_input_is_foreground(owner, identity.0)? {
+            phase("background"); stable = None;
+        } else {
+            if log.is_none() && last_scan.elapsed() >= Duration::from_secs(2) {
+                log = codex_rollout(&root, conversation)?;
+                last_scan = Instant::now();
+            }
+            let status = log.as_ref().map(|path| codex_turn_idle(path, conversation)).transpose()?.flatten();
+            let ServerMsg::InputState { pid: observed, revision, text, .. } = client.request(
+                |req| ClientMsg::ReadInputState { req, session }, Duration::from_secs(2),
+            )? else { anyhow::bail!("Codex terminal state is unavailable"); };
+            ensure!(observed == pid, "Codex terminal changed");
+            if status == Some(true) && revision.is_some() && codex_idle_screen(&text) {
+                let revision = revision.unwrap();
+                let started = match &stable {
+                    Some((prior_revision, prior_text, started)) if *prior_revision == revision && *prior_text == text => *started,
+                    _ => Instant::now(),
+                };
+                stable = Some((revision, text.clone(), started));
+                phase("ready");
+                if started.elapsed() >= Duration::from_millis(700) && last_send.elapsed() >= Duration::from_secs(2)
+                    && !requested.load(Ordering::Acquire) && !cancel.load(Ordering::Acquire)
+                    && host::legacy_input_is_foreground(owner, identity.0)?
+                    && codex_turn_idle(log.as_ref().unwrap(), conversation)? == Some(true)
+                {
+                    let reply = client.request(|req| ClientMsg::InputIfUnchanged {
+                        req, session, pid, revision, text, data: vec![0x04],
+                    }, Duration::from_secs(2))?;
+                    if matches!(reply, ServerMsg::InputAccepted { accepted: true, .. }) {
+                        sent = true;
+                        sent_at = Some(Instant::now());
+                        armed.store(true, Ordering::Release);
+                        phase("closing");
+                    }
+                    last_send = Instant::now();
+                    stable = None;
+                }
+            } else {
+                phase(match status { Some(false) => "working", Some(true) => "draft", None => "starting" });
+                stable = None;
+            }
+        }
+        let guard = wake.0.lock().map_err(|_| anyhow::anyhow!("Codex return cancellation is unavailable"))?;
+        if !cancel.load(Ordering::Acquire) {
+            let _ = wake.1.wait_timeout(guard, Duration::from_millis(300));
+        }
+    }
+}
+
+fn codex_rollout(root: &Path, id: &str) -> Result<Option<PathBuf>> {
+    let mut found = None;
+    let sessions = root.join("sessions");
+    if !sessions.is_dir() { return Ok(None); }
+    for year in fs::read_dir(&sessions)? {
+        let year = year?.path();
+        if !year.is_dir() { continue; }
+        for month in fs::read_dir(year)? {
+            let month = month?.path();
+            if !month.is_dir() { continue; }
+            for day in fs::read_dir(month)? {
+                let day = day?.path();
+                if !day.is_dir() { continue; }
+                for file in fs::read_dir(day)? {
+                    let file = file?.path();
+                    if file.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("rollout-") && name.ends_with(&format!("-{id}.jsonl"))) {
+                        ensure!(found.is_none(), "Multiple Codex histories match this conversation");
+                        ensure!(file.is_file() && file.canonicalize()?.starts_with(root.canonicalize()?), "Codex history is outside its account");
+                        found = Some(file);
+                    }
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// The last turn boundary must be complete. An incomplete or oversized tail
+/// leaves the terminal alone until the next observation.
+fn codex_turn_idle(path: &Path, id: &str) -> Result<Option<bool>> {
+    const TAIL: u64 = 4 * 1024 * 1024;
+    let mut file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    let mut first = String::new();
+    {
+        let mut reader = BufReader::new((&mut file).take(1024 * 1024));
+        reader.read_line(&mut first)?;
+    }
+    let Ok(meta) = serde_json::from_str::<Value>(&first) else { return Ok(None); };
+    ensure!(meta["type"] == "session_meta" && meta["payload"]["id"] == id, "Codex history identity changed");
+    let start = size.saturating_sub(TAIL);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    (&mut file).take(TAIL + 1024 * 1024).read_to_end(&mut bytes)?;
+    if start > 0 {
+        let Some(skip) = bytes.iter().position(|byte| *byte == b'\n') else { return Ok(None); };
+        bytes.drain(..=skip);
+    }
+    let mut last = None;
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.is_empty() { continue; }
+        let Ok(row) = serde_json::from_slice::<Value>(line) else { return Ok(None); };
+        if row["type"] != "event_msg" { continue; }
+        last = match row["payload"]["type"].as_str() {
+            Some("task_started" | "user_message") => Some(false),
+            Some("task_complete" | "turn_complete" | "turn_aborted") => Some(true),
+            _ => last,
+        };
+    }
+    Ok(last.or_else(|| (start == 0).then_some(true)))
+}
+
+fn codex_idle_screen(text: &str) -> bool {
+    if text.len() > 1024 * 1024 { return false; }
+    if text.contains("Working (") || text.contains("esc to interrupt") || text.contains("Copying ") { return false; }
+    let lines: Vec<_> = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let Some(prompt) = lines.iter().rposition(|line| *line == "› Ask Codex to do anything") else { return false; };
+    let tail = &lines[prompt + 1..];
+    tail.first().is_some_and(|line| line.contains(" · "))
+        && tail.get(1).is_some_and(|line| line.contains("? for shortcuts"))
+        && (tail.len() == 2
+            || (tail.len() == 3 && tail[2].contains("warnings") && tail[2].contains("f2 to view")))
+}
 /// A command shortcut is not a safe reload while Claude is working: native
 /// busy contexts can queue its slash command as a model prompt. Require the
 /// actual, bounded idle terminal footer before asking the native command router.
@@ -841,6 +1023,35 @@ fn verify_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn codex_return_requires_empty_composer_and_completed_native_turn() {
+        let screen = "final answer\n› Ask Codex to do anything\nGPT-6 high · /tmp/project\n← for agents · ? for shortcuts\n⚠ 10 warnings · f2 to view\n";
+        assert!(codex_idle_screen(screen));
+        for unsafe_screen in [
+            screen.replace("Ask Codex to do anything", "unfinished draft"),
+            screen.replace("GPT-6 high", "Working (4s • esc to interrupt)"),
+            screen.replace("? for shortcuts", "approval required"),
+            format!("• Working (0s • esc to interrupt)\n{screen}"),
+            format!("{screen}modal dialog\n"),
+        ] { assert!(!codex_idle_screen(&unsafe_screen)); }
+
+        let root = tempfile::tempdir().unwrap();
+        let id = "11111111-2222-3333-4444-555555555555";
+        let dir = root.path().join("sessions/2026/11/20");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("rollout-2026-11-20T00-00-00-{id}.jsonl"));
+        let meta = json!({"type":"session_meta","payload":{"id":id}});
+        let started = json!({"type":"event_msg","payload":{"type":"task_started"}});
+        let completed = json!({"type":"event_msg","payload":{"type":"task_complete"}});
+        fs::write(&path, format!("{meta}\n")).unwrap();
+        assert_eq!(codex_rollout(root.path(), id).unwrap(), Some(path.clone()));
+        assert_eq!(codex_turn_idle(&path, id).unwrap(), Some(true));
+        fs::write(&path, format!("{meta}\n{started}\n")).unwrap();
+        assert_eq!(codex_turn_idle(&path, id).unwrap(), Some(false));
+        fs::write(&path, format!("{meta}\n{started}\n{completed}\n")).unwrap();
+        assert_eq!(codex_turn_idle(&path, id).unwrap(), Some(true));
+        assert!(codex_turn_idle(&path, "aaaaaaaa-2222-3333-4444-555555555555").is_err());
+    }
     #[test]
     fn native_reload_binding_restores_exact_bytes_and_keeps_concurrent_user_edits() {
         let root = tempfile::tempdir().unwrap();

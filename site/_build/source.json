@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.7",
-  "source_commit": "f99d58822f6c3e72fd29b9691aefce6d899ffdaa",
-  "note": "0.3.7 source: Codex GUI steering remains available during unsettled thread setting updates on a confirmed active turn; native terminal extension preparation emits one summary instead of per-extension failures. Existing component images and separate mobile provenance retain their prior recorded capture inputs.",
+  "kiln_version": "0.3.8",
+  "source_commit": "8ba842afcc5fb3ea96d56d93db8c42f011871e4c",
+  "note": "0.3.8 source: macOS Codex GUI-owned TUI conversations return after a completed native turn and empty composer, using guarded input on the verified PTY; active work and drafts defer return. Existing component images and mobile provenance retain their recorded capture inputs.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
