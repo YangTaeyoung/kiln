@@ -315,7 +315,7 @@ impl AgentPane {
     pub fn legacy_return_error(&self) -> Option<&str> { self.legacy_return.as_ref().and_then(|bridge|bridge.error()) }
     pub fn legacy_return_label(&self) -> Option<&'static str> { self.legacy_return.as_ref().map(|bridge|bridge.label()) }
     pub fn start_legacy_return(&mut self, ctx: &egui::Context, session: u64, pid: u32, socket: String) {
-        if self.descriptor.tool != Tool::Claude || self.transcript.controls.status.contains_key("native_terminal_return") || self.legacy_return.is_some() { return; }
+        if !matches!(self.descriptor.tool, Tool::Claude | Tool::Codex) || self.transcript.controls.status.contains_key("native_terminal_return") || self.legacy_return.is_some() { return; }
         if let Some(conversation) = self.transcript.provider_session_id.clone() {
             self.legacy_return = Some(super::legacy_return::LegacyReturn::start(ctx, super::legacy_return::Source::Gui {worker:self.descriptor.id.clone(),conversation},session,pid,socket));
         }

@@ -1957,7 +1957,7 @@ pub(super) fn legacy_cli_identity(pid: u32, expected: &Path, version: &str) -> R
     Ok((executable, process.stamp))
 }
 
-pub(super) fn legacy_gui_cli_identity(root: u32, session: u64, expected: &Path, worker: &str, conversation: &str) -> Result<(u32, PathBuf, String)> {
+pub(super) fn legacy_gui_cli_identity(root: u32, session: u64, expected: &Path, worker: &str, conversation: &str, tool: Tool) -> Result<(u32, PathBuf, String)> {
     let root = legacy_gui_owner(root, session, worker)?;
     // Process display names can be version numbers, and an MCP process may also
     // be named claude. Select only an exact resume child of the declared host.
@@ -1965,7 +1965,12 @@ pub(super) fn legacy_gui_cli_identity(root: u32, session: u64, expected: &Path, 
     for child in handoff_processes::children(root)? {
         let Ok(mut processes)=handoff_processes::inspect(&[child]) else {continue;};
         let process=processes.remove(0);
-        if process.parent==root && process.argv.windows(2).any(|args|matches!(args[0].as_str(),"--resume"|"--session-id") && args[1]==conversation)
+        let same_conversation = process.argv.windows(2).any(|args| match tool {
+            Tool::Claude => matches!(args[0].as_str(),"--resume"|"--session-id") && args[1]==conversation,
+            Tool::Codex => args[0]=="resume" && args[1]==conversation,
+            Tool::Antigravity => false,
+        });
+        if process.parent==root && same_conversation
             && !process.argv.iter().any(|arg|matches!(arg.as_str(),"-p"|"--print")) {matches.push(process);}
     }
     ensure!(matches.len()==1,"The native frontend belongs to another conversation or is ambiguous");

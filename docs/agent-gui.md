@@ -140,17 +140,19 @@ process ownership; those processes stay running. The terminal starts only after
 the previous agent has finished exiting. A refusal explains the blocking state
 without changing the current conversation.
 
-Requesting GUI while the native CLI is open records a return request. Kiln does
-not synthesize an exit command, Ctrl-C or a prompt. Exit the native CLI through its
-normal exit action. Only after its natural process exit does Kiln import appended
-user/assistant text and reconnect the structured backend. The import verifies the
+Requesting GUI while the native CLI is open records a return request. For a
+macOS Codex conversation opened from Kiln’s GUI, the verified idle and empty
+composer path sends Codex’s Ctrl+D exit input to the same PTY. Other unsupported
+native sessions require their normal exit action. Only after the native process
+exits does Kiln import appended user/assistant text and reconnect the structured
+backend. The import verifies the
 retained native-history prefix; a mismatch preserves existing GUI history and
 reports an error. Images from native history become attachment notices. Native
 terminal tool cards and image payloads are not reconstructed by this text import.
 
 Interactive `claude`, `codex` and `agy` commands started through Kiln’s registered shell functions can also use the joined **GUI | TUI** tabs. Kiln connects the pane only after verifying the exact live host binding for that terminal. The original PTY, parent shell, command arguments and selected account profile are retained. This applies to the functions supplied by Kiln’s zsh or PowerShell integration; the registered commands depend on the shell.
 
-To move from TUI to GUI, select **GUI**, then exit the native CLI normally, for example with `/exit` or **Ctrl+D** where that CLI supports it. Kiln waits for natural exit and does not terminate current work or inject a guessed quit command. If you exit the initial TUI without requesting GUI, the original shell resumes with the native exit status.
+For a macOS Codex conversation opened from the GUI, selecting **GUI** waits for a completed native turn and an empty TUI composer, then sends Codex’s Ctrl+D exit input to the same verified PTY. A changed screen or input revision cancels that attempt; active work and drafts remain in the CLI. For other native sessions, select **GUI** and exit the CLI normally, for example with `/exit` or **Ctrl+D** where supported. Kiln reconnects only after the native process exits. If you exit the initial TUI without requesting GUI, the original shell resumes with the native exit status.
 
 Management, print and remote commands, pipelines, redirected input/output, and user aliases or custom functions that bypass Kiln’s integration keep their native execution path. Bash and fish do not receive automatic agent wrappers. Commands in terminals outside Kiln are not automatically tracked.
 
