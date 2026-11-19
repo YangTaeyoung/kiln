@@ -142,12 +142,21 @@ fn prepare_managed_record(tool: Tool, mut spec: SpawnSpec, accounts: &AccountMan
     Ok((path, record))
 }
 
-/// Prepared diagnostics only: no asset I/O or reconciliation from UI/restarts.
+/// Keep optional import diagnostics out of the agent's interactive output.
+/// The prepared report remains available in GUI session settings.
 fn print_extension_report(report:&kiln_accounts::extensions::ExtensionReport) {
     if !report.validated(){return;}
-    for entry in &report.entries {if ["failed","unsupported"].contains(&entry.state.as_str()) {
-        eprintln!("[Kiln extension preparation] {}: {} ({})",entry.name,entry.state,entry.reason);
-    }}
+    let skipped: Vec<_> = report.entries.iter().filter(|entry|
+        ["failed", "unsupported"].contains(&entry.state.as_str())).collect();
+    if std::env::var("KILN_EXTENSION_DIAGNOSTICS").as_deref() == Ok("1") {
+        for entry in skipped {
+            eprintln!("[Kiln extension preparation] {}: {} ({})",entry.name,entry.state,entry.reason);
+        }
+        return;
+    }
+    if !skipped.is_empty() {
+        eprintln!("[Kiln] {} optional personal extensions were skipped; agent startup continues. Set KILN_EXTENSION_DIAGNOSTICS=1 for details.", skipped.len());
+    }
 }
 fn prepared_extension_report(path:&Path)->Result<kiln_accounts::extensions::ExtensionReport> {
     kiln_accounts::extensions::ExtensionReport::read_prepared(&path.with_extension("extensions.json"))
