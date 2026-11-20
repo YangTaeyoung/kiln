@@ -99,7 +99,7 @@ Kiln checks for updates automatically and installs them through the Sparkle upda
 
 ### Windows {#windows}
 
-Kiln checks for updates once a day. To check yourself, open **Settings → About → Check for Updates**, then choose **Install and Restart**. Kiln verifies that the downloaded archive matches the release signing key before it replaces any files. Running terminals keep running.
+Kiln checks for updates once a day. To check yourself, open **Settings → About → Check for Updates**, then choose **Install and Restart**. Kiln verifies that the downloaded archive matches the release signing key before it replaces any files. Kiln reopens after the previous app process exits. Running terminals keep running.
 
 > **Tip:** On macOS 15 and later, if a command that reaches your local network fails in a panel that was open before the update, open a new terminal panel and retry it there. See [Local network access on macOS](terminal.html#local-network-access-on-macos).
 

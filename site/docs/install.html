@@ -129,7 +129,7 @@
 <h3 id="macos">macOS</h3>
 <p>Kiln checks for updates automatically and installs them through the Sparkle update dialog. To check yourself, choose <strong>Kiln → Check for Updates</strong>, or use the update control in <strong>Settings → About</strong>. You can turn off automatic checks in Settings.</p>
 <h3 id="windows">Windows</h3>
-<p>Kiln checks for updates once a day. To check yourself, open <strong>Settings → About → Check for Updates</strong>, then choose <strong>Install and Restart</strong>. Kiln verifies that the downloaded archive matches the release signing key before it replaces any files. Running terminals keep running.</p>
+<p>Kiln checks for updates once a day. To check yourself, open <strong>Settings → About → Check for Updates</strong>, then choose <strong>Install and Restart</strong>. Kiln verifies that the downloaded archive matches the release signing key before it replaces any files. Kiln reopens after the previous app process exits. Running terminals keep running.</p>
 <blockquote class="callout"><p><strong>Tip</strong> On macOS 15 and later, if a command that reaches your local network fails in a panel that was open before the update, open a new terminal panel and retry it there. See <a href="terminal.html#local-network-access-on-macos">Local network access on macOS</a>.</p>
 </blockquote>
 <h2 id="choose-a-language">Choose a language</h2>
@@ -253,7 +253,7 @@
 <h3 id="macos">macOS</h3>
 <p>Kiln은 업데이트를 자동으로 확인하고 Sparkle 업데이트 대화상자로 설치합니다. 직접 확인하려면 <strong>Kiln → 업데이트 확인</strong>을 선택하거나 <strong>설정 → 앱 정보</strong>의 업데이트 항목을 사용하세요. 자동 확인은 설정에서 끌 수 있습니다.</p>
 <h3 id="windows">Windows</h3>
-<p>Kiln은 하루에 한 번 업데이트를 확인합니다. 직접 확인하려면 <strong>설정 → 앱 정보 → 업데이트 확인</strong>을 연 다음 <strong>설치하고 다시 시작</strong>을 선택합니다. Kiln은 파일을 교체하기 전에 내려받은 압축 파일이 릴리스 서명 키와 맞는지 검증합니다. 실행 중인 터미널은 계속 실행됩니다.</p>
+<p>Kiln은 하루에 한 번 업데이트를 확인합니다. 직접 확인하려면 <strong>설정 → 앱 정보 → 업데이트 확인</strong>을 연 다음 <strong>설치하고 다시 시작</strong>을 선택합니다. Kiln은 파일을 교체하기 전에 내려받은 압축 파일이 릴리스 서명 키와 맞는지 검증합니다. 이전 앱 프로세스가 종료되면 Kiln이 다시 열립니다. 실행 중인 터미널은 계속 실행됩니다.</p>
 <blockquote class="callout"><p><strong>팁</strong> macOS 15 이상에서, 업데이트 전부터 열려 있던 패널에서 로컬 네트워크에 접근하는 명령이 실패하면 새 터미널 패널을 열고 다시 실행하세요. <a href="terminal.html#local-network-access-on-macos">macOS의 로컬 네트워크 접근</a>을 참고하세요.</p>
 </blockquote>
 <h2 id="choose-a-language">언어 선택하기</h2>
@@ -377,7 +377,7 @@
 <h3 id="macos">macOS</h3>
 <p>Kiln は自動でアップデートを確認し、Sparkle のアップデートダイアログからインストールします。手動で確認するには、<strong>Kiln → アップデートを確認…</strong> を選ぶか、<strong>設定 → このアプリについて</strong>にあるアップデートの項目を使います。アップデートの自動確認は設定でオフにできます。</p>
 <h3 id="windows">Windows</h3>
-<p>Kiln は 1 日に 1 回アップデートを確認します。手動で確認するには<strong>設定 → このアプリについて → アップデートを確認…</strong> を開き、<strong>インストールして再起動</strong>を選びます。Kiln は、ダウンロードしたアーカイブがリリースの署名鍵と一致することを確かめてから、ファイルを置き換えます。実行中のターミナルはそのまま動き続けます。</p>
+<p>Kiln は 1 日に 1 回アップデートを確認します。手動で確認するには<strong>設定 → このアプリについて → アップデートを確認…</strong> を開き、<strong>インストールして再起動</strong>を選びます。Kiln は、ダウンロードしたアーカイブがリリースの署名鍵と一致することを確かめてから、ファイルを置き換えます。以前のアプリのプロセスが終了すると Kiln が再び開きます。実行中のターミナルはそのまま動き続けます。</p>
 <blockquote class="callout"><p><strong>ヒント</strong> macOS 15 以降では、アップデート前から開いていたパネルでローカルネットワークに接続するコマンドが失敗することがあります。その場合は新しいターミナルパネルを開き、そこで再実行してください。詳しくは <a href="terminal.html#local-network-access-on-macos">macOS のローカルネットワークアクセス</a>を参照してください。</p>
 </blockquote>
 <h2 id="choose-a-language">言語を選ぶ</h2>
@@ -501,7 +501,7 @@
 <h3 id="macos">macOS</h3>
 <p>Kiln 会自动检查更新，并通过 Sparkle 更新对话框安装。要手动检查，选择 <strong>Kiln → 检查更新</strong>，或者使用<strong>设置 → 关于</strong>中的更新控件。自动检查可以在设置中关闭。</p>
 <h3 id="windows">Windows</h3>
-<p>Kiln 每天检查一次更新。要手动检查，打开<strong>设置 → 关于 → 检查更新</strong>，然后选择<strong>安装并重新启动</strong>。替换任何文件之前，Kiln 会先验证下载的压缩包与发布签名密钥是否匹配。正在运行的终端不受影响。</p>
+<p>Kiln 每天检查一次更新。要手动检查，打开<strong>设置 → 关于 → 检查更新</strong>，然后选择<strong>安装并重新启动</strong>。替换任何文件之前，Kiln 会先验证下载的压缩包与发布签名密钥是否匹配。旧版应用进程退出后，Kiln 会重新打开。正在运行的终端会保持运行。</p>
 <blockquote class="callout"><p><strong>提示</strong> 在 macOS 15 及更高版本上，如果某条访问本地网络的命令在更新前就已打开的面板中失败，请新开一个终端面板再试。详见 <a href="terminal.html#local-network-access-on-macos">macOS 上的本地网络访问</a>。</p>
 </blockquote>
 <h2 id="choose-a-language">选择语言</h2>

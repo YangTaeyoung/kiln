@@ -1,7 +1,7 @@
 {
   "kiln_version": "0.3.9",
-  "source_commit": "49301407e29445241c5aaae0742df776e0f2adae",
-  "note": "0.3.8 source: macOS Codex GUI-owned TUI conversations return after a completed native turn and empty composer, using guarded input on the verified PTY; active work and drafts defer return. Existing component images and mobile provenance retain their recorded capture inputs.",
+  "source_commit": "2b5608830ff7182e3014396379254c3d5fd80447",
+  "note": "0.3.9: three provider slash-command catalogs, same-pane CLI input and Windows updater relaunch. Existing component images and mobile provenance retain their recorded capture inputs.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
