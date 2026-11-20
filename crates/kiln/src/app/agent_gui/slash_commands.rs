@@ -627,7 +627,7 @@ impl AgentPane {
             }
             SlashPanel::Actions => self.actions_ui(ui),
             SlashPanel::WorkingDirectory => {
-                ui.label("cwd");
+                ui.label(tr("작업 폴더"));
                 ui.add(
                     egui::Label::new(
                         RichText::new(self.descriptor.cwd.display().to_string()).monospace(),
