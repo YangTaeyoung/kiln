@@ -92,7 +92,8 @@ impl Codex {
         self.native.idle()?;
         let live = matches!(
             action,
-            CodexAction::UpdateActiveTurn { .. }
+            CodexAction::Rename { .. }
+                | CodexAction::UpdateActiveTurn { .. }
                 | CodexAction::AddQueuedTask { .. }
                 | CodexAction::UpdateQueuedTask { .. }
                 | CodexAction::DeleteQueuedTask { .. }
@@ -103,6 +104,15 @@ impl Codex {
         );
         let mut active_change = None;
         let (key, method, params) = match action {
+            CodexAction::Rename { name } => {
+                let name = name.trim();
+                ensure!(!name.is_empty(), "A conversation name is required");
+                (
+                    "rename",
+                    "thread/name/set",
+                    json!({"threadId":self.thread,"name":name}),
+                )
+            }
             CodexAction::SetGoal {
                 objective,
                 status,
@@ -464,6 +474,7 @@ impl Codex {
             "skills/list",
             "mcpServerStatus/list",
             "thread/read",
+            "thread/name/set",
             "experimentalFeature/list",
             "thread/goal/get",
             "thread/goal/set",

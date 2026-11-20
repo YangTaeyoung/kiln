@@ -126,6 +126,25 @@ impl Claude {
             cancelled: false,
         }
     }
+    fn publish_commands(&self, e: &mut Effects) {
+        let mut entries = self.command_catalog.clone();
+        for entry in &mut entries {
+            entry.terminal_only = self.terminal_commands.contains(&entry.name);
+        }
+        let missing: Vec<_> = self.terminal_commands.iter()
+            .filter(|name| !entries.iter().any(|entry| &entry.name == *name))
+            .take(256)
+            .collect();
+        entries.extend(controls::native_entries(&json!(missing)).into_iter().map(|mut entry| {
+            entry.terminal_only = true;
+            entry
+        }));
+        e.event(Event::Controls(ControlEvent::Catalog {
+            kind: CatalogKind::Commands,
+            entries,
+        }));
+    }
+
     pub fn command(&mut self, c: &Command, id: &str) -> Result<Effects> {
         let mut e = Effects::default();
         if !matches!(
@@ -156,10 +175,7 @@ impl Claude {
                     self.native.idle()?;
                 }
                 if matches!(target, Discovery::Commands) {
-                    e.event(Event::Controls(ControlEvent::Catalog {
-                        kind: CatalogKind::Commands,
-                        entries: self.command_catalog.clone(),
-                    }));
+                    self.publish_commands(&mut e);
                 } else {
                     self.discover(target.clone(), &mut e);
                 }
@@ -467,13 +483,7 @@ impl Claude {
                         .filter_map(Value::as_str)
                         .map(str::to_owned)
                         .collect();
-                    for entry in &mut self.command_catalog {
-                        entry.terminal_only = self.terminal_commands.contains(&entry.name);
-                    }
-                    e.event(Event::Controls(ControlEvent::Catalog {
-                        kind: CatalogKind::Commands,
-                        entries: self.command_catalog.clone(),
-                    }));
+                    self.publish_commands(&mut e);
                 }
                 if v["tools"].is_array() {
                     e.event(status("tools", &v, &["tools"]));

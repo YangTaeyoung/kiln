@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 mod settings_ui;
 #[path = "commands_ui.rs"]
 mod commands_ui;
+#[path = "slash_commands.rs"]
+mod slash_commands;
 #[path = "actions_ui.rs"]
 mod actions_ui;
 #[path = "launch_ui.rs"]
@@ -171,6 +173,7 @@ pub struct AgentPane {
     replay_required: bool,
     launch_request: Option<LaunchOptions>,
     terminal_request: bool,
+    native_slash: Option<slash_commands::NativeSlashDraft>,
     client: Option<Client>,
     pub transcript: Transcript,
     backlog: VecDeque<Envelope>,
@@ -211,6 +214,12 @@ impl AgentPane {
     /// Stable across GUI/TUI handoffs and reconnects: use confirmed history,
     /// never the unsent composer or the most recent assistant/tool response.
     pub fn conversation_title(&self) -> String {
+        if let Some(ControlValue::Text(name)) = self.transcript.controls.status.get("thread_name")
+            .and_then(|status| status.fields.get("name"))
+            && !name.trim().is_empty()
+        {
+            return name.clone();
+        }
         let first = self.transcript.entries.iter().find_map(|entry| match entry {
             Entry::Message(message) if message.role == Role::User && !message.text.trim().is_empty() => Some(message.text.as_str()),
             _ => None,
@@ -246,6 +255,7 @@ impl AgentPane {
             replay_required: true,
             launch_request: None,
             terminal_request: false,
+            native_slash: None,
             client: None,
             transcript: Transcript::default(),
             backlog: VecDeque::new(),
@@ -474,6 +484,7 @@ impl AgentPane {
     }
     fn apply(&mut self, envelope: &Envelope) {
         if matches!(envelope.event, Event::Generation) {
+            self.native_slash = None;
             self.local_intents.clear();
             self.answers.clear();
             self.controls_ui.grants.clear();
@@ -616,6 +627,9 @@ impl AgentPane {
                 .is_some_and(|id| !self.transcript.models.iter().any(|m| &m.id == id))
             || (self.composer.text.trim().is_empty() && self.composer.attachments.is_empty())
         {
+            return;
+        }
+        if self.submit_slash() {
             return;
         }
         let draft = self.composer.clone();

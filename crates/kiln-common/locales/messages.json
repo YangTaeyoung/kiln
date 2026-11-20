@@ -1,4 +1,44 @@
 {
+  "CLI 명령": {
+    "en": "CLI command",
+    "ja": "CLI コマンド",
+    "zh-CN": "CLI 命令"
+  },
+  "CLI 명령 열기": {
+    "en": "Open CLI command",
+    "ja": "CLI コマンドを開く",
+    "zh-CN": "打开 CLI 命令"
+  },
+  "CLI 입력창에 넣기": {
+    "en": "Insert into CLI input",
+    "ja": "CLI の入力欄に挿入",
+    "zh-CN": "插入 CLI 输入框"
+  },
+  "CLI 입력창이 열리면 명령을 넣고 Enter로 실행하세요.": {
+    "en": "When the CLI prompt is ready, insert the command and press Enter to run it.",
+    "ja": "CLI の入力欄が表示されたら、コマンドを挿入し、Enter で実行します。",
+    "zh-CN": "CLI 输入框就绪后，插入命令并按 Enter 运行。"
+  },
+  "응답 복사": {
+    "en": "Copy response",
+    "ja": "応答をコピー",
+    "zh-CN": "复制回复"
+  },
+  "복사할 응답이 없습니다.": {
+    "en": "There is no response to copy.",
+    "ja": "コピーできる応答がありません。",
+    "zh-CN": "没有可复制的回复。"
+  },
+  "이 명령은 단독으로 보내세요.": {
+    "en": "Send this command on its own.",
+    "ja": "このコマンドは単独で送信してください。",
+    "zh-CN": "请单独发送此命令。"
+  },
+  "현재 대화에서 실행할 수 없습니다.": {
+    "en": "This command cannot run in the current conversation state.",
+    "ja": "現在の会話の状態ではこのコマンドを実行できません。",
+    "zh-CN": "当前会话状态下无法运行此命令。"
+  },
   "\"안녕, Kiln\"": {
     "en": "\"Hello, Kiln\"",
     "ja": "\"こんにちは、Kiln\"",

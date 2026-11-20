@@ -37,6 +37,19 @@ fn native_error_message(error: &Value) -> String {
         .unwrap_or("Codex reported an error.")
         .into()
 }
+fn publish_thread_name(thread: &Value, key: &str, effects: &mut Effects) {
+    let display_name = bounded(thread, key).replace('\n', " ");
+    let name = display_name.trim();
+    let fields = (!name.is_empty())
+        .then(|| ("name".into(), ControlValue::Text(name.into())))
+        .into_iter()
+        .collect();
+    effects.event(Event::Controls(ControlEvent::Status(NativeStatus {
+        subject: "thread_name".into(),
+        fields,
+        unavailable: None,
+    })));
+}
 pub(in crate::app::agent_gui) struct Codex {
     cwd: PathBuf,
     resume: Option<String>,
@@ -699,6 +712,9 @@ impl Codex {
                     self.thread = id.clone();
                     self.ready = true;
                     e.event(Event::Session(id));
+                    if r["thread"].get("name").is_some() {
+                        publish_thread_name(&r["thread"], "name", &mut e);
+                    }
                     self.selected = r.get("model").and_then(Value::as_str).map(String::from);
                     e.event(Event::Models {
                         choices: vec![],
@@ -741,6 +757,9 @@ impl Codex {
                 if self.thread.is_empty() {
                     self.thread = s(&p["thread"], "id");
                 }
+            }
+            "thread/name/updated" if self.ready && p["threadId"] == self.thread => {
+                publish_thread_name(p, "threadName", &mut e);
             }
             "turn/started" => {
                 if p.get("threadId").is_some() && p["threadId"] != self.thread {

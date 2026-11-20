@@ -1379,6 +1379,7 @@ impl KilnApp {
                     bar.label(egui::RichText::new(kiln_common::i18n::tr("현재 작업이 끝나면 TUI로 전환합니다. GUI를 선택하면 전환을 취소합니다.")).color(t.orange));
                     egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
                 } else { body };
+                let body = self.native_slash_bar(ui, *pid, session, body);
                 let mut child = ui.new_child(UiBuilder::new().max_rect(body).id_salt(("card", *pid)));
                 child.set_clip_rect(body);
                 match self.panes.get_mut(pid).map(|p| &mut p.kind) {
@@ -1556,6 +1557,45 @@ impl KilnApp {
                 if widgets::icon_button(&mut bui,Icon::History,26.0,view.inspector_open(),kiln_common::i18n::tr("명령 기록")).clicked(){view.open_history();}
             }
         }
+    }
+
+    fn native_slash_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        pane: PaneId,
+        session: Option<SessionId>,
+        body: egui::Rect,
+    ) -> egui::Rect {
+        use kiln_common::i18n::tr;
+        if self.quick.open && self.quick.pane == Some(pane) {
+            return body;
+        }
+        let Some(view) = self.agent_views.get_mut(&pane) else { return body; };
+        if view.presentation() != agent_gui::Presentation::Terminal || body.height() < 84. {
+            return body;
+        }
+        let Some(text) = view.native_slash_text().map(str::to_owned) else { return body; };
+        let mode = session.and_then(|id| self.conn.screens.get(&id)).map(|screen| screen.mode);
+        let ready = self.conn.is_connected()
+            && mode.is_some()
+            && session.is_some_and(|id| self.conn.terminal_health.get(&id).is_none_or(|health| {
+                health.state == kiln_proto::TerminalState::Healthy
+            }))
+            && view.native_slash_can_insert();
+        let banner = egui::Rect::from_min_size(body.min, vec2(body.width(), 58.));
+        let mut bar = ui.new_child(UiBuilder::new().max_rect(banner).id_salt(("native-slash", pane)));
+        bar.set_clip_rect(banner);
+        bar.horizontal(|ui| {
+            if ui.add_enabled(ready, egui::Button::new(tr("CLI 입력창에 넣기"))).clicked()
+                && let (Some(session), Some(mode), Some(command)) = (session, mode, view.take_native_slash_input())
+            {
+                self.conn.input(session, super::keys::paste_bytes(&command, mode));
+                self.actions.push(Action::FocusPane(pane));
+            }
+            ui.add(egui::Label::new(RichText::new(text).monospace()).truncate());
+        });
+        bar.add(egui::Label::new(tr("CLI 입력창이 열리면 명령을 넣고 Enter로 실행하세요.")).wrap());
+        egui::Rect::from_min_max(pos2(body.left(), banner.bottom()), body.max)
     }
 
     /// Anchored in each agent's content area, directly below its close control.

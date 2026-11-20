@@ -16,6 +16,12 @@ prompt_id = None
 processes = {}
 
 
+if provider == "antigravity" and sys.argv[1:] == ["mcp", "list"]:
+    print("NAME         TYPE  STATUS   COMMAND/URL")
+    print("fixture MCP  http  enabled  https://example.invalid/private-canary")
+    sys.exit(0)
+
+
 def emit(value):
     print(json.dumps(value), flush=True)
 
@@ -96,6 +102,17 @@ for line in sys.stdin:
         if subtype == "initialize":
             emit({"type": "control_response", "response": {"subtype": "success", "request_id": value["request_id"], "response": {"models": []}}})
             ready()
+        elif subtype == "mcp_status":
+            server = {
+                "name": "fixture-mcp",
+                "status": "connected",
+                "tools": [{"name": "fixture_tool", "description": "private-canary"}],
+            }
+            emit({"type": "control_response", "response": {
+                "subtype": "success",
+                "request_id": value["request_id"],
+                "response": {"mcpServers": [server]},
+            }})
         elif subtype == "interrupt":
             pending = None
             finish("interrupted")
@@ -103,6 +120,15 @@ for line in sys.stdin:
         result(value["id"], {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}} if provider == "antigravity" else {})
     elif method == "model/list":
         result(value["id"], {"data": []})
+    elif method == "mcpServerStatus/list":
+        assert value["params"]["threadId"] == session
+        server = {
+            "name": "fixture-mcp",
+            "authStatus": "unsupported",
+            "runtimeStatus": "connected",
+            "tools": {"fixture_tool": {"description": "private-canary"}},
+        }
+        result(value["id"], {"data": [server], "nextCursor": None})
     elif method in ("thread/start", "thread/resume", "session/new", "session/load"):
         ready(value["id"])
     elif method in ("turn/interrupt", "session/cancel"):

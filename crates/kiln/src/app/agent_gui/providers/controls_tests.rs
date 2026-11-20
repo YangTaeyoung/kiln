@@ -276,6 +276,74 @@ fn native_skills_send_requires_advertised_exact_path() {
     );
 }
 #[test]
+fn codex_rename_uses_native_thread_and_publishes_confirmed_name() {
+    let mut a = configured(Tool::Codex);
+    let action = Command::NativeAction(NativeAction::Codex(CodexAction::Rename {
+        name: "  New title  ".into(),
+    }));
+    let request = a.command(&action, "runtime").unwrap();
+    assert_eq!(request.writes.len(), 1);
+    let id = &request.writes[0]["id"];
+    assert!(id.is_string());
+    assert_eq!(
+        request.writes[0],
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "thread/name/set",
+            "params": {"threadId": "s", "name": "New title"},
+        }),
+    );
+
+    let ack = a.ingest(json!({"id": id, "result": {}})).unwrap();
+    assert!(ack.writes.is_empty());
+    assert!(ack.events.iter().any(|event| matches!(
+        event,
+        Event::Controls(ControlEvent::Outcome(outcome))
+            if outcome.control == "action:rename" && outcome.state == ApplicationState::Acknowledged
+    )));
+    assert!(ack.events.iter().all(|event| !matches!(
+        event,
+        Event::Controls(ControlEvent::Status(status)) if status.subject == "thread_name"
+    )));
+
+    let unrelated = a
+        .ingest(json!({
+            "method": "thread/name/updated",
+            "params": {"threadId": "other", "threadName": "Other title"},
+        }))
+        .unwrap();
+    assert!(unrelated.events.is_empty());
+
+    let confirmation = a
+        .ingest(json!({
+            "method": "thread/name/updated",
+            "params": {"threadId": "s", "threadName": "Confirmed title", "extra": "ignored"},
+        }))
+        .unwrap();
+    assert_eq!(
+        confirmation.events,
+        vec![Event::Controls(ControlEvent::Status(NativeStatus {
+            subject: "thread_name".into(),
+            fields: BTreeMap::from([("name".into(), ControlValue::Text("Confirmed title".into()))]),
+            unavailable: None,
+        }))],
+    );
+}
+#[test]
+fn codex_resume_hydrates_native_thread_name() {
+    let mut a = Adapter::new(Tool::Codex, "/tmp".into(), Some("s".into()));
+    let e = a
+        .ingest(json!({"id": "thread", "result": {"thread": {"id": "s", "name": "Saved title"}}}))
+        .unwrap();
+    assert!(e.events.iter().any(|event| matches!(
+        event,
+        Event::Controls(ControlEvent::Status(status))
+            if status.subject == "thread_name"
+                && status.fields.get("name") == Some(&ControlValue::Text("Saved title".into()))
+    )));
+}
+#[test]
 fn explicit_goal_and_queue_actions_never_start_a_turn() {
     let mut a = configured(Tool::Codex);
     let q = a

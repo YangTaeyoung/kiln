@@ -32,7 +32,9 @@ fn harness(pane: AgentPane, width: f32) -> Harness<'static, AgentPane> {
 fn open(h: &mut Harness<'_, AgentPane>) {
     h.run();
     h.get_by_label("메시지").focus();
-    h.run();
+    // Focusing starts the asynchronous path search. Let loaded() wait for it
+    // while the focused composer can continue requesting repaints.
+    h.step();
 }
 fn loaded(h: &mut Harness<'_, AgentPane>) {
     let until = Instant::now() + Duration::from_secs(4);

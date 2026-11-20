@@ -1,0 +1,61 @@
+add-dir	Include another directory in the workspace
+agents	Choose a custom agent or inspect running subagents
+agy-customizations	Get help writing rules, skills, plugins, hooks, and MCP configuration
+antigravity-guide	Ask how to use or configure Antigravity
+artifact	Review artifacts from the current conversation
+boost	Apply deep reasoning to a difficult task
+branch	Fork the current conversation	fork
+browser	Assign a browser task to a subagent
+btw	Ask a side question without changing the main conversation
+changelog	Read Antigravity CLI release notes
+clear	Start a fresh conversation and clear the terminal
+codesearch	Search the workspace for code
+compact	Summarize older conversation history to free up context
+config	Open Antigravity CLI preferences
+context	Inspect how much context the conversation uses
+conversation	Open the conversation picker	resume
+copy	Copy a response to the clipboard
+credits	Check available AI credits
+cs	Search the workspace for code	codesearch
+diff	Review workspace changes, commits, and agent turns
+effort	View or change the model's reasoning effort
+exit	Leave the Antigravity CLI
+feedback	Open the feedback form
+fork	Continue a copy of the current conversation
+goal	Work toward a goal until its completion is verified
+grill-me	Clarify a task through an interview
+help	See CLI commands and keyboard shortcuts
+hooks	Inspect tool lifecycle hooks
+keybindings	Edit terminal keyboard shortcuts
+learn	Turn session feedback into a proposed rule or skill
+logout	Sign out of Antigravity
+mcp	Manage MCP servers
+model	Select a model or use it for one prompt
+new	Start a fresh conversation and clear the terminal	clear
+open	Open a path in the editor or list files opened in this session
+permissions	Review and edit tool permission rules
+plan	Draft an implementation plan for review
+plugin	Browse and manage installed plugins
+plugins	Browse and manage installed plugins	plugin
+projects	Browse, create, edit, or switch projects
+quit	Leave the Antigravity CLI	exit
+quota	Check model quota usage	usage
+record	Dictate a prompt
+remote-control	Turn browser access to this CLI session on or off
+rename	Change the conversation title
+resume	Pick a previous conversation to reopen
+rewind	Roll the conversation back to an earlier message
+run-workflow	Coordinate agents across scripted workflow stages
+schedule	Set a timer or recurring instruction for this conversation
+search	Search the workspace for code	codesearch
+settings	Open Antigravity CLI preferences	config
+skills	Browse available skills or reload them from disk
+statusline	Configure the terminal status line
+swarm	Start cooperating agents or open their live board
+switch	Open the conversation picker	resume
+tasks	Monitor background tasks and their logs
+teamwork	Start a team of agents to work on a longer task
+title	Configure the terminal window title
+undo	Roll the conversation back to an earlier message	rewind
+usage	Check model quota usage
+voice	Dictate a prompt or start a live voice conversation
