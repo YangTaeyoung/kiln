@@ -186,8 +186,9 @@ pub(super) fn serve_terminal(
         let mut child = command
             .spawn()
             .context("Could not open the native conversation terminal")?;
-        journal.push(cli_frontend_status(true))?;
-        let mut transport_error = None;
+        let mut transport_error = journal.push(cli_frontend_status(true))
+            .err()
+            .map(|error| error.to_string());
         loop {
             if TERMINATE.load(Ordering::Relaxed) {
                 group.terminate(journal)?;

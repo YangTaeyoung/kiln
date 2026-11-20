@@ -576,6 +576,12 @@ fn command_ux_local_actions_and_native_terminal_fallback_keep_prompt_paths_disti
             fields: [("running".into(), ControlValue::Bool(true))].into(),
             unavailable: None,
         }));
+    p.replay_required = true;
+    assert!(
+        p.take_native_slash_input().is_none(),
+        "Wait for journal replay after reconnect"
+    );
+    p.replay_required = false;
     assert_eq!(
         p.take_native_slash_input().as_deref(),
         Some("/mcp login fixture-server")

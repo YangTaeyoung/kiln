@@ -1567,7 +1567,9 @@ impl KilnApp {
         body: egui::Rect,
     ) -> egui::Rect {
         use kiln_common::i18n::tr;
-        let focused = self.focused_pane() == Some(pane);
+        if self.quick.open && self.quick.pane == Some(pane) {
+            return body;
+        }
         let Some(view) = self.agent_views.get_mut(&pane) else { return body; };
         if view.presentation() != agent_gui::Presentation::Terminal || body.height() < 84. {
             return body;
@@ -1588,9 +1590,7 @@ impl KilnApp {
                 && let (Some(session), Some(mode), Some(command)) = (session, mode, view.take_native_slash_input())
             {
                 self.conn.input(session, super::keys::paste_bytes(&command, mode));
-                if focused {
-                    self.focus_terminal = true;
-                }
+                self.actions.push(Action::FocusPane(pane));
             }
             ui.add(egui::Label::new(RichText::new(text).monospace()).truncate());
         });

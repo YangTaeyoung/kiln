@@ -654,6 +654,7 @@ impl AgentPane {
                             && name.len() <= 256
                             && !name.chars().any(char::is_control)
                             && self.controls_ui.slash_name.ready(ui.ctx())
+                            && self.action_available("thread/name/set")
                             && !self.settings_blocked(),
                         egui::Button::new(tr("적용")),
                     )
@@ -726,6 +727,8 @@ impl AgentPane {
             && self.live_cli_frontend()
             && !self.presentation_pending()
             && !self.transcript.return_requested
+            && !self.replay_required
+            && self.backlog.is_empty()
             && self.transport_alive
     }
 
