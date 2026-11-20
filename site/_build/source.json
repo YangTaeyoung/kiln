@@ -1,6 +1,6 @@
 {
   "kiln_version": "0.3.9",
-  "source_commit": "0242276ec422dd8fcba9e32e0b1bcd6202070aa9",
+  "source_commit": "771912ed08ce2c4af56d5d7a12c55956b5837982",
   "note": "0.3.8 source: macOS Codex GUI-owned TUI conversations return after a completed native turn and empty composer, using guarded input on the verified PTY; active work and drafts defer return. Existing component images and mobile provenance retain their recorded capture inputs.",
   "mobile": {
     "version": "0.1.0",
