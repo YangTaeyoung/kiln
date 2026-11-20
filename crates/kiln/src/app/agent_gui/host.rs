@@ -22,6 +22,8 @@ mod handoff_processes;
 mod presentation;
 #[path = "native_return.rs"]
 mod native_return;
+#[path = "agy_mcp.rs"]
+mod agy_mcp;
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
@@ -776,11 +778,23 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
             let mut initialized = false;
             let mut capture_bootstrap = true;
             let mut terminal_handoff = false;
+            let mut agy_mcp = None::<crossbeam_channel::Receiver<NativeStatus>>;
             let outcome = (|| -> Result<()> {
                 loop {
                     if TERMINATE.load(Ordering::Relaxed) {
                         group.terminate(&mut journal)?;
                         return Ok(());
+                    }
+                    let mcp_result = agy_mcp.as_ref().and_then(|result| match result.try_recv() {
+                        Ok(status) => Some(status),
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                            Some(agy_mcp::unavailable())
+                        }
+                        Err(crossbeam_channel::TryRecvError::Empty) => None,
+                    });
+                    if let Some(status) = mcp_result {
+                        agy_mcp = None;
+                        journal.push(Event::Controls(ControlEvent::Status(status)))?;
                     }
                     if capture_bootstrap {
                         backend.observe_bootstrap(&group);
@@ -889,6 +903,28 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
                             }
                             fs::remove_file(path)?;
                             if terminal_handoff { return Ok(()); }
+                            continue;
+                        }
+                        if config.descriptor.tool == Tool::Antigravity
+                            && q.command == Command::Discover(Discovery::Mcp)
+                        {
+                            if claim_command(&mut journal, &q)? {
+                                if agy_mcp.is_none() {
+                                    match agy_mcp::query(&config, &accounts) {
+                                        Ok(query) => agy_mcp = Some(query),
+                                        Err(_) => {
+                                            journal.push(Event::Controls(ControlEvent::Status(
+                                                agy_mcp::unavailable(),
+                                            )))?;
+                                        }
+                                    }
+                                }
+                                journal.push(Event::CommandState {
+                                    id: q.id,
+                                    state: CommandPhase::Accepted,
+                                })?;
+                            }
+                            fs::remove_file(path)?;
                             continue;
                         }
                         if matches!(q.command, Command::Restart) {

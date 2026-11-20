@@ -27,14 +27,11 @@ impl Codex {
             Discovery::Skills => ("skills/list", json!({"cwds":[self.cwd],"forceReload":true})),
             Discovery::Mcp => (
                 "mcpServerStatus/list",
-                json!({"threadId":self.thread,"limit":100}),
+                json!({"threadId":self.thread,"limit":100,"detail":"toolsAndAuthOnly"}),
             ),
             Discovery::Policy => ("configRequirements/read", json!({})),
             Discovery::Settings => ("config/read", json!({"cwd":self.cwd,"includeLayers":false})),
-            Discovery::Commands => {
-                e.event(unavailable("slash_commands"));
-                return;
-            }
+            Discovery::Commands => return,
             Discovery::Context => (
                 "thread/read",
                 json!({"threadId":self.thread,"includeTurns":false}),
@@ -678,7 +675,7 @@ impl Codex {
             return id.starts_with("discovery-");
         };
         if v.get("error").is_some() {
-            e.event(unavailable(&format!("{target:?}")));
+            e.event(discovery_unavailable(&target));
             return true;
         }
         let r = &v["result"];
@@ -687,7 +684,11 @@ impl Codex {
             Discovery::Skills | Discovery::Mcp | Discovery::Status | Discovery::Queue
         ) && !r["data"].is_array()
         {
-            e.event(unavailable("malformed_native_catalog"));
+            if target == Discovery::Mcp {
+                e.event(discovery_unavailable(&target));
+            } else {
+                e.event(unavailable("malformed_native_catalog"));
+            }
             return true;
         }
         match target {
@@ -829,6 +830,7 @@ impl Codex {
                     r["nextCursor"].is_string(),
                 ));
                 let mut fields = BTreeMap::new();
+                let mut tool_names_budget = 256;
                 for (i, mcp) in r["data"]
                     .as_array()
                     .into_iter()
@@ -844,15 +846,9 @@ impl Codex {
                     if let Some(v) = mcp["runtimeStatus"].as_str() {
                         fields.insert(format!("{i}.state"), ControlValue::Text(v.into()));
                     }
-                    fields.insert(
-                        format!("{i}.tool_count"),
-                        ControlValue::Integer(
-                            mcp["tools"]
-                                .as_object()
-                                .map(|v| v.len() as u64)
-                                .unwrap_or_default(),
-                        ),
-                    );
+                    if let Some(tools) = mcp["tools"].as_object() {
+                        append_mcp_tools(&mut fields, i, tools.len(), tools.keys().map(String::as_str), &mut tool_names_budget);
+                    }
                 }
                 e.event(Event::Controls(ControlEvent::Status(NativeStatus {
                     subject: "mcp".into(),

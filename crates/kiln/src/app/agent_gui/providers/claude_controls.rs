@@ -28,13 +28,12 @@ impl Claude {
             ("available_output_styles", CatalogKind::Styles),
         ] {
             if let Some(v) = r.get(key) {
-                let mut entries = controls::native_entries(v);
+                let entries = controls::native_entries(v);
                 e.event(coverage(key, v, entries.len(), false));
                 if kind == CatalogKind::Commands {
-                    for entry in &mut entries {
-                        entry.terminal_only = self.terminal_commands.contains(&entry.name);
-                    }
-                    self.command_catalog = entries.clone();
+                    self.command_catalog = entries;
+                    self.publish_commands(e);
+                    continue;
                 }
                 if kind == CatalogKind::Styles {
                     self.styles = entries.iter().map(|v| v.name.clone()).collect();
@@ -569,7 +568,7 @@ impl Claude {
             .is_some_and(|op| op.readback.as_deref() == Some(id));
         if s(r, "subtype") == "error" {
             if let Discovery::TaskOutput {task_id,run_id}=&target {e.event(Event::TaskActivity(super::super::super::activity::Event::Output{task_id:task_id.clone(),run_id:run_id.clone(),text:String::new(),truncated:false,unavailable:true}));}
-            e.event(unavailable(&format!("{target:?}")));
+            e.event(discovery_unavailable(&target));
             if owns {
                 self.native.finish(
                     ApplicationState::Unconfirmed,
@@ -679,17 +678,15 @@ impl Claude {
                 "server_count".into(),
                 ControlValue::Integer(servers.len() as u64),
             );
+            let mut tool_names_budget = 256;
             for (i, server) in servers.iter().take(128).enumerate() {
                 for key in ["name", "status", "scope"] {
                     if let Some(v) = server.get(key).and_then(ControlValue::from_safe) {
                         fields.insert(format!("{i}.{key}"), v);
                     }
                 }
-                if let Some(v) = server["tools"].as_array() {
-                    fields.insert(
-                        format!("{i}.tool_count"),
-                        ControlValue::Integer(v.len() as u64),
-                    );
+                if let Some(tools) = server["tools"].as_array() {
+                    append_mcp_tools(&mut fields, i, tools.len(), tools.iter().filter_map(|tool| tool["name"].as_str()), &mut tool_names_budget);
                 }
             }
             e.event(Event::Controls(ControlEvent::Status(NativeStatus {
@@ -697,6 +694,8 @@ impl Claude {
                 fields,
                 unavailable: None,
             })));
+        } else {
+            e.event(discovery_unavailable(&Discovery::Mcp));
         }
     }
 }

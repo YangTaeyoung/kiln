@@ -1,7 +1,7 @@
 //! Structured agents run under the actual isolated daemon and PTY owner.
 use kiln::app::agent_gui::{
-    AgentPane, Client, Command, CommandPhase, Decision, Descriptor, Entry, Envelope, Lifecycle,
-    SavedDraft, ToolStatus, Transcript,
+    AgentPane, Client, Command, CommandPhase, ControlValue, Decision, Descriptor, Discovery, Entry,
+    Envelope, Lifecycle, SavedDraft, ToolStatus, Transcript,
 };
 use kiln_accounts::Tool;
 use kiln_daemon::client::Client as DaemonClient;
@@ -376,6 +376,31 @@ fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
         assert_eq!(runtime.session(session).pid, original.pid);
         assert_eq!(transcript.provider_session_id, native);
         assert_eq!(transcript.generation, generation);
+        assert_eq!(prompts(&wires(&project)), 1);
+        if tool == Tool::Antigravity {
+            fs::create_dir(project.join(".agents")).unwrap();
+            fs::write(
+                project.join(".agents/mcp_config.json"),
+                br#"{"mcpServers":{"workspace-fixture":{"command":"private-canary","disabled":true}}}"#,
+            ).unwrap();
+        }
+        client.send(Command::Discover(Discovery::Mcp)).unwrap();
+        wait(&mut client, &mut transcript, |t| t.controls.status.contains_key("mcp"));
+        let fields = &transcript.controls.status["mcp"].fields;
+        if tool == Tool::Antigravity {
+            assert_eq!(fields["0.name"], ControlValue::Text("fixture MCP".into()));
+            assert_eq!(fields["0.status"], ControlValue::Text("enabled".into()));
+            assert_eq!(fields["1.name"], ControlValue::Text("workspace-fixture".into()));
+            assert_eq!(fields["1.scope"], ControlValue::Text("workspace".into()));
+            assert_eq!(fields["1.status"], ControlValue::Text("disabled".into()));
+        } else {
+            assert_eq!(fields["0.name"], ControlValue::Text("fixture-mcp".into()));
+            assert_eq!(
+                fields["0.tool_names"],
+                ControlValue::Strings(vec!["fixture_tool".into()]),
+            );
+        }
+        assert!(!serde_json::to_string(fields).unwrap().contains("private-canary"));
         assert_eq!(prompts(&wires(&project)), 1);
         let request = transcript.requests.keys().next().unwrap().clone();
         respond(&client, request, Decision::Deny);

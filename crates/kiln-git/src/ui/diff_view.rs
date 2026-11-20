@@ -1,7 +1,10 @@
 //! diff 뷰어(DiffView): 파일/커밋/패치 diff 를 통합·좌우 분할 모드로 그린다.
 
 use kiln_common::paths::Canonical;
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 
 use egui::{
     Align, Align2, Color32, CornerRadius, FontId, Id, Layout, Margin, Rect, RichText, Sense, Stroke, TextFormat, Ui,
@@ -11,8 +14,8 @@ use kiln_common::Task;
 
 use super::panel::one_line_job;
 use super::widgets::*;
-use crate::cmd::{GitResult, Mode, git};
-use crate::diff::{DiffLine, FileChange, FileDiff, LineKind, parse_diff};
+use crate::cmd::{GitError, GitResult, Mode, git, git_bytes, git_raw};
+use crate::diff::{DiffLine, FileChange, FileDiff, LineKind, parse_diff, synth_added_file};
 use crate::repo::{self, CommitDetail, HunkAction};
 use crate::util::{now_unix, relative_time};
 
@@ -23,6 +26,12 @@ const NOTE_H: f32 = 30.0;
 const GAP_H: f32 = 12.0;
 const FONT_SIZE: f32 = 12.5;
 const MAX_LINE_CHARS: usize = 1200;
+// Untracked paths are always listed. Bound the extra I/O and the number of
+// rendered lines used for their previews independently of Git's tracked diff.
+const MAX_UNTRACKED_PREVIEWS: usize = 128;
+const MAX_UNTRACKED_FILE_BYTES: usize = 128 * 1024;
+const MAX_UNTRACKED_TOTAL_BYTES: usize = 1024 * 1024;
+const MAX_UNTRACKED_FILE_LINES: usize = 4096;
 
 /// 표시 방식.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +43,7 @@ pub enum DiffMode {
 #[derive(Clone, Debug)]
 enum Source {
     File { path: PathBuf, staged: bool },
+    Worktree,
     Commit(String),
     Patch { title: String, text: String },
     /// `git diff <from> [<to>]`. `to` 가 없으면 작업 트리와 비교한다.
@@ -118,6 +128,12 @@ impl DiffView {
     /// 작업트리(`staged=false`) 또는 인덱스(`staged=true`) 파일 diff. `path` 는 절대 경로나 루트 기준 상대 경로.
     pub fn for_file(root: &Path, path: &Path, staged: bool) -> Self {
         Self::new(root, Source::File { path: path.to_path_buf(), staged })
+    }
+
+    /// Read-only changes from HEAD to the working copy under `root`, including
+    /// untracked files. For a branch without a first commit, compare with an empty tree.
+    pub fn for_worktree(root: &Path) -> Self {
+        Self::new(root, Source::Worktree)
     }
 
     /// 커밋 diff.
@@ -234,7 +250,9 @@ impl DiffView {
                 rows.push(Row::File(fi));
             }
             if f.binary || f.hunks.is_empty() {
-                rows.push(Row::Note(fi));
+                if f.binary || !matches!(self.source, Source::Worktree) || f.change != FileChange::Added {
+                    rows.push(Row::Note(fi));
+                }
                 continue;
             }
             for (hi, h) in f.hunks.iter().enumerate() {
@@ -330,6 +348,7 @@ impl DiffView {
     fn source_key(&self) -> String {
         match &self.source {
             Source::File { path, staged } => format!("{}:{staged}", path.display()),
+            Source::Worktree => format!("worktree:{}", self.root.display()),
             Source::Commit(s) => s.clone(),
             Source::Patch { title, .. } => title.clone(),
             Source::Range { from, to } => format!("{from}..{}", to.as_deref().unwrap_or("")),
@@ -365,6 +384,9 @@ impl DiffView {
                             outline_badge(ui, lbl, c);
                         }
                         Source::Commit(_) => {}
+                        Source::Worktree => {
+                            outline_badge(ui, kiln_common::i18n::tr("작업 트리"), t.yellow);
+                        }
                         Source::Patch { title, .. } => {
                             ui.label(RichText::new(title).font(kiln_common::fonts::semibold(14.0)).color(t.text));
                         }
@@ -623,6 +645,7 @@ fn load(root: &Path, source: &Source) -> GitResult<Loaded> {
             let f = repo::file_diff(&top, &rel, *staged)?;
             Ok(Loaded { top, rel: Some(rel), files: f.into_iter().collect(), commit: None })
         }
+        Source::Worktree => Ok(Loaded { top, rel: None, files: worktree_files(root)?, commit: None }),
         Source::Commit(sha) => {
             let c = repo::commit_detail(&top, sha)?;
             let files = c.files.clone();
@@ -637,6 +660,206 @@ fn load(root: &Path, source: &Source) -> GitResult<Loaded> {
             let text = git(&top, Mode::Read, &args)?;
             Ok(Loaded { top, rel: None, files: parse_diff(&text), commit: None })
         }
+    }
+}
+
+fn worktree_files(root: &Path) -> GitResult<Vec<FileDiff>> {
+    let head = git_raw(root, Mode::Read, &["rev-parse", "--verify", "--quiet", "HEAD"], None)?;
+    let base = if head.success {
+        String::from_utf8_lossy(&head.stdout).into_owned()
+    } else if head.stderr.is_empty() {
+        // hash-object uses the repository's object format. Without -w it
+        // computes the well-known empty tree ID without storing an object.
+        git(root, Mode::Read, &["hash-object", "-t", "tree", "--stdin"])?
+    } else {
+        return Err(GitError::Failed(head.stderr));
+    };
+    let filter_overrides = worktree_filter_overrides(root)?;
+    let mut diff_args = vec!["-c", "core.fsmonitor=false"];
+    for setting in &filter_overrides {
+        diff_args.extend(["-c", setting.as_str()]);
+    }
+    diff_args.extend([
+        "diff", "--patch", "--relative",
+        "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short",
+        "--ignore-submodules=dirty",
+        "--src-prefix=a/", "--dst-prefix=b/", base.trim(), "--", ".",
+    ]);
+    let patch = git(root, Mode::Read, &diff_args)?;
+    let mut files = parse_diff(&patch);
+    let paths = git_bytes(root, Mode::Read, &[
+        "-c", "core.fsmonitor=false", "ls-files", "--others", "--exclude-standard", "-z", "--", ".",
+    ])?;
+    let canonical_root = std::fs::canonicalize(root).ok();
+    let mut remaining = MAX_UNTRACKED_TOTAL_BYTES;
+    for (index, path) in paths.split(|byte| *byte == 0).filter(|path| !path.is_empty()).enumerate() {
+        let content = if index < MAX_UNTRACKED_PREVIEWS
+            && remaining > 0
+            && let Some(root) = &canonical_root
+            && let Ok(path) = std::str::from_utf8(path)
+        {
+            untracked_preview(root, Path::new(path), &mut remaining)
+        } else {
+            None
+        };
+        files.push(synth_added_file(&String::from_utf8_lossy(path), content.as_deref().unwrap_or_default()));
+    }
+    Ok(files)
+}
+
+fn worktree_filter_overrides(root: &Path) -> GitResult<BTreeSet<String>> {
+    // Git may execute clean/process filters even with --no-ext-diff and
+    // --no-textconv. Disable configured external conversion for this preview.
+    let keys = git_bytes(root, Mode::Read, &["config", "--null", "--name-only", "--list"])?;
+    let mut overrides = BTreeSet::new();
+    for key in keys.split(|byte| *byte == 0).filter(|key| key.starts_with(b"filter.")) {
+        let key = std::str::from_utf8(key).map_err(|e| GitError::Parse(e.to_string()))?;
+        let value = match key.rsplit_once('.') {
+            Some((_, "clean" | "process")) => "",
+            Some((_, "required")) => "false",
+            _ => continue,
+        };
+        if key.contains('=') {
+            return Err(GitError::Parse("unsupported diff filter key".into()));
+        }
+        overrides.insert(format!("{key}={value}"));
+    }
+    Ok(overrides)
+}
+
+fn untracked_preview(root: &Path, path: &Path, remaining: &mut usize) -> Option<Vec<u8>> {
+    if !path.components().all(|component| matches!(component, Component::Normal(_))) {
+        return None;
+    }
+    let path = root.join(path);
+    let preview_limit = (*remaining).min(MAX_UNTRACKED_FILE_BYTES);
+    let expected = path.symlink_metadata().ok()?;
+    if !expected.is_file()
+        || expected.len() > preview_limit as u64
+        || std::fs::canonicalize(&path).ok()? != path
+    {
+        return None;
+    }
+    let file = File::open(&path).ok()?;
+    let actual = file.metadata().ok()?;
+    if !actual.is_file()
+        || actual.len() > preview_limit as u64
+        || std::fs::canonicalize(&path).ok()? != path
+    {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if (actual.dev(), actual.ino()) != (expected.dev(), expected.ino()) {
+            return None;
+        }
+    }
+    let mut bytes = Vec::new();
+    let mut reader = file.take(preview_limit as u64);
+    let result = reader.read_to_end(&mut bytes);
+    *remaining -= bytes.len();
+    if result.is_err()
+        || bytes.len() as u64 != actual.len()
+        || reader.get_ref().metadata().ok()?.len() != actual.len()
+        || bytes.iter().filter(|byte| **byte == b'\n').count() > MAX_UNTRACKED_FILE_LINES
+    {
+        return None;
+    }
+    Some(bytes)
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::*;
+    use std::fs;
+
+    fn run_git(root: &Path, args: &[&str]) {
+        git(root, Mode::Write, args).unwrap();
+    }
+
+    #[test]
+    fn worktree_diff_combines_edits_and_limits_the_workspace_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let workspace = root.join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        run_git(root, &["init", "--quiet", "--template="]);
+        fs::write(root.join(".gitattributes"), "*.txt diff=fixture filter=fixture\n").unwrap();
+        fs::write(root.join(".gitignore"), "*.ignored\n").unwrap();
+        fs::write(workspace.join("mixed.txt"), "committed\n").unwrap();
+        fs::write(workspace.join("staged.txt"), "committed\n").unwrap();
+        fs::write(root.join("sibling.txt"), "committed\n").unwrap();
+        run_git(root, &["add", "--", "."]);
+        run_git(root, &[
+            "-c", "user.name=Kiln Test", "-c", "user.email=kiln@example.test",
+            "-c", "commit.gpgsign=false", "-c", "core.hooksPath=missing-fixture-hooks",
+            "commit", "--quiet", "-m", "Initial files",
+        ]);
+
+        fs::write(workspace.join("mixed.txt"), "staged\n").unwrap();
+        fs::write(workspace.join("staged.txt"), "staged only\n").unwrap();
+        run_git(root, &["add", "--", "workspace"]);
+        fs::write(workspace.join("mixed.txt"), "working copy\n").unwrap();
+        fs::write(workspace.join("new.txt"), "untracked\n").unwrap();
+        fs::write(workspace.join("new.ignored"), "ignored\n").unwrap();
+        fs::write(root.join("sibling.txt"), "outside\n").unwrap();
+        fs::write(root.join("outside.txt"), "outside\n").unwrap();
+        run_git(root, &["config", "diff.external", "missing-kiln-fixture-diff"]);
+        run_git(root, &["config", "diff.fixture.textconv", "missing-kiln-fixture-textconv"]);
+        run_git(root, &["config", "filter.fixture.clean", "missing-kiln-fixture-clean"]);
+        run_git(root, &["config", "filter.fixture.process", "missing-kiln-fixture-process"]);
+        run_git(root, &["config", "filter.fixture.required", "true"]);
+        let index = root.join(".git/index");
+        let before = fs::read(&index).unwrap();
+
+        let view = DiffView::for_worktree(&workspace);
+        assert!(view.is_worktree_file().is_none());
+        let loaded = load(&workspace, &view.source).unwrap();
+        let paths: Vec<_> = loaded.files.iter().map(FileDiff::path).collect();
+        assert_eq!(paths, ["mixed.txt", "staged.txt", "new.txt"]);
+        let added = |file: &FileDiff| file.hunks[0].lines.last().unwrap().text.clone();
+        assert_eq!(added(&loaded.files[0]), "working copy");
+        assert_eq!(added(&loaded.files[1]), "staged only");
+        assert_eq!(added(&loaded.files[2]), "untracked");
+        assert_eq!(fs::read(index).unwrap(), before);
+    }
+
+    #[test]
+    fn unborn_worktree_diff_keeps_paths_with_oversized_previews() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run_git(root, &["init", "--quiet", "--template="]);
+        fs::write(root.join("first.txt"), "staged\n").unwrap();
+        run_git(root, &["add", "--", "first.txt"]);
+        fs::write(root.join("first.txt"), "after staging\n").unwrap();
+        fs::write(root.join("oversized.txt"), vec![b'a'; MAX_UNTRACKED_FILE_BYTES + 1]).unwrap();
+
+        let files = worktree_files(root).unwrap();
+        assert_eq!(files[0].path(), "first.txt");
+        assert_eq!(files[0].change, FileChange::Added);
+        assert_eq!(files[0].hunks[0].lines[0].text, "after staging");
+        assert_eq!(files[1].path(), "oversized.txt");
+        assert!(files[1].hunks.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untracked_preview_skips_file_and_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let worktree = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(worktree.path()).unwrap();
+        fs::write(elsewhere.path().join("payload.txt"), "outside\n").unwrap();
+        symlink(elsewhere.path().join("payload.txt"), root.join("file-link")).unwrap();
+        symlink(elsewhere.path(), root.join("dir-link")).unwrap();
+
+        let mut remaining = MAX_UNTRACKED_TOTAL_BYTES;
+        for path in ["file-link", "dir-link/payload.txt", "../payload.txt"] {
+            assert!(untracked_preview(&root, Path::new(path), &mut remaining).is_none());
+        }
+        assert_eq!(remaining, MAX_UNTRACKED_TOTAL_BYTES);
     }
 }
 

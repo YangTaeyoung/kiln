@@ -12,6 +12,7 @@ Start with [getting started](getting-started.md), then open the guide for your t
 | [Kiln Remote mobile companion](mobile-remote.md) | Optional host, Android/iOS source builds, pairing and actual-UI evidence boundaries |
 | [Object storage](object-storage.md) | AWS, OCI, Google and Cloudflare profiles, authentication and transfer limits |
 | [Native agent conversations](agent-gui.md) | GUI/Terminal mode, streamed tools, approvals, images and durable drafts |
+| [Agent slash commands](agent-slash-commands.md) | Provider catalogs, aliases, GUI actions and CLI command panels |
 | [Native feature coverage](agent-feature-coverage.md) | Provider controls/actions, startup options, native references and extension boundaries |
 | [0.3.0 source notes](releases/0.3.0.md) | Unpublished expanded GUI features and delivery boundary |
 | [0.3.0 native verification](maintainers/0.3.0-status.md) | Observed provider controls/tools, inference provenance, IME and cleanup limits |

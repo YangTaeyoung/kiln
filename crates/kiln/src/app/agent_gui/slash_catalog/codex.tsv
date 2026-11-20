@@ -1,0 +1,72 @@
+model	Select a model, reasoning effort, or service tier
+fast	Toggle Fast mode when the selected model offers that tier
+presets	Run or save reusable prompts and commands
+daybreak	Toggle Daybreak when enabled for the account and model
+ide	Bring editor selections and open files into the next prompt
+permissions	Choose what Codex can do and when it asks for approval
+keymap	View and remap terminal shortcuts
+vim	Toggle Vim editing in the composer
+setup-default-sandbox	Set up the elevated sandbox when offered on Windows
+experimental	Manage experimental features
+approve	Retry a recent action denied by automatic review
+memories	Manage how Codex uses and creates memories
+skills	Browse skills and add one to the prompt
+import	Import setup, projects, and chats from Claude Code
+hooks	Inspect and manage lifecycle hooks
+review	Review local changes or use custom review instructions
+rename	Change the name of the current chat
+new	Open a fresh chat in the current CLI
+archive	Archive the current chat
+delete	Permanently remove the current chat and its descendant sessions
+resume	Continue a saved chat
+fork	Create a new chat from the current conversation
+worktree	Start or continue a chat in a managed Git worktree when supported
+app	Open this chat in ChatGPT Desktop on macOS or Windows
+init	Generate an AGENTS.md starter file
+compact	Condense older turns to free context space
+config	Browse and change Codex terminal preferences
+recap	Summarize the current chat while retaining its context
+plan	Enter Plan mode when available and optionally send a planning request
+voice	Control voice when supported by the session
+goal	Manage a persistent chat goal when goals are enabled
+goooooooooooal	Alternate spelling of /goal with repeated o characters	goal
+agents	Open the command center for Codex chats
+side	Open a side conversation
+btw	Open a side conversation for a follow-up
+copy	Copy a response or excerpt to the clipboard (except on Android)
+export	Save or copy the transcript as Markdown
+raw	Toggle raw scrollback for easier text selection
+tui	Choose scrollback or fullscreen for the next launch
+diff	Inspect staged, unstaged, and untracked changes
+mention	Find a file and add it to the prompt
+status	View session settings, context, and token usage
+daemon	Inspect and manage the Codex background server
+rc	Manage remote control for the local background server
+remote	Alternate spelling of /rc	rc
+warnings	Inspect warnings retained during the session
+cd	Continue this chat from another working directory
+pwd	Print the active working directory
+cwd	Alternate spelling of /pwd	pwd
+usage	Check token activity and available usage resets with Codex sign-in
+debug-config	Inspect configuration layers and policy sources
+title	Choose fields for the terminal title
+statusline	Choose fields for the terminal footer
+theme	Pick a syntax highlighting theme
+pets	Choose or hide an animated terminal pet
+pet	Alternate spelling of /pets	pets
+mcp	Inspect MCP servers and tools or sign in to a server
+apps	Browse connected apps when connectors are enabled
+plugins	Browse installed and available plugins when enabled
+logout	Sign out of Codex
+quit	Close the Codex CLI
+exit	Close the Codex CLI
+feedback	Send feedback or save diagnostics as a ZIP archive
+rollout	Print the session log path (debug builds only)
+ps	Inspect Codex background terminals
+stop	Stop the current chat’s background terminals
+clean	Alternate spelling of /stop	stop
+clear	Clear the terminal and open a fresh chat
+test-approval	Show a sample approval prompt (debug builds only)
+subagents	Switch among this chat’s subagent threads
+debug-m-drop	Internal memory maintenance stub in Codex 0.171.0
+debug-m-update	Internal memory maintenance stub in Codex 0.171.0

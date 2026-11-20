@@ -24,6 +24,9 @@ pub(super) struct ControlsUi {
     pub surface: Surface,
     pub search: String,
     pub command_search: String,
+    pub slash_panel: Option<slash_commands::SlashPanel>,
+    pub slash_diff: Option<kiln_git::DiffView>,
+    pub slash_name: EditingText,
     pub composer_options_open: bool,
     pub edits: BTreeMap<String, ControlEditor>,
     pub actions: actions_ui::ActionForm,
@@ -160,7 +163,7 @@ impl AgentPane {
                     let selected = self.controls_ui.surface == surface;
                     let response = ui.add(egui::Button::new(RichText::new(tr(title)).color(if selected {t.text} else {t.text_dim})).frame(false).fill(egui::Color32::TRANSPARENT));
                     if selected { ui.painter().line_segment([response.rect.left_bottom() + egui::vec2(0., 4.), response.rect.right_bottom() + egui::vec2(0., 4.)], Stroke::new(2., t.accent)); }
-                    if response.clicked() { self.controls_ui.surface = surface; self.controls_ui.composer_options_open = false; }
+                    if response.clicked() { self.controls_ui.surface = surface; self.controls_ui.slash_panel = None; self.controls_ui.composer_options_open = false; }
                 }
             });
         });
@@ -645,7 +648,7 @@ impl AgentPane {
             }
         }
     }
-    fn status_ui(&mut self, ui: &mut Ui) {
+    pub(super) fn status_ui(&mut self, ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
             for (label, target) in [
                 ("MCP 새로 고침", Discovery::Mcp),
@@ -658,7 +661,10 @@ impl AgentPane {
                 }
             }
         });
-        let visible: Vec<_> = self.transcript.controls.status.values().filter(|status| !matches!(status.subject.as_str(), "native_terminal_return" | "prompt_suggestion")).collect();
+        if self.transcript.controls.status.contains_key("mcp") {
+            self.mcp_status_ui(ui, false);
+        }
+        let visible: Vec<_> = self.transcript.controls.status.values().filter(|status| !matches!(status.subject.as_str(), "native_terminal_return" | "native_cli_frontend" | "prompt_suggestion" | "mcp")).collect();
         if visible.is_empty() {
             ui.label(tr("네이티브 상태를 아직 받지 못했습니다."));
         }

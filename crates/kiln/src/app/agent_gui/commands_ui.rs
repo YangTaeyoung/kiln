@@ -8,6 +8,7 @@ struct CompletionState {
     active: usize,
     dismissed: bool,
     scroll_to_active: bool,
+    navigated: bool,
 }
 #[derive(Clone)]
 struct CompletionEntry {
@@ -18,30 +19,61 @@ struct CompletionEntry {
 impl AgentPane {
     pub(super) fn commands_ui(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.y = 6.;
-        ui.heading(tr("명령 및 스킬"));
+        let skills_only = matches!(
+            self.controls_ui.slash_panel,
+            Some(slash_commands::SlashPanel::Skills)
+        );
+        if let Some(panel) = self.controls_ui.slash_panel.clone() {
+            if ui.button(tr("목록")).clicked() {
+                self.controls_ui.slash_panel = None;
+            }
+            if !skills_only {
+                self.slash_panel_ui(ui, panel);
+                self.command_errors_ui(ui);
+                return;
+            }
+        }
+        ui.heading(tr(if skills_only {
+            "스킬"
+        } else {
+            "명령 및 스킬"
+        }));
         ui.add(egui::Label::new(tr("초안에 삽입한 뒤 보내기를 눌러 실행하세요.")).wrap());
         self.command_search_ui(ui);
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(
-                    !self.settings_blocked(),
-                    egui::Button::new(tr("명령 새로 고침")),
-                )
-                .clicked()
-            {
-                self.discover(Discovery::Commands);
-            }
-            if ui
-                .add_enabled(
-                    self.editing_allowed(),
-                    egui::Button::new(tr("스킬 새로 고침")),
-                )
-                .clicked()
-            {
-                self.discover(Discovery::Skills);
-            }
-        });
+        if self.descriptor.tool != Tool::Antigravity {
+            ui.horizontal_wrapped(|ui| {
+                if !skills_only
+                    && ui
+                        .add_enabled(
+                            !self.settings_blocked(),
+                            egui::Button::new(tr("명령 새로 고침")),
+                        )
+                        .clicked()
+                {
+                    self.discover(Discovery::Commands);
+                }
+                if ui
+                    .add_enabled(
+                        self.editing_allowed(),
+                        egui::Button::new(tr("스킬 새로 고침")),
+                    )
+                    .clicked()
+                {
+                    self.discover(Discovery::Skills);
+                }
+            });
+        }
         let controls = self.transcript.controls.clone();
+        let commands: Vec<_> = self
+            .slash_catalog()
+            .into_iter()
+            .map(std::borrow::Cow::into_owned)
+            .collect();
+        let commands = Some(commands.iter().collect::<Vec<_>>());
+        let skills = controls
+            .skills
+            .as_ref()
+            .map(|entries| entries.iter().collect::<Vec<_>>());
         // The catalog, including expanded descriptions, has its own scrolling boundary.
         // Changing the search starts its results at the top without moving the composer.
         egui::ScrollArea::vertical()
@@ -51,10 +83,11 @@ impl AgentPane {
             )
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                for (title, catalog, skill) in [
-                    ("명령", &controls.commands, false),
-                    ("스킬", &controls.skills, true),
-                ] {
+                for (title, catalog, skill) in [("명령", &commands, false), ("스킬", &skills, true)]
+                {
+                    if skills_only && !skill {
+                        continue;
+                    }
                     ui.add_space(6.);
                     ui.strong(tr(title));
                     match catalog {
@@ -62,9 +95,15 @@ impl AgentPane {
                             ui.label(tr("목록을 아직 받지 못했습니다."));
                         }
                         Some(entries) => {
-                            let query = self.controls_ui.command_search.trim().to_lowercase();
+                            let query = self
+                                .controls_ui
+                                .command_search
+                                .trim()
+                                .trim_start_matches(['/', '$'])
+                                .to_lowercase();
                             let visible = entries
                                 .iter()
+                                .copied()
                                 .filter(|entry| self.entry_visible(entry, skill))
                                 .collect::<Vec<_>>();
                             let filtered = visible
@@ -106,7 +145,7 @@ impl AgentPane {
                     ("에이전트", &controls.agents),
                     ("응답 스타일", &controls.styles),
                 ] {
-                    if let Some(entries) = entries {
+                    if !skills_only && let Some(entries) = entries {
                         egui::CollapsingHeader::new(tr(title)).show(ui, |ui| {
                             for entry in entries.iter().filter(|entry| !entry.terminal_only) {
                                 ui.strong(&entry.name);
@@ -119,14 +158,18 @@ impl AgentPane {
                     }
                 }
             });
+        self.command_errors_ui(ui);
+        for status in controls.status.values().filter(|s| s.unavailable.is_some()) {
+            ui.add(egui::Label::new(status.unavailable.as_deref().unwrap()).wrap());
+        }
+    }
+
+    fn command_errors_ui(&self, ui: &mut Ui) {
         if let Some(error) = &self.error {
             ui.add(egui::Label::new(RichText::new(error).color(Theme::current().red)).wrap());
         }
         if let Some(error) = self.transcript.errors.last() {
             ui.add(egui::Label::new(RichText::new(error).color(Theme::current().red)).wrap());
-        }
-        for status in controls.status.values().filter(|s| s.unavailable.is_some()) {
-            ui.add(egui::Label::new(status.unavailable.as_deref().unwrap()).wrap());
         }
     }
 
@@ -179,8 +222,9 @@ impl AgentPane {
     }
 
     fn entry_visible(&self, entry: &NativeEntry, skill: bool) -> bool {
-        !entry.terminal_only
-            && (!skill || self.descriptor.tool != Tool::Codex || entry.path.is_some())
+        !skill
+            || (!entry.terminal_only
+                && (self.descriptor.tool != Tool::Codex || entry.path.is_some()))
     }
 
     fn command_row(&mut self, ui: &mut Ui, entry: &NativeEntry, skill: bool) {
@@ -282,6 +326,9 @@ impl AgentPane {
         if insert_response.clicked() {
             self.insert_entry(entry, skill, false);
         }
+        if entry.terminal_only {
+            ui.small(tr("CLI 명령"));
+        }
         if !entry.description.trim().is_empty() {
             summary(ui, &entry.description, 1);
         }
@@ -377,9 +424,22 @@ impl AgentPane {
         let query = token[1..].to_lowercase();
         let mut seen = BTreeSet::new();
         let mut result = vec![];
+        let commands = self.slash_catalog();
+        let skills = self
+            .transcript
+            .controls
+            .skills
+            .as_deref()
+            .unwrap_or_default();
         for (catalog, skill) in [
-            (&self.transcript.controls.commands, false),
-            (&self.transcript.controls.skills, true),
+            (
+                commands
+                    .iter()
+                    .map(|entry| entry.as_ref())
+                    .collect::<Vec<_>>(),
+                false,
+            ),
+            (skills.iter().collect(), true),
         ] {
             let prefix = if skill && self.descriptor.tool == Tool::Codex {
                 '$'
@@ -389,7 +449,7 @@ impl AgentPane {
             if !token.starts_with(prefix) {
                 continue;
             }
-            for entry in catalog.iter().flatten() {
+            for entry in catalog {
                 if self.entry_visible(entry, skill)
                     && entry.enabled != Some(false)
                     && (entry
@@ -459,6 +519,19 @@ impl AgentPane {
                 .data_mut(|data| data.insert_temp(self.completion_id(), state));
             return false;
         }
+        let exact_command = !state.navigated
+            && slash_commands::parse(&self.composer.text).is_some_and(|(name, arguments)| {
+                arguments.is_empty()
+                    && entries.iter().any(|entry| {
+                        !entry.skill
+                            && (entry.native.name.trim_start_matches('/') == name
+                                || entry
+                                    .native
+                                    .aliases
+                                    .iter()
+                                    .any(|alias| alias.trim_start_matches('/') == name))
+                    })
+            });
         let mut handled = false;
         // consume_key deliberately tolerates Shift/Alt; completion accepts plain keys only.
         let plain = ui.input(|i| {
@@ -471,14 +544,16 @@ impl AgentPane {
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
                 state.active = (state.active + 1) % entries.len();
                 state.scroll_to_active = true;
+                state.navigated = true;
                 handled = true;
             } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
                 state.active = (state.active + entries.len() - 1) % entries.len();
                 state.scroll_to_active = true;
+                state.navigated = true;
                 handled = true;
             } else if ui.input_mut(|i| {
                 i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
-                    || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    || (!exact_command && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
             }) {
                 let entry = &entries[state.active];
                 self.insert_entry(&entry.native, entry.skill, true);
@@ -600,13 +675,25 @@ impl AgentPane {
         &self,
     ) -> impl FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley> + 'static {
         let mut names = vec![];
+        let commands = self.slash_catalog();
+        let skills = self
+            .transcript
+            .controls
+            .skills
+            .as_deref()
+            .unwrap_or_default();
         for (catalog, skill) in [
-            (&self.transcript.controls.commands, false),
-            (&self.transcript.controls.skills, true),
+            (
+                commands
+                    .iter()
+                    .map(|entry| entry.as_ref())
+                    .collect::<Vec<_>>(),
+                false,
+            ),
+            (skills.iter().collect(), true),
         ] {
             for entry in catalog
-                .iter()
-                .flatten()
+                .into_iter()
                 .filter(|entry| self.entry_visible(entry, skill) && entry.enabled != Some(false))
             {
                 let prefix = if skill && self.descriptor.tool == Tool::Codex {

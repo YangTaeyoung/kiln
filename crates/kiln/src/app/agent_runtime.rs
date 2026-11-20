@@ -859,7 +859,7 @@ pub fn launch_of(spec: &SpawnSpec) -> Option<(PathBuf, String)> {
     (spec.args.first().map(String::as_str) == Some("agent-run")).then_some(())?;
     Some((PathBuf::from(value("--record")?), value("--generation")?))
 }
-fn bounded(mut cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
+pub(super) fn bounded(mut cmd: Command, timeout: Duration) -> Result<Vec<u8>> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

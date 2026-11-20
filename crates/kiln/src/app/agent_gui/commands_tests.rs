@@ -57,7 +57,7 @@ fn focus_editor(h: &mut Harness<'_, AgentPane>) {
 }
 
 #[test]
-fn command_ux_search_clear_and_expand_hide_terminal_items_without_mutating_catalog() {
+fn command_ux_search_and_terminal_items_do_not_mutate_the_native_catalog() {
     for width in [320., 900.] {
         let mut p = pane(Tool::Codex);
         p.controls_ui.surface = Surface::Commands;
@@ -74,7 +74,7 @@ fn command_ux_search_clear_and_expand_hide_terminal_items_without_mutating_catal
         let original = p.transcript.controls.clone();
         let mut h = harness(p, width, 820.);
         h.run();
-        assert!(h.query_by_label("/terminal-secret").is_none());
+        h.get_by_label("/terminal-secret");
         assert!(h.query_by_label("$missing-path").is_none());
         assert!(h.query_by_label("origin-compact").is_none());
         h.get_by_label("/compact").click();
@@ -127,16 +127,28 @@ fn command_ux_large_catalog_scrolls_inside_fixed_search_and_composer() {
 #[test]
 fn command_ux_completion_keyboard_wraps_and_enter_tab_only_edit_draft() {
     for (navigate, completion, expected) in [
-        (egui::Key::ArrowDown, egui::Key::Enter, "한글 안내 /review "),
-        (egui::Key::ArrowUp, egui::Key::Tab, "한글 안내 /review "),
+        (
+            egui::Key::ArrowDown,
+            egui::Key::Enter,
+            "한글 안내 /kiln-fixture-b ",
+        ),
+        (
+            egui::Key::ArrowUp,
+            egui::Key::Tab,
+            "한글 안내 /kiln-fixture-b ",
+        ),
     ] {
         let mut p = pane(Tool::Claude);
-        p.composer.text = "한글 안내 /".into();
+        p.transcript.controls.commands = Some(vec![
+            entry("kiln-fixture-a", "First fixture"),
+            entry("kiln-fixture-b", "Second fixture"),
+        ]);
+        p.composer.text = "한글 안내 /kiln-fixture-".into();
         let mut h = harness(p, 520., 760.);
         h.run();
         focus_editor(&mut h);
-        h.get_by_label("/compact");
-        h.get_by_label("/review");
+        h.get_by_label("/kiln-fixture-a");
+        h.get_by_label("/kiln-fixture-b");
         let before = h.get_by_label("메시지").rect();
         h.key_press(navigate);
         h.run();
@@ -275,7 +287,7 @@ fn command_ux_completion_scrolls_beyond_first_page_and_filters_unusable_entries(
     let mut h = harness(p, 520., 760.);
     h.run();
     focus_editor(&mut h);
-    assert!(h.query_by_label("/native-terminal").is_none());
+    h.get_by_label("/native-terminal");
     assert!(h.query_by_label("/native-disabled").is_none());
     for _ in 0..9 {
         h.key_press(egui::Key::ArrowDown);
@@ -295,6 +307,7 @@ fn command_ux_every_catalog_row_keeps_actions_and_left_aligned_names_within_boun
     for width in [320., 520., 1100.] {
         let mut p = pane(Tool::Claude);
         p.controls_ui.surface = Surface::Commands;
+        p.controls_ui.command_search = "command-".into();
         p.transcript.controls.commands = Some(
             (0..30)
                 .map(|index| {
@@ -476,4 +489,177 @@ fn command_ux_completion_popup_is_narrow_and_paints_both_lines_at_the_leading_ed
             assert!(h.state().sent.is_empty());
         }
     }
+}
+
+#[test]
+fn command_ux_mcp_enter_queries_each_provider_without_a_prompt() {
+    for tool in Tool::ALL {
+        let mut h = harness(pane(tool), 520., 760.);
+        h.run();
+        focus_editor(&mut h);
+        h.get_by_label("메시지").type_text("/mcp");
+        h.run();
+        h.get_by_label("/mcp");
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(h.state().sent, [Command::Discover(Discovery::Mcp)]);
+        assert!(h.state().composer.text.is_empty());
+        assert!(h.state().pending.is_none());
+
+        let fields = [
+            ("0.name".into(), ControlValue::Text("fixture-server".into())),
+            ("0.tool_count".into(), ControlValue::Integer(1)),
+            (
+                "0.tool_names".into(),
+                ControlValue::Strings(vec!["example_tool".into()]),
+            ),
+        ]
+        .into();
+        h.state_mut()
+            .transcript
+            .controls
+            .apply(&ControlEvent::Status(NativeStatus {
+                subject: "mcp".into(),
+                fields,
+                unavailable: None,
+            }));
+        h.run();
+        h.get_by_label("fixture-server");
+        h.get_by_label("도구").click();
+        h.run();
+        h.get_by_label("example_tool");
+    }
+}
+
+#[test]
+fn command_ux_local_actions_and_native_terminal_fallback_keep_prompt_paths_distinct() {
+    let mut p = pane(Tool::Codex);
+    p.composer.text = "/compact".into();
+    p.submit();
+    assert_eq!(p.sent, [Command::NativeAction(NativeAction::Compact)]);
+    assert!(p.pending.is_none());
+
+    let mut p = pane(Tool::Codex);
+    p.composer.text = "/goal pause".into();
+    p.submit();
+    assert_eq!(
+        p.sent,
+        [Command::NativeAction(NativeAction::Codex(
+            CodexAction::SetGoal {
+                objective: None,
+                status: Some(GoalStatus::Paused),
+                token_budget: None,
+            }
+        ))]
+    );
+
+    let mut p = pane(Tool::Codex);
+    p.transcript.provider_session_id = Some("native".into());
+    p.composer.text = "/mcp login fixture-server".into();
+    p.submit();
+    assert_eq!(p.sent, [Command::SetPresentation(Presentation::Terminal)]);
+    assert_eq!(p.composer.text, "/mcp login fixture-server");
+    assert!(
+        p.take_native_slash_input().is_none(),
+        "Do not target a GUI worker"
+    );
+    p.local_intents.clear();
+    p.transcript.presentation = Presentation::Terminal;
+    assert!(
+        p.take_native_slash_input().is_none(),
+        "The CLI child has not spawned"
+    );
+    p.transcript
+        .controls
+        .apply(&ControlEvent::Status(NativeStatus {
+            subject: "native_cli_frontend".into(),
+            fields: [("running".into(), ControlValue::Bool(true))].into(),
+            unavailable: None,
+        }));
+    assert_eq!(
+        p.take_native_slash_input().as_deref(),
+        Some("/mcp login fixture-server")
+    );
+    assert!(p.take_native_slash_input().is_none(), "Insert only once");
+    assert!(p.composer.text.is_empty());
+
+    let mut p = pane(Tool::Claude);
+    p.composer.text = "/compact notes for the next task".into();
+    p.submit();
+    assert!(
+        matches!(p.sent.as_slice(), [Command::Submit {text,..}] if text == "/compact notes for the next task")
+    );
+
+    let mut p = pane(Tool::Antigravity);
+    p.transcript.controls.commands = Some(vec![entry("agents", "Provider command")]);
+    p.composer.text = "/agents".into();
+    p.submit();
+    assert!(matches!(p.sent.as_slice(), [Command::Submit {text,..}] if text == "/agents"));
+}
+
+#[test]
+fn command_ux_slash_skills_opens_the_skill_catalog() {
+    let mut p = pane(Tool::Codex);
+    let mut skill = entry("fixture-skill", "Skill for the fixture");
+    skill.path = Some("/fixture/skills/fixture/SKILL.md".into());
+    p.transcript.controls.skills = Some(vec![skill]);
+    p.composer.text = "/skills".into();
+    p.submit();
+    assert_eq!(p.sent, [Command::Discover(Discovery::Skills)]);
+    let mut h = harness(p, 520., 760.);
+    h.run();
+    h.get_by_label("$fixture-skill");
+    assert!(h.query_by_label("/mcp").is_none());
+}
+
+#[test]
+fn command_ux_upstream_command_catalogs_include_aliases_and_native_routes() {
+    for (tool, alias, canonical) in [
+        (Tool::Codex, "remote", "rc"),
+        (Tool::Claude, "reset", "clear"),
+        (Tool::Antigravity, "quota", "usage"),
+    ] {
+        let mut p = pane(tool);
+        let catalog = p.slash_catalog();
+        let entry = catalog
+            .iter()
+            .find(|entry| entry.name == canonical)
+            .unwrap();
+        assert!(entry.aliases.iter().any(|name| name == alias));
+        p.transcript.provider_session_id = Some("native".into());
+        p.composer.text = format!("/{alias}");
+        p.submit();
+        assert_eq!(p.sent, [Command::SetPresentation(Presentation::Terminal)]);
+        assert_eq!(p.native_slash_text(), Some(format!("/{alias}").as_str()));
+    }
+}
+
+#[test]
+fn command_ux_rename_and_file_mention_use_gui_paths() {
+    let mut p = pane(Tool::Codex);
+    p.composer.text = "/rename 한글 대화".into();
+    p.submit();
+    assert_eq!(
+        p.sent,
+        [Command::NativeAction(NativeAction::Codex(
+            CodexAction::Rename {
+                name: "한글 대화".into(),
+            }
+        ))]
+    );
+    assert!(p.composer.text.is_empty());
+    p.transcript
+        .controls
+        .apply(&ControlEvent::Status(NativeStatus {
+            subject: "thread_name".into(),
+            fields: [("name".into(), ControlValue::Text("한글 대화".into()))].into(),
+            unavailable: None,
+        }));
+    assert_eq!(p.conversation_title(), "한글 대화");
+
+    let mut p = pane(Tool::Codex);
+    p.composer.text = "/mention crates".into();
+    p.submit();
+    assert!(p.sent.is_empty());
+    assert_eq!(p.composer.text, "@crates");
 }

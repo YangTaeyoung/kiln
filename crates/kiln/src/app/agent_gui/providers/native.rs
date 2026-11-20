@@ -106,7 +106,11 @@ impl NativeFlight {
                 continue;
             }
             if let Some(target) = self.reads.remove(&id) {
-                e.event(unavailable(&format!("{target:?} timed out")));
+                e.event(if target == Discovery::Mcp {
+                    discovery_unavailable(&target)
+                } else {
+                    unavailable(&format!("{target:?} timed out"))
+                });
             }
         }
         self.read_started
@@ -159,6 +163,32 @@ pub(super) fn unavailable(subject: &str) -> Event {
         unavailable: Some("The native CLI did not provide this capability.".into()),
     }))
 }
+pub(super) fn discovery_unavailable(target: &Discovery) -> Event {
+    if *target == Discovery::Mcp {
+        unavailable("mcp")
+    } else {
+        unavailable(&format!("{target:?}"))
+    }
+}
+
+pub(super) fn append_mcp_tools<'a>(
+    fields: &mut BTreeMap<String, ControlValue>,
+    index: usize,
+    count: usize,
+    tools: impl Iterator<Item = &'a str>,
+    budget: &mut usize,
+) {
+    fields.insert(format!("{index}.tool_count"), ControlValue::Integer(count as u64));
+    let names = tools.filter(|name| name.len() <= 256 && !name.chars().any(char::is_control))
+        .take((*budget).min(32))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    *budget -= names.len();
+    if !names.is_empty() {
+        fields.insert(format!("{index}.tool_names"), ControlValue::Strings(names));
+    }
+}
+
 pub(super) fn acp_options(raw: &Value) -> Vec<ControlOption> {
     raw.as_array()
         .into_iter()

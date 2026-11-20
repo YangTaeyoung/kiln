@@ -429,6 +429,9 @@ pub struct PermissionGrant {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum CodexAction {
+    Rename {
+        name: String,
+    },
     SetGoal {
         objective: Option<String>,
         status: Option<GoalStatus>,

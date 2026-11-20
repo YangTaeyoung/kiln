@@ -1,0 +1,137 @@
+add-dir	Grant the session access to another working directory
+advisor	Select a second model for advice during a task
+agents	Show how to create and manage subagents
+allowed-tools	Manage rules for tool use and working directories	permissions
+android	Show the download link for the Claude mobile app	mobile
+app	Continue this conversation in Claude Code Desktop	desktop
+artifact-capabilities	Load the reference for capabilities available to published artifacts
+artifact-diagramming	Load diagram layout and rendering guidance for artifacts
+artifacts	Browse and attach artifacts shared with your account
+auto-mode-setup	Draft and review auto mode rules for your environment
+autocompact	Set the context threshold for automatic summarization
+autofix-pr	Start a cloud session to fix CI failures and review feedback
+background	Detach this session so it keeps running in the background
+batch	Plan a large change and distribute the work across worktrees
+bg	Detach this session so it keeps running in the background	background
+branch	Create a branch of this conversation and switch to it
+btw	Ask a side question without adding it to the conversation history
+bug	Prepare a bug report with optional session details
+cd	Move this conversation to a different working directory
+checkpoint	Restore conversation or file state from a checkpoint	rewind
+checkup	Diagnose Claude Code setup problems and propose fixes	doctor
+chrome	Configure the Claude in Chrome integration
+claude-api	Load Claude API and Managed Agents guidance
+claude-in-chrome	Run a browser task through the Claude in Chrome integration
+clear	Start a conversation with an empty context
+code-review	Review a diff, pull request, branch, or path for correctness
+color	Change the prompt bar color for this session
+compact	Summarize the conversation to free context space
+config	Open Claude Code settings or change settings by key
+context	Inspect the contents and usage of the context window
+continue	Resume an existing conversation	resume
+copy	Copy or save content from the last response
+cost	Inspect usage, limits, and current session cost	usage
+dataviz	Load guidance for building charts and dashboards
+debug	Enable session debug logging and diagnose a problem
+deep-research	Investigate a question across web sources and compile a cited report
+design	Work with Claude Design for mockups or account access
+design-login	Authorize Claude Design access for design-system sync
+design-sync	Upload a design system from the repository to Claude Design
+desktop	Continue this conversation in Claude Code Desktop
+diff	Inspect changes in the working tree
+doctor	Diagnose Claude Code setup problems and propose fixes
+effort	Inspect or change the model's reasoning effort
+exit	Close Claude Code or detach from a background session
+export	Save the conversation as plain text
+fast	Inspect or toggle fast mode
+feedback	Send product feedback about Claude Code
+fewer-permission-prompts	Suggest permission rules for frequent read-only tools
+focus	Toggle the compact display for prompts and responses
+fork	Copy this conversation into a background session
+goal	Set a condition for Claude to work toward across turns
+heapdump	Save a local memory snapshot for diagnostics
+help	Open Claude Code help and the command list
+hooks	Inspect configured event hooks
+ide	View and manage connections to IDEs
+import	Bring configuration from another coding agent into Claude Code
+init	Draft a CLAUDE.md guide for the project
+insights	Build a local report on recent Claude Code sessions
+install-github-app	Set up the Claude GitHub App for a repository
+install-slack-app	Open installation for the Claude Slack app
+ios	Show the download link for the Claude mobile app	mobile
+keybindings	Open the keyboard shortcuts configuration
+list-agents	Show the agents and other sessions Claude can message
+login	Sign in to an Anthropic account
+logout	Sign out of the current Anthropic account
+loop	Schedule a prompt to repeat within the current session
+mcp	View and manage MCP servers and their authentication
+memory	View or configure project instructions and auto memory
+mobile	Show the download link for the Claude mobile app
+model	Choose the model Claude Code uses
+name	Rename this conversation	rename
+new	Start a conversation with an empty context	clear
+output-style	Inspect or select the session's output style
+passes	Share a Claude Code guest pass when eligible
+peers	Show the agents and other sessions Claude can message	list-agents
+permissions	Manage rules for tool use and working directories
+plan	Enter plan mode with an optional task
+plugin	Browse, install, and manage Claude Code plugins
+plugin-authoring	Load guidance for creating Claude Code mods
+powerup	Open interactive lessons about Claude Code features
+privacy-settings	Inspect or change account privacy settings
+proactive	Schedule a prompt to repeat within the current session	loop
+quit	Close Claude Code or detach from a background session	exit
+radio	Open Claude FM or print the stream URL
+rate-limit-options	Inspect options for continuing after a usage limit
+rc	Connect this session to Claude Remote Control	remote-control
+recap	Generate a brief summary of this conversation
+release-notes	Browse Claude Code release notes by version
+reload-plugins	Apply pending changes to active plugins
+reload-skills	Discover skill and command changes on disk
+remote-control	Connect this session to Claude Remote Control
+remote-env	Select the default environment for cloud sessions
+rename	Rename this conversation
+reset	Start a conversation with an empty context	clear
+restart	Restart Claude Code and restore this session
+resume	Resume an existing conversation
+review	Review a diff, pull request, branch, or path for correctness	code-review
+rewind	Restore conversation or file state from a checkpoint
+routines	Manage cloud scheduled tasks	schedule
+run	Launch and exercise the application in this project
+run-skill-generator	Teach Claude how to run and verify the project
+sandbox	Configure command sandboxing
+schedule	Manage cloud scheduled tasks
+scroll-speed	Adjust mouse scrolling for fullscreen mode
+security-review	Review pending changes for security issues
+settings	Open Claude Code settings or change settings by key	config
+setup-bedrock	Configure credentials and models for Amazon Bedrock
+setup-vertex	Configure credentials and models for Google Cloud
+share	Prepare a bug report with optional session details	bug
+simplify	Review changed code for cleanup and apply improvements
+skill-doctor	Inspect skill usage and context cost
+skills	Browse available skills and adjust their visibility
+slides	Create a presentation artifact from a brief
+stats	Open activity statistics in the usage view	usage
+status	Inspect account, model, connection, and version details
+statusline	Customize the status line
+stickers	Check whether Claude Code stickers are available
+stop	Stop the attached background session
+subtask	Start a subagent with the current conversation as context
+tasks	Inspect and manage background work for this session
+team-onboarding	Create an onboarding guide from your Claude Code activity
+teleport	Bring a Claude cloud session into this terminal
+terminal-setup	Configure the terminal shortcut for inserting newlines
+theme	Select a color theme
+tui	Choose the terminal renderer and relaunch
+ultrareview	Run a cloud code review across multiple agents
+undo	Restore conversation or file state from a checkpoint	rewind
+update	Restart Claude Code and restore this session	restart
+update-config	Configure settings, permissions, environment variables, or hooks
+upgrade	Open the subscription upgrade page
+usage	View session costs, usage limits, and activity
+usage-credits	Manage usage credits or request them from an administrator
+verify	Exercise a code change and check the observed behavior
+voice	Configure voice dictation
+web-setup	Link GitHub for cloud sessions
+workflow-authoring	Load guidance for writing and editing dynamic workflows
+workflows	View and manage dynamic workflows

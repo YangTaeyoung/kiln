@@ -178,6 +178,10 @@ fn task6_palette_inserts_native_skill_preserves_draft_attachment_and_sends_expli
             h.run();
             h.get_by_label("명령 및 스킬").click();
             h.run();
+            h.get_by_label("명령 및 스킬 검색").click();
+            h.run();
+            h.get_by_label("명령 및 스킬 검색").type_text("review-code");
+            h.run();
             h.get_by_label("초안에 삽입").click();
             h.run();
             assert!(h.state().sent.is_empty());
@@ -193,21 +197,24 @@ fn task6_palette_inserts_native_skill_preserves_draft_attachment_and_sends_expli
     }
 }
 #[test]
-fn task6_unknown_empty_catalogs_and_model_choices_replace_actual_widgets() {
+fn task6_native_catalogs_replace_widgets_without_removing_gui_commands() {
     let mut p = fixture(Tool::Antigravity);
     p.controls_ui.surface = Surface::Commands;
     let mut h = harness(p, 900., true);
     h.run();
     assert_eq!(
         h.query_all_by_label("목록을 아직 받지 못했습니다.").count(),
-        2
+        1
     );
-    h.state_mut().transcript.controls.commands = Some(vec![entry("compact")]);
+    h.get_by_label("/mcp");
+    h.state_mut().transcript.controls.commands = Some(vec![entry("fixture-provider-command")]);
     h.run();
-    assert!(h.query_by_label("초안에 삽입").is_some());
+    h.get_by_label("/fixture-provider-command");
     h.state_mut().transcript.controls.commands = Some(vec![]);
+    h.state_mut().transcript.controls.skills = Some(vec![]);
     h.run();
-    assert!(h.query_by_label("초안에 삽입").is_none());
+    assert!(h.query_by_label("/fixture-provider-command").is_none());
+    h.get_by_label("/mcp");
     assert!(h.query_by_label("제공된 항목이 없습니다.").is_some());
     h.state_mut().controls_ui.surface = Surface::Conversation;
     h.state_mut().transcript.controls.options_reported = true;

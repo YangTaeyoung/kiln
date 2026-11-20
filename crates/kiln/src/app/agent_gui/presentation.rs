@@ -186,6 +186,7 @@ pub(super) fn serve_terminal(
         let mut child = command
             .spawn()
             .context("Could not open the native conversation terminal")?;
+        journal.push(cli_frontend_status(true))?;
         let mut transport_error = None;
         loop {
             if TERMINATE.load(Ordering::Relaxed) {
@@ -194,6 +195,7 @@ pub(super) fn serve_terminal(
             }
             match child.try_wait() {
                 Ok(Some(status)) => {
+                    journal.push(cli_frontend_status(false))?;
                     if !status.success() {
                         journal.push(Event::Error(format!(
                             "Native terminal exited ({status}); resuming the saved conversation"
@@ -237,6 +239,14 @@ pub(super) fn serve_terminal(
     })?;
     journal.flush()?;
     Ok(None)
+}
+
+fn cli_frontend_status(running: bool) -> Event {
+    Event::Controls(ControlEvent::Status(NativeStatus {
+        subject: "native_cli_frontend".into(),
+        fields: [("running".into(), ControlValue::Bool(running))].into(),
+        unavailable: None,
+    }))
 }
 
 fn refresh_shell_identity(config: &Config, journal: &mut Journal) -> Result<()> {
