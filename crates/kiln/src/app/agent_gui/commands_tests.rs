@@ -637,6 +637,14 @@ fn command_ux_upstream_command_catalogs_include_aliases_and_native_routes() {
 #[test]
 fn command_ux_rename_and_file_mention_use_gui_paths() {
     let mut p = pane(Tool::Codex);
+    p.transcript.controls.capabilities.push(NativeCapability {
+        id: "thread/name/set".into(),
+        label: "Thread name".into(),
+        scope: ControlScope::Live,
+        available: true,
+        description: String::new(),
+        documentation: String::new(),
+    });
     p.composer.text = "/rename 한글 대화".into();
     p.submit();
     assert_eq!(
@@ -662,4 +670,26 @@ fn command_ux_rename_and_file_mention_use_gui_paths() {
     p.submit();
     assert!(p.sent.is_empty());
     assert_eq!(p.composer.text, "@crates");
+}
+
+#[test]
+fn command_ux_retained_worker_never_receives_an_unknown_rename_operation() {
+    let mut p = pane(Tool::Codex);
+    p.transcript.provider_session_id = Some("native".into());
+    p.composer.text = "/rename parsed by the CLI".into();
+    p.submit();
+    assert_eq!(p.sent, [Command::SetPresentation(Presentation::Terminal)]);
+    p.local_intents.clear();
+    p.transcript.presentation = Presentation::Terminal;
+    p.transcript
+        .controls
+        .apply(&ControlEvent::Status(NativeStatus {
+            subject: "native_terminal_return".into(),
+            fields: [("automatic".into(), ControlValue::Bool(false))].into(),
+            unavailable: None,
+        }));
+    assert_eq!(
+        p.take_native_slash_input().as_deref(),
+        Some("/rename parsed by the CLI")
+    );
 }

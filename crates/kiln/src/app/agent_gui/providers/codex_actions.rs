@@ -474,6 +474,7 @@ impl Codex {
             "skills/list",
             "mcpServerStatus/list",
             "thread/read",
+            "thread/name/set",
             "experimentalFeature/list",
             "thread/goal/get",
             "thread/goal/set",

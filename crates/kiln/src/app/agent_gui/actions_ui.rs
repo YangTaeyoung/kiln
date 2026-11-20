@@ -44,7 +44,7 @@ pub(super) fn capability_label(id: &str) -> String {
     .into()
 }
 impl AgentPane {
-    fn action_available(&self, id: &str) -> bool {
+    pub(super) fn action_available(&self, id: &str) -> bool {
         self.transcript
             .controls
             .capabilities

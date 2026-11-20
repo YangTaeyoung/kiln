@@ -386,13 +386,17 @@ impl AgentPane {
                 self.focus = true;
                 return true;
             }
-            Slash::Rename if arguments.is_empty() => {
+            Slash::Rename if arguments.is_empty() && self.action_available("thread/name/set") => {
                 self.controls_ui.slash_name =
                     editing_text::EditingText::new(self.conversation_title());
                 panel = Some(SlashPanel::Rename);
                 None
             }
-            Slash::Rename if arguments.len() <= 256 && !arguments.chars().any(char::is_control) => {
+            Slash::Rename
+                if self.action_available("thread/name/set")
+                    && arguments.len() <= 256
+                    && !arguments.chars().any(char::is_control) =>
+            {
                 Some(Command::NativeAction(NativeAction::Codex(
                     CodexAction::Rename {
                         name: arguments.into(),
@@ -726,12 +730,16 @@ impl AgentPane {
     }
 
     fn live_cli_frontend(&self) -> bool {
-        self.transcript
-            .controls
-            .status
+        let status = &self.transcript.controls.status;
+        if let Some(ControlValue::Bool(running)) = status
             .get("native_cli_frontend")
             .and_then(|status| status.fields.get("running"))
-            == Some(&ControlValue::Bool(true))
+        {
+            return *running;
+        }
+        // Retained pre-0.3.9 workers publish this marker while preparing their
+        // frontend. The user still waits for and confirms the live CLI prompt.
+        status.contains_key("native_terminal_return")
     }
 
     pub(in crate::app) fn take_native_slash_input(&mut self) -> Option<String> {
