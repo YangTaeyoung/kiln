@@ -202,17 +202,20 @@ fn workspace_reopens_the_same_split_with_saved_output_and_directory_after_daemon
         project.join("src").canonicalize().unwrap(),
     );
     assert!(pump_until(&mut h, 10, |h| {
-        h.state().debug_focused_text().is_some_and(|text| {
+        h.output().platform_output.ime.is_some() && h.state().debug_focused_text().is_some_and(|text| {
             text.split_once("OLD_OUTPUT").is_some_and(|(_, after)| {
                 after.lines().filter(|line| line.ends_with(['$', '%', '#'])).count() >= 2
             })
         })
-    }), "the replacement shell is ready for commands");
+    }), "the replacement shell is ready and has keyboard focus");
     h.event(egui::Event::Text("printf 'NEW_%s\\n' OUTPUT".into()));
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_text().is_some_and(|text| text.contains("printf 'NEW_%s"))
+    }), "the replacement shell echoes keyboard input");
     h.key_press(egui::Key::Enter);
     assert!(pump_until(&mut h, 10, |h| {
         h.state().debug_focused_text().is_some_and(|text| text.contains("OLD_OUTPUT") && text.contains("NEW_OUTPUT"))
-    }));
+    }), "restored terminal output: {:?}", h.state().debug_focused_text());
     assert_eq!(std::fs::read_to_string(project.join("run-count")).unwrap(), "x");
 }
 

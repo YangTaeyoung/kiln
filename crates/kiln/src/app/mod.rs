@@ -795,6 +795,11 @@ impl KilnApp {
             }
         }
         self.spawn_for_pane(pane);
+        // The saved view may have already consumed the startup focus request.
+        // Its replacement uses a different terminal widget once the shell starts.
+        if self.focused_pane() == Some(pane) {
+            self.focus_terminal = true;
+        }
     }
 
     fn remember_terminal(&mut self, pane: PaneId, session: SessionId) {

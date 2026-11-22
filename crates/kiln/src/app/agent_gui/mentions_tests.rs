@@ -397,15 +397,15 @@ fn path_mentions_arrow_navigation_selects_the_highlighted_file_without_send() {
     open(&mut h);
     loaded(&mut h);
     h.key_press(egui::Key::ArrowDown);
-    h.run();
+    h.run_steps(2);
     assert_eq!(h.state().mentions.active, 1);
     h.key_press(egui::Key::ArrowUp);
-    h.run();
+    h.run_steps(2);
     assert_eq!(h.state().mentions.active, 0);
     h.key_press(egui::Key::ArrowDown);
-    h.run();
+    h.run_steps(2);
     h.key_press(egui::Key::Tab);
-    h.run();
+    h.run_steps(2);
     assert!(h.state().composer.text.contains("alpine.txt"));
     assert!(h.state().sent.is_empty());
 }
