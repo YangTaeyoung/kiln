@@ -184,6 +184,7 @@ impl Drop for Runtime {
         }
     }
 }
+#[track_caller]
 fn wait(client: &mut Client, transcript: &mut Transcript, predicate: impl Fn(&Transcript) -> bool) {
     let until = Instant::now() + Duration::from_secs(15);
     loop {
@@ -340,6 +341,69 @@ fn inflight_followups(runtime: &Runtime) {
         assert_eq!(prompts(&wire), if tool == Tool::Codex {1} else {2});
         if tool == Tool::Codex { assert_eq!(wire.iter().filter(|v|v["method"]=="turn/steer").count(), 1); }
     }
+}
+
+#[cfg(unix)]
+fn reopen_workspace_conversation(runtime: &Runtime) {
+    use egui_kittest::Harness;
+    use kiln::app::KilnApp;
+
+    let (spec, descriptor, session, _) = runtime.spawn(Tool::Codex, "workspace-reopen");
+    let mut history = Client::connect(descriptor.clone());
+    let mut transcript = Transcript::default();
+    wait(&mut history, &mut transcript, |t| t.lifecycle == Lifecycle::Ready);
+    history.send(Command::Submit {
+        text: "previous workspace prompt".into(), attachments: vec![], model: None,
+    }).unwrap();
+    wait(&mut history, &mut transcript, |t| !t.requests.is_empty());
+    respond(&history, transcript.requests.keys().next().unwrap().clone(), Decision::Deny);
+    wait(&mut history, &mut transcript, |t| t.lifecycle == Lifecycle::Ready);
+    let previous = runtime.session(session);
+    let previous_generation = transcript.generation.clone();
+    let expected_entries = transcript.entries.clone();
+    let mut saved = SavedDraft::default();
+    saved.composer.text = "unsent workspace draft".into();
+    let snapshot = json!({"workspaces": [{
+        "name": "Fixture workspace", "root": descriptor.cwd,
+        "pages": [{"root":{"Leaf":7},"focused":7,"title":"Fixture conversation","panes":[{
+            "id":7, "session":session, "cwd":descriptor.cwd, "launch":spec, "agent_draft":saved,
+            "terminal":{"owner":{"pid":previous.pid,"created_unix":previous.created_unix}}
+        }]}]
+    }]});
+    fs::write(runtime.root.path().join("config/state.json"), serde_json::to_vec(&snapshot).unwrap()).unwrap();
+
+    runtime.daemon.send(ClientMsg::Shutdown);
+    let until = Instant::now() + Duration::from_secs(10);
+    while Path::new(&runtime.socket).exists() {
+        assert!(Instant::now() < until, "fixture daemon did not stop");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    wait(&mut history, &mut transcript, |t| matches!(t.lifecycle, Lifecycle::Disconnected | Lifecycle::Failed));
+    drop(history);
+    let mut history = Client::connect(descriptor.clone());
+    let mut transcript = Transcript::default();
+
+    let mut app = Harness::builder().with_size([1000.0, 700.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, None));
+    let until = Instant::now() + Duration::from_secs(15);
+    loop {
+        app.step();
+        for event in history.drain() { transcript.apply(&event); }
+        if transcript.generation != previous_generation && transcript.lifecycle == Lifecycle::Ready {
+            break;
+        }
+        assert!(Instant::now() < until, "workspace did not reopen the conversation: {:?}", transcript.errors);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(app.state().debug_focused_pane_id(), Some(7));
+    assert_eq!(app.state().debug_focused_agent_draft().unwrap().composer.text, "unsent workspace draft");
+    assert_eq!(transcript.entries, expected_entries);
+    let wire = wires(&descriptor.cwd);
+    assert_eq!(prompts(&wire), 1);
+    assert_eq!(
+        wire.into_iter().find(|v| v["method"] == "thread/resume").unwrap()["params"]["threadId"],
+        "fixture-codex",
+    );
 }
 
 #[test]
@@ -572,4 +636,6 @@ fn daemon_pty_protocol_decisions_restore_stop_and_final_output() {
             );
         }
     }
+    #[cfg(unix)]
+    reopen_workspace_conversation(&runtime);
 }

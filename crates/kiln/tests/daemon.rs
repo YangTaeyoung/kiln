@@ -165,14 +165,21 @@ fn hot_upgrade_keeps_processes_screen_and_io() {
     let d = Daemon::start("upgrade");
     let c = d.client();
     let daemon_pid = c.server_pid;
-    let s = create(&c, "/bin/sh", &[]);
-    type_line(&c, s, "echo shellpid=$$");
-    let text = wait_for(&c, s, "shellpid=");
-    let shell_pid: u32 = text.lines().filter_map(|l| l.trim().strip_prefix("shellpid=")).filter_map(|v| v.trim().parse().ok()).next_back().expect("pid");
-    // 장시간 실행 중인 자식 프로세스(에이전트 역할).
-    type_line(&c, s, "sleep 300 & echo bg=$!");
+    let s = create_script(&c, r#"
+sleep 300 &
+child=$!
+trap 'kill "$child" 2>/dev/null' EXIT
+printf 'shellpid=%s\nbg=%s\n' "$$" "$child"
+while IFS= read -r line; do
+    [ "$line" = quit ] && break
+    printf 'received:%s\n' "$line"
+done
+"#);
     let text = wait_for(&c, s, "bg=");
-    let bg_pid: u32 = text.lines().filter_map(|l| l.trim().strip_prefix("bg=")).filter_map(|v| v.trim().parse().ok()).next_back().expect("bg pid");
+    let pid = |label| text.lines().filter_map(|line| line.trim().strip_prefix(label))
+        .find_map(|value| value.trim().parse::<u32>().ok()).expect("fixture process ID");
+    let shell_pid = pid("shellpid=");
+    let bg_pid = pid("bg=");
 
     c.send(ClientMsg::Upgrade { req: 99, exe: exe().to_string_lossy().into_owned() });
     upgrade::disconnected(&c, 99);
@@ -187,17 +194,21 @@ fn hot_upgrade_keeps_processes_screen_and_io() {
                 }
         assert!(Instant::now() < deadline, "daemon did not come back");
     };
-    assert_eq!(c2.server_pid, daemon_pid, "exec 는 같은 pid 를 유지한다");
+    if kiln_daemon::ptyhost::host_mode() {
+        assert_ne!(c2.server_pid, daemon_pid, "hosted handover replaces the daemon");
+    } else {
+        assert_eq!(c2.server_pid, daemon_pid, "native handover keeps the daemon PID");
+    }
     assert!(alive(shell_pid), "셸이 살아 있어야 한다");
     assert!(alive(bg_pid), "백그라운드 작업이 살아 있어야 한다");
     let screen = read(&c2, s);
     assert!(screen.contains("shellpid="), "화면이 복원되어야 한다:\n{screen}");
-    type_line(&c2, s, "echo after-$((6*7))");
-    wait_for(&c2, s, "after-42");
+    type_line(&c2, s, "after-42");
+    wait_for(&c2, s, "received:after-42");
     // 새 세션도 만들 수 있다.
     let s2 = create(&c2, "/bin/sh", &[]);
     assert!(s2 > s);
-    type_line(&c2, s, "kill %1");
+    type_line(&c2, s, "quit");
 }
 
 #[test]

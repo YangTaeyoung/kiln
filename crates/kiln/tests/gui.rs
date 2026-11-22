@@ -123,6 +123,144 @@ fn shutdown(base: &std::path::Path) {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn workspace_reopens_the_same_split_with_saved_output_and_directory_after_daemon_shutdown() {
+    use kiln_daemon::client::Client;
+    use kiln_proto::{ClientMsg, ServerMsg};
+
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, project) = setup("workspace-reopen");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) { shutdown(&self.0); }
+    }
+    let _cleanup = Cleanup(base.clone());
+    use_posix_shell(&base);
+    let mut h = Harness::builder().with_size([1200.0, 800.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(project.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some()));
+    let ctx = h.ctx.clone();
+    h.state_mut().debug_split(&ctx, true);
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_pane_sessions().len() == 2 && h.state().debug_focused_text().is_some_and(|text| {
+            text.lines().any(|line| line.ends_with(['$', '%', '#']))
+        })
+    }), "wait for the second shell to accept input");
+
+    let socket = base.join("d.sock").to_string_lossy().into_owned();
+    let client = Client::connect(&socket, None).unwrap();
+    let old_daemon = client.server_pid;
+    let session = h.state().debug_focused_session().unwrap();
+    let focused = h.state().debug_focused_pane_id();
+    let layout = h.state().debug_workspace_panes();
+    let list = |client: &Client| {
+        let ServerMsg::Sessions { sessions, .. } = client.request(
+            |req| ClientMsg::ListSessions { req }, Duration::from_secs(3),
+        ).unwrap() else { panic!("missing daemon inventory"); };
+        sessions
+    };
+    let old_shell = list(&client).into_iter().find(|info| info.id == session).unwrap().pid;
+    client.send(ClientMsg::Rename { session, name: "Build log".into() });
+    client.send(ClientMsg::Input {
+        session,
+        data: b"cd src && printf x >>../run-count && printf 'OLD_%s\\n' OUTPUT\r".to_vec(),
+    });
+    let state_file = base.join("cfg/state.json");
+    assert!(pump_until(&mut h, 12, |_| {
+        let Ok(bytes) = std::fs::read(&state_file) else { return false; };
+        let Ok(state) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return false; };
+        state["workspaces"][0]["pages"][0]["panes"].as_array().is_some_and(|panes| panes.iter().any(|pane| {
+            pane["id"].as_u64() == focused
+                && pane["terminal"]["scrollback"].as_str().is_some_and(|text| text.contains("OLD_OUTPUT"))
+                && pane["cwd"].as_str().is_some_and(|cwd| PathBuf::from(cwd).ends_with("proj/src"))
+        }))
+    }), "save the actual previous output and current directory");
+    eframe::App::on_exit(h.state_mut());
+    drop(h);
+    drop(client);
+    shutdown(&base);
+
+    let mut h = Harness::builder().with_size([1200.0, 800.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, None));
+    let client = Client::connect(&socket, None).unwrap();
+    assert_ne!(client.server_pid, old_daemon);
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_pane_sessions().len() == 2
+            && h.state().debug_focused_text().is_some_and(|text| text.contains("OLD_OUTPUT"))
+    }), "show the previous text in the original pane without user action");
+    assert_eq!(h.state().debug_workspace_panes(), layout);
+    assert_eq!(h.state().debug_focused_pane_id(), focused);
+    let session = h.state().debug_focused_session().unwrap();
+    let sessions = list(&client);
+    assert_eq!(sessions.len(), 2);
+    let restored = sessions.iter().find(|info| info.id == session).unwrap();
+    assert_ne!(restored.pid, old_shell);
+    assert_eq!(restored.name.as_deref(), Some("Build log"));
+    assert_eq!(
+        PathBuf::from(restored.cwd.as_ref().unwrap()).canonicalize().unwrap(),
+        project.join("src").canonicalize().unwrap(),
+    );
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_text().is_some_and(|text| {
+            text.split_once("OLD_OUTPUT").is_some_and(|(_, after)| {
+                after.lines().filter(|line| line.ends_with(['$', '%', '#'])).count() >= 2
+            })
+        })
+    }), "the replacement shell is ready for commands");
+    h.event(egui::Event::Text("printf 'NEW_%s\\n' OUTPUT".into()));
+    h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_text().is_some_and(|text| text.contains("OLD_OUTPUT") && text.contains("NEW_OUTPUT"))
+    }));
+    assert_eq!(std::fs::read_to_string(project.join("run-count")).unwrap(), "x");
+}
+
+#[test]
+fn console_font_zoom_uses_command_arrows_and_hovered_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, project) = setup("console-font-zoom");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) { shutdown(&self.0); }
+    }
+    let _cleanup = Cleanup(base.clone());
+    use_posix_shell(&base);
+    let mut h = Harness::builder().with_size([1000.0, 700.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(project)));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some()));
+    let terminal = h.state().debug_pane_rects()[0].1.center();
+    let font_size = |h: &mut Harness<'_, KilnApp>| {
+        eframe::App::on_exit(h.state_mut());
+        let bytes = std::fs::read(base.join("cfg/state.json")).unwrap();
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["settings"]["font_size"].as_f64().unwrap()
+    };
+    let original = font_size(&mut h);
+    h.key_press_modifiers(egui::Modifiers::MAC_CMD, egui::Key::ArrowUp);
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original + 1.0);
+    h.event(egui::Event::PointerMoved(terminal));
+    h.run_steps(2);
+    let wheel = |modifiers, direction| egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, direction),
+        modifiers,
+        phase: egui::TouchPhase::Move,
+    };
+    h.event(wheel(egui::Modifiers::MAC_CMD, 1.0));
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original + 2.0);
+    h.event(wheel(egui::Modifiers::NONE, -1.0));
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original + 2.0);
+    h.key_press_modifiers(egui::Modifiers::MAC_CMD, egui::Key::ArrowDown);
+    h.event(wheel(egui::Modifiers::MAC_CMD, -1.0));
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original);
+    assert_eq!(h.ctx.zoom_factor(), 1.0, "zoom only changes the terminal font");
+}
+
 #[test]
 fn custom_theme_selection_reload_and_relaunch_preserve_terminal_sessions() {
     use kiln::app::Action;

@@ -379,6 +379,19 @@ pub fn resume(path: &Path) -> Result<SpawnSpec> {
     attach(&mut spec, path, &record)?;
     Ok(spec)
 }
+/// A workspace reopen must not use the original request file.
+pub(super) fn reopen(path: &Path, accounts: &AccountManager) -> Result<SpawnSpec> {
+    let record = read(path)?;
+    ensure!(
+        !super::conversation_sync::handover::blocked(&kiln_common::paths::config_dir(), path, &record),
+        "Conversation ownership transferred"
+    );
+    accounts.validate_launch_environment(record.tool, &record.spec.env)?;
+    let resume = record.conversation.as_deref().is_some_and(valid_id);
+    ensure!(resume || !record.request_started, "The previous request has no confirmed conversation ID");
+    launch_spec(path, &record, resume, None)
+}
+
 pub fn renew(path: &Path) -> Result<SpawnSpec> {
     let _lock = lock_record(path)?;
     let mut record = read(path)?;

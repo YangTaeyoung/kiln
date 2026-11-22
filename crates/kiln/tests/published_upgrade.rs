@@ -1,4 +1,4 @@
-//! Opt-in compatibility gate against an explicitly supplied published protocol-5
+//! Opt-in compatibility gate against an explicitly supplied published protocol-5 or protocol-6
 //! executable. Only disposable sockets, configuration and shell processes are used.
 #[cfg(unix)]
 mod unix {
@@ -229,7 +229,7 @@ mod unix {
     }
     fn run(hosted: bool) {
         let Some(old) = std::env::var_os("KILN_TEST_OLD_EXE") else {
-            eprintln!("KILN_TEST_OLD_EXE absent; published protocol-5 upgrade NOT verified");
+            eprintln!("KILN_TEST_OLD_EXE absent; published protocol-5 or protocol-6 upgrade NOT verified");
             return;
         };
         let old = PathBuf::from(old)
@@ -244,9 +244,9 @@ mod unix {
         );
         let mut owner = Owner::start(&old, hosted);
         let mut legacy = owner.legacy();
-        assert_eq!(
-            legacy.proto, 5,
-            "gate requires the published protocol-5 daemon"
+        assert!(
+            matches!(legacy.proto, 5 | 6),
+            "gate requires the published protocol-5 or protocol-6 daemon"
         );
         let old_daemon = legacy.pid;
         let spec = SpawnSpec {
@@ -326,7 +326,7 @@ mod unix {
         if let Some(reaper) = reaper {
             assert!(reaper.join().unwrap().success());
         }
-        assert_eq!(kiln_proto::PROTO_VERSION, 6);
+        assert_eq!(kiln_proto::PROTO_VERSION, 7);
         if hosted {
             assert_ne!(current.server_pid, old_daemon);
         } else {
@@ -381,11 +381,11 @@ mod unix {
         }
     }
     #[test]
-    fn published_protocol_5_native_session_survives_protocol_6_upgrade() {
+    fn published_native_session_survives_protocol_upgrade() {
         run(false);
     }
     #[test]
-    fn published_protocol_5_hosted_session_survives_protocol_6_upgrade() {
+    fn published_hosted_session_survives_protocol_upgrade() {
         run(true);
     }
 }

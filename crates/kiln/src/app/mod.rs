@@ -303,6 +303,8 @@ pub struct KilnApp {
     panes: HashMap<PaneId, Pane>,
     pending_creates: HashMap<u32, PaneId>,
     launch_specs: HashMap<PaneId, SpawnSpec>,
+    saved_terminals: HashMap<PaneId, state::SavedTerminal>,
+    last_scrollback_poll: Option<Instant>,
     capacity_recovery: capacity_recovery::Recovery,
     agent_handover: agent_handover::Transfers,
     cli_updates: agent_runtime::Updates,
@@ -431,6 +433,8 @@ impl KilnApp {
             panes: HashMap::new(),
             pending_creates: HashMap::new(),
             launch_specs: HashMap::new(),
+            saved_terminals: HashMap::new(),
+            last_scrollback_poll: None,
             capacity_recovery: Default::default(),
             agent_handover: Default::default(),
             cli_updates: Default::default(),
@@ -575,6 +579,9 @@ impl KilnApp {
                         None => PaneKind::Term { session: pp.session, pending: None, view: pp.session.map(TermView::new) },
                     };
                     if pp.tool.is_none() {
+                        if let Some(terminal) = &pp.terminal {
+                            self.saved_terminals.insert(pp.id, terminal.clone());
+                        }
                         if let Some(spec) = &pp.launch {
                             if let Some(mut view)=agent_gui::AgentPane::from_spec(spec) {
                                 if let Some(draft)=&pp.agent_draft {view.restore_draft(draft.clone());}
@@ -649,6 +656,7 @@ impl KilnApp {
                                 session: p.session(),
                                 cwd: p.session().and_then(|s| self.conn.infos.get(&s)).and_then(|i| i.cwd.clone()).or_else(|| p.cwd.clone()),
                                 tool: p.tool().and_then(|t| t.persist()),
+                                terminal: self.saved_terminals.get(&p.id).cloned(),
                                 launch: self.launch_specs.get(&p.id).cloned(),
                                 agent_draft: self.agent_views.get(&p.id).map(agent_gui::AgentPane::draft)
                                     .or_else(|| self.shell_agent_drafts.get(&p.id).cloned()),
@@ -730,15 +738,78 @@ impl KilnApp {
             workspace: ws_info.as_ref().map(|w| w.1.clone()),
             ..Default::default()
         });
+        let saved_terminal = self.saved_terminals.get(&pane);
+        if spec.name.is_none() {
+            spec.name = saved_terminal.and_then(|terminal| terminal.title.clone());
+        }
         if spec.workspace.is_none() { spec.workspace = ws_info.map(|w| w.1); }
         // New sessions start at the size of the largest terminal drawn in the latest pass.
         if let Some((cols, rows)) = self.conn.terminal_grid() {
             spec.cols = cols;
             spec.rows = rows;
         }
-        if let Some(req) = self.conn.create(spec) {
+        let scrollback = saved_terminal.map_or("", |terminal| terminal.scrollback.as_str());
+        if let Some(req) = self.conn.create_with_scrollback(spec, scrollback) {
             *pending = Some(req);
             self.pending_creates.insert(req, pane);
+        }
+    }
+
+    fn reopen_terminal(&mut self, pane: PaneId, previous_session: Option<SessionId>) {
+        let spec = self.launch_specs.get(&pane).map_or(Ok(None), |saved| {
+            if let Some(spec) = agent_gui::reopen_spec(saved, previous_session)? {
+                return Ok(Some(spec));
+            }
+            agent_runtime::record_path(saved)
+                .map(|path| agent_runtime::reopen(&path, &self.rotator.mgr))
+                .transpose()
+        });
+
+        if let Some(Pane { kind: PaneKind::Term { session, view, .. }, .. }) = self.panes.get_mut(&pane) {
+            *session = None;
+            *view = None;
+        }
+        if self.quick.pane == Some(pane) {
+            self.quick.view = None;
+            self.quick.focus_pending = self.quick.open;
+        }
+        match spec {
+            Ok(Some(spec)) => {
+                let shell_view = self.shell_agent_views.remove(&pane).is_some();
+                if (shell_view || !self.agent_views.contains_key(&pane))
+                    && let Some(mut view) = agent_gui::AgentPane::from_spec(&spec)
+                {
+                    if let Some(draft) = self.agent_views.get(&pane).map(agent_gui::AgentPane::draft)
+                        .or_else(|| self.shell_agent_drafts.remove(&pane))
+                    {
+                        view.restore_draft(draft);
+                    }
+                    self.agent_views.insert(pane, view);
+                }
+                self.launch_specs.insert(pane, spec);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                self.retain_terminal_launch(pane, error.to_string());
+                return;
+            }
+        }
+        self.spawn_for_pane(pane);
+    }
+
+    fn remember_terminal(&mut self, pane: PaneId, session: SessionId) {
+        let Some(info) = self.conn.infos.get(&session) else { return; };
+        let terminal = self.saved_terminals.entry(pane).or_default();
+        terminal.owner = Some(info.into());
+        let process = info.fg_process.as_deref().unwrap_or("");
+        if let Some(title) = info.name.clone().or_else(|| ui::meaningful_title(&info.title, process, info.cwd.as_deref())) {
+            terminal.title = Some(title);
+        }
+        if let Some(cwd) = &info.cwd
+            && let Some(pane) = self.panes.get_mut(&pane)
+            && pane.cwd.as_ref() != Some(cwd)
+        {
+            pane.cwd = Some(cwd.clone());
         }
     }
 
@@ -990,6 +1061,9 @@ impl KilnApp {
                             } else {
                                 self.shell_agent_views.remove(&pane);
                                 self.agent_views.remove(&pane);
+                                if let Some(spec) = self.launch_specs.get_mut(&pane) {
+                                    spec.env.retain(|(key, _)| key != "KILN_SHELL_GUI_AGENT");
+                                }
                             }
                         }
                     }
@@ -1249,6 +1323,7 @@ impl KilnApp {
         self.agent_gui_imports.remove(&p);
         self.pending_input.remove(&p);
         self.launch_specs.remove(&p);
+        self.saved_terminals.remove(&p);
         self.cli_restarts.remove(&p);self.cli_confirmations.remove(&p);
         self.pending_agent_prompts.remove(&p);
         self.terminal_launch_drafts.remove(&p);
@@ -2134,6 +2209,9 @@ impl KilnApp {
                             *s = Some(session);
                             *pending = None;
                             *view = Some(TermView::new(session));
+                            if let Some(terminal) = self.saved_terminals.get_mut(&pid) {
+                                terminal.owner = self.conn.infos.get(&session).map(Into::into);
+                            }
                             if let Some(input) = self.pending_input.remove(&pid) {
                                 self.conn.input(session, input.into_bytes());
                             }
@@ -2178,11 +2256,23 @@ impl KilnApp {
                 }
                 ConnEvent::Disconnected => self.retain_disconnected_launches(),
                 ConnEvent::Connected => {
+                    self.last_scrollback_poll = None;
                     if self.restored {
                         self.transient_info(kiln_common::i18n::tr("데몬에 다시 연결됨"), "");
                     }
                 }
                 ConnEvent::Upgrading => self.transient_info(kiln_common::i18n::tr("데몬을 새 버전으로 교체하는 중"), kiln_common::i18n::tr("실행 중인 세션은 그대로 유지됩니다")),
+                ConnEvent::Scrollback { session, owner, text } => {
+                    if text.len() <= kiln_proto::MAX_SAVED_SCROLLBACK_BYTES {
+                        for (&pane, terminal) in &mut self.saved_terminals {
+                            if terminal.owner == Some(owner)
+                                && self.panes.get(&pane).and_then(Pane::session) == Some(session)
+                            {
+                                terminal.scrollback.clone_from(&text);
+                            }
+                        }
+                    }
+                }
                 ConnEvent::SessionText { session, text } => {
                     let mut out = Vec::new();
                     self.rotator.set_managed(self.panes.iter().filter_map(|(pane,p)|self.launch_specs.get(pane).filter(|spec|agent_runtime::record_path(spec).is_some() || agent_gui::descriptor(spec).is_some() || self.shell_agent_views.contains_key(pane)).and_then(|_|p.session())));
@@ -2201,25 +2291,36 @@ impl KilnApp {
         if self.conn.is_connected() {
             for session in std::mem::take(&mut self.cancelled_sessions) { self.conn.kill(session); }
         }
-        // 세션 목록을 받은 뒤: 사라진 세션의 카드는 새 셸로 채운다.
         if self.conn.is_connected() && self.conn.sessions_listed {
-            self.restored = true;
-            let visible: Vec<PaneId> = self.workspaces.iter().flat_map(|w| w.all_panes()).collect();
-            for p in visible {
-                let needs = match self.panes.get(&p).map(|x| &x.kind) {
-                    Some(PaneKind::Term { session, pending, .. }) => !self.terminal_launch_drafts.contains_key(&p) && pending.is_none() && session.is_none_or(|s| !self.conn.exists(s)),
-                    _ => false,
-                };
-                if needs {
-                    if let Some(Pane { kind: PaneKind::Term { session, view, .. }, .. }) = self.panes.get_mut(&p) {
-                        *session = None;
-                        *view = None;
-                    }
-                    self.spawn_for_pane(p);
-                }
-            }
+            self.sync_workspace_terminals();
         }
         if !self.conn.is_connected() { self.retain_disconnected_launches(); }
+    }
+
+    fn sync_workspace_terminals(&mut self) {
+        self.restored = true;
+        let poll_scrollback = self.last_scrollback_poll.is_none_or(|last| last.elapsed() >= Duration::from_secs(3));
+        if poll_scrollback { self.last_scrollback_poll = Some(Instant::now()); }
+        let panes: Vec<_> = self.workspaces.iter().flat_map(|w| w.all_panes()).collect();
+        for pane in panes {
+            let Some(Pane { kind: PaneKind::Term { session, pending, .. }, .. }) = self.panes.get(&pane) else { continue; };
+            if pending.is_some() || self.terminal_launch_drafts.contains_key(&pane) { continue; }
+            let session = *session;
+            let terminal = self.saved_terminals.get(&pane);
+            let same_owner = session.and_then(|id| self.conn.infos.get(&id)).is_some_and(|info| {
+                terminal.and_then(|saved| saved.owner).is_none_or(|owner| owner == info.into())
+            });
+            if let Some(session) = session.filter(|_| same_owner) {
+                self.remember_terminal(pane, session);
+                if poll_scrollback && self.agent_views.get(&pane).is_none_or(|view| view.presentation() == agent_gui::Presentation::Terminal) {
+                    self.conn.read_scrollback(session);
+                }
+            } else if session.is_some() || terminal.is_some() {
+                self.reopen_terminal(pane, session);
+            } else {
+                self.spawn_for_pane(pane);
+            }
+        }
     }
 
     fn retain_disconnected_launches(&mut self) {
@@ -2455,7 +2556,7 @@ impl KilnApp {
         self.cancel_pane_layout();
         let snapshot=self.persist();
         let bytes=serde_json::to_vec(&snapshot).unwrap();
-        self.workspaces.clear();self.panes.clear();self.agent_views.clear();self.agent_gui_imports.clear();self.shell_agent_views.clear();self.shell_agent_drafts.clear();self.shell_agent_scan=None;self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
+        self.workspaces.clear();self.panes.clear();self.agent_views.clear();self.agent_gui_imports.clear();self.shell_agent_views.clear();self.shell_agent_drafts.clear();self.shell_agent_scan=None;self.pending_input.clear();self.pending_agent_prompts.clear();self.pending_creates.clear();self.launch_specs.clear();self.saved_terminals.clear();self.cli_restarts.clear();self.cli_confirmations.clear();self.terminal_launch_drafts.clear();
         self.restore(serde_json::from_slice(&bytes).unwrap(),ctx);
     }
 

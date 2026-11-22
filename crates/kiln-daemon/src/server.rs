@@ -24,6 +24,7 @@ pub struct Session {
     pub id: SessionId,
     pty: AnyPty,
     emu: Mutex<Emu>,
+    restored_scrollback: String,
     input: crate::input_queue::InputQueue,
     info: Mutex<SessionInfo>,
     generation: AtomicU64,
@@ -94,6 +95,7 @@ pub struct Daemon {
     next_client: AtomicU64,
     upgrading: AtomicBool,
     session_changes: Mutex<()>,
+    registry_write: Mutex<()>,
     reader_lifecycle: Mutex<()>,
     unreachable_hosts: Mutex<Vec<HostRecord>>,
     readers_running: AtomicUsize,
@@ -221,6 +223,7 @@ impl Daemon {
             next_client: AtomicU64::new(1),
             upgrading: AtomicBool::new(false),
             session_changes: Mutex::new(()),
+            registry_write: Mutex::new(()),
             reader_lifecycle: Mutex::new(()),
             unreachable_hosts: Mutex::new(Vec::new()),
             readers_running: AtomicUsize::new(0),
@@ -261,7 +264,14 @@ impl Daemon {
         v
     }
 
-    fn create(self: &Arc<Self>, mut spec: SpawnSpec) -> std::io::Result<SessionId> {
+    fn create(self: &Arc<Self>, spec: SpawnSpec) -> std::io::Result<SessionId> {
+        self.create_with_scrollback(spec, "")
+    }
+
+    fn create_with_scrollback(self: &Arc<Self>, mut spec: SpawnSpec, scrollback: &str) -> std::io::Result<SessionId> {
+        if scrollback.len() > MAX_SAVED_SCROLLBACK_BYTES {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "scrollback exceeds the saved text limit"));
+        }
         let _change = self.session_changes.lock();
         if self.upgrading.load(Ordering::SeqCst) {
             return Err(std::io::Error::other("daemon is upgrading; retry after reconnecting"));
@@ -294,20 +304,18 @@ impl Daemon {
             attention: false,
             last_notification: None,
         };
-        self.install(id, pty, Emu::new(spec.cols, spec.rows), info)?;
+        let mut emu = Emu::new(spec.cols, spec.rows);
+        emu.seed_scrollback(scrollback);
+        self.install(id, pty, emu, info, Vec::new(), scrollback.to_owned())?;
         self.save_registry();
         Ok(id)
     }
 
-    fn install(self: &Arc<Self>, id: SessionId, pty: AnyPty, emu: Emu, info: SessionInfo) -> std::io::Result<()> {
-        self.install_with_replies(id, pty, emu, info, Vec::new())
-    }
-
-    fn install_with_replies(self: &Arc<Self>, id: SessionId, pty: AnyPty, emu: Emu, info: SessionInfo, replies: Vec<Vec<u8>>) -> std::io::Result<()> {
+    fn install(self: &Arc<Self>, id: SessionId, pty: AnyPty, emu: Emu, info: SessionInfo, replies: Vec<Vec<u8>>, restored_scrollback: String) -> std::io::Result<()> {
         let reader = pty.reader()?;
         let input = crate::input_queue::InputQueue::new(pty.writer()?, id)?;
         for reply in replies { input.respond(reply)?; }
-        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), input, info: Mutex::new(info), generation: AtomicU64::new(1), reader_active: AtomicBool::new(false), cancelled: AtomicBool::new(false), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()), recovery: Mutex::new(Default::default()), control: Mutex::new(()) });
+        let sess = Arc::new(Session { id, pty, emu: Mutex::new(emu), restored_scrollback, input, info: Mutex::new(info), generation: AtomicU64::new(1), reader_active: AtomicBool::new(false), cancelled: AtomicBool::new(false), images: Mutex::new(SessionImages::default()), telemetry: Mutex::new(crate::shell::Tracker::default()), recovery: Mutex::new(Default::default()), control: Mutex::new(()) });
         self.sessions.write().insert(id, sess.clone());
         if sess.info.lock().exited.is_none() {
             let d = self.clone();
@@ -431,6 +439,7 @@ impl Daemon {
 
     /// 호스트 방식 세션 목록을 파일에 남긴다(데몬이 비정상 종료되면 다음 데몬이 입양한다).
     fn save_registry(&self) {
+        let _write = self.registry_write.lock();
         let mut records: Vec<HostRecord> = self
             .sessions
             .read()
@@ -441,7 +450,7 @@ impl Daemon {
                 if i.exited.is_some() {
                     return None;
                 }
-                Some(HostRecord { session: s.id, endpoint: h.endpoint.clone(), name: i.name.clone(), workspace: i.workspace.clone(), cwd: i.cwd.clone(), created_unix: i.created_unix, terminal_replies: Vec::new(), terminal_dump: None })
+                Some(HostRecord { session: s.id, endpoint: h.endpoint.clone(), name: i.name.clone(), workspace: i.workspace.clone(), cwd: i.cwd.clone(), created_unix: i.created_unix, terminal_replies: Vec::new(), terminal_dump: None, restored_scrollback: s.restored_scrollback.clone() })
             })
             .collect();
         records.extend(self.unreachable_hosts.lock().iter().cloned());
@@ -458,7 +467,13 @@ impl Daemon {
                     Ok(dump) => Emu::restore(dump),
                     Err(_) => { self.unreachable_hosts.lock().push(r); continue; }
                 },
-                None if r.terminal_replies.is_empty() => Emu::new(120, 32),
+                None if r.terminal_replies.is_empty() => {
+                    let mut emu = Emu::new(120, 32);
+                    if r.restored_scrollback.len() <= MAX_SAVED_SCROLLBACK_BYTES {
+                        emu.seed_scrollback(&r.restored_scrollback);
+                    }
+                    emu
+                },
                 None => { self.unreachable_hosts.lock().push(r); continue; }
             };
             // A checkpoint already consumed historical queries. Replaying their
@@ -487,7 +502,7 @@ impl Daemon {
             let _ = h.resize(cols.saturating_sub(1).max(1), rows);
             let _ = h.resize(cols, rows);
             log::info!("adopted session {} from {}", r.session, r.endpoint);
-            if self.install_with_replies(r.session, AnyPty::Host(h), emu, info, r.terminal_replies.clone()).is_err() {
+            if self.install(r.session, AnyPty::Host(h), emu, info, r.terminal_replies.clone(), r.restored_scrollback.clone()).is_err() {
                 self.unreachable_hosts.lock().push(r);
             }
         }
@@ -745,10 +760,13 @@ impl Daemon {
                     None => reply(ServerMsg::Error { req, message: "명령 출력을 더 이상 사용할 수 없습니다. 데몬 재시작 또는 기록 제한을 확인하세요.".into() }),
                 }
             },
-            ClientMsg::Create { req, spec } => match self.create(spec) {
-                Ok(session) => reply(ServerMsg::Created { req, session }),
-                Err(e) => reply(ServerMsg::Error { req, message: format!("spawn failed: {e}") }),
-            },
+            ClientMsg::Create { req, spec } => self.reply_created(req, self.create(spec), reply),
+            ClientMsg::CreateWithScrollback { req, spec, scrollback } =>
+                self.reply_created(req, self.create_with_scrollback(spec, &scrollback), reply),
+            ClientMsg::ReadScrollback { req, session } => {
+                let text = self.session(session).and_then(|session| session.emu.lock().saved_scrollback());
+                reply(ServerMsg::Scrollback { req, text });
+            }
             ClientMsg::Attach { session, cols, rows } => {
                 if let Some(s) = self.session(session) {
                     if cols > 0 && rows > 0 {
@@ -897,15 +915,34 @@ impl Daemon {
             ClientMsg::Shutdown => {
                 let _change = self.session_changes.lock();
                 if self.upgrading.load(Ordering::SeqCst) { return true; }
-                for s in self.sessions.read().values() {
+                let sessions = std::mem::take(&mut *self.sessions.write());
+                for s in sessions.values() {
                     s.cancelled.store(true, Ordering::SeqCst);
                     s.pty.kill();
                 }
+                // A host may still be processing Kill. The next daemon must not
+                // adopt a process that this shutdown has already terminated.
+                self.save_registry();
                 let _ = std::fs::remove_file(&self.socket);
                 std::process::exit(0);
             }
         }
         true
+    }
+
+    fn reply_created(&self, req: u32, result: std::io::Result<SessionId>, reply: impl Fn(ServerMsg)) {
+        match result {
+            Ok(session) => {
+                // The broadcast can be dropped by a busy client. The creator
+                // needs the owner details before it reconciles the pane.
+                if let Some(created) = self.session(session) {
+                    let info = created.info.lock().clone();
+                    reply(ServerMsg::SessionUpdated(info));
+                }
+                reply(ServerMsg::Created { req, session });
+            }
+            Err(error) => reply(ServerMsg::Error { req, message: format!("spawn failed: {error}") }),
+        }
     }
 
     fn resize(&self, s: &Session, cols: u16, rows: u16) {
@@ -1370,18 +1407,26 @@ fn acquire_instance_lock(socket: &str) -> anyhow::Result<std::fs::File> {
     }
 }
 
-fn retain_unrestored_records(daemon: &Arc<Daemon>, restored: &[SessionId]) {
+fn retain_unrestored_records(daemon: &Arc<Daemon>, restored: &[SessionId]) -> Vec<HostRecord> {
+    let records = crate::ptyhost::load_registry(&daemon.socket);
     let mut unreachable = daemon.unreachable_hosts.lock();
-    for record in crate::ptyhost::load_registry(&daemon.socket) {
+    for record in &records {
         if !restored.contains(&record.session) && !unreachable.iter().any(|r| r.session == record.session) {
             daemon.next_session.fetch_max(record.session + 1, Ordering::SeqCst);
-            unreachable.push(record);
+            unreachable.push(record.clone());
         }
     }
+    records
 }
 
-fn restore_host_session(daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut Vec<SavedImages>, replies: &mut PendingReplies) -> anyhow::Result<()> {
+fn restore_host_session(
+    daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut Vec<SavedImages>,
+    replies: &mut PendingReplies, records: &[HostRecord],
+) -> anyhow::Result<()> {
     let id = s.info.id;
+    let restored_scrollback = records.iter()
+        .find(|record| record.session == id && record.endpoint == s.endpoint)
+        .map_or_else(String::new, |record| record.restored_scrollback.clone());
     let host = if let Some(code) = s.info.exited {
         HostPty::finished(s.endpoint.clone(), s.info.pid, code)
     } else {
@@ -1395,12 +1440,12 @@ fn restore_host_session(daemon: &Arc<Daemon>, mut s: SavedHosted, images: &mut V
                 let terminal_dump = if pending.is_empty() { None } else { Some(postcard::to_stdvec(&s.dump)?) };
                 daemon.unreachable_hosts.lock().push(HostRecord { session: id, endpoint: s.endpoint,
                     name: s.info.name, workspace: s.info.workspace, cwd: s.info.cwd,
-                    created_unix: s.info.created_unix, terminal_replies: pending, terminal_dump });
+                    created_unix: s.info.created_unix, terminal_replies: pending, terminal_dump, restored_scrollback });
                 return Ok(());
             }
         }
     };
-    daemon.install_with_replies(id, AnyPty::Host(host), Emu::restore(s.dump), s.info, replies.get(&id).cloned().unwrap_or_default())?;
+    daemon.install(id, AnyPty::Host(host), Emu::restore(s.dump), s.info, replies.get(&id).cloned().unwrap_or_default(), restored_scrollback)?;
     replies.remove(&id);
     if let (Some(sess), Some(pos)) = (daemon.session(id), images.iter().position(|i| i.session == id)) {
         sess.images.lock().load(images.swap_remove(pos));
@@ -1414,8 +1459,8 @@ fn restore_hosted(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<()> {
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
     let mut images = state.images;
     let restored: Vec<_> = state.sessions.iter().map(|s| s.info.id).collect();
-    retain_unrestored_records(daemon, &restored);
-    for s in state.sessions { restore_host_session(daemon, s, &mut images, &mut replies)?; }
+    let records = retain_unrestored_records(daemon, &restored);
+    for s in state.sessions { restore_host_session(daemon, s, &mut images, &mut replies, &records)?; }
     daemon.save_registry();
     Ok(())
 }
@@ -1505,18 +1550,18 @@ fn restore(daemon: &Arc<Daemon>, bytes: &[u8]) -> anyhow::Result<Listener> {
     let mut replies = decode_replies(trailer)?;
     daemon.next_session.store(state.next_session, Ordering::SeqCst);
     let restored: Vec<_> = state.sessions.iter().map(|s| s.info.id).chain(hosted.iter().map(|s| s.info.id)).collect();
-    retain_unrestored_records(daemon, &restored);
+    let records = retain_unrestored_records(daemon, &restored);
     for s in state.sessions {
         let pty = AnyPty::Native(Pty::from_raw(s.fd, s.pid)?);
         let emu = Emu::restore(s.dump);
         let id = s.info.id;
-        daemon.install_with_replies(id, pty, emu, s.info, replies.get(&id).cloned().unwrap_or_default())?;
+        daemon.install(id, pty, emu, s.info, replies.get(&id).cloned().unwrap_or_default(), String::new())?;
         replies.remove(&id);
         if let (Some(sess), Some(pos)) = (daemon.session(id), images.iter().position(|i| i.session == id)) {
             sess.images.lock().load(images.swap_remove(pos));
         }
     }
-    for s in hosted { restore_host_session(daemon, s, &mut images, &mut replies)?; }
+    for s in hosted { restore_host_session(daemon, s, &mut images, &mut replies, &records)?; }
     daemon.save_registry();
     crate::pty::set_cloexec(state.listener_fd, true)?;
     // SAFETY: 이전 프로세스에서 상속한 리스닝 소켓 fd.
@@ -1636,7 +1681,7 @@ with open('result.json','w') as f: json.dump([reply,next_line],f)
         let daemon = Daemon::new(socket.clone());
         let pending = vec![b"\x1b[1;1R".to_vec()];
         let mut replies = HashMap::from([(777, pending.clone())]);
-        restore_host_session(&daemon, SavedHosted { info: SessionInfo { id: 777, ..Default::default() }, endpoint: dir.path().join("absent.sock").to_string_lossy().into_owned(), dump: Emu::new(80,24).dump() }, &mut Vec::new(), &mut replies).unwrap();
+        restore_host_session(&daemon, SavedHosted { info: SessionInfo { id: 777, ..Default::default() }, endpoint: dir.path().join("absent.sock").to_string_lossy().into_owned(), dump: Emu::new(80,24).dump() }, &mut Vec::new(), &mut replies, &[]).unwrap();
         daemon.save_registry();
         let records = crate::ptyhost::load_registry(&socket);
         assert_eq!(records[0].terminal_replies, pending);
@@ -1678,7 +1723,7 @@ with open('result.json','w') as f: json.dump([reply,next_line],f)
         let events = emu.advance(b"\x1b[6n");
         let pending: Vec<Vec<u8>> = events.into_iter().filter_map(|event| if let Event::PtyWrite(reply) = event { Some(reply.into_bytes()) } else { None }).collect();
         assert_eq!(pending, vec![b"\x1b[1;1R".to_vec()]);
-        crate::ptyhost::save_registry(&socket, &[HostRecord { session: 777, endpoint, name: None, workspace: None, cwd: None, created_unix: 0, terminal_replies: pending, terminal_dump: Some(postcard::to_stdvec(&emu.dump()).unwrap()) }]);
+        crate::ptyhost::save_registry(&socket, &[HostRecord { session: 777, endpoint, name: None, workspace: None, cwd: None, created_unix: 0, terminal_replies: pending, terminal_dump: Some(postcard::to_stdvec(&emu.dump()).unwrap()), restored_scrollback: String::new() }]);
         let daemon = Daemon::new(socket);
         daemon.adopt_orphans();
         let session = daemon.session(777).unwrap();

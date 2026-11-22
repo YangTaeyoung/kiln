@@ -684,7 +684,12 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
     let lock = journal::open(&dir.join("host.lock"), false)?;
     // A client health probe briefly tests this same OS lock. Allow that probe to
     // finish without mistaking it for a second long-lived worker on restart.
-    let lock_deadline = Instant::now() + Duration::from_millis(250);
+    let reopening = std::env::var_os("KILN_GUI_REOPEN").is_some();
+    let lock_deadline = Instant::now() + if reopening {
+        Duration::from_secs(3)
+    } else {
+        Duration::from_millis(250)
+    };
     loop {
         match lock.try_lock() {
             Ok(()) => break,
@@ -697,6 +702,17 @@ pub(super) fn serve_status(id: &str) -> Result<i32> {
     }
     let mut config: Config = journal::read(&dir.join("config.json"))?;
     ensure!(config.descriptor.id == id, "agent config identity mismatch");
+    if reopening {
+        config.initial_prompt = None;
+        if let Some(shell) = &config.shell
+            && std::env::var("KILN_GUI_REOPEN_SHELL").ok().and_then(|id| id.parse::<u64>().ok()) == Some(shell.shell_session)
+        {
+            // The daemon inventory has lost the original parent and this
+            // process owns the worker lock. Keep the exact journal and profile.
+            config.shell = None;
+            journal::atomic(&dir.join("config.json"), &serde_json::to_vec(&config)?)?;
+        }
+    }
     // Older saved conversations may predate an explicit runtime PATH. Repair
     // the in-memory launch environment without rewriting the saved profile.
     super::super::agent_launch::pin_runtime_path(&mut config.environment)?;

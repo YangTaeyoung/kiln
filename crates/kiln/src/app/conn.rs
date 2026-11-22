@@ -66,6 +66,7 @@ pub enum ConnEvent {
     SearchResult { found: bool },
     /// `read_text` 요청에 대한 세션 화면 텍스트.
     SessionText { session: SessionId, text: String },
+    Scrollback { session: SessionId, owner: super::state::TerminalOwner, text: String },
 }
 
 pub enum State {
@@ -110,6 +111,7 @@ pub struct Conn {
     /// 응답이 오면 클립보드로 복사할 ReadRange 요청.
     pending_copy: std::collections::HashSet<u32>,
     pending_text: HashMap<u32, SessionId>,
+    pending_scrollback: HashMap<u32, (SessionId, super::state::TerminalOwner)>,
     cell_px: (u16, u16),
     terminal_palette: TerminalPalette,
     terminal_focus_candidate: Option<(SessionId, egui::ViewportId, egui::Id)>,
@@ -152,6 +154,7 @@ impl Conn {
             textures: HashMap::new(),
             pending_copy: Default::default(),
             pending_text: HashMap::new(),
+            pending_scrollback: HashMap::new(),
             cell_px: (0, 0),
             terminal_palette: palette_for_theme(&kiln_common::Theme::current()),
             terminal_focus_candidate: None,
@@ -196,6 +199,7 @@ impl Conn {
             textures: HashMap::new(),
             pending_copy: Default::default(),
             pending_text: HashMap::new(),
+            pending_scrollback: HashMap::new(),
             cell_px: (0, 0),
             terminal_palette: palette_for_theme(&kiln_common::Theme::current()),
             terminal_focus_candidate: None,
@@ -233,10 +237,8 @@ impl Conn {
                 // Command ids are local to the daemon lifetime, never reuse stale output after reconnect.
                 self.command_outputs.clear();
                 self.last_health_poll = None;
-                for (sid, (cols, rows)) in &self.attached {
-                    c.send(ClientMsg::Attach { session: *sid, cols: *cols, rows: *rows });
-                }
-                for session in &self.closing_sessions { c.send(ClientMsg::Kill { session:*session }); }
+                // Wait for the replacement daemon's inventory before attaching
+                // or sending input to numerical session IDs from the old list.
                 self.client = Some(c);
                 self.state = State::Connected;
                 self.events.push(ConnEvent::Connected);
@@ -302,6 +304,10 @@ impl Conn {
         self.upgrades.disconnected();
         self.pending_copy.clear();
         self.pending_text.clear();
+        self.pending_scrollback.clear();
+        self.sessions_listed = false;
+        self.attached.clear();
+        self.drawn.clear();
         self.reported_terminal_focus=None;
         self.shell_completions.clear();
         self.state=State::Disconnected{since:Instant::now(),last_error:"connection lost".into()};
@@ -321,7 +327,14 @@ impl Conn {
                 self.shell_completions.retain(|id,_|self.infos.contains_key(id));
                 self.observed_agents.retain(|id,_|self.infos.contains_key(id));
                 self.terminal_health.retain(|id,_|self.infos.contains_key(id));
+                self.telemetry.retain(|id,_|self.infos.contains_key(id));
+                self.screens.retain(|id,_|live.contains(id));
                 self.sessions_listed = true;
+                if let Some(client) = &self.client {
+                    for &session in &self.closing_sessions {
+                        if live.contains(&session) { client.send(ClientMsg::Kill { session }); }
+                    }
+                }
             }
             ServerMsg::SessionUpdated(i) => {
                 if self.closing_sessions.contains(&i.id) { return; }
@@ -366,6 +379,11 @@ impl Conn {
                     self.events.push(ConnEvent::SessionText { session, text });
                 }
             }
+            ServerMsg::Scrollback { req, text } => {
+                if let (Some((session, owner)), Some(text)) = (self.pending_scrollback.remove(&req), text) {
+                    self.events.push(ConnEvent::Scrollback { session, owner, text });
+                }
+            }
             ServerMsg::ShellCompletion {session,request}=>{if !self.is_connected()||self.closing_sessions.contains(&session)||!self.is_alive(session){return;}if let Some(r)=request{self.shell_completions.insert(session,r);}else{self.shell_completions.remove(&session);}},
             ServerMsg::SessionTelemetry { session, telemetry } => {
                 if self.closing_sessions.contains(&session) { return; }
@@ -393,6 +411,12 @@ impl Conn {
     }
 
     fn update_info(&mut self, mut info: SessionInfo) {
+        if self.infos.get(&info.id).is_some_and(|previous| {
+            previous.pid != info.pid || previous.created_unix != info.created_unix
+        }) {
+            self.screens.remove(&info.id);
+            self.telemetry.remove(&info.id);
+        }
         // A snapshot captured before exit can be queued after the exit event.
         // Preserve completion only for the same process, allowing a new owner.
         if info.exited.is_none()
@@ -477,14 +501,24 @@ impl Conn {
     }
 
     pub fn create(&mut self, spec: SpawnSpec) -> Option<u32> {
+        self.create_with_scrollback(spec, "")
+    }
+
+    pub fn create_with_scrollback(&mut self, spec: SpawnSpec, scrollback: &str) -> Option<u32> {
         self.sync_palette();
         let c = self.client.as_ref()?;
         let req = c.next_req();
-        c.send(ClientMsg::Create { req, spec });
+        let message = if scrollback.is_empty() || scrollback.len() > MAX_SAVED_SCROLLBACK_BYTES {
+            ClientMsg::Create { req, spec }
+        } else {
+            ClientMsg::CreateWithScrollback { req, spec, scrollback: scrollback.to_owned() }
+        };
+        c.send(message);
         Some(req)
     }
 
     pub fn attach(&mut self, sid: SessionId, cols: u16, rows: u16) {
+        if self.client.is_some() && !self.sessions_listed { return; }
         self.drawn.insert(sid, (self.pumps, Instant::now()));
         let area = |(c, r): (u16, u16)| u32::from(c) * u32::from(r);
         if self.grid.is_none_or(|(grid, pass)| pass != self.pumps || area(grid) < area((cols, rows))) {
@@ -539,6 +573,7 @@ impl Conn {
     }
 
     pub fn input(&self, sid: SessionId, data: Vec<u8>) {
+        if self.client.is_some() && !self.sessions_listed { return; }
         if !data.is_empty() && self.terminal_health.get(&sid).is_none_or(|h|h.state==TerminalState::Healthy) {
             self.repaint.input();
             self.input_times.borrow_mut().insert(sid, std::time::SystemTime::now());
@@ -616,6 +651,15 @@ impl Conn {
         let req = self.next_req();
         self.pending_text.insert(req, session);
         self.send(ClientMsg::ReadText { req, session, history: 0 });
+    }
+
+    pub fn read_scrollback(&mut self, session: SessionId) {
+        let Some(client) = &self.client else { return };
+        let Some(info) = self.infos.get(&session) else { return };
+        if self.pending_scrollback.values().any(|(id, _)| *id == session) { return; }
+        let req = client.next_req();
+        self.pending_scrollback.insert(req, (session, info.into()));
+        client.send(ClientMsg::ReadScrollback { req, session });
     }
 
     /// 셀 픽셀 크기가 바뀌면 데몬에 알린다(이미지 크기 계산용).

@@ -8,7 +8,8 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-pub const PROTO_VERSION: u32 = 6;
+pub const PROTO_VERSION: u32 = 7;
+pub const MAX_SAVED_SCROLLBACK_BYTES: usize = 32 * 1024;
 pub const MAX_FRAME: usize = 64 * 1024 * 1024;
 
 pub type SessionId = u64;
@@ -99,6 +100,10 @@ pub enum ClientMsg {
     /// Snapshot used only for conditional control input; never accepts stale UI observations.
     ReadInputState { req:u32, session:SessionId },
     InputIfUnchanged { req:u32, session:SessionId, pid:u32, revision:u64, text:String, data:Vec<u8> },
+    /// Start a fresh child with the previous terminal's text in its scrollback.
+    CreateWithScrollback { req: u32, spec: SpawnSpec, scrollback: String },
+    /// Checkpoint normal-screen output as bounded plain text.
+    ReadScrollback { req: u32, session: SessionId },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -133,6 +138,7 @@ pub enum ServerMsg {
     ShellCompletion { session: SessionId, request: Option<ShellCompletion> },
     InputState { req:u32, pid:u32, revision:Option<u64>, text:String },
     InputAccepted { req:u32, accepted:bool },
+    Scrollback { req: u32, text: Option<String> },
 }
 
 /// Ephemeral Zsh edit snapshot for passive previews or explicit menu requests.

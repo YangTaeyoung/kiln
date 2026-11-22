@@ -645,6 +645,8 @@ pub struct HostRecord {
     pub terminal_replies: Vec<Vec<u8>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_dump: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub restored_scrollback: String,
 }
 
 pub fn registry_path(daemon_socket: &str) -> std::path::PathBuf {
@@ -668,11 +670,22 @@ pub fn save_registry(daemon_socket: &str, records: &[HostRecord]) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let tmp = path.with_extension("tmp");
-    if let Ok(b) = serde_json::to_vec_pretty(records) {
-        if std::fs::write(&tmp, b).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("{}-{serial}.tmp", std::process::id()));
+    let Ok(bytes) = serde_json::to_vec_pretty(records) else { return; };
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut file) = options.open(&tmp) {
+        let written = file.write_all(&bytes).is_ok();
+        drop(file);
+        if written && std::fs::rename(&tmp, &path).is_ok() { return; }
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
