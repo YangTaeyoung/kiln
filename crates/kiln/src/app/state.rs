@@ -118,12 +118,36 @@ pub struct PaneP {
     pub id: PaneId,
     pub session: Option<u64>,
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<SavedTerminal>,
     #[serde(default)]
     pub tool: Option<ToolP>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<kiln_proto::SpawnSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_draft: Option<super::agent_gui::SavedDraft>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
+pub struct SavedTerminal {
+    #[serde(default)]
+    pub owner: Option<TerminalOwner>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scrollback: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalOwner {
+    pid: u32,
+    created_unix: u64,
+}
+
+impl From<&kiln_proto::SessionInfo> for TerminalOwner {
+    fn from(info: &kiln_proto::SessionInfo) -> Self {
+        Self { pid: info.pid, created_unix: info.created_unix }
+    }
 }
 
 /// 카드에 담긴 도구(터미널이 아닌 카드).
@@ -189,7 +213,7 @@ impl WorkspaceP {
                         TabP::DbConsole { conn } => ToolP::DbConsole { conn },
                         TabP::Terminal { .. } => unreachable!(),
                     };
-                    PageP { manual_split:false, zoomed:None, root: Node::Leaf(id), focused: id, panes: vec![PaneP { id, session: None, cwd: None, tool: Some(tool), launch: None, agent_draft: None }], title: None,agent_request:None,agent_request_offset:0 }
+                    PageP { manual_split:false, zoomed:None, root: Node::Leaf(id), focused: id, panes: vec![PaneP { id, session: None, cwd: None, terminal: None, tool: Some(tool), launch: None, agent_draft: None }], title: None,agent_request:None,agent_request_offset:0 }
                 }
             };
             self.pages.push(page);

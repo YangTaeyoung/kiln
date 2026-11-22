@@ -153,6 +153,26 @@ fn host_spec(descriptor: &Descriptor) -> Result<SpawnSpec> {
     })
 }
 
+/// Reopen the same journal with the current helper. A shell-owned journal can
+/// become pane-owned once its saved parent terminal is gone.
+pub(super) fn reopen_spec(spec: &SpawnSpec, previous_session: Option<u64>) -> Result<Option<SpawnSpec>> {
+    let (descriptor, shell_session) = if let Some(descriptor) = descriptor(spec) {
+        (descriptor, None)
+    } else if let Some((_, id)) = spec.env.iter().find(|(key, _)| key == "KILN_SHELL_GUI_AGENT") {
+        let session = previous_session.context("missing original shell session")?;
+        let saved = saved_shell_spec(session, id)?;
+        (self::descriptor(&saved).context("missing saved shell conversation")?, Some(session))
+    } else {
+        return Ok(None);
+    };
+    let mut spec = host_spec(&descriptor)?;
+    spec.env.push(("KILN_GUI_REOPEN".into(), "1".into()));
+    if let Some(session) = shell_session {
+        spec.env.push(("KILN_GUI_REOPEN_SHELL".into(), session.to_string()));
+    }
+    Ok(Some(spec))
+}
+
 /// Adopt only an explicitly tracked native conversation after its old PTY has
 /// reported exit. Call on a background worker; never resolve the active account.
 pub fn prepare_existing_native(record_path: &Path) -> Result<SpawnSpec> {

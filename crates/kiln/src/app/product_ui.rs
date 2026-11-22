@@ -128,7 +128,7 @@ impl KilnApp {
             }
             let pane=self.quick.pane.unwrap();
             let session=self.panes.get(&pane).and_then(Pane::session);
-            if let Some(sid)=session {if self.quick.view.is_none(){self.quick.view=Some(TermView::new(sid));}}
+            if let Some(sid)=session {if self.quick.view.as_ref().is_none_or(|view| view.session != sid){self.quick.view=Some(TermView::new(sid));}}
             let settings=terminal::TermSettings{font_size:self.settings.font_size,option_as_meta:self.settings.option_as_meta,completion_preview:self.settings.terminal_completion_preview,line_height:self.settings.line_height,copy_on_select:self.settings.copy_on_select,cursor_blink:self.settings.cursor_blink,close_shortcut:None};
             let mut close=false;let mut attach=false;
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("quick-terminal"),egui::ViewportBuilder::default().with_title(kiln_common::i18n::tr("Kiln · 빠른 터미널")).with_inner_size([900.0,420.0]).with_min_inner_size([400.0,240.0]).with_always_on_top(),|ctx,_|{
@@ -139,7 +139,7 @@ impl KilnApp {
                     if actions.2 { if let Some(view) = &mut self.quick.view { view.open_history(); } }
                     attach=actions.0; close|=actions.1;
                     widgets::divider(ui);
-                    if let Some(view)=&mut self.quick.view{let out=view.ui(ui,&mut self.conn,&settings,self.quick.focus_pending,None);self.quick.focus_pending=false;if let Some(link)=out.open{self.actions.push(Action::OpenLink(link));}if let Some((command,cwd))=out.command_to_run{self.actions.push(Action::RunSavedCommand(launchers::SelectedCommand{name:kiln_common::i18n::tr("명령 다시 실행").into(),command,cwd:cwd.map(PathBuf::from)}));}}else{ui.spinner();ui.label(kiln_common::i18n::tr("터미널 시작 중…"));ui.ctx().request_repaint_after(Duration::from_millis(100));}
+                    if let Some(view)=&mut self.quick.view{let out=view.ui(ui,&mut self.conn,&settings,self.quick.focus_pending,None);self.quick.focus_pending=false;if out.font_delta != 0.0 { self.actions.push(Action::FontDelta(out.font_delta)); } if let Some(link)=out.open{self.actions.push(Action::OpenLink(link));}if let Some((command,cwd))=out.command_to_run{self.actions.push(Action::RunSavedCommand(launchers::SelectedCommand{name:kiln_common::i18n::tr("명령 다시 실행").into(),command,cwd:cwd.map(PathBuf::from)}));}}else{ui.spinner();ui.label(kiln_common::i18n::tr("터미널 시작 중…"));ui.ctx().request_repaint_after(Duration::from_millis(100));}
                 });
             });
             if attach{self.actions.push(Action::RevealPane(pane));ctx.send_viewport_cmd(egui::ViewportCommand::Focus);close=true;}

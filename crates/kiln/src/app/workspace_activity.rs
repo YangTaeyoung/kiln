@@ -79,8 +79,23 @@ impl KilnApp {
                     tasks.push(WorkspaceTask{pane,title,qualifier:String::new(),phase,agent:Some(view.descriptor.tool),updated:created,recorded:None});
                     locations.push(view.descriptor.cwd.file_name().unwrap_or_default().to_string_lossy().into_owned());continue;
                 }
-                let Some(session)=self.panes.get(&pane).and_then(Pane::session) else {continue};
-                let Some(info)=self.conn.infos.get(&session) else {continue};
+                let terminal = self.panes.get(&pane);
+                let session = terminal.and_then(Pane::session);
+                let Some((session, info)) = session.and_then(|id| self.conn.infos.get(&id).map(|info| (id, info))) else {
+                    if let Some(saved) = self.saved_terminals.get(&pane) {
+                        let card = self.card_info(pane);
+                        let title = page.title.as_ref().filter(|_| panes.len() == 1)
+                            .or(saved.title.as_ref()).cloned().unwrap_or(card.name);
+                        tasks.push(WorkspaceTask {
+                            pane, title, qualifier: String::new(), phase: TaskPhase::Unknown,
+                            agent: None, updated: 0, recorded: None,
+                        });
+                        locations.push(terminal.and_then(|pane| pane.cwd.as_deref())
+                            .and_then(|cwd| Path::new(cwd).file_name())
+                            .map(|name| name.to_string_lossy().into_owned()).unwrap_or_default());
+                    }
+                    continue;
+                };
                 let telemetry=self.conn.telemetry.get(&session);
                 let command_time=telemetry.into_iter().flat_map(|t|&t.commands)
                     .map(|c|c.started_unix.max(c.finished_unix.unwrap_or(0))).max().unwrap_or(0);

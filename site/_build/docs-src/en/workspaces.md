@@ -20,7 +20,9 @@ One folder can have as many workspaces as you need, for example **API review** a
 - split layout,
 - unsent requests (drafts).
 
-Kiln restores each workspace independently when it reopens. Files and Git history belong to the folder, so every workspace for that folder sees the same files and the same history.
+Kiln reopens each workspace with its previous tabs, splits and focused pane. It reconnects to terminals that are still running. After a computer restart, a new shell starts in the last saved folder and shows recent saved output. Kiln resumes managed conversations in their original panes with their drafts.
+
+Files and Git history belong to the folder, so every workspace for that folder sees the same files and history.
 
 ## One workspace, several repositories {#one-workspace-several-repositories}
 
@@ -104,3 +106,5 @@ Use the sidebar to move between workspaces and tasks. Switching workspaces keeps
 You can customize navigation shortcuts in Settings.
 
 On Windows, app shortcuts shown with `⌘` use `Ctrl+Shift`, `⇧⌘` uses `Ctrl+Shift+Alt` and `⌥⌘` uses `Ctrl+Alt`.
+
+On macOS, press `⌘↑` or `⌘↓` in a focused terminal, or hold `⌘` while scrolling over a terminal, to change the terminal font size.

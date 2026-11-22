@@ -219,6 +219,33 @@ impl Emu {
         out
     }
 
+    pub fn saved_scrollback(&self) -> Option<String> {
+        if self.term.mode().contains(TermMode::ALT_SCREEN) {
+            return None;
+        }
+        let text = self.text(200);
+        let start = text.ceil_char_boundary(text.len().saturating_sub(kiln_proto::MAX_SAVED_SCROLLBACK_BYTES));
+        Some(text[start..].trim_end_matches('\n').to_owned())
+    }
+
+    /// Seed the new emulator's history without interpreting escape sequences
+    /// or passing the old output to the new child.
+    pub fn seed_scrollback(&mut self, text: &str) {
+        if text.is_empty() { return; }
+        let mut plain = String::with_capacity(text.len());
+        for ch in text.chars() {
+            match ch {
+                '\n' => plain.push_str("\r\n"),
+                ch if !ch.is_control() => plain.push(ch),
+                _ => {}
+            }
+        }
+        if !plain.is_empty() {
+            plain.push_str("\r\n");
+            self.advance(plain.as_bytes());
+        }
+    }
+
     /// 현재 보이는 영역 위쪽(또는 아래쪽)에서 `query` 를 찾아 화면에 보이도록 스크롤한다.
     pub fn search(&mut self, query: &str, backward: bool) -> bool {
         if query.is_empty() {
@@ -546,6 +573,21 @@ mod tests {
         assert_ne!(l.cells[4].flags & flags::WIDE, 0);
         assert_ne!(l.cells[5].flags & flags::SPACER, 0);
         assert_eq!(e.cursor().unwrap().col, 8);
+    }
+
+    #[test]
+    fn saved_scrollback_is_visible_and_does_not_execute_terminal_controls() {
+        let mut emu = Emu::new(80, 5);
+        emu.seed_scrollback("previous output\n\x1b[?1049hbody");
+        assert!(!emu.term.mode().contains(TermMode::ALT_SCREEN));
+        let saved = emu.saved_scrollback().unwrap();
+        assert!(saved.contains("previous output"));
+        assert!(saved.contains("[?1049hbody"));
+        emu.advance(b"fresh prompt");
+        assert!(emu.text(0).contains("previous output"));
+        assert!(emu.text(0).contains("fresh prompt"));
+        emu.advance(b"\x1b[?1049halt screen");
+        assert_eq!(emu.saved_scrollback(), None);
     }
 
     #[test]

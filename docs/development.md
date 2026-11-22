@@ -25,7 +25,7 @@ KILN_TEST_OLD_EXE=/tmp/previous-release/Kiln.app/Contents/MacOS/kiln \
 ```
 
 This opt-in gate creates private daemon sockets/configuration and checks protocol
-5 to 6 handover in both native and hosted modes, preserving shell PID, screen and
+5 or 6 to 7 handover in both native and hosted modes, preserving shell PID, screen and
 real input/output. If the variable is absent, the tests explicitly skip verification;
 that run does not establish published-version compatibility or a Sparkle GUI update.
 

@@ -123,6 +123,7 @@ pub enum LinkTarget {
 pub struct TermOutput {
     pub focused: bool,
     pub clicked: bool,
+    pub font_delta: f32,
     pub open: Option<LinkTarget>,
     /// 종료된 세션에서 Enter 를 눌러 재시작을 요청했다.
     pub restart: bool,
@@ -150,6 +151,7 @@ pub struct TermView {
     ime_cursor: Option<kiln_proto::Cursor>,
     last_input_pass: Option<(egui::ViewportId, u64)>,
     scroll_accum: f32,
+    font_scroll_accum: f32,
     last_mouse_cell: Option<(u16, u16)>,
     mouse_capture: MouseCapture,
     search: Option<SearchBar>,
@@ -164,6 +166,33 @@ pub struct TermView {
     theme: kiln_common::Theme,
     /// false 면 바탕을 칠하지 않는다(카드가 둥근 바탕을 그린다).
     pub fill_background: bool,
+}
+
+fn terminal_font_delta(events: &mut Vec<egui::Event>, focused: bool, hovered: bool, wheel: &mut f32) -> f32 {
+    let command_only = |m: &egui::Modifiers| m.mac_cmd && !m.ctrl && !m.alt && !m.shift;
+    let mut keys = 0.0;
+    events.retain(|event| match event {
+        egui::Event::Key { key, pressed: true, modifiers, .. } if focused && command_only(modifiers) => {
+            match key {
+                egui::Key::ArrowUp => keys += 1.0,
+                egui::Key::ArrowDown => keys -= 1.0,
+                _ => return true,
+            }
+            false
+        }
+        egui::Event::MouseWheel { unit, delta, modifiers, .. } if hovered && command_only(modifiers) && delta.y != 0.0 => {
+            let steps = match unit {
+                egui::MouseWheelUnit::Point => delta.y / 24.0,
+                egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => delta.y,
+            };
+            *wheel += steps;
+            false
+        }
+        _ => true,
+    });
+    let steps = wheel.trunc();
+    *wheel -= steps;
+    keys + steps
 }
 
 // Text events follow their key event, but InputState.modifiers contains the
@@ -224,6 +253,7 @@ impl TermView {
             ime_cursor: None,
             last_input_pass: None,
             scroll_accum: 0.0,
+            font_scroll_accum: 0.0,
             last_mouse_cell: None,
             mouse_capture: MouseCapture::default(),
             search: None,
@@ -389,6 +419,12 @@ impl TermView {
         if !focused {self.clear_preedit();}
         out.focused = focused;
         out.clicked = kiln_common::widgets::selected_on_press(&resp) || resp.drag_started();
+        if ui.memory(|m| m.allows_interaction(ui.layer_id())) && !resp.context_menu_opened() {
+            let can_zoom_with_keys = focused && self.search.as_ref().is_none_or(|search| !search.focus);
+            out.font_delta = ui.input_mut(|input| terminal_font_delta(
+                &mut input.events, can_zoom_with_keys, resp.hovered(), &mut self.font_scroll_accum,
+            ));
+        }
         if focused {
             ui.memory_mut(|m| {
                 m.set_focus_lock_filter(id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })

@@ -758,14 +758,28 @@ impl KilnApp {
                         _ if is_shell=>(t.text_faint,false,""),
                         _=>(t.text_faint,false,""),
                     };
-                    let name = meaningful_title(&i.title, &proc_name, i.cwd.as_deref()).unwrap_or(proc_name);
+                    let name = meaningful_title(&i.title, &proc_name, i.cwd.as_deref())
+                        .or_else(|| i.name.clone())
+                        .or_else(|| self.saved_terminals.get(&pid).and_then(|terminal| terminal.title.clone()))
+                        .unwrap_or(proc_name);
                     let detail = self.capacity_recovery.label(pid).unwrap_or_else(|| status.into());
                     let right = i.cwd.as_deref().map(|c| short_path(Path::new(c))).unwrap_or_default();
                     let running = activity == kiln_proto::AgentActivity::Running && i.exited.is_none() && !i.attention;
                     let icon = agent_icon(session.and_then(|sid| self.conn.session_agent(sid)));
                     CardInfo { name, detail, right, dot, pulse, running, icon }
                 }
-                None => CardInfo { name: if self.terminal_launch_error(pid).is_some(){kiln_common::i18n::tr("시작 요청 보관됨")}else{kiln_common::i18n::tr("시작하는 중…")}.into(), detail: String::new(), right: String::new(), dot: if self.terminal_launch_error(pid).is_some(){t.orange}else{t.text_faint}, pulse: false, running: false, icon: Icon::Terminal },
+                None => {
+                    let failed = self.terminal_launch_error(pid).is_some();
+                    let title = self.saved_terminals.get(&pid).and_then(|terminal| terminal.title.clone());
+                    let label = if failed { "시작 요청 보관됨" } else { "시작하는 중…" };
+                    CardInfo {
+                        name: title.unwrap_or_else(|| kiln_common::i18n::tr(label).into()),
+                        detail: String::new(),
+                        right: pane.cwd.as_deref().map(|cwd| short_path(Path::new(cwd))).unwrap_or_default(),
+                        dot: if failed { t.orange } else { t.text_faint },
+                        pulse: false, running: false, icon: Icon::Terminal,
+                    }
+                },
             },
             PaneKind::Tool(tool) => {
                 let dirty = tool.is_dirty();
@@ -1401,6 +1415,7 @@ impl KilnApp {
                     Some(PaneKind::Term { view: Some(view), session: Some(_), .. }) => {
                         view.fill_background = false;
                         let out = view.ui(&mut child, &mut self.conn, &settings, focus_req && is_focused, cwd.as_deref());
+                        if out.font_delta != 0.0 { self.actions.push(Action::FontDelta(out.font_delta)); }
                         if focus_req && is_focused {
                             focus_consumed = true;
                         }

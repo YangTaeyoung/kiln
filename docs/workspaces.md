@@ -8,8 +8,14 @@ The dialog also lists existing workspaces for the selected directory so you can
 open one without creating another. Cancelling does not start a terminal.
 
 Each workspace keeps its own tasks, terminal sessions, split layout and unsent
-requests. These are restored independently when Kiln reopens. Switching
-workspaces keeps running processes alive; closing a workspace ends only its own
+requests. Kiln opens the same tabs and panels automatically, including after a
+computer restart. If a terminal process is still running, Kiln reconnects to it.
+Otherwise a new shell opens in the last saved folder and shows the recent
+terminal output retained as local plain text. Managed conversations reopen from
+their saved identity and history. Reopening never sends a previous command or
+prompt.
+
+Switching workspaces keeps running processes alive. Closing a workspace ends its
 sessions and still asks before discarding drafts. Files and Git history belong
 to the directory and remain shared.
 
@@ -59,6 +65,8 @@ warnings remain enabled.
 | `⌘J` | Recent work |
 | `⌘B` | Toggle the workspace sidebar |
 | `⌘,` | Settings |
+| `⌘↑` / `⌘↓` | Increase/decrease text size in a focused terminal |
+| `⌘` + scroll | Adjust text size over a terminal |
 | `Ctrl` + backtick | Quick terminal |
 
 Navigation shortcuts can be customized in Settings. See

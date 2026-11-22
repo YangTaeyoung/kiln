@@ -123,6 +123,147 @@ fn shutdown(base: &std::path::Path) {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn workspace_reopens_the_same_split_with_saved_output_and_directory_after_daemon_shutdown() {
+    use kiln_daemon::client::Client;
+    use kiln_proto::{ClientMsg, ServerMsg};
+
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, project) = setup("workspace-reopen");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) { shutdown(&self.0); }
+    }
+    let _cleanup = Cleanup(base.clone());
+    use_posix_shell(&base);
+    let mut h = Harness::builder().with_size([1200.0, 800.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(project.clone())));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some()));
+    let ctx = h.ctx.clone();
+    h.state_mut().debug_split(&ctx, true);
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_pane_sessions().len() == 2 && h.state().debug_focused_text().is_some_and(|text| {
+            text.lines().any(|line| line.ends_with(['$', '%', '#']))
+        })
+    }), "wait for the second shell to accept input");
+
+    let socket = base.join("d.sock").to_string_lossy().into_owned();
+    let client = Client::connect(&socket, None).unwrap();
+    let old_daemon = client.server_pid;
+    let session = h.state().debug_focused_session().unwrap();
+    let focused = h.state().debug_focused_pane_id();
+    let layout = h.state().debug_workspace_panes();
+    let list = |client: &Client| {
+        let ServerMsg::Sessions { sessions, .. } = client.request(
+            |req| ClientMsg::ListSessions { req }, Duration::from_secs(3),
+        ).unwrap() else { panic!("missing daemon inventory"); };
+        sessions
+    };
+    let old_shell = list(&client).into_iter().find(|info| info.id == session).unwrap().pid;
+    client.send(ClientMsg::Rename { session, name: "Build log".into() });
+    client.send(ClientMsg::Input {
+        session,
+        data: b"cd src && printf x >>../run-count && printf 'OLD_%s\\n' OUTPUT\r".to_vec(),
+    });
+    let state_file = base.join("cfg/state.json");
+    assert!(pump_until(&mut h, 12, |_| {
+        let Ok(bytes) = std::fs::read(&state_file) else { return false; };
+        let Ok(state) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return false; };
+        state["workspaces"][0]["pages"][0]["panes"].as_array().is_some_and(|panes| panes.iter().any(|pane| {
+            pane["id"].as_u64() == focused
+                && pane["terminal"]["scrollback"].as_str().is_some_and(|text| text.contains("OLD_OUTPUT"))
+                && pane["cwd"].as_str().is_some_and(|cwd| PathBuf::from(cwd).ends_with("proj/src"))
+        }))
+    }), "save the actual previous output and current directory");
+    eframe::App::on_exit(h.state_mut());
+    drop(h);
+    drop(client);
+    shutdown(&base);
+
+    let mut h = Harness::builder().with_size([1200.0, 800.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, None));
+    let client = Client::connect(&socket, None).unwrap();
+    assert_ne!(client.server_pid, old_daemon);
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_pane_sessions().len() == 2
+            && h.state().debug_focused_text().is_some_and(|text| text.contains("OLD_OUTPUT"))
+    }), "show the previous text in the original pane without user action");
+    assert_eq!(h.state().debug_workspace_panes(), layout);
+    assert_eq!(h.state().debug_focused_pane_id(), focused);
+    let session = h.state().debug_focused_session().unwrap();
+    let sessions = list(&client);
+    assert_eq!(sessions.len(), 2);
+    let restored = sessions.iter().find(|info| info.id == session).unwrap();
+    assert_ne!(restored.pid, old_shell);
+    assert_eq!(restored.name.as_deref(), Some("Build log"));
+    assert_eq!(
+        PathBuf::from(restored.cwd.as_ref().unwrap()).canonicalize().unwrap(),
+        project.join("src").canonicalize().unwrap(),
+    );
+    assert!(pump_until(&mut h, 10, |h| {
+        h.output().platform_output.ime.is_some() && h.state().debug_focused_text().is_some_and(|text| {
+            text.split_once("OLD_OUTPUT").is_some_and(|(_, after)| {
+                after.lines().filter(|line| line.ends_with(['$', '%', '#'])).count() >= 2
+            })
+        })
+    }), "the replacement shell is ready and has keyboard focus");
+    h.event(egui::Event::Text("printf 'NEW_%s\\n' OUTPUT".into()));
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_text().is_some_and(|text| text.contains("printf 'NEW_%s"))
+    }), "the replacement shell echoes keyboard input");
+    h.key_press(egui::Key::Enter);
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_text().is_some_and(|text| text.contains("OLD_OUTPUT") && text.contains("NEW_OUTPUT"))
+    }), "restored terminal output: {:?}", h.state().debug_focused_text());
+    assert_eq!(std::fs::read_to_string(project.join("run-count")).unwrap(), "x");
+}
+
+#[test]
+fn console_font_zoom_uses_command_arrows_and_hovered_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (base, project) = setup("console-font-zoom");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) { shutdown(&self.0); }
+    }
+    let _cleanup = Cleanup(base.clone());
+    use_posix_shell(&base);
+    let mut h = Harness::builder().with_size([1000.0, 700.0])
+        .build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(project)));
+    assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some()));
+    let terminal = h.state().debug_pane_rects()[0].1.center();
+    let font_size = |h: &mut Harness<'_, KilnApp>| {
+        eframe::App::on_exit(h.state_mut());
+        let bytes = std::fs::read(base.join("cfg/state.json")).unwrap();
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["settings"]["font_size"].as_f64().unwrap()
+    };
+    let original = font_size(&mut h);
+    h.key_press_modifiers(egui::Modifiers::MAC_CMD, egui::Key::ArrowUp);
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original + 1.0);
+    h.event(egui::Event::PointerMoved(terminal));
+    h.run_steps(2);
+    let wheel = |modifiers, direction| egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, direction),
+        modifiers,
+        phase: egui::TouchPhase::Move,
+    };
+    h.event(wheel(egui::Modifiers::MAC_CMD, 1.0));
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original + 2.0);
+    h.event(wheel(egui::Modifiers::NONE, -1.0));
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original + 2.0);
+    h.key_press_modifiers(egui::Modifiers::MAC_CMD, egui::Key::ArrowDown);
+    h.event(wheel(egui::Modifiers::MAC_CMD, -1.0));
+    h.run_steps(2);
+    assert_eq!(font_size(&mut h), original);
+    assert_eq!(h.ctx.zoom_factor(), 1.0, "zoom only changes the terminal font");
+}
+
 #[test]
 fn custom_theme_selection_reload_and_relaunch_preserve_terminal_sessions() {
     use kiln::app::Action;
@@ -905,6 +1046,24 @@ fn saved_command_requires_preview_then_runs_once_in_selected_directory() {
     let marker = cwd.join("executions.txt");
     let entries = serde_json::json!([{ "name": "Local verification", "command": "printf 'ran-once\\n' >> executions.txt", "cwd": cwd }]);
     std::fs::write(base.join("cfg/commands.json"), serde_json::to_vec(&entries).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // The test measures command confirmation and exactly-once routing.
+        // Interactive Bash can flush bytes queued during readline startup.
+        let shell = base.join("fixture-shell");
+        std::fs::write(&shell, r#"#!/bin/sh
+printf 'fixture> '
+while IFS= read -r line; do
+    /bin/sh -c "$line"
+    printf 'fixture> '
+done
+"#).unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(base.join("cfg/state.json"), serde_json::json!({
+            "settings": {"shell": shell}
+        }).to_string()).unwrap();
+    }
     let mut h = Harness::builder().with_size([1024.0, 768.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj)));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some()));
     assert!(!marker.exists(), "loading saved commands must never execute them");
@@ -1361,6 +1520,12 @@ while True:
     h.state_mut().debug_queue_action(kiln::app::Action::ToggleQuickTerminal);
     assert!(pump_until(&mut h, 10, |_| sessions().len() == 2));
     let quick = sessions().into_iter().find(|s| s.id != initial).unwrap().id;
+    assert!(pump_until(&mut h, 10, |_| {
+        match client.request(|req| kiln_proto::ClientMsg::ReadText { req, session: quick, history: 0 }, Duration::from_secs(2)) {
+            Ok(kiln_proto::ServerMsg::Text { text, .. }) => text.lines().any(|line| line.trim_end().ends_with(['$', '%', '#'])),
+            _ => false,
+        }
+    }), "wait for the quick terminal prompt before starting its resize probe");
     client.send(kiln_proto::ClientMsg::Input { session: quick, data: b"python3 resize-probe.py\r".to_vec() });
     assert!(pump_until(&mut h, 10, |_| proj.join("resize-ready").exists()));
     h.state_mut().debug_queue_action(kiln::app::Action::SelectPage(1));
@@ -1508,6 +1673,11 @@ fn check_closing_last_work_surface(close_page: bool) {
 
     h.state_mut().debug_queue_action(Action::SelectWorkspace(1));
     assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_session() == Some(retained)));
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_text().is_some_and(|text| {
+            text.lines().any(|line| line.trim_end().ends_with(['$', '%', '#']))
+        })
+    }), "wait for the retained workspace shell before sending input");
     client.send(kiln_proto::ClientMsg::Input { session: retained, data: b"printf 'other-workspace-%s\\n' alive\r".to_vec() });
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| text.contains("other-workspace-alive"))));
     assert_eq!(h.state().debug_active_workspace_root().canonical().unwrap(), other.canonical().unwrap());
@@ -1771,6 +1941,11 @@ fn adaptive_long_titles_keep_controls_bounded_and_switch_restore_grid_working() 
             h.key_press_modifiers(cmd(),egui::Key::D);
             assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==index+1&&h.state().debug_focused_session().is_some()));
         }
+        assert!(pump_until(&mut h, 10, |h| {
+            h.state().debug_focused_text().is_some_and(|text| {
+                text.lines().any(|line| line.ends_with(['$', '%', '#']))
+            })
+        }), "wait for the Bash prompt before starting foreground work in pane {index}");
         panes.push(h.state().debug_focused_pane_id().unwrap());
         let (busy,busy_name)=long_running(120);
         client.send(kiln_proto::ClientMsg::Input{session:h.state().debug_focused_session().unwrap(),data:format!("printf '\\033]0;{title}\\007'; {busy}\r").into_bytes()});

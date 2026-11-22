@@ -47,7 +47,8 @@
 <li>split layout,</li>
 <li>unsent requests (drafts).</li>
 </ul>
-<p>Kiln restores each workspace independently when it reopens. Files and Git history belong to the folder, so every workspace for that folder sees the same files and the same history.</p>
+<p>Kiln reopens each workspace with its previous tabs, splits and focused pane. It reconnects to terminals that are still running. After a computer restart, a new shell starts in the last saved folder and shows recent saved output. Kiln resumes managed conversations in their original panes with their drafts.</p>
+<p>Files and Git history belong to the folder, so every workspace for that folder sees the same files and history.</p>
 <h2 id="one-workspace-several-repositories">One workspace, several repositories</h2>
 <p>When your frontend, backend and shared libraries live in separate Git repositories, open their parent folder, such as <code>~/dev/projects</code>, as the workspace folder.</p>
 <ul>
@@ -147,7 +148,8 @@
 </tbody>
 </table></div>
 <p>You can customize navigation shortcuts in Settings.</p>
-<p>On Windows, app shortcuts shown with <code>⌘</code> use <code>Ctrl+Shift</code>, <code>⇧⌘</code> uses <code>Ctrl+Shift+Alt</code> and <code>⌥⌘</code> uses <code>Ctrl+Alt</code>.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="install.html"><small>Previous</small>Install and update</a><a class="pn next" href="terminal.html"><small>Next</small>AI terminal: sessions, shells and recovery</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">문서<b>Kiln 사용하기</b></p></div><h1>워크스페이스와 작업</h1><p class="desc">폴더에 이름 붙인 워크스페이스를 만들고, 여러 저장소를 함께 다루고, 사이드바에서 작업을 확인하고, 터미널 분할 화면을 배치합니다.</p><p>워크스페이스는 폴더에 이름을 붙여 만든 보기로, 작업·터미널·분할 화면·초안을 따로 가집니다. 같은 폴더에서 여러 일을 각자의 터미널과 레이아웃으로 진행하려면 워크스페이스를 여러 개 만드세요.</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-ko.webp" alt="합성 예제 워크스페이스의 Claude Code 대화 설정." width="1280" height="820" loading="lazy" decoding="async"></div><figcaption>합성 예제 워크스페이스의 Claude Code 대화 설정.</figcaption></figure>
+<p>On Windows, app shortcuts shown with <code>⌘</code> use <code>Ctrl+Shift</code>, <code>⇧⌘</code> uses <code>Ctrl+Shift+Alt</code> and <code>⌥⌘</code> uses <code>Ctrl+Alt</code>.</p>
+<p>On macOS, press <code>⌘↑</code> or <code>⌘↓</code> in a focused terminal, or hold <code>⌘</code> while scrolling over a terminal, to change the terminal font size.</p><nav class="pager" aria-label="Previous / Next"><a class="pn prev" href="install.html"><small>Previous</small>Install and update</a><a class="pn next" href="terminal.html"><small>Next</small>AI terminal: sessions, shells and recovery</a></nav></article><article class="doc" data-lang="ko" lang="ko" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">문서<b>Kiln 사용하기</b></p></div><h1>워크스페이스와 작업</h1><p class="desc">폴더에 이름 붙인 워크스페이스를 만들고, 여러 저장소를 함께 다루고, 사이드바에서 작업을 확인하고, 터미널 분할 화면을 배치합니다.</p><p>워크스페이스는 폴더에 이름을 붙여 만든 보기로, 작업·터미널·분할 화면·초안을 따로 가집니다. 같은 폴더에서 여러 일을 각자의 터미널과 레이아웃으로 진행하려면 워크스페이스를 여러 개 만드세요.</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-ko.webp" alt="합성 예제 워크스페이스의 Claude Code 대화 설정." width="1280" height="820" loading="lazy" decoding="async"></div><figcaption>합성 예제 워크스페이스의 Claude Code 대화 설정.</figcaption></figure>
 <h2 id="create-a-workspace">워크스페이스 만들기</h2>
 <ol>
 <li>워크스페이스 사이드바에서 <strong>+</strong>를 선택하거나 <code>⌘N</code>을 누릅니다.</li>
@@ -161,7 +163,8 @@
 <li>분할 레이아웃</li>
 <li>보내지 않은 요청(초안)</li>
 </ul>
-<p>Kiln을 다시 열면 워크스페이스가 각각 따로 복원됩니다. 파일과 Git 기록은 폴더에 속하므로, 같은 폴더의 워크스페이스는 모두 같은 파일과 같은 기록을 봅니다.</p>
+<p>Kiln을 다시 열면 워크스페이스마다 이전 탭, 분할 화면, 선택한 패널이 돌아옵니다. 실행 중인 터미널에는 다시 연결합니다. 컴퓨터를 재시작한 뒤에는 마지막으로 저장한 폴더에서 새 셸을 열고 최근에 저장한 출력을 보여줍니다. Kiln에서 관리하는 대화는 원래 패널에서 초안과 함께 이어집니다.</p>
+<p>파일과 Git 기록은 폴더에 속하므로, 같은 폴더의 워크스페이스는 같은 파일과 기록을 봅니다.</p>
 <h2 id="one-workspace-several-repositories">워크스페이스 하나에 저장소 여러 개</h2>
 <p>프론트엔드, 백엔드, 공유 라이브러리가 각각 다른 Git 저장소에 있다면 <code>~/dev/projects</code> 같은 상위 폴더를 워크스페이스 폴더로 여세요.</p>
 <ul>
@@ -261,7 +264,8 @@
 </tbody>
 </table></div>
 <p>탐색 단축키는 설정에서 바꿀 수 있습니다.</p>
-<p>Windows에서는 <code>⌘</code>로 표시된 앱 단축키 대신 <code>Ctrl+Shift</code>를, <code>⇧⌘</code> 대신 <code>Ctrl+Shift+Alt</code>를, <code>⌥⌘</code> 대신 <code>Ctrl+Alt</code>를 씁니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="install.html"><small>이전</small>설치와 업데이트</a><a class="pn next" href="terminal.html"><small>다음</small>AI 터미널: 세션·셸·연결 복구</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">ドキュメント<b>Kiln を使う</b></p></div><h1>ワークスペースと作業</h1><p class="desc">フォルダーに名前付きのワークスペースを作り、複数のリポジトリをまとめて扱い、サイドバーで作業を確認しながらターミナルを分割して配置する方法を説明します。</p><p>ワークスペースは、フォルダーに名前を付けて開くビューです。作業、ターミナル、分割、下書きをワークスペースごとに持ちます。同じフォルダーでも、作業ごとにターミナルやレイアウトを分けたいときは、ワークスペースを複数作成します。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-ja.webp" alt="合成サンプルワークスペースの Claude Code セッション設定。" width="1280" height="820" loading="lazy" decoding="async"></div><figcaption>合成サンプルワークスペースの Claude Code セッション設定。</figcaption></figure>
+<p>Windows에서는 <code>⌘</code>로 표시된 앱 단축키 대신 <code>Ctrl+Shift</code>를, <code>⇧⌘</code> 대신 <code>Ctrl+Shift+Alt</code>를, <code>⌥⌘</code> 대신 <code>Ctrl+Alt</code>를 씁니다.</p>
+<p>macOS에서는 터미널에 포커스를 두고 <code>⌘↑</code> 또는 <code>⌘↓</code>를 누르거나, 터미널 위에서 <code>⌘</code>를 누른 채 스크롤해 글자 크기를 조절합니다.</p><nav class="pager" aria-label="이전 / 다음"><a class="pn prev" href="install.html"><small>이전</small>설치와 업데이트</a><a class="pn next" href="terminal.html"><small>다음</small>AI 터미널: 세션·셸·연결 복구</a></nav></article><article class="doc" data-lang="ja" lang="ja" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">ドキュメント<b>Kiln を使う</b></p></div><h1>ワークスペースと作業</h1><p class="desc">フォルダーに名前付きのワークスペースを作り、複数のリポジトリをまとめて扱い、サイドバーで作業を確認しながらターミナルを分割して配置する方法を説明します。</p><p>ワークスペースは、フォルダーに名前を付けて開くビューです。作業、ターミナル、分割、下書きをワークスペースごとに持ちます。同じフォルダーでも、作業ごとにターミナルやレイアウトを分けたいときは、ワークスペースを複数作成します。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-ja.webp" alt="合成サンプルワークスペースの Claude Code セッション設定。" width="1280" height="820" loading="lazy" decoding="async"></div><figcaption>合成サンプルワークスペースの Claude Code セッション設定。</figcaption></figure>
 <h2 id="create-a-workspace">ワークスペースを作成する</h2>
 <ol>
 <li>ワークスペースのサイドバーで <strong>+</strong> を選ぶか、<code>⌘N</code> を押します。</li>
@@ -275,7 +279,8 @@
 <li>分割レイアウト</li>
 <li>未送信のリクエスト（下書き）</li>
 </ul>
-<p>Kiln を開き直すと、各ワークスペースは個別に復元されます。ファイルと Git 履歴はフォルダーに属するので、同じフォルダーのワークスペースからは、どれも同じファイルと同じ履歴が見えます。</p>
+<p>Kiln を開き直すと、ワークスペースごとに前回のタブ、分割レイアウト、フォーカスしていたパネルが復元されます。実行中のターミナルには再接続します。コンピューターの再起動後は、最後に保存したフォルダーで新しいシェルが開き、保存済みの最近の出力が表示されます。Kiln が管理する会話は、下書きとともに元のパネルで再開します。</p>
+<p>ファイルと Git 履歴はフォルダーに属するため、同じフォルダーのワークスペースで共有されます。</p>
 <h2 id="one-workspace-several-repositories">1 つのワークスペースに複数のリポジトリ</h2>
 <p>フロントエンド、バックエンド、共有ライブラリが別々の Git リポジトリにある場合は、<code>~/dev/projects</code> のような親フォルダーをワークスペースのフォルダーとして開きます。</p>
 <ul>
@@ -375,7 +380,8 @@
 </tbody>
 </table></div>
 <p>ナビゲーションのショートカットは設定で変更できます。</p>
-<p>Windows では、<code>⌘</code> で表記されたアプリのショートカットは <code>Ctrl+Shift</code>、<code>⇧⌘</code> は <code>Ctrl+Shift+Alt</code>、<code>⌥⌘</code> は <code>Ctrl+Alt</code> に置き換わります。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="install.html"><small>前へ</small>インストールとアップデート</a><a class="pn next" href="terminal.html"><small>次へ</small>AI ターミナル：セッション・シェル・復旧</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">文档<b>使用 Kiln</b></p></div><h1>工作区与任务</h1><p class="desc">为文件夹创建命名工作区，跨多个仓库工作，在侧边栏跟踪任务，并排布终端拆分视图。</p><p>工作区是文件夹的一个命名视图，有自己的任务、终端、拆分视图和草稿。如果同一个文件夹里的几项工作各需要一套终端和布局，就为它创建多个工作区。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-zh-CN.webp" alt="合成示例工作区中的 Claude Code 会话设置。" width="1280" height="820" loading="lazy" decoding="async"></div><figcaption>合成示例工作区中的 Claude Code 会话设置。</figcaption></figure>
+<p>Windows では、<code>⌘</code> で表記されたアプリのショートカットは <code>Ctrl+Shift</code>、<code>⇧⌘</code> は <code>Ctrl+Shift+Alt</code>、<code>⌥⌘</code> は <code>Ctrl+Alt</code> に置き換わります。</p>
+<p>macOS では、フォーカス中のターミナルで <code>⌘↑</code> または <code>⌘↓</code> を押すか、ターミナル上で <code>⌘</code> を押しながらスクロールすると文字サイズを変更できます。</p><nav class="pager" aria-label="前へ / 次へ"><a class="pn prev" href="install.html"><small>前へ</small>インストールとアップデート</a><a class="pn next" href="terminal.html"><small>次へ</small>AI ターミナル：セッション・シェル・復旧</a></nav></article><article class="doc" data-lang="zh-CN" lang="zh-CN" hidden><div class="doc-head"><div class="chip-tile" data-glaze="shino" data-seed="4.6"></div><p class="crumb">文档<b>使用 Kiln</b></p></div><h1>工作区与任务</h1><p class="desc">为文件夹创建命名工作区，跨多个仓库工作，在侧边栏跟踪任务，并排布终端拆分视图。</p><p>工作区是文件夹的一个命名视图，有自己的任务、终端、拆分视图和草稿。如果同一个文件夹里的几项工作各需要一套终端和布局，就为它创建多个工作区。</p><figure class="shot"><div class="plate" data-glaze="kaki" data-seed="3.4"><img src="../assets/shots/agents-zh-CN.webp" alt="合成示例工作区中的 Claude Code 会话设置。" width="1280" height="820" loading="lazy" decoding="async"></div><figcaption>合成示例工作区中的 Claude Code 会话设置。</figcaption></figure>
 <h2 id="create-a-workspace">创建工作区</h2>
 <ol>
 <li>在工作区侧边栏中选择 <strong>+</strong>，或按 <code>⌘N</code>。</li>
@@ -389,7 +395,8 @@
 <li>拆分布局；</li>
 <li>未发送的请求（草稿）。</li>
 </ul>
-<p>Kiln 重新打开时会分别恢复每个工作区。文件和 Git 历史属于文件夹，因此同一文件夹下的所有工作区看到的文件和历史都相同。</p>
+<p>重新打开 Kiln 后，每个工作区会恢复上次的标签页、拆分布局和焦点面板，并重新连接仍在运行的终端。电脑重启后，新 Shell 会在上次保存的目录中启动，并显示最近保存的输出。由 Kiln 管理的对话会连同草稿一起在原面板中继续。</p>
+<p>文件和 Git 历史记录属于目录，同一目录的工作区会共享这些文件和记录。</p>
 <h2 id="one-workspace-several-repositories">一个工作区，多个仓库</h2>
 <p>如果前端、后端和共享库分属不同的 Git 仓库，就把它们的父文件夹（例如 <code>~/dev/projects</code>）作为工作区文件夹打开。</p>
 <ul>
@@ -489,7 +496,8 @@
 </tbody>
 </table></div>
 <p>导航快捷键可以在设置中自定义。</p>
-<p>在 Windows 上，标为 <code>⌘</code> 的应用快捷键对应 <code>Ctrl+Shift</code>，<code>⇧⌘</code> 对应 <code>Ctrl+Shift+Alt</code>，<code>⌥⌘</code> 对应 <code>Ctrl+Alt</code>。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="install.html"><small>上一页</small>安装与更新</a><a class="pn next" href="terminal.html"><small>下一页</small>AI 终端：会话、Shell 与恢复</a></nav></article></main>
+<p>在 Windows 上，标为 <code>⌘</code> 的应用快捷键对应 <code>Ctrl+Shift</code>，<code>⇧⌘</code> 对应 <code>Ctrl+Shift+Alt</code>，<code>⌥⌘</code> 对应 <code>Ctrl+Alt</code>。</p>
+<p>在 macOS 上，聚焦终端后按 <code>⌘↑</code> 或 <code>⌘↓</code>，或将指针放在终端上并按住 <code>⌘</code> 滚动，即可调整字体大小。</p><nav class="pager" aria-label="上一页 / 下一页"><a class="pn prev" href="install.html"><small>上一页</small>安装与更新</a><a class="pn next" href="terminal.html"><small>下一页</small>AI 终端：会话、Shell 与恢复</a></nav></article></main>
   <aside class="toc" aria-labelledby="toc-h"><p class="toc-h" id="toc-h">On this page</p><ul id="toc"></ul></aside>
 </div>
 <footer class="foot"><div class="foot-in"><p>MIT © 2026 Taeyoung Yang</p><nav><a href="https://github.com/YangTaeyoung/kiln/releases" data-ui="releases">Releases</a><a href="https://github.com/YangTaeyoung/kiln/issues" class="icon-link"><svg class="action-icon " viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span data-ui="issue">Report an issue</span></a></nav></div></footer>
