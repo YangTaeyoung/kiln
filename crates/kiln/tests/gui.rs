@@ -1670,6 +1670,11 @@ fn check_closing_last_work_surface(close_page: bool) {
 
     h.state_mut().debug_queue_action(Action::SelectWorkspace(1));
     assert!(pump_until(&mut h, 5, |h| h.state().debug_focused_session() == Some(retained)));
+    assert!(pump_until(&mut h, 10, |h| {
+        h.state().debug_focused_text().is_some_and(|text| {
+            text.lines().any(|line| line.trim_end().ends_with(['$', '%', '#']))
+        })
+    }), "wait for the retained workspace shell before sending input");
     client.send(kiln_proto::ClientMsg::Input { session: retained, data: b"printf 'other-workspace-%s\\n' alive\r".to_vec() });
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some_and(|text| text.contains("other-workspace-alive"))));
     assert_eq!(h.state().debug_active_workspace_root().canonical().unwrap(), other.canonical().unwrap());
