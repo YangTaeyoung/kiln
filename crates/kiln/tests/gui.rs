@@ -1909,6 +1909,11 @@ fn adaptive_long_titles_keep_controls_bounded_and_switch_restore_grid_working() 
             h.key_press_modifiers(cmd(),egui::Key::D);
             assert!(pump_until(&mut h,10,|h|h.state().debug_pane_count()==index+1&&h.state().debug_focused_session().is_some()));
         }
+        assert!(pump_until(&mut h, 10, |h| {
+            h.state().debug_focused_text().is_some_and(|text| {
+                text.lines().any(|line| line.ends_with(['$', '%', '#']))
+            })
+        }), "wait for the Bash prompt before starting foreground work in pane {index}");
         panes.push(h.state().debug_focused_pane_id().unwrap());
         let (busy,busy_name)=long_running(120);
         client.send(kiln_proto::ClientMsg::Input{session:h.state().debug_focused_session().unwrap(),data:format!("printf '\\033]0;{title}\\007'; {busy}\r").into_bytes()});
