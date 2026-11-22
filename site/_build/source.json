@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.9",
-  "source_commit": "2b5608830ff7182e3014396379254c3d5fd80447",
-  "note": "0.3.9: three provider slash-command catalogs, same-pane CLI input and Windows updater relaunch. Existing component images and mobile provenance retain their recorded capture inputs.",
+  "kiln_version": "0.3.10",
+  "source_commit": "1a8f631bb091a1343c57de44c67010ed6196e74a",
+  "note": "0.3.10: automatic workspace reopening after restart, saved terminal output and conversations, and macOS terminal font shortcuts. Existing illustrations and mobile provenance retain their recorded capture inputs.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
