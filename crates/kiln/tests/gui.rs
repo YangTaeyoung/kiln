@@ -1043,6 +1043,24 @@ fn saved_command_requires_preview_then_runs_once_in_selected_directory() {
     let marker = cwd.join("executions.txt");
     let entries = serde_json::json!([{ "name": "Local verification", "command": "printf 'ran-once\\n' >> executions.txt", "cwd": cwd }]);
     std::fs::write(base.join("cfg/commands.json"), serde_json::to_vec(&entries).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // The test measures command confirmation and exactly-once routing.
+        // Interactive Bash can flush bytes queued during readline startup.
+        let shell = base.join("fixture-shell");
+        std::fs::write(&shell, r#"#!/bin/sh
+printf 'fixture> '
+while IFS= read -r line; do
+    /bin/sh -c "$line"
+    printf 'fixture> '
+done
+"#).unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(base.join("cfg/state.json"), serde_json::json!({
+            "settings": {"shell": shell}
+        }).to_string()).unwrap();
+    }
     let mut h = Harness::builder().with_size([1024.0, 768.0]).build_eframe(|cc| KilnApp::new(&cc.egui_ctx, Some(proj)));
     assert!(pump_until(&mut h, 10, |h| h.state().debug_focused_text().is_some()));
     assert!(!marker.exists(), "loading saved commands must never execute them");
@@ -1499,6 +1517,12 @@ while True:
     h.state_mut().debug_queue_action(kiln::app::Action::ToggleQuickTerminal);
     assert!(pump_until(&mut h, 10, |_| sessions().len() == 2));
     let quick = sessions().into_iter().find(|s| s.id != initial).unwrap().id;
+    assert!(pump_until(&mut h, 10, |_| {
+        match client.request(|req| kiln_proto::ClientMsg::ReadText { req, session: quick, history: 0 }, Duration::from_secs(2)) {
+            Ok(kiln_proto::ServerMsg::Text { text, .. }) => text.lines().any(|line| line.trim_end().ends_with(['$', '%', '#'])),
+            _ => false,
+        }
+    }), "wait for the quick terminal prompt before starting its resize probe");
     client.send(kiln_proto::ClientMsg::Input { session: quick, data: b"python3 resize-probe.py\r".to_vec() });
     assert!(pump_until(&mut h, 10, |_| proj.join("resize-ready").exists()));
     h.state_mut().debug_queue_action(kiln::app::Action::SelectPage(1));
