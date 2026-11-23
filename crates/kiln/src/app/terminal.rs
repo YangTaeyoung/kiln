@@ -8,6 +8,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthChar;
 
+const RESIZE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(40);
+
+/// Coalesce a moving split without waiting for the pointer to stop moving.
+#[derive(Default)]
+struct ResizeCadence {
+    sent: Option<((u16, u16), std::time::Instant)>,
+}
+
+impl ResizeCadence {
+    fn delay(&mut self, size: (u16, u16), now: std::time::Instant, first_attach: bool) -> std::time::Duration {
+        if !first_attach && let Some((previous, at)) = self.sent {
+            if previous == size { return std::time::Duration::ZERO; }
+            let remaining = RESIZE_INTERVAL.saturating_sub(now.saturating_duration_since(at));
+            if !remaining.is_zero() { return remaining; }
+        }
+        self.sent = Some((size, now));
+        std::time::Duration::ZERO
+    }
+}
+
 pub struct Palette {
     pub fg: Color32,
     pub bg: Color32,
@@ -162,7 +182,7 @@ pub struct TermView {
     command_draft: String,
     accessible_input: String,
     pub palette: Arc<Palette>,
-    pending_size: Option<((u16, u16), std::time::Instant)>,
+    resize: ResizeCadence,
     theme: kiln_common::Theme,
     /// false 면 바탕을 칠하지 않는다(카드가 둥근 바탕을 그린다).
     pub fill_background: bool,
@@ -264,7 +284,7 @@ impl TermView {
             command_draft: String::new(),
             accessible_input: String::new(),
             palette: Arc::new(Palette::default()),
-            pending_size: None,
+            resize: ResizeCadence::default(),
             theme: kiln_common::Theme::current(),
             fill_background: true,
         }
@@ -716,20 +736,14 @@ impl TermView {
     }
 
     fn request_size(&mut self, ctx: &egui::Context, conn: &mut Conn, cols: u16, rows: u16) {
-        // 크기가 안정되기를 기다리는 동안에도 보이는 세션의 화면은 계속 받는다.
+        // 크기 변경을 모으는 동안에도 보이는 세션의 화면은 계속 받는다.
         conn.keep_attached(self.session);
         let now = std::time::Instant::now();
-        match self.pending_size {
-            Some((sz, _)) if sz == (cols, rows) => {}
-            _ => self.pending_size = Some(((cols, rows), now)),
-        }
-        let ((c, r), since) = self.pending_size.unwrap();
-        // 첫 attach 는 즉시, 이후 크기 변경은 40ms 동안 안정되면 보낸다.
-        let attached_before = conn.screens.contains_key(&self.session);
-        if !attached_before || since.elapsed().as_millis() >= 40 {
-            conn.attach(self.session, c, r);
+        let delay = self.resize.delay((cols, rows), now, !conn.screens.contains_key(&self.session));
+        if delay.is_zero() {
+            conn.attach(self.session, cols, rows);
         } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(40).saturating_sub(since.elapsed()));
+            ctx.request_repaint_after(delay);
         }
     }
 
@@ -1378,6 +1392,65 @@ pub fn modifiers_none() -> Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continuous_resize_updates_the_pty_before_the_drag_stops() {
+        let start = std::time::Instant::now();
+        let mut cadence = ResizeCadence::default();
+        let mut sent = Vec::new();
+        for step in 0..=100 {
+            let size = (80 + step, 24);
+            let at = start + std::time::Duration::from_millis(u64::from(step) * 8);
+            if cadence.delay(size, at, step == 0).is_zero() { sent.push((size, at)); }
+        }
+        assert_eq!(sent.len(), 21, "a moving target still reaches the PTY every 40ms");
+        assert_eq!(sent.first().unwrap().0, (80, 24));
+        assert_eq!(sent.last().unwrap().0, (180, 24));
+        assert!(sent.windows(2).all(|pair| pair[1].1.duration_since(pair[0].1) == RESIZE_INTERVAL));
+    }
+
+    #[test]
+    fn resize_delivers_the_latest_grid_and_reattaches_without_delay() {
+        let start = std::time::Instant::now();
+        let mut cadence = ResizeCadence::default();
+        assert!(cadence.delay((80, 24), start, true).is_zero());
+        assert_eq!(cadence.delay((90, 30), start + std::time::Duration::from_millis(10), false), std::time::Duration::from_millis(30));
+        assert_eq!(cadence.delay((100, 40), start + std::time::Duration::from_millis(20), false), std::time::Duration::from_millis(20));
+        assert!(cadence.delay((100, 40), start + RESIZE_INTERVAL, false).is_zero());
+        assert!(cadence.delay((100, 40), start + std::time::Duration::from_millis(41), false).is_zero());
+        assert_eq!(cadence.delay((110, 40), start + std::time::Duration::from_millis(42), false), std::time::Duration::from_millis(38));
+        assert!(cadence.delay((110, 40), start + std::time::Duration::from_millis(43), true).is_zero());
+    }
+
+    #[test]
+    fn click_and_text_in_one_pass_reach_only_the_new_terminal() {
+        use egui_kittest::Harness;
+        let mut conn = Conn::offline(egui::Context::default());
+        for sid in [1, 2] {
+            conn.screens.insert(sid, Screen { cols: 80, rows: 8, lines: vec![Line::default(); 8], row_versions: vec![1; 8], ..Default::default() });
+        }
+        let mut first = true;
+        let mut h = Harness::builder().with_size([1000.0, 300.0]).build_ui_state(move |ui, state: &mut ([TermView; 2], Conn)| {
+            let area = ui.available_rect_before_wrap();
+            for index in 0..2 {
+                let rect = Rect::from_min_size(area.min + vec2(index as f32 * 500.0, 0.0), vec2(490.0, area.height()));
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(index));
+                state.0[index].ui(&mut child, &mut state.1, &TermSettings::default(), first && index == 0, None);
+            }
+            first = false;
+        }, ([TermView::new(1), TermView::new(2)], conn));
+        h.run_steps(3);
+        for (point, expected) in [(pos2(750.0, 150.0), 2), (pos2(250.0, 150.0), 1)] {
+            h.state().1.input_times.borrow_mut().clear();
+            h.event(egui::Event::PointerMoved(point));
+            h.event(egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+            h.event(egui::Event::Text("x".into()));
+            h.step();
+            assert_eq!(h.state().1.input_times.borrow().keys().copied().collect::<Vec<_>>(), vec![expected], "paint order must not duplicate input into the previous pane");
+            h.event(egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+            h.step();
+        }
+    }
 
     #[test]
     fn terminal_health_recovery_labels_fit_all_four_languages() {
