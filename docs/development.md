@@ -15,6 +15,24 @@ git diff --check
 
 GUI tests use egui_kittest. Daemon tests start real PTYs in isolated configurations.
 Use targeted suites for the files you change, then relevant integration tests.
+
+For divider responsiveness, `cargo test --locked -p kiln --test terminal_resize`
+holds a divider in motion while a real isolated PTY records size changes, then
+checks keyboard delivery and unchanged session/shell identities. The terminal
+library tests also cover continuous size changes and click-plus-text input batches.
+
+The optional native Metal pacing probe draws synthetic terminal content without
+opening a daemon or user configuration:
+
+```sh
+cargo run --locked -p kiln --example frame_pacing -- one /tmp/kiln-pacing-one.json
+cargo run --locked -p kiln --example frame_pacing -- two /tmp/kiln-pacing-two.json
+```
+
+It compares one and two queued frames and records the time synthetic input waits
+for the GUI thread. This is a visible test window; its results do not measure
+physical keyboard, IME, or end-to-end PTY echo latency.
+
 When the daemon protocol changes, verify the real previous published executable,
 not only a same-binary restart or synthetic restore format:
 

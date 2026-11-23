@@ -68,6 +68,8 @@ Drag a pane's title to the left, right, top or bottom edge of another pane. A hi
 
 Drag a divider to resize the panes on either side.
 
+Terminal contents follow divider movement while you drag, so you can check the result before releasing the pointer. Running commands and terminal sessions stay in place.
+
 | Where you drag | What moves |
 | --- | --- |
 | Away from an aligned intersection | Only that segment of the divider. |
