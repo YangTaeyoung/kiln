@@ -325,7 +325,9 @@ fn path_mentions_selection_preserves_provider_native_path_and_only_explicit_send
             "{row:?} {editor:?}"
         );
         h.key_press(egui::Key::Enter);
-        h.run();
+        // Selection can refresh asynchronous metadata. Assert the committed
+        // result without requiring every background repaint to become idle.
+        h.run_steps(2);
         let quoted = serde_json::to_string(&file.to_str().unwrap().replace('\\', "/")).unwrap();
         let expected = format!("{}{quoted} ", if tool == Tool::Codex { "" } else { "@" });
         assert_eq!(h.state().composer.text, expected);
