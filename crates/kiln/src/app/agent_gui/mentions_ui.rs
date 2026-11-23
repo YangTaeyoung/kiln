@@ -1,4 +1,4 @@
-//! Bounded, asynchronous file-path references. No directory I/O runs on the UI thread.
+//! Bounded, asynchronous file-path references and the native Codex Chrome mention.
 use super::*;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -16,6 +16,7 @@ struct Entry {
     path: PathBuf,
     label: String,
     directory: bool,
+    chrome_plugin: bool,
     rank: u8,
 }
 struct SearchResult {
@@ -214,6 +215,7 @@ fn scan(cwd: &Path, query: Query) -> SearchResult {
                     path: path.clone(),
                     label,
                     directory,
+                    chrome_plugin: false,
                     rank,
                 });
             }
@@ -277,6 +279,23 @@ impl AgentPane {
             self.mentions.running = Some(Task::spawn(ui.ctx(), move || scan(&cwd, query)));
         }
     }
+    fn mention_entries(&self) -> Vec<Entry> {
+        let show_chrome = self.descriptor.tool == Tool::Codex
+            && self.transcript.controls.status.get("chrome_plugin")
+                .and_then(|status| status.fields.get("available")) == Some(&ControlValue::Bool(true))
+            && self.mentions.query.as_ref().is_some_and(|query| {
+                !self.composer.text[query.start..].starts_with("@\"")
+                    && "chrome".starts_with(&query.needle.to_ascii_lowercase())
+            });
+        let chrome = show_chrome.then(|| Entry {
+            path: PathBuf::from(controls::CODEX_CHROME_PLUGIN_PATH),
+            label: "Chrome".into(),
+            directory: false,
+            chrome_plugin: true,
+            rank: 0,
+        });
+        chrome.into_iter().chain(self.mentions.entries.iter().cloned()).collect()
+    }
     fn insert_mention(&mut self, ui: &Ui, entry: &Entry, browse: bool) {
         if self.composing || self.ime_frame {
             return;
@@ -307,8 +326,13 @@ impl AgentPane {
             .chars()
             .next()
             .is_some_and(closing_punctuation);
+        let reference = if entry.chrome_plugin {
+            controls::CODEX_CHROME_MENTION.to_owned()
+        } else {
+            format!("{sigil}{quoted}")
+        };
         let insertion = format!(
-            "{sigil}{quoted}{}",
+            "{reference}{}",
             if (browse && entry.directory) || suffix_is_punctuation {
                 ""
             } else {
@@ -354,7 +378,8 @@ impl AgentPane {
             self.mentions.dismissed = true;
             return true;
         }
-        let count = self.mentions.entries.len();
+        let entries = self.mention_entries();
+        let count = entries.len();
         for (key, down) in [(egui::Key::ArrowDown, true), (egui::Key::ArrowUp, false)] {
             if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key)) {
                 if count > 0 {
@@ -372,8 +397,8 @@ impl AgentPane {
         let enter =
             ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         if tab || enter {
-            if let Some(entry) = self.mentions.entries.get(self.mentions.active).cloned() {
-                self.insert_mention(ui, &entry, tab);
+            if let Some(entry) = entries.get(self.mentions.active) {
+                self.insert_mention(ui, entry, tab);
             }
             return true; // Pending/empty results must never turn selection into Send.
         }
@@ -420,7 +445,8 @@ impl AgentPane {
         let theme = Theme::current();
         let bounds = ui.ctx().content_rect().shrink(8.);
         let width = ui.available_width().min(bounds.width()).min(456.).max(120.);
-        let height = (self.mentions.entries.len().max(1) as f32 * 46. + 48.)
+        let entries = self.mention_entries();
+        let height = (entries.len().max(1) as f32 * 46. + 48.)
             .min(230.)
             .min(bounds.height() * 0.5);
         let anchor = ui.min_rect();
@@ -428,7 +454,6 @@ impl AgentPane {
             anchor.left().min(bounds.right() - width).max(bounds.left()),
             (anchor.top() - height - 12.).max(bounds.top()),
         );
-        let entries = self.mentions.entries.clone();
         let mut chosen = None;
         let popup = egui::Area::new(egui::Id::new(("agent-path-mentions", &self.descriptor.id)))
             .order(egui::Order::Foreground)
@@ -494,7 +519,9 @@ impl AgentPane {
                                         painter.text(
                                             text_rect.min + egui::vec2(0., 21.),
                                             egui::Align2::LEFT_TOP,
-                                            kiln_common::i18n::tr(if entry.directory {
+                                            kiln_common::i18n::tr(if entry.chrome_plugin {
+                                                "플러그인"
+                                            } else if entry.directory {
                                                 "폴더"
                                             } else {
                                                 "파일"

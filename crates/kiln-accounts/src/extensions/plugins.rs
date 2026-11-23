@@ -675,6 +675,10 @@ pub(super) fn codex(source: &Dir, scan: &mut Scan, b: &mut Budget) {
             return Err("REGISTRY_RECORDS_1024");
         }
         for (id, configuration) in plugins {
+            if id == codex_chrome::PLUGIN {
+                // The reserved marketplace and its native runtime belong to Codex.
+                continue;
+            }
             let result = (|| -> R<()> {
                 let (name, market) = plugin_id(id)?;
                 let fields = configuration

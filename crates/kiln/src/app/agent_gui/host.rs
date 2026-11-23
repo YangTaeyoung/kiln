@@ -532,6 +532,9 @@ fn base_command(config: &Config, accounts: &AccountManager) -> Result<Process> {
             "file"
         };
         command.args(["-c", &format!("cli_auth_credentials_store=\"{store}\"")]);
+        if let Some(marketplace) = kiln_accounts::extensions::codex_chrome_override(&config.environment) {
+            command.args(["-c", &marketplace]);
+        }
     }
     // The only resolved connection values exist in this final Command's environment.
     if let Some(launch) = accounts.connection_launch(config.descriptor.tool, &config.environment)? {

@@ -120,6 +120,9 @@ fn prepare_managed_record(tool: Tool, mut spec: SpawnSpec, accounts: &AccountMan
         if spec.env.iter().any(|(k, _)| k == "KILN_AGENT_PROFILE") {
             let store = codex_store_override(&spec);
             spec.args.extend(["-c".into(), store]);
+            if let Some(marketplace) = kiln_accounts::extensions::codex_chrome_override(&spec.env) {
+                spec.args.extend(["-c".into(), marketplace]);
+            }
         }
     }
     let stamp = std::time::SystemTime::now()
@@ -194,6 +197,9 @@ pub fn run_shell(program: &str, cwd: PathBuf, args: Vec<String>) -> Result<()> {
     if tool == Tool::Codex && env.iter().any(|(name, _)| name == "KILN_AGENT_PROFILE") {
         let store = codex_store_override(&SpawnSpec { env: env.clone(), ..Default::default() });
         cmd.args(["-c", &store]);
+        if let Some(marketplace) = kiln_accounts::extensions::codex_chrome_override(&env) {
+            cmd.args(["-c", &marketplace]);
+        }
     }
     cmd.envs(env.iter().cloned());
     if let Some(launch) = accounts.connection_launch(tool, &env)? {
@@ -376,6 +382,11 @@ pub fn resume(path: &Path) -> Result<SpawnSpec> {
         Tool::Claude => vec!["--resume".into(), id.into()],
         Tool::Antigravity => vec!["--conversation".into(), id.into()],
     };
+    if record.tool == Tool::Codex
+        && let Some(marketplace) = kiln_accounts::extensions::codex_chrome_override(&spec.env)
+    {
+        spec.args.extend(["-c".into(), marketplace]);
+    }
     attach(&mut spec, path, &record)?;
     Ok(spec)
 }

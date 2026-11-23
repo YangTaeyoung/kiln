@@ -184,6 +184,8 @@ Tool headers use the app language, including questions and known MCP operations.
 
 Type `@` in the message to search files and folders in the current workspace. Use the arrow keys to choose, Tab to browse a folder, Enter to insert, and Esc to dismiss. Paths with spaces and non-Latin names are quoted. Selection only edits the draft; sending remains explicit. Claude keeps its native `@` reference syntax, Codex uses the same path-as-text contract as its TUI, and Antigravity receives the selected full path. Provider permissions and native context handling still apply.
 
+In a Codex panel, type `@Chrome` to select OpenAI’s Chrome plugin when Codex reports it installed and enabled. Set up the ChatGPT Chrome extension in the ChatGPT desktop app first. A managed Codex account can use the bundled marketplace from the default Codex installation when its profile enables the Chrome plugin. Chrome and OpenAI still handle site access and approval.
+
 ### Native next-prompt suggestions {#prompt-suggestions}
 
 When Claude Code emits a native next-prompt suggestion, it appears as faint text in the empty GUI message box. **Tab** copies it into your draft; **Enter** or Send submits it. **Esc** hides that suggestion. Typing, attachments and input-method composition take priority. Suggestions follow Claude’s settings and availability and need not appear after every response. Kiln does not invent replacement suggestions.

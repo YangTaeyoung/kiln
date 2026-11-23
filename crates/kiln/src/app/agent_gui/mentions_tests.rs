@@ -201,6 +201,7 @@ fn path_mentions_mid_token_insertion_preserves_brackets_and_quoted_suffixes() {
             path: file.clone(),
             label: "file with spaces.txt".into(),
             directory: false,
+            chrome_plugin: false,
             rank: 0,
         };
         let mut h = Harness::builder().build_ui_state(
@@ -295,6 +296,7 @@ fn path_mentions_stale_async_results_cannot_replace_a_new_query() {
             path: root.path().join("old"),
             label: "old-private-result".into(),
             directory: false,
+            chrome_plugin: false,
             rank: 0,
         }],
         error: None,
@@ -442,4 +444,24 @@ fn path_mentions_tab_browses_spaced_directory_and_escape_or_ime_never_sends() {
     h.run();
     assert!(h.state().sent.is_empty());
     assert!(h.state().composing);
+}
+
+#[test]
+fn codex_chrome_selection_only_edits_the_draft() {
+    let root = tempfile::tempdir().unwrap();
+    let mut pane = pane(Tool::Codex, root.path(), "@Ch");
+    assert!(pane.mention_entries().is_empty());
+    pane.transcript.controls.status.insert("chrome_plugin".into(), NativeStatus {
+        subject: "chrome_plugin".into(),
+        fields: [("available".into(), ControlValue::Bool(true))].into(),
+        unavailable: None,
+    });
+    let mut h = harness(pane, 750.);
+    open(&mut h);
+    loaded(&mut h);
+    assert!(h.query_by_label("Chrome").is_some());
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert_eq!(h.state().composer.text, format!("{} ", controls::CODEX_CHROME_MENTION));
+    assert!(h.state().sent.is_empty());
 }

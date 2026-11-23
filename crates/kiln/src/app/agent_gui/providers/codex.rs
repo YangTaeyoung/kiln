@@ -88,6 +88,7 @@ pub(in crate::app::agent_gui) struct Codex {
     queue: Vec<QueuedTask>,
     skills: Vec<NativeEntry>,
     skill_enabled: BTreeMap<String, bool>,
+    chrome_available: bool,
     explicit_effort: bool,
     expected_settings: BTreeMap<String, ControlValue>,
     settings_ack: bool,
@@ -134,6 +135,7 @@ impl Codex {
             queue: vec![],
             skills: vec![],
             skill_enabled: BTreeMap::new(),
+            chrome_available: false,
             explicit_effort: false,
             expected_settings: BTreeMap::new(),
             settings_ack: false,
@@ -398,6 +400,9 @@ impl Codex {
                 }
                 let mut input = vec![json!({"type":"text","text":text,"text_elements":[]})];
                 input.extend(image_blocks(id, attachments, Tool::Codex)?);
+                if self.chrome_available && text.contains(controls::CODEX_CHROME_MENTION) {
+                    input.push(json!({"type":"mention","name":"Chrome","path":controls::CODEX_CHROME_PLUGIN_PATH}));
+                }
                 if let Command::SubmitWithSkills { skills, .. } = c {
                     ensure!(skills.len() <= 32, "Too many skills");
                     for skill in skills {
@@ -654,6 +659,19 @@ impl Codex {
                     "The native model catalog is required to validate explicit new-conversation options"
                 );
             }
+            if id == "chrome-plugin" {
+                self.chrome_available = v["result"]["marketplaces"].as_array().into_iter().flatten()
+                    .filter_map(|marketplace| marketplace["plugins"].as_array())
+                    .flatten()
+                    .any(|plugin| plugin["id"] == controls::CODEX_CHROME_PLUGIN_ID
+                        && plugin["installed"] == true && plugin["enabled"] == true);
+                e.event(Event::Controls(ControlEvent::Status(NativeStatus {
+                    subject: "chrome_plugin".into(),
+                    fields: BTreeMap::from([("available".into(), ControlValue::Bool(self.chrome_available))]),
+                    unavailable: None,
+                })));
+                return Ok(e);
+            }
             if self.detailed_response(&id, &v, &mut e) {
                 return Ok(e);
             }
@@ -730,6 +748,7 @@ impl Codex {
 
                     self.discovery(Discovery::Policy, &mut e);
                     self.discovery(Discovery::Skills, &mut e);
+                    e.write(rpc(json!("chrome-plugin"), "plugin/installed", json!({"cwds":[self.cwd]})));
                     e.state(Lifecycle::Ready);
                 }
                 "models" => self.models(r, &mut e)?,

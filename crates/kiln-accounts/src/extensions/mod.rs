@@ -1,6 +1,9 @@
 //! Private native author assets. Reconciled only by the launch preparation worker.
 //! The manifest contains fingerprints, never payload/configuration values.
+mod codex_chrome;
 mod components;
+pub(crate) use codex_chrome::prepare as prepare_codex_chrome;
+pub use codex_chrome::launch_override as codex_chrome_override;
 mod fs;
 mod ownership;
 mod plugins;
