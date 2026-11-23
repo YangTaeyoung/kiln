@@ -1043,6 +1043,13 @@ impl AccountManager {
         let destination = self.runtime_dir(tool, &id);
         report = crate::extensions::reconcile_with_overrides(tool, &source, &destination,
             env.claude_plugin_cache.as_deref(), env.claude_plugin_dirs, env.claude_plugin_seed);
+        if tool == Tool::Codex
+            && let Some(marketplace) = crate::extensions::prepare_codex_chrome(
+                &env.home, &source, &destination, &mut report,
+            )
+        {
+            variables.push(marketplace);
+        }
         if tool == Tool::Claude {
             variables.push(("CLAUDE_CODE_PLUGIN_CACHE_DIR".into(), destination.join("plugins").to_string_lossy().into_owned()));
             if env.claude_plugin_dirs { variables.push(("CLAUDE_CODE_PLUGIN_DIRS".into(), String::new())); }

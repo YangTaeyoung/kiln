@@ -256,6 +256,10 @@ pub struct NativeControls {
     pub outcomes: BTreeMap<String, ControlOutcome>,
     pub status: BTreeMap<String, NativeStatus>,
 }
+pub(super) const CODEX_CHROME_PLUGIN_ID: &str = "chrome@openai-bundled";
+pub(super) const CODEX_CHROME_PLUGIN_PATH: &str = "plugin://chrome@openai-bundled";
+pub(super) const CODEX_CHROME_MENTION: &str = "[@Chrome](plugin://chrome@openai-bundled)";
+
 impl NativeControls {
     pub(crate) fn apply(&mut self, event: &ControlEvent) {
         match event {

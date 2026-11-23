@@ -1125,3 +1125,33 @@ fn claude_native_prompt_suggestions_are_display_data_and_clear_on_submission() {
     let stale = adapter.ingest(json!({"type":"prompt_suggestion","suggestion":"오래된 추천","uuid":"stale","session_id":"s"})).unwrap();
     assert!(stale.events.is_empty(), "A late suggestion never appears while a newer turn is running");
 }
+
+#[test]
+fn codex_chrome_mention_uses_the_installed_official_plugin() {
+    for (installed, enabled) in [(true, true), (false, true), (true, false)] {
+        let mut adapter = configured(Tool::Codex);
+        let effect = adapter.ingest(json!({
+            "id":"chrome-plugin",
+            "result":{"marketplaces":[{"plugins":[{
+                "id":controls::CODEX_CHROME_PLUGIN_ID,"installed":installed,"enabled":enabled
+            }]}]}
+        })).unwrap();
+        let available = installed && enabled;
+        assert!(effect.events.iter().any(|event| matches!(event,
+            Event::Controls(ControlEvent::Status(s))
+                if s.subject == "chrome_plugin" && s.fields["available"] == ControlValue::Bool(available))));
+        let turn = adapter.command(&Command::Submit {
+            text: format!("{} List my tabs", controls::CODEX_CHROME_MENTION),
+            attachments: vec![],
+            model: None,
+        }, "runtime").unwrap();
+        let input = turn.writes[0]["params"]["input"].as_array().unwrap();
+        assert_eq!(input.len(), if available { 2 } else { 1 });
+        if available {
+            assert_eq!(input[1], json!({"type":"mention", "name":"Chrome", "path":controls::CODEX_CHROME_PLUGIN_PATH}));
+        }
+    }
+    let mut adapter = configured(Tool::Codex);
+    adapter.ingest(json!({"id":"chrome-plugin","error":{"code":-32601,"message":"Not supported"}})).unwrap();
+    assert!(submit(&mut adapter).is_ok());
+}

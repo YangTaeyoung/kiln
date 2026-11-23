@@ -186,6 +186,8 @@ Claude Code、Codex 和 Antigravity 的设置及基本选项会以应用语言�
 
 在消息中输入 `@`，即可搜索当前工作目录中的文件和文件夹。使用方向键选择、Tab 浏览文件夹、Enter 插入、Esc 关闭。包含空格或中文的路径也会用引号保留。选择只会修改草稿，发送仍需明确操作。Claude 保留原生 `@` 引用格式，Codex 使用与正式 TUI 相同的路径文本，Antigravity 接收所选完整路径。提供方的权限与上下文处理规则仍然适用。
 
+如果 Codex 报告 OpenAI Chrome 插件已安装并启用，在 Codex 面板中输入 `@Chrome` 即可选中它。请先在 ChatGPT 桌面应用中设置 ChatGPT Chrome 扩展。如果配置文件启用了 Chrome 插件，托管 Codex 账户可使用默认 Codex 安装提供的内置插件市场。网站访问及批准遵循 Chrome 和 OpenAI 的设置。
+
 ### 下一条输入建议 {#prompt-suggestions}
 
 Claude Code 发出下一条输入建议时，会在 GUI 的空消息框中显示浅色文字。按 **Tab** 填入草稿，再按 **Enter** 或发送提交。**Esc** 隐藏该条建议。已有输入、附件和输入法组合优先。建议遵循 Claude 的设置和可用性，并非每次回复后都会出现。Kiln 不会自行编造替代建议。
