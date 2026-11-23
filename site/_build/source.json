@@ -1,7 +1,7 @@
 {
-  "kiln_version": "0.3.11",
-  "source_commit": "ee893e87efbb7463963eb318bdd9e4a3d60ea1a0",
-  "note": "0.3.11: the Codex panel supports the official @Chrome plugin in enabled accounts. Existing illustrations and mobile provenance retain their recorded capture inputs.",
+  "kiln_version": "0.3.12",
+  "source_commit": "d769f249fa3a9030f04ed32f75da8be60994b0a4",
+  "note": "0.3.12: terminal contents resize during ongoing divider drags; all four workspace guides reflect the behavior. Existing illustrations retain their recorded capture inputs.",
   "mobile": {
     "version": "0.1.0",
     "host_source_commit": "4126fdf5f0a734ed22274d5f84a8a1daf8f21555",
